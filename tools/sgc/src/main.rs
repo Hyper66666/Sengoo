@@ -6,7 +6,7 @@ use sengoo_compiler::mir::{
     Instruction as MirInstruction, MirFunction, Terminator as MirTerminator,
 };
 use sengoo_compiler::{
-    lower_ast, lower_hir, ClassMember, Codegen, Decl, DeclKind, Expr, ExprKind, Function,
+    lower_ast, lower_hir, ClassMember, Codegen, Decl, DeclKind, Expr, ExprKind, Function, Import,
     ImportKind, MirOptLevel, Param, Parser, Path as AstPath, SelfParam, Span, Stmt, StmtKind,
     TraitBound, TraitItem, Type, TypeChecker, TypeKind, VariantField, Visibility,
 };
@@ -34,6 +34,20 @@ enum RunEngine {
     Lli,
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ReflectionMode {
+    Auto,
+    On,
+    Off,
+}
+
+impl Default for ReflectionMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
 const REFLECTION_SCHEMA_VERSION: u32 = 1;
@@ -47,6 +61,7 @@ static LLD_AVAILABILITY: AtomicI8 = AtomicI8::new(LINKER_UNKNOWN);
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct ReflectionCliOptions {
+    mode: ReflectionMode,
     enabled: bool,
     modules: Vec<String>,
     symbols: Vec<String>,
@@ -99,7 +114,7 @@ enum DaemonCommand {
         opt_level: u8,
         emit_llvm: bool,
         force_rebuild: bool,
-        reflect: bool,
+        reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
     },
@@ -109,7 +124,7 @@ enum DaemonCommand {
         engine: RunEngine,
         force_rebuild: bool,
         args: Vec<String>,
-        reflect: bool,
+        reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
     },
@@ -191,6 +206,7 @@ struct ModuleGraphSnapshot {
     module_fingerprints: Vec<ModuleFingerprint>,
     module_function_fingerprints: BTreeMap<String, Vec<FunctionFingerprint>>,
     dependency_edges: BTreeMap<String, Vec<String>>,
+    reflection_import_modules: Vec<String>,
     diagnostics: Vec<String>,
     frontend_session_store: FrontendSessionStoreV4,
     reused_modules: Vec<String>,
@@ -489,9 +505,15 @@ enum Commands {
         #[arg(long)]
         daemon_addr: Option<String>,
 
-        /// Enable opt-in reflection metadata sidecar generation.
-        #[arg(long)]
-        reflect: bool,
+        /// Reflection mode (`auto` by default; `--reflect` is shorthand for `--reflect=on`).
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ReflectionMode::Auto,
+            num_args = 0..=1,
+            default_missing_value = "on"
+        )]
+        reflect: ReflectionMode,
 
         /// Restrict reflection to selected module paths (repeatable).
         #[arg(long = "reflect-module")]
@@ -527,9 +549,15 @@ enum Commands {
         #[arg(long)]
         daemon_addr: Option<String>,
 
-        /// Enable opt-in reflection metadata sidecar generation.
-        #[arg(long)]
-        reflect: bool,
+        /// Reflection mode (`auto` by default; `--reflect` is shorthand for `--reflect=on`).
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ReflectionMode::Auto,
+            num_args = 0..=1,
+            default_missing_value = "on"
+        )]
+        reflect: ReflectionMode,
 
         /// Restrict reflection to selected module paths (repeatable).
         #[arg(long = "reflect-module")]
@@ -771,7 +799,7 @@ fn resolve_daemon_addr(explicit: Option<&str>) -> String {
 }
 
 fn reflection_options_from_cli(
-    enabled: bool,
+    mode: ReflectionMode,
     modules: &[String],
     symbols: &[String],
 ) -> ReflectionCliOptions {
@@ -791,7 +819,8 @@ fn reflection_options_from_cli(
     normalized_symbols.dedup();
 
     ReflectionCliOptions {
-        enabled,
+        mode,
+        enabled: matches!(mode, ReflectionMode::On),
         modules: normalized_modules,
         symbols: normalized_symbols,
     }
@@ -818,13 +847,108 @@ fn normalize_reflection_symbol_selector(raw: &str) -> String {
     trimmed.to_string()
 }
 
+fn import_path_segments_lower(path: &AstPath) -> Vec<String> {
+    path.segments
+        .iter()
+        .map(|segment| segment.name.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+}
+
+fn import_decl_requests_reflection(import_decl: &Import) -> bool {
+    let segments = import_path_segments_lower(&import_decl.path);
+    if segments.is_empty() {
+        return false;
+    }
+
+    if segments.len() == 1 && segments[0] == "reflect" {
+        return true;
+    }
+
+    if segments.len() >= 2
+        && (segments[0] == "std" || segments[0] == "sengoo")
+        && segments[1] == "reflect"
+    {
+        return true;
+    }
+
+    if segments.len() == 1
+        && (segments[0] == "std" || segments[0] == "sengoo")
+        && matches!(&import_decl.kind, ImportKind::Selective(names) if names
+            .iter()
+            .any(|name| name.name.eq_ignore_ascii_case("reflect")))
+    {
+        return true;
+    }
+
+    false
+}
+
+fn decl_requests_reflection(decl: &Decl) -> bool {
+    match &decl.kind {
+        DeclKind::Import(import_decl) => import_decl_requests_reflection(import_decl),
+        DeclKind::Module(module_decl) => module_decl.items.iter().any(decl_requests_reflection),
+        _ => false,
+    }
+}
+
+fn source_requests_reflection(source: &str) -> bool {
+    let program = match Parser::parse(source) {
+        Ok(program) => program,
+        Err(_) => return false,
+    };
+    program.decls.iter().any(decl_requests_reflection)
+}
+
+fn resolve_reflection_options_for_snapshot(
+    mut reflection: ReflectionCliOptions,
+    snapshot: &ModuleGraphSnapshot,
+) -> ReflectionCliOptions {
+    reflection.enabled = match reflection.mode {
+        ReflectionMode::On => true,
+        ReflectionMode::Off => false,
+        ReflectionMode::Auto => {
+            if !reflection.modules.is_empty() || !reflection.symbols.is_empty() {
+                true
+            } else {
+                !snapshot.reflection_import_modules.is_empty()
+            }
+        }
+    };
+    reflection
+}
+
+fn reflection_mode_note(reflection: &ReflectionCliOptions, snapshot: &ModuleGraphSnapshot) -> String {
+    match reflection.mode {
+        ReflectionMode::On => "reflection: forced on (--reflect=on)".to_string(),
+        ReflectionMode::Off => "reflection: forced off (--reflect=off)".to_string(),
+        ReflectionMode::Auto => {
+            if !reflection.enabled {
+                return "reflection: auto disabled (no reflect import detected)".to_string();
+            }
+            if !reflection.modules.is_empty() || !reflection.symbols.is_empty() {
+                return "reflection: auto enabled by explicit selector filters".to_string();
+            }
+            if snapshot.reflection_import_modules.len() == 1 {
+                return format!(
+                    "reflection: auto enabled by import in {}",
+                    snapshot.reflection_import_modules[0]
+                );
+            }
+            format!(
+                "reflection: auto enabled by imports in {} module(s)",
+                snapshot.reflection_import_modules.len()
+            )
+        }
+    }
+}
+
 fn daemon_request_build(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
-    reflect: bool,
+    reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
 ) -> DaemonRequest {
@@ -850,7 +974,7 @@ fn daemon_request_run(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
-    reflect: bool,
+    reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
 ) -> DaemonRequest {
@@ -877,7 +1001,7 @@ async fn dispatch_build_via_daemon(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
-    reflect: bool,
+    reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
 ) -> Result<DaemonDispatchOutcome> {
@@ -901,7 +1025,7 @@ async fn dispatch_run_via_daemon(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
-    reflect: bool,
+    reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
 ) -> Result<DaemonDispatchOutcome> {
@@ -3268,6 +3392,18 @@ fn collect_module_graph_snapshot(
 ) -> ModuleGraphSnapshot {
     let root_module = canonical_or_lossy(input_path);
     let module_sources = collect_module_sources_with_edges(input_path, source);
+    let mut reflection_import_modules = module_sources
+        .iter()
+        .filter_map(|(path, info)| {
+            if source_requests_reflection(&info.source) {
+                Some(path.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    reflection_import_modules.sort();
+    reflection_import_modules.dedup();
 
     let mut dependency_edges = module_sources
         .iter()
@@ -3462,6 +3598,7 @@ fn collect_module_graph_snapshot(
         module_fingerprints,
         module_function_fingerprints,
         dependency_edges,
+        reflection_import_modules,
         diagnostics,
         frontend_session_store: FrontendSessionStoreV4 {
             schema_version: BUILD_GRAPH_SCHEMA_VERSION,
@@ -5495,6 +5632,8 @@ async fn cmd_build(
         previous_frontend_session.as_ref(),
         probe_mode,
     );
+    let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
+    println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
     let module_fingerprints = graph_snapshot.module_fingerprints.clone();
     if !graph_snapshot.diagnostics.is_empty() {
         println!("frontend probe diagnostics (stable order):");
@@ -5897,6 +6036,8 @@ async fn cmd_run(
         previous_frontend_session.as_ref(),
         probe_mode,
     );
+    let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
+    println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
     let module_fingerprints = graph_snapshot.module_fingerprints.clone();
     if !graph_snapshot.diagnostics.is_empty() {
         println!("frontend probe diagnostics (stable order):");
@@ -6300,7 +6441,7 @@ mod tests {
         validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
         BuildWorksetPlan, CachedNativeRecoveryPlan, Cli, DaemonDispatchOutcome, EditClass,
         EditImpact, FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint,
-        ReflectionMetadata, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
+        ReflectionMetadata, ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
         DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use clap::Parser as _;
@@ -6582,6 +6723,87 @@ mod tests {
             "tests/demo.sg::main",
         ])
         .is_ok());
+        assert!(Cli::try_parse_from([
+            "sgc",
+            "build",
+            "tests/demo.sg",
+            "--reflect=off",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "sgc",
+            "run",
+            "tests/demo.sg",
+            "--reflect=auto",
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn source_requests_reflection_detects_common_import_forms() {
+        assert!(super::source_requests_reflection("import reflect;\ndef main() -> i64 { 0 }\n"));
+        assert!(super::source_requests_reflection(
+            "import std::reflect;\ndef main() -> i64 { 0 }\n"
+        ));
+        assert!(super::source_requests_reflection(
+            "import std{io, reflect};\ndef main() -> i64 { 0 }\n"
+        ));
+        assert!(!super::source_requests_reflection(
+            "import std::io;\ndef main() -> i64 { 0 }\n"
+        ));
+    }
+
+    #[test]
+    fn reflection_auto_mode_enables_when_dependency_imports_reflect() {
+        let root = std::env::temp_dir().join(format!(
+            "sengoo-sgc-reflect-auto-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let root_module = root.join("main.sg");
+        let dep_module = root.join("util.sg");
+        let std_dir = root.join("std");
+        fs::create_dir_all(&std_dir).unwrap();
+        let std_reflect = std_dir.join("reflect.sg");
+
+        fs::write(
+            &root_module,
+            "import util;\ndef main() -> i64 { util_value() }\n",
+        )
+        .unwrap();
+        fs::write(
+            &dep_module,
+            "import std::reflect;\ndef util_value() -> i64 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(&std_reflect, "def meta_probe() -> i64 { 1 }\n").unwrap();
+
+        let root_source = fs::read_to_string(&root_module).unwrap();
+        let snapshot = super::collect_module_graph_snapshot(
+            &root_module,
+            &root_source,
+            None,
+            None,
+            super::FrontendProbeMode::FastNoVerify,
+        );
+        let dep_id = super::canonical_or_lossy(&dep_module);
+        assert!(snapshot.reflection_import_modules.contains(&dep_id));
+
+        let auto = super::resolve_reflection_options_for_snapshot(
+            super::reflection_options_from_cli(ReflectionMode::Auto, &[], &[]),
+            &snapshot,
+        );
+        assert!(auto.enabled);
+
+        let forced_off = super::resolve_reflection_options_for_snapshot(
+            super::reflection_options_from_cli(ReflectionMode::Off, &[], &[]),
+            &snapshot,
+        );
+        assert!(!forced_off.enabled);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -6651,7 +6873,8 @@ mod tests {
         );
         let module_id = super::canonical_or_lossy(&module_path);
         let graph = reflection_graph_for_module(&module_path);
-        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let options =
+            reflection_options_from_cli(ReflectionMode::On, &[], &[format!("{}::add", module_id)]);
         let metadata = build_reflection_metadata(&graph, &options, None)
             .unwrap()
             .expect("reflection metadata");
@@ -6674,7 +6897,7 @@ mod tests {
         );
         let module_id = super::canonical_or_lossy(&module_path);
         let graph = reflection_graph_for_module(&module_path);
-        let options = reflection_options_from_cli(true, &[], &[String::from("add")]);
+        let options = reflection_options_from_cli(ReflectionMode::On, &[], &[String::from("add")]);
         let metadata = build_reflection_metadata(&graph, &options, None)
             .unwrap()
             .expect("reflection metadata");
@@ -6695,7 +6918,8 @@ mod tests {
         );
         let module_id = super::canonical_or_lossy(&module_path);
         let graph = reflection_graph_for_module(&module_path);
-        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let options =
+            reflection_options_from_cli(ReflectionMode::On, &[], &[format!("{}::add", module_id)]);
         let llvm_defined = HashSet::from([String::from("add")]);
         let metadata = build_reflection_metadata(&graph, &options, Some(&llvm_defined))
             .unwrap()
@@ -6718,7 +6942,8 @@ mod tests {
         );
         let module_id = super::canonical_or_lossy(&module_path);
         let graph = reflection_graph_for_module(&module_path);
-        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let options =
+            reflection_options_from_cli(ReflectionMode::On, &[], &[format!("{}::add", module_id)]);
         let llvm_defined = HashSet::<String>::new();
         let err = build_reflection_metadata(&graph, &options, Some(&llvm_defined)).unwrap_err();
         assert!(err
@@ -6733,7 +6958,11 @@ mod tests {
             temp_sg_module("meta-unknown", "def add(a: i64, b: i64) -> i64 { a + b }\n");
         let module_id = super::canonical_or_lossy(&module_path);
         let graph = reflection_graph_for_module(&module_path);
-        let options = reflection_options_from_cli(true, &[], &[format!("{}::missing", module_id)]);
+        let options = reflection_options_from_cli(
+            ReflectionMode::On,
+            &[],
+            &[format!("{}::missing", module_id)],
+        );
         let err = build_reflection_metadata(&graph, &options, None).unwrap_err();
         assert!(err
             .to_string()
@@ -6747,7 +6976,7 @@ mod tests {
         let graph = reflection_graph_for_module(&module_path);
         let artifact = temp_artifact("reflect-sidecar", "exe");
 
-        let options = reflection_options_from_cli(true, &[], &[]);
+        let options = reflection_options_from_cli(ReflectionMode::On, &[], &[]);
         maybe_emit_reflection_sidecar(&artifact, &graph, &options, None).unwrap();
         let sidecar_path = reflection_sidecar_path_for_artifact(&artifact);
         assert!(sidecar_path.exists());
@@ -6755,7 +6984,7 @@ mod tests {
             serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
         validate_reflection_metadata(&metadata).unwrap();
 
-        let disabled = reflection_options_from_cli(false, &[], &[]);
+        let disabled = reflection_options_from_cli(ReflectionMode::Off, &[], &[]);
         maybe_emit_reflection_sidecar(&artifact, &graph, &disabled, None).unwrap();
         assert!(!sidecar_path.exists());
 
@@ -6765,7 +6994,16 @@ mod tests {
 
     #[test]
     fn daemon_build_request_uses_protocol_and_version() {
-        let request = daemon_request_build("tests/demo.sg", None, 2, false, false, false, &[], &[]);
+        let request = daemon_request_build(
+            "tests/demo.sg",
+            None,
+            2,
+            false,
+            false,
+            ReflectionMode::Off,
+            &[],
+            &[],
+        );
         assert_eq!(request.protocol_version, DAEMON_PROTOCOL_VERSION);
         assert_eq!(request.client_version, env!("CARGO_PKG_VERSION"));
     }
@@ -6791,7 +7029,7 @@ mod tests {
             2,
             false,
             false,
-            false,
+            ReflectionMode::Off,
             &[],
             &[],
         );
@@ -6845,7 +7083,16 @@ mod tests {
             handle_daemon_client(stream).await.unwrap();
         });
 
-        let request = daemon_request_build(&input_string, None, 2, true, false, false, &[], &[]);
+        let request = daemon_request_build(
+            &input_string,
+            None,
+            2,
+            true,
+            false,
+            ReflectionMode::Off,
+            &[],
+            &[],
+        );
         let response = send_daemon_request(&addr.to_string(), &request)
             .await
             .unwrap();
@@ -6872,7 +7119,7 @@ mod tests {
             2,
             false,
             false,
-            false,
+            ReflectionMode::Off,
             &[],
             &[],
         )
