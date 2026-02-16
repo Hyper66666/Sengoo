@@ -4026,6 +4026,32 @@
       window.location.hash = `${state.lang}:${chapter.id}`;
     }
 
+    function scrollChapterToTop() {
+      const contentPanel = document.querySelector(".content");
+      if (contentPanel) {
+        if (typeof contentPanel.scrollTo === "function") {
+          contentPanel.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        } else {
+          contentPanel.scrollTop = 0;
+        }
+      }
+
+      const chapterRoot = document.getElementById("chapter-root");
+      if (chapterRoot && typeof chapterRoot.scrollIntoView === "function") {
+        chapterRoot.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+      } else {
+        window.scrollTo(0, 0);
+      }
+    }
+
+    function changeChapter(nextIndex) {
+      if (nextIndex < 0 || nextIndex >= CHAPTERS.length || nextIndex === state.chapterIndex) {
+        return;
+      }
+      state.chapterIndex = nextIndex;
+      render({ scrollToTop: true });
+    }
+
     function buildCodeCard(codeInfo) {
       const wrapper = document.createElement("div");
       wrapper.className = "code-card";
@@ -4106,8 +4132,7 @@
         btn.textContent = text(chapter.title);
         if (idx === state.chapterIndex) btn.classList.add("active");
         btn.addEventListener("click", () => {
-          state.chapterIndex = idx;
-          render();
+          changeChapter(idx);
         });
         li.appendChild(btn);
         toc.appendChild(li);
@@ -4169,8 +4194,7 @@
       prev.title = prev.disabled ? ui.first : "";
       prev.addEventListener("click", () => {
         if (state.chapterIndex > 0) {
-          state.chapterIndex -= 1;
-          render();
+          changeChapter(state.chapterIndex - 1);
         }
       });
 
@@ -4181,8 +4205,7 @@
       next.title = next.disabled ? ui.last : "";
       next.addEventListener("click", () => {
         if (state.chapterIndex < CHAPTERS.length - 1) {
-          state.chapterIndex += 1;
-          render();
+          changeChapter(state.chapterIndex + 1);
         }
       });
 
@@ -4201,11 +4224,14 @@
       document.documentElement.lang = state.lang === "zh" ? "zh-CN" : "en";
     }
 
-    function render() {
+    function render(options = {}) {
       renderTopbar();
       renderTOC();
       renderChapter();
       updateHash();
+      if (options.scrollToTop) {
+        scrollChapterToTop();
+      }
     }
 
     function initEvents() {
@@ -4220,12 +4246,10 @@
 
       document.addEventListener("keydown", (event) => {
         if (event.key === "ArrowLeft" && state.chapterIndex > 0) {
-          state.chapterIndex -= 1;
-          render();
+          changeChapter(state.chapterIndex - 1);
         }
         if (event.key === "ArrowRight" && state.chapterIndex < CHAPTERS.length - 1) {
-          state.chapterIndex += 1;
-          render();
+          changeChapter(state.chapterIndex + 1);
         }
       });
 
@@ -4234,7 +4258,7 @@
         const prevIndex = state.chapterIndex;
         parseHash();
         if (prevLang !== state.lang || prevIndex !== state.chapterIndex) {
-          render();
+          render({ scrollToTop: prevIndex !== state.chapterIndex });
         }
       });
     }
