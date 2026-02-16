@@ -1621,20 +1621,20 @@
       {
         id: "inheritance-status",
         title: {
-          en: "17. Inheritance: Current Status and Safer Alternatives",
+          en: "17. Inheritance V1: Stabilized Rules",
           zh: "17. 继承：当前状态与更稳替代"
         },
         summary: {
-          en: "Parser-level class/inheritance syntax exists, but production-grade semantics are still evolving. This chapter explains what to trust now.",
+          en: "Inheritance V1 is now validated in parser + type checker. This chapter explains the supported rules and constraints.",
           zh: "语法层面已有 class/inheritance 入口，但生产级语义仍在演进。本章说明当前可依赖范围。"
         },
         sections: [
           {
-            heading: { en: "Syntax currently accepted by checker", zh: "当前可通过检查的继承语法" },
+            heading: { en: "Canonical class header in V1", zh: "当前可通过检查的继承语法" },
             paragraphs: {
               en: [
-                "The following style can pass `sgc check` in the current compiler.",
-                "Treat it as experimental capability, not guaranteed production contract."
+                "Use exactly one parent in class header: `class Child: Parent { ... }`.",
+                "Trait lists in class header are rejected; move trait conformance to `impl Trait for Type`."
               ],
               zh: [
                 "下面这类写法在当前编译器里可通过 `sgc check`。",
@@ -1643,20 +1643,20 @@
             },
             code: {
               title: {
-                en: "Class + extends syntax example",
+                en: "Single-parent class + override example",
                 zh: "class + extends 语法示例"
               },
               lang: "sg",
-              snippet: "class Animal {\n    age: i64;\n}\n\nclass Dog: Animal {\n    weight: i64;\n}\n\ndef main() -> i64 {\n    let d = Dog { age: 2, weight: 8 };\n    d.age + d.weight\n}"
+              snippet: "class Animal {\n    age: i64;\n    def score(self) -> i64 {\n        self.age\n    }\n}\n\nclass Dog: Animal {\n    weight: i64;\n    def score(self) -> i64 {\n        self.age + self.weight\n    }\n}\n\ndef main() -> i64 {\n    let d = Dog { age: 2, weight: 8 };\n    d.score()\n}"
             }
           },
           {
-            heading: { en: "Current engineering recommendation", zh: "当前工程建议" },
+            heading: { en: "Checker validation rules", zh: "当前工程建议" },
             bullets: {
               en: [
-                "Use inheritance syntax only for experiments or parser-level validation.",
-                "For production features, prefer `struct + trait` design and explicit APIs.",
-                "Always verify with `sgc check` and real run tests for your target path."
+                "Parent class must exist and be a class declaration.",
+                "Inheritance cycles are rejected deterministically.",
+                "Duplicate field names across parent chain are rejected."
               ],
               zh: [
                 "继承语法建议仅用于实验或语法层验证。",
@@ -1666,10 +1666,10 @@
             }
           },
           {
-            heading: { en: "Safer replacement pattern", zh: "更稳的替代模式" },
+            heading: { en: "Trait interop note", zh: "更稳的替代模式" },
             paragraphs: {
               en: [
-                "Use explicit data + explicit behavior functions. This keeps behavior predictable across compiler changes."
+                "Use traits for cross-type polymorphism; use class inheritance for single-parent reuse."
               ],
               zh: [
                 "使用显式数据 + 显式行为函数，能在编译器演进期保持更高可预测性。"
@@ -1677,16 +1677,16 @@
             },
             code: {
               title: {
-                en: "Explicit behavior pipeline (stable style)",
+                en: "Invalid class header migration",
                 zh: "显式行为管线（稳定风格）"
               },
               lang: "sg",
-              snippet: "struct DogData {\n    x: i64,\n    y: i64,\n}\n\ndef animal_age(x: i64) -> i64 {\n    x\n}\n\ndef dog_score(x: i64, y: i64) -> i64 {\n    animal_age(x) + y\n}\n\ndef main() -> i64 {\n    let d = DogData { x: 2, y: 8 };\n    dog_score(d.x, d.y)\n}"
+              snippet: "class Animal {}\ntrait Runner {\n    def run(self) -> i64 { 1 }\n}\n// invalid in V1:\n// class Dog: Animal, Runner {}\n\nclass Dog: Animal {}\nimpl Runner for Dog {\n    def run(self) -> i64 { 1 }\n}"
             }
           }
         ],
         takeaway: {
-          en: "Takeaway: inheritance syntax exists, but treat trait-oriented and explicit behavior design as the stable engineering baseline today.",
+          en: "Takeaway: inheritance V1 is available now with explicit checker guarantees; use traits for behavior contracts.",
           zh: "本章结论：继承语法已存在，但当前稳定工程基线仍应是 trait 导向 + 显式行为设计。"
         }
       },
@@ -1987,15 +1987,15 @@
       {
         id: "class-inheritance-status",
         group: "model",
-        title: { en: "Class and Inheritance Status", zh: "Class 与继承当前状态" },
+        title: { en: "Class and Inheritance (V1)", zh: "Class 与继承当前状态" },
         summary: {
-          en: "Class/extends syntax exists in the pipeline, but production-grade semantics are still evolving.",
+          en: "Class inheritance now has V1 checker guarantees: parent validation, cycle detection, and inherited member resolution.",
           zh: "class/extends 语法已存在，但生产级语义仍在演进。"
         },
         core: {
           en: [
-            "Use class/inheritance syntax with caution and explicit validation.",
-            "For stable production modeling, prefer struct + trait combinations."
+            "Header form is strict: `class Child: Parent { ... }` only.",
+            "Trait lists in class header are rejected; use `impl Trait for Type`."
           ],
           zh: [
             "使用 class/继承时保持谨慎并做显式验证。",
@@ -2004,9 +2004,9 @@
         },
         checklist: {
           en: [
-            "Use sgc check for parser/type verification.",
-            "Verify runtime paths with real workloads.",
-            "Keep migration fallback path ready."
+            "Run `sgc check` after hierarchy changes.",
+            "Add tests for parent-missing, cycle, and duplicate inherited fields.",
+            "Verify inherited method fallback and child override in examples."
           ],
           zh: [
             "先用 sgc check 做语法与类型验证。",
@@ -2014,15 +2014,15 @@
             "保留可回退建模方案。"
           ]
         },
-        exampleTitle: { en: "Current class syntax shape", zh: "当前 class 语法形态" },
+        exampleTitle: { en: "Inherited method fallback example", zh: "当前 class 语法形态" },
         exampleLang: "sg",
-        example: "class Animal {\n    age: i64;\n}\n\nclass Dog: Animal {\n    weight: i64;\n}\n\ndef main() -> i64 {\n    let d = Dog { age: 2, weight: 8 };\n    d.age + d.weight\n}",
+        example: "class Parent {\n    def score(self) -> i64 {\n        7\n    }\n}\n\nclass Child: Parent {}\n\ndef main() -> i64 {\n    let c = Child {};\n    c.score()\n}",
         practice: {
-          en: ["For critical paths, maintain an equivalent struct + trait fallback design."],
+          en: ["Do not write `class Child: Parent, Trait { ... }` in V1."],
           zh: ["核心路径建议同步维护 struct + trait 备选实现。"]
         },
         takeaway: {
-          en: "Takeaway: inheritance syntax is promising, but stability-first teams stay trait-oriented today.",
+          en: "Takeaway: class inheritance in Sengoo is now a supported V1 feature with clear limits.",
           zh: "本页结论：继承有潜力，但稳定优先团队当前仍应 trait 导向。"
         }
       },

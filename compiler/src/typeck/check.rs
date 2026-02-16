@@ -16,6 +16,13 @@ use std::collections::{HashMap, HashSet};
 // 内部类型检查结果（返回 TypeckError）
 type TyResult<T> = std::result::Result<T, TypeckError>;
 
+#[derive(Debug, Clone)]
+struct ClassDeclInfo {
+    parent: Option<String>,
+    fields: Vec<(String, Type)>,
+    methods: Vec<Function>,
+}
+
 /// 类型检查器
 #[derive(Debug)]
 pub struct TypeChecker {
@@ -28,6 +35,7 @@ pub struct TypeChecker {
     /// Impl 注册表
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
+    class_decls: HashMap<String, ClassDeclInfo>,
 }
 
 impl TypeChecker {
@@ -40,6 +48,7 @@ impl TypeChecker {
             trait_registry: TraitRegistry::new(),
             impl_registry: ImplRegistry::new(),
             struct_field_defs: HashMap::new(),
+            class_decls: HashMap::new(),
         }
     }
 
@@ -75,12 +84,12 @@ impl TypeChecker {
 
     /// 检查整个程序
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
-        // 第一遍：声明类型
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
 
-        // 第二遍：检查类型
+        self.prepare_class_hierarchy(program)?;
+
         for decl in &program.decls {
             self.check_decl(decl)?;
         }
@@ -96,6 +105,8 @@ impl TypeChecker {
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
+
+        self.prepare_class_hierarchy(program)?;
 
         for decl in &program.decls {
             self.check_decl_with_filtered_function_bodies(decl, checked_function_names)?;
@@ -269,6 +280,280 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn prepare_class_hierarchy(&mut self, program: &Program) -> Result<()> {
+        self.class_decls.clear();
+        self.collect_class_decls(program)?;
+        self.validate_class_parent_targets()?;
+        self.validate_class_cycles()?;
+
+        let mut class_names: Vec<String> = self.class_decls.keys().cloned().collect();
+        class_names.sort();
+
+        let mut field_cache: HashMap<String, Vec<(String, Type)>> = HashMap::new();
+        for class_name in &class_names {
+            let mut stack = HashSet::new();
+            let fields = self
+                .resolve_class_fields_for(class_name, &mut field_cache, &mut stack)
+                .map_err(CompileError::from)?;
+            self.struct_field_defs.insert(class_name.clone(), fields);
+        }
+
+        let mut method_cache: HashMap<String, HashMap<String, Function>> = HashMap::new();
+        for class_name in class_names {
+            let mut stack = HashSet::new();
+            let methods = self
+                .resolve_class_methods_for(&class_name, &mut method_cache, &mut stack)
+                .map_err(CompileError::from)?;
+
+            let target_ty = self
+                .env
+                .lookup(&class_name)
+                .and_then(|symbol| symbol.get_ty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.env.new_ty(TyKind::Adt {
+                        name: class_name.clone(),
+                        args: vec![],
+                    })
+                });
+
+            let mut impl_info = crate::typeck::r#trait::ImplInfo::new(target_ty.clone(), None);
+            let mut method_names: Vec<String> = methods.keys().cloned().collect();
+            method_names.sort();
+
+            for method_name in method_names {
+                if let Some(method) = methods.get(&method_name) {
+                    let fn_ty = self
+                        .class_method_signature(method)
+                        .map_err(CompileError::from)?;
+                    impl_info.add_method(method_name, fn_ty);
+                }
+            }
+
+            self.impl_registry
+                .register_inherent(type_key(&target_ty), impl_info);
+        }
+
+        Ok(())
+    }
+
+    fn collect_class_decls(&mut self, program: &Program) -> Result<()> {
+        for decl in &program.decls {
+            let DeclKind::Class(class_decl) = &decl.kind else {
+                continue;
+            };
+
+            let parent = class_decl.extends.as_ref().and_then(|path| {
+                path.as_simple()
+                    .map(|ident| ident.name.clone())
+                    .or_else(|| path.segments.last().map(|ident| ident.name.clone()))
+            });
+
+            let mut fields = Vec::new();
+            let mut methods = Vec::new();
+
+            for (field_index, member) in class_decl.members.iter().enumerate() {
+                match member {
+                    ClassMember::Field(field) => {
+                        let field_name = field
+                            .name
+                            .as_ref()
+                            .map(|ident| ident.name.clone())
+                            .unwrap_or_else(|| format!("_{}", field_index));
+                        fields.push((field_name, field.ty.clone()));
+                    }
+                    ClassMember::Method(method) => {
+                        methods.push(method.clone());
+                    }
+                }
+            }
+
+            self.class_decls.insert(
+                class_decl.name.name.clone(),
+                ClassDeclInfo {
+                    parent,
+                    fields,
+                    methods,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    fn validate_class_parent_targets(&self) -> Result<()> {
+        for (class_name, class_info) in &self.class_decls {
+            if let Some(parent) = &class_info.parent {
+                if !self.class_decls.contains_key(parent) {
+                    return Err(CompileError::TypeckError(TypeckError::Other(format!(
+                        "class `{}` has unknown parent class `{}`",
+                        class_name, parent
+                    ))));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_class_cycles(&self) -> Result<()> {
+        let mut state: HashMap<String, u8> = HashMap::new();
+        let mut stack = Vec::new();
+        let mut class_names: Vec<String> = self.class_decls.keys().cloned().collect();
+        class_names.sort();
+
+        for class_name in class_names {
+            self.detect_class_cycle(&class_name, &mut state, &mut stack)
+                .map_err(CompileError::from)?;
+        }
+
+        Ok(())
+    }
+
+    fn detect_class_cycle(
+        &self,
+        class_name: &str,
+        state: &mut HashMap<String, u8>,
+        stack: &mut Vec<String>,
+    ) -> TyResult<()> {
+        match state.get(class_name).copied() {
+            Some(2) => return Ok(()),
+            Some(1) => {
+                let cycle_start = stack.iter().position(|name| name == class_name).unwrap_or(0);
+                let mut cycle: Vec<String> = stack[cycle_start..].to_vec();
+                cycle.push(class_name.to_string());
+                return Err(TypeckError::Other(format!(
+                    "cyclic class inheritance detected: {}",
+                    cycle.join(" -> ")
+                )));
+            }
+            _ => {}
+        }
+
+        state.insert(class_name.to_string(), 1);
+        stack.push(class_name.to_string());
+
+        if let Some(parent) = self
+            .class_decls
+            .get(class_name)
+            .and_then(|class_info| class_info.parent.as_ref())
+        {
+            self.detect_class_cycle(parent, state, stack)?;
+        }
+
+        stack.pop();
+        state.insert(class_name.to_string(), 2);
+        Ok(())
+    }
+
+    fn resolve_class_fields_for(
+        &self,
+        class_name: &str,
+        cache: &mut HashMap<String, Vec<(String, Type)>>,
+        stack: &mut HashSet<String>,
+    ) -> TyResult<Vec<(String, Type)>> {
+        if let Some(cached) = cache.get(class_name) {
+            return Ok(cached.clone());
+        }
+
+        if !stack.insert(class_name.to_string()) {
+            return Err(TypeckError::Other(format!(
+                "cyclic class inheritance detected near `{}`",
+                class_name
+            )));
+        }
+
+        let class_info = self.class_decls.get(class_name).ok_or_else(|| {
+            TypeckError::Other(format!("internal error: class `{}` not collected", class_name))
+        })?;
+
+        let mut merged = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(parent) = &class_info.parent {
+            let parent_fields = self.resolve_class_fields_for(parent, cache, stack)?;
+            for (field_name, field_ty) in parent_fields {
+                seen.insert(field_name.clone());
+                merged.push((field_name, field_ty));
+            }
+        }
+
+        for (field_name, field_ty) in &class_info.fields {
+            if !seen.insert(field_name.clone()) {
+                return Err(TypeckError::Other(format!(
+                    "duplicate inherited field `{}` in class `{}`",
+                    field_name, class_name
+                )));
+            }
+            merged.push((field_name.clone(), field_ty.clone()));
+        }
+
+        stack.remove(class_name);
+        cache.insert(class_name.to_string(), merged.clone());
+        Ok(merged)
+    }
+
+    fn resolve_class_methods_for(
+        &self,
+        class_name: &str,
+        cache: &mut HashMap<String, HashMap<String, Function>>,
+        stack: &mut HashSet<String>,
+    ) -> TyResult<HashMap<String, Function>> {
+        if let Some(cached) = cache.get(class_name) {
+            return Ok(cached.clone());
+        }
+
+        if !stack.insert(class_name.to_string()) {
+            return Err(TypeckError::Other(format!(
+                "cyclic class inheritance detected near `{}`",
+                class_name
+            )));
+        }
+
+        let class_info = self.class_decls.get(class_name).ok_or_else(|| {
+            TypeckError::Other(format!("internal error: class `{}` not collected", class_name))
+        })?;
+
+        let mut resolved = HashMap::new();
+        if let Some(parent) = &class_info.parent {
+            resolved = self.resolve_class_methods_for(parent, cache, stack)?;
+        }
+
+        let mut local_seen = HashSet::new();
+        for method in &class_info.methods {
+            let method_name = method.name.name.clone();
+            if !local_seen.insert(method_name.clone()) {
+                return Err(TypeckError::Other(format!(
+                    "duplicate method `{}` in class `{}`",
+                    method_name, class_name
+                )));
+            }
+            resolved.insert(method_name, method.clone());
+        }
+
+        stack.remove(class_name);
+        cache.insert(class_name.to_string(), resolved.clone());
+        Ok(resolved)
+    }
+
+    fn class_method_signature(&mut self, method: &Function) -> TyResult<FunctionTy> {
+        let mut param_types = Vec::new();
+        for param in &method.params {
+            param_types.push(self.check_type(&param.ty)?);
+        }
+
+        let ret_ty = if let Some(ret) = &method.return_type {
+            self.check_type(ret)?
+        } else {
+            self.env.unit_ty()
+        };
+
+        Ok(FunctionTy::new(
+            method.self_param.is_some(),
+            param_types,
+            ret_ty,
+        ))
+    }
     fn check_function_signature_decl(&mut self, fn_decl: &Function) -> Result<()> {
         let mut param_types = Vec::new();
         for param in &fn_decl.params {
@@ -378,7 +663,7 @@ impl TypeChecker {
                     self.check_type(&field.ty)?;
                 }
                 ClassMember::Method(method) => {
-                    self.check_function_decl(method)?;
+                    self.check_class_method_decl(&class_decl.name.name, method)?;
                 }
             }
         }
@@ -387,7 +672,44 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查类型别名
+    fn check_class_method_decl(&mut self, class_name: &str, method: &Function) -> Result<()> {
+        self.env.push_scope();
+
+        if method.self_param.is_some() {
+            let self_ty = self
+                .env
+                .lookup(class_name)
+                .and_then(|symbol| symbol.get_ty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.env.new_ty(TyKind::Adt {
+                        name: class_name.to_string(),
+                        args: vec![],
+                    })
+                });
+            self.env.insert_var("self".to_string(), self_ty);
+        }
+
+        for param in &method.params {
+            let ty = self.check_type(&param.ty)?;
+            self.env.insert_var(param.name.name.clone(), ty);
+        }
+
+        let ret_ty = if let Some(ret) = &method.return_type {
+            self.check_type(ret)?
+        } else {
+            self.env.unit_ty()
+        };
+
+        let body_ty = self.check_block(&method.body)?;
+        self.infer
+            .unify(&body_ty, &ret_ty)
+            .map_err(CompileError::from)?;
+
+        self.env.pop_scope();
+        Ok(())
+    }
+
     fn check_type_alias(&mut self, type_alias: &TypeAlias) -> Result<()> {
         self.check_type(&type_alias.ty)?;
         Ok(())
@@ -714,13 +1036,45 @@ impl TypeChecker {
             ExprKind::Path(path) => self.check_path(path),
             ExprKind::Lambda { params, body } => self.check_lambda(params, body),
             ExprKind::Struct { path, fields, .. } => {
-                // Resolve the struct name to its ADT type
-                let name = path.as_simple().map(|i| i.name.clone()).unwrap_or_default();
-                // Type-check each field value
-                for fv in fields {
-                    self.check_expr(&fv.value)?;
+                let name = path
+                    .as_simple()
+                    .map(|ident| ident.name.clone())
+                    .unwrap_or_default();
+
+                let field_defs = self.struct_field_defs.get(&name).cloned().ok_or_else(|| {
+                    TypeckError::UndefinedType { name: name.clone() }
+                })?;
+
+                let mut field_types: HashMap<String, Ty> = HashMap::new();
+                for (field_name, field_ty) in field_defs {
+                    field_types.insert(field_name, self.check_type(&field_ty)?);
                 }
-                // Look up the struct type in the environment
+
+                let mut seen = HashSet::new();
+                for field_value in fields {
+                    let field_name = match &field_value.name {
+                        crate::ast::FieldName::Ident(ident) => ident.name.clone(),
+                        crate::ast::FieldName::String(name) => name.clone(),
+                    };
+
+                    if !seen.insert(field_name.clone()) {
+                        return Err(TypeckError::Other(format!(
+                            "duplicate struct literal field `{}` for `{}`",
+                            field_name, name
+                        )));
+                    }
+
+                    let expected_ty = field_types.get(&field_name).cloned().ok_or_else(|| {
+                        TypeckError::FieldNotFound {
+                            type_name: name.clone(),
+                            field_name: field_name.clone(),
+                        }
+                    })?;
+
+                    let value_ty = self.check_expr(&field_value.value)?;
+                    self.infer.unify(&expected_ty, &value_ty)?;
+                }
+
                 if let Some(symbol) = self.env.lookup(&name) {
                     if let Some(ty) = symbol.get_ty() {
                         Ok(ty.clone())
@@ -728,7 +1082,7 @@ impl TypeChecker {
                         Ok(self.env.new_ty(TyKind::Adt { name, args: vec![] }))
                     }
                 } else {
-                    Ok(self.env.new_ty(TyKind::Adt { name, args: vec![] }))
+                    Err(TypeckError::UndefinedType { name })
                 }
             }
             _ => Ok(self.env.error_ty()),
@@ -858,15 +1212,36 @@ impl TypeChecker {
     }
 
     /// 检查字段访问
-    fn check_field(&mut self, base: &Expr, _name: &Ident) -> TyResult<Ty> {
+    fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
-        Ok(match &base_ty.kind {
-            TyKind::Adt { .. } => self.env.error_ty(),
-            _ => self.env.error_ty(),
-        })
+
+        match &base_ty.kind {
+            TyKind::Adt { name: type_name, .. } => {
+                let field_defs = self.struct_field_defs.get(type_name).cloned().ok_or_else(|| {
+                    TypeckError::FieldNotFound {
+                        type_name: type_name.clone(),
+                        field_name: name.name.clone(),
+                    }
+                })?;
+
+                let field_ty = field_defs
+                    .into_iter()
+                    .find(|(field_name, _)| field_name == &name.name)
+                    .map(|(_, field_ty)| field_ty)
+                    .ok_or_else(|| TypeckError::FieldNotFound {
+                        type_name: type_name.clone(),
+                        field_name: name.name.clone(),
+                    })?;
+
+                self.check_type(&field_ty)
+            }
+            _ => Err(TypeckError::FieldNotFound {
+                type_name: base_ty.kind.to_string(),
+                field_name: name.name.clone(),
+            }),
+        }
     }
 
-    /// 检查函数调用
     fn resolve_struct_field_types(&mut self, struct_name: &str) -> TyResult<Vec<(String, Ty)>> {
         let field_defs = self
             .struct_field_defs

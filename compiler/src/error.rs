@@ -1,135 +1,125 @@
-//! 编译器错误类型定义
-//!
-//! 使用 `thiserror` 定义错误，使用 `miette` 提供友好的错误信息。
+//! Compiler error types.
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-/// 编译器结果类型
+/// Compiler result type.
 pub type Result<T> = std::result::Result<T, CompileError>;
 
-/// 编译器错误
+/// Top-level compiler error.
 #[derive(Debug, Diagnostic, Error)]
 pub enum CompileError {
-    /// 词法错误
-    #[error("词法错误: {0}")]
-    #[diagnostic(code(lexer::error), help("检查源代码中的非法字符或格式"))]
+    #[error("lex error: {0}")]
+    #[diagnostic(code(lexer::error), help("check invalid characters or malformed literals"))]
     LexError(#[from] LexError),
 
-    /// 语法错误
-    #[error("语法错误: {0}")]
+    #[error("parse error: {0}")]
     #[diagnostic(code(parser::error))]
     ParseError(#[from] ParseError),
 
-    /// 类型错误
-    #[error("类型错误: {0}")]
+    #[error("type error: {0}")]
     #[diagnostic(code(typeck::error))]
     TypeError(#[from] TypeError),
 
-    /// 类型检查错误
-    #[error("类型检查错误: {0}")]
+    #[error("type check error: {0}")]
     #[diagnostic(code(typeck::error))]
     TypeckError(#[from] crate::typeck::TypeckError),
 
-    /// IO 错误
-    #[error("IO 错误: {0}")]
+    #[error("io error: {0}")]
     #[diagnostic(code(io::error))]
     IoError(#[from] std::io::Error),
 
-    /// HIR 降低错误
-    #[error("HIR 降低错误: {0}")]
+    #[error("HIR lowering error: {0}")]
     #[diagnostic(code(hir::lower_error))]
     HirLower(String),
 
-    /// MIR 降低错误
-    #[error("MIR 降低错误: {0}")]
+    #[error("MIR lowering error: {0}")]
     #[diagnostic(code(mir::lower_error))]
     MirLower(String),
 
-    /// 代码生成错误
-    #[error("代码生成错误: {0}")]
+    #[error("codegen error: {0}")]
     #[diagnostic(code(codegen::error))]
     Codegen(String),
 }
 
-/// 词法错误
+/// Lexer errors.
 #[derive(Debug, Clone, Diagnostic, Error)]
 pub enum LexError {
-    #[error("非法字符: {0}")]
-    #[diagnostic(code(lexer::illegal_char), help("移除或替换此字符"))]
+    #[error("illegal character: {0}")]
+    #[diagnostic(code(lexer::illegal_char), help("remove or replace this character"))]
     IllegalChar(char),
 
-    #[error("未闭合的字符串")]
-    #[diagnostic(code(lexer::unclosed_string), help("添加闭合的引号"))]
+    #[error("unclosed string literal")]
+    #[diagnostic(code(lexer::unclosed_string), help("add closing quote"))]
     UnclosedString,
 
-    #[error("未闭合的字节串")]
-    #[diagnostic(code(lexer::unclosed_bytes), help("添加闭合的引号"))]
+    #[error("unclosed bytes literal")]
+    #[diagnostic(code(lexer::unclosed_bytes), help("add closing quote"))]
     UnclosedBytes,
 
-    #[error("未闭合的多行注释")]
-    #[diagnostic(code(lexer::unclosed_comment), help("添加 */ 来闭合注释"))]
+    #[error("unclosed block comment")]
+    #[diagnostic(code(lexer::unclosed_comment), help("add */ to close comment"))]
     UnclosedComment,
 
-    #[error("无效的数字字面量: {0}")]
+    #[error("invalid numeric literal: {0}")]
     #[diagnostic(code(lexer::invalid_number))]
     InvalidNumber(String),
 
-    #[error("无效的转义序列: \\{0}")]
+    #[error("invalid escape sequence: \\{0}")]
     #[diagnostic(code(lexer::invalid_escape))]
     InvalidEscape(char),
 }
 
-/// 语法错误
+/// Parser errors.
 #[derive(Debug, Clone, Diagnostic, Error)]
 pub enum ParseError {
-    #[error("期望 {expected}, 找到 {found}")]
+    #[error("expected {expected}, found {found}")]
     #[diagnostic(code(parser::unexpected_token))]
     UnexpectedToken {
         expected: String,
         found: String,
-        #[label("此处")]
+        #[label("here")]
         span: SourceSpan,
     },
 
-    #[error("未闭合的块")]
-    #[diagnostic(code(parser::unclosed_block), help(r#"添加 }} 来闭合块"#))]
-    UnclosedBlock(#[label("块开始于此")] SourceSpan),
+    #[error("unclosed block")]
+    #[diagnostic(code(parser::unclosed_block), help("add }} to close the block"))]
+    UnclosedBlock(#[label("block starts here")] SourceSpan),
 
-    #[error("未闭合的括号")]
-    #[diagnostic(code(parser::unclosed_paren), help(r#"添加 ) 来闭合括号"#))]
-    UnclosedParen(#[label("括号开始于此")] SourceSpan),
+    #[error("unclosed parenthesis")]
+    #[diagnostic(code(parser::unclosed_paren), help("add ) to close parenthesis"))]
+    UnclosedParen(#[label("paren starts here")] SourceSpan),
 
-    #[error("无效的模式: {0}")]
+    #[error("invalid pattern: {0}")]
     #[diagnostic(code(parser::invalid_pattern))]
     InvalidPattern(String),
 
-    #[error("结构体字段名无效: 期望标识符或字符串字段名，实际为 {found}")]
+    #[error("invalid struct field: expected identifier or string key, found {found}")]
     #[diagnostic(
         code(parser::invalid_struct_field),
-        help("字段应写成 `name: expr`、`\"name\": expr` 或简写 `name`")
+        help("use `name: expr`, `\"name\": expr`, or shorthand `name`")
     )]
     InvalidStructField {
         found: String,
-        #[label("无效字段名")]
+        #[label("invalid field")]
         span: SourceSpan,
     },
 
-    #[error("结构体字段简写仅支持标识符")]
+    #[error("struct field shorthand supports identifiers only")]
     #[diagnostic(
         code(parser::invalid_struct_field_shorthand),
-        help("将字段改为显式写法，例如 `field: value`")
+        help("rewrite as explicit `field: value`")
     )]
     InvalidStructFieldShorthand {
-        #[label("此处不能使用字段简写")]
+        #[label("shorthand not allowed here")]
         span: SourceSpan,
     },
 
-    #[error("重复的参数名: {0}")]
-    #[diagnostic(code(parser::duplicate_param), help("使用不同的名称"))]
+    #[error("duplicate parameter name: {0}")]
+    #[diagnostic(code(parser::duplicate_param), help("use a different parameter name"))]
     DuplicateParam(String),
 
-    #[error("意外的表达式结尾")]
+    #[error("unexpected end of input")]
     #[diagnostic(code(parser::unexpected_eof))]
     UnexpectedEof,
 }
@@ -140,99 +130,104 @@ impl ParseError {
     }
 
     pub fn expected_declaration() -> Self {
-        Self::invalid_pattern("expected declaration / 需要声明")
+        Self::invalid_pattern("expected declaration")
     }
 
     pub fn expected_trait_item() -> Self {
-        Self::invalid_pattern("expected trait item / 需要 trait 成员")
+        Self::invalid_pattern("expected trait item")
     }
 
     pub fn expected_trait_path_in_impl() -> Self {
-        Self::invalid_pattern("expected trait path in impl declaration / impl 声明需要 trait 路径")
+        Self::invalid_pattern("expected trait path in impl declaration")
+    }
+
+    pub fn invalid_class_header_form() -> Self {
+        Self::invalid_pattern("invalid class header: expected `class Child: Parent { ... }`")
+    }
+
+    pub fn class_header_trait_list_not_supported() -> Self {
+        Self::invalid_pattern("class header trait list is not supported; use `impl Trait for Type`")
     }
 
     pub fn unexpected_token_in_expression() -> Self {
-        Self::invalid_pattern("unexpected token in expression / 表达式中出现非法 token")
+        Self::invalid_pattern("unexpected token in expression")
     }
 
     pub fn unexpected_token_in_pattern() -> Self {
-        Self::invalid_pattern("unexpected token in pattern / 模式中出现非法 token")
+        Self::invalid_pattern("unexpected token in pattern")
     }
 
     pub fn expected_identifier() -> Self {
-        Self::invalid_pattern("expected identifier / 需要标识符")
+        Self::invalid_pattern("expected identifier")
     }
 
     pub fn expected_array_length() -> Self {
-        Self::invalid_pattern("expected array length / 需要数组长度")
+        Self::invalid_pattern("expected array length")
     }
 
     pub fn expected_type() -> Self {
-        Self::invalid_pattern("expected type / 需要类型")
+        Self::invalid_pattern("expected type")
     }
 
     pub fn unexpected_range_in_infix() -> Self {
-        Self::invalid_pattern("unexpected `..` in infix position / 中缀位置不允许 `..`")
+        Self::invalid_pattern("unexpected `..` in infix position")
     }
 
     pub fn unexpected_token_in_infix() -> Self {
-        Self::invalid_pattern("unexpected token in infix position / 中缀位置出现非法 token")
+        Self::invalid_pattern("unexpected token in infix position")
     }
 }
 
-/// 类型错误
+/// User-facing type errors.
 #[derive(Debug, Clone, Diagnostic, Error)]
 pub enum TypeError {
-    #[error("类型不匹配: 期望 {expected}, 找到 {found}")]
-    #[diagnostic(code(typeck::mismatch), help("尝试使用显式类型转换"))]
+    #[error("type mismatch: expected {expected}, found {found}")]
+    #[diagnostic(code(typeck::mismatch), help("add an explicit conversion if needed"))]
     Mismatch {
         expected: String,
         found: String,
-        #[label("此处")]
+        #[label("here")]
         span: SourceSpan,
     },
 
-    #[error("未定义的变量: {name}")]
-    #[diagnostic(code(typeck::undefined_var), help("检查变量名是否正确拼写"))]
+    #[error("undefined variable: {name}")]
+    #[diagnostic(code(typeck::undefined_var), help("check the variable name"))]
     UndefinedVar {
         name: String,
-        #[label("未定义的变量")]
+        #[label("undefined variable")]
         _span: SourceSpan,
     },
 
-    #[error("未定义的类型: {0}")]
+    #[error("undefined type: {0}")]
     #[diagnostic(code(typeck::undefined_type))]
     UndefinedType(String),
 
-    #[error("未定义的方法: {0}")]
-    #[diagnostic(code(typeck::undefined_method), help("检查方法名是否正确"))]
+    #[error("undefined method: {0}")]
+    #[diagnostic(code(typeck::undefined_method), help("check method name and receiver type"))]
     UndefinedMethod(String),
 
-    #[error("参数数量不匹配: 期望 {expected} 个, 找到 {found} 个")]
+    #[error("argument count mismatch: expected {expected}, found {found}")]
     #[diagnostic(code(typeck::arg_count))]
     ArgCountMismatch { expected: usize, found: usize },
 
-    #[error("特征未实现: {trait_name}")]
+    #[error("trait not implemented: {trait_name}")]
     #[diagnostic(code(typeck::trait_not_implemented))]
     TraitNotImplemented { trait_name: String },
 }
 
 impl CompileError {
-    /// 创建一个位置标记的词法错误
+    /// Build lexer error at span.
     pub fn lex(_span: SourceSpan, err: LexError) -> Self {
-        // 注意：当前 LexError 不包含位置，未来可以扩展
         CompileError::LexError(err)
     }
 
-    /// 创建一个位置标记的语法错误
+    /// Build parser error at span.
     pub fn parse(_span: SourceSpan, err: ParseError) -> Self {
-        // ParseError 已经包含 span
         CompileError::ParseError(err)
     }
 
-    /// 创建一个位置标记的类型错误
+    /// Build type error at span.
     pub fn typeck(_span: SourceSpan, err: TypeError) -> Self {
-        // TypeError 已经包含 span
         CompileError::TypeError(err)
     }
 }

@@ -13,7 +13,7 @@ def main() -> i64 {
     let err = compile_to_ir(source).expect_err("invalid struct field should fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("结构体字段名无效"),
+        msg.contains("invalid struct field"),
         "expected actionable struct-field diagnostic, got:\n{}",
         msg
     );
@@ -59,7 +59,7 @@ def main() -> i64 {
     let err = compile_to_ir(source).expect_err("string field shorthand should fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("结构体字段简写仅支持标识符"),
+        msg.contains("struct field shorthand supports identifiers only"),
         "expected shorthand diagnostic, got:\n{}",
         msg
     );

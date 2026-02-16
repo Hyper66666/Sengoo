@@ -4,6 +4,7 @@ pub mod array_assign_tests;
 pub mod codegen_type_tests;
 pub mod compile_options_tests;
 pub mod constant_folding_tests;
+pub mod class_inheritance_tests;
 pub mod diagnostics_tests;
 pub mod for_loop_tests;
 pub mod incremental_typeck_tests;

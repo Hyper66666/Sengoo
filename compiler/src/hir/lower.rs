@@ -5,18 +5,44 @@ use super::*;
 use crate::ast::{self, Decl, Program, VariantField};
 use crate::hir::ty::{FloatKind, IntKind};
 use crate::typeck::TypeEnv;
+use std::collections::{HashMap, HashSet};
 
 /// 将 AST 程序转换为 HIR 模块
 pub fn lower_ast(program: &Program, type_env: &TypeEnv) -> Module {
     let mut module = Module::new("main".to_string());
+    let class_index = build_class_index(program);
 
     for decl in &program.decls {
-        if let Ok(hir_item) = lower_decl(decl, type_env) {
-            module.add_item(hir_item);
+        match &decl.kind {
+            ast::DeclKind::Class(class_decl) => {
+                if let Ok((class_struct, class_impl)) =
+                    lower_class_bundle(class_decl, &class_index, type_env)
+                {
+                    module.add_item(HIRItem::Struct(class_struct));
+                    if let Some(impl_item) = class_impl {
+                        module.add_item(HIRItem::Impl(impl_item));
+                    }
+                }
+            }
+            _ => {
+                if let Ok(hir_item) = lower_decl(decl, type_env) {
+                    module.add_item(hir_item);
+                }
+            }
         }
     }
 
     module
+}
+
+fn build_class_index<'a>(program: &'a Program) -> HashMap<String, &'a ast::Class> {
+    let mut index = HashMap::new();
+    for decl in &program.decls {
+        if let ast::DeclKind::Class(class_decl) = &decl.kind {
+            index.insert(class_decl.name.name.clone(), class_decl);
+        }
+    }
+    index
 }
 
 /// 降低 AST 声明到 HIR 项
@@ -220,40 +246,198 @@ fn lower_variant(variant: &ast::EnumVariant, type_env: &TypeEnv) -> HIRVariant {
 }
 
 /// 降低类声明（作为结构体处理）
-fn lower_class(class_decl: &ast::Class, type_env: &TypeEnv) -> Result<HIRStruct, String> {
+fn class_parent_name(class_decl: &ast::Class) -> Option<String> {
+    class_decl.extends.as_ref().and_then(|path| {
+        path.as_simple()
+            .map(|ident| ident.name.clone())
+            .or_else(|| path.segments.last().map(|ident| ident.name.clone()))
+    })
+}
+
+fn resolve_effective_class_fields(
+    class_decl: &ast::Class,
+    class_index: &HashMap<String, &ast::Class>,
+    visiting: &mut HashSet<String>,
+) -> Result<Vec<ast::StructField>, String> {
+    let class_name = class_decl.name.name.clone();
+    if !visiting.insert(class_name.clone()) {
+        return Err(format!(
+            "cyclic class inheritance detected while lowering `{}`",
+            class_name
+        ));
+    }
+
+    let mut merged_fields = Vec::new();
+    let mut seen_names = HashSet::new();
+
+    if let Some(parent_name) = class_parent_name(class_decl) {
+        let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
+            format!("class `{}` extends unknown parent `{}`", class_name, parent_name)
+        })?;
+        let parent_fields = resolve_effective_class_fields(parent_decl, class_index, visiting)?;
+        for parent_field in parent_fields {
+            if let Some(parent_field_name) = parent_field.name.as_ref() {
+                seen_names.insert(parent_field_name.name.clone());
+            }
+            merged_fields.push(parent_field);
+        }
+    }
+
+    for (field_index, member) in class_decl.members.iter().enumerate() {
+        let ast::ClassMember::Field(field) = member else {
+            continue;
+        };
+
+        let field_name = field
+            .name
+            .as_ref()
+            .map(|ident| ident.name.clone())
+            .unwrap_or_else(|| format!("_{}", field_index));
+
+        if !seen_names.insert(field_name.clone()) {
+            return Err(format!(
+                "duplicate inherited field `{}` in class `{}`",
+                field_name, class_name
+            ));
+        }
+
+        let mut normalized_field = field.clone();
+        if normalized_field.name.is_none() {
+            normalized_field.name = Some(ast::Ident::new(field_name, field.span));
+        }
+        merged_fields.push(normalized_field);
+    }
+
+    visiting.remove(&class_name);
+    Ok(merged_fields)
+}
+
+fn resolve_effective_class_methods(
+    class_decl: &ast::Class,
+    class_index: &HashMap<String, &ast::Class>,
+    visiting: &mut HashSet<String>,
+) -> Result<Vec<ast::Function>, String> {
+    let class_name = class_decl.name.name.clone();
+    if !visiting.insert(class_name.clone()) {
+        return Err(format!(
+            "cyclic class inheritance detected while lowering `{}`",
+            class_name
+        ));
+    }
+
+    let mut resolved_methods = if let Some(parent_name) = class_parent_name(class_decl) {
+        let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
+            format!("class `{}` extends unknown parent `{}`", class_name, parent_name)
+        })?;
+        resolve_effective_class_methods(parent_decl, class_index, visiting)?
+    } else {
+        Vec::new()
+    };
+
+    let mut index_by_name: HashMap<String, usize> = resolved_methods
+        .iter()
+        .enumerate()
+        .map(|(index, method)| (method.name.name.clone(), index))
+        .collect();
+    let mut local_seen = HashSet::new();
+
+    for member in &class_decl.members {
+        let ast::ClassMember::Method(method) = member else {
+            continue;
+        };
+
+        let method_name = method.name.name.clone();
+        if !local_seen.insert(method_name.clone()) {
+            return Err(format!(
+                "duplicate method `{}` in class `{}`",
+                method_name, class_name
+            ));
+        }
+
+        if let Some(existing_index) = index_by_name.get(&method_name).copied() {
+            resolved_methods[existing_index] = method.clone();
+        } else {
+            index_by_name.insert(method_name, resolved_methods.len());
+            resolved_methods.push(method.clone());
+        }
+    }
+
+    visiting.remove(&class_name);
+    Ok(resolved_methods)
+}
+
+fn lower_class_bundle(
+    class_decl: &ast::Class,
+    class_index: &HashMap<String, &ast::Class>,
+    type_env: &TypeEnv,
+) -> Result<(HIRStruct, Option<HIRImpl>), String> {
     let name = class_decl.name.name.clone();
     let is_pub = matches!(class_decl.vis, ast::Visibility::Public);
-
-    let mut index = 0;
-    let fields: Vec<HIRField> = class_decl
-        .members
+    let type_params = class_decl
+        .type_params
         .iter()
-        .filter_map(|m| {
-            if let ast::ClassMember::Field(field) = m {
-                let field_idx = index;
-                index += 1;
-                let name = field
-                    .name
-                    .as_ref()
-                    .map(|ident| ident.name.clone())
-                    .unwrap_or_else(|| format!("_{}", field_idx));
-                Some(HIRField {
-                    name,
-                    ty: lower_type(&field.ty, type_env),
-                    is_pub: matches!(field.vis, ast::Visibility::Public),
-                })
-            } else {
-                None
-            }
+        .map(|p| p.name.name.clone())
+        .collect();
+
+    let mut field_visiting = HashSet::new();
+    let effective_fields =
+        resolve_effective_class_fields(class_decl, class_index, &mut field_visiting)?;
+    let fields = effective_fields
+        .iter()
+        .enumerate()
+        .map(|(field_index, field)| HIRField {
+            name: field
+                .name
+                .as_ref()
+                .map(|ident| ident.name.clone())
+                .unwrap_or_else(|| format!("_{}", field_index)),
+            ty: lower_type(&field.ty, type_env),
+            is_pub: matches!(field.vis, ast::Visibility::Public),
         })
         .collect();
 
-    Ok(HIRStruct {
-        name,
-        type_params: vec![],
+    let class_struct = HIRStruct {
+        name: name.clone(),
+        type_params,
         fields,
         is_pub,
-    })
+    };
+
+    let mut method_visiting = HashSet::new();
+    let effective_methods =
+        resolve_effective_class_methods(class_decl, class_index, &mut method_visiting)?;
+    let self_ty = HIRType::named(name.clone(), vec![]);
+    let impl_items = effective_methods
+        .iter()
+        .filter_map(|method| {
+            lower_function_with_self(
+                method,
+                type_env,
+                Some(self_ty.clone()),
+                Some(name.clone()),
+            )
+            .ok()
+        })
+        .collect::<Vec<_>>();
+
+    let class_impl = if impl_items.is_empty() {
+        None
+    } else {
+        Some(HIRImpl {
+            target_type: self_ty,
+            trait_name: None,
+            items: impl_items,
+        })
+    };
+
+    Ok((class_struct, class_impl))
+}
+
+fn lower_class(class_decl: &ast::Class, type_env: &TypeEnv) -> Result<HIRStruct, String> {
+    let mut class_index = HashMap::new();
+    class_index.insert(class_decl.name.name.clone(), class_decl);
+    let (class_struct, _) = lower_class_bundle(class_decl, &class_index, type_env)?;
+    Ok(class_struct)
 }
 
 /// 降低 Trait 声明
