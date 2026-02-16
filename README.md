@@ -9,18 +9,32 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
 
-## Practical Demo (Developer-Oriented)
+## Practical Demos (Developer-Oriented)
 
-If you want one concrete, business-style proof point instead of synthetic microbenchmarks, run:
+If you want business-style proof points instead of only synthetic microbenchmarks, run:
 
 ```bash
+# Sengoo vs Python hot-path runtime demo
 python bench/demos/hotpath-risk-scoring/run_demo.py
+
+# Sengoo auto reflection vs C++ manual registry demo
+python bench/demos/reflection-auto-vs-cpp/run_demo.py
 ```
 
-This demo uses the same transaction risk pre-filter logic in Sengoo and Python, verifies result parity, and reports:
-- runtime comparison (`avg`/`p50`)
-- Python vs Sengoo speed ratio
-- Sengoo compile cost and estimated break-even runs
+Latest demo snapshots (measured on **February 16, 2026**):
+
+- Hot-path demo report:
+  `bench/demos/hotpath-risk-scoring/results/1771254169774-risk-scoring-demo.json`
+- Reflection ergonomics demo report:
+  `bench/demos/reflection-auto-vs-cpp/results/1771255074700-reflection-auto-vs-cpp.json`
+
+| Demo | Sengoo | Python / C++ |
+|---|---:|---:|
+| Hot-path runtime avg (ms) | 25.23 | Python: 1285.13 |
+| Hot-path speed ratio | 50.93x faster than Python | baseline |
+| Reflection rule file LOC | 28 | C++: 55 |
+| Manual registry entries | 0 | C++: 2 |
+| Missing dynamic rules | 0 | C++: 1 |
 
 ## Why Sengoo
 
@@ -29,14 +43,14 @@ This demo uses the same transaction risk pre-filter logic in Sengoo and Python, 
 Sengoo runtime exposes a Python interop layer (see `runtime/src/python.rs`) so teams can keep Python orchestration while moving hot paths to compiled native modules.
 
 Interop benchmark snapshot (measured on **February 16, 2026**):
-`bench/results/1771230408116-python-interop.json`
+`bench/results/1771234431756-python-interop.json`
 
 | Runner | Loop avg (ms) | Calls/s | vs Python native |
 |---|---:|---:|---:|
-| Python native | 2.184 | 9.16M | baseline |
-| Sengoo Runtime (PythonInterop) | 2.665 | 7.50M | +22.02% |
-| C++ (CPython C API) | 2.919 | 6.85M | +33.63% |
-| Rust (PyO3) | 2.930 | 6.83M | +34.15% |
+| Python native | 0.965 | 5.18M | baseline |
+| Sengoo Runtime (PythonInterop) | 0.665 | 7.52M | -31.14% |
+| C++ (CPython C API) | 0.718 | 6.97M | -25.65% |
+| Rust (PyO3) | 1.069 | 4.68M | +10.74% |
 
 ## 2) Fast Feedback Through Incremental Pipeline Reuse
 
@@ -57,27 +71,38 @@ Cross-language scenario matrix snapshot (measured on **February 16, 2026**):
 | Incremental reduction (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
 Advanced pipeline snapshot (real edits + 100k/1000k scale, measured on **February 16, 2026**):
-`bench/results/1771246902505-advanced-pipeline.json`
+`bench/results/1771252338862-advanced-pipeline.json`
 
 Real incremental scenarios (`after_avg_ms`, Sengoo):
 
 | Scenario | After avg (ms) |
 |---|---:|
-| `loop_body_change` | 226.49 |
-| `function_signature_change` | 309.90 |
-| `add_new_function` | 221.41 |
+| `loop_body_change` | 242.07 |
+| `function_signature_change` | 267.02 |
+| `add_new_function` | 245.44 |
 
 100k LOC full pipeline (Sengoo):
 
 | Stage | Avg (ms) |
 |---|---:|
-| Frontend (`compile_frontend_llvm_avg_ms`) | 571.15 |
-| Codegen object (`codegen_obj_avg_ms`) | 79.75 |
-| Link (`link_avg_ms`) | 657.88 |
-| End-to-end (`e2e_avg_ms`) | 1308.79 |
+| Frontend (`compile_frontend_llvm_avg_ms`) | 503.57 |
+| Codegen object (`codegen_obj_avg_ms`) | 57.78 |
+| Link (`link_avg_ms`) | 492.72 |
+| End-to-end (`e2e_avg_ms`) | 1054.08 |
 
-The same report includes a 1000k LOC scale point:
-`scale_curve/1000000/sengoo/e2e_avg_ms = 5885.34`
+1000k LOC full pipeline (same report, `e2e_avg_ms`):
+
+| Language | 1000k e2e avg (ms) |
+|---|---:|
+| Sengoo | 6482.95 |
+| C++ | 3373.79 |
+| Rust | 35292.84 |
+| Python | 5100.83 |
+
+Sengoo 1000k stage split:
+- Frontend: `5869.79ms` (`90.54%`)
+- Codegen object: `56.19ms` (`0.87%`)
+- Link: `556.97ms` (`8.59%`)
 
 ## 3) Runtime-Class Performance Track
 
