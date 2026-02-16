@@ -99,6 +99,14 @@ Real incremental scenarios (`after_avg_ms`, Sengoo):
 | Rust | 35292.84 |
 | Python | 5100.83 |
 
+10k-1000k three-language e2e compile comparison (`Sengoo / C++ / Rust`):
+
+| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) |
+|---|---:|---:|---:|
+| 10k | 666.99 | 830.18 | 1225.40 |
+| 100k | 1054.08 | 1145.91 | 4135.55 |
+| 1000k | 6482.95 | 3373.79 | 35292.84 |
+
 Sengoo 1000k stage split:
 - Frontend: `5869.79ms` (`90.54%`)
 - Codegen object: `56.19ms` (`0.87%`)

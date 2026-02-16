@@ -805,3 +805,37 @@ inkwell = { version = "0.5", features = ["llvm18-0"] }
 ---
 
 **文档维护**: 每次重大架构变更后请更新本文档。
+
+---
+
+## 2026-02-16 Addendum: Bench and Demo Baseline
+
+This addendum aligns the guide with the latest benchmark and demo evidence used in README.
+
+### 10k-1000k three-language e2e compile baseline
+
+Source: `bench/results/1771252338862-advanced-pipeline.json`
+
+| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) |
+|---|---:|---:|---:|
+| 10k | 666.99 | 830.18 | 1225.40 |
+| 100k | 1054.08 | 1145.91 | 4135.55 |
+| 1000k | 6482.95 | 3373.79 | 35292.84 |
+
+Sengoo 1000k stage split:
+- Frontend: `5869.79ms` (`90.54%`)
+- Codegen object: `56.19ms` (`0.87%`)
+- Link: `556.97ms` (`8.59%`)
+
+### Demo references
+
+- Hot-path runtime demo report: `bench/demos/hotpath-risk-scoring/results/1771254169774-risk-scoring-demo.json`
+- Reflection ergonomics demo report: `bench/demos/reflection-auto-vs-cpp/results/1771255074700-reflection-auto-vs-cpp.json`
+
+### Reproduce
+
+```bash
+python bench/advanced_pipeline_bench.py
+python bench/demos/hotpath-risk-scoring/run_demo.py
+python bench/demos/reflection-auto-vs-cpp/run_demo.py
+```

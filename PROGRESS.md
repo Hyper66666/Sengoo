@@ -359,3 +359,27 @@ bb_0:
   - 同一变量不能有多个可变借用
   - 可变借用与其他借用不能共存
   - 支持嵌套作用域和生命周期跟踪
+
+---
+
+## 2026-02-16 Performance Snapshot
+
+Advanced pipeline report: `bench/results/1771252338862-advanced-pipeline.json`
+
+### 10k-1000k three-language e2e compile baseline
+
+| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) |
+|---|---:|---:|---:|
+| 10k | 666.99 | 830.18 | 1225.40 |
+| 100k | 1054.08 | 1145.91 | 4135.55 |
+| 1000k | 6482.95 | 3373.79 | 35292.84 |
+
+Sengoo 1000k stage split:
+- Frontend: `5869.79ms` (`90.54%`)
+- Codegen object: `56.19ms` (`0.87%`)
+- Link: `556.97ms` (`8.59%`)
+
+### Demo evidence
+
+- Hot-path practical demo (`Sengoo vs Python`): `bench/demos/hotpath-risk-scoring/results/1771254169774-risk-scoring-demo.json`
+- Reflection ergonomics demo (`Sengoo auto vs C++ manual`): `bench/demos/reflection-auto-vs-cpp/results/1771255074700-reflection-auto-vs-cpp.json`
