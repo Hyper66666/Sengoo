@@ -90,22 +90,13 @@ Real incremental scenarios (`after_avg_ms`, Sengoo):
 | Link (`link_avg_ms`) | 492.72 |
 | End-to-end (`e2e_avg_ms`) | 1054.08 |
 
-1000k LOC full pipeline (same report, `e2e_avg_ms`):
+10k-1000k four-language e2e compile comparison (`Sengoo / C++ / Rust / Python`):
 
-| Language | 1000k e2e avg (ms) |
-|---|---:|
-| Sengoo | 6482.95 |
-| C++ | 3373.79 |
-| Rust | 35292.84 |
-| Python | 5100.83 |
-
-10k-1000k three-language e2e compile comparison (`Sengoo / C++ / Rust`):
-
-| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) |
-|---|---:|---:|---:|
-| 10k | 666.99 | 830.18 | 1225.40 |
-| 100k | 1054.08 | 1145.91 | 4135.55 |
-| 1000k | 6482.95 | 3373.79 | 35292.84 |
+| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) | Python (ms) |
+|---|---:|---:|---:|---:|
+| 10k | 666.99 | 830.18 | 1225.40 | 81.95 |
+| 100k | 1054.08 | 1145.91 | 4135.55 | 498.95 |
+| 1000k | 6482.95 | 3373.79 | 35292.84 | 5100.83 |
 
 Sengoo 1000k stage split:
 - Frontend: `5869.79ms` (`90.54%`)
