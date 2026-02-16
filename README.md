@@ -5,22 +5,17 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 - Python interoperability for gradual migration from existing ecosystems
 - Fast full/incremental compile loops for day-to-day development
 - Native execution path through an LLVM backend
+- Optional non-invasive reflection with sidecar metadata
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
 
-## Who Should Evaluate Sengoo
+## Why Sengoo
 
-- Teams with Python-heavy services that need selective native-speed acceleration
-- Developers who want short edit-build-run loops without leaving native binaries
-- Compiler/tooling engineers who care about measurable incremental architecture
+## 1) Hybrid Python Migration, Not Rewrite-Only Migration
 
-## Core Strengths
+Sengoo runtime exposes a Python interop layer (see `runtime/src/python.rs`) so teams can keep Python orchestration while moving hot paths to compiled native modules.
 
-### 1) Python Interoperability for Hybrid Architectures
-
-Sengoo runtime provides a Python interop layer (implemented in `runtime/src/python.rs`) so teams can keep Python orchestration while moving hot paths to compiled modules.
-
-Latest local interop benchmark (measured on **February 16, 2026**):
+Interop benchmark snapshot (measured on **February 16, 2026**):
 `bench/results/1771230408116-python-interop.json`
 
 | Runner | Loop avg (ms) | Calls/s | vs Python native |
@@ -30,15 +25,9 @@ Latest local interop benchmark (measured on **February 16, 2026**):
 | C++ (CPython C API) | 2.919 | 6.85M | +33.63% |
 | Rust (PyO3) | 2.930 | 6.83M | +34.15% |
 
-What this means in practice:
+## 2) Fast Feedback Through Incremental Pipeline Reuse
 
-- The interop boundary cost is competitive with common C++/Rust embedding paths.
-- You can migrate incrementally instead of rewriting a full Python system.
-- Runtime interop is suitable for mixed workloads where Python remains the control plane.
-
-### 2) Fast Compile + Incremental Feedback
-
-Sengoo compiler pipeline is optimized for short feedback loops:
+Compiler pipeline focus:
 
 - Build/run cache and module fingerprint invalidation
 - AST-aware edit classification (`noop` / `impl_only` / `interface_change`)
@@ -74,7 +63,7 @@ Real incremental scenarios (`after_avg_ms`, Sengoo):
 | Link (`link_avg_ms`) | 460.78 |
 | End-to-end (`e2e_avg_ms`) | 967.10 |
 
-### 3) Runtime-Class Performance Track
+## 3) Runtime-Class Performance Track
 
 Scenario runtime p50 average (same matrix file `1771185238357`):
 
@@ -87,60 +76,64 @@ Scenario runtime p50 average (same matrix file `1771185238357`):
 
 Interpretation:
 
-- Sengoo runtime behavior is in the same class as C++/Rust in this matrix profile.
-- In these loop-heavy samples, Sengoo is much faster than Python process runtime.
+- Sengoo runtime behavior is currently in the same class as C++/Rust in this loop-heavy matrix profile.
+- In these samples, Sengoo is significantly faster than Python runtime execution.
 
-### 4) Generality: Not Optimized for One Synthetic Case Only
+## 4) Non-Invasive Reflection (Opt-In)
 
-Bootstrap generality proof (measured on **February 16, 2026**):
-`bench/results/1771230417893-bootstrap-generality.json`
+Reflection in Sengoo is designed for low baseline overhead:
 
-- Proof status: `pass`
-- Scenarios passed: `6/6`
-- Covered capability classes:
-  - `control_flow_for`
-  - `branching_while`
-  - `array_ops`
-  - `recursion`
-  - `impl_method`
-  - `module_import_graph`
+- Disabled by default
+- Enabled explicitly with `--reflect`
+- Metadata emitted to sidecar JSON (`*.sgreflect.json`)
+- Typed runtime invocation (`call_i64`/`call_f64`/`call_bool`) with signature checks
+- Native reflection binding path is used when available (fallback handler path is retained)
 
-This suite validates that optimization progress still preserves broad language behavior.
-
-## Language and Tooling Highlights
-
-- LLVM-based native compilation path
-- Type-check and compile pipeline through `sgc`
-- Cache/incremental-aware CLI flow
-- Optional daemon mode for persistent compile sessions
-- VS Code extension (current package version: `1.0.0`)
-
-Useful CLI commands:
+Reflection build example:
 
 ```bash
-# type check
-sgc check <file.sg>
-
-# run via compile+cache pipeline
-sgc run <file.sg> -O 1
-
-# build native binary
-sgc build <file.sg> -O 2
-
-# force full rebuild
-sgc build <file.sg> -O 2 --force-rebuild
-
-# optional daemon
-sgc daemon --addr 127.0.0.1:48765
+sgc build examples/09_method_call.sg -O 2 --reflect
 ```
 
-## Best-Fit Application Scenarios
+Fine-grained reflection selection:
 
-- Accelerating hot loops inside Python services
-- CLI tools that need fast iterative compile cycles
-- Algorithm-heavy modules distributed as native binaries
-- Mixed-language systems where gradual migration matters
-- Teams that want measurable perf gates in CI while evolving a compiler stack
+```bash
+sgc build examples/09_method_call.sg -O 2 --reflect \
+  --reflect-module examples/09_method_call.sg \
+  --reflect-symbol examples/09_method_call.sg::main
+```
+
+Runtime reflection usage example (Rust):
+
+```rust
+use sengoo_runtime::{ReflectValue, ReflectionRuntime};
+
+let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
+let symbols = rt.list_symbols("examples/09_method_call.sg")?;
+println!("symbols = {}", symbols.len());
+
+let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
+println!("result = {}", value);
+```
+
+Reflection overhead benchmark:
+
+```bash
+cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
+python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-reflection-report>.json
+```
+
+Reflection benchmark cases:
+
+- `disabled`: compile with reflection fully off (baseline path)
+- `enabled-unused`: compile with `--reflect`, runtime reflection API not called
+- `enabled-used`: compile with `--reflect`, perform runtime symbol listing and typed reflection invoke
+
+Current gate defaults:
+
+- `soft`: enabled-unused overhead <= `25%`, enabled-used overhead <= `45%`
+- `hard`: enabled-unused overhead <= `15%`, enabled-used overhead <= `30%`
+- disabled regression check compares against `bench/baseline.json` key `reflection/<suite>/disabled` when available
 
 ## Quick Start
 
@@ -155,6 +148,30 @@ target/release/sgc run examples/01_hello.sg
 ```bash
 target/release/sgc build examples/05_loop.sg -O 2
 ```
+
+Useful commands:
+
+```bash
+# type check
+sgc check <file.sg>
+
+# compile and run
+sgc run <file.sg> -O 1
+
+# build native binary
+sgc build <file.sg> -O 2
+
+# force full rebuild
+sgc build <file.sg> -O 2 --force-rebuild
+
+# optional daemon mode
+sgc daemon --addr 127.0.0.1:48765
+```
+
+## VS Code Extension
+
+- Extension package location: `vscode-sengoo/`
+- Current package version: `1.0.0`
 
 ## Benchmark Reproducibility
 
@@ -176,18 +193,24 @@ Fairness profile used in advanced pipeline comparison:
 - C++: precompiled header enabled
 - Rust: cargo incremental enabled (`CARGO_INCREMENTAL=1`)
 
+## Documentation
+
+- Tutorial: `docs/sengoo-tutorial.html`
+- Language features: `docs/language-features.md`
+- Development guide: `docs/DEVELOPMENT_GUIDE.md`
+
 ## Repository Layout
 
 ```text
 Sengoo/
 |-- compiler/        # Frontend, type checker, HIR/MIR pipeline
-|-- runtime/         # Runtime support and interop layer
+|-- runtime/         # Runtime support, Python interop, reflection runtime API
 |-- tools/
 |   |-- sgc/         # Compiler CLI
 |   |-- sgfmt/       # Formatter
 |   `-- sglsp/       # Language server
 |-- examples/        # Language examples
-|-- docs/            # Documents and plans
+|-- docs/            # Tutorial and developer docs
 `-- vscode-sengoo/   # VS Code extension
 ```
 
@@ -198,7 +221,7 @@ Current stage: early but fast-iterating.
 Current focus:
 
 - Frontend architecture optimization
-- Stronger incremental consistency under real code edits
+- Stronger incremental consistency under real edits
 - Better interop/reflection ergonomics
 - Tooling and developer experience polish
 
@@ -209,31 +232,24 @@ Notes:
 
 ---
 
-## 中文版
+# Sengoo（中文版）
 
-# Sengoo（中文介绍）
+Sengoo 是一门自研编译型语言，目标聚焦工程落地：
 
-Sengoo 是一门自研编译型语言，当前目标非常明确：
-
-- 强化 Python 互操作，支持渐进式迁移
-- 提升全量/增量编译速度，缩短开发反馈周期
-- 基于 LLVM 走原生性能路径
+- 强化 Python 互操作，支持渐进迁移
+- 提升全量/增量编译反馈速度，缩短开发周期
+- 基于 LLVM 生成原生可执行程序
+- 提供按需开启的非侵入式反射能力
 
 项目仍在快速迭代，但本地 CLI 开发流程已经可用。
 
-## 适合什么团队
+## 为什么选择 Sengoo
 
-- 已有大量 Python 资产，但热点模块需要原生加速的团队
-- 追求“改完就能快编译验证”的工程团队
-- 关注编译器工程化、增量架构和可观测性能门禁的开发者
-
-## 核心优势
-
-### 1）Python 互操作：不必一次性重写系统
+## 1）Python 渐进迁移能力
 
 Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支持“Python 编排 + Sengoo 热点模块”的混合架构。
 
-最新本地互操作基准（**2026-02-16**）：
+互操作基准快照（**2026-02-16**）：
 `bench/results/1771230408116-python-interop.json`
 
 | 路径 | Loop 平均耗时 (ms) | 吞吐 (Calls/s) | 相对 Python 原生 |
@@ -243,23 +259,16 @@ Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支
 | C++ (CPython C API) | 2.919 | 6.85M | +33.63% |
 | Rust (PyO3) | 2.930 | 6.83M | +34.15% |
 
-工程意义：
+## 2）增量编译反馈
 
-- Sengoo 的跨语言边界开销与常见 C++/Rust Python 嵌入路径同一量级。
-- 可以按模块逐步迁移，而不是“全量重写再上线”。
-- 适合保留 Python 主流程，同时把热点逻辑下沉到编译型模块。
+编译链路重点：
 
-### 2）编译与增量反馈：面向高迭代开发
-
-Sengoo 编译链路当前重点放在“编辑-编译-运行”短反馈：
-
-- build/run cache
-- 模块指纹失效机制
+- build/run cache 与模块指纹失效机制
 - AST 级编辑分类（`noop` / `impl_only` / `interface_change`）
-- workset 感知的后端调度
-- 可选 daemon 常驻编译模式
+- workset 感知后端调度
+- 可选 daemon 常驻模式
 
-跨语言场景矩阵快照（**2026-02-16**）：
+跨语言场景矩阵（**2026-02-16**）：
 `bench/results/1771185238357-scenario-matrix.json`
 
 | 指标（平均） | Sengoo | C++ | Rust | Python |
@@ -268,29 +277,9 @@ Sengoo 编译链路当前重点放在“编辑-编译-运行”短反馈：
 | 增量编辑后编译 (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | 增量收益 (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
-高级流水线基准（真实编辑 + 100k 规模，**2026-02-16**）：
-`bench/results/1771228834821-advanced-pipeline.json`
+## 3）运行时性能路径
 
-Sengoo 真实增量场景（`after_avg_ms`）：
-
-| 场景 | after 平均耗时 (ms) |
-|---|---:|
-| `loop_body_change` | 219.75 |
-| `function_signature_change` | 206.60 |
-| `add_new_function` | 240.84 |
-
-100k LOC 全链路：
-
-| 阶段 | 平均耗时 (ms) |
-|---|---:|
-| 前端 (`compile_frontend_llvm_avg_ms`) | 446.09 |
-| 代码生成 (`codegen_obj_avg_ms`) | 60.23 |
-| 链接 (`link_avg_ms`) | 460.78 |
-| 端到端 (`e2e_avg_ms`) | 967.10 |
-
-### 3）运行性能轨道：接近 C++/Rust 量级
-
-同一场景矩阵下的 runtime p50 平均：
+同一矩阵中的 runtime p50 均值：
 
 | 语言 | Runtime p50 平均 (ms) |
 |---|---:|
@@ -299,75 +288,72 @@ Sengoo 真实增量场景（`after_avg_ms`）：
 | Rust | 8.59 |
 | Python | 45.14 |
 
-解释：
+含义：在该循环密集矩阵中，Sengoo 与 C++/Rust 处于同量级，并明显快于 Python 解释执行。
 
-- 在当前样本中，Sengoo 运行时表现与 C++/Rust 接近。
-- 在循环密集型样例里，相对 Python 进程运行时间有明显优势。
+## 4）非侵入式反射（按需开启）
 
-### 4）通用性验证：不是只对单一样例做优化
+Sengoo 反射能力采用“默认关闭 + 按需开启”模型：
 
-Bootstrap 通用性证明（**2026-02-16**）：
-`bench/results/1771230417893-bootstrap-generality.json`
+- 默认不启用，避免影响基线路径
+- 显式 `--reflect` 开启
+- 输出 sidecar 元数据（`*.sgreflect.json`）
+- 运行时提供类型化调用（`call_i64`/`call_f64`/`call_bool`）
+- 可用时走原生反射绑定路径，不可用时自动回退
 
-- 证明状态：`pass`
-- 场景通过：`6/6`
-- 覆盖能力：
-  - `control_flow_for`
-  - `branching_while`
-  - `array_ops`
-  - `recursion`
-  - `impl_method`
-  - `module_import_graph`
-
-这套基准用于保证优化过程中不牺牲语言通用能力和正确性。
-
-## 语言与工具链亮点
-
-- LLVM 原生编译路径
-- `sgc` 提供检查、运行、构建一体化流程
-- 缓存/增量友好的命令行体验
-- 可选 daemon 模式
-- VS Code 插件（当前打包版本 `1.0.0`）
-
-常用命令：
+反射构建示例：
 
 ```bash
-sgc check <file.sg>
-sgc run <file.sg> -O 1
-sgc build <file.sg> -O 2
-sgc build <file.sg> -O 2 --force-rebuild
-sgc daemon --addr 127.0.0.1:48765
+sgc build examples/09_method_call.sg -O 2 --reflect
 ```
 
-## 典型应用场景
+细粒度筛选示例：
 
-- Python 服务中的热点循环/算法模块加速
-- 需要高频迭代验证的 CLI 工具开发
-- 需要原生二进制交付的算法组件
-- 需要平滑迁移的混合语言工程
-- 希望在 CI 中建立可量化性能门禁的团队
+```bash
+sgc build examples/09_method_call.sg -O 2 --reflect \
+  --reflect-module examples/09_method_call.sg \
+  --reflect-symbol examples/09_method_call.sg::main
+```
+
+运行时调用示例（Rust）：
+
+```rust
+use sengoo_runtime::{ReflectValue, ReflectionRuntime};
+
+let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
+let symbols = rt.list_symbols("examples/09_method_call.sg")?;
+println!("symbols = {}", symbols.len());
+
+let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
+println!("result = {}", value);
+```
+
+反射性能门禁：
+
+```bash
+cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
+python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-reflection-report>.json
+```
 
 ## 快速开始
 
 ```bash
 cargo build --release
-```
-
-```bash
 target/release/sgc run examples/01_hello.sg
-```
-
-```bash
 target/release/sgc build examples/05_loop.sg -O 2
 ```
 
-## 基准与复现
+## VS Code 插件
 
-基准仓库（独立维护）：
+- 插件目录：`vscode-sengoo/`
+- 当前打包版本：`1.0.0`
+
+## 基准复现
+
+基准套件位于独立仓库：
 
 - `https://github.com/Hyper66666/bench`
 
-常用脚本：
+常用命令：
 
 ```bash
 python ./bench/scenario_matrix_bench.py
@@ -376,23 +362,8 @@ python ./bench/python_interop_bench.py
 python ./bench/bootstrap_generality_bench.py
 ```
 
-高级流水线公平化设置：
+## 文档入口
 
-- C++ 启用预编译头（PCH）
-- Rust 启用 `cargo incremental`（`CARGO_INCREMENTAL=1`）
-
-## 当前状态
-
-当前阶段：早期但快速迭代。
-
-当前重点：
-
-- 前端架构进一步优化
-- 真实代码编辑场景下的增量稳定性
-- 互操作与反射能力的工程化增强
-- 工具链和开发体验打磨
-
-说明：
-
-- 上述数据均为本地机器实测，主要用于趋势判断。
-- 建议使用 bench 仓库和 CI gate 在目标硬件上复测。
+- 教程：`docs/sengoo-tutorial.html`
+- 语言特性：`docs/language-features.md`
+- 开发手册：`docs/DEVELOPMENT_GUIDE.md`

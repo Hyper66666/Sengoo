@@ -1,268 +1,249 @@
-# Sengoo 高级语言特性实现文档
+# Sengoo Language Features
 
-## 1. 已完成的实现
+Sengoo is a compiled language focused on practical engineering workflows:
 
-### 1.1 枚举类型 (Enum)
+- Hybrid Python interoperability for gradual migration
+- Fast compile feedback with incremental pipeline reuse
+- LLVM-native code generation and executable output
+- Optional non-invasive reflection with sidecar metadata
 
-**MIR 层表示** (`compiler/src/mir/mod.rs`):
-```rust
-pub enum MIRType {
-    // ... 其他类型
-    Enum {
-        discr_type: Box<MIRType>,  // 判别值类型
-        variants: Vec<(u32, Option<MIRType>)>,  // (判别值, 变体数据类型)
-    },
+## 1. Current Capability Snapshot
+
+| Capability | Status | Notes |
+|---|---|---|
+| Core syntax (`def`, `if`, `for`, `while`, `struct`, `impl`) | Available | Use `examples/*.sg` as validated learning surface. |
+| Static type-check pipeline | Available | Entry command: `sgc check <file.sg>`. |
+| Incremental compile pipeline | Available | Fingerprint + workset-based invalidation/rebuild strategy. |
+| Daemon compile service | Available | `sgc daemon --addr 127.0.0.1:48765`. |
+| Python interop runtime path | Available | Runtime integration in `runtime/src/python.rs`. |
+| Non-invasive reflection | Available (opt-in) | Enabled only with `--reflect`; default path stays lean. |
+| VS Code extension | Available | Current package version: `1.0.0`. |
+
+## 2. Language Surface Highlights
+
+## 2.1 Function-oriented syntax
+
+```sg
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def add(a: i64, b: i64) -> i64 {
+    a + b
 }
 ```
 
-**支持的变体类型**:
-- 单元变体: `None` → `Enum { variants: [(0, None)] }`
-- 元组变体: `Some(T)` → `Enum { variants: [(1, Some(T))] }`
-- 结构体变体: `Ok { value: T }` → `Enum { variants: [(0, Some(StructType))] }`
+## 2.2 Control flow + loops
 
-### 1.2 模式匹配 (Match Expression)
-
-**HIR 表示** (`compiler/src/hir/expr.rs`):
-```rust
-Match {
-    scrutinee: Box<HIRExpr>,
-    arms: Vec<HIRMatchArm>,
+```sg
+def sum(arr: [i64; 4]) -> i64 {
+    let total = 0;
+    for v in arr {
+        total = total + v;
+    }
+    total
 }
 ```
 
-**MIR Lowering** (`compiler/src/mir/lowering.rs`):
-- 枚举模式匹配 → `Switch` 终止符
-- 字面量模式匹配 → `If-Else` 链
-- 通配符模式 `_` → 直接执行
+## 2.3 Method call surface
 
-**LLVM 代码生成** (`compiler/src/codegen/mod.rs`):
-- `Switch` → LLVM `switch` 指令
-- `Discriminant` → `extractvalue` 指令
-- `EnumConstruct` → `insertvalue` 指令
-
-### 1.3 新增 MIR 指令
-
-```rust
-// 获取枚举判别值
-Discriminant { destination: Local, source: Local }
-
-// 构造枚举变体
-EnumConstruct {
-    destination: Local,
-    discriminant: u32,
-    payload: Option<Local>,
-    enum_type: MIRType,
+```sg
+impl i64 {
+    def abs(self) -> i64 {
+        if self < 0 { -self } else { self }
+    }
 }
 
-// 提取枚举载荷
-ExtractPayload { destination: Local, source: Local }
+let x = (-21).abs();
 ```
 
-## 2. Trait 系统架构
+## 3. Non-Invasive Reflection (Opt-In)
 
-### 2.1 HIR 层定义
+Reflection is designed to avoid polluting the default hot path:
 
-**Trait 定义** (`compiler/src/hir/item.rs`):
-```rust
-pub struct HIRTrait {
-    pub name: String,
-    pub type_params: Vec<String>,
-    pub items: Vec<HIRTraitItem>,  // 方法、常量、类型别名
-    pub is_pub: bool,
-}
+- Disabled by default
+- Enabled only with explicit `--reflect`
+- Emitted as sidecar metadata (`*.sgreflect.json`)
+- Runtime typed invocation API validates signature and argument types
+- Native reflection binding can be used when available for lower invoke overhead
 
-pub enum HIRTraitItem {
-    Function(HIRFunction),
-    Const(String, HIRType),
-    Type(String),
-}
+## 3.1 CLI example
+
+```bash
+# baseline reflected build
+sgc build examples/09_method_call.sg -O 2 --reflect
+
+# narrowed reflection scope
+sgc build examples/09_method_call.sg -O 2 --reflect \
+  --reflect-module examples/09_method_call.sg \
+  --reflect-symbol examples/09_method_call.sg::main
 ```
 
-**Impl 定义**:
-```rust
-pub struct HIRImpl {
-    pub target_type: HIRType,      // impl 的目标类型
-    pub trait_name: Option<String>, // impl 的 trait (None = 固有 impl)
-    pub items: Vec<HIRFunction>,    // impl 的方法
-}
-```
+Generated artifact pattern:
 
-### 2.2 Trait 注册表实现 (`compiler/src/typeck/trait.rs`)
+- `<binary>.sgreflect.json` (metadata)
+- `<binary>.sgreflect.<dll|so|dylib>` (optional native reflection library)
 
-**TraitRegistry**: 收集和管理 Trait 定义
-```rust
-pub struct TraitRegistry {
-    traits: HashMap<String, Arc<TraitInfo>>,
-}
-
-pub struct TraitInfo {
-    pub name: String,
-    pub type_params: Vec<String>,
-    pub methods: HashMap<String, MethodSig>,
-    pub consts: HashMap<String, Ty>,
-    pub assoc_types: Vec<String>,
-    pub is_pub: bool,
-}
-
-pub struct MethodSig {
-    pub has_self: bool,
-    pub param_types: Vec<Ty>,
-    pub return_type: Ty,
-}
-```
-
-**ImplRegistry**: 收集和管理 Impl 块
-```rust
-pub struct ImplRegistry {
-    // 固有 impl (type_key -> Vec<ImplInfo>)
-    inherent_impls: HashMap<String, Vec<ImplInfo>>,
-    // Trait impl (trait_name -> type_key -> ImplInfo)
-    trait_impls: HashMap<String, HashMap<String, ImplInfo>>,
-}
-
-pub struct ImplInfo {
-    pub target_type: Ty,
-    pub trait_name: Option<String>,
-    pub methods: HashMap<String, FunctionTy>,
-    pub consts: HashMap<String, Ty>,
-    pub assoc_types: HashMap<String, Ty>,
-}
-```
-
-### 2.3 方法调用
-
-**HIR 表示**:
-```rust
-MethodCall {
-    receiver: Box<HIRExpr>,
-    method: String,
-    args: Vec<HIRExpr>,
-}
-```
-
-**类型检查实现** (`compiler/src/typeck/check.rs:check_method_call`):
-1. 获取接收者类型
-2. 查找固有 impl 的方法
-3. 查找 Trait impl 的方法
-4. 验证参数类型和数量
-5. 返回方法返回类型
-
-### 2.4 Trait 解析流程
-
-```
-1. 收集所有 Trait 定义 → TraitRegistry
-2. 收集所有 Impl 定义 → ImplRegistry
-3. 方法调用时:
-   a. 确定接收者类型
-   b. 查找匹配的 Impl 块
-   c. 解析方法调用为静态函数调用
-   d. 对于 Trait 对象，使用动态分发
-```
-
-### 2.4 动态分发实现
-
-对于 Trait 对象 `dyn Trait`:
-```rust
-// Trait 对象表示
-struct TraitObject {
-    vtable: *const VTable,  // 虚函数表指针
-    data: *const u8,        // 数据指针
-}
-
-// 虚函数表
-struct VTable {
-    drop: fn(*const u8),
-    size: usize,
-    align: usize,
-    methods: [*const fn()],  // 方法指针数组
-}
-```
-
-## 3. 标准库扩展设计
-
-### 3.1 集合模块
+## 3.2 Runtime API example (Rust)
 
 ```rust
-// 核心 trait
-pub trait Iter {
-    type Item;
-    fn next(&mut self) -> Option<Self::Item>;
-}
+use sengoo_runtime::{ReflectionRuntime, ReflectValue};
 
-pub trait IntoIterator {
-    type Item;
-    type IntoIter: Iter<Item = Self::Item>;
-    fn into_iter(self) -> Self::IntoIter;
-}
+let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
+let symbols = rt.list_symbols("examples/09_method_call.sg")?;
+println!("symbols = {}", symbols.len());
 
-// 容器
-pub struct Vec<T> { /* ... */ }
-pub struct HashMap<K, V> { /* ... */ }
+let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
+println!("result = {}", value);
 ```
 
-### 3.2 异步支持
+## 3.3 Performance gate example
+
+```bash
+cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
+python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-report>.json
+```
+
+## 4. Tooling Workflow
+
+Recommended local loop:
+
+1. Edit source file(s)
+2. `sgc check <file.sg>`
+3. `sgc run <file.sg> -O 1`
+4. For release: `sgc build <file.sg> -O 2`
+5. If reflection is needed: add `--reflect` and optional filters
+
+## 5. Best-Fit Scenarios
+
+- Python services with native-speed hotspot requirements
+- CLI/automation tools requiring short edit-build-run loops
+- Compiler/runtime experimentation with measurable benchmark gates
+- Mixed-language systems that need low-risk incremental migration
+
+---
+
+# Sengoo 语言特性（中文版）
+
+Sengoo 是一门面向工程落地的编译型语言，当前重点：
+
+- Python 互操作与渐进迁移
+- 快速编译反馈（增量链路）
+- LLVM 原生代码生成
+- 按需开启的非侵入式反射
+
+## 1. 能力快照
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 核心语法（`def`/`if`/`for`/`while`/`struct`/`impl`） | 可用 | 建议以 `examples/*.sg` 为已验证学习面。 |
+| 静态类型检查流水线 | 可用 | 命令：`sgc check <file.sg>`。 |
+| 增量编译链路 | 可用 | 基于指纹 + workset 感知失效与重编译。 |
+| Daemon 编译服务 | 可用 | `sgc daemon --addr 127.0.0.1:48765`。 |
+| Python 互操作运行时路径 | 可用 | 实现在 `runtime/src/python.rs`。 |
+| 非侵入式反射 | 可用（按需） | 仅在 `--reflect` 开启时生效，默认路径保持轻量。 |
+| VS Code 插件 | 可用 | 当前打包版本 `1.0.0`。 |
+
+## 2. 语法亮点
+
+## 2.1 函数中心语法
+
+```sg
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def add(a: i64, b: i64) -> i64 {
+    a + b
+}
+```
+
+## 2.2 控制流与循环
+
+```sg
+def sum(arr: [i64; 4]) -> i64 {
+    let total = 0;
+    for v in arr {
+        total = total + v;
+    }
+    total
+}
+```
+
+## 2.3 方法调用面
+
+```sg
+impl i64 {
+    def abs(self) -> i64 {
+        if self < 0 { -self } else { self }
+    }
+}
+
+let x = (-21).abs();
+```
+
+## 3. 非侵入式反射（按需开启）
+
+反射设计目标是“不打扰默认热路径”：
+
+- 默认关闭
+- 仅显式传入 `--reflect` 才开启
+- 以 sidecar 元数据形式输出（`*.sgreflect.json`）
+- 运行时提供类型化调用 API，并校验签名与参数
+- 在可用时可绑定原生反射动态库以降低调用开销
+
+## 3.1 CLI 示例
+
+```bash
+# 基础反射构建
+sgc build examples/09_method_call.sg -O 2 --reflect
+
+# 精确筛选模块与符号
+sgc build examples/09_method_call.sg -O 2 --reflect \
+  --reflect-module examples/09_method_call.sg \
+  --reflect-symbol examples/09_method_call.sg::main
+```
+
+产物模式：
+
+- `<binary>.sgreflect.json`（元数据）
+- `<binary>.sgreflect.<dll|so|dylib>`（可选原生反射动态库）
+
+## 3.2 运行时 API 示例（Rust）
 
 ```rust
-// async/await 语法 lowering
-async fn fetch_data() -> String { ... }
+use sengoo_runtime::{ReflectionRuntime, ReflectValue};
 
-// 降低为状态机
-enum FetchDataStateMachine {
-    Start,
-    AwaitingRequest,
-    Complete(String),
-}
+let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
+let symbols = rt.list_symbols("examples/09_method_call.sg")?;
+println!("symbols = {}", symbols.len());
+
+let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
+println!("result = {}", value);
 ```
 
-### 3.3 序列化
+## 3.3 性能门禁示例
 
-```rust
-pub trait Serialize {
-    fn serialize(&self) -> Vec<u8>;
-}
-
-pub trait Deserialize: Sized {
-    fn deserialize(data: &[u8]) -> Result<Self>;
-}
+```bash
+cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
+python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-report>.json
 ```
 
-## 4. 实现状态
+## 4. 工具链工作流
 
-| 特性 | AST | HIR | 类型检查 | MIR | 代码生成 |
-|------|-----|-----|---------|-----|---------|
-| 枚举定义 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 模式匹配 | ✅ | ✅ | ⚠️ | ✅ | ✅ |
-| Trait 定义 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Impl 块 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Trait 注册表 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Impl 注册表 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 方法调用解析 | ✅ | ✅ | ✅ | ❌ | ❌ |
-| 宏系统 | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+推荐本地循环：
 
-**说明**: ✅ 已实现, ⚠️ 部分实现, ❌ 未实现
+1. 编辑源码
+2. `sgc check <file.sg>`
+3. `sgc run <file.sg> -O 1`
+4. 发布构建：`sgc build <file.sg> -O 2`
+5. 需要反射时：追加 `--reflect` 与可选筛选参数
 
-**最新更新**:
-- ✅ 实现了 `TraitRegistry` 用于收集和管理 Trait 定义
-- ✅ 实现了 `ImplRegistry` 用于收集和管理 Impl 块
-- ✅ 实现了 `check_method_call` 方法调用的类型检查
-- ✅ 支持固有 impl (inherent impl) 方法查找
-- ✅ 支持 Trait impl 方法查找
+## 5. 典型适用场景
 
-## 5. 下一步工作
-
-### 5.1 优先级 1: MIR Lowering 和代码生成
-
-1. 将方法调用降低到 MIR 层
-2. 实现 Trait 方法的代码生成
-3. 处理动态分发（Trait 对象）
-
-### 5.2 优先级 2: 标准库核心
-
-实现最常用的 Trait 和集合类型：
-- `Display`, `Debug` Trait
-- `Iterator` Trait 和相关适配器
-- `Vec<T>`, `HashMap<K, V>` 基础实现
-
-### 5.3 优先级 3: 异步支持
-
-实现 async/await 语法 lowering 到状态机
+- Python 服务中的热点模块加速
+- 需要短反馈周期的 CLI/自动化工具
+- 具备可观测基准门禁的编译器/运行时工程实验
+- 需要低风险渐进迁移的混合语言系统
