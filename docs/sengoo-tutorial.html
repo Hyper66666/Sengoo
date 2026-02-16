@@ -3,48 +3,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sengoo Tutorial | Language Guide</title>
+  <title>Sengoo Tutorial | Bilingual Guide</title>
   <style>
     :root {
-      --bg: #f4f7fb;
+      --bg: #f2f6fb;
       --card: #ffffff;
-      --line: #dbe5f0;
-      --text: #1f2937;
-      --muted: #4b5563;
-      --primary: #0f4c81;
-      --primary-soft: #e8f1fb;
+      --line: #d7e3f0;
+      --text: #172033;
+      --muted: #4a596e;
+      --primary: #0e4f86;
+      --primary-soft: #e8f2ff;
       --ok: #0f766e;
       --warn: #b45309;
+      --danger: #be123c;
     }
 
-    * {
-      box-sizing: border-box;
-    }
-
-    html {
-      scroll-behavior: smooth;
-    }
-
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(180deg, #edf3fb 0%, #f9fcff 42%, #f2f6fb 100%);
       color: var(--text);
-      background: linear-gradient(180deg, #eef4fb 0%, #f8fbff 35%, #f4f7fb 100%);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       line-height: 1.7;
     }
 
     .topbar {
       position: sticky;
       top: 0;
-      z-index: 20;
-      background: #0f4c81;
+      z-index: 40;
       color: #fff;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
-      backdrop-filter: blur(6px);
+      background: linear-gradient(120deg, #0e4f86 0%, #1565a3 100%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(8px);
     }
 
     .topbar-inner {
-      max-width: 1240px;
+      max-width: 1300px;
       margin: 0 auto;
       padding: 12px 20px;
       display: flex;
@@ -53,46 +48,38 @@
       gap: 12px;
     }
 
-    .brand {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-    }
-
-    .subtitle {
-      font-size: 13px;
-      opacity: 0.88;
-    }
+    .brand { font-size: 24px; font-weight: 800; }
+    .subtitle { font-size: 13px; opacity: 0.92; }
 
     .lang-switch {
       display: inline-flex;
-      background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.28);
       border-radius: 10px;
       overflow: hidden;
+      background: rgba(255, 255, 255, 0.12);
     }
 
     .lang-btn {
       border: 0;
       background: transparent;
       color: #fff;
-      padding: 8px 14px;
       font-size: 13px;
+      padding: 8px 14px;
       cursor: pointer;
     }
 
     .lang-btn.active {
       background: #fff;
-      color: #0f4c81;
+      color: var(--primary);
       font-weight: 700;
     }
 
-    .page {
-      max-width: 1240px;
+    .layout {
+      max-width: 1300px;
       margin: 0 auto;
-      padding: 24px 20px 40px;
+      padding: 20px;
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
+      grid-template-columns: 320px minmax(0, 1fr);
       gap: 20px;
     }
 
@@ -100,112 +87,66 @@
       position: sticky;
       top: 76px;
       align-self: start;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 14px;
-      box-shadow: 0 2px 14px rgba(15, 76, 129, 0.06);
       max-height: calc(100vh - 96px);
       overflow: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 2px 14px rgba(14, 79, 134, 0.08);
     }
 
     .sidebar h3 {
-      margin: 4px 0 12px;
-      font-size: 13px;
-      color: var(--muted);
-      letter-spacing: 0.2px;
+      margin: 2px 0 12px;
+      font-size: 12px;
       text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--muted);
     }
 
     .sidebar a {
       display: block;
-      color: var(--text);
       text-decoration: none;
-      padding: 7px 8px;
-      border-radius: 8px;
+      color: var(--text);
       font-size: 14px;
+      border-radius: 8px;
+      padding: 6px 8px;
+      margin-bottom: 2px;
       transition: background-color 0.2s ease, color 0.2s ease;
     }
 
-    .sidebar a:hover {
-      background: var(--primary-soft);
-      color: var(--primary);
-    }
-
-    .sidebar a.active {
-      background: #dbeafe;
-      color: #0f4c81;
-      font-weight: 700;
-    }
-
-    .content {
-      min-width: 0;
-    }
+    .sidebar a:hover { background: var(--primary-soft); color: var(--primary); }
+    .sidebar a.active { background: #dbeafe; color: var(--primary); font-weight: 700; }
 
     .card {
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 26px 30px;
-      margin-bottom: 16px;
-      box-shadow: 0 2px 14px rgba(15, 76, 129, 0.06);
+      border-radius: 14px;
+      padding: 26px 28px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 14px rgba(14, 79, 134, 0.06);
       scroll-margin-top: 86px;
     }
 
-    h1 {
-      margin: 0 0 8px;
-      font-size: 34px;
-      color: #0b3d69;
-      line-height: 1.3;
-    }
-
-    h2 {
-      margin: 0 0 10px;
-      font-size: 26px;
-      color: #0f4c81;
-      line-height: 1.35;
-    }
-
-    h3 {
-      margin: 22px 0 8px;
-      font-size: 20px;
-      color: #153e68;
-    }
-
-    p {
-      margin: 10px 0;
-    }
-
-    ul,
-    ol {
-      margin: 8px 0 12px 22px;
-      padding: 0;
-    }
-
-    li {
-      margin: 4px 0;
-    }
+    h1 { margin: 0 0 8px; font-size: 34px; color: #0d4678; line-height: 1.25; }
+    h2 { margin: 0 0 10px; font-size: 27px; color: #0e4f86; line-height: 1.3; }
+    h3 { margin: 22px 0 8px; font-size: 20px; color: #16486f; }
+    p { margin: 9px 0; }
+    ul, ol { margin: 8px 0 14px 22px; padding: 0; }
+    li { margin: 4px 0; }
 
     .hint {
+      margin: 12px 0;
       border-left: 4px solid var(--primary);
       background: var(--primary-soft);
-      padding: 10px 12px;
       border-radius: 8px;
-      margin: 12px 0;
-      color: #133a5e;
+      padding: 10px 12px;
+      color: #143f65;
     }
 
-    .warn {
-      border-left-color: var(--warn);
-      background: #fff7ed;
-      color: #7c2d12;
-    }
-
-    .ok {
-      border-left-color: var(--ok);
-      background: #ecfdf5;
-      color: #065f46;
-    }
+    .hint.ok { border-left-color: var(--ok); background: #ecfdf5; color: #0f513d; }
+    .hint.warn { border-left-color: var(--warn); background: #fff7ed; color: #8f3f08; }
+    .hint.err { border-left-color: var(--danger); background: #fff1f2; color: #881337; }
 
     table {
       width: 100%;
@@ -214,24 +155,19 @@
       font-size: 14px;
     }
 
-    th,
-    td {
+    th, td {
       border: 1px solid var(--line);
       padding: 8px 10px;
       text-align: left;
       vertical-align: top;
     }
 
-    th {
-      background: #f1f6fd;
-      color: #123a60;
-      font-weight: 700;
-    }
+    th { background: #f0f6fd; color: #113c62; font-weight: 700; }
 
     code {
-      font-family: Consolas, Menlo, Monaco, monospace;
-      background: #eef3fa;
-      border: 1px solid #d7e2ef;
+      font-family: Consolas, "Courier New", monospace;
+      background: #edf3fb;
+      border: 1px solid #d7e3f1;
       border-radius: 4px;
       padding: 1px 5px;
       font-size: 0.92em;
@@ -239,47 +175,30 @@
 
     pre {
       margin: 10px 0 14px;
-      padding: 14px;
-      border: 1px solid #d7e2ef;
+      border: 1px solid #d7e3f1;
       border-radius: 10px;
       background: #f7faff;
+      padding: 14px;
       overflow-x: auto;
-      line-height: 1.55;
       font-size: 13.5px;
+      line-height: 1.55;
     }
 
-    pre code {
-      background: transparent;
-      border: 0;
-      padding: 0;
+    pre code { background: transparent; border: 0; padding: 0; }
+    .footer { color: var(--muted); font-size: 13px; }
+
+    .lang-content { display: none; }
+    .lang-content.active { display: block; }
+
+    @media (max-width: 1060px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; max-height: none; }
     }
 
-    .lang-content {
-      display: none;
-    }
-
-    .lang-content.active {
-      display: block;
-    }
-
-    .footer {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    @media (max-width: 980px) {
-      .page {
-        grid-template-columns: 1fr;
-      }
-
-      .sidebar {
-        position: static;
-        max-height: none;
-      }
-
-      .card {
-        padding: 20px;
-      }
+    @media (max-width: 640px) {
+      .card { padding: 18px; }
+      h1 { font-size: 28px; }
+      h2 { font-size: 24px; }
     }
   </style>
 </head>
@@ -288,417 +207,556 @@
     <div class="topbar-inner">
       <div>
         <div class="brand">Sengoo Tutorial</div>
-        <div class="subtitle" data-i18n-en="Language type, syntax, features, and practical workflows" data-i18n-zh="语言类型、语法规范、核心特性与实践工作流"></div>
+        <div class="subtitle"
+          data-i18n-en="Reference-style guide for syntax, tooling, reflection, interop, and performance workflow"
+          data-i18n-zh="参考手册式教程：语法、工具链、反射、互操作与性能工作流">
+        </div>
       </div>
-      <div class="lang-switch" role="tablist" aria-label="Language Switch">
+      <div class="lang-switch">
         <button id="btn-en" class="lang-btn active" onclick="setLanguage('en')">English</button>
         <button id="btn-zh" class="lang-btn" onclick="setLanguage('zh')">中文</button>
       </div>
     </div>
   </header>
 
-  <div class="page">
+  <div class="layout">
     <aside class="sidebar">
-      <h3 data-i18n-en="Contents" data-i18n-zh="目录"></h3>
+      <h3 data-i18n-en="Contents" data-i18n-zh="目录">Contents</h3>
       <nav id="toc">
-        <a href="#overview" data-i18n-en="1. Overview" data-i18n-zh="1. 概览"></a>
-        <a href="#quickstart" data-i18n-en="2. Quick Start" data-i18n-zh="2. 快速开始"></a>
-        <a href="#language-type" data-i18n-en="3. Language Type" data-i18n-zh="3. 语言定位"></a>
-        <a href="#features" data-i18n-en="4. Core Features" data-i18n-zh="4. 核心特性"></a>
-        <a href="#syntax" data-i18n-en="5. Syntax Rules" data-i18n-zh="5. 语法规范"></a>
-        <a href="#tooling" data-i18n-en="6. Tooling and CLI" data-i18n-zh="6. 工具链与 CLI"></a>
-        <a href="#interop" data-i18n-en="7. Python Interop" data-i18n-zh="7. Python 互操作"></a>
-        <a href="#reflection" data-i18n-en="8. Non-Invasive Reflection" data-i18n-zh="8. 非侵入式反射"></a>
-        <a href="#performance" data-i18n-en="9. Performance Model" data-i18n-zh="9. 性能模型"></a>
-        <a href="#applications" data-i18n-en="10. Application Scenarios" data-i18n-zh="10. 应用场景"></a>
-        <a href="#status" data-i18n-en="11. Current Status" data-i18n-zh="11. 当前状态"></a>
-        <a href="#faq" data-i18n-en="12. FAQ" data-i18n-zh="12. 常见问题"></a>
+        <a href="#overview" data-i18n-en="1. What Is Sengoo?" data-i18n-zh="1. Sengoo 是什么？">1. What Is Sengoo?</a>
+        <a href="#install" data-i18n-en="2. Install and Setup" data-i18n-zh="2. 安装与环境准备">2. Install and Setup</a>
+        <a href="#quickstart" data-i18n-en="3. 3-Minute Quick Start" data-i18n-zh="3. 3 分钟快速上手">3. 3-Minute Quick Start</a>
+        <a href="#syntax" data-i18n-en="4. Syntax Basics" data-i18n-zh="4. 语法基础">4. Syntax Basics</a>
+        <a href="#types" data-i18n-en="5. Types and Values" data-i18n-zh="5. 类型与值">5. Types and Values</a>
+        <a href="#variables" data-i18n-en="6. Variables and Assignment" data-i18n-zh="6. 变量与赋值">6. Variables and Assignment</a>
+        <a href="#operators" data-i18n-en="7. Operators" data-i18n-zh="7. 运算符">7. Operators</a>
+        <a href="#functions" data-i18n-en="8. Functions" data-i18n-zh="8. 函数">8. Functions</a>
+        <a href="#flow" data-i18n-en="9. Control Flow" data-i18n-zh="9. 控制流">9. Control Flow</a>
+        <a href="#arrays" data-i18n-en="10. Arrays and Indexing" data-i18n-zh="10. 数组与索引">10. Arrays and Indexing</a>
+        <a href="#structs" data-i18n-en="11. Structs" data-i18n-zh="11. 结构体">11. Structs</a>
+        <a href="#methods" data-i18n-en="12. Methods and impl" data-i18n-zh="12. 方法与 impl">12. Methods and impl</a>
+        <a href="#lambda" data-i18n-en="13. Lambda and Closures" data-i18n-zh="13. Lambda 与闭包">13. Lambda and Closures</a>
+        <a href="#modules" data-i18n-en="14. Modules and Imports" data-i18n-zh="14. 模块与导入">14. Modules and Imports</a>
+        <a href="#reflection" data-i18n-en="15. Auto Reflection" data-i18n-zh="15. 自动反射">15. Auto Reflection</a>
+        <a href="#interop" data-i18n-en="16. Python Interop" data-i18n-zh="16. Python 互操作">16. Python Interop</a>
+        <a href="#cli" data-i18n-en="17. CLI Reference" data-i18n-zh="17. CLI 命令参考">17. CLI Reference</a>
+        <a href="#perf" data-i18n-en="18. Performance Model" data-i18n-zh="18. 性能模型">18. Performance Model</a>
+        <a href="#errors" data-i18n-en="19. Common Errors and Fixes" data-i18n-zh="19. 常见错误与排查">19. Common Errors and Fixes</a>
+        <a href="#workflow" data-i18n-en="20. Developer Workflow" data-i18n-zh="20. 开发者工作流">20. Developer Workflow</a>
+        <a href="#roadmap" data-i18n-en="21. Learning Path and Demos" data-i18n-zh="21. 学习路径与 Demo">21. Learning Path and Demos</a>
+        <a href="#faq" data-i18n-en="22. FAQ" data-i18n-zh="22. 常见问题">22. FAQ</a>
       </nav>
     </aside>
 
-    <main class="content">
-      <section class="card" id="overview">
+    <main>
+      <section id="overview" class="card">
         <div class="lang-content lang-en active">
-          <h1>Sengoo Language Tutorial</h1>
-          <p>Sengoo is a self-developed <strong>compiled</strong> language focused on practical engineering outcomes: hybrid Python migration, fast compile feedback, and LLVM-native execution.</p>
-          <p>This page helps developers understand what Sengoo is, how to write valid programs, and where Sengoo fits in production projects.</p>
-          <div class="hint ok">Default view is English. Use the top-right switch to read the Chinese version.</div>
+          <h1>Sengoo Language Tutorial (Detailed Edition)</h1>
+          <p>Sengoo is a self-developed <strong>compiled language</strong> focused on practical engineering outcomes: fast edit-build-run loops, LLVM-native execution, and smooth migration for Python hotspots.</p>
+          <p>This page is intentionally detailed, like a reference site. Each chapter includes syntax, runnable examples, operational advice, and common pitfalls.</p>
         </div>
         <div class="lang-content lang-zh">
-          <h1>Sengoo 编程语言教程</h1>
-          <p>Sengoo 是一门自研的<strong>编译型</strong>语言，目标聚焦工程落地：支持 Python 渐进迁移、提供快速编译反馈，并通过 LLVM 生成原生可执行程序。</p>
-          <p>本教程帮助开发者回答三个问题：这是什么语言、如何写出合法程序、在真实项目中适合落地在哪里。</p>
-          <div class="hint ok">页面默认英文，右上角可切换到中文。</div>
+          <h1>Sengoo 语言教程（详细版）</h1>
+          <p>Sengoo 是一门自研的<strong>编译型语言</strong>，面向工程落地：快速编辑-编译-运行反馈、LLVM 原生执行、以及 Python 热点模块平滑迁移。</p>
+          <p>本页按参考手册方式组织，每章提供语法说明、可运行示例、工程建议和常见问题。</p>
         </div>
       </section>
 
-      <section class="card" id="quickstart">
+      <section id="install" class="card">
         <div class="lang-content lang-en active">
-          <h2>2. Quick Start</h2>
-          <h3>Build compiler</h3>
-          <pre><code>cargo build --release</code></pre>
-          <h3>Run a program</h3>
-          <pre><code>target/release/sgc run examples/01_hello.sg</code></pre>
-          <h3>Build native binary</h3>
-          <pre><code>target/release/sgc build examples/05_loop.sg -O 2</code></pre>
-          <h3>Type-check only</h3>
-          <pre><code>target/release/sgc check examples/09_method_call.sg</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>2. 快速开始</h2>
-          <h3>构建编译器</h3>
-          <pre><code>cargo build --release</code></pre>
-          <h3>运行程序</h3>
-          <pre><code>target/release/sgc run examples/01_hello.sg</code></pre>
-          <h3>构建原生可执行文件</h3>
-          <pre><code>target/release/sgc build examples/05_loop.sg -O 2</code></pre>
-          <h3>仅做类型检查</h3>
-          <pre><code>target/release/sgc check examples/09_method_call.sg</code></pre>
-        </div>
-      </section>
-
-      <section class="card" id="language-type">
-        <div class="lang-content lang-en active">
-          <h2>3. What Type of Language Is Sengoo?</h2>
+          <h2>2. Install and Setup</h2>
           <table>
-            <thead>
-              <tr><th>Dimension</th><th>Sengoo Today</th></tr>
-            </thead>
+            <thead><tr><th>Component</th><th>Why</th><th>Check Command</th></tr></thead>
             <tbody>
-              <tr><td>Execution model</td><td>Compiled language with LLVM IR generation and native link path.</td></tr>
-              <tr><td>Typing model</td><td>Static type-checking with practical local inference.</td></tr>
-              <tr><td>Syntax style</td><td>Python-like keywords (<code>def</code>, <code>for</code>, <code>if</code>) with brace-delimited blocks.</td></tr>
-              <tr><td>Tooling model</td><td>CLI-first workflow (<code>sgc</code>) + VS Code extension.</td></tr>
-              <tr><td>Interop strategy</td><td>Runtime-level Python interoperability for gradual migration.</td></tr>
+              <tr><td>Rust toolchain</td><td>Build compiler/runtime</td><td><code>cargo --version</code></td></tr>
+              <tr><td>LLVM/Clang</td><td>Native codegen and linking</td><td><code>clang --version</code></td></tr>
+              <tr><td>Python 3.10+</td><td>Bench scripts and interop demos</td><td><code>python --version</code></td></tr>
+            </tbody>
+          </table>
+          <pre><code>git clone https://github.com/Hyper66666/Sengoo.git
+cd Sengoo
+cargo build --release
+target/release/sgc --help</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>2. 安装与环境准备</h2>
+          <table>
+            <thead><tr><th>组件</th><th>用途</th><th>检查命令</th></tr></thead>
+            <tbody>
+              <tr><td>Rust 工具链</td><td>构建编译器和运行时</td><td><code>cargo --version</code></td></tr>
+              <tr><td>LLVM/Clang</td><td>原生代码生成与链接</td><td><code>clang --version</code></td></tr>
+              <tr><td>Python 3.10+</td><td>运行 bench 脚本与互操作 demo</td><td><code>python --version</code></td></tr>
+            </tbody>
+          </table>
+          <pre><code>git clone https://github.com/Hyper66666/Sengoo.git
+cd Sengoo
+cargo build --release
+target/release/sgc --help</code></pre>
+        </div>
+      </section>
+
+      <section id="quickstart" class="card">
+        <div class="lang-content lang-en active">
+          <h2>3. 3-Minute Quick Start</h2>
+          <pre><code>target/release/sgc run examples/01_hello.sg
+target/release/sgc build examples/05_loop.sg -O 2
+target/release/sgc check examples/09_method_call.sg</code></pre>
+          <div class="hint ok">Recommended daily order: <code>check -&gt; run -&gt; build</code>.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>3. 3 分钟快速上手</h2>
+          <pre><code>target/release/sgc run examples/01_hello.sg
+target/release/sgc build examples/05_loop.sg -O 2
+target/release/sgc check examples/09_method_call.sg</code></pre>
+          <div class="hint ok">建议日常顺序：<code>check -&gt; run -&gt; build</code>。</div>
+        </div>
+      </section>
+
+      <section id="syntax" class="card">
+        <div class="lang-content lang-en active">
+          <h2>4. Syntax Basics</h2>
+          <pre><code>// comment
+def main() -&gt; i64 {
+    42
+}</code></pre>
+          <ul>
+            <li>Use braces for all blocks.</li>
+            <li>Use semicolons on local declarations/assignments.</li>
+            <li>Leave off semicolon on final expression when returning.</li>
+          </ul>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>4. 语法基础</h2>
+          <pre><code>// 注释
+def main() -&gt; i64 {
+    42
+}</code></pre>
+          <ul>
+            <li>所有代码块统一使用花括号。</li>
+            <li>局部声明与赋值语句建议使用分号。</li>
+            <li>块末尾返回表达式通常不加分号。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="types" class="card">
+        <div class="lang-content lang-en active">
+          <h2>5. Types and Values</h2>
+          <table>
+            <thead><tr><th>Type</th><th>Example</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>i64</code></td><td><code>42</code></td><td>Main integer type in examples.</td></tr>
+              <tr><td><code>bool</code></td><td><code>true</code>, <code>false</code></td><td>Branch and methods.</td></tr>
+              <tr><td>array</td><td><code>[1, 2, 3]</code></td><td>Index by <code>arr[i]</code>.</td></tr>
+              <tr><td>struct</td><td><code>Point { x: 1, y: 2 }</code></td><td>User-defined product type.</td></tr>
             </tbody>
           </table>
         </div>
         <div class="lang-content lang-zh">
-          <h2>3. Sengoo 是什么类型的语言？</h2>
+          <h2>5. 类型与值</h2>
           <table>
-            <thead>
-              <tr><th>维度</th><th>Sengoo 当前形态</th></tr>
-            </thead>
+            <thead><tr><th>类型</th><th>示例</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>执行模型</td><td>编译型语言，支持 LLVM IR 与原生链接流程。</td></tr>
-              <tr><td>类型系统</td><td>静态类型检查，局部变量支持实用型推断。</td></tr>
-              <tr><td>语法风格</td><td>关键字接近 Python（<code>def</code>/<code>for</code>/<code>if</code>），代码块使用大括号。</td></tr>
-              <tr><td>工具链</td><td>以 <code>sgc</code> 为核心的 CLI 工作流 + VS Code 插件。</td></tr>
-              <tr><td>互操作策略</td><td>运行时层面的 Python 互操作，支持渐进迁移。</td></tr>
+              <tr><td><code>i64</code></td><td><code>42</code></td><td>示例中最常用的整数类型。</td></tr>
+              <tr><td><code>bool</code></td><td><code>true</code>, <code>false</code></td><td>用于分支与方法调用。</td></tr>
+              <tr><td>数组</td><td><code>[1, 2, 3]</code></td><td>通过 <code>arr[i]</code> 索引访问。</td></tr>
+              <tr><td>结构体</td><td><code>Point { x: 1, y: 2 }</code></td><td>用户自定义复合类型。</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="card" id="features">
+      <section id="variables" class="card">
         <div class="lang-content lang-en active">
-          <h2>4. Core Features</h2>
-          <ul>
-            <li><strong>Function-oriented syntax</strong>: <code>def name(...) -&gt; type { ... }</code>.</li>
-            <li><strong>Structured data</strong>: arrays, structs, fields, indexing, and method calls.</li>
-            <li><strong>Incremental compile pipeline</strong>: fingerprints + workset-driven rebuild.</li>
-            <li><strong>Daemon mode</strong>: optional persistent process to reduce startup cost.</li>
-            <li><strong>Python interop</strong>: hybrid architecture with gradual migration path.</li>
-            <li><strong>Non-invasive reflection</strong>: auto-by-default sidecar metadata, typed runtime invoke, and explicit <code>on/off</code> override.</li>
-          </ul>
-          <div class="hint warn">Some grammar surfaces may still be experimental. For production-facing usage, prioritize examples and bench suites that are continuously validated.</div>
+          <h2>6. Variables and Assignment</h2>
+          <pre><code>def main() -&gt; i64 {
+    let x = 100;
+    let y = 200;
+    let z = x + y;
+    z
+}</code></pre>
         </div>
         <div class="lang-content lang-zh">
-          <h2>4. 核心特性</h2>
-          <ul>
-            <li><strong>函数中心语法</strong>：<code>def name(...) -&gt; type { ... }</code>。</li>
-            <li><strong>结构化数据能力</strong>：数组、结构体、字段访问、索引、方法调用。</li>
-            <li><strong>增量编译流水线</strong>：指纹缓存 + workset 感知重编译。</li>
-            <li><strong>Daemon 模式</strong>：可选常驻进程，降低重复冷启动成本。</li>
-            <li><strong>Python 互操作</strong>：支持“Python 编排 + Sengoo 热点模块”混合架构。</li>
-            <li><strong>非侵入式反射</strong>：默认自动检测导入后启用，也可用 <code>on/off</code> 显式覆盖。</li>
-          </ul>
-          <div class="hint warn">部分语法仍处于持续演进阶段。面向实际工程时，建议优先参考持续回归验证的 examples 与 bench 用例。</div>
+          <h2>6. 变量与赋值</h2>
+          <pre><code>def main() -&gt; i64 {
+    let x = 100;
+    let y = 200;
+    let z = x + y;
+    z
+}</code></pre>
         </div>
       </section>
 
-      <section class="card" id="syntax">
+      <section id="operators" class="card">
         <div class="lang-content lang-en active">
-          <h2>5. Syntax Rules (Practical Version)</h2>
-          <h3>5.1 Minimal grammar map</h3>
-          <pre><code>program      := decl*
-decl         := function | struct | impl | const | static | import | module
-function     := "def" ident "(" params? ")" ("-&gt;" type)? block
-block        := "{" stmt* expr? "}"
-stmt         := let_stmt | assign_stmt | expr_stmt | decl
-expr         := literal | ident | call | method_call | if | for | while | loop</code></pre>
+          <h2>7. Operators</h2>
+          <table>
+            <thead><tr><th>Category</th><th>Operators</th></tr></thead>
+            <tbody>
+              <tr><td>Arithmetic</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td></tr>
+              <tr><td>Comparison</td><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td></tr>
+              <tr><td>Boolean</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>7. 运算符</h2>
+          <table>
+            <thead><tr><th>类别</th><th>运算符</th></tr></thead>
+            <tbody>
+              <tr><td>算术</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td></tr>
+              <tr><td>比较</td><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td></tr>
+              <tr><td>布尔</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-          <h3>5.2 Core declaration sample</h3>
+      <section id="functions" class="card">
+        <div class="lang-content lang-en active">
+          <h2>8. Functions</h2>
+          <pre><code>def add(a: i64, b: i64) -&gt; i64 {
+    a + b
+}
+
+def main() -&gt; i64 {
+    add(10, 32)
+}</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>8. 函数</h2>
+          <pre><code>def add(a: i64, b: i64) -&gt; i64 {
+    a + b
+}
+
+def main() -&gt; i64 {
+    add(10, 32)
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="flow" class="card">
+        <div class="lang-content lang-en active">
+          <h2>9. Control Flow</h2>
+          <pre><code>def classify(x: i64) -&gt; i64 {
+    if x &gt; 0 { 1 } else { 0 }
+}</code></pre>
+          <pre><code>def sum_arr() -&gt; i64 {
+    let arr = [1, 2, 3, 4];
+    let total = 0;
+    for v in arr { total = total + v; }
+    total
+}</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>9. 控制流</h2>
+          <pre><code>def classify(x: i64) -&gt; i64 {
+    if x &gt; 0 { 1 } else { 0 }
+}</code></pre>
+          <pre><code>def sum_arr() -&gt; i64 {
+    let arr = [1, 2, 3, 4];
+    let total = 0;
+    for v in arr { total = total + v; }
+    total
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="arrays" class="card">
+        <div class="lang-content lang-en active">
+          <h2>10. Arrays and Indexing</h2>
+          <pre><code>def main() -&gt; i64 {
+    let arr = [10, 20, 30];
+    arr[1]
+}</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>10. 数组与索引</h2>
+          <pre><code>def main() -&gt; i64 {
+    let arr = [10, 20, 30];
+    arr[1]
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="structs" class="card">
+        <div class="lang-content lang-en active">
+          <h2>11. Structs</h2>
           <pre><code>struct Point {
     x: i64,
     y: i64,
 }
 
-def add(a: i64, b: i64) -&gt; i64 {
-    a + b
+def main() -&gt; i64 {
+    let p = Point { x: 10, y: 20 };
+    p.x + p.y
 }</code></pre>
-
-          <h3>5.3 Control flow sample</h3>
-          <pre><code>def sum(arr: [i64; 4]) -&gt; i64 {
-    let total = 0;
-    for v in arr {
-        total = total + v;
-    }
-    total
-}</code></pre>
-
-          <h3>5.4 Style recommendations</h3>
-          <ul>
-            <li>Use semicolons for local declarations and assignments.</li>
-            <li>Keep one statement per line in early-stage modules.</li>
-            <li>Use <code>sgc check</code> frequently after edits.</li>
-          </ul>
         </div>
         <div class="lang-content lang-zh">
-          <h2>5. 语法规范（实用学习版）</h2>
-          <h3>5.1 最小语法地图</h3>
-          <pre><code>program      := decl*
-decl         := function | struct | impl | const | static | import | module
-function     := "def" ident "(" params? ")" ("-&gt;" type)? block
-block        := "{" stmt* expr? "}"
-stmt         := let_stmt | assign_stmt | expr_stmt | decl
-expr         := literal | ident | call | method_call | if | for | while | loop</code></pre>
-
-          <h3>5.2 核心声明示例</h3>
+          <h2>11. 结构体</h2>
           <pre><code>struct Point {
     x: i64,
     y: i64,
 }
 
-def add(a: i64, b: i64) -&gt; i64 {
-    a + b
+def main() -&gt; i64 {
+    let p = Point { x: 10, y: 20 };
+    p.x + p.y
 }</code></pre>
+        </div>
+      </section>
 
-          <h3>5.3 控制流示例</h3>
-          <pre><code>def sum(arr: [i64; 4]) -&gt; i64 {
-    let total = 0;
-    for v in arr {
-        total = total + v;
+      <section id="methods" class="card">
+        <div class="lang-content lang-en active">
+          <h2>12. Methods and <code>impl</code></h2>
+          <pre><code>impl i64 {
+    def abs(self) -&gt; i64 {
+        if self &lt; 0 { -self } else { self }
     }
-    total
+}
+
+def main() -&gt; i64 {
+    (-21).abs()
 }</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>12. 方法与 <code>impl</code></h2>
+          <pre><code>impl i64 {
+    def abs(self) -&gt; i64 {
+        if self &lt; 0 { -self } else { self }
+    }
+}
 
-          <h3>5.4 编码规范建议</h3>
-          <ul>
-            <li>局部声明和赋值建议使用分号结束。</li>
-            <li>初学阶段建议一行一语句，便于定位错误。</li>
-            <li>每次修改后优先执行 <code>sgc check</code>。</li>
-          </ul>
+def main() -&gt; i64 {
+    (-21).abs()
+}</code></pre>
         </div>
       </section>
 
-      <section class="card" id="tooling">
+      <section id="lambda" class="card">
         <div class="lang-content lang-en active">
-          <h2>6. Tooling and CLI</h2>
+          <h2>13. Lambda and Closures</h2>
+          <pre><code>def main() -&gt; i64 {
+    let x = 10;
+    let f = |y| x + y;
+    f(5)
+}</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>13. Lambda 与闭包</h2>
+          <pre><code>def main() -&gt; i64 {
+    let x = 10;
+    let f = |y| x + y;
+    f(5)
+}</code></pre>
+        </div>
+      </section>
+
+      <section id="modules" class="card">
+        <div class="lang-content lang-en active">
+          <h2>14. Modules and Imports</h2>
+          <pre><code>import reflect;
+
+def main() -&gt; i64 {
+    0
+}</code></pre>
+          <div class="hint">Import statements should end with semicolon in current parser behavior.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>14. 模块与导入</h2>
+          <pre><code>import reflect;
+
+def main() -&gt; i64 {
+    0
+}</code></pre>
+          <div class="hint">按当前解析器行为，导入语句建议以分号结束。</div>
+        </div>
+      </section>
+
+      <section id="reflection" class="card">
+        <div class="lang-content lang-en active">
+          <h2>15. Auto Reflection (Non-Invasive)</h2>
           <table>
-            <thead>
-              <tr><th>Command</th><th>Purpose</th></tr>
-            </thead>
+            <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
             <tbody>
-              <tr><td><code>sgc build file.sg -O 2</code></td><td>Compile to native executable.</td></tr>
-              <tr><td><code>sgc run file.sg -O 1</code></td><td>Compile and run.</td></tr>
-              <tr><td><code>sgc check file.sg</code></td><td>Type-check/compile validation only.</td></tr>
-              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>Start persistent daemon service.</td></tr>
-              <tr><td><code>sgc build file.sg --reflect[=auto|on|off]</code></td><td>Control reflection mode (default auto) and emit sidecar metadata when enabled.</td></tr>
+              <tr><td><code>--reflect=auto</code></td><td>Default. Enables only when reflect import is detected.</td></tr>
+              <tr><td><code>--reflect</code> / <code>--reflect=on</code></td><td>Force on.</td></tr>
+              <tr><td><code>--reflect=off</code></td><td>Force off.</td></tr>
             </tbody>
           </table>
-          <h3>VS Code Extension</h3>
-          <p>Packaged extension version: <code>1.0.0</code> in <code>vscode-sengoo/</code>.</p>
+          <pre><code>sgc build examples/09_method_call.sg -O 2
+sgc build examples/09_method_call.sg -O 2 --reflect=on \
+  --reflect-module examples/09_method_call.sg \
+  --reflect-symbol examples/09_method_call.sg::main
+python bench/demos/reflection-auto-vs-cpp/run_demo.py</code></pre>
         </div>
         <div class="lang-content lang-zh">
-          <h2>6. 工具链与 CLI</h2>
+          <h2>15. 自动反射（非侵入式）</h2>
           <table>
-            <thead>
-              <tr><th>命令</th><th>用途</th></tr>
-            </thead>
+            <thead><tr><th>模式</th><th>行为</th></tr></thead>
             <tbody>
-              <tr><td><code>sgc build file.sg -O 2</code></td><td>编译为原生可执行文件。</td></tr>
-              <tr><td><code>sgc run file.sg -O 1</code></td><td>编译并运行。</td></tr>
-              <tr><td><code>sgc check file.sg</code></td><td>仅做类型检查/编译链路校验。</td></tr>
-              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>启动常驻编译服务。</td></tr>
-              <tr><td><code>sgc build file.sg --reflect[=auto|on|off]</code></td><td>控制反射模式（默认 auto），启用时输出 sidecar 元数据。</td></tr>
+              <tr><td><code>--reflect=auto</code></td><td>默认模式，仅检测到反射导入时启用。</td></tr>
+              <tr><td><code>--reflect</code> / <code>--reflect=on</code></td><td>强制开启。</td></tr>
+              <tr><td><code>--reflect=off</code></td><td>强制关闭。</td></tr>
             </tbody>
           </table>
-          <h3>VS Code 插件</h3>
-          <p>当前打包版本：<code>1.0.0</code>，位于 <code>vscode-sengoo/</code>。</p>
-        </div>
-      </section>
-
-      <section class="card" id="interop">
-        <div class="lang-content lang-en active">
-          <h2>7. Python Interoperability</h2>
-          <p>Sengoo exposes runtime-level Python interoperability (PyO3 path), enabling hybrid stacks where Python remains the control plane and Sengoo handles hot paths.</p>
-          <h3>Run interop benchmark example</h3>
-          <pre><code>cd bench
-python ./tests/python_interop_example.py</code></pre>
-          <div class="hint">Use this path for gradual migration, not all-at-once rewrites.</div>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>7. Python 互操作</h2>
-          <p>Sengoo 提供运行时层面的 Python 互操作（PyO3 路径），适合“Python 负责编排，Sengoo 承担热点计算”的混合架构。</p>
-          <h3>互操作示例运行</h3>
-          <pre><code>cd bench
-python ./tests/python_interop_example.py</code></pre>
-          <div class="hint">推荐采用渐进迁移，不建议一次性整体重写。</div>
-        </div>
-      </section>
-
-      <section class="card" id="reflection">
-        <div class="lang-content lang-en active">
-          <h2>8. Non-Invasive Reflection</h2>
-          <p>Reflection is sidecar-driven with <code>auto</code> mode by default. It turns on only when reflect imports are detected, and can be forced with <code>--reflect=on/off</code>.</p>
-          <h3>CLI usage</h3>
-          <pre><code># auto mode (default): enables reflection when reflect imports are present
-sgc build examples/09_method_call.sg -O 2
-
-# optional fine-grained filters
+          <pre><code>sgc build examples/09_method_call.sg -O 2
 sgc build examples/09_method_call.sg -O 2 --reflect=on \
   --reflect-module examples/09_method_call.sg \
-  --reflect-symbol examples/09_method_call.sg::main</code></pre>
-          <p>Artifacts include <code>&lt;binary&gt;.sgreflect.json</code> and optional native reflection library for fast typed calls.</p>
-
-          <h3>Runtime usage (Rust API)</h3>
-          <pre><code>use sengoo_runtime::{ReflectValue, ReflectionRuntime};
-
-let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
-let symbols = rt.list_symbols("examples/09_method_call.sg")?;
-println!("symbols = {}", symbols.len());
-
-let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
-println!("result = {}", value);</code></pre>
-
-          <h3>Reflection benchmark</h3>
-          <pre><code>cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
-python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;report&gt;.json</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>8. 非侵入式反射</h2>
-          <p>反射能力采用 sidecar 元数据方案，默认 <code>auto</code> 模式：仅在检测到反射导入时启用，也可以通过 <code>--reflect=on/off</code> 强制开关。</p>
-          <h3>CLI 用法</h3>
-          <pre><code># auto（默认）：检测到反射导入时自动启用
-sgc build examples/09_method_call.sg -O 2
-
-# 可选：精确筛选模块与符号
-sgc build examples/09_method_call.sg -O 2 --reflect=on \
-  --reflect-module examples/09_method_call.sg \
-  --reflect-symbol examples/09_method_call.sg::main</code></pre>
-          <p>构建产物会包含 <code>&lt;binary&gt;.sgreflect.json</code>，并可按需生成原生反射动态库以加速类型化调用。</p>
-
-          <h3>运行时调用示例（Rust API）</h3>
-          <pre><code>use sengoo_runtime::{ReflectValue, ReflectionRuntime};
-
-let rt = ReflectionRuntime::new("target/release/app.sgreflect.json");
-let symbols = rt.list_symbols("examples/09_method_call.sg")?;
-println!("symbols = {}", symbols.len());
-
-let value = rt.call_i64("examples/09_method_call.sg", "main", &[])?;
-println!("result = {}", value);</code></pre>
-
-          <h3>反射性能基准</h3>
-          <pre><code>cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
-python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;report&gt;.json</code></pre>
+  --reflect-symbol examples/09_method_call.sg::main
+python bench/demos/reflection-auto-vs-cpp/run_demo.py</code></pre>
         </div>
       </section>
 
-      <section class="card" id="performance">
+      <section id="interop" class="card">
         <div class="lang-content lang-en active">
-          <h2>9. Performance Model</h2>
-          <ul>
-            <li><strong>Runtime track</strong>: native execution targets the same class as C++/Rust in loop-heavy scenarios.</li>
-            <li><strong>Compile track</strong>: optimize for short edit-build-run loops through incremental reuse and track scale curve at 1k/10k/100k/1000k LOC.</li>
-            <li><strong>Link track</strong>: link time is measured explicitly in advanced pipeline benchmarks.</li>
-            <li><strong>Reflection track</strong>: verify disabled-path regression and enabled-path overhead with dedicated gates.</li>
-          </ul>
-          <div class="hint">Use the independent <code>bench</code> repository for longitudinal regression tracking.</div>
+          <h2>16. Python Interop</h2>
+          <pre><code>cd bench
+python ./tests/python_interop_example.py
+python ./python_interop_bench.py --calls 5000 --samples 3 --warmup 1</code></pre>
         </div>
         <div class="lang-content lang-zh">
-          <h2>9. 性能模型</h2>
-          <ul>
-            <li><strong>运行时维度</strong>：在循环密集场景中，目标是达到 C++/Rust 同量级。</li>
-            <li><strong>编译维度</strong>：通过增量复用优化“编辑-编译-运行”反馈链路，并持续跟踪 1k/10k/100k/1000k LOC 规模曲线。</li>
-            <li><strong>链接维度</strong>：在高级流水线基准里单独统计链接时间。</li>
-            <li><strong>反射维度</strong>：通过专用 gate 同时约束关闭路径回归与开启路径开销。</li>
-          </ul>
-          <div class="hint">建议使用独立 <code>bench</code> 仓库持续跟踪趋势与回归。</div>
+          <h2>16. Python 互操作</h2>
+          <pre><code>cd bench
+python ./tests/python_interop_example.py
+python ./python_interop_bench.py --calls 5000 --samples 3 --warmup 1</code></pre>
         </div>
       </section>
 
-      <section class="card" id="applications">
+      <section id="cli" class="card">
         <div class="lang-content lang-en active">
-          <h2>10. Application Scenarios</h2>
-          <ul>
-            <li>Compute-heavy modules in Python services.</li>
-            <li>CLI/automation tools requiring short compile feedback loops.</li>
-            <li>Algorithmic modules distributed as native executables.</li>
-            <li>Compiler/runtime experimentation with measurable CI perf gates.</li>
-          </ul>
+          <h2>17. CLI Reference</h2>
+          <table>
+            <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>sgc build &lt;file.sg&gt;</code></td><td>Compile source.</td></tr>
+              <tr><td><code>sgc run &lt;file.sg&gt;</code></td><td>Compile and run.</td></tr>
+              <tr><td><code>sgc check &lt;file.sg&gt;</code></td><td>Parse/type validation.</td></tr>
+              <tr><td><code>sgc dump-ast &lt;file.sg&gt;</code></td><td>AST debug output.</td></tr>
+              <tr><td><code>sgc repl</code></td><td>Interactive REPL.</td></tr>
+              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>Persistent compile daemon.</td></tr>
+            </tbody>
+          </table>
         </div>
         <div class="lang-content lang-zh">
-          <h2>10. 应用场景</h2>
-          <ul>
-            <li>Python 服务中的计算密集模块加速。</li>
-            <li>需要快速反馈周期的 CLI 与自动化工具。</li>
-            <li>以原生可执行文件交付的算法模块。</li>
-            <li>具备可观测性能门禁的编译器/运行时工程实验。</li>
-          </ul>
+          <h2>17. CLI 命令参考</h2>
+          <table>
+            <thead><tr><th>命令</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td><code>sgc build &lt;file.sg&gt;</code></td><td>编译源文件。</td></tr>
+              <tr><td><code>sgc run &lt;file.sg&gt;</code></td><td>编译并运行。</td></tr>
+              <tr><td><code>sgc check &lt;file.sg&gt;</code></td><td>语法与类型校验。</td></tr>
+              <tr><td><code>sgc dump-ast &lt;file.sg&gt;</code></td><td>输出 AST 便于调试。</td></tr>
+              <tr><td><code>sgc repl</code></td><td>交互式 REPL。</td></tr>
+              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>常驻编译服务。</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
-      <section class="card" id="status">
+      <section id="perf" class="card">
         <div class="lang-content lang-en active">
-          <h2>11. Current Status and Expectations</h2>
-          <p>Sengoo is in an early but rapidly iterating stage. Compiler/runtime/tooling are usable, while broader surface stabilization is still ongoing.</p>
+          <h2>18. Performance Model</h2>
+          <pre><code>cd bench
+python ./scenario_matrix_bench.py
+python ./advanced_pipeline_bench.py
+python ./noninvasive_reflection_bench.py
+python ./bootstrap_generality_bench.py</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>18. 性能模型</h2>
+          <pre><code>cd bench
+python ./scenario_matrix_bench.py
+python ./advanced_pipeline_bench.py
+python ./noninvasive_reflection_bench.py
+python ./bootstrap_generality_bench.py</code></pre>
+        </div>
+      </section>
+
+      <section id="errors" class="card">
+        <div class="lang-content lang-en active">
+          <h2>19. Common Errors and Fixes</h2>
           <ul>
-            <li>Validated: core syntax path, incremental pipeline, benchmark suites, Python interop bench, reflection baseline benches.</li>
-            <li>Evolving: frontend architecture scalability, reflection ergonomics, and larger-scale compile optimization.</li>
+            <li><code>command 'sengoo.run' not found</code>: reinstall extension and run <code>Developer: Reload Window</code>.</li>
+            <li><code>invalid pattern: expected field name</code>: check struct/pattern field syntax and use <code>sgc dump-ast</code>.</li>
+            <li>Noisy compile errors: run <code>sgc check</code> first, then <code>--force-rebuild</code>.</li>
           </ul>
         </div>
         <div class="lang-content lang-zh">
-          <h2>11. 当前状态与预期</h2>
-          <p>Sengoo 处于早期但快速迭代阶段。编译器/运行时/工具链已可用，但更大语法面与工程稳定性仍在持续推进。</p>
+          <h2>19. 常见错误与排查</h2>
           <ul>
-            <li>已验证：核心语法路径、增量编译链路、基准套件、Python 互操作基准、反射基线基准。</li>
-            <li>持续演进：前端架构规模化、反射易用性、超大规模编译优化。</li>
+            <li><code>command 'sengoo.run' not found</code>：重装插件后执行 <code>Developer: Reload Window</code>。</li>
+            <li><code>invalid pattern: expected field name</code>：检查结构体/模式字段语法，并用 <code>sgc dump-ast</code> 定位。</li>
+            <li>报错不清晰：先跑 <code>sgc check</code>，再尝试 <code>--force-rebuild</code>。</li>
           </ul>
         </div>
       </section>
 
-      <section class="card" id="faq">
+      <section id="workflow" class="card">
         <div class="lang-content lang-en active">
-          <h2>12. FAQ</h2>
-          <h3>Does Sengoo replace Python?</h3>
-          <p>Usually no. The practical strategy is coexistence: Python for orchestration and Sengoo/native for hotspots.</p>
-
-          <h3>Will reflection slow down all builds?</h3>
-          <p>No. Default <code>--reflect=auto</code> enables reflection only when reflect imports are used; you can still force <code>--reflect=off</code> for strict baseline builds.</p>
-
-          <h3>Where should I go after this tutorial?</h3>
-          <p>Read <code>docs/DEVELOPMENT_GUIDE.md</code> and <code>docs/language-features.md</code>, then run bench suites to validate local behavior.</p>
+          <h2>20. Developer Workflow</h2>
+          <ol>
+            <li>Edit source.</li>
+            <li><code>sgc check</code>.</li>
+            <li><code>sgc run</code>.</li>
+            <li><code>sgc build</code>.</li>
+            <li>Run relevant bench suites for perf-sensitive changes.</li>
+          </ol>
         </div>
         <div class="lang-content lang-zh">
-          <h2>12. 常见问题</h2>
-          <h3>Sengoo 会完全替代 Python 吗？</h3>
-          <p>通常不会。更现实的策略是共存：Python 负责编排，Sengoo/原生模块负责热点路径。</p>
+          <h2>20. 开发者工作流</h2>
+          <ol>
+            <li>修改源码。</li>
+            <li>执行 <code>sgc check</code>。</li>
+            <li>执行 <code>sgc run</code>。</li>
+            <li>执行 <code>sgc build</code>。</li>
+            <li>性能敏感改动配套 bench 回归。</li>
+          </ol>
+        </div>
+      </section>
 
-          <h3>反射会拖慢所有构建吗？</h3>
-          <p>不会。默认 <code>--reflect=auto</code> 仅在存在反射导入时启用；如需严格基线构建，可显式传 <code>--reflect=off</code>。</p>
+      <section id="roadmap" class="card">
+        <div class="lang-content lang-en active">
+          <h2>21. Learning Path and Demos</h2>
+          <ol>
+            <li>Run <code>examples/01_hello.sg</code> to <code>examples/08_struct.sg</code>.</li>
+            <li>Run <code>examples/09_method_call.sg</code> and inspect <code>impl</code>.</li>
+            <li>Run demos under <code>bench/demos/</code>.</li>
+          </ol>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>21. 学习路径与 Demo</h2>
+          <ol>
+            <li>按顺序运行 <code>examples/01_hello.sg</code> 到 <code>examples/08_struct.sg</code>。</li>
+            <li>运行 <code>examples/09_method_call.sg</code> 理解 <code>impl</code>。</li>
+            <li>运行 <code>bench/demos/</code> 下的演示。</li>
+          </ol>
+        </div>
+      </section>
 
-          <h3>学完本教程下一步做什么？</h3>
-          <p>建议继续阅读 <code>docs/DEVELOPMENT_GUIDE.md</code> 与 <code>docs/language-features.md</code>，再运行 bench 套件验证本地行为。</p>
+      <section id="faq" class="card">
+        <div class="lang-content lang-en active">
+          <h2>22. FAQ</h2>
+          <h3>Is Sengoo a Python replacement?</h3>
+          <p>Usually no. Practical architecture is coexistence: Python orchestration + Sengoo/native hotspots.</p>
+          <h3>Does auto reflection add overhead to all projects?</h3>
+          <p>No. In <code>--reflect=auto</code>, reflection activates only when reflect import is detected.</p>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>22. 常见问题</h2>
+          <h3>Sengoo 是要替代 Python 吗？</h3>
+          <p>通常不是。更实用的是共存架构：Python 编排 + Sengoo/原生热点模块。</p>
+          <h3>自动反射会拖慢所有项目吗？</h3>
+          <p>不会。在 <code>--reflect=auto</code> 模式下，只有检测到反射导入才启用。</p>
         </div>
       </section>
 
       <section class="card footer">
         <div class="lang-content lang-en active">
-          <p>This tutorial is aligned with the currently validated behavior in this repository. For perf numbers and trend lines, use the independent bench repository.</p>
+          <p>This tutorial is synchronized with repository behavior and CLI help as of February 16, 2026.</p>
         </div>
         <div class="lang-content lang-zh">
-          <p>本教程与当前仓库内已验证行为保持一致。性能数据与趋势请以独立 bench 仓库为准。</p>
+          <p>本教程已按 2026-02-16 的仓库行为与 CLI 帮助信息同步更新。</p>
         </div>
       </section>
     </main>
@@ -706,53 +764,51 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
 
   <script>
     function setLanguage(lang) {
-      const isZh = lang === 'zh';
-      document.documentElement.lang = isZh ? 'zh-CN' : 'en';
+      const isZh = lang === "zh";
+      document.documentElement.lang = isZh ? "zh-CN" : "en";
 
-      document.querySelectorAll('.lang-content').forEach((el) => {
-        const show = isZh ? el.classList.contains('lang-zh') : el.classList.contains('lang-en');
-        el.classList.toggle('active', show);
+      document.querySelectorAll(".lang-content").forEach((el) => {
+        const show = isZh ? el.classList.contains("lang-zh") : el.classList.contains("lang-en");
+        el.classList.toggle("active", show);
       });
 
-      document.querySelectorAll('[data-i18n-en]').forEach((el) => {
-        el.textContent = isZh ? el.getAttribute('data-i18n-zh') : el.getAttribute('data-i18n-en');
+      document.querySelectorAll("[data-i18n-en]").forEach((el) => {
+        el.textContent = isZh ? el.getAttribute("data-i18n-zh") : el.getAttribute("data-i18n-en");
       });
 
-      document.getElementById('btn-en').classList.toggle('active', !isZh);
-      document.getElementById('btn-zh').classList.toggle('active', isZh);
-      localStorage.setItem('sengoo-tutorial-lang', lang);
+      document.querySelectorAll("#toc a").forEach((el) => {
+        el.textContent = isZh ? el.getAttribute("data-i18n-zh") : el.getAttribute("data-i18n-en");
+      });
+
+      document.getElementById("btn-en").classList.toggle("active", !isZh);
+      document.getElementById("btn-zh").classList.toggle("active", isZh);
+      localStorage.setItem("sengoo-tutorial-lang", lang);
     }
 
-    function initActiveToc() {
-      const links = Array.from(document.querySelectorAll('#toc a'));
-      const map = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
+    function initTocActive() {
+      const links = Array.from(document.querySelectorAll("#toc a"));
+      const map = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
 
       const observer = new IntersectionObserver(
         (entries) => {
-          const visible = entries
+          const firstVisible = entries
             .filter((e) => e.isIntersecting)
             .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-          if (!visible) {
-            return;
-          }
-          links.forEach((a) => a.classList.remove('active'));
-          const link = map.get(visible.target.id);
-          if (link) {
-            link.classList.add('active');
-          }
+
+          if (!firstVisible) return;
+          links.forEach((a) => a.classList.remove("active"));
+          const target = map.get(firstVisible.target.id);
+          if (target) target.classList.add("active");
         },
-        {
-          rootMargin: '-90px 0px -70% 0px',
-          threshold: 0.01
-        }
+        { rootMargin: "-88px 0px -70% 0px", threshold: 0.01 }
       );
 
-      document.querySelectorAll('main section[id]').forEach((section) => observer.observe(section));
+      document.querySelectorAll("main section[id]").forEach((section) => observer.observe(section));
     }
 
-    const preferred = localStorage.getItem('sengoo-tutorial-lang') || 'en';
+    const preferred = localStorage.getItem("sengoo-tutorial-lang") || "en";
     setLanguage(preferred);
-    initActiveToc();
+    initTocActive();
   </script>
 </body>
 </html>

@@ -9,6 +9,19 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
 
+## Practical Demo (Developer-Oriented)
+
+If you want one concrete, business-style proof point instead of synthetic microbenchmarks, run:
+
+```bash
+python bench/demos/hotpath-risk-scoring/run_demo.py
+```
+
+This demo uses the same transaction risk pre-filter logic in Sengoo and Python, verifies result parity, and reports:
+- runtime comparison (`avg`/`p50`)
+- Python vs Sengoo speed ratio
+- Sengoo compile cost and estimated break-even runs
+
 ## Why Sengoo
 
 ## 1) Hybrid Python Migration, Not Rewrite-Only Migration
