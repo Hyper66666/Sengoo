@@ -1,0 +1,6 @@
+// Sengoo Hello World - 最简单的程序
+// 返回一个整数值
+
+def main() -> i64 {
+    42
+}

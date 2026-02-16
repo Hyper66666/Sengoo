@@ -1,0 +1,6 @@
+// Sengoo 数组示例
+
+def main() -> i64 {
+    let arr = [10, 20, 30];
+    arr[1]
+}

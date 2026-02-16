@@ -1,0 +1,7 @@
+// Sengoo Lambda 闭包示例
+
+def main() -> i64 {
+    let x = 10;
+    let f = |y| x + y;
+    f(5)
+}

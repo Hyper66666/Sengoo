@@ -1,0 +1,68 @@
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout bench repo
+        uses: actions/checkout@v4
+        with:
+          repository: Hyper66666/bench
+          path: bench
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmark suites
+        shell: bash
+        run: |
+          cargo run -p sgc -- bench run runtime
+          cargo run -p sgc -- bench compile compile
+          cargo run -p sgc -- bench incremental incremental
+          python3 ./bench/advanced_pipeline_bench.py --daemon-compare --daemon-addr 127.0.0.1:48767
+          python3 ./bench/python_interop_bench.py
+          python3 ./bench/bootstrap_generality_bench.py
+
+      - name: Resolve latest benchmark reports
+        id: reports
+        shell: bash
+        run: |
+          echo "runtime=$(ls -1t bench/results/*-runtime-runtime.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "compile=$(ls -1t bench/results/*-compile-compile.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "incremental=$(ls -1t bench/results/*-incremental-incremental.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "advanced=$(ls -1t bench/results/*-advanced-pipeline.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "interop=$(ls -1t bench/results/*-python-interop.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "bootstrap=$(ls -1t bench/results/*-bootstrap-generality.json | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Run hard perf gate checks
+        shell: bash
+        run: |
+          bash ./bench/scripts/perf-gate.sh --mode hard --sample "${{ steps.reports.outputs.runtime }}"
+          bash ./bench/scripts/perf-gate.sh --mode hard --sample "${{ steps.reports.outputs.compile }}"
+          bash ./bench/scripts/perf-gate.sh --mode hard --sample "${{ steps.reports.outputs.incremental }}"
+          python3 ./bench/scripts/advanced-kpi-gate.py --mode hard --fail-fast --require-phase-deltas --require-daemon-comparison --sample "${{ steps.reports.outputs.advanced }}"
+          python3 ./bench/scripts/interop-bootstrap-gate.py \
+            --mode hard \
+            --fail-fast \
+            --interop-sample "${{ steps.reports.outputs.interop }}" \
+            --bootstrap-sample "${{ steps.reports.outputs.bootstrap }}" \
+            --max-sengoo-overhead-pct 50
+
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench/results/*.json

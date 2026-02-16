@@ -1,0 +1,26 @@
+[package]
+name = "sglsp"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sglsp"
+path = "src/main.rs"
+
+[dependencies]
+# 编译器核心
+sengoo-compiler = { path = "../../compiler" }
+
+# LSP 支持
+tower-lsp = "0.20"
+tokio = { version = "1.40", features = ["full"] }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+# 错误处理
+thiserror = { workspace = true }
+miette = { workspace = true }
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"

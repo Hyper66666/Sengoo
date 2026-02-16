@@ -1,0 +1,7 @@
+// Sengoo 算术运算示例
+
+def main() -> i64 {
+    let a = 10;
+    let b = 20;
+    a + b
+}

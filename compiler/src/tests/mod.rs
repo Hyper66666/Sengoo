@@ -1,0 +1,24 @@
+//! Test modules for the Sengoo compiler
+
+pub mod array_assign_tests;
+pub mod codegen_type_tests;
+pub mod compile_options_tests;
+pub mod constant_folding_tests;
+pub mod diagnostics_tests;
+pub mod for_loop_tests;
+pub mod incremental_typeck_tests;
+pub mod method_call_tests;
+pub mod parser_ambiguity_tests;
+pub mod perf_runtime_regression_tests;
+pub mod phi_tests;
+pub mod print_tests;
+pub mod property_tests;
+pub mod recursive_tests;
+pub mod regression_suite_tests;
+pub mod snapshot_tests;
+pub mod stability_property_tests;
+pub mod string_tests;
+pub mod struct_codegen_tests;
+pub mod trait_tests;
+pub mod type_mismatch_tests;
+pub mod while_loop_tests;

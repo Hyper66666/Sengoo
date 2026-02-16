@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    "compiler",
+    "runtime",
+    "tools/sgc",
+    "tools/sgfmt",
+    "tools/sgpy",
+    "tools/sglsp",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Sengoo Team"]
+license = "MIT"
+repository = "https://github.com/sengoo/sengoo"
+homepage = "https://sengoo.dev"
+
+[workspace.dependencies]
+# 错误处理
+thiserror = "2.0"
+miette = { version = "7.4", features = ["fancy"] }
+
+# 词法分析
+logos = "0.15"
+
+# 语法分析
+chumsky = "1.0"
+
+# 代码生成
+inkwell = { version = "0.5", features = ["llvm18-0"] }
+llvm-sys = "180"
+
+# Python互操作
+pyo3 = { version = "0.23", features = ["auto-initialize"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 测试
+expect-test = "1.5"
+proptest = "1.5"
+insta = "1.41"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+strip = true
+codegen-units = 1

@@ -1,0 +1,112 @@
+{
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "def main() -> ${1:i64} {",
+      "    $0",
+      "}"
+    ],
+    "description": "Sengoo main 函数"
+  },
+  "Function Definition": {
+    "prefix": "def",
+    "body": [
+      "def ${1:name}(${2:params}) -> ${3:i64} {",
+      "    $0",
+      "}"
+    ],
+    "description": "定义函数"
+  },
+  "Struct Definition": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "    ${2:field}: ${3:i64},",
+      "}"
+    ],
+    "description": "定义结构体"
+  },
+  "Impl Block": {
+    "prefix": "impl",
+    "body": [
+      "impl ${1:Type} {",
+      "    def ${2:method}(self${3:, params}) -> ${4:i64} {",
+      "        $0",
+      "    }",
+      "}"
+    ],
+    "description": "实现方法"
+  },
+  "Trait Definition": {
+    "prefix": "trait",
+    "body": [
+      "trait ${1:Name} {",
+      "    def ${2:method}(self${3:, params}) -> ${4:i64};",
+      "}"
+    ],
+    "description": "定义 trait"
+  },
+  "If Expression": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "    $0",
+      "}"
+    ],
+    "description": "if 表达式"
+  },
+  "If-Else Expression": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition} {",
+      "    $2",
+      "} else {",
+      "    $0",
+      "}"
+    ],
+    "description": "if-else 表达式"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:collection} {",
+      "    $0",
+      "}"
+    ],
+    "description": "for 循环"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "    $0",
+      "}"
+    ],
+    "description": "while 循环"
+  },
+  "Let Binding": {
+    "prefix": "let",
+    "body": "let ${1:name} = ${0:value};",
+    "description": "变量绑定"
+  },
+  "Lambda": {
+    "prefix": "lambda",
+    "body": "|${1:params}| ${0:body}",
+    "description": "Lambda 闭包"
+  },
+  "Match Expression": {
+    "prefix": "match",
+    "body": [
+      "match ${1:expr} {",
+      "    case ${2:pattern} => $3,",
+      "    default => $0,",
+      "}"
+    ],
+    "description": "match 表达式"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": "print(${0:value});",
+    "description": "打印输出"
+  }
+}

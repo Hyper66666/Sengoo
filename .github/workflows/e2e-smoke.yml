@@ -1,0 +1,44 @@
+name: e2e-smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout bench repo
+        uses: actions/checkout@v4
+        with:
+          repository: Hyper66666/bench
+          path: bench
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run smoke (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash ./bench/scripts/e2e-smoke.sh
+
+      - name: Run smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -File .\bench\scripts\e2e-smoke.ps1

@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sengoo Tutorial | Language Guide</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --card: #ffffff;
+      --line: #dbe5f0;
+      --text: #1f2937;
+      --muted: #4b5563;
+      --primary: #0f4c81;
+      --primary-soft: #e8f1fb;
+      --ok: #0f766e;
+      --warn: #b45309;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, #eef4fb 0%, #f8fbff 35%, #f4f7fb 100%);
+      line-height: 1.7;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: #0f4c81;
+      color: #fff;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(6px);
+    }
+
+    .topbar-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      opacity: 0.88;
+    }
+
+    .lang-switch {
+      display: inline-flex;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .lang-btn {
+      border: 0;
+      background: transparent;
+      color: #fff;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .lang-btn.active {
+      background: #fff;
+      color: #0f4c81;
+      font-weight: 700;
+    }
+
+    .page {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 76px;
+      align-self: start;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 2px 14px rgba(15, 76, 129, 0.06);
+      max-height: calc(100vh - 96px);
+      overflow: auto;
+    }
+
+    .sidebar h3 {
+      margin: 4px 0 12px;
+      font-size: 13px;
+      color: var(--muted);
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .sidebar a {
+      display: block;
+      color: var(--text);
+      text-decoration: none;
+      padding: 7px 8px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .sidebar a:hover {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .content {
+      min-width: 0;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 26px 30px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 14px rgba(15, 76, 129, 0.06);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 34px;
+      color: #0b3d69;
+      line-height: 1.3;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 26px;
+      color: #0f4c81;
+      line-height: 1.35;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 20px;
+      color: #153e68;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul {
+      margin: 8px 0 12px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    .hint {
+      border-left: 4px solid var(--primary);
+      background: var(--primary-soft);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin: 12px 0;
+      color: #133a5e;
+    }
+
+    .warn {
+      border-left-color: var(--warn);
+      background: #fff7ed;
+      color: #7c2d12;
+    }
+
+    .ok {
+      border-left-color: var(--ok);
+      background: #ecfdf5;
+      color: #065f46;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 14px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f6fd;
+      color: #123a60;
+      font-weight: 700;
+    }
+
+    code {
+      font-family: Consolas, Menlo, Monaco, monospace;
+      background: #eef3fa;
+      border: 1px solid #d7e2ef;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 10px 0 14px;
+      padding: 14px;
+      border: 1px solid #d7e2ef;
+      border-radius: 10px;
+      background: #f7faff;
+      overflow-x: auto;
+      line-height: 1.55;
+      font-size: 13.5px;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+
+    .lang-content {
+      display: none;
+    }
+
+    .lang-content.active {
+      display: block;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        max-height: none;
+      }
+
+      .card {
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <div class="brand">Sengoo Tutorial</div>
+        <div class="subtitle" data-i18n-en="Language type, syntax, features, and practical workflows" data-i18n-zh="语言类型、语法规范、核心特性与实践工作流"></div>
+      </div>
+      <div class="lang-switch" role="tablist" aria-label="Language Switch">
+        <button id="btn-en" class="lang-btn active" onclick="setLanguage('en')">English</button>
+        <button id="btn-zh" class="lang-btn" onclick="setLanguage('zh')">中文</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="page">
+    <aside class="sidebar">
+      <h3 data-i18n-en="Contents" data-i18n-zh="目录"></h3>
+      <nav>
+        <a href="#overview" data-i18n-en="1. Overview" data-i18n-zh="1. 概览"></a>
+        <a href="#quickstart" data-i18n-en="2. Quick Start" data-i18n-zh="2. 快速开始"></a>
+        <a href="#language-type" data-i18n-en="3. Language Type" data-i18n-zh="3. 语言定位"></a>
+        <a href="#features" data-i18n-en="4. Core Features" data-i18n-zh="4. 核心特性"></a>
+        <a href="#syntax" data-i18n-en="5. Syntax Reference" data-i18n-zh="5. 语法规范"></a>
+        <a href="#tooling" data-i18n-en="6. Tooling and CLI" data-i18n-zh="6. 工具链与 CLI"></a>
+        <a href="#interop" data-i18n-en="7. Python Interop" data-i18n-zh="7. Python 互操作"></a>
+        <a href="#performance" data-i18n-en="8. Performance Model" data-i18n-zh="8. 性能模型"></a>
+        <a href="#applications" data-i18n-en="9. Application Scenarios" data-i18n-zh="9. 应用场景"></a>
+        <a href="#status" data-i18n-en="10. Current Status" data-i18n-zh="10. 当前状态"></a>
+        <a href="#faq" data-i18n-en="11. FAQ" data-i18n-zh="11. 常见问题"></a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <section class="card" id="overview">
+        <div class="lang-content lang-en active">
+          <h1>Sengoo Language Tutorial</h1>
+          <p>Sengoo is a self-developed <strong>compiled</strong> language focused on practical engineering outcomes: hybrid Python migration, fast compile feedback, and LLVM-native output.</p>
+          <p>This tutorial is written for developers who need to understand what Sengoo is, how to write valid programs, and where this language fits in real projects.</p>
+          <div class="hint ok">Default view is English. Use the top-right language switch to read the Chinese version.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h1>Sengoo 编程语言教程</h1>
+          <p>Sengoo 是一门自研<strong>编译型</strong>语言，目标聚焦工程落地：支持 Python 渐进迁移、提供快速编译反馈，并通过 LLVM 输出原生程序。</p>
+          <p>本教程面向开发者，重点回答三件事：这是什么语言、如何写出合法程序、在真实项目中适合用在哪里。</p>
+          <div class="hint ok">页面默认英文，右上角可切换到中文。</div>
+        </div>
+      </section>
+
+      <section class="card" id="quickstart">
+        <div class="lang-content lang-en active">
+          <h2>2. Quick Start</h2>
+          <h3>Build compiler</h3>
+          <pre><code>cargo build --release</code></pre>
+          <h3>Run a program</h3>
+          <pre><code>target/release/sgc run examples/01_hello.sg</code></pre>
+          <h3>Build native binary</h3>
+          <pre><code>target/release/sgc build examples/05_loop.sg -O 2</code></pre>
+          <h3>Type-check only</h3>
+          <pre><code>target/release/sgc check examples/09_method_call.sg</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>2. 快速开始</h2>
+          <h3>构建编译器</h3>
+          <pre><code>cargo build --release</code></pre>
+          <h3>运行程序</h3>
+          <pre><code>target/release/sgc run examples/01_hello.sg</code></pre>
+          <h3>构建原生可执行文件</h3>
+          <pre><code>target/release/sgc build examples/05_loop.sg -O 2</code></pre>
+          <h3>仅做类型检查</h3>
+          <pre><code>target/release/sgc check examples/09_method_call.sg</code></pre>
+        </div>
+      </section>
+
+      <section class="card" id="language-type">
+        <div class="lang-content lang-en active">
+          <h2>3. What Type of Language Is Sengoo?</h2>
+          <table>
+            <thead>
+              <tr><th>Dimension</th><th>Sengoo Today</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Execution model</td><td>Compiled language with LLVM IR generation and native-link path.</td></tr>
+              <tr><td>Typing model</td><td>Static type checker with inference for many local bindings and explicit return types in common practice.</td></tr>
+              <tr><td>Syntax style</td><td>Python-like keywords (`def`, `for`, `if`) with brace-delimited blocks.</td></tr>
+              <tr><td>Tooling model</td><td>CLI-first workflow (`sgc`) + VS Code extension.</td></tr>
+              <tr><td>Performance focus</td><td>Incremental compile pipeline and native runtime execution path.</td></tr>
+              <tr><td>Interop strategy</td><td>Runtime-level Python interoperability for gradual migration scenarios.</td></tr>
+            </tbody>
+          </table>
+          <div class="hint">Sengoo is not a Python interpreter replacement. It is a compiled systems-oriented language designed to coexist with Python-heavy stacks.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>3. Sengoo 属于哪种语言？</h2>
+          <table>
+            <thead>
+              <tr><th>维度</th><th>当前形态</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>执行模型</td><td>编译型语言，生成 LLVM IR，并支持原生链接执行。</td></tr>
+              <tr><td>类型模型</td><td>静态类型检查；局部绑定可做较多推导，函数返回常显式标注。</td></tr>
+              <tr><td>语法风格</td><td>关键词接近 Python（`def`/`for`/`if`），但使用大括号代码块。</td></tr>
+              <tr><td>工具形态</td><td>CLI 优先（`sgc`）+ VS Code 插件。</td></tr>
+              <tr><td>性能方向</td><td>重点优化增量编译链路与原生执行性能。</td></tr>
+              <tr><td>互操作策略</td><td>通过运行时层提供 Python 互操作，支持渐进迁移。</td></tr>
+            </tbody>
+          </table>
+          <div class="hint">Sengoo 不是 Python 解释器替代品，而是面向工程性能与迁移路径的编译型语言。</div>
+        </div>
+      </section>
+
+      <section class="card" id="features">
+        <div class="lang-content lang-en active">
+          <h2>4. Core Features</h2>
+          <ul>
+            <li><strong>Function-oriented syntax</strong>: `def name(...) -> type { ... }`.</li>
+            <li><strong>Structured data</strong>: arrays, structs, fields, indexing, and method calls.</li>
+            <li><strong>Control flow</strong>: `if/else`, `for-in`, `while`, `loop`, `break`, `continue`, `return`.</li>
+            <li><strong>Implementation blocks</strong>: attach methods via `impl`.</li>
+            <li><strong>Incremental compiler pipeline</strong>: cache metadata, module fingerprints, workset-aware rebuild.</li>
+            <li><strong>Daemon mode</strong>: persistent compiler process to avoid repeated startup overhead.</li>
+          </ul>
+          <div class="hint warn">Some grammar forms are present in AST/parser but may still be experimental at full codegen/runtime level. Treat examples under <code>examples/</code> and active benchmark suites as the currently validated surface.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>4. 核心特性</h2>
+          <ul>
+            <li><strong>函数中心语法</strong>：`def name(...) -> type { ... }`。</li>
+            <li><strong>结构化数据</strong>：数组、结构体、字段访问、索引、方法调用。</li>
+            <li><strong>控制流</strong>：`if/else`、`for-in`、`while`、`loop`、`break`、`continue`、`return`。</li>
+            <li><strong>实现块</strong>：通过 `impl` 为类型挂载方法。</li>
+            <li><strong>增量编译管线</strong>：缓存元数据、模块指纹、workset 感知重编译。</li>
+            <li><strong>Daemon 模式</strong>：常驻编译进程，降低重复冷启动成本。</li>
+          </ul>
+          <div class="hint warn">部分语法虽然已进入 AST/Parser，但在完整代码生成或运行时层面仍可能处于实验阶段。建议以 <code>examples/</code> 和当前基准用例可跑通的能力为准。</div>
+        </div>
+      </section>
+
+            <section class="card" id="syntax">
+        <div class="lang-content lang-en active">
+          <h2>5. Syntax Reference (Detailed Learning Version)</h2>
+          <p>This section is the practical syntax handbook for developers who are starting Sengoo from zero.</p>
+
+          <h3>5.1 Minimal grammar map</h3>
+          <pre><code>program      := decl*
+decl         := function | struct | enum | impl | trait | const | static | import | module
+function     := "def" ident "(" params? ")" ("->" type)? block
+block        := "{" stmt* expr? "}"
+stmt         := "let" ... ";" | "const" ... ";" | expr ";" | decl
+expr         := literal | ident | call | method_call | if | for | while | loop | match | ...
+</code></pre>
+          <div class="hint">Compiler internals support more forms than the examples show. For learning, start with the validated forms from <code>examples/</code>.</div>
+
+          <h3>5.2 Declaration syntax</h3>
+          <h4>Function</h4>
+          <pre><code>def add(a: i64, b: i64) -> i64 {
+    a + b
+}</code></pre>
+
+          <h4>Struct</h4>
+          <pre><code>struct Point {
+    x: i64,
+    y: i64,
+}</code></pre>
+
+          <h4>Impl and methods</h4>
+          <pre><code>impl i64 {
+    def abs(self) -> i64 {
+        if self &lt; 0 { -self } else { self }
+    }
+}</code></pre>
+
+          <h4>Const / Static</h4>
+          <pre><code>const MAGIC: i64 = 42;
+static mut COUNTER: i64 = 0;</code></pre>
+
+          <h4>Import (parser-level forms)</h4>
+          <pre><code>import math;
+import math as m;
+import std::{io, fs};
+import * from std;</code></pre>
+
+          <h3>5.3 Type syntax</h3>
+          <table>
+            <thead>
+              <tr><th>Type class</th><th>Examples</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Integer</td><td><code>i8 i16 i32 i64 i128</code>, <code>u8 u16 u32 u64 u128</code></td></tr>
+              <tr><td>Float</td><td><code>f32</code>, <code>f64</code></td></tr>
+              <tr><td>Basic</td><td><code>bool</code>, <code>char</code>, <code>str</code>, <code>bytes</code></td></tr>
+              <tr><td>Array / Tuple</td><td><code>[i64; 4]</code>, <code>(i64, bool)</code></td></tr>
+              <tr><td>Pointer / Ref</td><td><code>*const T</code>, <code>*mut T</code>, <code>&amp;T</code>, <code>&amp;mut T</code></td></tr>
+              <tr><td>Function type</td><td><code>fn(i64, i64) -> i64</code></td></tr>
+              <tr><td>Trait types</td><td><code>dyn Trait</code>, <code>impl Trait</code> (advanced/experimental surface)</td></tr>
+            </tbody>
+          </table>
+
+          <h3>5.4 Expressions and operators</h3>
+          <h4>Arithmetic / comparison / logic</h4>
+          <pre><code>a + b
+a - b
+a * b
+a / b
+a % b
+a == b
+a != b
+a &lt; b
+a &lt;= b
+a &gt; b
+a &gt;= b
+!flag
+lhs &amp;&amp; rhs
+lhs || rhs</code></pre>
+
+          <h4>Assignment family</h4>
+          <pre><code>x = y;
+x += 1;
+x -= 1;
+x *= 2;
+x /= 2;
+x %= 2;</code></pre>
+
+          <h4>Bitwise operators</h4>
+          <pre><code>a & b
+a | b
+a ^ b
+a &lt;&lt; 2
+a &gt;&gt; 1
+~a</code></pre>
+
+          <h3>5.5 Control flow syntax</h3>
+          <h4>If/else</h4>
+          <pre><code>if x > 0 {
+    1
+} else {
+    0
+}</code></pre>
+
+          <h4>For-in</h4>
+          <pre><code>let arr = [1, 2, 3];
+let sum = 0;
+for v in arr {
+    sum = sum + v
+}
+sum</code></pre>
+
+          <h4>While / loop</h4>
+          <pre><code>while cond {
+    // ...
+}
+
+loop {
+    if done { break }
+}</code></pre>
+
+          <h4>Match (advanced surface)</h4>
+          <pre><code>match value {
+    case 0 => 0,
+    case _ => 1,
+}</code></pre>
+
+          <h3>5.6 Function calls, lambda, and method calls</h3>
+          <pre><code>def main() -> i64 {
+    let x = 10;
+    let f = |y| x + y;
+    let v = f(5);
+    v
+}</code></pre>
+
+          <pre><code>let a = -21;
+let b = a.abs();</code></pre>
+
+          <h3>5.7 Data structure syntax</h3>
+          <h4>Array and indexing</h4>
+          <pre><code>let arr = [10, 20, 30];
+let x = arr[1];</code></pre>
+
+          <h4>Struct construction and field access</h4>
+          <pre><code>struct Point { x: i64, y: i64 }
+let p = Point { x: 10, y: 20 };
+let s = p.x + p.y;</code></pre>
+
+          <h3>5.8 Comments and literals</h3>
+          <ul>
+            <li>Single-line comment: <code>// comment</code></li>
+            <li>Block comment: <code>/* comment */</code></li>
+            <li>Literals: integer, float, string, char, bool, array, tuple</li>
+          </ul>
+
+          <h3>5.9 Syntax conventions for clean code</h3>
+          <ul>
+            <li>Use semicolons for local declarations and assignments.</li>
+            <li>Use explicit return types in public functions.</li>
+            <li>Keep one statement per line in early-stage projects for easier diagnostics.</li>
+            <li>Prefer simple control flow before introducing advanced expression nesting.</li>
+          </ul>
+
+          <h3>5.10 Learning path (recommended)</h3>
+          <ol>
+            <li>Run all files in <code>examples/01_hello.sg</code> to <code>examples/08_struct.sg</code>.</li>
+            <li>Read and run <code>examples/09_method_call.sg</code>.</li>
+            <li>Write one small program that uses: function + array + loop + struct.</li>
+            <li>Use <code>sgc check</code> after each change to learn error patterns early.</li>
+          </ol>
+        </div>
+                <div class="lang-content lang-zh">
+          <h2>5. 语法教程（详细学习版）</h2>
+          <p>这一章是给“从零学习 Sengoo”的开发者准备的实用语法手册。</p>
+
+          <h3>5.1 最小语法地图</h3>
+          <pre><code>program      := decl*
+decl         := function | struct | enum | impl | trait | const | static | import | module
+function     := "def" ident "(" params? ")" ("->" type)? block
+block        := "{" stmt* expr? "}"
+stmt         := "let" ... ";" | "const" ... ";" | expr ";" | decl
+expr         := literal | ident | call | method_call | if | for | while | loop | match | ...
+</code></pre>
+          <div class="hint">编译器内部支持的语法比示例更多。学习时建议先以 <code>examples/</code> 中可验证语法为主。</div>
+
+          <h3>5.2 声明语法</h3>
+          <h4>函数定义</h4>
+          <pre><code>def add(a: i64, b: i64) -> i64 {
+    a + b
+}</code></pre>
+
+          <h4>结构体</h4>
+          <pre><code>struct Point {
+    x: i64,
+    y: i64,
+}</code></pre>
+
+          <h4>Impl 与方法</h4>
+          <pre><code>impl i64 {
+    def abs(self) -> i64 {
+        if self &lt; 0 { -self } else { self }
+    }
+}</code></pre>
+
+          <h4>Const / Static</h4>
+          <pre><code>const MAGIC: i64 = 42;
+static mut COUNTER: i64 = 0;</code></pre>
+
+          <h4>Import（解析器层已支持）</h4>
+          <pre><code>import math;
+import math as m;
+import std::{io, fs};
+import * from std;</code></pre>
+
+          <h3>5.3 类型语法</h3>
+          <table>
+            <thead>
+              <tr><th>类型类别</th><th>示例</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>整数</td><td><code>i8 i16 i32 i64 i128</code>，<code>u8 u16 u32 u64 u128</code></td></tr>
+              <tr><td>浮点</td><td><code>f32</code>，<code>f64</code></td></tr>
+              <tr><td>基础类型</td><td><code>bool</code>、<code>char</code>、<code>str</code>、<code>bytes</code></td></tr>
+              <tr><td>数组/元组</td><td><code>[i64; 4]</code>，<code>(i64, bool)</code></td></tr>
+              <tr><td>指针/引用</td><td><code>*const T</code>、<code>*mut T</code>、<code>&amp;T</code>、<code>&amp;mut T</code></td></tr>
+              <tr><td>函数类型</td><td><code>fn(i64, i64) -> i64</code></td></tr>
+              <tr><td>Trait 类型</td><td><code>dyn Trait</code>、<code>impl Trait</code>（高级/实验面）</td></tr>
+            </tbody>
+          </table>
+
+          <h3>5.4 表达式与运算符</h3>
+          <h4>算术 / 比较 / 逻辑</h4>
+          <pre><code>a + b
+a - b
+a * b
+a / b
+a % b
+a == b
+a != b
+a &lt; b
+a &lt;= b
+a &gt; b
+a &gt;= b
+!flag
+lhs &amp;&amp; rhs
+lhs || rhs</code></pre>
+
+          <h4>赋值族</h4>
+          <pre><code>x = y;
+x += 1;
+x -= 1;
+x *= 2;
+x /= 2;
+x %= 2;</code></pre>
+
+          <h4>位运算</h4>
+          <pre><code>a &amp; b
+a | b
+a ^ b
+a &lt;&lt; 2
+a &gt;&gt; 1
+~a</code></pre>
+
+          <h3>5.5 控制流语法</h3>
+          <h4>If/else</h4>
+          <pre><code>if x &gt; 0 {
+    1
+} else {
+    0
+}</code></pre>
+
+          <h4>For-in</h4>
+          <pre><code>let arr = [1, 2, 3];
+let sum = 0;
+for v in arr {
+    sum = sum + v
+}
+sum</code></pre>
+
+          <h4>While / loop</h4>
+          <pre><code>while cond {
+    // ...
+}
+
+loop {
+    if done { break }
+}</code></pre>
+
+          <h4>Match（高级语法面）</h4>
+          <pre><code>match value {
+    case 0 => 0,
+    case _ => 1,
+}</code></pre>
+
+          <h3>5.6 函数调用、Lambda、方法调用</h3>
+          <pre><code>def main() -> i64 {
+    let x = 10;
+    let f = |y| x + y;
+    let v = f(5);
+    v
+}</code></pre>
+
+          <pre><code>let a = -21;
+let b = a.abs();</code></pre>
+
+          <h3>5.7 数据结构语法</h3>
+          <h4>数组与索引</h4>
+          <pre><code>let arr = [10, 20, 30];
+let x = arr[1];</code></pre>
+
+          <h4>结构体构造与字段访问</h4>
+          <pre><code>struct Point { x: i64, y: i64 }
+let p = Point { x: 10, y: 20 };
+let s = p.x + p.y;</code></pre>
+
+          <h3>5.8 注释与字面量</h3>
+          <ul>
+            <li>单行注释：<code>// comment</code></li>
+            <li>块注释：<code>/* comment */</code></li>
+            <li>字面量：整数、浮点、字符串、字符、布尔、数组、元组</li>
+          </ul>
+
+          <h3>5.9 代码风格建议</h3>
+          <ul>
+            <li>局部声明和赋值建议用分号结束。</li>
+            <li>公共函数建议显式返回类型。</li>
+            <li>初学阶段建议一行一语句，便于定位错误。</li>
+            <li>先写清晰控制流，再逐步引入复杂表达式嵌套。</li>
+          </ul>
+
+          <h3>5.10 建议学习路径</h3>
+          <ol>
+            <li>顺序运行 <code>examples/01_hello.sg</code> 到 <code>examples/08_struct.sg</code>。</li>
+            <li>再读并运行 <code>examples/09_method_call.sg</code>。</li>
+            <li>手写一个包含：函数 + 数组 + 循环 + 结构体 的小程序。</li>
+            <li>每次修改后都先跑 <code>sgc check</code>，尽快熟悉错误提示。</li>
+          </ol>
+        </div>
+
+        </div>
+      </section>
+<section class="card" id="tooling">
+        <div class="lang-content lang-en active">
+          <h2>6. Tooling and CLI</h2>
+          <table>
+            <thead>
+              <tr><th>Command</th><th>Purpose</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>sgc build file.sg -O 2</code></td><td>Compile to native executable.</td></tr>
+              <tr><td><code>sgc build file.sg --emit-llvm</code></td><td>Emit LLVM IR.</td></tr>
+              <tr><td><code>sgc run file.sg -O 1</code></td><td>Compile and run through configured engine policy.</td></tr>
+              <tr><td><code>sgc check file.sg</code></td><td>Type-check/compile pipeline validation without final binary output.</td></tr>
+              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>Start persistent daemon service.</td></tr>
+              <tr><td><code>sgc run file.sg --daemon</code></td><td>Try daemon first, fallback to one-shot if unavailable.</td></tr>
+            </tbody>
+          </table>
+          <h3>VS Code extension</h3>
+          <p>Current packaged extension version is <code>1.0.0</code> in <code>vscode-sengoo/</code>.</p>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>6. 工具链与 CLI</h2>
+          <table>
+            <thead>
+              <tr><th>命令</th><th>用途</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>sgc build file.sg -O 2</code></td><td>编译为原生可执行文件。</td></tr>
+              <tr><td><code>sgc build file.sg --emit-llvm</code></td><td>输出 LLVM IR。</td></tr>
+              <tr><td><code>sgc run file.sg -O 1</code></td><td>编译并运行。</td></tr>
+              <tr><td><code>sgc check file.sg</code></td><td>做类型检查/编译链路校验，不产出最终可执行文件。</td></tr>
+              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>启动常驻编译服务。</td></tr>
+              <tr><td><code>sgc run file.sg --daemon</code></td><td>优先走 daemon，失败自动回退一次性编译。</td></tr>
+            </tbody>
+          </table>
+          <h3>VS Code 插件</h3>
+          <p>当前插件版本为 <code>1.0.0</code>，位于 <code>vscode-sengoo/</code>。</p>
+        </div>
+      </section>
+
+      <section class="card" id="interop">
+        <div class="lang-content lang-en active">
+          <h2>7. Python Interoperability</h2>
+          <p>Sengoo currently provides Python interoperability through runtime-level integration (PyO3 path), used by benchmark suites and hybrid deployment workflows.</p>
+          <h3>What this enables</h3>
+          <ul>
+            <li>Keep Python orchestration while moving hot loops/modules to compiled native paths.</li>
+            <li>Measure cross-boundary costs using the dedicated interop benchmark suite.</li>
+            <li>Adopt gradual migration instead of hard rewrites.</li>
+          </ul>
+          <h3>Run interop benchmark example</h3>
+          <pre><code>cd bench
+python ./tests/python_interop_example.py</code></pre>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>7. Python 互操作</h2>
+          <p>Sengoo 目前通过运行时层（PyO3 路径）提供 Python 互操作能力，已用于基准测试与混合部署流程。</p>
+          <h3>它解决什么问题</h3>
+          <ul>
+            <li>保留 Python 编排层，把热点逻辑迁移到编译后的原生模块。</li>
+            <li>通过专用互操作基准量化跨语言边界开销。</li>
+            <li>支持渐进迁移，而不是一次性重写。</li>
+          </ul>
+          <h3>互操作示例运行</h3>
+          <pre><code>cd bench
+python ./tests/python_interop_example.py</code></pre>
+        </div>
+      </section>
+
+      <section class="card" id="performance">
+        <div class="lang-content lang-en active">
+          <h2>8. Performance Model</h2>
+          <ul>
+            <li><strong>Runtime track</strong>: native execution aims to stay in the same performance class as C++/Rust for loop-heavy scenarios.</li>
+            <li><strong>Compile track</strong>: emphasis on incremental reuse through fingerprints and workset planning.</li>
+            <li><strong>Link track</strong>: link time is measured explicitly in advanced pipeline suite.</li>
+          </ul>
+          <div class="hint">Use benchmark reports in the independent <code>bench</code> repository to evaluate regressions and compare trend lines over time.</div>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>8. 性能模型</h2>
+          <ul>
+            <li><strong>运行时维度</strong>：原生执行目标是在循环密集场景接近 C++/Rust 量级。</li>
+            <li><strong>编译维度</strong>：通过指纹和 workset 计划强化增量复用。</li>
+            <li><strong>链接维度</strong>：在 advanced pipeline 中单独统计链接阶段。</li>
+          </ul>
+          <div class="hint">建议使用独立的 <code>bench</code> 仓库持续跟踪性能趋势和回归。</div>
+        </div>
+      </section>
+
+      <section class="card" id="applications">
+        <div class="lang-content lang-en active">
+          <h2>9. Application Scenarios</h2>
+          <ul>
+            <li>Compute-heavy modules in Python services.</li>
+            <li>CLI and automation tools requiring short edit-run loops.</li>
+            <li>Algorithmic components distributed as native binaries.</li>
+            <li>Compiler/language experiments with measurable performance gates.</li>
+          </ul>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>9. 应用场景</h2>
+          <ul>
+            <li>Python 服务中的计算密集型模块加速。</li>
+            <li>需要快速迭代反馈的 CLI 与自动化工具。</li>
+            <li>以原生二进制交付的算法组件。</li>
+            <li>具备可观测性能门禁的编译器/语言实验项目。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" id="status">
+        <div class="lang-content lang-en active">
+          <h2>10. Current Status and Expectations</h2>
+          <p>Sengoo is in early but fast-iterating stage. Compiler and runtime are usable, while some language areas are still under active optimization and stabilization.</p>
+          <ul>
+            <li>Validated: core syntax from examples, incremental pipeline, benchmark suites, Python interop benchmarks.</li>
+            <li>Evolving: broader frontend architecture, reflection ergonomics, and larger-scale optimization.</li>
+          </ul>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>10. 当前状态与预期</h2>
+          <p>Sengoo 目前处于早期但快速迭代阶段。编译器与运行时已可用，但部分语言能力仍在持续优化和稳定化中。</p>
+          <ul>
+            <li>已验证：示例覆盖的核心语法、增量编译链路、基准套件、Python 互操作基准。</li>
+            <li>持续演进：前端架构、反射能力工程化、规模化性能优化。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card" id="faq">
+        <div class="lang-content lang-en active">
+          <h2>11. FAQ</h2>
+          <h3>Why braces if keywords look Python-like?</h3>
+          <p>Sengoo intentionally combines readable control keywords with explicit block boundaries for compiler and tooling clarity.</p>
+
+          <h3>Does Sengoo replace Python?</h3>
+          <p>Not as a full replacement. The practical strategy is coexistence: Python for orchestration, Sengoo/native for hot paths.</p>
+
+          <h3>Where should I continue after this tutorial?</h3>
+          <p>Read <code>docs/DEVELOPMENT_GUIDE.md</code> if you want to contribute to the compiler/runtime/tooling stack.</p>
+        </div>
+        <div class="lang-content lang-zh">
+          <h2>11. 常见问题</h2>
+          <h3>为什么关键词像 Python，但代码块用大括号？</h3>
+          <p>这是有意设计：保留可读性，同时使用明确边界提升编译器与工具链处理稳定性。</p>
+
+          <h3>Sengoo 是要完全替代 Python 吗？</h3>
+          <p>不是。更实用的路径是共存：Python 负责编排，Sengoo/原生模块负责热点计算。</p>
+
+          <h3>学完本教程下一步做什么？</h3>
+          <p>如果你要参与项目开发，请继续阅读 <code>docs/DEVELOPMENT_GUIDE.md</code>。</p>
+        </div>
+      </section>
+
+      <section class="card footer">
+        <div class="lang-content lang-en active">
+          <p>This document is intentionally aligned with the currently validated examples and toolchain behavior in this repository.</p>
+        </div>
+        <div class="lang-content lang-zh">
+          <p>本教程内容与当前仓库中已验证可运行的示例和工具链行为保持一致。</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    function setLanguage(lang) {
+      const isZh = lang === 'zh';
+      document.documentElement.lang = isZh ? 'zh-CN' : 'en';
+
+      document.querySelectorAll('.lang-content').forEach((el) => {
+        const show = isZh ? el.classList.contains('lang-zh') : el.classList.contains('lang-en');
+        el.classList.toggle('active', show);
+      });
+
+      document.querySelectorAll('[data-i18n-en]').forEach((el) => {
+        el.textContent = isZh ? el.getAttribute('data-i18n-zh') : el.getAttribute('data-i18n-en');
+      });
+
+      document.getElementById('btn-en').classList.toggle('active', !isZh);
+      document.getElementById('btn-zh').classList.toggle('active', isZh);
+    }
+
+    // Default language: English
+    setLanguage('en');
+  </script>
+</body>
+</html>

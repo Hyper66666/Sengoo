@@ -1,0 +1,20 @@
+[package]
+name = "sengoo-compiler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 工作空间依赖
+thiserror = { workspace = true }
+miette = { workspace = true }
+logos = { workspace = true }
+
+# 序列化
+serde = { workspace = true }
+
+[dev-dependencies]
+expect-test = { workspace = true }
+proptest = { workspace = true }
+insta = { workspace = true }

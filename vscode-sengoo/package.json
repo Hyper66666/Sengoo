@@ -1,0 +1,244 @@
+{
+  "name": "sengoo",
+  "displayName": "Sengoo Language",
+  "description": "Sengoo 编程语言支持 - 语法高亮、代码片段、LSP 集成、运行调试",
+  "version": "1.0.0",
+  "publisher": "sengoo-lang",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Debuggers"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:sengoo",
+    "onDebug",
+    "onDebugResolve:sengoo",
+    "onDebugDynamicConfigurations:sengoo",
+    "onCommand:sengoo.run",
+    "onCommand:sengoo.build",
+    "onCommand:sengoo.buildAndRun",
+    "onCommand:sengoo.check",
+    "onCommand:sengoo.showInfo"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "sengoo",
+        "aliases": ["Sengoo", "sengoo", "sg"],
+        "extensions": [".sg"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sengoo",
+        "scopeName": "source.sengoo",
+        "path": "./syntaxes/sengoo.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "sengoo",
+        "path": "./snippets/sengoo.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "sengoo.run",
+        "title": "Sengoo: 运行当前文件",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sengoo.build",
+        "title": "Sengoo: 编译当前文件"
+      },
+      {
+        "command": "sengoo.buildAndRun",
+        "title": "Sengoo: 编译并运行",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sengoo.check",
+        "title": "Sengoo: 类型检查当前文件"
+      },
+      {
+        "command": "sengoo.showInfo",
+        "title": "Sengoo: 显示信息"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "sengoo.run",
+          "when": "resourceLangId == sengoo",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sengoo.buildAndRun",
+          "when": "resourceLangId == sengoo",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "sengoo.run",
+          "when": "resourceLangId == sengoo",
+          "group": "sengoo@1"
+        },
+        {
+          "command": "sengoo.build",
+          "when": "resourceLangId == sengoo",
+          "group": "sengoo@2"
+        },
+        {
+          "command": "sengoo.check",
+          "when": "resourceLangId == sengoo",
+          "group": "sengoo@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "sengoo.run",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "resourceLangId == sengoo"
+      },
+      {
+        "command": "sengoo.build",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "resourceLangId == sengoo"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "sengoo",
+        "languages": ["sengoo"],
+        "label": "Sengoo Debug",
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "要运行的 .sg 文件路径",
+                "default": "${file}"
+              },
+              "sgcPath": {
+                "type": "string",
+                "description": "sgc 编译器路径",
+                "default": "sgc"
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["run", "build"],
+                "description": "运行模式: run (直接运行) 或 build (编译后运行)",
+                "default": "run"
+              },
+              "buildArgs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "传递给编译器的额外参数",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "工作目录",
+                "default": "${workspaceFolder}"
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Sengoo: 运行当前文件",
+            "description": "使用 sgc run 运行当前 .sg 文件",
+            "body": {
+              "type": "sengoo",
+              "request": "launch",
+              "name": "运行 Sengoo 文件",
+              "program": "^\"\\${file}\"",
+              "mode": "run",
+              "cwd": "^\"\\${workspaceFolder}\""
+            }
+          },
+          {
+            "label": "Sengoo: 编译并运行",
+            "description": "使用 sgc build 编译后运行可执行文件",
+            "body": {
+              "type": "sengoo",
+              "request": "launch",
+              "name": "编译并运行 Sengoo",
+              "program": "^\"\\${file}\"",
+              "mode": "build",
+              "cwd": "^\"\\${workspaceFolder}\""
+            }
+          }
+        ]
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "sengoo",
+        "required": ["task"],
+        "properties": {
+          "task": {
+            "type": "string",
+            "enum": ["build", "run", "check"],
+            "description": "任务类型"
+          },
+          "file": {
+            "type": "string",
+            "description": "目标 .sg 文件"
+          }
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Sengoo",
+      "properties": {
+        "sengoo.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用 Sengoo LSP 语言服务器"
+        },
+        "sengoo.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "sglsp 可执行文件路径（留空则使用 PATH 中的 sglsp）"
+        },
+        "sengoo.sgc.path": {
+          "type": "string",
+          "default": "",
+          "description": "sgc 编译器路径（留空则使用 PATH 中的 sgc）"
+        },
+        "sengoo.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "LSP 服务器通信日志级别"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

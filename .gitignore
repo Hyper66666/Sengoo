@@ -1,0 +1,60 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.claude/
+
+# LLVM
+*.ll
+*.bc
+*.o
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.Python
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Sengoo specific
+*.sgc
+*.sgo
+output/
+build/
+
+# JS dependencies
+node_modules/
+vscode-sengoo/node_modules/
+
+# Local agent/project metadata
+.kiro/
+.serena/
+.spec-workflow/
+
+# Windows reserved/local artifacts
+nul
+
+# Not for GitHub publishing
+openspec/
+sengoo-cli/
+插件/
+vscode-sengoo/*.vsix
+
+# Benchmark artifacts
+bench/results/*.json
+bench/suites/**/build/
+
+# Bench is maintained as a standalone repository
+bench/

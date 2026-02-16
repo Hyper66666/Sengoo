@@ -1,0 +1,10 @@
+// Sengoo 条件分支示例
+
+def main() -> i64 {
+    let x = 5;
+    if x > 3 {
+        100
+    } else {
+        200
+    }
+}
