@@ -30,6 +30,7 @@ jobs:
           cargo run -p sgc -- bench run runtime --iterations 1 --warmup 1
           cargo run -p sgc -- bench compile compile --iterations 1
           cargo run -p sgc -- bench incremental incremental --iterations 1
+          cargo run -p sgc -- bench reflection runtime --iterations 1 --warmup 1
           python3 ./bench/python_interop_bench.py --calls 5000 --samples 2 --warmup 1
           python3 ./bench/bootstrap_generality_bench.py
 
@@ -40,6 +41,7 @@ jobs:
           echo "runtime=$(ls -1t bench/results/*-runtime-runtime.json | head -n1)" >> "$GITHUB_OUTPUT"
           echo "compile=$(ls -1t bench/results/*-compile-compile.json | head -n1)" >> "$GITHUB_OUTPUT"
           echo "incremental=$(ls -1t bench/results/*-incremental-incremental.json | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "reflection=$(ls -1t bench/results/*-reflection-runtime.json | head -n1)" >> "$GITHUB_OUTPUT"
           echo "interop=$(ls -1t bench/results/*-python-interop.json | head -n1)" >> "$GITHUB_OUTPUT"
           echo "bootstrap=$(ls -1t bench/results/*-bootstrap-generality.json | head -n1)" >> "$GITHUB_OUTPUT"
 
@@ -49,6 +51,9 @@ jobs:
           bash ./bench/scripts/perf-gate.sh --mode soft --sample "${{ steps.reports.outputs.runtime }}"
           bash ./bench/scripts/perf-gate.sh --mode soft --sample "${{ steps.reports.outputs.compile }}"
           bash ./bench/scripts/perf-gate.sh --mode soft --sample "${{ steps.reports.outputs.incremental }}"
+          python3 ./scripts/reflection-perf-gate.py \
+            --mode soft \
+            --sample "${{ steps.reports.outputs.reflection }}"
           python3 ./bench/scripts/interop-bootstrap-gate.py \
             --mode soft \
             --interop-sample "${{ steps.reports.outputs.interop }}" \

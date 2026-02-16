@@ -9,6 +9,7 @@
 //! - [`python`] - Python 互操作（可选，待实现）
 
 pub mod error;
+pub mod reflect;
 
 // TODO: 逐步添加模块
 // pub mod value;
@@ -18,6 +19,11 @@ pub mod error;
 pub mod python;
 
 pub use error::{Result, RuntimeError};
+pub use reflect::{
+    ReflectInvokeError, ReflectValue, ReflectionLoadError, ReflectionMetadata,
+    ReflectionModuleMetadata, ReflectionRuntime, ReflectionSymbolMetadata,
+    REFLECTION_SCHEMA_VERSION,
+};
 
 /// 运行时版本
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

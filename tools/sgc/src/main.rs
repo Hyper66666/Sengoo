@@ -10,6 +10,9 @@ use sengoo_compiler::{
     ImportKind, MirOptLevel, Param, Parser, Path as AstPath, SelfParam, Span, Stmt, StmtKind,
     TraitBound, TraitItem, Type, TypeChecker, TypeKind, VariantField, Visibility,
 };
+use sengoo_runtime::{
+    ReflectionRuntime, ReflectionSymbolMetadata as RuntimeReflectionSymbolMetadata,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -33,6 +36,7 @@ enum RunEngine {
 
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
+const REFLECTION_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:48765";
 const DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const LINKER_UNKNOWN: i8 = -1;
@@ -40,6 +44,44 @@ const LINKER_UNAVAILABLE: i8 = 0;
 const LINKER_AVAILABLE: i8 = 1;
 
 static LLD_AVAILABILITY: AtomicI8 = AtomicI8::new(LINKER_UNKNOWN);
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct ReflectionCliOptions {
+    enabled: bool,
+    modules: Vec<String>,
+    symbols: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ReflectionSymbolMetadata {
+    symbol: String,
+    signature: String,
+    #[serde(default)]
+    native_symbol: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ReflectionModuleMetadata {
+    module_id: String,
+    #[serde(default)]
+    symbols: Vec<ReflectionSymbolMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ReflectionMetadata {
+    #[serde(default = "default_reflection_schema_version")]
+    schema_version: u32,
+    compiler_version: String,
+    #[serde(default)]
+    compatible_compiler_versions: Vec<String>,
+    root_module: String,
+    #[serde(default)]
+    modules: Vec<ReflectionModuleMetadata>,
+}
+
+fn default_reflection_schema_version() -> u32 {
+    REFLECTION_SCHEMA_VERSION
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DaemonRequest {
@@ -57,6 +99,9 @@ enum DaemonCommand {
         opt_level: u8,
         emit_llvm: bool,
         force_rebuild: bool,
+        reflect: bool,
+        reflect_module: Vec<String>,
+        reflect_symbol: Vec<String>,
     },
     Run {
         input: String,
@@ -64,6 +109,9 @@ enum DaemonCommand {
         engine: RunEngine,
         force_rebuild: bool,
         args: Vec<String>,
+        reflect: bool,
+        reflect_module: Vec<String>,
+        reflect_symbol: Vec<String>,
     },
 }
 
@@ -227,6 +275,12 @@ struct FunctionFingerprint {
     calls: Vec<String>,
     #[serde(default)]
     module_imports: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionSignatureInfo {
+    symbol: String,
+    signature: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -434,6 +488,18 @@ enum Commands {
         /// Daemon address (default: 127.0.0.1:48765).
         #[arg(long)]
         daemon_addr: Option<String>,
+
+        /// Enable opt-in reflection metadata sidecar generation.
+        #[arg(long)]
+        reflect: bool,
+
+        /// Restrict reflection to selected module paths (repeatable).
+        #[arg(long = "reflect-module")]
+        reflect_module: Vec<String>,
+
+        /// Restrict reflection to selected symbols (repeatable).
+        #[arg(long = "reflect-symbol")]
+        reflect_symbol: Vec<String>,
     },
 
     /// Run a Sengoo source file.
@@ -460,6 +526,18 @@ enum Commands {
         /// Daemon address (default: 127.0.0.1:48765).
         #[arg(long)]
         daemon_addr: Option<String>,
+
+        /// Enable opt-in reflection metadata sidecar generation.
+        #[arg(long)]
+        reflect: bool,
+
+        /// Restrict reflection to selected module paths (repeatable).
+        #[arg(long = "reflect-module")]
+        reflect_module: Vec<String>,
+
+        /// Restrict reflection to selected symbols (repeatable).
+        #[arg(long = "reflect-symbol")]
+        reflect_symbol: Vec<String>,
 
         /// Arguments passed to program (reserved).
         #[arg(trailing_var_arg = true)]
@@ -545,6 +623,25 @@ enum BenchCommands {
         #[arg(long, default_value_t = 3)]
         iterations: u32,
     },
+
+    /// Reflection overhead benchmark suite.
+    Reflection {
+        /// Suite name or path.
+        #[arg(default_value = "runtime")]
+        suite: String,
+
+        /// Optimization level (0-3).
+        #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
+        opt_level: u8,
+
+        /// Warmup runs per case.
+        #[arg(long, default_value_t = 1)]
+        warmup: u32,
+
+        /// Measured runs per case.
+        #[arg(long, default_value_t = 5)]
+        iterations: u32,
+    },
 }
 
 #[tokio::main]
@@ -563,6 +660,9 @@ async fn main() -> Result<()> {
             force_rebuild,
             daemon,
             daemon_addr,
+            reflect,
+            reflect_module,
+            reflect_symbol,
         } => {
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
@@ -573,6 +673,9 @@ async fn main() -> Result<()> {
                     opt_level,
                     emit_llvm,
                     force_rebuild,
+                    reflect,
+                    &reflect_module,
+                    &reflect_symbol,
                 )
                 .await?;
                 if matches!(outcome, DaemonDispatchOutcome::Handled) {
@@ -585,6 +688,7 @@ async fn main() -> Result<()> {
                 opt_level,
                 emit_llvm,
                 force_rebuild,
+                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
         }
@@ -595,18 +699,38 @@ async fn main() -> Result<()> {
             force_rebuild,
             daemon,
             daemon_addr,
+            reflect,
+            reflect_module,
+            reflect_symbol,
             args,
         } => {
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
-                let outcome =
-                    dispatch_run_via_daemon(&addr, &input, opt_level, engine, force_rebuild, &args)
-                        .await?;
+                let outcome = dispatch_run_via_daemon(
+                    &addr,
+                    &input,
+                    opt_level,
+                    engine,
+                    force_rebuild,
+                    &args,
+                    reflect,
+                    &reflect_module,
+                    &reflect_symbol,
+                )
+                .await?;
                 if matches!(outcome, DaemonDispatchOutcome::Handled) {
                     return Ok(());
                 }
             }
-            cmd_run(&input, opt_level, engine, force_rebuild, &args).await
+            cmd_run(
+                &input,
+                opt_level,
+                engine,
+                force_rebuild,
+                &args,
+                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+            )
+            .await
         }
         Commands::Check { input } => cmd_check(&input).await,
         Commands::Repl => cmd_repl().await,
@@ -629,6 +753,12 @@ async fn main() -> Result<()> {
                 opt_level,
                 iterations,
             } => cmd_bench_incremental(&suite, opt_level, iterations).await,
+            BenchCommands::Reflection {
+                suite,
+                opt_level,
+                warmup,
+                iterations,
+            } => cmd_bench_reflection(&suite, opt_level, warmup, iterations).await,
         },
     }
 }
@@ -640,12 +770,63 @@ fn resolve_daemon_addr(explicit: Option<&str>) -> String {
         .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
 }
 
+fn reflection_options_from_cli(
+    enabled: bool,
+    modules: &[String],
+    symbols: &[String],
+) -> ReflectionCliOptions {
+    let mut normalized_modules = modules
+        .iter()
+        .map(|module| canonical_or_lossy(Path::new(module)))
+        .collect::<Vec<_>>();
+    normalized_modules.sort();
+    normalized_modules.dedup();
+
+    let mut normalized_symbols = symbols
+        .iter()
+        .map(|symbol| normalize_reflection_symbol_selector(symbol))
+        .filter(|symbol| !symbol.is_empty())
+        .collect::<Vec<_>>();
+    normalized_symbols.sort();
+    normalized_symbols.dedup();
+
+    ReflectionCliOptions {
+        enabled,
+        modules: normalized_modules,
+        symbols: normalized_symbols,
+    }
+}
+
+fn normalize_reflection_symbol_selector(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(index) = trimmed.find(".sg::") {
+        let module_end = index + 3;
+        let suffix_start = index + 5;
+        if module_end <= trimmed.len() && suffix_start <= trimmed.len() {
+            let module = canonical_or_lossy(Path::new(&trimmed[..module_end]));
+            let suffix = &trimmed[suffix_start..];
+            if !suffix.trim().is_empty() {
+                return format!("{}::{}", module, suffix);
+            }
+        }
+    }
+
+    trimmed.to_string()
+}
+
 fn daemon_request_build(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    reflect: bool,
+    reflect_module: &[String],
+    reflect_symbol: &[String],
 ) -> DaemonRequest {
     DaemonRequest {
         protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -656,6 +837,9 @@ fn daemon_request_build(
             opt_level,
             emit_llvm,
             force_rebuild,
+            reflect,
+            reflect_module: reflect_module.to_vec(),
+            reflect_symbol: reflect_symbol.to_vec(),
         },
     }
 }
@@ -666,6 +850,9 @@ fn daemon_request_run(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
+    reflect: bool,
+    reflect_module: &[String],
+    reflect_symbol: &[String],
 ) -> DaemonRequest {
     DaemonRequest {
         protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -676,6 +863,9 @@ fn daemon_request_run(
             engine,
             force_rebuild,
             args: args.to_vec(),
+            reflect,
+            reflect_module: reflect_module.to_vec(),
+            reflect_symbol: reflect_symbol.to_vec(),
         },
     }
 }
@@ -687,8 +877,20 @@ async fn dispatch_build_via_daemon(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    reflect: bool,
+    reflect_module: &[String],
+    reflect_symbol: &[String],
 ) -> Result<DaemonDispatchOutcome> {
-    let request = daemon_request_build(input, output, opt_level, emit_llvm, force_rebuild);
+    let request = daemon_request_build(
+        input,
+        output,
+        opt_level,
+        emit_llvm,
+        force_rebuild,
+        reflect,
+        reflect_module,
+        reflect_symbol,
+    );
     dispatch_daemon_request(addr, &request, "build").await
 }
 
@@ -699,8 +901,20 @@ async fn dispatch_run_via_daemon(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
+    reflect: bool,
+    reflect_module: &[String],
+    reflect_symbol: &[String],
 ) -> Result<DaemonDispatchOutcome> {
-    let request = daemon_request_run(input, opt_level, engine, force_rebuild, args);
+    let request = daemon_request_run(
+        input,
+        opt_level,
+        engine,
+        force_rebuild,
+        args,
+        reflect,
+        reflect_module,
+        reflect_symbol,
+    );
     dispatch_daemon_request(addr, &request, "run").await
 }
 
@@ -856,6 +1070,9 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             opt_level,
             emit_llvm,
             force_rebuild,
+            reflect,
+            reflect_module,
+            reflect_symbol,
         } => {
             cmd_build(
                 &input,
@@ -863,6 +1080,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 opt_level,
                 emit_llvm,
                 force_rebuild,
+                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
         }
@@ -872,7 +1090,20 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             engine,
             force_rebuild,
             args,
-        } => cmd_run(&input, opt_level, engine, force_rebuild, &args).await,
+            reflect,
+            reflect_module,
+            reflect_symbol,
+        } => {
+            cmd_run(
+                &input,
+                opt_level,
+                engine,
+                force_rebuild,
+                &args,
+                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+            )
+            .await
+        }
     };
 
     match result {
@@ -1842,6 +2073,436 @@ fn function_fingerprints_for_module(module_path: &str, source: &str) -> Vec<Func
 
     functions.sort_by(|a, b| a.symbol.cmp(&b.symbol));
     functions
+}
+
+fn push_function_signature_info(
+    out: &mut Vec<FunctionSignatureInfo>,
+    module_path: &str,
+    scope: &[String],
+    function: &Function,
+) {
+    out.push(FunctionSignatureInfo {
+        symbol: function_symbol(module_path, scope, &function.name.name),
+        signature: function_signature(function),
+    });
+}
+
+fn collect_function_signatures_from_decl(
+    out: &mut Vec<FunctionSignatureInfo>,
+    module_path: &str,
+    scope: &[String],
+    decl: &Decl,
+) {
+    match &decl.kind {
+        DeclKind::Function(function) => {
+            push_function_signature_info(out, module_path, scope, function);
+        }
+        DeclKind::Class(class_decl) => {
+            let mut scoped = scope.to_vec();
+            scoped.push("class".to_string());
+            scoped.push(class_decl.name.name.clone());
+            for member in &class_decl.members {
+                if let ClassMember::Method(function) = member {
+                    push_function_signature_info(out, module_path, &scoped, function);
+                }
+            }
+        }
+        DeclKind::Trait(trait_decl) => {
+            let mut scoped = scope.to_vec();
+            scoped.push("trait".to_string());
+            scoped.push(trait_decl.name.name.clone());
+            for item in &trait_decl.items {
+                if let TraitItem::Function(function) = item {
+                    push_function_signature_info(out, module_path, &scoped, function);
+                }
+            }
+        }
+        DeclKind::Impl(impl_decl) => {
+            let mut scoped = scope.to_vec();
+            scoped.push("impl".to_string());
+            scoped.push(type_signature(&impl_decl.target_type));
+            for function in &impl_decl.items {
+                push_function_signature_info(out, module_path, &scoped, function);
+            }
+        }
+        DeclKind::Module(module_decl) => {
+            let mut scoped = scope.to_vec();
+            scoped.push("mod".to_string());
+            scoped.push(module_decl.name.name.clone());
+            for item in &module_decl.items {
+                collect_function_signatures_from_decl(out, module_path, &scoped, item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn function_signatures_for_module(module_path: &str, source: &str) -> Vec<FunctionSignatureInfo> {
+    let program = match Parser::parse(source) {
+        Ok(program) => program,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut signatures = Vec::new();
+    for decl in &program.decls {
+        collect_function_signatures_from_decl(&mut signatures, module_path, &[], decl);
+    }
+    signatures.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+    signatures.dedup_by(|a, b| a.symbol == b.symbol);
+    signatures
+}
+
+fn reflection_sidecar_path_for_artifact(artifact_path: &Path) -> PathBuf {
+    PathBuf::from(format!(
+        "{}.sgreflect.json",
+        artifact_path.to_string_lossy()
+    ))
+}
+
+fn llvm_defined_function_names(llvm_ir: &str) -> HashSet<String> {
+    let mut symbols = HashSet::new();
+    for line in llvm_ir.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("define ") {
+            continue;
+        }
+        let Some(at_index) = trimmed.find('@') else {
+            continue;
+        };
+        let after_at = &trimmed[at_index + 1..];
+        let Some(paren_index) = after_at.find('(') else {
+            continue;
+        };
+        let mut symbol = after_at[..paren_index].trim().to_string();
+        if let Some(unquoted) = symbol
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        {
+            symbol = unquoted.to_string();
+        }
+        if !symbol.is_empty() {
+            symbols.insert(symbol);
+        }
+    }
+    symbols
+}
+
+fn read_llvm_defined_function_names(path: &Path) -> Result<HashSet<String>> {
+    let llvm_ir = fs::read_to_string(path).into_diagnostic().map_err(|e| {
+        miette::miette!(
+            "failed to read LLVM IR for reflection metadata {}: {}",
+            path.to_string_lossy(),
+            e
+        )
+    })?;
+    Ok(llvm_defined_function_names(&llvm_ir))
+}
+
+fn validate_reflection_metadata(metadata: &ReflectionMetadata) -> Result<()> {
+    if metadata.schema_version != REFLECTION_SCHEMA_VERSION {
+        return Err(miette::miette!(
+            "reflection metadata schema mismatch: expected {} got {}",
+            REFLECTION_SCHEMA_VERSION,
+            metadata.schema_version
+        ));
+    }
+    if metadata.compiler_version.trim().is_empty() {
+        return Err(miette::miette!(
+            "reflection metadata missing compiler_version"
+        ));
+    }
+    if metadata.compatible_compiler_versions.is_empty() {
+        return Err(miette::miette!(
+            "reflection metadata missing compatible_compiler_versions"
+        ));
+    }
+    if metadata
+        .compatible_compiler_versions
+        .iter()
+        .any(|version| version.trim().is_empty())
+    {
+        return Err(miette::miette!(
+            "reflection metadata contains empty compatible compiler version"
+        ));
+    }
+    if metadata.root_module.trim().is_empty() {
+        return Err(miette::miette!("reflection metadata missing root_module"));
+    }
+
+    let mut module_ids = HashSet::<String>::new();
+    for module in &metadata.modules {
+        if module.module_id.trim().is_empty() {
+            return Err(miette::miette!(
+                "reflection metadata contains empty module id"
+            ));
+        }
+        if !module_ids.insert(module.module_id.clone()) {
+            return Err(miette::miette!(
+                "reflection metadata contains duplicate module id: {}",
+                module.module_id
+            ));
+        }
+
+        let mut symbol_ids = HashSet::<String>::new();
+        for symbol in &module.symbols {
+            if symbol.symbol.trim().is_empty() {
+                return Err(miette::miette!(
+                    "reflection metadata contains empty symbol in module {}",
+                    module.module_id
+                ));
+            }
+            if symbol.signature.trim().is_empty() {
+                return Err(miette::miette!(
+                    "reflection metadata contains empty signature for symbol {}",
+                    symbol.symbol
+                ));
+            }
+            if let Some(native_symbol) = &symbol.native_symbol {
+                if native_symbol.trim().is_empty() {
+                    return Err(miette::miette!(
+                        "reflection metadata contains empty native symbol for {}",
+                        symbol.symbol
+                    ));
+                }
+            }
+            if !symbol
+                .symbol
+                .starts_with(&(module.module_id.clone() + "::"))
+            {
+                return Err(miette::miette!(
+                    "reflection symbol {} does not belong to module {}",
+                    symbol.symbol,
+                    module.module_id
+                ));
+            }
+            if !symbol_ids.insert(symbol.symbol.clone()) {
+                return Err(miette::miette!(
+                    "reflection metadata contains duplicate symbol {} in module {}",
+                    symbol.symbol,
+                    module.module_id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_reflection_metadata(
+    graph_v2: &BuildGraphV2,
+    reflection: &ReflectionCliOptions,
+    llvm_defined_symbols: Option<&HashSet<String>>,
+) -> Result<Option<ReflectionMetadata>> {
+    if !reflection.enabled {
+        return Ok(None);
+    }
+
+    let available_modules = graph_v2
+        .nodes
+        .iter()
+        .map(|node| node.module_path.clone())
+        .collect::<HashSet<_>>();
+    let mut selected_modules = if !reflection.modules.is_empty() {
+        reflection.modules.clone()
+    } else if !reflection.symbols.is_empty() {
+        available_modules.iter().cloned().collect::<Vec<_>>()
+    } else {
+        vec![graph_v2.root_module.clone()]
+    };
+    selected_modules.sort();
+    selected_modules.dedup();
+
+    for module in &selected_modules {
+        if !available_modules.contains(module) {
+            return Err(miette::miette!(
+                "reflection module not found in build graph: {}",
+                module
+            ));
+        }
+    }
+
+    let mut selected_full_symbols = HashSet::<String>::new();
+    let mut selected_short_symbols = HashSet::<String>::new();
+    for selector in &reflection.symbols {
+        if selector.contains("::") {
+            selected_full_symbols.insert(selector.clone());
+        } else {
+            selected_short_symbols.insert(selector.clone());
+        }
+    }
+    let filter_by_symbol = !selected_full_symbols.is_empty() || !selected_short_symbols.is_empty();
+    let mut unresolved_full_symbols = selected_full_symbols.clone();
+    let mut unresolved_short_symbols = selected_short_symbols.clone();
+
+    let mut modules = Vec::new();
+    for module in selected_modules {
+        let source = fs::read_to_string(&module).into_diagnostic().map_err(|e| {
+            miette::miette!(
+                "failed to read module for reflection metadata {}: {}",
+                module,
+                e
+            )
+        })?;
+        let mut signatures = function_signatures_for_module(&module, &source)
+            .into_iter()
+            .map(|entry| ReflectionSymbolMetadata {
+                symbol: entry.symbol,
+                signature: entry.signature,
+                native_symbol: None,
+            })
+            .collect::<Vec<_>>();
+
+        if filter_by_symbol {
+            signatures.retain(|entry| {
+                let mut matched = false;
+                if selected_full_symbols.contains(&entry.symbol) {
+                    matched = true;
+                }
+                let short = entry.symbol.rsplit("::").next().unwrap_or_default();
+                if selected_short_symbols.contains(short) {
+                    matched = true;
+                }
+                matched
+            });
+        }
+        signatures.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+        signatures.dedup_by(|a, b| a.symbol == b.symbol);
+
+        if let Some(llvm_defined_symbols) = llvm_defined_symbols {
+            let mut short_counts = HashMap::<String, usize>::new();
+            for entry in &signatures {
+                let short = entry
+                    .symbol
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                *short_counts.entry(short).or_insert(0) += 1;
+            }
+
+            let mut filtered = Vec::new();
+            for mut entry in signatures {
+                let short = entry
+                    .symbol
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let explicitly_selected = selected_full_symbols.contains(&entry.symbol)
+                    || selected_short_symbols.contains(&short);
+
+                if short_counts.get(&short).copied().unwrap_or_default() > 1 {
+                    if explicitly_selected {
+                        return Err(miette::miette!(
+                            "reflection symbol {} has ambiguous native binding name {}",
+                            entry.symbol,
+                            short
+                        ));
+                    }
+                    continue;
+                }
+
+                if llvm_defined_symbols.contains(&short) {
+                    entry.native_symbol = Some(short.clone());
+                    unresolved_full_symbols.remove(&entry.symbol);
+                    unresolved_short_symbols.remove(&short);
+                    filtered.push(entry);
+                } else if explicitly_selected {
+                    return Err(miette::miette!(
+                        "reflection symbol {} is not emitted in LLVM IR (native symbol: {})",
+                        entry.symbol,
+                        short
+                    ));
+                }
+            }
+            signatures = filtered;
+        } else {
+            for entry in &signatures {
+                unresolved_full_symbols.remove(&entry.symbol);
+                let short = entry.symbol.rsplit("::").next().unwrap_or_default();
+                unresolved_short_symbols.remove(short);
+            }
+        }
+
+        if !filter_by_symbol || !signatures.is_empty() {
+            modules.push(ReflectionModuleMetadata {
+                module_id: module,
+                symbols: signatures,
+            });
+        }
+    }
+
+    if !unresolved_full_symbols.is_empty() || !unresolved_short_symbols.is_empty() {
+        let mut unresolved = unresolved_full_symbols
+            .into_iter()
+            .chain(unresolved_short_symbols)
+            .collect::<Vec<_>>();
+        unresolved.sort();
+        return Err(miette::miette!(
+            "reflection symbol(s) not found in selected modules: {}",
+            unresolved.join(", ")
+        ));
+    }
+
+    modules.sort_by(|a, b| a.module_id.cmp(&b.module_id));
+
+    let metadata = ReflectionMetadata {
+        schema_version: REFLECTION_SCHEMA_VERSION,
+        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+        compatible_compiler_versions: vec![env!("CARGO_PKG_VERSION").to_string()],
+        root_module: graph_v2.root_module.clone(),
+        modules,
+    };
+    validate_reflection_metadata(&metadata)?;
+    Ok(Some(metadata))
+}
+
+fn maybe_emit_reflection_sidecar(
+    artifact_path: &Path,
+    graph_v2: &BuildGraphV2,
+    reflection: &ReflectionCliOptions,
+    llvm_ir_path: Option<&Path>,
+) -> Result<()> {
+    let sidecar_path = reflection_sidecar_path_for_artifact(artifact_path);
+    if !reflection.enabled {
+        if sidecar_path.exists() {
+            fs::remove_file(&sidecar_path)
+                .into_diagnostic()
+                .map_err(|e| {
+                    miette::miette!(
+                        "failed to remove stale reflection metadata {}: {}",
+                        sidecar_path.to_string_lossy(),
+                        e
+                    )
+                })?;
+        }
+        return Ok(());
+    }
+
+    let llvm_defined_symbols = if let Some(llvm_ir_path) = llvm_ir_path {
+        Some(read_llvm_defined_function_names(llvm_ir_path)?)
+    } else {
+        None
+    };
+
+    let Some(metadata) =
+        build_reflection_metadata(graph_v2, reflection, llvm_defined_symbols.as_ref())?
+    else {
+        return Ok(());
+    };
+    let bytes = serde_json::to_vec_pretty(&metadata)
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to serialize reflection metadata sidecar: {}", e))?;
+    fs::write(&sidecar_path, bytes)
+        .into_diagnostic()
+        .map_err(|e| {
+            miette::miette!(
+                "failed to write reflection metadata sidecar {}: {}",
+                sidecar_path.to_string_lossy(),
+                e
+            )
+        })?;
+    println!("Reflection metadata: {}", sidecar_path.to_string_lossy());
+    Ok(())
 }
 
 fn interface_fingerprint(source: &str) -> u64 {
@@ -3960,6 +4621,15 @@ fn diff_report_against_baseline(report: &BenchReport) -> Vec<String> {
                     ));
                 }
             }
+            "reflection" => {
+                if let (Some(curr), Some(base)) = (case.p50_ms, base_case.p50_ms) {
+                    let delta_pct = ((curr - base) / base) * 100.0;
+                    lines.push(format!(
+                        "{} p50: {:.2}ms vs baseline {:.2}ms ({:+.2}%)",
+                        case.name, curr, base, delta_pct
+                    ));
+                }
+            }
             _ => {}
         }
     }
@@ -4276,12 +4946,521 @@ async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations: u32) -> R
     Ok(())
 }
 
+fn default_build_output_path_for_case(case: &Path) -> PathBuf {
+    let stem = case.file_stem().unwrap_or_default().to_string_lossy();
+    let source_dir = case.parent().unwrap_or(Path::new("."));
+    let build_dir = source_dir.join("build");
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    build_dir.join(format!("{}{}", stem, ext))
+}
+
+fn reflection_shared_library_extension() -> &'static str {
+    if cfg!(windows) {
+        "dll"
+    } else if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    }
+}
+
+fn reflection_shared_library_path_for_artifact(artifact_path: &Path) -> PathBuf {
+    PathBuf::from(format!(
+        "{}.sgreflect.{}",
+        artifact_path.to_string_lossy(),
+        reflection_shared_library_extension()
+    ))
+}
+
+fn reflection_native_export_symbols_from_sidecar(sidecar_path: &Path) -> Result<Vec<String>> {
+    let bytes = fs::read(sidecar_path).into_diagnostic().map_err(|e| {
+        miette::miette!(
+            "failed to read reflection sidecar for native export symbols {}: {}",
+            sidecar_path.to_string_lossy(),
+            e
+        )
+    })?;
+    let metadata: ReflectionMetadata =
+        serde_json::from_slice(&bytes)
+            .into_diagnostic()
+            .map_err(|e| {
+                miette::miette!(
+                    "failed to parse reflection sidecar for native export symbols {}: {}",
+                    sidecar_path.to_string_lossy(),
+                    e
+                )
+            })?;
+    validate_reflection_metadata(&metadata)?;
+
+    let mut symbols = HashSet::<String>::new();
+    for module in metadata.modules {
+        for symbol in module.symbols {
+            let exported = symbol.native_symbol.unwrap_or_else(|| {
+                symbol
+                    .symbol
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            });
+            if !exported.trim().is_empty() {
+                symbols.insert(exported);
+            }
+        }
+    }
+    let mut exported = symbols.into_iter().collect::<Vec<_>>();
+    exported.sort();
+    Ok(exported)
+}
+
+fn run_shared_link_command(
+    clang_exe: &str,
+    object_paths: &[PathBuf],
+    shared_library_path: &Path,
+    use_lld: bool,
+    extra_linker_flags: &[String],
+) -> Result<std::process::ExitStatus> {
+    let mut clang_cmd = Command::new(clang_exe);
+    clang_cmd.arg("-Wno-override-module");
+    if use_lld {
+        clang_cmd.arg("-fuse-ld=lld");
+    }
+    clang_cmd.arg("-shared");
+    for object in object_paths {
+        clang_cmd.arg(object);
+    }
+    for flag in extra_linker_flags {
+        clang_cmd.arg(flag);
+    }
+    clang_cmd.arg("-o").arg(shared_library_path);
+    clang_cmd
+        .status()
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to invoke clang shared linker: {}", e))
+}
+
+fn link_shared_library_from_objects(
+    clang_exe: &str,
+    object_paths: &[PathBuf],
+    shared_library_path: &Path,
+    export_symbols: &[String],
+) -> Result<()> {
+    let mode = linker_mode_from_env();
+    let lld_state = LLD_AVAILABILITY.load(Ordering::Relaxed);
+    let try_lld_first = match mode {
+        LinkerMode::Lld => true,
+        LinkerMode::System => false,
+        LinkerMode::Auto => lld_state != LINKER_UNAVAILABLE,
+    };
+
+    let export_linker_flags = if cfg!(windows) {
+        export_symbols
+            .iter()
+            .map(|symbol| format!("-Wl,/EXPORT:{}", symbol))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let export_all_linker_flags = if cfg!(windows) {
+        vec!["-Wl,--export-all-symbols".to_string()]
+    } else {
+        Vec::new()
+    };
+
+    if try_lld_first {
+        let lld_status = run_shared_link_command(
+            clang_exe,
+            object_paths,
+            shared_library_path,
+            true,
+            &export_linker_flags,
+        )?;
+        if lld_status.success() {
+            if matches!(mode, LinkerMode::Auto) {
+                LLD_AVAILABILITY.store(LINKER_AVAILABLE, Ordering::Relaxed);
+            }
+            return Ok(());
+        }
+        if cfg!(windows) {
+            let lld_export_all_status = run_shared_link_command(
+                clang_exe,
+                object_paths,
+                shared_library_path,
+                true,
+                &export_all_linker_flags,
+            )?;
+            if lld_export_all_status.success() {
+                if matches!(mode, LinkerMode::Auto) {
+                    LLD_AVAILABILITY.store(LINKER_AVAILABLE, Ordering::Relaxed);
+                }
+                return Ok(());
+            }
+        }
+        if matches!(mode, LinkerMode::Lld) {
+            return Err(miette::miette!("compile failed (lld linker mode)"));
+        }
+        LLD_AVAILABILITY.store(LINKER_UNAVAILABLE, Ordering::Relaxed);
+        println!("link fallback: lld unavailable, retrying with system linker");
+    }
+
+    let status = run_shared_link_command(
+        clang_exe,
+        object_paths,
+        shared_library_path,
+        false,
+        &export_linker_flags,
+    )?;
+    if status.success() {
+        return Ok(());
+    }
+    if cfg!(windows) {
+        let status_export_all = run_shared_link_command(
+            clang_exe,
+            object_paths,
+            shared_library_path,
+            false,
+            &export_all_linker_flags,
+        )?;
+        if status_export_all.success() {
+            return Ok(());
+        }
+    }
+    Err(miette::miette!("compile failed"))
+}
+
+fn compile_reflection_shared_library(
+    clang_exe: &str,
+    llvm_ir_path: &Path,
+    shared_library_path: &Path,
+    runtime_c: Option<&str>,
+    opt_level: u8,
+    export_symbols: &[String],
+) -> Result<()> {
+    let object_path = shared_library_path.with_extension(object_file_extension());
+    compile_ir_to_object(clang_exe, llvm_ir_path, &object_path, opt_level)?;
+    let mut object_paths = vec![object_path];
+    if let Some(runtime_c) = runtime_c {
+        object_paths.push(ensure_runtime_object(clang_exe, runtime_c, opt_level)?);
+    }
+    link_shared_library_from_objects(
+        clang_exe,
+        &object_paths,
+        shared_library_path,
+        export_symbols,
+    )?;
+    Ok(())
+}
+
+fn maybe_prepare_reflection_native_library(
+    clang_exe: Option<&str>,
+    runtime_c: Option<&str>,
+    llvm_ir_path: &Path,
+    artifact_path: &Path,
+    sidecar_path: &Path,
+    opt_level: u8,
+) -> Result<Option<PathBuf>> {
+    let Some(clang_exe) = clang_exe else {
+        return Ok(None);
+    };
+    if !llvm_ir_path.exists() || !sidecar_path.exists() {
+        return Ok(None);
+    }
+
+    let export_symbols = reflection_native_export_symbols_from_sidecar(sidecar_path)?;
+    if export_symbols.is_empty() {
+        return Ok(None);
+    }
+
+    let shared_library_path = reflection_shared_library_path_for_artifact(artifact_path);
+    compile_reflection_shared_library(
+        clang_exe,
+        llvm_ir_path,
+        &shared_library_path,
+        runtime_c,
+        opt_level,
+        &export_symbols,
+    )?;
+    Ok(Some(shared_library_path))
+}
+
+fn signature_is_zero_arity_i64(signature: &str) -> bool {
+    let mut params = None::<&str>;
+    let mut ret = None::<&str>;
+
+    for part in signature.split('|') {
+        if let Some(value) = part.strip_prefix("params=[") {
+            params = value.strip_suffix(']');
+        } else if let Some(value) = part.strip_prefix("ret=") {
+            ret = Some(value.trim());
+        }
+    }
+
+    matches!(ret, Some("i64")) && matches!(params, Some(raw) if raw.trim().is_empty())
+}
+
+fn select_reflection_i64_zero_arity_symbol(
+    symbols: &[RuntimeReflectionSymbolMetadata],
+) -> Option<String> {
+    for preferred in ["reflect_probe", "main"] {
+        for symbol in symbols {
+            let short = symbol.symbol.rsplit("::").next().unwrap_or_default();
+            if short == preferred && signature_is_zero_arity_i64(&symbol.signature) {
+                return Some(short.to_string());
+            }
+        }
+    }
+
+    for symbol in symbols {
+        let short = symbol.symbol.rsplit("::").next().unwrap_or_default();
+        if signature_is_zero_arity_i64(&symbol.signature) {
+            return Some(short.to_string());
+        }
+    }
+
+    None
+}
+
+fn measure_reflection_used_ms(
+    sidecar_path: &Path,
+    module_id: &str,
+    native_library_path: Option<&Path>,
+) -> Result<(f64, bool)> {
+    let runtime = ReflectionRuntime::new(sidecar_path);
+    let start = Instant::now();
+    let symbols = runtime
+        .list_symbols(module_id)
+        .map_err(|e| miette::miette!("reflection API list failed: {}", e))?;
+    let symbol = select_reflection_i64_zero_arity_symbol(&symbols).ok_or_else(|| {
+        miette::miette!(
+            "no zero-arity i64 symbol found for reflection invoke in module {}",
+            module_id
+        )
+    })?;
+
+    let mut native_bound = false;
+    if let Some(native_library_path) = native_library_path {
+        native_bound = runtime
+            .register_i64_native_bindings_from_library(native_library_path)
+            .is_ok();
+    }
+    if !native_bound {
+        runtime
+            .register_fn(module_id, &symbol, |_args| {
+                Ok(sengoo_runtime::ReflectValue::I64(0))
+            })
+            .map_err(|e| miette::miette!("reflection API register failed: {}", e))?;
+    }
+
+    runtime
+        .call_i64(module_id, &symbol, &[])
+        .map_err(|e| miette::miette!("reflection API typed invoke failed: {}", e))?;
+    Ok((start.elapsed().as_secs_f64() * 1000.0, native_bound))
+}
+
+async fn cmd_bench_reflection(
+    suite: &str,
+    opt_level: u8,
+    warmup: u32,
+    iterations: u32,
+) -> Result<()> {
+    let suite_path = resolve_bench_suite_path("runtime", suite)?;
+    let cases = collect_bench_cases(&suite_path)?;
+    let case = cases
+        .first()
+        .cloned()
+        .ok_or_else(|| miette::miette!("no reflection benchmark case found"))?;
+    let case_name = case
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| case.to_string_lossy().to_string());
+
+    println!(
+        "Benchmark reflection suite: {} (case={})",
+        suite_path.to_string_lossy(),
+        case_name
+    );
+
+    let base_args = vec![
+        "build".to_string(),
+        case.to_string_lossy().to_string(),
+        "-O".to_string(),
+        opt_level.to_string(),
+        "--force-rebuild".to_string(),
+    ];
+    let mut reflect_args = base_args.clone();
+    reflect_args.push("--reflect".to_string());
+
+    let module_id = canonical_or_lossy(&case);
+    let artifact_path = default_build_output_path_for_case(&case);
+    let sidecar_path = reflection_sidecar_path_for_artifact(&artifact_path);
+    let llvm_ir_path = artifact_path.with_extension("ll");
+    let clang_exe = find_clang();
+    let runtime_c = find_runtime_c();
+    let mut native_prepare_warning: Option<String> = None;
+    let mut native_bound_measurements = 0u32;
+
+    for _ in 0..warmup {
+        let _ = measure_sgc_command_ms(&base_args)?;
+        let _ = measure_sgc_command_ms(&reflect_args)?;
+        let _ = measure_sgc_command_ms(&reflect_args)?;
+        if !sidecar_path.exists() {
+            return Err(miette::miette!(
+                "reflection sidecar missing during warmup: {}",
+                sidecar_path.to_string_lossy()
+            ));
+        }
+        let native_library_path = match maybe_prepare_reflection_native_library(
+            clang_exe.as_deref(),
+            runtime_c.as_deref(),
+            &llvm_ir_path,
+            &artifact_path,
+            &sidecar_path,
+            opt_level,
+        ) {
+            Ok(path) => path,
+            Err(err) => {
+                if native_prepare_warning.is_none() {
+                    native_prepare_warning = Some(err.to_string());
+                }
+                None
+            }
+        };
+        let _ =
+            measure_reflection_used_ms(&sidecar_path, &module_id, native_library_path.as_deref())?;
+    }
+
+    let mut disabled_samples = Vec::new();
+    let mut enabled_unused_samples = Vec::new();
+    let mut enabled_used_samples = Vec::new();
+    for _ in 0..iterations {
+        disabled_samples.push(measure_sgc_command_ms(&base_args)?);
+
+        enabled_unused_samples.push(measure_sgc_command_ms(&reflect_args)?);
+
+        let build_ms = measure_sgc_command_ms(&reflect_args)?;
+        if !sidecar_path.exists() {
+            return Err(miette::miette!(
+                "reflection sidecar missing after reflected build: {}",
+                sidecar_path.to_string_lossy()
+            ));
+        }
+        let native_library_path = match maybe_prepare_reflection_native_library(
+            clang_exe.as_deref(),
+            runtime_c.as_deref(),
+            &llvm_ir_path,
+            &artifact_path,
+            &sidecar_path,
+            opt_level,
+        ) {
+            Ok(path) => path,
+            Err(err) => {
+                if native_prepare_warning.is_none() {
+                    native_prepare_warning = Some(err.to_string());
+                }
+                None
+            }
+        };
+        let (used_ms, native_bound) =
+            measure_reflection_used_ms(&sidecar_path, &module_id, native_library_path.as_deref())?;
+        if native_bound {
+            native_bound_measurements += 1;
+        }
+        enabled_used_samples.push(build_ms + used_ms);
+    }
+
+    let avg = |samples: &[f64]| -> f64 {
+        if samples.is_empty() {
+            0.0
+        } else {
+            samples.iter().sum::<f64>() / samples.len() as f64
+        }
+    };
+    let disabled_p50 = percentile(&disabled_samples, 0.50).unwrap_or(0.0);
+    let enabled_unused_p50 = percentile(&enabled_unused_samples, 0.50).unwrap_or(0.0);
+    let enabled_used_p50 = percentile(&enabled_used_samples, 0.50).unwrap_or(0.0);
+    if disabled_p50 > 0.0 {
+        println!(
+            "  - disabled p50={:.2}ms, enabled-unused overhead={:+.2}%, enabled-used overhead={:+.2}%",
+            disabled_p50,
+            ((enabled_unused_p50 - disabled_p50) / disabled_p50) * 100.0,
+            ((enabled_used_p50 - disabled_p50) / disabled_p50) * 100.0,
+        );
+    }
+    if let Some(warning) = native_prepare_warning {
+        println!(
+            "  - note: native reflection binding unavailable in bench, fallback handler used ({})",
+            warning
+        );
+    } else if iterations > 0 {
+        println!(
+            "  - native reflection binding used in {}/{} measured iteration(s)",
+            native_bound_measurements, iterations
+        );
+    }
+
+    let report = BenchReport {
+        schema_version: 1,
+        kind: "reflection".to_string(),
+        suite: suite.to_string(),
+        generated_at_unix_ms: now_unix_ms(),
+        cases: vec![
+            BenchCaseResult {
+                name: "disabled".to_string(),
+                iterations,
+                warmup,
+                sample_ms: disabled_samples.clone(),
+                p50_ms: percentile(&disabled_samples, 0.50),
+                p95_ms: percentile(&disabled_samples, 0.95),
+                phases: None,
+                total_ms: Some(avg(&disabled_samples)),
+                before_ms: None,
+                after_ms: None,
+                cache_reused_modules: None,
+            },
+            BenchCaseResult {
+                name: "enabled-unused".to_string(),
+                iterations,
+                warmup,
+                sample_ms: enabled_unused_samples.clone(),
+                p50_ms: percentile(&enabled_unused_samples, 0.50),
+                p95_ms: percentile(&enabled_unused_samples, 0.95),
+                phases: None,
+                total_ms: Some(avg(&enabled_unused_samples)),
+                before_ms: None,
+                after_ms: None,
+                cache_reused_modules: None,
+            },
+            BenchCaseResult {
+                name: "enabled-used".to_string(),
+                iterations,
+                warmup,
+                sample_ms: enabled_used_samples.clone(),
+                p50_ms: percentile(&enabled_used_samples, 0.50),
+                p95_ms: percentile(&enabled_used_samples, 0.95),
+                phases: None,
+                total_ms: Some(avg(&enabled_used_samples)),
+                before_ms: None,
+                after_ms: None,
+                cache_reused_modules: None,
+            },
+        ],
+    };
+
+    let out = write_bench_report(&report)?;
+    println!("Reflection benchmark report: {}", out.to_string_lossy());
+    for line in diff_report_against_baseline(&report) {
+        println!("  baseline: {}", line);
+    }
+    Ok(())
+}
+
 async fn cmd_build(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    reflection: ReflectionCliOptions,
 ) -> Result<()> {
     println!("Building: {}", input);
 
@@ -4390,6 +5569,12 @@ async fn cmd_build(
                     "build cache hit (opt=O{}, emit_llvm={})",
                     metadata.opt_level, metadata.emit_llvm
                 );
+                maybe_emit_reflection_sidecar(
+                    Path::new(&metadata.output_path),
+                    &graph_v2,
+                    &reflection,
+                    Some(Path::new(&metadata.llvm_ir_path)),
+                )?;
                 println!("Build output: {}", metadata.output_path);
                 return Ok(());
             }
@@ -4459,6 +5644,12 @@ async fn cmd_build(
                         "build workset plan: reuse previous artifacts ({})",
                         class_label
                     );
+                    maybe_emit_reflection_sidecar(
+                        Path::new(&previous.output_path),
+                        &graph_v2,
+                        &reflection,
+                        Some(Path::new(&previous.llvm_ir_path)),
+                    )?;
                     println!("Build output: {}", previous.output_path);
                     return Ok(());
                 }
@@ -4539,6 +5730,12 @@ async fn cmd_build(
     let llvm_ir_hash = source_fingerprint(&llvm_ir);
 
     if emit_llvm {
+        maybe_emit_reflection_sidecar(
+            Path::new(&output_file),
+            &graph_v2,
+            &reflection,
+            Some(&llvm_ir_path),
+        )?;
         let metadata = BuildCacheMetadata {
             cache_schema_version: BUILD_GRAPH_SCHEMA_VERSION,
             source_hash,
@@ -4625,6 +5822,12 @@ async fn cmd_build(
         object_paths.push(ensure_runtime_object(&clang_exe, runtime_c, opt_level)?);
     }
     link_native_binary_from_objects(&clang_exe, &object_paths, output_path)?;
+    maybe_emit_reflection_sidecar(
+        Path::new(&output_file),
+        &graph_v2,
+        &reflection,
+        Some(&llvm_ir_path),
+    )?;
 
     let metadata = BuildCacheMetadata {
         cache_schema_version: BUILD_GRAPH_SCHEMA_VERSION,
@@ -4653,6 +5856,7 @@ async fn cmd_run(
     requested_engine: RunEngine,
     force_rebuild: bool,
     _args: &[String],
+    reflection: ReflectionCliOptions,
 ) -> Result<()> {
     println!("Running: {}", input);
 
@@ -4754,12 +5958,24 @@ async fn cmd_run(
                         let exe = metadata.executable_path.as_deref().ok_or_else(|| {
                             miette::miette!("cache corrupted: missing native executable path")
                         })?;
+                        maybe_emit_reflection_sidecar(
+                            Path::new(exe),
+                            &graph_v2,
+                            &reflection,
+                            Some(Path::new(&metadata.llvm_ir_path)),
+                        )?;
                         run_native_binary(Path::new(exe))
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
                             miette::miette!("cache hit but lli is unavailable; try --force-rebuild")
                         })?;
+                        maybe_emit_reflection_sidecar(
+                            Path::new(&metadata.llvm_ir_path),
+                            &graph_v2,
+                            &reflection,
+                            Some(Path::new(&metadata.llvm_ir_path)),
+                        )?;
                         run_with_lli(lli, Path::new(&metadata.llvm_ir_path))
                     }
                     RunEngine::Auto => Err(miette::miette!("compile failed")),
@@ -4989,6 +6205,21 @@ async fn cmd_run(
             ))
         }
     }
+    let reflection_artifact_path = match resolved_engine {
+        RunEngine::Native => executable_path.as_path(),
+        RunEngine::Lli => llvm_ir_path.as_path(),
+        RunEngine::Auto => {
+            return Err(miette::miette!(
+                "internal error: resolved_engine should not be auto"
+            ))
+        }
+    };
+    maybe_emit_reflection_sidecar(
+        reflection_artifact_path,
+        &graph_v2,
+        &reflection,
+        Some(&llvm_ir_path),
+    )?;
     let metadata = RunCacheMetadata {
         source_hash,
         root_interface_hash,
@@ -5053,24 +6284,27 @@ async fn cmd_dump_ast(input: &str) -> Result<()> {
 mod tests {
     use super::{
         bench_root_dir, build_cache_key, build_graph_v2_for_source, build_metadata_matches,
-        cache_key, cache_mismatch_reasons, can_use_incremental_link_with_metadata,
-        can_use_incremental_link_with_run_metadata, classify_edit_impact, cmd_build,
-        collect_bench_cases, collect_impl_only_impacted_symbols, collect_module_graph_snapshot,
-        compile_ir_to_object, compile_native_binary, compile_source,
+        build_reflection_metadata, cache_key, cache_mismatch_reasons,
+        can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
+        classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
+        collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
         compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
         derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
         derive_run_workset_plan, dispatch_build_via_daemon, edit_class_label,
         ensure_runtime_object, find_clang, find_runtime_c, handle_daemon_client,
-        link_native_binary_from_objects, metadata_matches, module_dependency_levels,
-        module_fingerprints_for_source, module_invalidation_stats, parse_linker_mode,
-        resolve_bench_suite_path, resolve_daemon_addr, resolve_engine, send_daemon_request,
-        BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan,
-        CachedNativeRecoveryPlan, Cli, DaemonDispatchOutcome, EditClass, EditImpact,
-        FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint, RunCacheMetadata,
-        RunEngine, BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
+        link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
+        module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
+        parse_linker_mode, reflection_options_from_cli, reflection_sidecar_path_for_artifact,
+        resolve_bench_suite_path, resolve_daemon_addr, resolve_engine,
+        select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
+        validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
+        BuildWorksetPlan, CachedNativeRecoveryPlan, Cli, DaemonDispatchOutcome, EditClass,
+        EditImpact, FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint,
+        ReflectionMetadata, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
+        DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use clap::Parser as _;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -5119,6 +6353,32 @@ mod tests {
             std::env::temp_dir().join(stem)
         } else {
             std::env::temp_dir().join(format!("{}.{}", stem, ext))
+        }
+    }
+
+    fn temp_sg_module(name: &str, source: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "sengoo-sgc-reflect-{}-{}.sg",
+            name,
+            std::process::id()
+        ));
+        fs::write(&path, source).unwrap();
+        path
+    }
+
+    fn reflection_graph_for_module(path: &Path) -> BuildGraphV2 {
+        let module_id = super::canonical_or_lossy(path);
+        BuildGraphV2 {
+            schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+            root_module: module_id.clone(),
+            nodes: vec![BuildGraphNodeV2 {
+                module_path: module_id,
+                interface_hash: 1,
+                implementation_hash: 1,
+                depends_on: Vec::new(),
+                object_path: None,
+                functions: Vec::new(),
+            }],
         }
     }
 
@@ -5272,6 +6532,7 @@ mod tests {
         assert!(Cli::try_parse_from(["sgc", "bench", "run", "runtime"]).is_ok());
         assert!(Cli::try_parse_from(["sgc", "bench", "compile", "compile"]).is_ok());
         assert!(Cli::try_parse_from(["sgc", "bench", "incremental", "incremental"]).is_ok());
+        assert!(Cli::try_parse_from(["sgc", "bench", "reflection", "runtime"]).is_ok());
     }
 
     #[test]
@@ -5300,14 +6561,211 @@ mod tests {
     }
 
     #[test]
+    fn reflection_flags_parse_for_build_and_run() {
+        assert!(Cli::try_parse_from([
+            "sgc",
+            "build",
+            "tests/demo.sg",
+            "--reflect",
+            "--reflect-module",
+            "tests/demo.sg",
+            "--reflect-symbol",
+            "tests/demo.sg::main",
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "sgc",
+            "run",
+            "tests/demo.sg",
+            "--reflect",
+            "--reflect-symbol",
+            "tests/demo.sg::main",
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn reflection_signature_parser_detects_zero_arity_i64() {
+        assert!(signature_is_zero_arity_i64(
+            "pub|main|async=false|self=-|tp=[]|params=[]|ret=i64"
+        ));
+        assert!(!signature_is_zero_arity_i64(
+            "pub|main|async=false|self=-|tp=[]|params=[a:i64]|ret=i64"
+        ));
+        assert!(!signature_is_zero_arity_i64(
+            "pub|main|async=false|self=-|tp=[]|params=[]|ret=bool"
+        ));
+    }
+
+    #[test]
+    fn reflection_symbol_selector_prefers_reflect_probe_over_main() {
+        let symbols = vec![
+            sengoo_runtime::ReflectionSymbolMetadata {
+                symbol: "tests/demo.sg::main".to_string(),
+                signature: "pub|main|async=false|self=-|tp=[]|params=[]|ret=i64".to_string(),
+                native_symbol: Some("main".to_string()),
+            },
+            sengoo_runtime::ReflectionSymbolMetadata {
+                symbol: "tests/demo.sg::reflect_probe".to_string(),
+                signature: "pub|reflect_probe|async=false|self=-|tp=[]|params=[]|ret=i64"
+                    .to_string(),
+                native_symbol: Some("reflect_probe".to_string()),
+            },
+        ];
+        let picked = select_reflection_i64_zero_arity_symbol(&symbols);
+        assert_eq!(picked.as_deref(), Some("reflect_probe"));
+    }
+
+    #[test]
+    fn reflection_symbol_selector_falls_back_to_main() {
+        let symbols = vec![sengoo_runtime::ReflectionSymbolMetadata {
+            symbol: "tests/demo.sg::main".to_string(),
+            signature: "pub|main|async=false|self=-|tp=[]|params=[]|ret=i64".to_string(),
+            native_symbol: Some("main".to_string()),
+        }];
+        let picked = select_reflection_i64_zero_arity_symbol(&symbols);
+        assert_eq!(picked.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn reflection_symbol_selector_returns_none_without_supported_signature() {
+        let symbols = vec![sengoo_runtime::ReflectionSymbolMetadata {
+            symbol: "tests/demo.sg::flag".to_string(),
+            signature: "pub|flag|async=false|self=-|tp=[]|params=[]|ret=bool".to_string(),
+            native_symbol: Some("flag".to_string()),
+        }];
+        assert!(select_reflection_i64_zero_arity_symbol(&symbols).is_none());
+    }
+
+    #[test]
     fn daemon_addr_prefers_explicit_value() {
         let addr = resolve_daemon_addr(Some("127.0.0.1:50001"));
         assert_eq!(addr, "127.0.0.1:50001");
     }
 
     #[test]
+    fn reflection_metadata_generation_filters_symbols() {
+        let module_path = temp_sg_module(
+            "meta-filter",
+            "def add(a: i64, b: i64) -> i64 { a + b }\ndef sub(a: i64, b: i64) -> i64 { a - b }\n",
+        );
+        let module_id = super::canonical_or_lossy(&module_path);
+        let graph = reflection_graph_for_module(&module_path);
+        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let metadata = build_reflection_metadata(&graph, &options, None)
+            .unwrap()
+            .expect("reflection metadata");
+        assert_eq!(metadata.schema_version, 1);
+        assert_eq!(metadata.modules.len(), 1);
+        assert_eq!(metadata.modules[0].symbols.len(), 1);
+        assert_eq!(
+            metadata.modules[0].symbols[0].symbol,
+            format!("{}::add", module_id)
+        );
+        validate_reflection_metadata(&metadata).unwrap();
+        let _ = fs::remove_file(module_path);
+    }
+
+    #[test]
+    fn reflection_metadata_generation_accepts_short_symbol_selector() {
+        let module_path = temp_sg_module(
+            "meta-short-filter",
+            "def add(a: i64, b: i64) -> i64 { a + b }\ndef sub(a: i64, b: i64) -> i64 { a - b }\n",
+        );
+        let module_id = super::canonical_or_lossy(&module_path);
+        let graph = reflection_graph_for_module(&module_path);
+        let options = reflection_options_from_cli(true, &[], &[String::from("add")]);
+        let metadata = build_reflection_metadata(&graph, &options, None)
+            .unwrap()
+            .expect("reflection metadata");
+        assert_eq!(metadata.modules.len(), 1);
+        assert_eq!(metadata.modules[0].symbols.len(), 1);
+        assert_eq!(
+            metadata.modules[0].symbols[0].symbol,
+            format!("{}::add", module_id)
+        );
+        let _ = fs::remove_file(module_path);
+    }
+
+    #[test]
+    fn reflection_metadata_assigns_native_symbol_when_llvm_symbol_available() {
+        let module_path = temp_sg_module(
+            "meta-native-symbol",
+            "def add(a: i64, b: i64) -> i64 { a + b }\ndef sub(a: i64, b: i64) -> i64 { a - b }\n",
+        );
+        let module_id = super::canonical_or_lossy(&module_path);
+        let graph = reflection_graph_for_module(&module_path);
+        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let llvm_defined = HashSet::from([String::from("add")]);
+        let metadata = build_reflection_metadata(&graph, &options, Some(&llvm_defined))
+            .unwrap()
+            .expect("reflection metadata");
+
+        assert_eq!(metadata.modules.len(), 1);
+        assert_eq!(metadata.modules[0].symbols.len(), 1);
+        assert_eq!(
+            metadata.modules[0].symbols[0].native_symbol.as_deref(),
+            Some("add")
+        );
+        let _ = fs::remove_file(module_path);
+    }
+
+    #[test]
+    fn reflection_metadata_rejects_symbol_missing_from_llvm_ir() {
+        let module_path = temp_sg_module(
+            "meta-missing-llvm",
+            "def add(a: i64, b: i64) -> i64 { a + b }\n",
+        );
+        let module_id = super::canonical_or_lossy(&module_path);
+        let graph = reflection_graph_for_module(&module_path);
+        let options = reflection_options_from_cli(true, &[], &[format!("{}::add", module_id)]);
+        let llvm_defined = HashSet::<String>::new();
+        let err = build_reflection_metadata(&graph, &options, Some(&llvm_defined)).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is not emitted in LLVM IR (native symbol: add)"));
+        let _ = fs::remove_file(module_path);
+    }
+
+    #[test]
+    fn reflection_metadata_rejects_unknown_symbol() {
+        let module_path =
+            temp_sg_module("meta-unknown", "def add(a: i64, b: i64) -> i64 { a + b }\n");
+        let module_id = super::canonical_or_lossy(&module_path);
+        let graph = reflection_graph_for_module(&module_path);
+        let options = reflection_options_from_cli(true, &[], &[format!("{}::missing", module_id)]);
+        let err = build_reflection_metadata(&graph, &options, None).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("reflection symbol(s) not found in selected modules"));
+        let _ = fs::remove_file(module_path);
+    }
+
+    #[test]
+    fn reflection_sidecar_emit_and_disabled_cleanup() {
+        let module_path = temp_sg_module("sidecar", "def main() -> i64 { 1 }\n");
+        let graph = reflection_graph_for_module(&module_path);
+        let artifact = temp_artifact("reflect-sidecar", "exe");
+
+        let options = reflection_options_from_cli(true, &[], &[]);
+        maybe_emit_reflection_sidecar(&artifact, &graph, &options, None).unwrap();
+        let sidecar_path = reflection_sidecar_path_for_artifact(&artifact);
+        assert!(sidecar_path.exists());
+        let metadata: ReflectionMetadata =
+            serde_json::from_slice(&fs::read(&sidecar_path).unwrap()).unwrap();
+        validate_reflection_metadata(&metadata).unwrap();
+
+        let disabled = reflection_options_from_cli(false, &[], &[]);
+        maybe_emit_reflection_sidecar(&artifact, &graph, &disabled, None).unwrap();
+        assert!(!sidecar_path.exists());
+
+        let _ = fs::remove_file(module_path);
+        let _ = fs::remove_file(artifact);
+    }
+
+    #[test]
     fn daemon_build_request_uses_protocol_and_version() {
-        let request = daemon_request_build("tests/demo.sg", None, 2, false, false);
+        let request = daemon_request_build("tests/demo.sg", None, 2, false, false, false, &[], &[]);
         assert_eq!(request.protocol_version, DAEMON_PROTOCOL_VERSION);
         assert_eq!(request.client_version, env!("CARGO_PKG_VERSION"));
     }
@@ -5327,7 +6785,16 @@ mod tests {
         });
 
         let input = bench_root_dir().join("tests").join("simple_array.sg");
-        let request = daemon_request_build(input.to_string_lossy().as_ref(), None, 2, false, false);
+        let request = daemon_request_build(
+            input.to_string_lossy().as_ref(),
+            None,
+            2,
+            false,
+            false,
+            false,
+            &[],
+            &[],
+        );
         let response = send_daemon_request(&addr.to_string(), &request)
             .await
             .unwrap();
@@ -5357,9 +6824,16 @@ mod tests {
             .join("workset")
             .join(format!("{}.build.workset.json", stem));
 
-        cmd_build(&input_string, None, 2, true, false)
-            .await
-            .unwrap();
+        cmd_build(
+            &input_string,
+            None,
+            2,
+            true,
+            false,
+            super::ReflectionCliOptions::default(),
+        )
+        .await
+        .unwrap();
         let direct_manifest = fs::read_to_string(&manifest_path).unwrap();
 
         fs::remove_dir_all(root.join("build")).unwrap();
@@ -5371,7 +6845,7 @@ mod tests {
             handle_daemon_client(stream).await.unwrap();
         });
 
-        let request = daemon_request_build(&input_string, None, 2, true, false);
+        let request = daemon_request_build(&input_string, None, 2, true, false, false, &[], &[]);
         let response = send_daemon_request(&addr.to_string(), &request)
             .await
             .unwrap();
@@ -5398,6 +6872,9 @@ mod tests {
             2,
             false,
             false,
+            false,
+            &[],
+            &[],
         )
         .await
         .unwrap();
