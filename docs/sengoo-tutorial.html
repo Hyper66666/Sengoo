@@ -1,814 +1,4247 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sengoo Tutorial | Bilingual Guide</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sengoo Tutorial</title>
   <style>
     :root {
-      --bg: #f2f6fb;
-      --card: #ffffff;
-      --line: #d7e3f0;
-      --text: #172033;
-      --muted: #4a596e;
-      --primary: #0e4f86;
-      --primary-soft: #e8f2ff;
-      --ok: #0f766e;
-      --warn: #b45309;
-      --danger: #be123c;
+      --bg: #eef3f9;
+      --panel: #ffffff;
+      --line: #d6e0ee;
+      --text: #162335;
+      --sub: #51627b;
+      --brand: #0f4c81;
+      --brand-soft: #dce8f5;
+      --code-bg: #f4f8ff;
+      --code-line: #cedaeb;
+      --ok: #0a7d4e;
     }
 
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
-      background: linear-gradient(180deg, #edf3fb 0%, #f9fcff 42%, #f2f6fb 100%);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top left, #f9fcff 0%, var(--bg) 42%, #e7eef8 100%);
       color: var(--text);
-      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      line-height: 1.7;
+      min-height: 100vh;
+    }
+
+    .app {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 20px;
     }
 
     .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 40;
+      background: linear-gradient(90deg, #0d4a7d 0%, #16629f 100%);
       color: #fff;
-      background: linear-gradient(120deg, #0e4f86 0%, #1565a3 100%);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-      backdrop-filter: blur(8px);
-    }
-
-    .topbar-inner {
-      max-width: 1300px;
-      margin: 0 auto;
-      padding: 12px 20px;
+      border-radius: 14px;
+      padding: 20px 24px;
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      align-items: center;
+      box-shadow: 0 10px 30px rgba(13, 74, 125, 0.20);
     }
 
-    .brand { font-size: 24px; font-weight: 800; }
-    .subtitle { font-size: 13px; opacity: 0.92; }
+    .title-group h1 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: 0.3px;
+    }
+
+    .title-group p {
+      margin: 6px 0 0;
+      color: #d8e7f7;
+      font-size: 15px;
+    }
 
     .lang-switch {
       display: inline-flex;
-      border: 1px solid rgba(255, 255, 255, 0.28);
+      border: 1px solid rgba(255, 255, 255, 0.45);
       border-radius: 10px;
       overflow: hidden;
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.10);
     }
 
-    .lang-btn {
+    .lang-switch button {
       border: 0;
       background: transparent;
       color: #fff;
-      font-size: 13px;
-      padding: 8px 14px;
+      padding: 8px 16px;
       cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
     }
 
-    .lang-btn.active {
+    .lang-switch button.active {
       background: #fff;
-      color: var(--primary);
-      font-weight: 700;
+      color: var(--brand);
     }
 
     .layout {
-      max-width: 1300px;
-      margin: 0 auto;
-      padding: 20px;
+      margin-top: 16px;
       display: grid;
-      grid-template-columns: 320px minmax(0, 1fr);
-      gap: 20px;
+      grid-template-columns: 320px 1fr;
+      gap: 16px;
+      align-items: start;
     }
 
     .sidebar {
       position: sticky;
-      top: 76px;
-      align-self: start;
-      max-height: calc(100vh - 96px);
+      top: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(20, 38, 62, 0.08);
+    }
+
+    .sidebar-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #f7fbff;
+    }
+
+    .sidebar-header h2 {
+      margin: 0;
+      font-size: 17px;
+      color: #1f3655;
+    }
+
+    .toc {
+      list-style: none;
+      margin: 0;
+      padding: 10px;
+      max-height: calc(100vh - 140px);
       overflow: auto;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-      box-shadow: 0 2px 14px rgba(14, 79, 134, 0.08);
     }
 
-    .sidebar h3 {
-      margin: 2px 0 12px;
+    .toc .toc-group-title {
+      margin: 10px 0 6px;
+      padding: 4px 8px;
       font-size: 12px;
+      letter-spacing: 0.5px;
+      font-weight: 800;
+      color: #2f587f;
       text-transform: uppercase;
-      letter-spacing: 0.7px;
-      color: var(--muted);
     }
 
-    .sidebar a {
-      display: block;
-      text-decoration: none;
-      color: var(--text);
+    .toc button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: #263950;
+      padding: 12px 12px;
+      cursor: pointer;
       font-size: 14px;
-      border-radius: 8px;
-      padding: 6px 8px;
-      margin-bottom: 2px;
-      transition: background-color 0.2s ease, color 0.2s ease;
+      line-height: 1.35;
+      margin-bottom: 6px;
+      transition: background 0.15s ease, border-color 0.15s ease;
     }
 
-    .sidebar a:hover { background: var(--primary-soft); color: var(--primary); }
-    .sidebar a.active { background: #dbeafe; color: var(--primary); font-weight: 700; }
+    .toc button:hover {
+      background: #f3f8ff;
+      border-color: #d5e3f5;
+    }
 
-    .card {
-      background: var(--card);
+    .toc button.active {
+      background: var(--brand-soft);
+      border-color: #bfd5ee;
+      color: #0e3f6e;
+      font-weight: 700;
+    }
+
+    .content {
+      background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 14px;
-      padding: 26px 28px;
-      margin-bottom: 14px;
-      box-shadow: 0 2px 14px rgba(14, 79, 134, 0.06);
-      scroll-margin-top: 86px;
+      box-shadow: 0 8px 24px rgba(20, 38, 62, 0.08);
+      overflow: hidden;
     }
 
-    h1 { margin: 0 0 8px; font-size: 34px; color: #0d4678; line-height: 1.25; }
-    h2 { margin: 0 0 10px; font-size: 27px; color: #0e4f86; line-height: 1.3; }
-    h3 { margin: 22px 0 8px; font-size: 20px; color: #16486f; }
-    p { margin: 9px 0; }
-    ul, ol { margin: 8px 0 14px 22px; padding: 0; }
-    li { margin: 4px 0; }
-
-    .hint {
-      margin: 12px 0;
-      border-left: 4px solid var(--primary);
-      background: var(--primary-soft);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: #143f65;
+    .chapter-head {
+      padding: 22px 24px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f8fbff 0%, #f1f6fd 100%);
     }
 
-    .hint.ok { border-left-color: var(--ok); background: #ecfdf5; color: #0f513d; }
-    .hint.warn { border-left-color: var(--warn); background: #fff7ed; color: #8f3f08; }
-    .hint.err { border-left-color: var(--danger); background: #fff1f2; color: #881337; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 10px 0 14px;
-      font-size: 14px;
+    .chapter-meta {
+      margin: 0 0 8px;
+      color: #4f6584;
+      font-size: 13px;
+      letter-spacing: 0.2px;
     }
 
-    th, td {
+    .chapter-title {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.15;
+      color: #113e68;
+    }
+
+    .chapter-summary {
+      margin: 10px 0 0;
+      color: #2f445f;
+      font-size: 16px;
+      line-height: 1.65;
+      max-width: 980px;
+    }
+
+    .chapter-body {
+      padding: 22px 24px 26px;
+    }
+
+    .lesson {
+      padding: 18px;
       border: 1px solid var(--line);
-      padding: 8px 10px;
-      text-align: left;
-      vertical-align: top;
+      border-radius: 12px;
+      background: #fff;
+      margin-bottom: 14px;
     }
 
-    th { background: #f0f6fd; color: #113c62; font-weight: 700; }
+    .lesson h3 {
+      margin: 0 0 10px;
+      color: #19466f;
+      font-size: 22px;
+    }
 
-    code {
-      font-family: Consolas, "Courier New", monospace;
-      background: #edf3fb;
-      border: 1px solid #d7e3f1;
-      border-radius: 4px;
-      padding: 1px 5px;
-      font-size: 0.92em;
+    .lesson p {
+      margin: 0 0 10px;
+      line-height: 1.72;
+      color: #2b3e55;
+      font-size: 15px;
+    }
+
+    .lesson ul,
+    .lesson ol {
+      margin: 4px 0 12px 18px;
+      padding: 0;
+      color: #2b3e55;
+      line-height: 1.72;
+    }
+
+    .lesson li {
+      margin-bottom: 6px;
+    }
+
+    .code-card {
+      border: 1px solid var(--code-line);
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 12px 0 10px;
+      background: #fff;
+    }
+
+    .code-card header {
+      border-bottom: 1px solid var(--code-line);
+      background: #ecf4ff;
+      color: #21486f;
+      font-size: 13px;
+      padding: 7px 10px;
+      font-weight: 600;
     }
 
     pre {
-      margin: 10px 0 14px;
-      border: 1px solid #d7e3f1;
-      border-radius: 10px;
-      background: #f7faff;
+      margin: 0;
       padding: 14px;
-      overflow-x: auto;
-      font-size: 13.5px;
+      background: var(--code-bg);
+      color: #1b3047;
+      font-size: 14px;
       line-height: 1.55;
+      overflow-x: auto;
     }
 
-    pre code { background: transparent; border: 0; padding: 0; }
-    .footer { color: var(--muted); font-size: 13px; }
-
-    .lang-content { display: none; }
-    .lang-content.active { display: block; }
-
-    @media (max-width: 1060px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { position: static; max-height: none; }
+    code {
+      font-family: "Consolas", "Cascadia Code", "Fira Code", monospace;
     }
 
-    @media (max-width: 640px) {
-      .card { padding: 18px; }
-      h1 { font-size: 28px; }
-      h2 { font-size: 24px; }
+    .chapter-takeaway {
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid #cce5da;
+      background: #effaf4;
+      color: #104f35;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .chapter-nav {
+      border-top: 1px solid var(--line);
+      background: #f8fbff;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 24px;
+    }
+
+    .chapter-nav button {
+      border: 1px solid #b9cee7;
+      border-radius: 10px;
+      padding: 9px 14px;
+      cursor: pointer;
+      background: #fff;
+      color: #1a4f7d;
+      font-size: 14px;
+      font-weight: 600;
+      min-width: 154px;
+      text-align: center;
+    }
+
+    .chapter-nav button:hover:not(:disabled) {
+      background: #eaf3ff;
+    }
+
+    .chapter-nav button:disabled {
+      color: #95a6ba;
+      border-color: #d8e2ef;
+      background: #f3f6fa;
+      cursor: not-allowed;
+    }
+
+    .empty {
+      padding: 20px;
+      color: #4a607c;
+    }
+
+    @media (max-width: 1040px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+      }
+
+      .toc {
+        max-height: 280px;
+      }
+
+      .chapter-title {
+        font-size: 29px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .app {
+        padding: 12px;
+      }
+
+      .topbar {
+        padding: 14px;
+      }
+
+      .title-group h1 {
+        font-size: 24px;
+      }
+
+      .chapter-head,
+      .chapter-body,
+      .chapter-nav {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .chapter-nav {
+        flex-direction: column;
+      }
+
+      .chapter-nav button {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div>
-        <div class="brand">Sengoo Tutorial</div>
-        <div class="subtitle"
-          data-i18n-en="Reference-style guide for syntax, tooling, reflection, interop, and performance workflow"
-          data-i18n-zh="参考手册式教程：语法、工具链、反射、互操作与性能工作流">
-        </div>
+  <div class="app">
+    <header class="topbar">
+      <div class="title-group">
+        <h1 id="site-title">Sengoo Tutorial</h1>
+        <p id="site-subtitle">Learn syntax, workflow, tooling, interop, and reflection step by step.</p>
       </div>
-      <div class="lang-switch">
-        <button id="btn-en" class="lang-btn active" onclick="setLanguage('en')">English</button>
-        <button id="btn-zh" class="lang-btn" onclick="setLanguage('zh')">中文</button>
+      <div class="lang-switch" role="group" aria-label="Language switch">
+        <button id="lang-en" type="button" class="active">English</button>
+        <button id="lang-zh" type="button">中文</button>
       </div>
-    </div>
-  </header>
+    </header>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <h3 data-i18n-en="Contents" data-i18n-zh="目录">Contents</h3>
-      <nav id="toc">
-        <a href="#overview" data-i18n-en="1. What Is Sengoo?" data-i18n-zh="1. Sengoo 是什么？">1. What Is Sengoo?</a>
-        <a href="#install" data-i18n-en="2. Install and Setup" data-i18n-zh="2. 安装与环境准备">2. Install and Setup</a>
-        <a href="#quickstart" data-i18n-en="3. 3-Minute Quick Start" data-i18n-zh="3. 3 分钟快速上手">3. 3-Minute Quick Start</a>
-        <a href="#syntax" data-i18n-en="4. Syntax Basics" data-i18n-zh="4. 语法基础">4. Syntax Basics</a>
-        <a href="#types" data-i18n-en="5. Types and Values" data-i18n-zh="5. 类型与值">5. Types and Values</a>
-        <a href="#variables" data-i18n-en="6. Variables and Assignment" data-i18n-zh="6. 变量与赋值">6. Variables and Assignment</a>
-        <a href="#operators" data-i18n-en="7. Operators" data-i18n-zh="7. 运算符">7. Operators</a>
-        <a href="#functions" data-i18n-en="8. Functions" data-i18n-zh="8. 函数">8. Functions</a>
-        <a href="#flow" data-i18n-en="9. Control Flow" data-i18n-zh="9. 控制流">9. Control Flow</a>
-        <a href="#arrays" data-i18n-en="10. Arrays and Indexing" data-i18n-zh="10. 数组与索引">10. Arrays and Indexing</a>
-        <a href="#structs" data-i18n-en="11. Structs" data-i18n-zh="11. 结构体">11. Structs</a>
-        <a href="#methods" data-i18n-en="12. Methods and impl" data-i18n-zh="12. 方法与 impl">12. Methods and impl</a>
-        <a href="#lambda" data-i18n-en="13. Lambda and Closures" data-i18n-zh="13. Lambda 与闭包">13. Lambda and Closures</a>
-        <a href="#modules" data-i18n-en="14. Modules and Imports" data-i18n-zh="14. 模块与导入">14. Modules and Imports</a>
-        <a href="#reflection" data-i18n-en="15. Auto Reflection" data-i18n-zh="15. 自动反射">15. Auto Reflection</a>
-        <a href="#interop" data-i18n-en="16. Python Interop" data-i18n-zh="16. Python 互操作">16. Python Interop</a>
-        <a href="#cli" data-i18n-en="17. CLI Reference" data-i18n-zh="17. CLI 命令参考">17. CLI Reference</a>
-        <a href="#perf" data-i18n-en="18. Performance Model" data-i18n-zh="18. 性能模型">18. Performance Model</a>
-        <a href="#errors" data-i18n-en="19. Common Errors and Fixes" data-i18n-zh="19. 常见错误与排查">19. Common Errors and Fixes</a>
-        <a href="#workflow" data-i18n-en="20. Developer Workflow" data-i18n-zh="20. 开发者工作流">20. Developer Workflow</a>
-        <a href="#roadmap" data-i18n-en="21. Learning Path and Demos" data-i18n-zh="21. 学习路径与 Demo">21. Learning Path and Demos</a>
-        <a href="#faq" data-i18n-en="22. FAQ" data-i18n-zh="22. 常见问题">22. FAQ</a>
-      </nav>
-    </aside>
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2 id="toc-title">Chapters</h2>
+        </div>
+        <ul class="toc" id="toc-list"></ul>
+      </aside>
 
-    <main>
-      <section id="overview" class="card">
-        <div class="lang-content lang-en active">
-          <h1>Sengoo Language Tutorial (Detailed Edition)</h1>
-          <p>Sengoo is a self-developed <strong>compiled language</strong> focused on practical engineering outcomes: fast edit-build-run loops, LLVM-native execution, and smooth migration for Python hotspots.</p>
-          <p>This page is intentionally detailed, like a reference site. Each chapter includes syntax, runnable examples, operational advice, and common pitfalls.</p>
-        </div>
-        <div class="lang-content lang-zh">
-          <h1>Sengoo 语言教程（详细版）</h1>
-          <p>Sengoo 是一门自研的<strong>编译型语言</strong>，面向工程落地：快速编辑-编译-运行反馈、LLVM 原生执行、以及 Python 热点模块平滑迁移。</p>
-          <p>本页按参考手册方式组织，每章提供语法说明、可运行示例、工程建议和常见问题。</p>
-        </div>
-      </section>
-
-      <section id="install" class="card">
-        <div class="lang-content lang-en active">
-          <h2>2. Install and Setup</h2>
-          <table>
-            <thead><tr><th>Component</th><th>Why</th><th>Check Command</th></tr></thead>
-            <tbody>
-              <tr><td>Rust toolchain</td><td>Build compiler/runtime</td><td><code>cargo --version</code></td></tr>
-              <tr><td>LLVM/Clang</td><td>Native codegen and linking</td><td><code>clang --version</code></td></tr>
-              <tr><td>Python 3.10+</td><td>Bench scripts and interop demos</td><td><code>python --version</code></td></tr>
-            </tbody>
-          </table>
-          <pre><code>git clone https://github.com/Hyper66666/Sengoo.git
-cd Sengoo
-cargo build --release
-target/release/sgc --help</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>2. 安装与环境准备</h2>
-          <table>
-            <thead><tr><th>组件</th><th>用途</th><th>检查命令</th></tr></thead>
-            <tbody>
-              <tr><td>Rust 工具链</td><td>构建编译器和运行时</td><td><code>cargo --version</code></td></tr>
-              <tr><td>LLVM/Clang</td><td>原生代码生成与链接</td><td><code>clang --version</code></td></tr>
-              <tr><td>Python 3.10+</td><td>运行 bench 脚本与互操作 demo</td><td><code>python --version</code></td></tr>
-            </tbody>
-          </table>
-          <pre><code>git clone https://github.com/Hyper66666/Sengoo.git
-cd Sengoo
-cargo build --release
-target/release/sgc --help</code></pre>
-        </div>
-      </section>
-
-      <section id="quickstart" class="card">
-        <div class="lang-content lang-en active">
-          <h2>3. 3-Minute Quick Start</h2>
-          <pre><code>target/release/sgc run examples/01_hello.sg
-target/release/sgc build examples/05_loop.sg -O 2
-target/release/sgc check examples/09_method_call.sg</code></pre>
-          <div class="hint ok">Recommended daily order: <code>check -&gt; run -&gt; build</code>.</div>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>3. 3 分钟快速上手</h2>
-          <pre><code>target/release/sgc run examples/01_hello.sg
-target/release/sgc build examples/05_loop.sg -O 2
-target/release/sgc check examples/09_method_call.sg</code></pre>
-          <div class="hint ok">建议日常顺序：<code>check -&gt; run -&gt; build</code>。</div>
-        </div>
-      </section>
-
-      <section id="syntax" class="card">
-        <div class="lang-content lang-en active">
-          <h2>4. Syntax Basics</h2>
-          <pre><code>// comment
-def main() -&gt; i64 {
-    42
-}</code></pre>
-          <ul>
-            <li>Use braces for all blocks.</li>
-            <li>Use semicolons on local declarations/assignments.</li>
-            <li>Leave off semicolon on final expression when returning.</li>
-          </ul>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>4. 语法基础</h2>
-          <pre><code>// 注释
-def main() -&gt; i64 {
-    42
-}</code></pre>
-          <ul>
-            <li>所有代码块统一使用花括号。</li>
-            <li>局部声明与赋值语句建议使用分号。</li>
-            <li>块末尾返回表达式通常不加分号。</li>
-          </ul>
-        </div>
-      </section>
-
-      <section id="types" class="card">
-        <div class="lang-content lang-en active">
-          <h2>5. Types and Values</h2>
-          <table>
-            <thead><tr><th>Type</th><th>Example</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td><code>i64</code></td><td><code>42</code></td><td>Main integer type in examples.</td></tr>
-              <tr><td><code>bool</code></td><td><code>true</code>, <code>false</code></td><td>Branch and methods.</td></tr>
-              <tr><td>array</td><td><code>[1, 2, 3]</code></td><td>Index by <code>arr[i]</code>.</td></tr>
-              <tr><td>struct</td><td><code>Point { x: 1, y: 2 }</code></td><td>User-defined product type.</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>5. 类型与值</h2>
-          <table>
-            <thead><tr><th>类型</th><th>示例</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr><td><code>i64</code></td><td><code>42</code></td><td>示例中最常用的整数类型。</td></tr>
-              <tr><td><code>bool</code></td><td><code>true</code>, <code>false</code></td><td>用于分支与方法调用。</td></tr>
-              <tr><td>数组</td><td><code>[1, 2, 3]</code></td><td>通过 <code>arr[i]</code> 索引访问。</td></tr>
-              <tr><td>结构体</td><td><code>Point { x: 1, y: 2 }</code></td><td>用户自定义复合类型。</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="variables" class="card">
-        <div class="lang-content lang-en active">
-          <h2>6. Variables and Assignment</h2>
-          <pre><code>def main() -&gt; i64 {
-    let x = 100;
-    let y = 200;
-    let z = x + y;
-    z
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>6. 变量与赋值</h2>
-          <pre><code>def main() -&gt; i64 {
-    let x = 100;
-    let y = 200;
-    let z = x + y;
-    z
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="operators" class="card">
-        <div class="lang-content lang-en active">
-          <h2>7. Operators</h2>
-          <table>
-            <thead><tr><th>Category</th><th>Operators</th></tr></thead>
-            <tbody>
-              <tr><td>Arithmetic</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td></tr>
-              <tr><td>Comparison</td><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td></tr>
-              <tr><td>Boolean</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>7. 运算符</h2>
-          <table>
-            <thead><tr><th>类别</th><th>运算符</th></tr></thead>
-            <tbody>
-              <tr><td>算术</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td></tr>
-              <tr><td>比较</td><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td></tr>
-              <tr><td>布尔</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="functions" class="card">
-        <div class="lang-content lang-en active">
-          <h2>8. Functions</h2>
-          <pre><code>def add(a: i64, b: i64) -&gt; i64 {
-    a + b
-}
-
-def main() -&gt; i64 {
-    add(10, 32)
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>8. 函数</h2>
-          <pre><code>def add(a: i64, b: i64) -&gt; i64 {
-    a + b
-}
-
-def main() -&gt; i64 {
-    add(10, 32)
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="flow" class="card">
-        <div class="lang-content lang-en active">
-          <h2>9. Control Flow</h2>
-          <pre><code>def classify(x: i64) -&gt; i64 {
-    if x &gt; 0 { 1 } else { 0 }
-}</code></pre>
-          <pre><code>def sum_arr() -&gt; i64 {
-    let arr = [1, 2, 3, 4];
-    let total = 0;
-    for v in arr { total = total + v; }
-    total
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>9. 控制流</h2>
-          <pre><code>def classify(x: i64) -&gt; i64 {
-    if x &gt; 0 { 1 } else { 0 }
-}</code></pre>
-          <pre><code>def sum_arr() -&gt; i64 {
-    let arr = [1, 2, 3, 4];
-    let total = 0;
-    for v in arr { total = total + v; }
-    total
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="arrays" class="card">
-        <div class="lang-content lang-en active">
-          <h2>10. Arrays and Indexing</h2>
-          <pre><code>def main() -&gt; i64 {
-    let arr = [10, 20, 30];
-    arr[1]
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>10. 数组与索引</h2>
-          <pre><code>def main() -&gt; i64 {
-    let arr = [10, 20, 30];
-    arr[1]
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="structs" class="card">
-        <div class="lang-content lang-en active">
-          <h2>11. Structs</h2>
-          <pre><code>struct Point {
-    x: i64,
-    y: i64,
-}
-
-def main() -&gt; i64 {
-    let p = Point { x: 10, y: 20 };
-    p.x + p.y
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>11. 结构体</h2>
-          <pre><code>struct Point {
-    x: i64,
-    y: i64,
-}
-
-def main() -&gt; i64 {
-    let p = Point { x: 10, y: 20 };
-    p.x + p.y
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="methods" class="card">
-        <div class="lang-content lang-en active">
-          <h2>12. Methods and <code>impl</code></h2>
-          <pre><code>impl i64 {
-    def abs(self) -&gt; i64 {
-        if self &lt; 0 { -self } else { self }
-    }
-}
-
-def main() -&gt; i64 {
-    (-21).abs()
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>12. 方法与 <code>impl</code></h2>
-          <pre><code>impl i64 {
-    def abs(self) -&gt; i64 {
-        if self &lt; 0 { -self } else { self }
-    }
-}
-
-def main() -&gt; i64 {
-    (-21).abs()
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="lambda" class="card">
-        <div class="lang-content lang-en active">
-          <h2>13. Lambda and Closures</h2>
-          <pre><code>def main() -&gt; i64 {
-    let x = 10;
-    let f = |y| x + y;
-    f(5)
-}</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>13. Lambda 与闭包</h2>
-          <pre><code>def main() -&gt; i64 {
-    let x = 10;
-    let f = |y| x + y;
-    f(5)
-}</code></pre>
-        </div>
-      </section>
-
-      <section id="modules" class="card">
-        <div class="lang-content lang-en active">
-          <h2>14. Modules and Imports</h2>
-          <pre><code>import reflect;
-
-def main() -&gt; i64 {
-    0
-}</code></pre>
-          <div class="hint">Import statements should end with semicolon in current parser behavior.</div>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>14. 模块与导入</h2>
-          <pre><code>import reflect;
-
-def main() -&gt; i64 {
-    0
-}</code></pre>
-          <div class="hint">按当前解析器行为，导入语句建议以分号结束。</div>
-        </div>
-      </section>
-
-      <section id="reflection" class="card">
-        <div class="lang-content lang-en active">
-          <h2>15. Auto Reflection (Non-Invasive)</h2>
-          <table>
-            <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
-            <tbody>
-              <tr><td><code>--reflect=auto</code></td><td>Default. Enables only when reflect import is detected.</td></tr>
-              <tr><td><code>--reflect</code> / <code>--reflect=on</code></td><td>Force on.</td></tr>
-              <tr><td><code>--reflect=off</code></td><td>Force off.</td></tr>
-            </tbody>
-          </table>
-          <pre><code>sgc build examples/09_method_call.sg -O 2
-sgc build examples/09_method_call.sg -O 2 --reflect=on \
-  --reflect-module examples/09_method_call.sg \
-  --reflect-symbol examples/09_method_call.sg::main
-python bench/demos/reflection-auto-vs-cpp/run_demo.py</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>15. 自动反射（非侵入式）</h2>
-          <table>
-            <thead><tr><th>模式</th><th>行为</th></tr></thead>
-            <tbody>
-              <tr><td><code>--reflect=auto</code></td><td>默认模式，仅检测到反射导入时启用。</td></tr>
-              <tr><td><code>--reflect</code> / <code>--reflect=on</code></td><td>强制开启。</td></tr>
-              <tr><td><code>--reflect=off</code></td><td>强制关闭。</td></tr>
-            </tbody>
-          </table>
-          <pre><code>sgc build examples/09_method_call.sg -O 2
-sgc build examples/09_method_call.sg -O 2 --reflect=on \
-  --reflect-module examples/09_method_call.sg \
-  --reflect-symbol examples/09_method_call.sg::main
-python bench/demos/reflection-auto-vs-cpp/run_demo.py</code></pre>
-        </div>
-      </section>
-
-      <section id="interop" class="card">
-        <div class="lang-content lang-en active">
-          <h2>16. Python Interop</h2>
-          <pre><code>cd bench
-python ./tests/python_interop_example.py
-python ./python_interop_bench.py --calls 5000 --samples 3 --warmup 1</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>16. Python 互操作</h2>
-          <pre><code>cd bench
-python ./tests/python_interop_example.py
-python ./python_interop_bench.py --calls 5000 --samples 3 --warmup 1</code></pre>
-        </div>
-      </section>
-
-      <section id="cli" class="card">
-        <div class="lang-content lang-en active">
-          <h2>17. CLI Reference</h2>
-          <table>
-            <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
-            <tbody>
-              <tr><td><code>sgc build &lt;file.sg&gt;</code></td><td>Compile source.</td></tr>
-              <tr><td><code>sgc run &lt;file.sg&gt;</code></td><td>Compile and run.</td></tr>
-              <tr><td><code>sgc check &lt;file.sg&gt;</code></td><td>Parse/type validation.</td></tr>
-              <tr><td><code>sgc dump-ast &lt;file.sg&gt;</code></td><td>AST debug output.</td></tr>
-              <tr><td><code>sgc repl</code></td><td>Interactive REPL.</td></tr>
-              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>Persistent compile daemon.</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>17. CLI 命令参考</h2>
-          <table>
-            <thead><tr><th>命令</th><th>用途</th></tr></thead>
-            <tbody>
-              <tr><td><code>sgc build &lt;file.sg&gt;</code></td><td>编译源文件。</td></tr>
-              <tr><td><code>sgc run &lt;file.sg&gt;</code></td><td>编译并运行。</td></tr>
-              <tr><td><code>sgc check &lt;file.sg&gt;</code></td><td>语法与类型校验。</td></tr>
-              <tr><td><code>sgc dump-ast &lt;file.sg&gt;</code></td><td>输出 AST 便于调试。</td></tr>
-              <tr><td><code>sgc repl</code></td><td>交互式 REPL。</td></tr>
-              <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>常驻编译服务。</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="perf" class="card">
-        <div class="lang-content lang-en active">
-          <h2>18. Performance Model</h2>
-          <pre><code>cd bench
-python ./scenario_matrix_bench.py
-python ./advanced_pipeline_bench.py
-python ./noninvasive_reflection_bench.py
-python ./bootstrap_generality_bench.py</code></pre>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>18. 性能模型</h2>
-          <pre><code>cd bench
-python ./scenario_matrix_bench.py
-python ./advanced_pipeline_bench.py
-python ./noninvasive_reflection_bench.py
-python ./bootstrap_generality_bench.py</code></pre>
-        </div>
-      </section>
-
-      <section id="errors" class="card">
-        <div class="lang-content lang-en active">
-          <h2>19. Common Errors and Fixes</h2>
-          <ul>
-            <li><code>command 'sengoo.run' not found</code>: reinstall extension and run <code>Developer: Reload Window</code>.</li>
-            <li><code>invalid pattern: expected field name</code>: check struct/pattern field syntax and use <code>sgc dump-ast</code>.</li>
-            <li>Noisy compile errors: run <code>sgc check</code> first, then <code>--force-rebuild</code>.</li>
-          </ul>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>19. 常见错误与排查</h2>
-          <ul>
-            <li><code>command 'sengoo.run' not found</code>：重装插件后执行 <code>Developer: Reload Window</code>。</li>
-            <li><code>invalid pattern: expected field name</code>：检查结构体/模式字段语法，并用 <code>sgc dump-ast</code> 定位。</li>
-            <li>报错不清晰：先跑 <code>sgc check</code>，再尝试 <code>--force-rebuild</code>。</li>
-          </ul>
-        </div>
-      </section>
-
-      <section id="workflow" class="card">
-        <div class="lang-content lang-en active">
-          <h2>20. Developer Workflow</h2>
-          <ol>
-            <li>Edit source.</li>
-            <li><code>sgc check</code>.</li>
-            <li><code>sgc run</code>.</li>
-            <li><code>sgc build</code>.</li>
-            <li>Run relevant bench suites for perf-sensitive changes.</li>
-          </ol>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>20. 开发者工作流</h2>
-          <ol>
-            <li>修改源码。</li>
-            <li>执行 <code>sgc check</code>。</li>
-            <li>执行 <code>sgc run</code>。</li>
-            <li>执行 <code>sgc build</code>。</li>
-            <li>性能敏感改动配套 bench 回归。</li>
-          </ol>
-        </div>
-      </section>
-
-      <section id="roadmap" class="card">
-        <div class="lang-content lang-en active">
-          <h2>21. Learning Path and Demos</h2>
-          <ol>
-            <li>Run <code>examples/01_hello.sg</code> to <code>examples/08_struct.sg</code>.</li>
-            <li>Run <code>examples/09_method_call.sg</code> and inspect <code>impl</code>.</li>
-            <li>Run demos under <code>bench/demos/</code>.</li>
-          </ol>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>21. 学习路径与 Demo</h2>
-          <ol>
-            <li>按顺序运行 <code>examples/01_hello.sg</code> 到 <code>examples/08_struct.sg</code>。</li>
-            <li>运行 <code>examples/09_method_call.sg</code> 理解 <code>impl</code>。</li>
-            <li>运行 <code>bench/demos/</code> 下的演示。</li>
-          </ol>
-        </div>
-      </section>
-
-      <section id="faq" class="card">
-        <div class="lang-content lang-en active">
-          <h2>22. FAQ</h2>
-          <h3>Is Sengoo a Python replacement?</h3>
-          <p>Usually no. Practical architecture is coexistence: Python orchestration + Sengoo/native hotspots.</p>
-          <h3>Does auto reflection add overhead to all projects?</h3>
-          <p>No. In <code>--reflect=auto</code>, reflection activates only when reflect import is detected.</p>
-        </div>
-        <div class="lang-content lang-zh">
-          <h2>22. 常见问题</h2>
-          <h3>Sengoo 是要替代 Python 吗？</h3>
-          <p>通常不是。更实用的是共存架构：Python 编排 + Sengoo/原生热点模块。</p>
-          <h3>自动反射会拖慢所有项目吗？</h3>
-          <p>不会。在 <code>--reflect=auto</code> 模式下，只有检测到反射导入才启用。</p>
-        </div>
-      </section>
-
-      <section class="card footer">
-        <div class="lang-content lang-en active">
-          <p>This tutorial is synchronized with repository behavior and CLI help as of February 16, 2026.</p>
-        </div>
-        <div class="lang-content lang-zh">
-          <p>本教程已按 2026-02-16 的仓库行为与 CLI 帮助信息同步更新。</p>
-        </div>
+      <section class="content" aria-live="polite">
+        <div id="chapter-root"></div>
       </section>
     </main>
   </div>
 
   <script>
-    function setLanguage(lang) {
-      const isZh = lang === "zh";
-      document.documentElement.lang = isZh ? "zh-CN" : "en";
+    const UI_TEXT = {
+      en: {
+        siteTitle: "Sengoo Tutorial",
+        siteSubtitle: "Learn syntax, workflow, tooling, interop, and reflection step by step.",
+        tocTitle: "Chapters",
+        chapterLabel: "Chapter",
+        lessonLabel: "Lesson",
+        prev: "Previous Chapter",
+        next: "Next Chapter",
+        first: "You are at the first chapter.",
+        last: "You are at the last chapter."
+      },
+      zh: {
+        siteTitle: "Sengoo 入门与实践教程",
+        siteSubtitle: "从语法到工程流程，逐章掌握 Sengoo 的开发方式。",
+        tocTitle: "章节目录",
+        chapterLabel: "第",
+        lessonLabel: "小节",
+        prev: "上一章",
+        next: "下一章",
+        first: "当前已经是第一章。",
+        last: "当前已经是最后一章。"
+      }
+    };
 
-      document.querySelectorAll(".lang-content").forEach((el) => {
-        const show = isZh ? el.classList.contains("lang-zh") : el.classList.contains("lang-en");
-        el.classList.toggle("active", show);
-      });
-
-      document.querySelectorAll("[data-i18n-en]").forEach((el) => {
-        el.textContent = isZh ? el.getAttribute("data-i18n-zh") : el.getAttribute("data-i18n-en");
-      });
-
-      document.querySelectorAll("#toc a").forEach((el) => {
-        el.textContent = isZh ? el.getAttribute("data-i18n-zh") : el.getAttribute("data-i18n-en");
-      });
-
-      document.getElementById("btn-en").classList.toggle("active", !isZh);
-      document.getElementById("btn-zh").classList.toggle("active", isZh);
-      localStorage.setItem("sengoo-tutorial-lang", lang);
-    }
-
-    function initTocActive() {
-      const links = Array.from(document.querySelectorAll("#toc a"));
-      const map = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
-
-      const observer = new IntersectionObserver(
-        (entries) => {
-          const firstVisible = entries
-            .filter((e) => e.isIntersecting)
-            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-
-          if (!firstVisible) return;
-          links.forEach((a) => a.classList.remove("active"));
-          const target = map.get(firstVisible.target.id);
-          if (target) target.classList.add("active");
+    const CORE_CHAPTERS = [
+      {
+        id: "language-overview",
+        title: {
+          en: "1. Language Overview",
+          zh: "1. 语言定位与目标"
         },
-        { rootMargin: "-88px 0px -70% 0px", threshold: 0.01 }
-      );
+        summary: {
+          en: "Sengoo is a compiled language built for practical engineering: native-speed execution, faster edit-build loops, and smooth migration from Python-heavy stacks.",
+          zh: "Sengoo 是一门面向工程落地的编译型语言，核心目标是原生性能、快速迭代编译，以及从 Python 体系平滑迁移。"
+        },
+        sections: [
+          {
+            heading: { en: "What kind of language is Sengoo?", zh: "Sengoo 属于什么类型语言？" },
+            paragraphs: {
+              en: [
+                "Sengoo uses static compilation (LLVM backend) and expression-oriented syntax. You write source code, compile it, then run native binaries.",
+                "The language is designed around day-to-day developer productivity: keep syntax simple, keep diagnostics readable, and reduce wasted rebuild work."
+              ],
+              zh: [
+                "Sengoo 采用静态编译（LLVM 后端）和表达式风格语法。你先写源码，再编译成原生可执行文件运行。",
+                "它强调开发效率：语法尽量简单、报错尽量可读、构建链尽量减少无效重编译。"
+              ]
+            },
+            bullets: {
+              en: [
+                "Compiled language with native executable output.",
+                "Incremental-oriented pipeline for faster local iteration.",
+                "Supports Python interop and optional reflection metadata."
+              ],
+              zh: [
+                "编译型语言，可输出原生可执行程序。",
+                "编译链强调增量能力，优化本地开发迭代速度。",
+                "支持 Python 互操作和可选反射元数据。"
+              ]
+            }
+          },
+          {
+            heading: { en: "What problems does it try to solve?", zh: "它主要解决什么问题？" },
+            paragraphs: {
+              en: [
+                "Many teams need better runtime performance but cannot rewrite entire Python systems at once. Sengoo is positioned as a practical middle path.",
+                "You can move hot paths and compute-heavy logic into Sengoo, while keeping existing Python orchestration where needed."
+              ],
+              zh: [
+                "很多团队希望提升运行性能，但又无法一次性重写整个 Python 系统。Sengoo 的定位就是这条现实中间路线。",
+                "你可以优先把热点或计算密集逻辑迁到 Sengoo，同时保留已有 Python 编排部分。"
+              ]
+            }
+          },
+          {
+            heading: { en: "First mental model", zh: "先建立一个心智模型" },
+            paragraphs: {
+              en: [
+                "Treat Sengoo as: concise syntax + native execution + tooling for fast feedback. Learn the core syntax first, then CLI workflow, then interop/reflection.",
+                "This tutorial is chapter-based. Click a chapter on the left; the right panel shows one complete chapter page."
+              ],
+              zh: [
+                "可以把 Sengoo 理解为：简洁语法 + 原生性能 + 快速反馈工具链。建议先掌握核心语法，再掌握 CLI 流程，最后学习互操作和反射。",
+                "本教程采用单章单页模式。点击左侧目录，右侧只展示当前章节完整内容。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: Sengoo is not trying to replace everything at once. It is built for performance-sensitive paths with practical migration and fast development loops.",
+          zh: "本章结论：Sengoo 不是一刀切替换，而是面向性能关键路径与工程迁移现实的语言。"
+        }
+      },
+      {
+        id: "environment-and-installation",
+        title: {
+          en: "2. Environment and Installation",
+          zh: "2. 环境准备与安装"
+        },
+        summary: {
+          en: "Set up toolchain once, then keep a predictable local workflow. This chapter covers required dependencies and the standard build flow.",
+          zh: "先把开发环境搭起来，再形成稳定可复现的本地流程。本章介绍依赖、构建和快速验证。"
+        },
+        sections: [
+          {
+            heading: { en: "Required components", zh: "基础依赖" },
+            bullets: {
+              en: [
+                "Rust toolchain (for building compiler/runtime/tools).",
+                "LLVM toolchain (for backend code generation and linking).",
+                "Optional: Python (for interop tests and benchmark scripts)."
+              ],
+              zh: [
+                "Rust 工具链（用于构建编译器、运行时和工具）。",
+                "LLVM 工具链（用于后端生成和链接）。",
+                "可选：Python（用于互操作测试和部分基准脚本）。"
+              ]
+            },
+            paragraphs: {
+              en: [
+                "If your project contains an installer script, run it first to auto-detect and install missing dependencies."
+              ],
+              zh: [
+                "如果仓库里已经有自动安装脚本，建议先运行它，自动检测并补齐缺失依赖。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Build Sengoo compiler", zh: "构建 Sengoo 编译器" },
+            code: {
+              title: {
+                en: "Build release binaries",
+                zh: "构建发布版本二进制"
+              },
+              lang: "bash",
+              snippet: "cargo build --release"
+            },
+            paragraphs: {
+              en: [
+                "After successful build, CLI executable is usually at `target/release/sgc.exe` on Windows."
+              ],
+              zh: [
+                "构建完成后，Windows 下一般可以在 `target/release/sgc.exe` 找到命令行程序。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Quick sanity check", zh: "快速健康检查" },
+            code: {
+              title: {
+                en: "Run a known example",
+                zh: "运行一个已知示例"
+              },
+              lang: "bash",
+              snippet: "target/release/sgc run examples/01_hello.sg"
+            },
+            paragraphs: {
+              en: [
+                "If this works, your compile + run chain is available. Then continue to syntax chapters."
+              ],
+              zh: [
+                "这一步通过，说明本机编译和运行链路可用，可以继续后面的语法章节。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: build once, verify with a tiny example, then keep using the same CLI entry points.",
+          zh: "本章结论：先构建一次并用小例子验通，再围绕固定 CLI 命令进行日常开发。"
+        }
+      },
+      {
+        id: "program-structure",
+        title: {
+          en: "3. Program Structure and Syntax Basics",
+          zh: "3. 程序结构与语法基础"
+        },
+        summary: {
+          en: "Understand the minimal structure of a Sengoo source file: function entry point, block syntax, and expression-style return values.",
+          zh: "掌握 Sengoo 源文件最小结构：入口函数、代码块、表达式返回。"
+        },
+        sections: [
+          {
+            heading: { en: "Minimal executable program", zh: "最小可执行程序" },
+            code: {
+              title: {
+                en: "Minimal main function",
+                zh: "最小 main 函数"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    42\n}"
+            },
+            paragraphs: {
+              en: [
+                "`def` declares a function. `main` is entry point. `-> i64` declares return type.",
+                "The last expression in a block is returned implicitly, so you do not need `return` in simple cases."
+              ],
+              zh: [
+                "`def` 用于定义函数，`main` 是入口，`-> i64` 表示返回类型。",
+                "代码块最后一个表达式会隐式作为返回值，简单场景通常不需要写 `return`。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Semicolon usage", zh: "分号使用规则" },
+            paragraphs: {
+              en: [
+                "Use semicolons for intermediate statements. Keep the final value expression without semicolon when it is the return value.",
+                "This style keeps data flow explicit and reduces accidental empty returns."
+              ],
+              zh: [
+                "中间语句通常使用分号；最后作为返回值的表达式一般不写分号。",
+                "这种写法能让数据流更清晰，避免意外返回空值。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Statement vs final expression",
+                zh: "中间语句与尾表达式"
+              },
+              lang: "sg",
+              snippet: "def add_one(x: i64) -> i64 {\n    let y = x + 1;\n    y\n}"
+            }
+          },
+          {
+            heading: { en: "Comments and readability", zh: "注释与可读性" },
+            bullets: {
+              en: [
+                "Use `//` for line comments.",
+                "Prefer one responsibility per function.",
+                "Name values by meaning (e.g., `total`, `risk_score`)."
+              ],
+              zh: [
+                "使用 `//` 写单行注释。",
+                "每个函数尽量只做一件事。",
+                "变量名体现业务含义，例如 `total`、`risk_score`。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Comment style",
+                zh: "注释示例"
+              },
+              lang: "sg",
+              snippet: "// compute final score from base and bonus\ndef score(base: i64, bonus: i64) -> i64 {\n    base + bonus\n}"
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: read Sengoo blocks as expression pipelines. Intermediate statements first, final expression last.",
+          zh: "本章结论：把 Sengoo 代码块理解成“表达式流水线”：先中间步骤，最后给出尾表达式。"
+        }
+      },
+      {
+        id: "variables-and-types",
+        title: {
+          en: "4. Variables and Core Types",
+          zh: "4. 变量与核心类型"
+        },
+        summary: {
+          en: "This chapter covers practical value binding and common core types used in existing Sengoo examples.",
+          zh: "本章聚焦日常最常用的值绑定与基础类型，用当前示例语法讲清楚。"
+        },
+        sections: [
+          {
+            heading: { en: "Value binding with `let`", zh: "使用 `let` 绑定值" },
+            code: {
+              title: {
+                en: "Simple binding and arithmetic",
+                zh: "基本变量绑定与运算"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let a = 10;\n    let b = 20;\n    let c = a + b;\n    c\n}"
+            },
+            paragraphs: {
+              en: [
+                "Use `let` to bind values. Build larger computations from small named steps.",
+                "Short, meaningful variable names make debugging faster."
+              ],
+              zh: [
+                "用 `let` 绑定值，建议把复杂逻辑拆成多个小步骤。",
+                "短而有语义的变量名能明显提高排错效率。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Core scalar types", zh: "常见标量类型" },
+            bullets: {
+              en: [
+                "`i64`: common integer type in examples and benchmarks.",
+                "`bool`: logical values (`true`/`false`).",
+                "Type annotations are explicit in function signatures."
+              ],
+              zh: [
+                "`i64`：示例和基准中最常用的整数类型。",
+                "`bool`：布尔值（`true`/`false`）。",
+                "函数签名中建议显式标注类型。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Boolean example",
+                zh: "布尔示例"
+              },
+              lang: "sg",
+              snippet: "def is_positive(x: i64) -> bool {\n    x > 0\n}"
+            }
+          },
+          {
+            heading: { en: "Reassignment pattern", zh: "变量重赋值模式" },
+            code: {
+              title: {
+                en: "Accumulator style",
+                zh: "累加器写法"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let total = 0;\n    total = total + 7;\n    total\n}"
+            },
+            paragraphs: {
+              en: [
+                "This style is common in loops and state transitions.",
+                "When a value changes over time, keep its update location centralized."
+              ],
+              zh: [
+                "这种写法常用于循环或状态推进。",
+                "当变量会变化时，尽量把更新逻辑集中在少数位置。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: most beginner programs only need `let`, `i64`, and `bool` to express meaningful logic.",
+          zh: "本章结论：只用 `let` + `i64` + `bool`，已经能写出不少有用逻辑。"
+        }
+      },
+      {
+        id: "functions",
+        title: {
+          en: "5. Functions and Reusable Logic",
+          zh: "5. 函数与可复用逻辑"
+        },
+        summary: {
+          en: "Functions are the core unit of reuse in Sengoo. Keep them small, typed, and easy to compose.",
+          zh: "函数是 Sengoo 最核心的复用单元。建议小函数、强类型、易组合。"
+        },
+        sections: [
+          {
+            heading: { en: "Define and call functions", zh: "函数定义与调用" },
+            code: {
+              title: {
+                en: "Function with typed parameters",
+                zh: "带类型参数的函数"
+              },
+              lang: "sg",
+              snippet: "def add(a: i64, b: i64) -> i64 {\n    a + b\n}\n\ndef main() -> i64 {\n    add(12, 30)\n}"
+            },
+            paragraphs: {
+              en: [
+                "Function signatures make input/output contracts explicit.",
+                "When behavior changes, update signatures early so compiler errors guide the refactor."
+              ],
+              zh: [
+                "函数签名把输入输出契约写清楚。",
+                "改动行为时优先更新签名，让编译器报错帮助你定位影响面。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Design rule: one function, one responsibility", zh: "设计原则：一函数一职责" },
+            bullets: {
+              en: [
+                "Split validation, compute, and formatting into separate functions.",
+                "Avoid deeply nested logic inside a single large function.",
+                "Reuse helper functions in tests and benchmarks."
+              ],
+              zh: [
+                "把校验、计算、格式化拆成独立函数。",
+                "避免一个大函数里塞太多层嵌套。",
+                "把辅助函数复用于测试和基准，减少重复代码。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Closures (lambda) for local logic", zh: "闭包（lambda）用于局部逻辑" },
+            code: {
+              title: {
+                en: "Closure captures outer variable",
+                zh: "闭包捕获外部变量"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let x = 10;\n    let f = |y| x + y;\n    f(5)\n}"
+            },
+            paragraphs: {
+              en: [
+                "Closures are useful for short local transformations.",
+                "If closure logic grows, extract into named functions."
+              ],
+              zh: [
+                "闭包适合写短小的局部转换逻辑。",
+                "如果闭包变复杂，建议提取成具名函数。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: function boundaries are your architecture boundaries. Clear signatures reduce both bugs and refactor cost.",
+          zh: "本章结论：函数边界就是架构边界。清晰签名能显著降低 bug 与重构成本。"
+        }
+      },
+      {
+        id: "control-flow",
+        title: {
+          en: "6. Control Flow",
+          zh: "6. 控制流"
+        },
+        summary: {
+          en: "Sengoo supports expression-friendly branching and practical loops for data processing tasks.",
+          zh: "Sengoo 支持表达式风格分支与实用循环，适合常见数据处理场景。"
+        },
+        sections: [
+          {
+            heading: { en: "If/else as value producer", zh: "if/else 作为值表达式" },
+            code: {
+              title: {
+                en: "Branching example",
+                zh: "分支示例"
+              },
+              lang: "sg",
+              snippet: "def classify(x: i64) -> i64 {\n    if x > 0 { 1 } else { 0 }\n}"
+            },
+            paragraphs: {
+              en: [
+                "Both branches should produce compatible types.",
+                "Use this style to keep small decision logic concise."
+              ],
+              zh: [
+                "两个分支应返回兼容类型。",
+                "这种写法适合短小、清晰的判断逻辑。"
+              ]
+            }
+          },
+          {
+            heading: { en: "`for in` over arrays", zh: "`for in` 遍历数组" },
+            code: {
+              title: {
+                en: "Summation loop",
+                zh: "求和循环"
+              },
+              lang: "sg",
+              snippet: "def sum_arr() -> i64 {\n    let arr = [1, 2, 3, 4];\n    let total = 0;\n    for v in arr {\n        total = total + v;\n    }\n    total\n}"
+            },
+            paragraphs: {
+              en: [
+                "This pattern appears frequently in metrics aggregation and lightweight ETL logic."
+              ],
+              zh: [
+                "这个模式在指标聚合、轻量 ETL 逻辑里非常常见。"
+              ]
+            }
+          },
+          {
+            heading: { en: "While loops for condition-driven iteration", zh: "while：条件驱动循环" },
+            code: {
+              title: {
+                en: "While counter loop",
+                zh: "while 计数循环"
+              },
+              lang: "sg",
+              snippet: "def count_to_ten() -> i64 {\n    let x = 0;\n    while x < 10 {\n        x = x + 1;\n    }\n    x\n}"
+            },
+            bullets: {
+              en: [
+                "Use `while` when loop length depends on runtime state.",
+                "Prefer explicit loop exit conditions for readability."
+              ],
+              zh: [
+                "当循环次数依赖运行时状态时，优先考虑 `while`。",
+                "退出条件要写清楚，避免难排查的死循环。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: write branch/loop logic as clear state transitions. Debugging becomes much easier.",
+          zh: "本章结论：把分支和循环写成清晰的状态推进，后续调试会轻松很多。"
+        }
+      },
+      {
+        id: "arrays-and-indexing",
+        title: {
+          en: "7. Arrays and Indexing",
+          zh: "7. 数组与索引"
+        },
+        summary: {
+          en: "Arrays are a fundamental container in current Sengoo examples and benchmarks.",
+          zh: "数组是当前 Sengoo 示例和基准里最核心的容器类型之一。"
+        },
+        sections: [
+          {
+            heading: { en: "Create and index arrays", zh: "数组创建与索引访问" },
+            code: {
+              title: {
+                en: "Basic array usage",
+                zh: "基础数组示例"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let arr = [10, 20, 30];\n    arr[1]\n}"
+            },
+            paragraphs: {
+              en: [
+                "Array indexing is direct and concise. Keep indexes meaningful and easy to reason about."
+              ],
+              zh: [
+                "数组索引访问写法直接简洁，建议让索引语义清晰可追踪。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Array in function signatures", zh: "函数参数中的数组类型" },
+            code: {
+              title: {
+                en: "Fixed-size array parameter",
+                zh: "定长数组参数示例"
+              },
+              lang: "sg",
+              snippet: "def sum4(arr: [i64; 4]) -> i64 {\n    let total = 0;\n    for v in arr {\n        total = total + v;\n    }\n    total\n}"
+            },
+            paragraphs: {
+              en: [
+                "Explicit shape in signatures helps both readability and compiler checks."
+              ],
+              zh: [
+                "在签名里明确数组形状，可提升可读性，也便于编译器做检查。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Practical tips", zh: "实践建议" },
+            bullets: {
+              en: [
+                "Start with tiny arrays in early debugging.",
+                "Isolate index math in helper functions when it gets complex.",
+                "Benchmark hot loops with representative array sizes."
+              ],
+              zh: [
+                "调试初期优先用小数组，先保证逻辑正确。",
+                "索引计算复杂时提取成辅助函数。",
+                "性能敏感循环要用接近真实规模的数据做基准。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: arrays are simple but powerful. Keep indexing logic explicit and test edge cases early.",
+          zh: "本章结论：数组能力强但也容易踩边界坑，索引逻辑务必显式并尽早测边界。"
+        }
+      },
+      {
+        id: "struct-and-impl",
+        title: {
+          en: "8. Structs and Methods (`impl`)",
+          zh: "8. 结构体与方法（`impl`）"
+        },
+        summary: {
+          en: "Use structs for domain modeling and `impl` blocks for behavior. This helps keep data and logic organized.",
+          zh: "用结构体承载数据，用 `impl` 承载行为，让业务模型更清晰。"
+        },
+        sections: [
+          {
+            heading: { en: "Define a struct", zh: "定义结构体" },
+            code: {
+              title: {
+                en: "Point struct example",
+                zh: "Point 结构体示例"
+              },
+              lang: "sg",
+              snippet: "struct Point {\n    x: i64,\n    y: i64,\n}\n\ndef main() -> i64 {\n    let p = Point { x: 10, y: 20 };\n    p.x + p.y\n}"
+            },
+            paragraphs: {
+              en: [
+                "Struct fields are explicitly typed. Field access is direct (`p.x`)."
+              ],
+              zh: [
+                "结构体字段是显式类型定义，访问方式是 `p.x`。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Attach methods with `impl`", zh: "使用 `impl` 组织方法" },
+            code: {
+              title: {
+                en: "Method call example",
+                zh: "方法调用示例"
+              },
+              lang: "sg",
+              snippet: "impl i64 {\n    def abs(self) -> i64 {\n        if self < 0 { -self } else { self }\n    }\n\n    def add(self, other: i64) -> i64 {\n        self + other\n    }\n}\n\ndef main() -> i64 {\n    let x = -21;\n    x.abs().add(21)\n}"
+            },
+            paragraphs: {
+              en: [
+                "Methods improve readability when operations are naturally tied to a type."
+              ],
+              zh: [
+                "当行为天然属于某个类型时，用方法调用通常比独立函数更直观。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Modeling guidance", zh: "建模建议" },
+            bullets: {
+              en: [
+                "Use structs for domain entities (order, user, metric row).",
+                "Keep each method small and predictable.",
+                "Prefer descriptive method names over clever short names."
+              ],
+              zh: [
+                "结构体用来表达领域实体（订单、用户、指标行等）。",
+                "方法尽量短小、行为可预期。",
+                "方法名优先可读，不追求花哨缩写。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: data model + behavior model together produce maintainable codebases.",
+          zh: "本章结论：数据模型和行为模型一起设计，代码可维护性会显著提升。"
+        }
+      },
+      {
+        id: "cli-workflow",
+        title: {
+          en: "9. CLI Workflow",
+          zh: "9. CLI 工作流"
+        },
+        summary: {
+          en: "Master a small set of CLI commands and you can cover nearly all daily development tasks.",
+          zh: "掌握一组核心 CLI 命令，基本就能覆盖日常开发全流程。"
+        },
+        sections: [
+          {
+            heading: { en: "Core commands", zh: "核心命令" },
+            code: {
+              title: {
+                en: "Most-used commands",
+                zh: "高频命令"
+              },
+              lang: "bash",
+              snippet: "sgc check examples/05_loop.sg\nsgc run examples/05_loop.sg -O 1\nsgc build examples/05_loop.sg -O 2\nsgc build examples/05_loop.sg -O 2 --emit-llvm"
+            },
+            bullets: {
+              en: [
+                "`check`: fast validation without final binary output.",
+                "`run`: compile and execute in one step.",
+                "`build`: produce native executable or LLVM IR."
+              ],
+              zh: [
+                "`check`：快速语义检查，不产出最终可执行文件。",
+                "`run`：一条命令完成编译并运行。",
+                "`build`：产出原生可执行文件或 LLVM IR。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Incremental and daemon modes", zh: "增量与守护进程模式" },
+            code: {
+              title: {
+                en: "Daemon usage",
+                zh: "守护进程模式示例"
+              },
+              lang: "bash",
+              snippet: "sgc daemon --addr 127.0.0.1:48765\nsgc run examples/05_loop.sg --daemon --daemon-addr 127.0.0.1:48765"
+            },
+            paragraphs: {
+              en: [
+                "Daemon mode keeps compiler state warm and can reduce repeated startup overhead in iterative development."
+              ],
+              zh: [
+                "守护进程模式可以让编译状态保持热启动，减少反复启动带来的额外开销。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Troubleshooting routine", zh: "故障排查顺序" },
+            bullets: {
+              en: [
+                "Run `check` first to isolate syntax/type issues.",
+                "If behavior looks stale, try `--force-rebuild`.",
+                "Use `--emit-llvm` to inspect backend output when needed."
+              ],
+              zh: [
+                "先跑 `check`，把语法/类型问题单独定位。",
+                "怀疑缓存状态异常时使用 `--force-rebuild`。",
+                "必要时用 `--emit-llvm` 查看后端输出。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: build your habit around `check -> run -> build`. That loop is enough for most projects.",
+          zh: "本章结论：围绕 `check -> run -> build` 建立习惯，基本足够支撑大多数项目开发。"
+        }
+      },
+      {
+        id: "python-interop",
+        title: {
+          en: "10. Python Interoperability",
+          zh: "10. Python 互操作"
+        },
+        summary: {
+          en: "Interop is one of Sengoo's strongest practical advantages: migrate hot paths incrementally without rewriting entire Python systems.",
+          zh: "互操作是 Sengoo 最实用的优势之一：可以只迁移热点，不必一次性重写整套 Python 系统。"
+        },
+        sections: [
+          {
+            heading: { en: "Migration strategy", zh: "迁移策略" },
+            paragraphs: {
+              en: [
+                "Keep orchestration, I/O glue, and existing ecosystem integrations in Python.",
+                "Move CPU-heavy loops or stable compute kernels into Sengoo, then expose callable interfaces."
+              ],
+              zh: [
+                "保留 Python 侧编排、I/O 胶水代码和现有生态集成。",
+                "将 CPU 密集循环或稳定计算内核迁到 Sengoo，再通过接口被 Python 调用。"
+              ]
+            },
+            bullets: {
+              en: [
+                "Lower migration risk.",
+                "Faster path to production value.",
+                "More realistic for legacy codebases."
+              ],
+              zh: [
+                "迁移风险更低。",
+                "更快产出业务价值。",
+                "更适合历史包袱较重的工程。"
+              ]
+            }
+          },
+          {
+            heading: { en: "How to benchmark interop", zh: "如何评估互操作效果" },
+            code: {
+              title: {
+                en: "Interop benchmark command",
+                zh: "互操作基准命令"
+              },
+              lang: "bash",
+              snippet: "python bench/python_interop_bench.py --calls 5000 --samples 5 --warmup 1"
+            },
+            paragraphs: {
+              en: [
+                "Use realistic call patterns from your application, not only synthetic loops.",
+                "Track both throughput and integration overhead."
+              ],
+              zh: [
+                "基准参数要尽量贴近真实调用方式，不要只跑纯合成循环。",
+                "同时关注吞吐和跨语言调用开销。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Engineering best practices", zh: "工程实践建议" },
+            bullets: {
+              en: [
+                "Define stable interfaces before moving implementation.",
+                "Use contract tests to verify result parity between Python and Sengoo.",
+                "Roll out by feature flag for safer production migration."
+              ],
+              zh: [
+                "先定义稳定接口，再迁移内部实现。",
+                "用契约测试保证 Python 与 Sengoo 结果一致。",
+                "线上按开关灰度迁移，降低回滚成本。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: interop gives you a practical migration lane: performance gain without all-at-once rewrite risk.",
+          zh: "本章结论：互操作让你获得“可落地”的迁移路线，既提速又不必全量重写。"
+        }
+      },
+      {
+        id: "reflection",
+        title: {
+          en: "11. Non-Invasive Reflection (Auto Mode)",
+          zh: "11. 非侵入式反射（自动模式）"
+        },
+        summary: {
+          en: "Sengoo reflection is designed to stay out of hot paths unless needed. Auto mode keeps baseline overhead low.",
+          zh: "Sengoo 的反射设计目标是“需要时再启用”，自动模式可以尽量保持基线路径开销低。"
+        },
+        sections: [
+          {
+            heading: { en: "Reflection modes", zh: "反射模式说明" },
+            bullets: {
+              en: [
+                "`--reflect=auto` (default): enable only when reflect imports are detected.",
+                "`--reflect=on`: force reflection metadata generation.",
+                "`--reflect=off`: force disable reflection for lean baseline."
+              ],
+              zh: [
+                "`--reflect=auto`（默认）：检测到反射导入时才启用。",
+                "`--reflect=on`：强制启用并生成反射元数据。",
+                "`--reflect=off`：强制关闭，保持最轻路径。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Build with explicit reflection control",
+                zh: "显式控制反射开关"
+              },
+              lang: "bash",
+              snippet: "sgc build examples/09_method_call.sg -O 2 --reflect=on\nsgc build examples/09_method_call.sg -O 2 --reflect=off"
+            }
+          },
+          {
+            heading: { en: "Fine-grained reflection scope", zh: "细粒度反射范围控制" },
+            code: {
+              title: {
+                en: "Module/symbol filters",
+                zh: "模块与符号筛选"
+              },
+              lang: "bash",
+              snippet: "sgc build examples/09_method_call.sg -O 2 --reflect=on \\\n  --reflect-module examples/09_method_call.sg \\\n  --reflect-symbol examples/09_method_call.sg::main"
+            },
+            paragraphs: {
+              en: [
+                "Limit reflection to specific modules/symbols when you only need a subset in tools/plugins."
+              ],
+              zh: [
+                "如果只需要一小部分反射能力，可限制到具体模块或符号，减少元数据规模。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Runtime usage and validation", zh: "运行时调用与验证" },
+            code: {
+              title: {
+                en: "Reflection benchmark and gate",
+                zh: "反射基准与门禁"
+              },
+              lang: "bash",
+              snippet: "cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5\npython ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-report>.json"
+            },
+            paragraphs: {
+              en: [
+                "Always validate overhead against your own workload before enabling reflection in production-critical paths."
+              ],
+              zh: [
+                "在生产关键路径启用反射前，必须先用你的真实场景做开销验证。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: reflection is available, but controlled. Use auto/on/off modes to match your cost-performance goals.",
+          zh: "本章结论：反射可用但可控，用 auto/on/off 模式按成本目标灵活选择。"
+        }
+      },
+      {
+        id: "development-workflow",
+        title: {
+          en: "12. Daily Development Workflow",
+          zh: "12. 日常开发工作流"
+        },
+        summary: {
+          en: "This chapter gives a practical loop that new contributors can follow every day.",
+          zh: "本章给出一套可直接执行的日常开发循环，适合新同学快速上手。"
+        },
+        sections: [
+          {
+            heading: { en: "Recommended inner loop", zh: "推荐内循环" },
+            steps: {
+              en: [
+                "Edit one focused change.",
+                "Run `sgc check <file.sg>` first.",
+                "Run `sgc run <file.sg> -O 1` for behavior check.",
+                "When stable, run `sgc build <file.sg> -O 2`."
+              ],
+              zh: [
+                "一次只改一小块逻辑。",
+                "先跑 `sgc check <file.sg>`。",
+                "再跑 `sgc run <file.sg> -O 1` 验证行为。",
+                "稳定后再 `sgc build <file.sg> -O 2`。"
+              ]
+            }
+          },
+          {
+            heading: { en: "When to run benchmark suites", zh: "什么时候跑基准" },
+            bullets: {
+              en: [
+                "Any change touching frontend/parser/typeck/incremental pipeline.",
+                "Any change in runtime/interop/reflection path.",
+                "Before publishing performance claims in README/docs."
+              ],
+              zh: [
+                "改到前端、解析、类型检查、增量链路时必须跑。",
+                "改到运行时、互操作、反射路径时必须跑。",
+                "更新 README/文档里的性能结论前必须跑。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Common benchmark commands",
+                zh: "常用基准命令"
+              },
+              lang: "bash",
+              snippet: "python bench/scenario_matrix_bench.py\npython bench/advanced_pipeline_bench.py\npython bench/python_interop_bench.py"
+            }
+          },
+          {
+            heading: { en: "Contributor checklist", zh: "贡献者检查清单" },
+            steps: {
+              en: [
+                "Update docs for behavior changes.",
+                "Keep examples runnable.",
+                "Record benchmark evidence for performance-sensitive updates.",
+                "Commit with clear, scoped message."
+              ],
+              zh: [
+                "行为变化必须同步文档。",
+                "示例文件必须保持可运行。",
+                "性能相关改动必须附基准证据。",
+                "提交信息要清晰、范围明确。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: predictable workflow beats ad-hoc heroics. Keep each change small, verifiable, and documented.",
+          zh: "本章结论：稳定流程比“临场发挥”更可靠。每次改动都应小步、可验证、可追溯。"
+        }
+      },
+      {
+        id: "roadmap-and-learning-path",
+        title: {
+          en: "13. Suggested Learning Path",
+          zh: "13. 建议学习路径"
+        },
+        summary: {
+          en: "If you are new to Sengoo, follow this sequence to learn quickly without being overwhelmed.",
+          zh: "如果你刚接触 Sengoo，按这个顺序学习可以更快形成完整能力。"
+        },
+        sections: [
+          {
+            heading: { en: "Step-by-step sequence", zh: "分阶段学习顺序" },
+            steps: {
+              en: [
+                "Run `examples/01_hello.sg` and `examples/02_arithmetic.sg`.",
+                "Practice variables/arrays/loops with `03` to `05` examples.",
+                "Learn closure + condition + struct via `06` to `08`.",
+                "Read method call and reflection chapters after core syntax is stable."
+              ],
+              zh: [
+                "先跑 `examples/01_hello.sg` 和 `examples/02_arithmetic.sg`。",
+                "再通过 `03` 到 `05` 练变量、数组、循环。",
+                "用 `06` 到 `08` 学闭包、分支、结构体。",
+                "核心语法熟练后，再进入方法调用和反射章节。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Build a small real project", zh: "做一个小型真实项目" },
+            paragraphs: {
+              en: [
+                "A good starter project is a scoring/aggregation CLI: read simple inputs, compute scores, return summary stats.",
+                "Then add Python interop boundary to validate migration workflow."
+              ],
+              zh: [
+                "推荐从“评分/聚合”类小 CLI 项目开始：读取输入、计算分值、输出汇总统计。",
+                "随后增加 Python 互操作边界，验证迁移流程。"
+              ]
+            }
+          },
+          {
+            heading: { en: "How to continue deeper", zh: "如何继续深入" },
+            bullets: {
+              en: [
+                "Study compiler internals from `compiler/` and `tools/sgc`.",
+                "Track benchmark trends in the bench repository.",
+                "Participate in OpenSpec proposals for large architecture changes."
+              ],
+              zh: [
+                "从 `compiler/` 与 `tools/sgc` 继续看内部实现。",
+                "在 bench 仓库持续跟踪性能趋势。",
+                "参与 OpenSpec 提案，推动较大架构变更。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: learn by running real files first, then move to architecture and performance engineering.",
+          zh: "本章结论：先跑通真实代码，再逐步深入架构与性能工程。"
+        }
+      },
+      {
+        id: "advanced-loops",
+        title: {
+          en: "14. Advanced Loop Patterns",
+          zh: "14. 循环进阶：break/continue 与嵌套"
+        },
+        summary: {
+          en: "This chapter covers practical loop combinations for real logic: choosing loop form, controlled exit, and nested loop readability.",
+          zh: "本章讲真实开发常见的循环组合：如何选循环形式、如何控制退出、如何写可维护的嵌套循环。"
+        },
+        sections: [
+          {
+            heading: { en: "Choose `for` / `while` / `loop` by intent", zh: "按语义选择 `for` / `while` / `loop`" },
+            paragraphs: {
+              en: [
+                "`for` is best for iterating known collections.",
+                "`while` is best when loop count depends on a condition.",
+                "`loop` is best when you want explicit break-controlled flow."
+              ],
+              zh: [
+                "`for` 适合遍历已知集合。",
+                "`while` 适合循环次数由条件决定的场景。",
+                "`loop` 适合你想显式用 `break` 控制流程的场景。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Three loop forms in one file",
+                zh: "同文件中的三种循环形式"
+              },
+              lang: "sg",
+              snippet: "def sum_for() -> i64 {\n    let sum = 0;\n    for v in [1, 2, 3] {\n        sum = sum + v;\n    }\n    sum\n}\n\ndef count_while() -> i64 {\n    let i = 0;\n    while i < 3 {\n        i = i + 1;\n    }\n    i\n}\n\ndef spin_loop() -> i64 {\n    let i = 0;\n    loop {\n        i = i + 1;\n        if i > 2 { break; }\n    }\n    i\n}"
+            }
+          },
+          {
+            heading: { en: "Use `break` and `continue` deliberately", zh: "有意识地使用 `break` 和 `continue`" },
+            paragraphs: {
+              en: [
+                "Use `continue` for skip rules and `break` for early stop conditions.",
+                "Keep these rules near the top of the loop body for easier reading."
+              ],
+              zh: [
+                "`continue` 用来跳过当前迭代，`break` 用来提前结束循环。",
+                "建议把这类规则放在循环体前半段，读代码时更容易建立流程图。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Practical filter + early stop loop",
+                zh: "过滤 + 提前结束示例"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let total = 0;\n    for v in [1, 2, 3, 4, 5] {\n        if v == 2 { continue; }\n        if v == 5 { break; }\n        total = total + v;\n    }\n    total\n}"
+            }
+          },
+          {
+            heading: { en: "Nested loops without chaos", zh: "避免嵌套循环失控" },
+            bullets: {
+              en: [
+                "One loop level, one responsibility.",
+                "Name counters/accumulators clearly.",
+                "Keep break condition explicit."
+              ],
+              zh: [
+                "每一层循环只处理一类职责。",
+                "计数器和累加器变量命名要清晰。",
+                "退出条件必须写得直接、可定位。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Nested `while + loop` pattern",
+                zh: "嵌套 `while + loop` 写法"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let x = 0;\n    while x < 3 {\n        let y = 0;\n        loop {\n            y = y + 1;\n            if y > 2 { break; }\n        }\n        x = x + 1;\n    }\n    x\n}"
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: loop quality is about control-flow clarity, not only syntax correctness.",
+          zh: "本章结论：循环代码的质量关键在于控制流清晰，而不只是“语法能过”。"
+        }
+      },
+      {
+        id: "strings",
+        title: {
+          en: "15. Strings in Sengoo",
+          zh: "15. 字符串：当前可用能力与边界"
+        },
+        summary: {
+          en: "Sengoo supports core string operations today, but some expression combinations are still evolving. This chapter shows reliable usage first.",
+          zh: "Sengoo 当前已经支持核心字符串操作，但部分组合表达式仍在持续优化中。本章先给可稳定使用的写法。"
+        },
+        sections: [
+          {
+            heading: { en: "Reliable baseline: literal + variable + `.len()`", zh: "稳定基线：字面量、变量、`.len()`" },
+            paragraphs: {
+              en: [
+                "String literals and variable-bound strings are available.",
+                "Use `.len()` for basic length logic."
+              ],
+              zh: [
+                "字符串字面量和变量绑定字符串可用。",
+                "长度相关逻辑可直接使用 `.len()`。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Length and equality on variable string",
+                zh: "变量字符串的长度与比较"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let s = \"hello\";\n    if s == \"hello\" {\n        s.len()\n    } else {\n        0\n    }\n}"
+            }
+          },
+          {
+            heading: { en: "Concatenation support", zh: "字符串拼接支持" },
+            paragraphs: {
+              en: [
+                "Concatenation with `+` is available and lowered through runtime helpers.",
+                "For now, keep concatenation usage simple and validate with `sgc check` in your target scenario."
+              ],
+              zh: [
+                "可使用 `+` 做字符串拼接，底层会走运行时辅助函数。",
+                "当前阶段建议把拼接写法保持简单，并用 `sgc check` 针对你的场景先验证。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Simple concatenation example",
+                zh: "简单拼接示例"
+              },
+              lang: "sg",
+              snippet: "def main() -> i64 {\n    let joined = \"hello\" + \" world\";\n    0\n}"
+            }
+          },
+          {
+            heading: { en: "Practical string checklist", zh: "字符串实践清单" },
+            bullets: {
+              en: [
+                "Prefer clear literal/variable comparisons (`==`, `!=`).",
+                "Use `.len()` for deterministic control logic.",
+                "When building larger string pipelines, add check/benchmark verification early."
+              ],
+              zh: [
+                "优先使用清晰的字面量/变量比较（`==`、`!=`）。",
+                "长度逻辑优先用 `.len()`，行为更稳定。",
+                "字符串处理链稍复杂时，尽早加入 check/benchmark 验证。"
+              ]
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: start with the stable subset, then expand usage with compiler checks as your string logic grows.",
+          zh: "本章结论：先用稳定子集，再随着业务复杂度增加逐步扩展写法并持续校验。"
+        }
+      },
+      {
+        id: "oop-modeling",
+        title: {
+          en: "16. OOP-Style Modeling Today",
+          zh: "16. 面向对象风格：当前推荐写法"
+        },
+        summary: {
+          en: "Sengoo already supports multiple building blocks for object-style design: data structs, inherent impls, and traits. Use them with a stability-first mindset.",
+          zh: "Sengoo 已具备面向对象风格所需的多块能力：数据结构体、`impl` 方法、trait。建议采用“稳定优先”原则组合使用。"
+        },
+        sections: [
+          {
+            heading: { en: "Data modeling with `struct`", zh: "用 `struct` 建模数据" },
+            paragraphs: {
+              en: [
+                "Use structs to define clear data boundaries first.",
+                "Start from explicit fields before adding abstraction."
+              ],
+              zh: [
+                "先用结构体定义清晰的数据边界。",
+                "先把字段模型写清楚，再逐步增加抽象层。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Struct baseline",
+                zh: "结构体基础示例"
+              },
+              lang: "sg",
+              snippet: "struct Point {\n    x: i64,\n    y: i64,\n}\n\ndef main() -> i64 {\n    let p = Point { x: 10, y: 20 };\n    p.x + p.y\n}"
+            }
+          },
+          {
+            heading: { en: "Inherent methods with `impl`", zh: "使用 `impl` 定义固有方法" },
+            paragraphs: {
+              en: [
+                "Method style works well when behavior naturally belongs to a type.",
+                "Current examples are strongest on primitive types (`i64`, `bool`)."
+              ],
+              zh: [
+                "当行为天然属于类型本身时，方法风格通常最直观。",
+                "当前稳定样例主要集中在基础类型（`i64`、`bool`）。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Primitive inherent methods",
+                zh: "基础类型方法示例"
+              },
+              lang: "sg",
+              snippet: "impl i64 {\n    def abs(self) -> i64 {\n        if self < 0 { -self } else { self }\n    }\n}\n\ndef main() -> i64 {\n    let x = -21;\n    x.abs()\n}"
+            }
+          },
+          {
+            heading: { en: "Trait-based polymorphism", zh: "用 trait 做多态抽象" },
+            paragraphs: {
+              en: [
+                "Traits are the main abstraction mechanism for behavior contracts.",
+                "Default methods and override behavior are available."
+              ],
+              zh: [
+                "trait 是当前行为契约抽象的核心机制。",
+                "支持默认方法，也支持在 impl 中覆盖。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Trait + impl example",
+                zh: "trait + impl 示例"
+              },
+              lang: "sg",
+              snippet: "trait Score {\n    def score(self) -> i64 {\n        0\n    }\n}\n\nimpl Score for i64 {\n    def score(self) -> i64 {\n        self + 10\n    }\n}\n\ndef main() -> i64 {\n    let base: i64 = 5;\n    base.score()\n}"
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: in current Sengoo, trait-oriented design is the practical path for object-style abstraction.",
+          zh: "本章结论：在当前 Sengoo 里，面向对象抽象最实用的路径是以 trait 为核心。"
+        }
+      },
+      {
+        id: "inheritance-status",
+        title: {
+          en: "17. Inheritance: Current Status and Safer Alternatives",
+          zh: "17. 继承：当前状态与更稳替代"
+        },
+        summary: {
+          en: "Parser-level class/inheritance syntax exists, but production-grade semantics are still evolving. This chapter explains what to trust now.",
+          zh: "语法层面已有 class/inheritance 入口，但生产级语义仍在演进。本章说明当前可依赖范围。"
+        },
+        sections: [
+          {
+            heading: { en: "Syntax currently accepted by checker", zh: "当前可通过检查的继承语法" },
+            paragraphs: {
+              en: [
+                "The following style can pass `sgc check` in the current compiler.",
+                "Treat it as experimental capability, not guaranteed production contract."
+              ],
+              zh: [
+                "下面这类写法在当前编译器里可通过 `sgc check`。",
+                "建议将其视作实验能力，而不是稳定生产契约。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Class + extends syntax example",
+                zh: "class + extends 语法示例"
+              },
+              lang: "sg",
+              snippet: "class Animal {\n    age: i64;\n}\n\nclass Dog: Animal {\n    weight: i64;\n}\n\ndef main() -> i64 {\n    let d = Dog { age: 2, weight: 8 };\n    d.age + d.weight\n}"
+            }
+          },
+          {
+            heading: { en: "Current engineering recommendation", zh: "当前工程建议" },
+            bullets: {
+              en: [
+                "Use inheritance syntax only for experiments or parser-level validation.",
+                "For production features, prefer `struct + trait` design and explicit APIs.",
+                "Always verify with `sgc check` and real run tests for your target path."
+              ],
+              zh: [
+                "继承语法建议仅用于实验或语法层验证。",
+                "生产功能优先采用 `struct + trait` 与显式 API 设计。",
+                "关键路径必须同时通过 `sgc check` 和真实运行测试。"
+              ]
+            }
+          },
+          {
+            heading: { en: "Safer replacement pattern", zh: "更稳的替代模式" },
+            paragraphs: {
+              en: [
+                "Use explicit data + explicit behavior functions. This keeps behavior predictable across compiler changes."
+              ],
+              zh: [
+                "使用显式数据 + 显式行为函数，能在编译器演进期保持更高可预测性。"
+              ]
+            },
+            code: {
+              title: {
+                en: "Explicit behavior pipeline (stable style)",
+                zh: "显式行为管线（稳定风格）"
+              },
+              lang: "sg",
+              snippet: "struct DogData {\n    x: i64,\n    y: i64,\n}\n\ndef animal_age(x: i64) -> i64 {\n    x\n}\n\ndef dog_score(x: i64, y: i64) -> i64 {\n    animal_age(x) + y\n}\n\ndef main() -> i64 {\n    let d = DogData { x: 2, y: 8 };\n    dog_score(d.x, d.y)\n}"
+            }
+          }
+        ],
+        takeaway: {
+          en: "Takeaway: inheritance syntax exists, but treat trait-oriented and explicit behavior design as the stable engineering baseline today.",
+          zh: "本章结论：继承语法已存在，但当前稳定工程基线仍应是 trait 导向 + 显式行为设计。"
+        }
+      },
+      {
+        id: "function-interface",
+        group: "syntax",
+        title: { en: "Function Interface Design", zh: "函数接口设计" },
+        summary: {
+          en: "Stable function interfaces reduce refactor cost and improve incremental compile behavior.",
+          zh: "稳定函数接口能降低重构成本，也更利于增量编译。"
+        },
+        core: {
+          en: [
+            "Treat signatures as contracts even inside one module.",
+            "Prefer explicit return types and domain-oriented parameter names."
+          ],
+          zh: [
+            "即使在单模块内，也把签名当成契约。",
+            "优先显式返回类型和业务语义参数名。"
+          ]
+        },
+        checklist: {
+          en: [
+            "One function, one business responsibility.",
+            "Avoid hidden side effects in utility helpers.",
+            "Separate validation and computation."
+          ],
+          zh: [
+            "一函数一职责。",
+            "工具函数避免隐藏副作用。",
+            "把校验和计算分开。"
+          ]
+        },
+        exampleTitle: { en: "Contract-oriented function", zh: "契约导向函数示例" },
+        exampleLang: "sg",
+        example: "def compute_score(base: i64, bonus: i64) -> i64 {\n    base + bonus\n}\n\ndef main() -> i64 {\n    compute_score(40, 2)\n}",
+        practice: {
+          en: ["When changing signatures, run dependency-wide checks to detect impact scope."],
+          zh: ["修改签名后做依赖范围检查，尽早识别影响面。"]
+        },
+        takeaway: {
+          en: "Takeaway: good interfaces optimize both humans and compilers.",
+          zh: "本页结论：好接口同时优化“人”和“编译器”。"
+        }
+      },
+      {
+        id: "scope-shadowing",
+        group: "syntax",
+        title: { en: "Scope and Reassignment", zh: "作用域与重赋值" },
+        summary: {
+          en: "Many subtle bugs come from scope misunderstandings and scattered state updates.",
+          zh: "很多隐蔽 bug 来自作用域误判和分散状态更新。"
+        },
+        core: {
+          en: [
+            "Keep variable names stable inside one block unless shadowing is truly needed.",
+            "Centralize reassignment points to keep state transitions readable."
+          ],
+          zh: [
+            "同一块内尽量保持变量名稳定，谨慎做遮蔽。",
+            "重赋值位置要集中，保持状态推进可读。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Avoid same-name temporaries across nested blocks.",
+            "Prefer narrow scopes over giant function-local state.",
+            "Comment non-obvious assignments."
+          ],
+          zh: [
+            "避免嵌套块里同名临时变量。",
+            "优先小作用域，不要巨型局部状态。",
+            "不直观赋值要写注释。"
+          ]
+        },
+        exampleTitle: { en: "Safe reassignment style", zh: "安全重赋值风格" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let total = 0;\n    total = total + 3;\n    total = total + 7;\n    total\n}",
+        practice: {
+          en: ["If one variable changes in many places, extract helper functions."],
+          zh: ["一个变量修改点过多时，及时拆辅助函数。"]
+        },
+        takeaway: {
+          en: "Takeaway: explicit state transitions beat local tricks.",
+          zh: "本页结论：显式状态推进优于局部技巧。"
+        }
+      },
+      {
+        id: "closure-capture",
+        group: "syntax",
+        title: { en: "Closure Capture Patterns", zh: "闭包捕获模式" },
+        summary: {
+          en: "Closures are good for local transforms, but should remain short and purpose-specific.",
+          zh: "闭包适合局部变换，但应保持短小并聚焦职责。"
+        },
+        core: {
+          en: [
+            "Use closures for nearby logic where global naming hurts readability.",
+            "Extract into named functions once closure complexity grows."
+          ],
+          zh: [
+            "就近逻辑可用闭包，避免过度全局命名。",
+            "闭包复杂后及时提取为具名函数。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Limit closure body complexity.",
+            "Keep captured state obvious.",
+            "Benchmark hot closures in critical loops."
+          ],
+          zh: [
+            "限制闭包体复杂度。",
+            "让捕获状态一眼可见。",
+            "关键循环里的闭包要做基准。"
+          ]
+        },
+        exampleTitle: { en: "Closure with capture", zh: "带捕获闭包示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let base = 10;\n    let add = |x| base + x;\n    add(5)\n}",
+        practice: {
+          en: ["Do not hide critical policy branches inside anonymous closures."],
+          zh: ["关键业务分支不要藏在匿名闭包里。"]
+        },
+        takeaway: {
+          en: "Takeaway: closures are ergonomic tools, not architecture boundaries.",
+          zh: "本页结论：闭包是便捷工具，不是架构边界。"
+        }
+      },
+      {
+        id: "array-indexing-mutation",
+        group: "model",
+        title: { en: "Array Indexing and Mutation", zh: "数组索引与修改" },
+        summary: {
+          en: "Array code is easy to write and easy to get wrong. Build guardrails early.",
+          zh: "数组代码容易写也容易错，建议尽早建立防护习惯。"
+        },
+        core: {
+          en: [
+            "Keep indexing math explicit and local.",
+            "When mutation is involved, isolate write paths."
+          ],
+          zh: [
+            "索引计算保持显式和局部化。",
+            "涉及修改时隔离写路径。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use tiny arrays for edge-case checks.",
+            "Name index variables clearly.",
+            "Separate read and write loops in complex transforms."
+          ],
+          zh: [
+            "先用小数组覆盖边界场景。",
+            "索引变量命名清晰。",
+            "复杂转换中读写循环尽量分开。"
+          ]
+        },
+        exampleTitle: { en: "Index access baseline", zh: "索引访问基线示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let arr = [10, 20, 30];\n    arr[1]\n}",
+        practice: {
+          en: ["Benchmark array-heavy hot paths with realistic sizes."],
+          zh: ["数组热点路径要用真实规模做基准。"]
+        },
+        takeaway: {
+          en: "Takeaway: array correctness depends on indexing discipline.",
+          zh: "本页结论：数组正确性高度依赖索引纪律。"
+        }
+      },
+      {
+        id: "struct-guidelines",
+        group: "model",
+        title: { en: "Struct Design Guidelines", zh: "结构体设计指南" },
+        summary: {
+          en: "Structs should model domain data, not accidental transport containers.",
+          zh: "结构体应表达领域数据，而不是临时拼装容器。"
+        },
+        core: {
+          en: [
+            "Name fields by domain meaning, not temporary algorithm roles.",
+            "Keep struct shape stable once multiple modules depend on it."
+          ],
+          zh: [
+            "字段按业务语义命名，而非临时算法角色。",
+            "被多模块依赖后保持结构形状稳定。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Avoid over-wide structs in early versions.",
+            "Prefer explicit fields over generic placeholders.",
+            "Version shape changes carefully."
+          ],
+          zh: [
+            "早期避免超宽结构体。",
+            "优先显式字段，不要泛化占位。",
+            "结构变更要有版本意识。"
+          ]
+        },
+        exampleTitle: { en: "Domain struct baseline", zh: "领域结构体基线" },
+        exampleLang: "sg",
+        example: "struct Point {\n    x: i64,\n    y: i64,\n}\n\ndef main() -> i64 {\n    let p = Point { x: 10, y: 20 };\n    p.x + p.y\n}",
+        practice: {
+          en: ["When schema changes frequently, isolate converters at boundaries."],
+          zh: ["结构频繁变动时，在边界层单独维护转换器。"]
+        },
+        takeaway: {
+          en: "Takeaway: stable data models accelerate downstream workflows.",
+          zh: "本页结论：稳定数据模型会加速所有下游流程。"
+        }
+      },
+      {
+        id: "impl-method-guidelines",
+        group: "model",
+        title: { en: "Inherent Methods with impl", zh: "impl 固有方法实践" },
+        summary: {
+          en: "Inherent methods improve readability when behavior naturally belongs to one type.",
+          zh: "当行为天然属于某类型时，固有方法可显著提升可读性。"
+        },
+        core: {
+          en: [
+            "Use method style when call sites read naturally.",
+            "Prefer tiny methods that compose with functions."
+          ],
+          zh: [
+            "当调用读起来更自然时优先方法风格。",
+            "方法保持短小，便于与函数组合。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Keep one behavior per method.",
+            "Avoid hidden mutation semantics.",
+            "Name methods with clear verbs."
+          ],
+          zh: [
+            "每个方法只做一个行为。",
+            "避免隐藏式状态修改。",
+            "方法名使用清晰动词。"
+          ]
+        },
+        exampleTitle: { en: "Primitive method style", zh: "基础类型方法风格" },
+        exampleLang: "sg",
+        example: "impl i64 {\n    def abs(self) -> i64 {\n        if self < 0 { -self } else { self }\n    }\n}\n\ndef main() -> i64 {\n    let x = -21;\n    x.abs()\n}",
+        practice: {
+          en: ["After adding methods, run sgc check to catch ambiguity early."],
+          zh: ["新增方法后跑 sgc check，尽早发现歧义。"]
+        },
+        takeaway: {
+          en: "Takeaway: method style is about readability consistency.",
+          zh: "本页结论：方法风格的核心是可读性一致。"
+        }
+      },
+      {
+        id: "trait-contract-default",
+        group: "model",
+        title: { en: "Trait Contracts and Defaults", zh: "Trait 契约与默认实现" },
+        summary: {
+          en: "Traits provide behavior contracts and default methods for scalable polymorphism.",
+          zh: "Trait 提供行为契约与默认实现，是可扩展多态的核心机制。"
+        },
+        core: {
+          en: [
+            "Start from contract-first trait definitions.",
+            "Use defaults to reduce boilerplate while preserving override freedom."
+          ],
+          zh: [
+            "trait 设计建议先定义契约再填实现。",
+            "默认方法用于减少样板并保留覆盖能力。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Mark required vs defaulted methods clearly.",
+            "Keep trait scope focused.",
+            "Avoid kitchen-sink traits."
+          ],
+          zh: [
+            "明确标注必须实现与默认方法。",
+            "trait 作用域保持聚焦。",
+            "避免“全家桶”超大 trait。"
+          ]
+        },
+        exampleTitle: { en: "Trait with default and override", zh: "带默认与覆盖的 trait 示例" },
+        exampleLang: "sg",
+        example: "trait Score {\n    def score(self) -> i64 {\n        0\n    }\n}\n\nimpl Score for i64 {\n    def score(self) -> i64 {\n        self + 10\n    }\n}\n\ndef main() -> i64 {\n    let base: i64 = 5;\n    base.score()\n}",
+        practice: {
+          en: ["Treat trait changes as API changes and communicate them explicitly."],
+          zh: ["trait 变更视作 API 变更，必须显式沟通。"]
+        },
+        takeaway: {
+          en: "Takeaway: trait-first abstraction is the practical OOP path in current Sengoo.",
+          zh: "本页结论：当前 Sengoo 的实用抽象路径是 trait-first。"
+        }
+      },
+      {
+        id: "class-inheritance-status",
+        group: "model",
+        title: { en: "Class and Inheritance Status", zh: "Class 与继承当前状态" },
+        summary: {
+          en: "Class/extends syntax exists in the pipeline, but production-grade semantics are still evolving.",
+          zh: "class/extends 语法已存在，但生产级语义仍在演进。"
+        },
+        core: {
+          en: [
+            "Use class/inheritance syntax with caution and explicit validation.",
+            "For stable production modeling, prefer struct + trait combinations."
+          ],
+          zh: [
+            "使用 class/继承时保持谨慎并做显式验证。",
+            "生产建模优先 struct + trait 组合。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use sgc check for parser/type verification.",
+            "Verify runtime paths with real workloads.",
+            "Keep migration fallback path ready."
+          ],
+          zh: [
+            "先用 sgc check 做语法与类型验证。",
+            "关键路径需用真实负载验证运行行为。",
+            "保留可回退建模方案。"
+          ]
+        },
+        exampleTitle: { en: "Current class syntax shape", zh: "当前 class 语法形态" },
+        exampleLang: "sg",
+        example: "class Animal {\n    age: i64;\n}\n\nclass Dog: Animal {\n    weight: i64;\n}\n\ndef main() -> i64 {\n    let d = Dog { age: 2, weight: 8 };\n    d.age + d.weight\n}",
+        practice: {
+          en: ["For critical paths, maintain an equivalent struct + trait fallback design."],
+          zh: ["核心路径建议同步维护 struct + trait 备选实现。"]
+        },
+        takeaway: {
+          en: "Takeaway: inheritance syntax is promising, but stability-first teams stay trait-oriented today.",
+          zh: "本页结论：继承有潜力，但稳定优先团队当前仍应 trait 导向。"
+        }
+      },
+      {
+        id: "if-expression-pattern",
+        group: "control",
+        title: { en: "If as Expression", zh: "if 作为表达式" },
+        summary: {
+          en: "Use if/else as value-producing expression to keep decision and result together.",
+          zh: "把 if/else 当作产值表达式，可让决策与结果更紧凑。"
+        },
+        core: {
+          en: [
+            "Both branches should produce compatible types.",
+            "Keep branch bodies short and move heavy logic into helpers."
+          ],
+          zh: [
+            "两个分支应返回兼容类型。",
+            "分支体保持短小，重逻辑下沉辅助函数。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Prefer expression style for short classification logic.",
+            "Avoid deep branch trees in one function.",
+            "Use clear branch intent naming."
+          ],
+          zh: [
+            "短分类逻辑优先表达式风格。",
+            "避免单函数深层分支树。",
+            "分支意图命名要清楚。"
+          ]
+        },
+        exampleTitle: { en: "Classification expression", zh: "分类表达式示例" },
+        exampleLang: "sg",
+        example: "def classify(x: i64) -> i64 {\n    if x > 0 { 1 } else { 0 }\n}",
+        practice: {
+          en: ["When branch rules grow, separate policy from execution."],
+          zh: ["分支规则变多后拆分“策略定义”和“执行”。"]
+        },
+        takeaway: {
+          en: "Takeaway: expression-style branching keeps flow compact and testable.",
+          zh: "本页结论：表达式分支让流程紧凑且易测。"
+        }
+      },
+      {
+        id: "for-loop-best-practice",
+        group: "control",
+        title: { en: "For-in Loop Patterns", zh: "for-in 循环模式" },
+        summary: {
+          en: "For-in loops are ideal for predictable collection traversal and aggregation.",
+          zh: "for-in 非常适合可预测集合遍历与聚合。"
+        },
+        core: {
+          en: [
+            "Use named accumulators for clarity.",
+            "Keep loop body deterministic and side-effect-light."
+          ],
+          zh: [
+            "使用具名累加器提高可读性。",
+            "循环体尽量保持确定性，减少副作用。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Initialize accumulators explicitly.",
+            "Place skip rules near top of loop body.",
+            "Extract heavy per-item logic into functions."
+          ],
+          zh: [
+            "累加器显式初始化。",
+            "跳过规则放在循环体前部。",
+            "单项重逻辑提取函数。"
+          ]
+        },
+        exampleTitle: { en: "Array aggregation pattern", zh: "数组聚合模式示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let total = 0;\n    for v in [1, 2, 3, 4] {\n        total = total + v;\n    }\n    total\n}",
+        practice: {
+          en: ["Benchmark representative loop sizes, not tiny arrays only."],
+          zh: ["基准要覆盖真实规模，不只测小数组。"]
+        },
+        takeaway: {
+          en: "Takeaway: for-in is the default loop for collection data paths.",
+          zh: "本页结论：集合数据路径默认优先 for-in。"
+        }
+      },
+      {
+        id: "while-loop-best-practice",
+        group: "control",
+        title: { en: "While Loop Patterns", zh: "while 循环模式" },
+        summary: {
+          en: "Use while when iteration count is condition-driven and unknown upfront.",
+          zh: "循环次数由条件决定且事前未知时，用 while。"
+        },
+        core: {
+          en: [
+            "Keep loop condition obvious and quickly readable.",
+            "Update control variables in one clear place."
+          ],
+          zh: [
+            "循环条件要一眼可读。",
+            "控制变量更新点尽量唯一且显式。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Guard against accidental infinite loops.",
+            "Use branch checkpoints for observability.",
+            "Keep loop body shallow."
+          ],
+          zh: [
+            "防止意外死循环。",
+            "关键路径设置可观测检查点。",
+            "循环体保持浅层。"
+          ]
+        },
+        exampleTitle: { en: "Condition-driven iteration", zh: "条件驱动迭代示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let i = 0;\n    while i < 5 {\n        i = i + 1;\n    }\n    i\n}",
+        practice: {
+          en: ["Prefer explicit counters over hidden state transitions."],
+          zh: ["优先显式计数器，不要隐藏状态推进。"]
+        },
+        takeaway: {
+          en: "Takeaway: with while loops, exit-condition clarity is everything.",
+          zh: "本页结论：while 的关键是退出条件清晰。"
+        }
+      },
+      {
+        id: "break-continue-playbook",
+        group: "control",
+        title: { en: "Break and Continue Playbook", zh: "break 与 continue 手册" },
+        summary: {
+          en: "Use break/continue for explicit policy shortcuts, not random jumps.",
+          zh: "break/continue 应用于显式策略分流，而不是随机跳转。"
+        },
+        core: {
+          en: [
+            "Place stop/skip rules at top of loop body.",
+            "Name skip reasons when policies are non-trivial."
+          ],
+          zh: [
+            "终止/跳过条件放在循环体前半段。",
+            "策略复杂时给跳过原因命名。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Keep break policy focused.",
+            "Avoid too many continue exits.",
+            "Extract policy functions as branch count grows."
+          ],
+          zh: [
+            "保持 break 策略聚焦。",
+            "避免过多 continue 出口。",
+            "分支增多后及时提取策略函数。"
+          ]
+        },
+        exampleTitle: { en: "Skip and stop policy loop", zh: "跳过与终止策略示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let total = 0;\n    for v in [1, 2, 3, 4, 5] {\n        if v == 2 { continue; }\n        if v == 5 { break; }\n        total = total + v;\n    }\n    total\n}",
+        practice: {
+          en: ["Add tests that separately cover skip and break branches."],
+          zh: ["测试里显式覆盖 skip 和 break 两类分支。"]
+        },
+        takeaway: {
+          en: "Takeaway: disciplined break/continue usage makes loops auditable.",
+          zh: "本页结论：有纪律地使用 break/continue，循环才可审计。"
+        }
+      },
+      {
+        id: "nested-loop-refactor",
+        group: "control",
+        title: { en: "Nested Loop Refactor", zh: "嵌套循环重构" },
+        summary: {
+          en: "Nested loops are inevitable; unstructured nested loops are optional.",
+          zh: "嵌套循环不可避免，但混乱嵌套可以避免。"
+        },
+        core: {
+          en: [
+            "Assign one responsibility per loop level.",
+            "Extract inner logic when readability drops."
+          ],
+          zh: [
+            "每层循环只承担一类职责。",
+            "当可读性下降时提取内层逻辑。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Keep nesting depth shallow where possible.",
+            "Use helper functions for inner blocks.",
+            "Make break targets obvious."
+          ],
+          zh: [
+            "尽量降低嵌套深度。",
+            "内层块使用辅助函数。",
+            "退出目标要明确。"
+          ]
+        },
+        exampleTitle: { en: "Nested while + loop baseline", zh: "嵌套 while + loop 基线" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let x = 0;\n    while x < 3 {\n        let y = 0;\n        loop {\n            y = y + 1;\n            if y > 2 { break; }\n        }\n        x = x + 1;\n    }\n    x\n}",
+        practice: {
+          en: ["Refactor any nested block that cannot be summarized in one sentence."],
+          zh: ["无法一句话解释的嵌套块建议立即重构。"]
+        },
+        takeaway: {
+          en: "Takeaway: the best nested loop structure is self-explanatory.",
+          zh: "本页结论：最好的嵌套循环是结构本身就能解释自己。"
+        }
+      },
+      {
+        id: "string-basics",
+        group: "runtime",
+        title: { en: "String Basics: len and compare", zh: "字符串基础：长度与比较" },
+        summary: {
+          en: "String literals, equality checks, and len are the stable baseline for text logic.",
+          zh: "字符串字面量、比较与长度是当前文本逻辑的稳定基线。"
+        },
+        core: {
+          en: [
+            "Prefer direct equality checks for branch decisions.",
+            "Use len for deterministic control conditions."
+          ],
+          zh: [
+            "分支判断优先直接相等比较。",
+            "控制条件优先使用长度。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Check both equal and non-equal paths.",
+            "Keep empty-string edge cases in tests.",
+            "Avoid mixing parsing and policy in one function."
+          ],
+          zh: [
+            "测试覆盖相等和不相等路径。",
+            "加入空字符串边界测试。",
+            "文本解析与策略判断不要混在同函数。"
+          ]
+        },
+        exampleTitle: { en: "String compare baseline", zh: "字符串比较基线示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let s = \"hello\";\n    if s == \"hello\" {\n        s.len()\n    } else {\n        0\n    }\n}",
+        practice: {
+          en: ["For production text paths, benchmark realistic payload sizes."],
+          zh: ["生产文本路径建议用真实长度分布做基准。"]
+        },
+        takeaway: {
+          en: "Takeaway: string reliability starts with a stable small subset.",
+          zh: "本页结论：字符串可靠性从稳定小子集开始。"
+        }
+      },
+      {
+        id: "string-concat-caveat",
+        group: "runtime",
+        title: { en: "String Concatenation Boundaries", zh: "字符串拼接边界" },
+        summary: {
+          en: "Concatenation is supported, but complex chained usage should be validated in your exact scenario.",
+          zh: "拼接能力可用，但复杂链式写法需在你的场景中验证。"
+        },
+        core: {
+          en: [
+            "Keep concatenation expressions simple and observable.",
+            "Validate downstream behavior after concatenation."
+          ],
+          zh: [
+            "拼接表达式保持简单可观测。",
+            "拼接后验证下游行为是否符合预期。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Run sgc check after text pipeline changes.",
+            "Add regression tests for concat-heavy paths.",
+            "Avoid deeply chained concatenation in one line."
+          ],
+          zh: [
+            "文本管线改动后先跑 sgc check。",
+            "拼接密集路径加回归测试。",
+            "避免单行超长链式拼接。"
+          ]
+        },
+        exampleTitle: { en: "Simple concat example", zh: "简单拼接示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let joined = \"hello\" + \" world\";\n    0\n}",
+        practice: {
+          en: ["Promote complex text assembly to dedicated utility layers."],
+          zh: ["复杂文本拼装建议上提到专门工具层。"]
+        },
+        takeaway: {
+          en: "Takeaway: keep concatenation explicit and test-backed until fully mature.",
+          zh: "本页结论：在管线完全成熟前，拼接要保持显式并有测试兜底。"
+        }
+      },
+      {
+        id: "reflection-playbook",
+        group: "runtime",
+        title: { en: "Reflection Usage Playbook", zh: "反射使用手册" },
+        summary: {
+          en: "Reflection is available with controllable cost; choose mode by workload needs.",
+          zh: "反射能力可用且成本可控，应按负载需求选择模式。"
+        },
+        core: {
+          en: [
+            "Default mode is auto; reflection activates when imports request it.",
+            "Use explicit on/off for benchmark-driven policy control."
+          ],
+          zh: [
+            "默认 auto 模式会在检测到导入时启用反射。",
+            "做性能策略时可显式 on/off。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use module/symbol filters for smaller metadata.",
+            "Benchmark reflection overhead against real latency budgets.",
+            "Gate reflection regressions in CI."
+          ],
+          zh: [
+            "用模块/符号过滤缩小元数据规模。",
+            "用真实延迟预算评估反射开销。",
+            "在 CI 增加反射回归门禁。"
+          ]
+        },
+        exampleTitle: { en: "Reflection control CLI", zh: "反射控制命令" },
+        exampleLang: "bash",
+        example: "sgc build examples/09_method_call.sg -O 2 --reflect=on \\\n  --reflect-module examples/09_method_call.sg \\\n  --reflect-symbol examples/09_method_call.sg::main",
+        practice: {
+          en: ["Treat reflection flags as deployment policy knobs, not random options."],
+          zh: ["把反射开关当作部署策略参数管理。"]
+        },
+        takeaway: {
+          en: "Takeaway: reflection should be intentional, measurable, and scoped.",
+          zh: "本页结论：反射要有意图、可度量、可控范围。"
+        }
+      },
+      {
+        id: "python-interop-playbook",
+        group: "runtime",
+        title: { en: "Python Interop Workflow", zh: "Python 互操作工作流" },
+        summary: {
+          en: "Interop lets teams migrate hotspots incrementally instead of rewriting full systems.",
+          zh: "互操作让团队可按热点渐进迁移，而非一次性重写全系统。"
+        },
+        core: {
+          en: [
+            "Keep orchestration in Python and move compute hotspots to Sengoo.",
+            "Define stable cross-language contracts before migration."
+          ],
+          zh: [
+            "保留 Python 编排层，把计算热点迁到 Sengoo。",
+            "迁移前先定义稳定跨语言契约。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Maintain parity tests between Python and Sengoo outputs.",
+            "Measure call overhead and batch behavior.",
+            "Roll out via feature flags."
+          ],
+          zh: [
+            "维护 Python 与 Sengoo 的结果一致性测试。",
+            "测量调用开销和批量行为。",
+            "通过特性开关灰度上线。"
+          ]
+        },
+        exampleTitle: { en: "Interop benchmark command", zh: "互操作基准命令" },
+        exampleLang: "bash",
+        example: "python bench/python_interop_bench.py --calls 5000 --samples 5 --warmup 1",
+        practice: {
+          en: ["Use workload-shaped benchmark inputs, not only synthetic loops."],
+          zh: ["基准输入应贴近业务形态，不只跑合成循环。"]
+        },
+        takeaway: {
+          en: "Takeaway: interop is a migration strategy, not just a benchmark trick.",
+          zh: "本页结论：互操作是迁移战略，不是基准技巧。"
+        }
+      },
+      {
+        id: "check-run-build-tree",
+        group: "tooling",
+        title: { en: "check / run / build Decision Tree", zh: "check / run / build 决策树" },
+        summary: {
+          en: "Most development loops can be standardized by choosing the right command per phase.",
+          zh: "日常开发效率很大程度取决于“阶段对应命令”的选择。"
+        },
+        core: {
+          en: [
+            "Use check first for fast syntax/type feedback.",
+            "Use run for behavior verification.",
+            "Use build for artifact and release validation."
+          ],
+          zh: [
+            "先 check 获取快速语法/类型反馈。",
+            "run 用于行为验证。",
+            "build 用于产物与发布校验。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Do not skip check in large refactors.",
+            "Reserve release builds for stable checkpoints.",
+            "Use force rebuild only when cache suspicion is high."
+          ],
+          zh: [
+            "大重构不要跳过 check。",
+            "发布构建放在稳定检查点执行。",
+            "仅在缓存可疑时使用强制重建。"
+          ]
+        },
+        exampleTitle: { en: "Command sequence baseline", zh: "命令顺序基线" },
+        exampleLang: "bash",
+        example: "sgc check examples/05_loop.sg\nsgc run examples/05_loop.sg -O 1\nsgc build examples/05_loop.sg -O 2",
+        practice: {
+          en: ["Automate this sequence with local scripts to reduce manual mistakes."],
+          zh: ["建议用本地脚本封装这套顺序，减少手动误操作。"]
+        },
+        takeaway: {
+          en: "Takeaway: command discipline directly impacts iteration speed.",
+          zh: "本页结论：命令纪律直接决定迭代速度。"
+        }
+      },
+      {
+        id: "emit-llvm-debug",
+        group: "tooling",
+        title: { en: "LLVM IR Inspection", zh: "LLVM IR 观察与调试" },
+        summary: {
+          en: "When behavior or performance is suspicious, IR output is your closest ground truth.",
+          zh: "当行为或性能可疑时，IR 是最接近真实后端行为的证据。"
+        },
+        core: {
+          en: [
+            "Use emit-llvm to inspect generated IR.",
+            "Check whether expected calls/branches appear in output."
+          ],
+          zh: [
+            "通过 emit-llvm 查看生成 IR。",
+            "重点检查关键调用与分支是否按预期出现。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Compare before/after IR when optimizing.",
+            "Keep IR snapshots for regression investigations.",
+            "Correlate IR changes with benchmark deltas."
+          ],
+          zh: [
+            "优化前后做 IR 对比。",
+            "关键版本保留 IR 快照用于回归分析。",
+            "把 IR 变化和基准变化关联分析。"
+          ]
+        },
+        exampleTitle: { en: "IR generation command", zh: "IR 生成命令" },
+        exampleLang: "bash",
+        example: "sgc build examples/05_loop.sg -O 2 --emit-llvm",
+        practice: {
+          en: ["Keep one known-good IR sample per core benchmark scenario."],
+          zh: ["核心基准场景建议保留一份已知正确 IR 样本。"]
+        },
+        takeaway: {
+          en: "Takeaway: IR literacy improves both correctness and speed debugging.",
+          zh: "本页结论：掌握 IR 可同时提升正确性与性能排查能力。"
+        }
+      },
+      {
+        id: "incremental-daemon",
+        group: "tooling",
+        title: { en: "Incremental Cache and Daemon", zh: "增量缓存与守护进程" },
+        summary: {
+          en: "Warm compiler state is a major productivity lever in iterative development.",
+          zh: "在高频迭代中，热状态编译是效率杠杆。"
+        },
+        core: {
+          en: [
+            "Incremental cache reduces repeated rebuild cost.",
+            "Daemon mode further reduces process startup overhead."
+          ],
+          zh: [
+            "增量缓存减少重复重建成本。",
+            "守护进程模式进一步降低进程启动开销。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use daemon mode in long local sessions.",
+            "Keep force rebuild as fallback diagnostics.",
+            "Monitor cache hit and miss patterns."
+          ],
+          zh: [
+            "长时间本地开发建议启用 daemon。",
+            "强制重建作为诊断兜底。",
+            "关注缓存命中与失配模式。"
+          ]
+        },
+        exampleTitle: { en: "Daemon workflow commands", zh: "daemon 工作流命令" },
+        exampleLang: "bash",
+        example: "sgc daemon --addr 127.0.0.1:48765\nsgc run examples/05_loop.sg --daemon --daemon-addr 127.0.0.1:48765",
+        practice: {
+          en: ["Record telemetry snapshots when tuning incremental heuristics."],
+          zh: ["调优增量策略时建议记录关键遥测快照。"]
+        },
+        takeaway: {
+          en: "Takeaway: cache plus daemon forms the daily feedback accelerator.",
+          zh: "本页结论：cache + daemon 是日常反馈加速器。"
+        }
+      },
+      {
+        id: "benchmark-repro",
+        group: "tooling",
+        title: { en: "Benchmark Reproducibility", zh: "基准可复现流程" },
+        summary: {
+          en: "Performance claims are only useful when others can reproduce them.",
+          zh: "不能复现的性能结论基本没有工程价值。"
+        },
+        core: {
+          en: [
+            "Store benchmark outputs with timestamps and hardware assumptions.",
+            "Document exact command lines for all published numbers."
+          ],
+          zh: [
+            "基准输出要附时间戳和硬件前提。",
+            "公开性能数字必须附完整命令。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Separate smoke and full suites.",
+            "Track regressions with soft/hard gates.",
+            "Keep raw JSON and summary tables together."
+          ],
+          zh: [
+            "区分 smoke 与 full 套件。",
+            "用 soft/hard 门禁跟踪回退。",
+            "原始 JSON 与汇总表同时保存。"
+          ]
+        },
+        exampleTitle: { en: "Common benchmark commands", zh: "常用基准命令" },
+        exampleLang: "bash",
+        example: "python bench/scenario_matrix_bench.py\npython bench/advanced_pipeline_bench.py\npython bench/python_interop_bench.py",
+        practice: {
+          en: ["When publishing numbers, include summary and raw file paths."],
+          zh: ["发布性能数字时同时附概要与原始文件路径。"]
+        },
+        takeaway: {
+          en: "Takeaway: reproducibility is the foundation of trustworthy optimization.",
+          zh: "本页结论：可复现性是可信优化的基础。"
+        }
+      },
+      {
+        id: "diagnostics-triage",
+        group: "tooling",
+        title: { en: "Diagnostics and Error Triage", zh: "诊断与错误分流" },
+        summary: {
+          en: "A consistent triage flow turns compiler errors into quick actionable fixes.",
+          zh: "一致分流流程能把编译错误快速转为可执行修复。"
+        },
+        core: {
+          en: [
+            "Classify errors first: syntax, type, lowering, codegen, runtime.",
+            "Fix from upstream stage to downstream stage."
+          ],
+          zh: [
+            "先分类错误：语法、类型、lowering、codegen、运行时。",
+            "修复顺序从上游阶段到下游阶段。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use minimal reproductions for hard failures.",
+            "Capture failing source snippets in issue reports.",
+            "Keep one known-good baseline per subsystem."
+          ],
+          zh: [
+            "复杂故障先做最小复现。",
+            "问题单附失败源码片段。",
+            "每个子系统保留已知正常基线。"
+          ]
+        },
+        exampleTitle: { en: "First-step diagnostic command", zh: "第一步诊断命令" },
+        exampleLang: "bash",
+        example: "sgc check <file.sg>",
+        practice: {
+          en: ["If check passes but run fails, prioritize backend/codegen investigation."],
+          zh: ["若 check 过而 run 失败，优先排查后端/codegen。"]
+        },
+        takeaway: {
+          en: "Takeaway: triage order matters more than brute-force debugging.",
+          zh: "本页结论：排查顺序比蛮力调试更重要。"
+        }
+      },
+      {
+        id: "workspace-layout",
+        group: "tooling",
+        title: { en: "Workspace Layout and File Roles", zh: "工作区结构与文件职责" },
+        summary: {
+          en: "Knowing subsystem location accelerates debugging and feature extension.",
+          zh: "知道每个子系统位置，能明显加快排错和扩展速度。"
+        },
+        core: {
+          en: [
+            "Compiler, runtime, and tools are separate concerns.",
+            "Keep docs and examples synchronized with real behavior."
+          ],
+          zh: [
+            "编译器、运行时、工具链是分层关注点。",
+            "文档和示例必须与真实行为同步。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use examples as runnable learning surface.",
+            "Treat docs as user-facing contract.",
+            "Keep command docs close to tool source."
+          ],
+          zh: [
+            "examples 作为可运行学习面。",
+            "docs 视作用户侧契约文档。",
+            "工具命令文档尽量靠近源码。"
+          ]
+        },
+        exampleTitle: { en: "High-level repository map", zh: "仓库高层结构图" },
+        exampleLang: "text",
+        example: "Sengoo/\n|-- compiler/\n|-- runtime/\n|-- tools/\n|-- examples/\n`-- docs/",
+        practice: {
+          en: ["Before coding, decide subsystem boundary for each new feature."],
+          zh: ["新功能动手前先决定落在哪个子系统边界。"]
+        },
+        takeaway: {
+          en: "Takeaway: good repository topology shortens every debugging loop.",
+          zh: "本页结论：好的仓库拓扑会缩短所有调试回路。"
+        }
+      },
+      {
+        id: "contributor-workflow",
+        group: "tooling",
+        title: { en: "Contributor Workflow and Quality Bar", zh: "贡献流程与质量门槛" },
+        summary: {
+          en: "A fast-moving language project needs clear quality gates to stay healthy.",
+          zh: "快速演进的语言项目必须有清晰质量门槛。"
+        },
+        core: {
+          en: [
+            "Keep changes scoped and test-backed.",
+            "Update docs whenever behavior changes."
+          ],
+          zh: [
+            "改动保持小范围并有测试支撑。",
+            "行为变化必须同步文档。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Run check/run/benchmark where applicable.",
+            "Attach evidence for performance claims.",
+            "Write clear commit messages with scope."
+          ],
+          zh: [
+            "按需执行 check/run/benchmark。",
+            "性能结论必须附证据。",
+            "提交信息要清晰并标注范围。"
+          ]
+        },
+        exampleTitle: { en: "Minimal contributor loop", zh: "最小贡献循环" },
+        exampleLang: "text",
+        example: "1) Implement small change\n2) Run validation\n3) Update docs\n4) Commit with scope\n5) Push and review",
+        practice: {
+          en: ["Prefer multiple small PRs over one giant PR."],
+          zh: ["优先多个小 PR，不要单个超大 PR。"]
+        },
+        takeaway: {
+          en: "Takeaway: quality gates keep iteration speed sustainable.",
+          zh: "本页结论：质量门禁是可持续迭代速度的保障。"
+        }
+      }
+    ];
 
-      document.querySelectorAll("main section[id]").forEach((section) => observer.observe(section));
+    const TOPIC_GROUPS = {
+      syntax: { en: "Syntax Deep Dive", zh: "语法深入" },
+      model: { en: "Data Modeling", zh: "数据建模" },
+      control: { en: "Control Flow Deep Dive", zh: "控制流深入" },
+      runtime: { en: "Runtime and Interop", zh: "运行时与互操作" },
+      tooling: { en: "Engineering Workflow", zh: "工程流程" }
+    };
+
+    const EXTRA_TOPIC_SPECS = [
+      {
+        id: "syntax-comments",
+        group: "syntax",
+        title: { en: "Comments and Formatting", zh: "注释与格式规范" },
+        summary: {
+          en: "Readable code scales better than clever code. This page gives a practical style baseline for teams.",
+          zh: "可读代码比“炫技代码”更能扩展。本页给出团队可执行的风格基线。"
+        },
+        core: {
+          en: [
+            "Use comments to explain intent, not to restate obvious syntax.",
+            "Keep one thought per line in early-stage modules to reduce debugging cost."
+          ],
+          zh: [
+            "注释应该解释“为什么这样做”，而不是重复表面语法。",
+            "在早期模块里尽量一行一意图，降低调试成本。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Prefer short functions over long narrative blocks.",
+            "Keep naming aligned with domain terms.",
+            "Use semicolons consistently for intermediate statements."
+          ],
+          zh: [
+            "短函数优先于长段落式逻辑。",
+            "命名与业务术语保持一致。",
+            "中间语句统一使用分号。"
+          ]
+        },
+        exampleTitle: { en: "Style baseline snippet", zh: "风格基线示例" },
+        exampleLang: "sg",
+        example: "// compute a stable score for one record\ndef score(base: i64, bonus: i64) -> i64 {\n    let result = base + bonus;\n    result\n}",
+        practice: {
+          en: [
+            "Create a formatting checklist in your repository and enforce it in code review.",
+            "Update comments whenever behavior changes to avoid stale documentation."
+          ],
+          zh: [
+            "在仓库里维护格式检查清单，并在 Code Review 中执行。",
+            "行为变化后同步更新注释，避免“过期文档”。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: formatting is not cosmetic; it is a maintenance multiplier.",
+          zh: "本页结论：格式不是装饰，而是可维护性的放大器。"
+        }
+      },
+      {
+        id: "literal-semantics",
+        group: "syntax",
+        title: { en: "Literal Forms and Value Semantics", zh: "字面量与值语义" },
+        summary: {
+          en: "Understand numeric, boolean, and string literals as the base vocabulary of every program.",
+          zh: "数字、布尔、字符串字面量是所有程序的基础词汇。"
+        },
+        core: {
+          en: [
+            "Start with explicit value construction before introducing abstractions.",
+            "Keep boundary values (0, negative, empty string) in mind while writing conditions."
+          ],
+          zh: [
+            "先把值构造写清楚，再引入抽象。",
+            "写条件时始终考虑边界值（0、负数、空字符串）。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use i64 consistently in arithmetic-heavy code paths.",
+            "Use bool conditions for control decisions.",
+            "Keep literal values close to where they are consumed."
+          ],
+          zh: [
+            "计算密集路径统一使用 i64。",
+            "控制分支尽量用 bool 表达式。",
+            "字面量尽量靠近使用位置。"
+          ]
+        },
+        exampleTitle: { en: "Literal composition", zh: "字面量组合示例" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let count = 10;\n    let enabled = true;\n    let name = \"sengoo\";\n    if enabled && name == \"sengoo\" { count } else { 0 }\n}",
+        practice: {
+          en: [
+            "Write explicit tests for edge literals before optimizing.",
+            "Treat literal-heavy business rules as configuration candidates."
+          ],
+          zh: [
+            "在优化之前先为边界字面量写显式测试。",
+            "字面量密集的业务规则可考虑配置化。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: precise literal usage prevents many early logic bugs.",
+          zh: "本页结论：字面量使用精准，能减少大量早期逻辑错误。"
+        }
+      },
+      {
+        id: "operator-precedence",
+        group: "syntax",
+        title: { en: "Operators and Precedence", zh: "运算符与优先级" },
+        summary: {
+          en: "Operator precedence mistakes are common and expensive. Use explicit parentheses for critical business logic.",
+          zh: "优先级误判非常常见且代价高。关键逻辑请主动加括号。"
+        },
+        core: {
+          en: [
+            "Even when precedence is known, parentheses improve review clarity.",
+            "For mixed boolean and arithmetic expressions, split steps into named let values."
+          ],
+          zh: [
+            "即使你知道优先级，加括号依然能显著提升评审可读性。",
+            "布尔与算术混合时，建议拆成命名 let 步骤。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Never rely on implicit precedence in security or finance calculations.",
+            "Use one expression purpose per line.",
+            "Refactor dense expressions into helper functions."
+          ],
+          zh: [
+            "安全/金融计算中不要依赖隐式优先级。",
+            "每行表达式只做一类运算目的。",
+            "高密度表达式及时提取到辅助函数。"
+          ]
+        },
+        exampleTitle: { en: "Safe precedence style", zh: "安全优先级写法" },
+        exampleLang: "sg",
+        example: "def main() -> i64 {\n    let a = 5;\n    let b = 10;\n    let c = 2;\n    let score = (a + b) * c;\n    score\n}",
+        practice: {
+          en: [
+            "Run sgc check after each expression refactor to catch type drift quickly."
+          ],
+          zh: [
+            "每次表达式重构后都跑 sgc check，尽早发现类型漂移问题。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: readability-first expression style is a long-term reliability strategy.",
+          zh: "本页结论：可读性优先的表达式风格是长期可靠性的策略。"
+        }
+      },
+      {
+        id: "module-organization",
+        group: "tooling",
+        title: { en: "Module Organization Strategy", zh: "模块组织策略" },
+        summary: {
+          en: "A clear module tree is the cheapest long-term architecture investment for a language project.",
+          zh: "清晰的模块树是语言项目长期最便宜的架构投资。"
+        },
+        core: {
+          en: [
+            "Split by responsibility first, then optimize by hot path.",
+            "Keep public API surface intentionally small."
+          ],
+          zh: [
+            "先按职责拆分，再按热点优化。",
+            "对外 API 面尽量保持小而稳定。"
+          ]
+        },
+        checklist: {
+          en: [
+            "One module should answer one kind of question.",
+            "Avoid circular dependencies between feature modules.",
+            "Document module boundaries in README or docs."
+          ],
+          zh: [
+            "一个模块只回答一类问题。",
+            "避免功能模块循环依赖。",
+            "在文档中明确模块边界。"
+          ]
+        },
+        exampleTitle: { en: "Simple module map", zh: "简单模块图" },
+        exampleLang: "text",
+        example: "src/\n|-- parser/\n|-- typeck/\n|-- lower/\n|-- codegen/\n`-- cli/",
+        practice: {
+          en: [
+            "When adding features, choose module destination before writing implementation."
+          ],
+          zh: [
+            "新功能动手前先确定落在哪个模块。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: architecture clarity compounds over time.",
+          zh: "本页结论：架构清晰度会随时间持续复利。"
+        }
+      },
+      {
+        id: "enum-match-roadmap",
+        group: "syntax",
+        title: { en: "Enum and Match Design Roadmap", zh: "Enum 与 Match 设计路线" },
+        summary: {
+          en: "Even before full match ergonomics, you can model variant-oriented data design in a future-proof way.",
+          zh: "即使 match 语法仍在演进，也可以先按变体建模思路设计可持续结构。"
+        },
+        core: {
+          en: [
+            "Model domain states explicitly with named variants.",
+            "Treat exhaustive branching as a maintainability goal."
+          ],
+          zh: [
+            "用具名变体显式建模业务状态。",
+            "把“穷尽分支”作为可维护目标。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Prefer explicit state naming over magic integer flags.",
+            "Keep variant payload minimal and meaningful.",
+            "Plan fallback branch strategy for unknown states."
+          ],
+          zh: [
+            "优先具名状态，不要魔法整数标记。",
+            "变体负载保持最小且有语义。",
+            "为未知状态准备回退策略。"
+          ]
+        },
+        exampleTitle: { en: "Variant modeling sketch", zh: "变体建模草图" },
+        exampleLang: "text",
+        example: "PaymentState:\n- Pending\n- Success(tx_id)\n- Failed(error_code)",
+        practice: {
+          en: [
+            "Refactor one boolean-heavy workflow into explicit state variants as an exercise."
+          ],
+          zh: [
+            "练习：把一个多布尔分支流程重构为显式状态变体。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: variant-oriented thinking reduces hidden state bugs.",
+          zh: "本页结论：变体导向思维能减少隐式状态 bug。"
+        }
+      },
+      {
+        id: "error-handling-strategy",
+        group: "tooling",
+        title: { en: "Error Handling Strategy", zh: "错误处理策略" },
+        summary: {
+          en: "Compiler projects fail slowly when error handling is ad hoc. Standardize it early.",
+          zh: "编译器项目如果错误处理随意，后期会慢性失控。应尽早标准化。"
+        },
+        core: {
+          en: [
+            "Separate user-facing diagnostics from internal debug context.",
+            "Preserve enough structure to support actionable messages."
+          ],
+          zh: [
+            "区分用户可读诊断和内部调试上下文。",
+            "保留结构化信息以支持可操作报错。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Every fatal error should include location or stage context.",
+            "Avoid generic panic-style messages in production paths.",
+            "Group frequent error categories for dashboard tracking."
+          ],
+          zh: [
+            "每个致命错误都应带位置或阶段信息。",
+            "生产路径避免泛化 panic 风格报错。",
+            "高频错误分组统计，支持趋势追踪。"
+          ]
+        },
+        exampleTitle: { en: "Diagnostic shape example", zh: "诊断结构示例" },
+        exampleLang: "text",
+        example: "typecheck failed: undefined variable `foo` at line 12, col 8",
+        practice: {
+          en: [
+            "Pick one ambiguous error message and rewrite it to include stage + actionable hint."
+          ],
+          zh: [
+            "练习：挑一条含糊报错，改写为“阶段+可操作建议”。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: error quality is a core product feature, not polish.",
+          zh: "本页结论：错误质量是核心产品能力，不是锦上添花。"
+        }
+      },
+      {
+        id: "testing-pyramid",
+        group: "tooling",
+        title: { en: "Testing Pyramid for Sengoo", zh: "Sengoo 测试金字塔" },
+        summary: {
+          en: "Balance fast unit tests, targeted integration tests, and selected end-to-end cases.",
+          zh: "在快速单测、目标集成测试、关键端到端之间建立平衡。"
+        },
+        core: {
+          en: [
+            "Unit tests should dominate volume for speed.",
+            "Integration tests should protect stage boundaries and contracts."
+          ],
+          zh: [
+            "单测数量应占主导，保证反馈速度。",
+            "集成测试重点保护阶段边界和契约。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Cover parser/typeck/lowering independently.",
+            "Add regression tests for every fixed production bug.",
+            "Keep one smoke suite runnable in under one minute."
+          ],
+          zh: [
+            "解析/类型/lowering 分层覆盖。",
+            "每个线上修复 bug 都补回归测试。",
+            "保留 1 分钟内可跑完的 smoke 套件。"
+          ]
+        },
+        exampleTitle: { en: "Test layer mapping", zh: "测试层级映射" },
+        exampleLang: "text",
+        example: "Unit: parser expr cases\nIntegration: parser + typeck\nE2E: sgc run sample.sg",
+        practice: {
+          en: [
+            "Audit existing tests and classify them into layers; fill the biggest coverage gap first."
+          ],
+          zh: [
+            "练习：盘点现有测试层级，先补最大覆盖缺口。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: test architecture determines engineering velocity ceiling.",
+          zh: "本页结论：测试架构决定工程速度上限。"
+        }
+      },
+      {
+        id: "performance-profiling",
+        group: "tooling",
+        title: { en: "Performance Profiling Workflow", zh: "性能剖析工作流" },
+        summary: {
+          en: "Optimize only after measuring stage-level cost attribution.",
+          zh: "优化前先测量并归因到具体阶段成本。"
+        },
+        core: {
+          en: [
+            "Break end-to-end time into frontend, codegen, link, runtime components.",
+            "Track both mean and tail metrics."
+          ],
+          zh: [
+            "把端到端时间拆分为前端、代码生成、链接、运行时。",
+            "同时跟踪均值和尾延迟指标。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Always store raw benchmark results.",
+            "Compare trend lines instead of single-run numbers.",
+            "Verify optimization impact across multiple scenarios."
+          ],
+          zh: [
+            "保留原始基准结果文件。",
+            "看趋势线，不看单次数字。",
+            "优化效果要跨场景验证。"
+          ]
+        },
+        exampleTitle: { en: "Stage profiling checklist", zh: "阶段剖析清单" },
+        exampleLang: "text",
+        example: "1) Collect baseline\n2) Attribute by stage\n3) Optimize one hotspot\n4) Re-measure all scenarios",
+        practice: {
+          en: [
+            "For each optimization PR, attach one before/after table with stage attribution."
+          ],
+          zh: [
+            "每个性能 PR 附一张前后对比表，并给出阶段归因。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: attribution-first profiling prevents fake optimizations.",
+          zh: "本页结论：先归因再优化，能避免“伪优化”。"
+        }
+      },
+      {
+        id: "compiler-pipeline-overview",
+        group: "tooling",
+        title: { en: "Compiler Pipeline Mental Model", zh: "编译管线心智模型" },
+        summary: {
+          en: "A shared pipeline mental model helps contributors debug and optimize consistently.",
+          zh: "统一的管线心智模型可让贡献者排错和优化更一致。"
+        },
+        core: {
+          en: [
+            "Think in stages: parse -> typeck -> lower -> codegen -> link.",
+            "Each stage should have explicit input/output contracts."
+          ],
+          zh: [
+            "按阶段思考：parse -> typeck -> lower -> codegen -> link。",
+            "每个阶段都应有明确输入输出契约。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Document stage ownership and responsibilities.",
+            "Avoid leaking stage-specific assumptions across boundaries.",
+            "Log stage timing for diagnostics."
+          ],
+          zh: [
+            "文档化阶段职责与 owner。",
+            "避免阶段假设跨边界泄漏。",
+            "记录阶段耗时用于诊断。"
+          ]
+        },
+        exampleTitle: { en: "Pipeline map", zh: "管线图" },
+        exampleLang: "text",
+        example: "Source -> AST -> Typed AST/HIR -> MIR -> LLVM IR -> Native binary",
+        practice: {
+          en: [
+            "When a bug appears, first identify failing stage before touching code."
+          ],
+          zh: [
+            "出现 bug 先定位故障阶段，再动代码。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: stage thinking reduces both debugging time and design mistakes.",
+          zh: "本页结论：阶段化思维能同时减少排错成本和设计错误。"
+        }
+      },
+      {
+        id: "build-cache-faq",
+        group: "tooling",
+        title: { en: "Build Cache FAQ", zh: "构建缓存常见问题" },
+        summary: {
+          en: "Most cache confusion comes from unclear invalidation expectations.",
+          zh: "缓存困惑大多来自失效预期不清。"
+        },
+        core: {
+          en: [
+            "Understand what changes trigger rebuild versus reuse.",
+            "Use force-rebuild only when diagnostics indicate stale artifacts."
+          ],
+          zh: [
+            "理解哪些改动会触发重建，哪些可复用。",
+            "只有在诊断提示缓存异常时才强制重建。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Log cache hit/miss reasons when possible.",
+            "Keep cache metadata near build outputs.",
+            "Validate incremental behavior in CI smoke checks."
+          ],
+          zh: [
+            "尽量记录命中/失配原因。",
+            "缓存元数据与构建产物就近存放。",
+            "在 CI smoke 中验证增量行为。"
+          ]
+        },
+        exampleTitle: { en: "Cache diagnostic command", zh: "缓存诊断命令" },
+        exampleLang: "bash",
+        example: "sgc build examples/05_loop.sg -O 2 --force-rebuild",
+        practice: {
+          en: [
+            "Collect one cache-hit and one cache-miss run log for onboarding docs."
+          ],
+          zh: [
+            "为入门文档准备一份 cache-hit 和 cache-miss 日志样本。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: cache transparency is essential for trust in fast builds.",
+          zh: "本页结论：缓存可解释性是快速构建可信度基础。"
+        }
+      },
+      {
+        id: "release-readiness",
+        group: "tooling",
+        title: { en: "Release Readiness Checklist", zh: "发布就绪检查清单" },
+        summary: {
+          en: "A language release should be treated like a product release with explicit gates.",
+          zh: "语言发布应按产品发布管理，必须有显式门槛。"
+        },
+        core: {
+          en: [
+            "Lock down feature scope before release cut.",
+            "Verify docs, examples, CLI behavior, and benchmark claims together."
+          ],
+          zh: [
+            "发布前冻结功能范围。",
+            "文档、示例、CLI 行为、性能结论一起核对。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Tag release commit and attach changelog.",
+            "Run smoke checks on major platforms.",
+            "Validate extension/tooling compatibility."
+          ],
+          zh: [
+            "打发布 tag 并附变更说明。",
+            "主要平台运行 smoke 检查。",
+            "验证插件和工具链兼容性。"
+          ]
+        },
+        exampleTitle: { en: "Release gate list", zh: "发布门禁列表示例" },
+        exampleLang: "text",
+        example: "Docs ✅  Examples ✅  CLI ✅  Bench ✅  CI ✅  Extension ✅",
+        practice: {
+          en: [
+            "Create a release template issue and reuse it for each version."
+          ],
+          zh: [
+            "建立发布模板 issue，并在每个版本复用。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: explicit release gates prevent accidental quality regressions.",
+          zh: "本页结论：显式发布门禁能防止质量意外回退。"
+        }
+      },
+      {
+        id: "real-project-playbook",
+        group: "tooling",
+        title: { en: "Real Project Implementation Playbook", zh: "真实项目落地手册" },
+        summary: {
+          en: "Move from tutorial code to production by controlling scope, observability, and migration risk.",
+          zh: "从教程代码到生产落地，关键是控制范围、可观测性与迁移风险。"
+        },
+        core: {
+          en: [
+            "Start with one bounded high-impact use case.",
+            "Design rollback and parity-check strategy before first deployment."
+          ],
+          zh: [
+            "先选一个边界清晰且收益高的场景。",
+            "首次部署前先设计回滚和一致性校验方案。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Define success metrics before coding.",
+            "Build canary rollout path.",
+            "Track runtime and compile-time KPIs separately."
+          ],
+          zh: [
+            "编码前定义成功指标。",
+            "建立灰度发布路径。",
+            "运行时和编译时 KPI 分开追踪。"
+          ]
+        },
+        exampleTitle: { en: "Pilot project flow", zh: "试点项目流程" },
+        exampleLang: "text",
+        example: "Choose hotspot -> Build Sengoo module -> Parity test -> Canary deploy -> Expand scope",
+        practice: {
+          en: [
+            "Run one two-week pilot and produce a migration decision report."
+          ],
+          zh: [
+            "做一个两周试点，并产出迁移决策报告。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: production adoption is a process design problem, not only a syntax problem.",
+          zh: "本页结论：生产落地本质是流程设计问题，不只是语法问题。"
+        }
+      },
+      {
+        id: "for-loop-cookbook",
+        group: "control",
+        title: { en: "For Loop Cookbook", zh: "for 循环实战手册" },
+        summary: {
+          en: "Use this page as a pattern catalog for common for-in loops in real code.",
+          zh: "把本章当作 for-in 循环的模式库，覆盖统计、过滤、聚合等常见写法。"
+        },
+        core: {
+          en: [
+            "Write loops around one clear objective: sum, filter, transform, or search.",
+            "When loop logic grows, extract helper functions instead of nesting conditions."
+          ],
+          zh: [
+            "每个循环只做一件事：求和、过滤、映射或查找。",
+            "循环内部逻辑变复杂时，优先拆成辅助函数，避免层层嵌套。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Name loop variables by role (`item`, `idx`, `acc`).",
+            "Keep state updates in one place per iteration.",
+            "Validate edge inputs: empty array, single element, large array."
+          ],
+          zh: [
+            "循环变量按职责命名（如 `item`、`idx`、`acc`）。",
+            "每次迭代只在固定位置更新状态。",
+            "覆盖边界输入：空数组、单元素、大数组。"
+          ]
+        },
+        exampleTitle: { en: "Aggregation loop", zh: "聚合循环示例" },
+        exampleLang: "sg",
+        example: "def sum_all(arr: [i64]) -> i64 {\n    let total = 0;\n    for v in arr {\n        total = total + v;\n    }\n    total\n}\n\ndef main() -> i64 {\n    let values = [1, 2, 3, 4, 5];\n    sum_all(values)\n}",
+        practice: {
+          en: [
+            "Rewrite one business loop into two smaller loops and compare readability."
+          ],
+          zh: [
+            "把一个业务大循环拆成两个小循环，比较可读性和维护成本。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: simple loops with explicit intent are easier to optimize later.",
+          zh: "本页结论：目标清晰的简单循环，更利于后续优化。"
+        }
+      },
+      {
+        id: "while-loop-state-machine",
+        group: "control",
+        title: { en: "While Loop as State Machine", zh: "while 循环与状态机" },
+        summary: {
+          en: "While loops are best used when the stopping condition depends on evolving state.",
+          zh: "当退出条件依赖运行时状态演进时，while 循环通常比 for 更自然。"
+        },
+        core: {
+          en: [
+            "Make loop invariants explicit before writing the body.",
+            "Represent state transitions with clear variable names and comments."
+          ],
+          zh: [
+            "先写清循环不变量，再写循环体。",
+            "用明确变量名表达状态迁移，必要时加注释说明。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Guard against infinite loops with explicit progress variables.",
+            "Keep termination condition close to state mutation.",
+            "Avoid hidden mutation inside helper calls."
+          ],
+          zh: [
+            "使用显式推进变量，防止死循环。",
+            "终止条件与状态更新尽量靠近。",
+            "避免在辅助函数里做隐式状态修改。"
+          ]
+        },
+        exampleTitle: { en: "Countdown state loop", zh: "倒计时状态循环" },
+        exampleLang: "sg",
+        example: "def countdown_sum(n: i64) -> i64 {\n    let x = n;\n    let total = 0;\n    while x > 0 {\n        total = total + x;\n        x = x - 1;\n    }\n    total\n}\n\ndef main() -> i64 {\n    countdown_sum(5)\n}",
+        practice: {
+          en: [
+            "Implement retry-with-limit logic using while and measure branch clarity."
+          ],
+          zh: [
+            "用 while 实现“最多重试 N 次”逻辑，并评估分支清晰度。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: while loops shine when you model state transitions deliberately.",
+          zh: "本页结论：明确状态迁移时，while 循环是高可控工具。"
+        }
+      },
+      {
+        id: "break-continue-nested",
+        group: "control",
+        title: { en: "Break/Continue in Nested Loops", zh: "嵌套循环中的 break/continue" },
+        summary: {
+          en: "Nested loops get hard quickly; use break/continue as a control-clarity tool, not a shortcut.",
+          zh: "嵌套循环容易失控，break/continue 应用于提升控制流清晰度，而非图省事。"
+        },
+        core: {
+          en: [
+            "Write exit strategy first: when to skip, when to stop, when to continue searching.",
+            "For multi-level exits, prefer helper functions to avoid confusing flow."
+          ],
+          zh: [
+            "先定义退出策略：何时跳过、何时终止、何时继续查找。",
+            "多层退出建议拆函数，避免控制流难以理解。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Use `continue` only for local skip cases with clear guard conditions.",
+            "Use `break` only when objective is fulfilled or impossible.",
+            "Comment non-obvious exit branches."
+          ],
+          zh: [
+            "`continue` 只用于局部跳过场景，并给出清晰条件。",
+            "`break` 只在目标已达成或已不可达时使用。",
+            "对不直观的退出分支加注释。"
+          ]
+        },
+        exampleTitle: { en: "Find first pair", zh: "首个匹配对查找" },
+        exampleLang: "sg",
+        example: "def find_pair(arr: [i64], target: i64) -> i64 {\n    let found = 0;\n    let i = 0;\n    while i < 4 {\n        let j = i + 1;\n        while j < 4 {\n            if arr[i] + arr[j] == target {\n                found = 1;\n                break;\n            }\n            j = j + 1;\n        }\n        if found == 1 { break; }\n        i = i + 1;\n    }\n    found\n}",
+        practice: {
+          en: [
+            "Refactor one nested-loop search into helper functions and compare diff complexity."
+          ],
+          zh: [
+            "将一个嵌套查找逻辑重构为辅助函数，对比改动复杂度。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: explicit exit semantics reduce nested-loop bugs.",
+          zh: "本页结论：显式退出语义能显著减少嵌套循环错误。"
+        }
+      },
+      {
+        id: "string-fundamentals-plus",
+        group: "syntax",
+        title: { en: "String Fundamentals and Boundaries", zh: "字符串基础与边界" },
+        summary: {
+          en: "String handling starts simple but quickly touches boundaries: length, comparison, and normalization.",
+          zh: "字符串入门很简单，但很快会遇到边界问题：长度、比较、规范化。"
+        },
+        core: {
+          en: [
+            "Treat string operations as data-quality boundaries, not only formatting steps.",
+            "Normalize inputs before business comparison whenever possible."
+          ],
+          zh: [
+            "把字符串操作看作数据质量边界，而不只是格式处理。",
+            "业务比较前尽量先做输入规范化。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Check empty and whitespace-only inputs.",
+            "Avoid duplicated normalization logic across modules.",
+            "Keep comparison policy centralized."
+          ],
+          zh: [
+            "覆盖空串与全空白输入。",
+            "避免模块间重复写规范化逻辑。",
+            "将比较策略集中管理。"
+          ]
+        },
+        exampleTitle: { en: "String guard baseline", zh: "字符串守卫示例" },
+        exampleLang: "sg",
+        example: "def is_valid_name(s: str) -> bool {\n    if s.len() == 0 { return false; }\n    if s == \" \" { return false; }\n    true\n}\n\ndef main() -> i64 {\n    if is_valid_name(\"sengoo\") { 1 } else { 0 }\n}",
+        practice: {
+          en: [
+            "Create one module-level helper for name/email normalization and reuse it."
+          ],
+          zh: [
+            "将姓名/邮箱规范化收敛到一个模块级 helper，并在各处复用。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: centralized string rules prevent scattered data bugs.",
+          zh: "本页结论：字符串规则集中化，能避免大量分散式数据错误。"
+        }
+      },
+      {
+        id: "string-processing-pipeline",
+        group: "runtime",
+        title: { en: "String Processing Pipeline", zh: "字符串处理流水线" },
+        summary: {
+          en: "For real applications, compose string parsing in stages to improve observability and correctness.",
+          zh: "真实业务中应将字符串处理分阶段流水化，以提升可观测性与正确性。"
+        },
+        core: {
+          en: [
+            "Split process into parse -> validate -> normalize -> map.",
+            "Emit diagnostics at each stage for easier debugging."
+          ],
+          zh: [
+            "按 parse -> validate -> normalize -> map 分阶段组织。",
+            "每个阶段输出诊断信息，方便定位问题。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Record rejected inputs with reason codes.",
+            "Avoid mixing parsing and business side effects.",
+            "Benchmark heavy string paths with realistic datasets."
+          ],
+          zh: [
+            "记录被拒绝输入及原因码。",
+            "不要把解析和业务副作用混在一起。",
+            "用真实数据集基准测试字符串热点路径。"
+          ]
+        },
+        exampleTitle: { en: "Stage-based processing sketch", zh: "分阶段处理示意" },
+        exampleLang: "text",
+        example: "raw input -> trim/normalize -> validate -> domain mapping -> downstream",
+        practice: {
+          en: [
+            "Turn one ad-hoc parser into a staged pipeline and compare error quality."
+          ],
+          zh: [
+            "将一个临时解析器改造成分阶段流水线，对比错误信息质量。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: staged pipelines scale better than one-pass string hacks.",
+          zh: "本页结论：分阶段流水线比一次性“字符串黑魔法”更可扩展。"
+        }
+      },
+      {
+        id: "oop-composition-patterns",
+        group: "model",
+        title: { en: "OOP via Composition Patterns", zh: "通过组合实现面向对象风格" },
+        summary: {
+          en: "In Sengoo today, composition + trait contracts is the most stable way to model OOP behavior.",
+          zh: "在当前 Sengoo 中，组合 + trait 契约是最稳妥的 OOP 建模方式。"
+        },
+        core: {
+          en: [
+            "Model data ownership with structs, and behavior variability with traits.",
+            "Favor composition relationships over inheritance coupling."
+          ],
+          zh: [
+            "用 struct 描述数据归属，用 trait 表达行为可变性。",
+            "优先组合关系，避免继承耦合。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Keep trait interfaces small and purpose-specific.",
+            "Expose constructors/helpers for safe object creation.",
+            "Test behavior contracts independently from data layout."
+          ],
+          zh: [
+            "trait 接口保持小而专注。",
+            "提供构造函数/辅助函数保障对象创建安全。",
+            "行为契约测试与数据布局测试分离。"
+          ]
+        },
+        exampleTitle: { en: "Composition baseline", zh: "组合模型示例" },
+        exampleLang: "sg",
+        example: "trait Render {\n    def render(self) -> i64;\n}\n\nstruct Button {\n    width: i64,\n}\n\nimpl Render for Button {\n    def render(self) -> i64 {\n        self.width\n    }\n}\n\ndef main() -> i64 {\n    let b = Button { width: 120 };\n    b.render()\n}",
+        practice: {
+          en: [
+            "Refactor one inheritance-shaped design into composition + trait contracts."
+          ],
+          zh: [
+            "把一个“像继承”的设计重构成“组合 + trait 契约”。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: composition-first OOP keeps design stable through compiler evolution.",
+          zh: "本页结论：组合优先的 OOP 设计在编译器演进中更稳定。"
+        }
+      },
+      {
+        id: "inheritance-migration-guide",
+        group: "model",
+        title: { en: "Inheritance Migration Guide", zh: "继承模型迁移指南" },
+        summary: {
+          en: "If your codebase started with class/inheritance syntax, migrate incrementally toward safer patterns.",
+          zh: "若项目早期使用了 class/inheritance，可按阶段迁移到更稳妥模型。"
+        },
+        core: {
+          en: [
+            "Preserve external behavior first, then replace internal structure.",
+            "Migrate by seams: data shape, behavior contract, call sites."
+          ],
+          zh: [
+            "先保持外部行为一致，再替换内部结构。",
+            "按切缝迁移：数据结构、行为契约、调用点。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Create parity tests before refactor.",
+            "Deprecate inheritance entry points in small steps.",
+            "Track migration progress with a public checklist."
+          ],
+          zh: [
+            "重构前先补齐一致性测试。",
+            "小步废弃继承入口，避免一次性大改。",
+            "用公开清单跟踪迁移进度。"
+          ]
+        },
+        exampleTitle: { en: "Migration sequence", zh: "迁移顺序示例" },
+        exampleLang: "text",
+        example: "1) Add trait contract\n2) Add composition type\n3) Switch call sites\n4) Remove inheritance path",
+        practice: {
+          en: [
+            "Choose one module and complete a full inheritance-to-composition migration."
+          ],
+          zh: [
+            "选择一个模块，完整走通一次“继承到组合”迁移。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: migration succeeds when behavior parity is measured continuously.",
+          zh: "本页结论：持续验证行为一致性，是迁移成功的关键。"
+        }
+      },
+      {
+        id: "reflection-auto-integration",
+        group: "runtime",
+        title: { en: "Automatic Reflection Integration", zh: "自动反射集成方法" },
+        summary: {
+          en: "Use reflection library imports to opt in per module, keeping zero cost for modules that do not import it.",
+          zh: "通过按模块引入反射库实现“用则开启、不用零开销”，避免全局编译开关依赖。"
+        },
+        core: {
+          en: [
+            "Reflection should be a library-level capability, not a global requirement.",
+            "Metadata generation should be scoped to importing modules."
+          ],
+          zh: [
+            "反射应是库级能力，而不是全局强制能力。",
+            "元数据生成应限定在引入反射的模块内。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Ensure non-reflection modules emit no metadata artifacts.",
+            "Document reflection import conventions clearly.",
+            "Benchmark with reflection on/off to prove overhead boundaries."
+          ],
+          zh: [
+            "确保未引入反射的模块不产出额外元数据。",
+            "明确反射库引入规范与示例。",
+            "对比开启/关闭反射的基准，验证开销边界。"
+          ]
+        },
+        exampleTitle: { en: "Module opt-in sketch", zh: "模块按需开启示例" },
+        exampleLang: "text",
+        example: "module A (imports reflect) -> metadata generated\nmodule B (no reflect import) -> no extra metadata",
+        practice: {
+          en: [
+            "Convert one globally-enabled reflection workflow into per-module opt-in."
+          ],
+          zh: [
+            "将一个全局反射流程改为按模块按需开启，并验证零额外开销路径。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: reflection can be ergonomic and still performance-safe with module opt-in.",
+          zh: "本页结论：模块按需开启可同时兼顾反射易用性与性能安全。"
+        }
+      },
+      {
+        id: "reflection-api-recipes",
+        group: "runtime",
+        title: { en: "Reflection API Recipes", zh: "反射 API 实用配方" },
+        summary: {
+          en: "This chapter shows practical reflection recipes for diagnostics, serialization, and lightweight tooling.",
+          zh: "本章给出反射在诊断、序列化和轻量工具中的实用配方。"
+        },
+        core: {
+          en: [
+            "Use reflection to reduce repetitive glue code, not to hide core business logic.",
+            "Cache reflection lookups in hot paths."
+          ],
+          zh: [
+            "用反射减少重复胶水代码，不要隐藏核心业务逻辑。",
+            "热点路径中的反射查询要做缓存。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Define stable metadata keys and naming conventions.",
+            "Avoid reflection calls inside ultra-tight loops when alternatives exist.",
+            "Add fallback behavior for missing metadata."
+          ],
+          zh: [
+            "制定稳定的元数据键与命名规范。",
+            "超高频循环中若有替代方案，避免直接反射调用。",
+            "为缺失元数据准备降级逻辑。"
+          ]
+        },
+        exampleTitle: { en: "Reflection usage sketch", zh: "反射调用示意" },
+        exampleLang: "text",
+        example: "fields = reflect.fields(User)\nfor f in fields:\n  print(f.name, f.type)",
+        practice: {
+          en: [
+            "Implement one debug-dump utility using reflection metadata only."
+          ],
+          zh: [
+            "仅使用反射元数据实现一个调试 dump 工具。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: reflection is strongest as a tooling accelerator, not a logic substitute.",
+          zh: "本页结论：反射最强价值在工具加速，而不是替代业务逻辑。"
+        }
+      },
+      {
+        id: "python-interop-error-model",
+        group: "runtime",
+        title: { en: "Python Interop Error Model", zh: "Python 互操作错误模型" },
+        summary: {
+          en: "Cross-runtime calls need explicit error mapping to stay debuggable in production.",
+          zh: "跨运行时调用必须有清晰错误映射，才能在生产环境可定位、可恢复。"
+        },
+        core: {
+          en: [
+            "Define boundary contracts for inputs, outputs, and exceptions.",
+            "Map Python exceptions to Sengoo diagnostics with context."
+          ],
+          zh: [
+            "明确输入、输出、异常的边界契约。",
+            "将 Python 异常映射为带上下文的 Sengoo 诊断。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Log command, parameters, and return status for failed calls.",
+            "Keep timeout and retry policy explicit.",
+            "Separate transient vs permanent failures."
+          ],
+          zh: [
+            "失败调用记录命令、参数和返回状态。",
+            "超时与重试策略显式化。",
+            "区分临时性失败与永久性失败。"
+          ]
+        },
+        exampleTitle: { en: "Interop boundary checklist", zh: "互操作边界检查表" },
+        exampleLang: "text",
+        example: "validate input -> call python -> capture stderr/stdout -> map error code -> return typed result",
+        practice: {
+          en: [
+            "Add one integration test covering Python exception propagation."
+          ],
+          zh: [
+            "新增一个集成测试，覆盖 Python 异常向 Sengoo 的传播路径。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: explicit interop error contracts prevent opaque runtime failures.",
+          zh: "本页结论：互操作错误契约清晰，才能避免黑盒式运行时故障。"
+        }
+      },
+      {
+        id: "python-interop-performance",
+        group: "runtime",
+        title: { en: "Python Interop Performance Patterns", zh: "Python 互操作性能模式" },
+        summary: {
+          en: "Interop can stay fast when you batch calls, cache boundaries, and avoid needless marshaling.",
+          zh: "通过批处理调用、边界缓存和减少编组开销，互操作也可以保持高性能。"
+        },
+        core: {
+          en: [
+            "Pay boundary crossing cost once per batch, not once per element.",
+            "Move compute-heavy loops to one side of the boundary."
+          ],
+          zh: [
+            "边界穿越成本尽量按批次支付，不要按元素支付。",
+            "计算密集循环尽量放在边界同一侧执行。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Benchmark small/medium/large payload modes separately.",
+            "Track serialization cost independently from Python execution cost.",
+            "Set latency SLO for cross-runtime endpoints."
+          ],
+          zh: [
+            "分小/中/大负载分别做基准。",
+            "序列化成本与 Python 执行成本分开统计。",
+            "给跨运行时接口设定延迟 SLO。"
+          ]
+        },
+        exampleTitle: { en: "Batch interop sketch", zh: "批量互操作示意" },
+        exampleLang: "text",
+        example: "single-call-per-item (slow)\nvs\nbatch-call-per-100-items (fast)",
+        practice: {
+          en: [
+            "Rewrite one per-item interop path into batched mode and measure p50/p95."
+          ],
+          zh: [
+            "将一个逐条互操作路径改为批处理，并测量 p50/p95 变化。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: interop speed is mostly an architecture decision, not a language limitation.",
+          zh: "本页结论：互操作速度主要取决于架构设计，而非语言本身限制。"
+        }
+      },
+      {
+        id: "cli-debug-troubleshooting",
+        group: "tooling",
+        title: { en: "CLI Debug and Troubleshooting", zh: "CLI 调试与排障" },
+        summary: {
+          en: "Use a structured CLI troubleshooting flow to reduce random trial-and-error.",
+          zh: "用结构化 CLI 排障流程替代随机试错，提升定位效率。"
+        },
+        core: {
+          en: [
+            "Diagnose by stage: parse -> check -> build -> run.",
+            "Collect reproducible commands before changing code."
+          ],
+          zh: [
+            "按阶段排查：parse -> check -> build -> run。",
+            "改代码前先固定可复现命令。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Always capture full command and output.",
+            "Pin toolchain version when reproducing user reports.",
+            "Create minimal failing sample under tests/ or bench/."
+          ],
+          zh: [
+            "完整记录命令与输出。",
+            "复现用户问题时固定工具链版本。",
+            "在 tests/ 或 bench/ 下构造最小失败样例。"
+          ]
+        },
+        exampleTitle: { en: "Troubleshooting flow", zh: "排障流程示例" },
+        exampleLang: "text",
+        example: "sgc check file.sg -> sgc build file.sg -O 0 -> sgc run file.sg -> inspect diagnostics",
+        practice: {
+          en: [
+            "Write one internal runbook for the top 5 recurring CLI errors."
+          ],
+          zh: [
+            "整理前 5 个高频 CLI 错误的内部排障手册。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: repeatable troubleshooting process beats ad-hoc debugging.",
+          zh: "本页结论：可复现排障流程，胜过临时拍脑袋调试。"
+        }
+      },
+      {
+        id: "project-scale-playbook",
+        group: "tooling",
+        title: { en: "Project Scaling Playbook", zh: "项目规模扩展手册" },
+        summary: {
+          en: "As codebase grows from 1k to 1000k LOC, structure and ownership matter more than syntax tricks.",
+          zh: "当代码规模从 1k 增长到 1000k 行，结构与协作边界比语法技巧更关键。"
+        },
+        core: {
+          en: [
+            "Scale with module boundaries, ownership, and quality gates.",
+            "Track compile/runtime KPIs continuously as project grows."
+          ],
+          zh: [
+            "通过模块边界、责任归属和质量门禁实现扩展。",
+            "随规模增长持续跟踪编译/运行 KPI。"
+          ]
+        },
+        checklist: {
+          en: [
+            "Define ownership map for major subsystems.",
+            "Set stage-level performance budgets.",
+            "Automate regression gates in CI."
+          ],
+          zh: [
+            "为核心子系统建立负责人地图。",
+            "设置分阶段性能预算。",
+            "在 CI 中自动化回归门禁。"
+          ]
+        },
+        exampleTitle: { en: "Scaling milestone map", zh: "规模化里程碑图" },
+        exampleLang: "text",
+        example: "1k LOC: single owner\n10k LOC: module owners\n100k LOC: stage budgets\n1000k LOC: strict CI gates + observability",
+        practice: {
+          en: [
+            "Draft a growth plan for 10x codebase expansion using this checklist."
+          ],
+          zh: [
+            "用本章清单制定一个 10 倍规模扩展计划。"
+          ]
+        },
+        takeaway: {
+          en: "Takeaway: sustainable scaling is an engineering management discipline.",
+          zh: "本页结论：可持续规模化本质是工程管理能力。"
+        }
+      }
+    ];
+
+    function makeTopicChapter(spec, chapterNumber) {
+      return {
+        id: spec.id,
+        group: spec.group,
+        title: {
+          en: `${chapterNumber}. ${spec.title.en}`,
+          zh: `${chapterNumber}. ${spec.title.zh}`
+        },
+        summary: spec.summary,
+        sections: [
+          {
+            heading: { en: "Core Idea", zh: "核心要点" },
+            paragraphs: spec.core
+          },
+          {
+            heading: { en: "Checklist", zh: "检查清单" },
+            bullets: spec.checklist
+          },
+          {
+            heading: { en: "Example and Practice", zh: "示例与实践" },
+            paragraphs: spec.practice,
+            code: {
+              title: spec.exampleTitle,
+              lang: spec.exampleLang,
+              snippet: spec.example
+            }
+          }
+        ],
+        takeaway: spec.takeaway
+      };
     }
 
-    const preferred = localStorage.getItem("sengoo-tutorial-lang") || "en";
-    setLanguage(preferred);
-    initTocActive();
+    const EXTRA_TOPIC_CHAPTERS = EXTRA_TOPIC_SPECS.map((spec, idx) =>
+      makeTopicChapter(spec, CORE_CHAPTERS.length + idx + 1)
+    );
+
+    function hasNumberPrefix(textValue) {
+      return /^\d+\.\s/.test(textValue || "");
+    }
+
+    function normalizeI18nList(list) {
+      if (!list) {
+        return { en: [], zh: [] };
+      }
+      if (Array.isArray(list)) {
+        return { en: list, zh: list };
+      }
+      return {
+        en: Array.isArray(list.en) ? list.en : [],
+        zh: Array.isArray(list.zh) ? list.zh : []
+      };
+    }
+
+    function normalizeChapter(chapter, index) {
+      const next = { ...chapter };
+      if (next.title && !hasNumberPrefix(next.title.en) && !hasNumberPrefix(next.title.zh)) {
+        next.title = {
+          en: `${index + 1}. ${next.title.en}`,
+          zh: `${index + 1}. ${next.title.zh}`
+        };
+      }
+
+      if (!Array.isArray(next.sections) || next.sections.length === 0) {
+        const hasDraftBlocks = next.core || next.checklist || next.practice || next.example;
+        if (hasDraftBlocks) {
+          const sections = [];
+          const core = normalizeI18nList(next.core);
+          const checklist = normalizeI18nList(next.checklist);
+          const practice = normalizeI18nList(next.practice);
+
+          if (core.en.length || core.zh.length) {
+            sections.push({
+              heading: { en: "Core Idea", zh: "核心要点" },
+              paragraphs: core
+            });
+          }
+
+          if (checklist.en.length || checklist.zh.length) {
+            sections.push({
+              heading: { en: "Checklist", zh: "检查清单" },
+              bullets: checklist
+            });
+          }
+
+          const practiceSection = {
+            heading: { en: "Example and Practice", zh: "示例与实践" },
+            paragraphs: practice
+          };
+          if (next.example) {
+            practiceSection.code = {
+              title: next.exampleTitle || { en: "Example", zh: "示例" },
+              lang: next.exampleLang || "sg",
+              snippet: next.example
+            };
+          }
+          if (
+            (practiceSection.paragraphs.en && practiceSection.paragraphs.en.length) ||
+            (practiceSection.paragraphs.zh && practiceSection.paragraphs.zh.length) ||
+            practiceSection.code
+          ) {
+            sections.push(practiceSection);
+          }
+
+          next.sections = sections;
+        }
+      }
+
+      return next;
+    }
+
+    const CHAPTERS = [...CORE_CHAPTERS, ...EXTRA_TOPIC_CHAPTERS].map((chapter, index) =>
+      normalizeChapter(chapter, index)
+    );
+
+    function groupForChapter(chapter, idx) {
+      if (chapter.group && TOPIC_GROUPS[chapter.group]) {
+        return TOPIC_GROUPS[chapter.group];
+      }
+      if (idx < 5) {
+        return { en: "Start Here", zh: "快速开始" };
+      }
+      if (idx < 13) {
+        return { en: "Core Language", zh: "核心语言" };
+      }
+      return { en: "Core Advanced", zh: "核心进阶" };
+    }
+
+    const state = {
+      lang: "en",
+      chapterIndex: 0
+    };
+
+    function text(node) {
+      return node ? node[state.lang] : "";
+    }
+
+    function parseHash() {
+      const raw = window.location.hash.replace(/^#/, "").trim();
+      if (!raw) return;
+      const parts = raw.split(":");
+      if (parts.length !== 2) return;
+      const [lang, chapterId] = parts;
+      if (lang === "en" || lang === "zh") {
+        state.lang = lang;
+      }
+      const idx = CHAPTERS.findIndex((c) => c.id === chapterId);
+      if (idx >= 0) {
+        state.chapterIndex = idx;
+      }
+    }
+
+    function updateHash() {
+      const chapter = CHAPTERS[state.chapterIndex];
+      if (!chapter) {
+        return;
+      }
+      window.location.hash = `${state.lang}:${chapter.id}`;
+    }
+
+    function buildCodeCard(codeInfo) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "code-card";
+      const head = document.createElement("header");
+      head.textContent = text(codeInfo.title);
+      wrapper.appendChild(head);
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      code.className = codeInfo.lang ? `language-${codeInfo.lang}` : "";
+      code.textContent = codeInfo.snippet;
+      pre.appendChild(code);
+      wrapper.appendChild(pre);
+      return wrapper;
+    }
+
+    function buildLesson(lesson, index) {
+      const lessonEl = document.createElement("article");
+      lessonEl.className = "lesson";
+
+      const h3 = document.createElement("h3");
+      const ui = UI_TEXT[state.lang];
+      h3.textContent = `${ui.lessonLabel} ${index + 1}: ${text(lesson.heading)}`;
+      lessonEl.appendChild(h3);
+
+      if (lesson.paragraphs) {
+        text(lesson.paragraphs).forEach((p) => {
+          const pe = document.createElement("p");
+          pe.textContent = p;
+          lessonEl.appendChild(pe);
+        });
+      }
+
+      if (lesson.bullets && text(lesson.bullets).length > 0) {
+        const ul = document.createElement("ul");
+        text(lesson.bullets).forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          ul.appendChild(li);
+        });
+        lessonEl.appendChild(ul);
+      }
+
+      if (lesson.steps && text(lesson.steps).length > 0) {
+        const ol = document.createElement("ol");
+        text(lesson.steps).forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          ol.appendChild(li);
+        });
+        lessonEl.appendChild(ol);
+      }
+
+      if (lesson.code) {
+        lessonEl.appendChild(buildCodeCard(lesson.code));
+      }
+
+      return lessonEl;
+    }
+
+    function renderTOC() {
+      const toc = document.getElementById("toc-list");
+      toc.innerHTML = "";
+      let currentGroupLabel = "";
+      CHAPTERS.forEach((chapter, idx) => {
+        const group = groupForChapter(chapter, idx);
+        const groupLabel = state.lang === "zh" ? group.zh : group.en;
+        if (groupLabel !== currentGroupLabel) {
+          const groupLi = document.createElement("li");
+          groupLi.className = "toc-group-title";
+          groupLi.textContent = groupLabel;
+          toc.appendChild(groupLi);
+          currentGroupLabel = groupLabel;
+        }
+
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = text(chapter.title);
+        if (idx === state.chapterIndex) btn.classList.add("active");
+        btn.addEventListener("click", () => {
+          state.chapterIndex = idx;
+          render();
+        });
+        li.appendChild(btn);
+        toc.appendChild(li);
+      });
+    }
+
+    function renderChapter() {
+      const root = document.getElementById("chapter-root");
+      root.innerHTML = "";
+      const chapter = CHAPTERS[state.chapterIndex];
+      if (!chapter) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No chapter found.";
+        root.appendChild(empty);
+        return;
+      }
+
+      const ui = UI_TEXT[state.lang];
+      const head = document.createElement("header");
+      head.className = "chapter-head";
+
+      const meta = document.createElement("p");
+      meta.className = "chapter-meta";
+      meta.textContent = `${ui.chapterLabel} ${state.chapterIndex + 1} / ${CHAPTERS.length}`;
+      head.appendChild(meta);
+
+      const title = document.createElement("h2");
+      title.className = "chapter-title";
+      title.textContent = text(chapter.title);
+      head.appendChild(title);
+
+      const summary = document.createElement("p");
+      summary.className = "chapter-summary";
+      summary.textContent = text(chapter.summary);
+      head.appendChild(summary);
+
+      root.appendChild(head);
+
+      const body = document.createElement("section");
+      body.className = "chapter-body";
+      chapter.sections.forEach((lesson, idx) => {
+        body.appendChild(buildLesson(lesson, idx));
+      });
+
+      const takeaway = document.createElement("div");
+      takeaway.className = "chapter-takeaway";
+      takeaway.textContent = text(chapter.takeaway);
+      body.appendChild(takeaway);
+      root.appendChild(body);
+
+      const nav = document.createElement("footer");
+      nav.className = "chapter-nav";
+
+      const prev = document.createElement("button");
+      prev.type = "button";
+      prev.textContent = ui.prev;
+      prev.disabled = state.chapterIndex === 0;
+      prev.title = prev.disabled ? ui.first : "";
+      prev.addEventListener("click", () => {
+        if (state.chapterIndex > 0) {
+          state.chapterIndex -= 1;
+          render();
+        }
+      });
+
+      const next = document.createElement("button");
+      next.type = "button";
+      next.textContent = ui.next;
+      next.disabled = state.chapterIndex >= CHAPTERS.length - 1;
+      next.title = next.disabled ? ui.last : "";
+      next.addEventListener("click", () => {
+        if (state.chapterIndex < CHAPTERS.length - 1) {
+          state.chapterIndex += 1;
+          render();
+        }
+      });
+
+      nav.appendChild(prev);
+      nav.appendChild(next);
+      root.appendChild(nav);
+    }
+
+    function renderTopbar() {
+      const ui = UI_TEXT[state.lang];
+      document.getElementById("site-title").textContent = ui.siteTitle;
+      document.getElementById("site-subtitle").textContent = ui.siteSubtitle;
+      document.getElementById("toc-title").textContent = ui.tocTitle;
+      document.getElementById("lang-en").classList.toggle("active", state.lang === "en");
+      document.getElementById("lang-zh").classList.toggle("active", state.lang === "zh");
+      document.documentElement.lang = state.lang === "zh" ? "zh-CN" : "en";
+    }
+
+    function render() {
+      renderTopbar();
+      renderTOC();
+      renderChapter();
+      updateHash();
+    }
+
+    function initEvents() {
+      document.getElementById("lang-en").addEventListener("click", () => {
+        state.lang = "en";
+        render();
+      });
+      document.getElementById("lang-zh").addEventListener("click", () => {
+        state.lang = "zh";
+        render();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft" && state.chapterIndex > 0) {
+          state.chapterIndex -= 1;
+          render();
+        }
+        if (event.key === "ArrowRight" && state.chapterIndex < CHAPTERS.length - 1) {
+          state.chapterIndex += 1;
+          render();
+        }
+      });
+
+      window.addEventListener("hashchange", () => {
+        const prevLang = state.lang;
+        const prevIndex = state.chapterIndex;
+        parseHash();
+        if (prevLang !== state.lang || prevIndex !== state.chapterIndex) {
+          render();
+        }
+      });
+    }
+
+    parseHash();
+    initEvents();
+    render();
   </script>
 </body>
 </html>
