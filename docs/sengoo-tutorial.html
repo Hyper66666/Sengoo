@@ -399,7 +399,7 @@
             <li><strong>Incremental compile pipeline</strong>: fingerprints + workset-driven rebuild.</li>
             <li><strong>Daemon mode</strong>: optional persistent process to reduce startup cost.</li>
             <li><strong>Python interop</strong>: hybrid architecture with gradual migration path.</li>
-            <li><strong>Non-invasive reflection</strong>: opt-in sidecar metadata, typed runtime invoke, default-off overhead model.</li>
+            <li><strong>Non-invasive reflection</strong>: auto-by-default sidecar metadata, typed runtime invoke, and explicit <code>on/off</code> override.</li>
           </ul>
           <div class="hint warn">Some grammar surfaces may still be experimental. For production-facing usage, prioritize examples and bench suites that are continuously validated.</div>
         </div>
@@ -411,7 +411,7 @@
             <li><strong>增量编译流水线</strong>：指纹缓存 + workset 感知重编译。</li>
             <li><strong>Daemon 模式</strong>：可选常驻进程，降低重复冷启动成本。</li>
             <li><strong>Python 互操作</strong>：支持“Python 编排 + Sengoo 热点模块”混合架构。</li>
-            <li><strong>非侵入式反射</strong>：按需开启 sidecar 元数据、类型化调用、默认关闭时零额外路径成本。</li>
+            <li><strong>非侵入式反射</strong>：默认自动检测导入后启用，也可用 <code>on/off</code> 显式覆盖。</li>
           </ul>
           <div class="hint warn">部分语法仍处于持续演进阶段。面向实际工程时，建议优先参考持续回归验证的 examples 与 bench 用例。</div>
         </div>
@@ -504,7 +504,7 @@ def add(a: i64, b: i64) -&gt; i64 {
               <tr><td><code>sgc run file.sg -O 1</code></td><td>Compile and run.</td></tr>
               <tr><td><code>sgc check file.sg</code></td><td>Type-check/compile validation only.</td></tr>
               <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>Start persistent daemon service.</td></tr>
-              <tr><td><code>sgc build file.sg --reflect</code></td><td>Emit reflection sidecar metadata for selected symbols/modules.</td></tr>
+              <tr><td><code>sgc build file.sg --reflect[=auto|on|off]</code></td><td>Control reflection mode (default auto) and emit sidecar metadata when enabled.</td></tr>
             </tbody>
           </table>
           <h3>VS Code Extension</h3>
@@ -521,7 +521,7 @@ def add(a: i64, b: i64) -&gt; i64 {
               <tr><td><code>sgc run file.sg -O 1</code></td><td>编译并运行。</td></tr>
               <tr><td><code>sgc check file.sg</code></td><td>仅做类型检查/编译链路校验。</td></tr>
               <tr><td><code>sgc daemon --addr 127.0.0.1:48765</code></td><td>启动常驻编译服务。</td></tr>
-              <tr><td><code>sgc build file.sg --reflect</code></td><td>为选定模块/符号输出反射 sidecar 元数据。</td></tr>
+              <tr><td><code>sgc build file.sg --reflect[=auto|on|off]</code></td><td>控制反射模式（默认 auto），启用时输出 sidecar 元数据。</td></tr>
             </tbody>
           </table>
           <h3>VS Code 插件</h3>
@@ -551,13 +551,13 @@ python ./tests/python_interop_example.py</code></pre>
       <section class="card" id="reflection">
         <div class="lang-content lang-en active">
           <h2>8. Non-Invasive Reflection</h2>
-          <p>Reflection is opt-in and sidecar-driven. Default builds keep reflection disabled to minimize overhead.</p>
+          <p>Reflection is sidecar-driven with <code>auto</code> mode by default. It turns on only when reflect imports are detected, and can be forced with <code>--reflect=on/off</code>.</p>
           <h3>CLI usage</h3>
-          <pre><code># compile with reflection metadata
-sgc build examples/09_method_call.sg -O 2 --reflect
+          <pre><code># auto mode (default): enables reflection when reflect imports are present
+sgc build examples/09_method_call.sg -O 2
 
 # optional fine-grained filters
-sgc build examples/09_method_call.sg -O 2 --reflect \
+sgc build examples/09_method_call.sg -O 2 --reflect=on \
   --reflect-module examples/09_method_call.sg \
   --reflect-symbol examples/09_method_call.sg::main</code></pre>
           <p>Artifacts include <code>&lt;binary&gt;.sgreflect.json</code> and optional native reflection library for fast typed calls.</p>
@@ -578,13 +578,13 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
         </div>
         <div class="lang-content lang-zh">
           <h2>8. 非侵入式反射</h2>
-          <p>反射能力采用按需开启 + sidecar 元数据方案。默认编译关闭反射，从而避免给常规路径增加额外开销。</p>
+          <p>反射能力采用 sidecar 元数据方案，默认 <code>auto</code> 模式：仅在检测到反射导入时启用，也可以通过 <code>--reflect=on/off</code> 强制开关。</p>
           <h3>CLI 用法</h3>
-          <pre><code># 开启反射元数据输出
-sgc build examples/09_method_call.sg -O 2 --reflect
+          <pre><code># auto（默认）：检测到反射导入时自动启用
+sgc build examples/09_method_call.sg -O 2
 
 # 可选：精确筛选模块与符号
-sgc build examples/09_method_call.sg -O 2 --reflect \
+sgc build examples/09_method_call.sg -O 2 --reflect=on \
   --reflect-module examples/09_method_call.sg \
   --reflect-symbol examples/09_method_call.sg::main</code></pre>
           <p>构建产物会包含 <code>&lt;binary&gt;.sgreflect.json</code>，并可按需生成原生反射动态库以加速类型化调用。</p>
@@ -610,7 +610,7 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
           <h2>9. Performance Model</h2>
           <ul>
             <li><strong>Runtime track</strong>: native execution targets the same class as C++/Rust in loop-heavy scenarios.</li>
-            <li><strong>Compile track</strong>: optimize for short edit-build-run loops through incremental reuse.</li>
+            <li><strong>Compile track</strong>: optimize for short edit-build-run loops through incremental reuse and track scale curve at 1k/10k/100k/1000k LOC.</li>
             <li><strong>Link track</strong>: link time is measured explicitly in advanced pipeline benchmarks.</li>
             <li><strong>Reflection track</strong>: verify disabled-path regression and enabled-path overhead with dedicated gates.</li>
           </ul>
@@ -620,7 +620,7 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
           <h2>9. 性能模型</h2>
           <ul>
             <li><strong>运行时维度</strong>：在循环密集场景中，目标是达到 C++/Rust 同量级。</li>
-            <li><strong>编译维度</strong>：通过增量复用优化“编辑-编译-运行”反馈链路。</li>
+            <li><strong>编译维度</strong>：通过增量复用优化“编辑-编译-运行”反馈链路，并持续跟踪 1k/10k/100k/1000k LOC 规模曲线。</li>
             <li><strong>链接维度</strong>：在高级流水线基准里单独统计链接时间。</li>
             <li><strong>反射维度</strong>：通过专用 gate 同时约束关闭路径回归与开启路径开销。</li>
           </ul>
@@ -675,7 +675,7 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
           <p>Usually no. The practical strategy is coexistence: Python for orchestration and Sengoo/native for hotspots.</p>
 
           <h3>Will reflection slow down all builds?</h3>
-          <p>No. Reflection is opt-in. Without <code>--reflect</code>, the default path stays minimal.</p>
+          <p>No. Default <code>--reflect=auto</code> enables reflection only when reflect imports are used; you can still force <code>--reflect=off</code> for strict baseline builds.</p>
 
           <h3>Where should I go after this tutorial?</h3>
           <p>Read <code>docs/DEVELOPMENT_GUIDE.md</code> and <code>docs/language-features.md</code>, then run bench suites to validate local behavior.</p>
@@ -686,7 +686,7 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/&lt;
           <p>通常不会。更现实的策略是共存：Python 负责编排，Sengoo/原生模块负责热点路径。</p>
 
           <h3>反射会拖慢所有构建吗？</h3>
-          <p>不会。反射是按需开启，不传 <code>--reflect</code> 时保持默认最小路径。</p>
+          <p>不会。默认 <code>--reflect=auto</code> 仅在存在反射导入时启用；如需严格基线构建，可显式传 <code>--reflect=off</code>。</p>
 
           <h3>学完本教程下一步做什么？</h3>
           <p>建议继续阅读 <code>docs/DEVELOPMENT_GUIDE.md</code> 与 <code>docs/language-features.md</code>，再运行 bench 套件验证本地行为。</p>

@@ -43,25 +43,28 @@ Cross-language scenario matrix snapshot (measured on **February 16, 2026**):
 | Incremental after edit (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | Incremental reduction (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
-Advanced pipeline snapshot (real edits + 100k scale, measured on **February 16, 2026**):
-`bench/results/1771228834821-advanced-pipeline.json`
+Advanced pipeline snapshot (real edits + 100k/1000k scale, measured on **February 16, 2026**):
+`bench/results/1771246902505-advanced-pipeline.json`
 
 Real incremental scenarios (`after_avg_ms`, Sengoo):
 
 | Scenario | After avg (ms) |
 |---|---:|
-| `loop_body_change` | 219.75 |
-| `function_signature_change` | 206.60 |
-| `add_new_function` | 240.84 |
+| `loop_body_change` | 226.49 |
+| `function_signature_change` | 309.90 |
+| `add_new_function` | 221.41 |
 
 100k LOC full pipeline (Sengoo):
 
 | Stage | Avg (ms) |
 |---|---:|
-| Frontend (`compile_frontend_llvm_avg_ms`) | 446.09 |
-| Codegen object (`codegen_obj_avg_ms`) | 60.23 |
-| Link (`link_avg_ms`) | 460.78 |
-| End-to-end (`e2e_avg_ms`) | 967.10 |
+| Frontend (`compile_frontend_llvm_avg_ms`) | 571.15 |
+| Codegen object (`codegen_obj_avg_ms`) | 79.75 |
+| Link (`link_avg_ms`) | 657.88 |
+| End-to-end (`e2e_avg_ms`) | 1308.79 |
+
+The same report includes a 1000k LOC scale point:
+`scale_curve/1000000/sengoo/e2e_avg_ms = 5885.34`
 
 ## 3) Runtime-Class Performance Track
 
@@ -79,12 +82,14 @@ Interpretation:
 - Sengoo runtime behavior is currently in the same class as C++/Rust in this loop-heavy matrix profile.
 - In these samples, Sengoo is significantly faster than Python runtime execution.
 
-## 4) Non-Invasive Reflection (Opt-In)
+## 4) Non-Invasive Reflection (Auto by Default)
 
-Reflection in Sengoo is designed for low baseline overhead:
+Reflection in Sengoo is designed for low baseline overhead with an auto mode:
 
-- Disabled by default
-- Enabled explicitly with `--reflect`
+- Default mode is `--reflect=auto`
+- Auto mode enables reflection only when reflect imports are detected (`import reflect;` / `import std::reflect;`)
+- Force enable with `--reflect` or `--reflect=on`
+- Force disable with `--reflect=off`
 - Metadata emitted to sidecar JSON (`*.sgreflect.json`)
 - Typed runtime invocation (`call_i64`/`call_f64`/`call_bool`) with signature checks
 - Native reflection binding path is used when available (fallback handler path is retained)
@@ -92,13 +97,13 @@ Reflection in Sengoo is designed for low baseline overhead:
 Reflection build example:
 
 ```bash
-sgc build examples/09_method_call.sg -O 2 --reflect
+sgc build examples/09_method_call.sg -O 2
 ```
 
 Fine-grained reflection selection:
 
 ```bash
-sgc build examples/09_method_call.sg -O 2 --reflect \
+sgc build examples/09_method_call.sg -O 2 --reflect=on \
   --reflect-module examples/09_method_call.sg \
   --reflect-symbol examples/09_method_call.sg::main
 ```
@@ -126,8 +131,8 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<lat
 Reflection benchmark cases:
 
 - `disabled`: compile with reflection fully off (baseline path)
-- `enabled-unused`: compile with `--reflect`, runtime reflection API not called
-- `enabled-used`: compile with `--reflect`, perform runtime symbol listing and typed reflection invoke
+- `enabled-unused`: compile with `--reflect=on`, runtime reflection API not called
+- `enabled-used`: compile with `--reflect=on`, perform runtime symbol listing and typed reflection invoke
 
 Current gate defaults:
 
@@ -277,6 +282,9 @@ Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支
 | 增量编辑后编译 (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | 增量收益 (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
+高级流水线（100k/1000k）快照：
+`bench/results/1771246902505-advanced-pipeline.json`（Sengoo 1000k 端到端：`5885.34ms`）
+
 ## 3）运行时性能路径
 
 同一矩阵中的 runtime p50 均值：
@@ -290,12 +298,14 @@ Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支
 
 含义：在该循环密集矩阵中，Sengoo 与 C++/Rust 处于同量级，并明显快于 Python 解释执行。
 
-## 4）非侵入式反射（按需开启）
+## 4）非侵入式反射（默认自动）
 
-Sengoo 反射能力采用“默认关闭 + 按需开启”模型：
+Sengoo 反射能力采用“默认自动 + 可强制开关”模型：
 
-- 默认不启用，避免影响基线路径
-- 显式 `--reflect` 开启
+- 默认 `--reflect=auto`
+- 在检测到反射导入时自动启用（`import reflect;` / `import std::reflect;`）
+- 显式强制开启：`--reflect` 或 `--reflect=on`
+- 显式强制关闭：`--reflect=off`
 - 输出 sidecar 元数据（`*.sgreflect.json`）
 - 运行时提供类型化调用（`call_i64`/`call_f64`/`call_bool`）
 - 可用时走原生反射绑定路径，不可用时自动回退
@@ -303,13 +313,13 @@ Sengoo 反射能力采用“默认关闭 + 按需开启”模型：
 反射构建示例：
 
 ```bash
-sgc build examples/09_method_call.sg -O 2 --reflect
+sgc build examples/09_method_call.sg -O 2
 ```
 
 细粒度筛选示例：
 
 ```bash
-sgc build examples/09_method_call.sg -O 2 --reflect \
+sgc build examples/09_method_call.sg -O 2 --reflect=on \
   --reflect-module examples/09_method_call.sg \
   --reflect-symbol examples/09_method_call.sg::main
 ```
