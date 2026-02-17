@@ -276,41 +276,68 @@ Notes:
 
 # Sengoo（中文版）
 
-Sengoo 是一门自研编译型语言，目标聚焦工程落地：
+Sengoo 是一门自研编译型语言，聚焦实际工程落地：
 
 - 强化 Python 互操作，支持渐进迁移
-- 提升全量/增量编译反馈速度，缩短开发周期
-- 基于 LLVM 生成原生可执行程序
-- 提供按需开启的非侵入式反射能力
+- 提升全量/增量编译反馈速度，缩短开发迭代周期
+- 基于 LLVM 生成原生可执行产物
+- 提供默认自动的非侵入式反射（sidecar 元数据）
 
 项目仍在快速迭代，但本地 CLI 开发流程已经可用。
 
+## 实用 Demo（面向开发者）
+
+如果你希望看到业务风格的可落地证明，而不是仅有合成微基准，可直接运行：
+
+```bash
+# Sengoo vs Python 热点性能 Demo
+python bench/demos/hotpath-risk-scoring/run_demo.py
+
+# Sengoo 自动反射 vs C++ 手工注册 Demo
+python bench/demos/reflection-auto-vs-cpp/run_demo.py
+```
+
+最新快照（测量日期：**2026-02-16**）：
+
+- 热点 Demo 报告：
+  `bench/demos/hotpath-risk-scoring/results/1771254169774-risk-scoring-demo.json`
+- 反射工程性 Demo 报告：
+  `bench/demos/reflection-auto-vs-cpp/results/1771255074700-reflection-auto-vs-cpp.json`
+
+| Demo | Sengoo | Python / C++ |
+|---|---:|---:|
+| 热点路径运行时均值 (ms) | 25.23 | Python: 1285.13 |
+| 热点路径速度比 | 比 Python 快 50.93x | 基线 |
+| 反射规则文件 LOC | 28 | C++: 55 |
+| 手工注册条目数 | 0 | C++: 2 |
+| 动态规则缺失数 | 0 | C++: 1 |
+
 ## 为什么选择 Sengoo
 
-## 1）Python 渐进迁移能力
+## 1) 混合式 Python 迁移，而非一次性重写
 
-Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支持“Python 编排 + Sengoo 热点模块”的混合架构。
+Sengoo 在运行时提供 Python 互操作层（见 `runtime/src/python.rs`），支持“Python 编排 + Sengoo 热点模块”的混合架构。
 
-互操作基准快照（**2026-02-16**）：
-`bench/results/1771230408116-python-interop.json`
+互操作基准快照（测量日期：**2026-02-16**）：
+`bench/results/1771234431756-python-interop.json`
 
 | 路径 | Loop 平均耗时 (ms) | 吞吐 (Calls/s) | 相对 Python 原生 |
 |---|---:|---:|---:|
-| Python 原生 | 2.184 | 9.16M | 基线 |
-| Sengoo Runtime (PythonInterop) | 2.665 | 7.50M | +22.02% |
-| C++ (CPython C API) | 2.919 | 6.85M | +33.63% |
-| Rust (PyO3) | 2.930 | 6.83M | +34.15% |
+| Python 原生 | 0.965 | 5.18M | 基线 |
+| Sengoo Runtime (PythonInterop) | 0.665 | 7.52M | -31.14% |
+| C++ (CPython C API) | 0.718 | 6.97M | -25.65% |
+| Rust (PyO3) | 1.069 | 4.68M | +10.74% |
 
-## 2）增量编译反馈
+## 2) 快速反馈的增量编译链路
 
 编译链路重点：
 
-- build/run cache 与模块指纹失效机制
-- AST 级编辑分类（`noop` / `impl_only` / `interface_change`）
+- build/run 缓存与模块指纹失效机制
+- AST 感知编辑分类（`noop` / `impl_only` / `interface_change`）
 - workset 感知后端调度
 - 可选 daemon 常驻模式
 
-跨语言场景矩阵（**2026-02-16**）：
+跨语言场景矩阵（测量日期：**2026-02-16**）：
 `bench/results/1771185238357-scenario-matrix.json`
 
 | 指标（平均） | Sengoo | C++ | Rust | Python |
@@ -319,12 +346,42 @@ Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支
 | 增量编辑后编译 (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | 增量收益 (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
-高级流水线（100k/1000k）快照：
-`bench/results/1771246902505-advanced-pipeline.json`（Sengoo 1000k 端到端：`5885.34ms`）
+高级流水线快照（真实编辑 + 100k/1000k 规模，测量日期：**2026-02-16**）：
+`bench/results/1771252338862-advanced-pipeline.json`
 
-## 3）运行时性能路径
+真实增量场景（`after_avg_ms`，Sengoo）：
 
-同一矩阵中的 runtime p50 均值：
+| 场景 | 平均耗时 (ms) |
+|---|---:|
+| `loop_body_change` | 242.07 |
+| `function_signature_change` | 267.02 |
+| `add_new_function` | 245.44 |
+
+100k LOC 全流程（Sengoo）：
+
+| 阶段 | 平均耗时 (ms) |
+|---|---:|
+| Frontend (`compile_frontend_llvm_avg_ms`) | 503.57 |
+| Codegen object (`codegen_obj_avg_ms`) | 57.78 |
+| Link (`link_avg_ms`) | 492.72 |
+| End-to-end (`e2e_avg_ms`) | 1054.08 |
+
+10k-1000k 四语言 e2e 编译对比（`Sengoo / C++ / Rust / Python`）：
+
+| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) | Python (ms) |
+|---|---:|---:|---:|---:|
+| 10k | 666.99 | 830.18 | 1225.40 | 81.95 |
+| 100k | 1054.08 | 1145.91 | 4135.55 | 498.95 |
+| 1000k | 6482.95 | 3373.79 | 35292.84 | 5100.83 |
+
+Sengoo 1000k 阶段占比：
+- Frontend: `5869.79ms`（`90.54%`）
+- Codegen object: `56.19ms`（`0.87%`）
+- Link: `556.97ms`（`8.59%`）
+
+## 3) 运行时性能等级
+
+场景 runtime p50 平均（同一矩阵文件 `1771185238357`）：
 
 | 语言 | Runtime p50 平均 (ms) |
 |---|---:|
@@ -333,19 +390,22 @@ Sengoo 在运行时提供 Python 互操作层（`runtime/src/python.rs`），支
 | Rust | 8.59 |
 | Python | 45.14 |
 
-含义：在该循环密集矩阵中，Sengoo 与 C++/Rust 处于同量级，并明显快于 Python 解释执行。
+解读：
 
-## 4）非侵入式反射（默认自动）
+- 在该循环密集型矩阵中，Sengoo 与 C++/Rust 处于同一量级。
+- 在这些样本里，Sengoo 运行时显著快于 Python 解释执行。
+
+## 4) 非侵入式反射（默认自动）
 
 Sengoo 反射能力采用“默认自动 + 可强制开关”模型：
 
 - 默认 `--reflect=auto`
-- 在检测到反射导入时自动启用（`import reflect;` / `import std::reflect;`）
+- 检测到反射导入时自动启用（`import reflect;` / `import std::reflect;`）
 - 显式强制开启：`--reflect` 或 `--reflect=on`
 - 显式强制关闭：`--reflect=off`
 - 输出 sidecar 元数据（`*.sgreflect.json`）
-- 运行时提供类型化调用（`call_i64`/`call_f64`/`call_bool`）
-- 可用时走原生反射绑定路径，不可用时自动回退
+- 提供类型化调用（`call_i64` / `call_f64` / `call_bool`）
+- 原生反射绑定路径可用时优先使用，不可用时回退
 
 反射构建示例：
 
@@ -385,8 +445,33 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<lat
 
 ```bash
 cargo build --release
+```
+
+```bash
 target/release/sgc run examples/01_hello.sg
+```
+
+```bash
 target/release/sgc build examples/05_loop.sg -O 2
+```
+
+常用命令：
+
+```bash
+# 类型检查
+sgc check <file.sg>
+
+# 编译并运行
+sgc run <file.sg> -O 1
+
+# 编译为原生二进制
+sgc build <file.sg> -O 2
+
+# 强制全量重建
+sgc build <file.sg> -O 2 --force-rebuild
+
+# 可选 daemon 模式
+sgc daemon --addr 127.0.0.1:48765
 ```
 
 ## VS Code 插件
@@ -396,7 +481,7 @@ target/release/sgc build examples/05_loop.sg -O 2
 
 ## 基准复现
 
-基准套件位于独立仓库：
+基准套件维护在独立仓库：
 
 - `https://github.com/Hyper66666/bench`
 
@@ -409,8 +494,44 @@ python ./bench/python_interop_bench.py
 python ./bench/bootstrap_generality_bench.py
 ```
 
+高级流水线公平性配置：
+
+- C++：启用预编译头（PCH）
+- Rust：启用 cargo incremental（`CARGO_INCREMENTAL=1`）
+
 ## 文档入口
 
 - 教程：`docs/sengoo-tutorial.html`
 - 语言特性：`docs/language-features.md`
 - 开发手册：`docs/DEVELOPMENT_GUIDE.md`
+
+## 仓库结构
+
+```text
+Sengoo/
+|-- compiler/        # 前端、类型检查、HIR/MIR 流水线
+|-- runtime/         # 运行时支持、Python 互操作、反射运行时 API
+|-- tools/
+|   |-- sgc/         # 编译器 CLI
+|   |-- sgfmt/       # 格式化工具
+|   `-- sglsp/       # 语言服务器
+|-- examples/        # 语言示例
+|-- docs/            # 教程与开发文档
+`-- vscode-sengoo/   # VS Code 扩展
+```
+
+## 项目状态
+
+当前阶段：早期，但在高速迭代。
+
+当前重点：
+
+- 前端架构优化
+- 真实编辑下更强的一致性增量编译
+- 互操作与反射体验持续打磨
+- 工具链与开发者体验完善
+
+说明：
+
+- 上述基准均为本机测量值，应作为趋势信号而非绝对结论。
+- 请结合 bench 仓库与 CI gate 在你的硬件环境上复验。
