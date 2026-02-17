@@ -7,8 +7,8 @@ use sengoo_compiler::mir::{
 };
 use sengoo_compiler::{
     lower_ast, lower_hir, ClassMember, Codegen, Decl, DeclKind, Expr, ExprKind, Function, Import,
-    ImportKind, MirOptLevel, Param, Parser, Path as AstPath, SelfParam, Span, Stmt, StmtKind,
-    TraitBound, TraitItem, Type, TypeChecker, TypeKind, VariantField, Visibility,
+    ImportKind, MirOptLevel, Param, Parser, Path as AstPath, Program, SelfParam, Span, Stmt,
+    StmtKind, TraitBound, TraitItem, Type, TypeChecker, TypeKind, VariantField, Visibility,
 };
 use sengoo_runtime::{
     ReflectionRuntime, ReflectionSymbolMetadata as RuntimeReflectionSymbolMetadata,
@@ -2266,13 +2266,21 @@ fn append_decl_interface_signature(out: &mut String, decl: &Decl) {
     }
 }
 
-fn ast_interface_signature(source: &str) -> Option<String> {
-    let program = Parser::parse(source).ok()?;
+fn interface_signature_from_program(program: &Program) -> String {
     let mut out = String::new();
     for decl in &program.decls {
         append_decl_interface_signature(&mut out, decl);
     }
-    Some(out)
+    out
+}
+
+fn interface_fingerprint_from_program(program: &Program) -> u64 {
+    source_fingerprint(&interface_signature_from_program(program))
+}
+
+fn ast_interface_signature(source: &str) -> Option<String> {
+    let program = Parser::parse(source).ok()?;
+    Some(interface_signature_from_program(&program))
 }
 
 fn source_span_slice<'a>(source: &'a str, span: Span) -> Option<&'a str> {
@@ -2516,7 +2524,14 @@ fn function_fingerprints_for_module(module_path: &str, source: &str) -> Vec<Func
         Ok(program) => program,
         Err(_) => return Vec::new(),
     };
+    function_fingerprints_for_program(module_path, source, &program)
+}
 
+fn function_fingerprints_for_program(
+    module_path: &str,
+    source: &str,
+    program: &Program,
+) -> Vec<FunctionFingerprint> {
     let mut functions = Vec::new();
     for decl in &program.decls {
         collect_function_fingerprints_from_decl(&mut functions, module_path, &[], decl, source);
@@ -3527,16 +3542,7 @@ fn resolve_import_candidates(source_dir: &Path, import_path: &AstPath) -> Vec<Pa
     candidates
 }
 
-fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathBuf>, bool) {
-    if !source.contains("import") {
-        return (Vec::new(), false);
-    }
-
-    let program = match Parser::parse(source) {
-        Ok(program) => program,
-        Err(_) => return (Vec::new(), false),
-    };
-
+fn resolve_direct_import_dependencies_from_program(source_dir: &Path, program: &Program) -> Vec<PathBuf> {
     let mut deps = program
         .decls
         .iter()
@@ -3553,6 +3559,20 @@ fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathB
         .collect::<Vec<_>>();
     deps.sort();
     deps.dedup();
+    deps
+}
+
+fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathBuf>, bool) {
+    if !source.contains("import") {
+        return (Vec::new(), false);
+    }
+
+    let program = match Parser::parse(source) {
+        Ok(program) => program,
+        Err(_) => return (Vec::new(), false),
+    };
+
+    let deps = resolve_direct_import_dependencies_from_program(source_dir, &program);
     let requests_reflection = program.decls.iter().any(decl_requests_reflection);
     (deps, requests_reflection)
 }
@@ -3931,23 +3951,27 @@ fn frontend_cache_entry_for_module(
     depends_on.dedup();
 
     let source_hash = source_fingerprint(&info.source);
-    let (interface_hash, body_hash) = if collect_symbol_fingerprints {
-        (
-            interface_fingerprint(&info.source),
-            implementation_fingerprint(&info.source),
-        )
+    let (interface_hash, body_hash, mut symbols) = if collect_symbol_fingerprints {
+        let body_hash = implementation_fingerprint(&info.source);
+        match Parser::parse(&info.source) {
+            Ok(program) => (
+                interface_fingerprint_from_program(&program),
+                body_hash,
+                function_fingerprints_for_program(module_path, &info.source, &program),
+            ),
+            Err(_) => (
+                interface_fingerprint_fast(&info.source),
+                body_hash,
+                Vec::new(),
+            ),
+        }
     } else {
         let normalized = normalize_source_for_hash(&info.source);
         (
             interface_fingerprint_fast_from_normalized(&normalized),
             implementation_fingerprint_from_normalized(&normalized),
+            Vec::new(),
         )
-    };
-
-    let mut symbols = if collect_symbol_fingerprints {
-        function_fingerprints_for_module(module_path, &info.source)
-    } else {
-        Vec::new()
     };
     if collect_symbol_fingerprints {
         for symbol in &mut symbols {
