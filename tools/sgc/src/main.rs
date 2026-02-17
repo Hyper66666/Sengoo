@@ -2674,7 +2674,9 @@ fn frontend_probe_module_full(
     checker
         .check_program(&parsed)
         .map_err(|e| format!("typecheck failed: {}", e))?;
-    let hir = lower_ast(&parsed, checker.env());
+    let type_env = checker.into_env();
+    let hir = lower_ast(&parsed, &type_env);
+    drop(type_env);
     let _ = lower_hir(&hir.items).map_err(|e| format!("lower failed: {}", e))?;
 
     Ok((

@@ -63,11 +63,15 @@ fn compile_frontend_to_mir_with_phase_timings(
         checker
             .check_program(&program)
             .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
+        let type_env = checker.into_env();
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
 
         let mir_start = Instant::now();
-        let hir_module = lower_ast(&program, checker.env());
+        let hir_module = lower_ast(&program, &type_env);
         let mut mir_fns = lower_hir(&hir_module.items).map_err(|e| miette::miette!("{}", e))?;
+        drop(hir_module);
+        drop(type_env);
+        drop(program);
         let mir_opt_level = MirOptLevel::from_u8(opt_level)
             .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
         let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
