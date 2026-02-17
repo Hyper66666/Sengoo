@@ -7,6 +7,8 @@ fn count_redundant_load_store(func: &MirFunction) -> usize {
     let mut count = 0usize;
     for bb in &func.basic_blocks {
         for pair in bb.instructions.windows(2) {
+            let load_inst = func.instruction(pair[0]);
+            let store_inst = func.instruction(pair[1]);
             if let (
                 Instruction::Load {
                     destination,
@@ -16,7 +18,7 @@ fn count_redundant_load_store(func: &MirFunction) -> usize {
                     destination: dst,
                     value,
                 },
-            ) = (&pair[0], &pair[1])
+            ) = (load_inst, store_inst)
             {
                 if destination == value && source == dst {
                     count += 1;
@@ -31,18 +33,23 @@ fn build_hot_loop_like_mir() -> MirFunction {
     let mut func = MirFunction::new("hot_loop_like".to_string(), vec![], MIRType::Unit);
     let user_local = func.add_local(LocalKind::User, MIRType::Int(64));
     let temp_local = func.add_local(LocalKind::Temp, MIRType::Int(64));
+    let entry = func.start_block;
 
-    let bb = func
-        .block_mut(func.start_block)
-        .expect("entry basic block must exist");
-    bb.instructions.push(Instruction::Load {
-        destination: temp_local,
-        source: user_local,
-    });
-    bb.instructions.push(Instruction::Store {
-        destination: user_local,
-        value: temp_local,
-    });
+    func.push_inst_to_block(
+        entry,
+        Instruction::Load {
+            destination: temp_local,
+            source: user_local,
+        },
+    );
+    func.push_inst_to_block(
+        entry,
+        Instruction::Store {
+            destination: user_local,
+            value: temp_local,
+        },
+    );
+    let bb = func.block_mut(entry).expect("entry basic block must exist");
     bb.set_terminator(Terminator::Return(None));
 
     func

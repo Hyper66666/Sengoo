@@ -538,7 +538,7 @@ impl<'a> LoweringContext<'a> {
 
     /// 获取局部变量的类型（返回引用，避免不必要的 clone�?
     fn get_local_type(&self, local: Local) -> &MIRType {
-        if let Some((_, ty)) = self.mir_fn.locals.get(local.id) {
+        if let Some((_, ty)) = self.mir_fn.locals.get(local.index()) {
             ty
         } else {
             &MIR_UNIT
@@ -674,9 +674,7 @@ impl<'a> LoweringContext<'a> {
     /// 添加指令到当前基本块
     fn push_inst(&mut self, inst: Instruction) {
         let block_id = self.current_block();
-        if let Some(block) = self.mir_fn.block_mut(block_id) {
-            block.push(inst);
-        }
+        self.mir_fn.push_inst_to_block(block_id, inst);
     }
 
     /// 设置当前基本块的终止�?

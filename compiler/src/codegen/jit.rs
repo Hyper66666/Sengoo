@@ -198,7 +198,8 @@ impl JITCodegen {
         }
 
         // 生成指令
-        for inst in &bb.instructions {
+        for inst_id in &bb.instructions {
+            let inst = mir_fn.instruction(*inst_id);
             self.codegen_instruction(inst, mir_fn)?;
         }
 

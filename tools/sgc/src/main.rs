@@ -17,12 +17,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::{BufReader as StdBufReader, BufWriter, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -49,10 +50,25 @@ impl Default for ReflectionMode {
     }
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum FrontendMemoryMode {
+    Auto,
+    Stream,
+    Legacy,
+}
+
+impl Default for FrontendMemoryMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
 const REFLECTION_SCHEMA_VERSION: u32 = 1;
 const FRONTEND_SCHEDULER_SCHEMA_VERSION: u32 = 1;
+const FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES: usize = 256 * 1024;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:48765";
 const DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const LINKER_UNKNOWN: i8 = -1;
@@ -182,6 +198,7 @@ struct ModuleInvalidationStats {
 struct ModuleSourceInfo {
     source: String,
     depends_on: Vec<String>,
+    requests_reflection: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -961,6 +978,42 @@ fn default_frontend_jobs_wire() -> String {
     "auto".to_string()
 }
 
+fn parse_frontend_memory_mode_wire(raw: &str) -> FrontendMemoryMode {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "stream" => FrontendMemoryMode::Stream,
+        "legacy" => FrontendMemoryMode::Legacy,
+        _ => FrontendMemoryMode::Auto,
+    }
+}
+
+fn frontend_memory_mode_label(mode: FrontendMemoryMode) -> &'static str {
+    match mode {
+        FrontendMemoryMode::Auto => "auto",
+        FrontendMemoryMode::Stream => "stream",
+        FrontendMemoryMode::Legacy => "legacy",
+    }
+}
+
+fn frontend_memory_mode_from_env() -> Option<FrontendMemoryMode> {
+    std::env::var("SENGOO_FRONTEND_MEMORY_MODE")
+        .ok()
+        .map(|raw| parse_frontend_memory_mode_wire(&raw))
+}
+
+fn resolve_frontend_memory_mode(source_len_bytes: usize) -> FrontendMemoryMode {
+    match frontend_memory_mode_from_env().unwrap_or(FrontendMemoryMode::Auto) {
+        FrontendMemoryMode::Auto => {
+            if source_len_bytes >= FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES {
+                FrontendMemoryMode::Stream
+            } else {
+                FrontendMemoryMode::Legacy
+            }
+        }
+        other => other,
+    }
+}
+
 fn frontend_trace_enabled(explicit_flag: bool) -> bool {
     if explicit_flag {
         return true;
@@ -1069,6 +1122,7 @@ fn decl_requests_reflection(decl: &Decl) -> bool {
     }
 }
 
+#[cfg(test)]
 fn source_requests_reflection(source: &str) -> bool {
     let program = match Parser::parse(source) {
         Ok(program) => program,
@@ -1290,7 +1344,7 @@ async fn send_daemon_request(
         .await
         .map_err(|e| format!("failed to flush daemon request: {}", e))?;
 
-    let mut reader = BufReader::new(read_half);
+    let mut reader = TokioBufReader::new(read_half);
     let mut line = String::new();
     timeout(DAEMON_CONNECT_TIMEOUT, reader.read_line(&mut line))
         .await
@@ -1331,7 +1385,7 @@ async fn cmd_daemon(addr: &str) -> Result<()> {
 
 async fn handle_daemon_client(stream: TcpStream) -> Result<()> {
     let (read_half, mut write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
+    let mut reader = TokioBufReader::new(read_half);
     let mut line = String::new();
     reader.read_line(&mut line).await.into_diagnostic()?;
     if line.trim().is_empty() {
@@ -1557,36 +1611,65 @@ fn compile_source_with_phase_timings(
     source: &str,
     opt_level: u8,
 ) -> Result<(String, BTreeMap<String, f64>)> {
+    let resolved_memory_mode = resolve_frontend_memory_mode(source.len());
+    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(source, opt_level)?;
+
+    let codegen_start = Instant::now();
+    let mut codegen = Codegen::new();
+    let llvm_ir = match resolved_memory_mode {
+        FrontendMemoryMode::Stream => {
+            let mut out = Vec::new();
+            codegen
+                .codegen_to_writer(&mir_fns, &mut out)
+                .map_err(|e| miette::miette!("codegen failed: {}", e))?;
+            String::from_utf8(out).map_err(|e| miette::miette!("invalid utf-8 LLVM IR: {}", e))?
+        }
+        FrontendMemoryMode::Legacy | FrontendMemoryMode::Auto => codegen
+            .codegen(&mir_fns)
+            .map_err(|e| miette::miette!("codegen failed: {}", e))?,
+    };
+    phases.insert(
+        "codegen".to_string(),
+        codegen_start.elapsed().as_secs_f64() * 1000.0,
+    );
+    phases.insert("link".to_string(), 0.0);
+
+    Ok((llvm_ir, phases))
+}
+
+fn compile_frontend_to_mir_with_phase_timings(
+    source: &str,
+    opt_level: u8,
+) -> Result<(Vec<MirFunction>, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
 
-    let parse_start = Instant::now();
-    let program = Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?;
-    phases.insert(
-        "parse".to_string(),
-        parse_start.elapsed().as_secs_f64() * 1000.0,
-    );
+    let (mut mir_fns, parse_ms, typeck_ms, mir_ms) = {
+        let parse_start = Instant::now();
+        let program = Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?;
+        let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
 
-    let typeck_start = Instant::now();
-    let mut checker = TypeChecker::new();
-    checker
-        .check_program(&program)
-        .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
-    phases.insert(
-        "typeck".to_string(),
-        typeck_start.elapsed().as_secs_f64() * 1000.0,
-    );
+        let typeck_start = Instant::now();
+        let mut checker = TypeChecker::new();
+        checker
+            .check_program(&program)
+            .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
+        let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
 
-    let mir_start = Instant::now();
-    let hir_module = lower_ast(&program, checker.env());
-    let mut mir_fns = lower_hir(&hir_module.items).map_err(|e| miette::miette!("{}", e))?;
-    let mir_opt_level = MirOptLevel::from_u8(opt_level)
-        .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
-    let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
-    pipeline.run(&mut mir_fns);
-    phases.insert(
-        "mir".to_string(),
-        mir_start.elapsed().as_secs_f64() * 1000.0,
-    );
+        let mir_start = Instant::now();
+        let hir_module = lower_ast(&program, checker.env());
+        let mut mir_fns = lower_hir(&hir_module.items).map_err(|e| miette::miette!("{}", e))?;
+        let mir_opt_level = MirOptLevel::from_u8(opt_level)
+            .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
+        let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
+        pipeline.run(&mut mir_fns);
+        let mir_ms = mir_start.elapsed().as_secs_f64() * 1000.0;
+
+        (mir_fns, parse_ms, typeck_ms, mir_ms)
+    };
+
+    phases.insert("parse".to_string(), parse_ms);
+    phases.insert("typeck".to_string(), typeck_ms);
+    phases.insert("mir".to_string(), mir_ms);
 
     let prune_start = Instant::now();
     prune_unreachable_mir_functions(&mut mir_fns);
@@ -1595,18 +1678,57 @@ fn compile_source_with_phase_timings(
         prune_start.elapsed().as_secs_f64() * 1000.0,
     );
 
+    Ok((mir_fns, phases))
+}
+
+fn compile_source_to_llvm_file_with_phase_timings(
+    source: &str,
+    opt_level: u8,
+    llvm_path: &Path,
+) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
+    let resolved_memory_mode = resolve_frontend_memory_mode(source.len());
+    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(source, opt_level)?;
+
     let codegen_start = Instant::now();
-    let mut codegen = Codegen::new();
-    let llvm_ir = codegen
-        .codegen(&mir_fns)
-        .map_err(|e| miette::miette!("codegen failed: {}", e))?;
+    let mut effective_mode = resolved_memory_mode;
+    let stream_result = if matches!(resolved_memory_mode, FrontendMemoryMode::Stream) {
+        let file = fs::File::create(llvm_path)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("failed to create LLVM IR output {}: {}", llvm_path.display(), e))?;
+        let mut writer = BufWriter::new(file);
+        let mut codegen = Codegen::new();
+        codegen
+            .codegen_to_writer(&mir_fns, &mut writer)
+            .map_err(|e| miette::miette!("codegen failed: {}", e))
+    } else {
+        Ok(())
+    };
+
+    if let Err(_err) = stream_result {
+        effective_mode = FrontendMemoryMode::Legacy;
+        let mut codegen = Codegen::new();
+        let llvm_ir = codegen
+            .codegen(&mir_fns)
+            .map_err(|e| miette::miette!("codegen failed: {}", e))?;
+        fs::write(llvm_path, llvm_ir)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
+    } else if matches!(resolved_memory_mode, FrontendMemoryMode::Legacy) {
+        let mut codegen = Codegen::new();
+        let llvm_ir = codegen
+            .codegen(&mir_fns)
+            .map_err(|e| miette::miette!("codegen failed: {}", e))?;
+        fs::write(llvm_path, llvm_ir)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
+    }
+
     phases.insert(
         "codegen".to_string(),
         codegen_start.elapsed().as_secs_f64() * 1000.0,
     );
     phases.insert("link".to_string(), 0.0);
-
-    Ok((llvm_ir, phases))
+    Ok((phases, effective_mode))
 }
 
 fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) -> usize {
@@ -1665,7 +1787,8 @@ fn collect_mir_call_targets(
     let mut targets = Vec::new();
     let mut seen = HashSet::new();
     for block in &mir_fn.basic_blocks {
-        for inst in &block.instructions {
+        for inst_id in &block.instructions {
+            let inst = mir_fn.instruction(*inst_id);
             if let MirInstruction::Call { func, .. } = inst {
                 if let Some(&idx) = index_by_name.get(func) {
                     if seen.insert(idx) {
@@ -1685,8 +1808,8 @@ fn collect_mir_call_targets(
     targets
 }
 
-fn link_ir_with_clang_ms(
-    llvm_ir: &str,
+fn link_ir_file_with_clang_ms(
+    llvm_ir_path: &Path,
     case_name: &str,
     clang_exe: &str,
     runtime_c: Option<&str>,
@@ -1697,19 +1820,22 @@ fn link_ir_with_clang_ms(
 
     let stamp = now_unix_ms();
     let base = sanitize_for_filename(case_name);
-    let ll_path = tmp_dir.join(format!("{}-{}.ll", base, stamp));
     let exe_path = if cfg!(windows) {
         tmp_dir.join(format!("{}-{}.exe", base, stamp))
     } else {
         tmp_dir.join(format!("{}-{}", base, stamp))
     };
 
-    fs::write(&ll_path, llvm_ir).into_diagnostic()?;
     let link_start = Instant::now();
-    compile_native_binary(clang_exe, &ll_path, &exe_path, runtime_c, clang_opt_level)?;
+    compile_native_binary(
+        clang_exe,
+        llvm_ir_path,
+        &exe_path,
+        runtime_c,
+        clang_opt_level,
+    )?;
     let link_ms = link_start.elapsed().as_secs_f64() * 1000.0;
 
-    let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
     Ok(link_ms)
 }
@@ -1721,7 +1847,7 @@ fn source_fingerprint(source: &str) -> u64 {
 }
 
 fn normalize_source_for_hash(source: &str) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(source.len());
     for line in source.lines() {
         let without_comment = line.split("//").next().unwrap_or_default().trim();
         if without_comment.is_empty() {
@@ -1735,6 +1861,26 @@ fn normalize_source_for_hash(source: &str) -> String {
 
 fn implementation_fingerprint_from_normalized(normalized: &str) -> u64 {
     source_fingerprint(normalized)
+}
+
+fn file_fingerprint(path: &Path) -> Result<u64> {
+    let file = fs::File::open(path)
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to open {} for hashing: {}", path.display(), e))?;
+    let mut reader = StdBufReader::new(file);
+    let mut hasher = DefaultHasher::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("failed to hash {}: {}", path.display(), e))?;
+        if n == 0 {
+            break;
+        }
+        buf[..n].hash(&mut hasher);
+    }
+    Ok(hasher.finish())
 }
 
 fn implementation_fingerprint(source: &str) -> u64 {
@@ -2873,6 +3019,20 @@ fn interface_fingerprint_fast_from_normalized(normalized: &str) -> u64 {
     source_fingerprint(&fallback_repr)
 }
 
+fn resolve_root_interface_hash(
+    source: &str,
+    root_implementation_hash: u64,
+    previous_root_implementation_hash: Option<u64>,
+    previous_root_interface_hash: Option<u64>,
+) -> u64 {
+    if previous_root_implementation_hash == Some(root_implementation_hash) {
+        if let Some(previous_interface_hash) = previous_root_interface_hash {
+            return previous_interface_hash;
+        }
+    }
+    interface_fingerprint(source)
+}
+
 fn module_invalidation_stats(
     before: &[ModuleFingerprint],
     after: &[ModuleFingerprint],
@@ -3367,14 +3527,14 @@ fn resolve_import_candidates(source_dir: &Path, import_path: &AstPath) -> Vec<Pa
     candidates
 }
 
-fn resolve_direct_import_dependencies(source_dir: &Path, source: &str) -> Vec<PathBuf> {
+fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathBuf>, bool) {
     if !source.contains("import") {
-        return Vec::new();
+        return (Vec::new(), false);
     }
 
     let program = match Parser::parse(source) {
         Ok(program) => program,
-        Err(_) => return Vec::new(),
+        Err(_) => return (Vec::new(), false),
     };
 
     let mut deps = program
@@ -3393,7 +3553,8 @@ fn resolve_direct_import_dependencies(source_dir: &Path, source: &str) -> Vec<Pa
         .collect::<Vec<_>>();
     deps.sort();
     deps.dedup();
-    deps
+    let requests_reflection = program.decls.iter().any(decl_requests_reflection);
+    (deps, requests_reflection)
 }
 
 fn collect_module_sources_with_edges(
@@ -3411,7 +3572,7 @@ fn collect_module_sources_with_edges(
         }
 
         let source_dir = module_path.parent().unwrap_or(Path::new("."));
-        let deps = resolve_direct_import_dependencies(source_dir, &source);
+        let (deps, requests_reflection) = resolve_direct_import_metadata(source_dir, &source);
         let mut dep_keys = deps
             .iter()
             .map(|dep| canonical_or_lossy(dep))
@@ -3424,6 +3585,7 @@ fn collect_module_sources_with_edges(
             ModuleSourceInfo {
                 source: source.clone(),
                 depends_on: dep_keys,
+                requests_reflection,
             },
         );
 
@@ -3825,7 +3987,7 @@ fn collect_module_graph_snapshot(
     let mut reflection_import_modules = module_sources
         .iter()
         .filter_map(|(path, info)| {
-            if source_requests_reflection(&info.source) {
+            if info.requests_reflection {
                 Some(path.clone())
             } else {
                 None
@@ -5579,7 +5741,11 @@ async fn cmd_bench_run(suite: &str, opt_level: u8, warmup: u32, iterations: u32)
     Ok(())
 }
 
-async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Result<()> {
+async fn cmd_bench_compile(
+    suite: &str,
+    opt_level: u8,
+    iterations: u32,
+) -> Result<()> {
     let suite_path = resolve_bench_suite_path("compile", suite)?;
     let cases = collect_bench_cases(&suite_path)?;
     let clang = find_clang();
@@ -5618,11 +5784,23 @@ async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Resul
         let mut phase_totals: BTreeMap<String, f64> = BTreeMap::new();
         // Use O0 for the external clang link step to reduce backend noise in compile KPI.
         let bench_link_opt_level = 0;
+        let tmp_dir = bench_root_dir().join("results").join(".tmp");
+        fs::create_dir_all(&tmp_dir).into_diagnostic()?;
         for _ in 0..iterations {
-            let (llvm_ir, mut phases) = compile_source_with_phase_timings(&source, opt_level)?;
+            let ll_path = tmp_dir.join(format!(
+                "{}-{}-{}.ll",
+                sanitize_for_filename(&case_name),
+                now_unix_ms(),
+                sample_ms.len()
+            ));
+            let (mut phases, _effective_mode) = compile_source_to_llvm_file_with_phase_timings(
+                &source,
+                opt_level,
+                &ll_path,
+            )?;
             if let Some(clang_exe) = clang.as_deref() {
-                let link_ms = link_ir_with_clang_ms(
-                    &llvm_ir,
+                let link_ms = link_ir_file_with_clang_ms(
+                    &ll_path,
                     &case_name,
                     clang_exe,
                     runtime_c.as_deref(),
@@ -5630,6 +5808,7 @@ async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Resul
                 )?;
                 phases.insert("link".to_string(), link_ms);
             }
+            let _ = fs::remove_file(&ll_path);
 
             let total_ms = phases.values().sum();
             sample_ms.push(total_ms);
@@ -6362,13 +6541,22 @@ async fn cmd_build(
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
 
-    let source_hash = implementation_fingerprint(&source);
-    let root_implementation_hash = source_hash;
-    let root_interface_hash = interface_fingerprint(&source);
     let cache_path = build_dir.join(format!("{}.build-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
     let previous_build_metadata_seed = load_build_cache(&cache_path);
     let previous_frontend_session = load_frontend_session_store(&frontend_session_path);
+    let source_hash = implementation_fingerprint(&source);
+    let root_implementation_hash = source_hash;
+    let root_interface_hash = resolve_root_interface_hash(
+        &source,
+        root_implementation_hash,
+        previous_build_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_implementation_hash),
+        previous_build_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_interface_hash),
+    );
     let probe_mode = if force_rebuild {
         FrontendProbeMode::FastNoVerify
     } else {
@@ -6635,19 +6823,21 @@ async fn cmd_build(
         }
     }
 
-    let llvm_ir = match compile_source(&source, opt_level) {
-        Ok(ir) => ir,
-        Err(e) => {
-            eprintln!("Compilation error:");
-            eprintln!("{}", e);
-            return Err(miette::miette!("compile failed"));
-        }
-    };
-
-    fs::write(&llvm_ir_path, &llvm_ir)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
-    let llvm_ir_hash = source_fingerprint(&llvm_ir);
+    let (_phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings(
+        &source,
+        opt_level,
+        &llvm_ir_path,
+    )
+    .map_err(|e| {
+        eprintln!("Compilation error:");
+        eprintln!("{}", e);
+        miette::miette!("compile failed")
+    })?;
+    println!(
+        "frontend memory mode: {}",
+        frontend_memory_mode_label(effective_memory_mode)
+    );
+    let llvm_ir_hash = file_fingerprint(&llvm_ir_path)?;
 
     if emit_llvm {
         maybe_emit_reflection_sidecar(
@@ -6804,7 +6994,16 @@ async fn cmd_run(
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
     let source_hash = implementation_fingerprint(&source);
     let root_implementation_hash = source_hash;
-    let root_interface_hash = interface_fingerprint(&source);
+    let root_interface_hash = resolve_root_interface_hash(
+        &source,
+        root_implementation_hash,
+        previous_run_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_implementation_hash),
+        previous_run_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_interface_hash),
+    );
     let probe_mode = if force_rebuild {
         FrontendProbeMode::FastNoVerify
     } else {
@@ -7068,19 +7267,21 @@ async fn cmd_run(
         println!("run workset plan: full rebuild");
     }
 
-    let llvm_ir = match compile_source(&source, opt_level) {
-        Ok(ir) => ir,
-        Err(e) => {
-            eprintln!("Compilation error:");
-            eprintln!("{}", e);
-            return Err(miette::miette!("compile failed"));
-        }
-    };
-
-    fs::write(&llvm_ir_path, &llvm_ir)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
-    let llvm_ir_hash = source_fingerprint(&llvm_ir);
+    let (_phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings(
+        &source,
+        opt_level,
+        &llvm_ir_path,
+    )
+    .map_err(|e| {
+        eprintln!("Compilation error:");
+        eprintln!("{}", e);
+        miette::miette!("compile failed")
+    })?;
+    println!(
+        "frontend memory mode: {}",
+        frontend_memory_mode_label(effective_memory_mode)
+    );
+    let llvm_ir_hash = file_fingerprint(&llvm_ir_path)?;
 
     match resolved_engine {
         RunEngine::Native => {
@@ -7255,8 +7456,8 @@ mod tests {
         BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, Cli,
         DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
         FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata,
-        ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
-        DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
+        ReflectionMode, RunCacheMetadata, RunEngine,
+        BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use clap::Parser as _;
     use std::collections::{BTreeMap, HashSet};

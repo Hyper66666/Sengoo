@@ -5,8 +5,10 @@ pub use jit::JITCodegen;
 
 use crate::mir::{
     self, CallArg, IntrinsicOp, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction,
+    MIR_I64,
 };
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 pub struct Codegen {
     ir: String,
@@ -186,7 +188,20 @@ impl Codegen {
         estimate
     }
 
-    pub fn codegen(&mut self, mir_fns: &[MirFunction]) -> Result<String, String> {
+    fn prepare_codegen_buffers(&mut self) {
+        self.ir.clear();
+        self.declarations.clear();
+        self.strings.clear();
+        self.string_counter = 0;
+        self.name_cache.clear();
+        self.type_str_cache.clear();
+        self.load_counter = 0;
+        self.emit_header();
+        self.declare_runtime_functions();
+    }
+
+    fn emit_module_ir(&mut self, mir_fns: &[MirFunction]) -> Result<(), String> {
+        self.prepare_codegen_buffers();
         // Pre-allocate IR buffer based on MIR size estimate to reduce reallocations
         let capacity = Self::estimate_ir_capacity(mir_fns);
         self.ir.reserve(capacity);
@@ -205,15 +220,39 @@ impl Codegen {
         for mir_fn in mir_fns {
             self.codegen_function(mir_fn)?;
         }
-        let mut result = self.declarations.clone();
+        Ok(())
+    }
+
+    pub fn codegen(&mut self, mir_fns: &[MirFunction]) -> Result<String, String> {
+        self.emit_module_ir(mir_fns)?;
+        let mut result = String::with_capacity(self.declarations.len() + self.ir.len());
+        result.push_str(&self.declarations);
         result.push_str(&self.ir);
         Ok(result)
+    }
+
+    pub fn codegen_to_writer<W: Write>(
+        &mut self,
+        mir_fns: &[MirFunction],
+        writer: &mut W,
+    ) -> Result<(), String> {
+        self.emit_module_ir(mir_fns)?;
+        writer
+            .write_all(self.declarations.as_bytes())
+            .map_err(|e| format!("failed to write declarations: {}", e))?;
+        writer
+            .write_all(self.ir.as_bytes())
+            .map_err(|e| format!("failed to write function IR: {}", e))?;
+        writer
+            .flush()
+            .map_err(|e| format!("failed to flush LLVM IR output: {}", e))?;
+        Ok(())
     }
 
     /// 从函数中收集字符串常量
     fn collect_string_constants(&mut self, mir_fn: &MirFunction) {
         for bb in &mir_fn.basic_blocks {
-            for inst in &bb.instructions {
+            for inst in mir_fn.block_instructions(bb) {
                 if let mir::Instruction::Assign {
                     value: mir::MirConstant::String(s),
                     ..
@@ -285,7 +324,8 @@ impl Codegen {
                 .push_str(&format!("{} = alloca {}\n", local_name, llvm_ty));
         }
 
-        for inst in &bb.instructions {
+        for inst_id in &bb.instructions {
+            let inst = mir_fn.instruction(*inst_id);
             self.codegen_instruction(inst, mir_fn)?;
         }
         if let Some(terminator) = &bb.terminator {
@@ -483,7 +523,7 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
                 // 使用 id 直接索引，O(1) 查找
-                let (local_info, src_ty) = &mir_fn.locals[source.id];
+                let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
                 self.emit_indent();
                 // 需要判断是否需要真的 load：
@@ -521,7 +561,7 @@ impl Codegen {
                 let dest = self.local_name(*destination);
                 let val = self.operand_value(*value, mir_fn);
                 let ty = self.get_local_type(mir_fn, *value);
-                let llvm_ty = self.mir_type_to_llvm_cached(&ty);
+                let llvm_ty = self.mir_type_to_llvm_cached(ty);
                 self.emit_indent();
                 self.ir.push_str(&format!(
                     "store {} {}, {}* {}\n",
@@ -537,7 +577,7 @@ impl Codegen {
                 let base_reg = self.local_name(*base);
 
                 // 使用 id 直接索引检查是否是用户变量
-                let idx_local_info = &mir_fn.locals[index.id].0;
+                let idx_local_info = &mir_fn.locals[index.index()].0;
 
                 self.emit_indent();
                 if idx_local_info.kind == LocalKind::User {
@@ -1141,20 +1181,25 @@ impl Codegen {
     pub(crate) fn build_name_cache(&mut self, mir_fn: &MirFunction) {
         self.name_cache.clear();
         // Find the maximum local id to size the cache
-        let max_id = mir_fn.locals.iter().map(|(l, _)| l.id).max().unwrap_or(0);
+        let max_id = mir_fn
+            .locals
+            .iter()
+            .map(|(l, _)| l.index())
+            .max()
+            .unwrap_or(0);
         // Pre-fill with empty strings up to max_id + 1
         self.name_cache.resize(max_id + 1, String::new());
         for (local, _ty) in &mir_fn.locals {
             // Delegate to shared utility for name generation
-            self.name_cache[local.id] = common::local_name(*local);
+            self.name_cache[local.index()] = common::local_name(*local);
         }
     }
 
     fn local_name(&self, local: Local) -> String {
-        if local.id < self.name_cache.len() && !self.name_cache[local.id].is_empty() {
-            self.name_cache[local.id].clone()
+        let idx = local.index();
+        if idx < self.name_cache.len() && !self.name_cache[idx].is_empty() {
+            self.name_cache[idx].clone()
         } else {
-            // Fallback to shared utility when cache isn't available
             common::local_name(local)
         }
     }
@@ -1174,13 +1219,13 @@ impl Codegen {
         result
     }
 
-    fn get_local_type(&self, mir_fn: &MirFunction, local: Local) -> MIRType {
+    fn get_local_type<'a>(&self, mir_fn: &'a MirFunction, local: Local) -> &'a MIRType {
         // 使用 id 直接索引，而不是比较 Local 对象
         mir_fn
             .locals
-            .get(local.id)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(MIRType::Int(64))
+            .get(local.index())
+            .map(|(_, ty)| ty)
+            .unwrap_or(&MIR_I64)
     }
 
     /// 获取操作数的值寄存器
@@ -1188,13 +1233,13 @@ impl Codegen {
     /// 否则直接返回寄存器名
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
         // 使用 id 直接索引，O(1) 查找 local 的类型信息
-        let local_info = &mir_fn.locals[local.id].0;
+        let local_info = &mir_fn.locals[local.index()].0;
 
         match local_info.kind {
             LocalKind::User => {
-                // 用户变量需要先 load — 使用实际 MIR 类型而非硬编码 i64
+                // 用户变量需要先 load - 使用实际 MIR 类型而非硬编码 i64
                 let ty = self.get_local_type(mir_fn, local);
-                let llvm_ty = self.mir_type_to_llvm_cached(&ty);
+                let llvm_ty = self.mir_type_to_llvm_cached(ty);
                 let temp_reg = format!("%load.{}", self.load_counter);
                 self.load_counter += 1;
                 self.emit_indent();

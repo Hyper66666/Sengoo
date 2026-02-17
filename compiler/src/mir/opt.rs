@@ -49,11 +49,13 @@ impl MirPass for ConstantFolding {
     fn run(&self, func: &mut MirFunction) -> bool {
         let mut changed = false;
 
-        for bb in &mut func.basic_blocks {
+        for bb_idx in 0..func.basic_blocks.len() {
             // Track known constants per basic block.
             let mut known_constants: HashMap<Local, MirConstant> = HashMap::new();
-
-            for inst in &mut bb.instructions {
+            let inst_len = func.basic_blocks[bb_idx].instructions.len();
+            for inst_pos in 0..inst_len {
+                let inst_id = func.basic_blocks[bb_idx].instructions[inst_pos];
+                let inst = func.instruction_mut(inst_id);
                 match inst {
                     Instruction::Assign { destination, value } => {
                         known_constants.insert(*destination, value.clone());
@@ -97,19 +99,27 @@ impl MirPass for RedundantLoadStoreElimination {
     fn run(&self, func: &mut MirFunction) -> bool {
         let mut changed = false;
 
-        for bb in &mut func.basic_blocks {
-            if bb.instructions.len() < 2 {
+        for bb_idx in 0..func.basic_blocks.len() {
+            let original_ids = {
+                let block = &mut func.basic_blocks[bb_idx];
+                std::mem::take(&mut block.instructions)
+            };
+
+            if original_ids.len() < 2 {
+                func.basic_blocks[bb_idx].instructions = original_ids;
                 continue;
             }
 
-            let mut optimized = Vec::with_capacity(bb.instructions.len());
+            let mut optimized = Vec::with_capacity(original_ids.len());
             let mut idx = 0usize;
             let mut block_changed = false;
 
-            while idx < bb.instructions.len() {
-                if idx + 1 < bb.instructions.len() {
-                    let load = &bb.instructions[idx];
-                    let store = &bb.instructions[idx + 1];
+            while idx < original_ids.len() {
+                if idx + 1 < original_ids.len() {
+                    let load_id = original_ids[idx];
+                    let store_id = original_ids[idx + 1];
+                    let load = func.instruction(load_id);
+                    let store = func.instruction(store_id);
                     if let (
                         Instruction::Load {
                             destination,
@@ -124,7 +134,7 @@ impl MirPass for RedundantLoadStoreElimination {
                         if destination == value && source == store_dst {
                             // Keep the load result available for later users, but drop the
                             // writeback because it stores the just-loaded value back unchanged.
-                            optimized.push(load.clone());
+                            optimized.push(load_id);
                             idx += 2;
                             block_changed = true;
                             continue;
@@ -132,13 +142,15 @@ impl MirPass for RedundantLoadStoreElimination {
                     }
                 }
 
-                optimized.push(bb.instructions[idx].clone());
+                optimized.push(original_ids[idx]);
                 idx += 1;
             }
 
             if block_changed {
-                bb.instructions = optimized;
+                func.basic_blocks[bb_idx].instructions = optimized;
                 changed = true;
+            } else {
+                func.basic_blocks[bb_idx].instructions = original_ids;
             }
         }
 
