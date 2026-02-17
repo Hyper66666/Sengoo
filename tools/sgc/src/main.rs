@@ -23,12 +23,23 @@ use std::process::Command;
 use std::sync::atomic::{AtomicI8, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
 
 mod cli;
+mod cache;
+mod daemon;
+
+pub(crate) use cache::{
+    frontend_session_store_path, load_build_cache, load_frontend_session_store, load_run_cache,
+    save_build_cache, save_frontend_session_store, save_run_cache,
+};
+pub(crate) use daemon::{
+    cmd_daemon, dispatch_build_via_daemon, dispatch_run_via_daemon, resolve_daemon_addr,
+    DaemonDispatchOutcome,
+};
+#[cfg(test)]
+pub(crate) use daemon::{daemon_request_build, handle_daemon_client, send_daemon_request};
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -120,61 +131,6 @@ fn default_reflection_schema_version() -> u32 {
 
 fn default_frontend_scheduler_schema_version() -> u32 {
     FRONTEND_SCHEDULER_SCHEMA_VERSION
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DaemonRequest {
-    protocol_version: u32,
-    client_version: String,
-    command: DaemonCommand,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum DaemonCommand {
-    Build {
-        input: String,
-        output: Option<String>,
-        opt_level: u8,
-        emit_llvm: bool,
-        force_rebuild: bool,
-        #[serde(default = "default_frontend_jobs_wire")]
-        frontend_jobs: String,
-        #[serde(default)]
-        frontend_trace: bool,
-        reflect: ReflectionMode,
-        reflect_module: Vec<String>,
-        reflect_symbol: Vec<String>,
-    },
-    Run {
-        input: String,
-        opt_level: u8,
-        engine: RunEngine,
-        force_rebuild: bool,
-        args: Vec<String>,
-        #[serde(default = "default_frontend_jobs_wire")]
-        frontend_jobs: String,
-        #[serde(default)]
-        frontend_trace: bool,
-        reflect: ReflectionMode,
-        reflect_module: Vec<String>,
-        reflect_symbol: Vec<String>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DaemonResponse {
-    protocol_version: u32,
-    server_version: String,
-    ok: bool,
-    recoverable: bool,
-    message: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DaemonDispatchOutcome {
-    Handled,
-    Fallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -595,13 +551,6 @@ async fn main() -> Result<()> {
     cli::run().await
 }
 
-fn resolve_daemon_addr(explicit: Option<&str>) -> String {
-    explicit
-        .map(str::to_string)
-        .or_else(|| std::env::var("SENGOO_DAEMON_ADDR").ok())
-        .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
-}
-
 fn parse_frontend_jobs_arg(raw: &str) -> std::result::Result<FrontendJobs, String> {
     let trimmed = raw.trim();
     if trimmed.eq_ignore_ascii_case("auto") {
@@ -622,14 +571,6 @@ fn frontend_jobs_label(frontend_jobs: FrontendJobs) -> String {
         FrontendJobs::Auto => "auto".to_string(),
         FrontendJobs::Fixed(value) => value.to_string(),
     }
-}
-
-fn parse_frontend_jobs_wire(raw: &str) -> FrontendJobs {
-    parse_frontend_jobs_arg(raw).unwrap_or(FrontendJobs::Auto)
-}
-
-fn default_frontend_jobs_wire() -> String {
-    "auto".to_string()
 }
 
 fn parse_frontend_memory_mode_wire(raw: &str) -> FrontendMemoryMode {
@@ -831,335 +772,6 @@ fn reflection_mode_note(
     }
 }
 
-fn daemon_request_build(
-    input: &str,
-    output: Option<&str>,
-    opt_level: u8,
-    emit_llvm: bool,
-    force_rebuild: bool,
-    frontend_jobs: FrontendJobs,
-    frontend_trace: bool,
-    reflect: ReflectionMode,
-    reflect_module: &[String],
-    reflect_symbol: &[String],
-) -> DaemonRequest {
-    DaemonRequest {
-        protocol_version: DAEMON_PROTOCOL_VERSION,
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
-        command: DaemonCommand::Build {
-            input: input.to_string(),
-            output: output.map(str::to_string),
-            opt_level,
-            emit_llvm,
-            force_rebuild,
-            frontend_jobs: frontend_jobs_label(frontend_jobs),
-            frontend_trace,
-            reflect,
-            reflect_module: reflect_module.to_vec(),
-            reflect_symbol: reflect_symbol.to_vec(),
-        },
-    }
-}
-
-fn daemon_request_run(
-    input: &str,
-    opt_level: u8,
-    engine: RunEngine,
-    force_rebuild: bool,
-    args: &[String],
-    frontend_jobs: FrontendJobs,
-    frontend_trace: bool,
-    reflect: ReflectionMode,
-    reflect_module: &[String],
-    reflect_symbol: &[String],
-) -> DaemonRequest {
-    DaemonRequest {
-        protocol_version: DAEMON_PROTOCOL_VERSION,
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
-        command: DaemonCommand::Run {
-            input: input.to_string(),
-            opt_level,
-            engine,
-            force_rebuild,
-            args: args.to_vec(),
-            frontend_jobs: frontend_jobs_label(frontend_jobs),
-            frontend_trace,
-            reflect,
-            reflect_module: reflect_module.to_vec(),
-            reflect_symbol: reflect_symbol.to_vec(),
-        },
-    }
-}
-
-async fn dispatch_build_via_daemon(
-    addr: &str,
-    input: &str,
-    output: Option<&str>,
-    opt_level: u8,
-    emit_llvm: bool,
-    force_rebuild: bool,
-    frontend_jobs: FrontendJobs,
-    frontend_trace: bool,
-    reflect: ReflectionMode,
-    reflect_module: &[String],
-    reflect_symbol: &[String],
-) -> Result<DaemonDispatchOutcome> {
-    let request = daemon_request_build(
-        input,
-        output,
-        opt_level,
-        emit_llvm,
-        force_rebuild,
-        frontend_jobs,
-        frontend_trace_enabled(frontend_trace),
-        reflect,
-        reflect_module,
-        reflect_symbol,
-    );
-    dispatch_daemon_request(addr, &request, "build").await
-}
-
-async fn dispatch_run_via_daemon(
-    addr: &str,
-    input: &str,
-    opt_level: u8,
-    engine: RunEngine,
-    force_rebuild: bool,
-    args: &[String],
-    frontend_jobs: FrontendJobs,
-    frontend_trace: bool,
-    reflect: ReflectionMode,
-    reflect_module: &[String],
-    reflect_symbol: &[String],
-) -> Result<DaemonDispatchOutcome> {
-    let request = daemon_request_run(
-        input,
-        opt_level,
-        engine,
-        force_rebuild,
-        args,
-        frontend_jobs,
-        frontend_trace_enabled(frontend_trace),
-        reflect,
-        reflect_module,
-        reflect_symbol,
-    );
-    dispatch_daemon_request(addr, &request, "run").await
-}
-
-async fn dispatch_daemon_request(
-    addr: &str,
-    request: &DaemonRequest,
-    command_label: &str,
-) -> Result<DaemonDispatchOutcome> {
-    let response = match send_daemon_request(addr, request).await {
-        Ok(response) => response,
-        Err(reason) => {
-            println!("daemon fallback ({}): {}", command_label, reason);
-            return Ok(DaemonDispatchOutcome::Fallback);
-        }
-    };
-
-    if response.ok {
-        println!("daemon {}: {}", command_label, response.message);
-        return Ok(DaemonDispatchOutcome::Handled);
-    }
-
-    if response.recoverable {
-        println!("daemon fallback ({}): {}", command_label, response.message);
-        return Ok(DaemonDispatchOutcome::Fallback);
-    }
-
-    Err(miette::miette!("{}", response.message))
-}
-
-async fn send_daemon_request(
-    addr: &str,
-    request: &DaemonRequest,
-) -> std::result::Result<DaemonResponse, String> {
-    let stream = timeout(DAEMON_CONNECT_TIMEOUT, TcpStream::connect(addr))
-        .await
-        .map_err(|_| format!("connect timeout to {}", addr))?
-        .map_err(|e| format!("connect failed to {}: {}", addr, e))?;
-
-    let (read_half, mut write_half) = stream.into_split();
-    let payload = serde_json::to_string(request)
-        .map_err(|e| format!("failed to serialize daemon request: {}", e))?;
-    write_half
-        .write_all(payload.as_bytes())
-        .await
-        .map_err(|e| format!("failed to send daemon request: {}", e))?;
-    write_half
-        .write_all(b"\n")
-        .await
-        .map_err(|e| format!("failed to terminate daemon request: {}", e))?;
-    write_half
-        .flush()
-        .await
-        .map_err(|e| format!("failed to flush daemon request: {}", e))?;
-
-    let mut reader = TokioBufReader::new(read_half);
-    let mut line = String::new();
-    timeout(DAEMON_CONNECT_TIMEOUT, reader.read_line(&mut line))
-        .await
-        .map_err(|_| "daemon response timeout".to_string())?
-        .map_err(|e| format!("failed to read daemon response: {}", e))?;
-
-    if line.trim().is_empty() {
-        return Err("daemon returned empty response".to_string());
-    }
-
-    serde_json::from_str::<DaemonResponse>(line.trim())
-        .map_err(|e| format!("invalid daemon response: {}", e))
-}
-
-async fn cmd_daemon(addr: &str) -> Result<()> {
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| miette::miette!("failed to bind daemon at {}: {}", addr, e))?;
-    println!(
-        "sgc daemon listening on {} (protocol v{}, server={})",
-        addr,
-        DAEMON_PROTOCOL_VERSION,
-        env!("CARGO_PKG_VERSION")
-    );
-
-    loop {
-        let (stream, peer) = listener
-            .accept()
-            .await
-            .map_err(|e| miette::miette!("daemon accept failed: {}", e))?;
-        tokio::spawn(async move {
-            if let Err(err) = handle_daemon_client(stream).await {
-                eprintln!("daemon client {} error: {}", peer, err);
-            }
-        });
-    }
-}
-
-async fn handle_daemon_client(stream: TcpStream) -> Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
-    let mut reader = TokioBufReader::new(read_half);
-    let mut line = String::new();
-    reader.read_line(&mut line).await.into_diagnostic()?;
-    if line.trim().is_empty() {
-        return Ok(());
-    }
-
-    let request: DaemonRequest = match serde_json::from_str(line.trim()) {
-        Ok(req) => req,
-        Err(err) => {
-            let response = DaemonResponse {
-                protocol_version: DAEMON_PROTOCOL_VERSION,
-                server_version: env!("CARGO_PKG_VERSION").to_string(),
-                ok: false,
-                recoverable: true,
-                message: format!("invalid daemon request: {}", err),
-            };
-            let encoded = serde_json::to_string(&response).into_diagnostic()?;
-            write_half
-                .write_all(encoded.as_bytes())
-                .await
-                .into_diagnostic()?;
-            write_half.write_all(b"\n").await.into_diagnostic()?;
-            write_half.flush().await.into_diagnostic()?;
-            return Ok(());
-        }
-    };
-
-    let response = execute_daemon_request(request).await;
-    let encoded = serde_json::to_string(&response).into_diagnostic()?;
-    write_half
-        .write_all(encoded.as_bytes())
-        .await
-        .into_diagnostic()?;
-    write_half.write_all(b"\n").await.into_diagnostic()?;
-    write_half.flush().await.into_diagnostic()?;
-    Ok(())
-}
-
-async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
-    if request.protocol_version != DAEMON_PROTOCOL_VERSION {
-        return DaemonResponse {
-            protocol_version: DAEMON_PROTOCOL_VERSION,
-            server_version: env!("CARGO_PKG_VERSION").to_string(),
-            ok: false,
-            recoverable: true,
-            message: format!(
-                "daemon protocol mismatch: client={} server={}",
-                request.protocol_version, DAEMON_PROTOCOL_VERSION
-            ),
-        };
-    }
-
-    let result = match request.command {
-        DaemonCommand::Build {
-            input,
-            output,
-            opt_level,
-            emit_llvm,
-            force_rebuild,
-            frontend_jobs,
-            frontend_trace,
-            reflect,
-            reflect_module,
-            reflect_symbol,
-        } => {
-            cmd_build(
-                &input,
-                output.as_deref(),
-                opt_level,
-                emit_llvm,
-                force_rebuild,
-                parse_frontend_jobs_wire(&frontend_jobs),
-                frontend_trace_enabled(frontend_trace),
-                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
-            )
-            .await
-        }
-        DaemonCommand::Run {
-            input,
-            opt_level,
-            engine,
-            force_rebuild,
-            args,
-            frontend_jobs,
-            frontend_trace,
-            reflect,
-            reflect_module,
-            reflect_symbol,
-        } => {
-            cmd_run(
-                &input,
-                opt_level,
-                engine,
-                force_rebuild,
-                &args,
-                parse_frontend_jobs_wire(&frontend_jobs),
-                frontend_trace_enabled(frontend_trace),
-                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
-            )
-            .await
-        }
-    };
-
-    match result {
-        Ok(()) => DaemonResponse {
-            protocol_version: DAEMON_PROTOCOL_VERSION,
-            server_version: env!("CARGO_PKG_VERSION").to_string(),
-            ok: true,
-            recoverable: false,
-            message: "request completed by daemon".to_string(),
-        },
-        Err(err) => DaemonResponse {
-            protocol_version: DAEMON_PROTOCOL_VERSION,
-            server_version: env!("CARGO_PKG_VERSION").to_string(),
-            ok: false,
-            recoverable: false,
-            message: format!("daemon request failed: {}", err),
-        },
-    }
-}
 
 fn find_runtime_c() -> Option<String> {
     if let Ok(path) = std::env::var("SENGOO_RUNTIME") {
@@ -4808,54 +4420,6 @@ fn cache_mismatch_reasons(metadata: &RunCacheMetadata, key: &RunCacheKey) -> Vec
     reasons
 }
 
-fn load_run_cache(path: &Path) -> Option<RunCacheMetadata> {
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-fn load_build_cache(path: &Path) -> Option<BuildCacheMetadata> {
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-fn frontend_session_store_path(build_dir: &Path, stem: &str) -> PathBuf {
-    build_dir
-        .join("workset")
-        .join(format!("{}.frontend-session-v4.json", stem))
-}
-
-fn load_frontend_session_store(path: &Path) -> Option<FrontendSessionStoreV4> {
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-fn save_run_cache(path: &Path, metadata: &RunCacheMetadata) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(metadata)
-        .map_err(|e| miette::miette!("failed to serialize run cache metadata: {}", e))?;
-    fs::write(path, bytes)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write run cache metadata: {}", e))
-}
-
-fn save_build_cache(path: &Path, metadata: &BuildCacheMetadata) -> Result<()> {
-    let bytes = serde_json::to_vec_pretty(metadata)
-        .map_err(|e| miette::miette!("failed to serialize build cache metadata: {}", e))?;
-    fs::write(path, bytes)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write build cache metadata: {}", e))
-}
-
-fn save_frontend_session_store(path: &Path, metadata: &FrontendSessionStoreV4) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).into_diagnostic()?;
-    }
-    let bytes = serde_json::to_vec_pretty(metadata)
-        .map_err(|e| miette::miette!("failed to serialize frontend session metadata: {}", e))?;
-    fs::write(path, bytes)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write frontend session metadata: {}", e))
-}
-
 fn runtime_object_cache_path(runtime_c_path: &Path, opt_level: u8) -> Result<PathBuf> {
     let canonical =
         fs::canonicalize(runtime_c_path).unwrap_or_else(|_| runtime_c_path.to_path_buf());
@@ -7178,8 +6742,9 @@ mod tests {
         signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
         BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan,
         DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
-        FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata,
-        ReflectionMode, RunCacheMetadata, RunEngine,
+        FrontendModuleCacheEntryV4, FrontendProbeMode, FrontendSchedulerTelemetry,
+        FrontendSessionStoreV4, FunctionFingerprint, LinkerMode, ModuleFingerprint,
+        ModuleGraphSnapshot, ReflectionMetadata, ReflectionMode, RunCacheMetadata, RunEngine,
         BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use crate::cli::Cli;
@@ -7259,6 +6824,41 @@ mod tests {
                 object_path: None,
                 functions: Vec::new(),
             }],
+        }
+    }
+
+    fn snapshot_with_root_hashes(input_path: &Path, interface_hash: u64, body_hash: u64) -> ModuleGraphSnapshot {
+        let root_module = super::canonical_or_lossy(input_path);
+        ModuleGraphSnapshot {
+            module_fingerprints: Vec::new(),
+            module_function_fingerprints: BTreeMap::new(),
+            dependency_edges: BTreeMap::new(),
+            reflection_import_modules: Vec::new(),
+            diagnostics: Vec::new(),
+            planner_trace: Vec::new(),
+            fallback_events: Vec::new(),
+            frontend_scheduler: FrontendSchedulerTelemetry::default(),
+            frontend_session_store: FrontendSessionStoreV4 {
+                schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+                scheduler_schema_version: super::FRONTEND_SCHEDULER_SCHEMA_VERSION,
+                dependency_graph_digest: 0,
+                compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+                root_module: root_module.clone(),
+                modules: vec![FrontendModuleCacheEntryV4 {
+                    module_id: root_module,
+                    source_hash: body_hash,
+                    parse_hash: body_hash,
+                    interface_hash,
+                    body_hash,
+                    hir_hash: body_hash,
+                    dependency_digest: 0,
+                    scheduler_schema_version: super::FRONTEND_SCHEDULER_SCHEMA_VERSION,
+                    depends_on: Vec::new(),
+                    symbols: Vec::new(),
+                }],
+            },
+            reused_modules: Vec::new(),
+            rebuilt_modules: Vec::new(),
         }
     }
 
@@ -7621,6 +7221,38 @@ mod tests {
     fn daemon_addr_prefers_explicit_value() {
         let addr = resolve_daemon_addr(Some("127.0.0.1:50001"));
         assert_eq!(addr, "127.0.0.1:50001");
+    }
+
+    #[test]
+    fn root_hashes_reuse_snapshot_without_force_rebuild() {
+        let input = Path::new("tests/main.sg");
+        let snapshot = snapshot_with_root_hashes(input, 111, 222);
+        let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(
+            input,
+            "invalid source {}",
+            &snapshot,
+            false,
+            None,
+            None,
+        );
+        assert_eq!(interface_hash, 111);
+        assert_eq!(impl_hash, 222);
+    }
+
+    #[test]
+    fn force_rebuild_root_hashes_can_reuse_previous_interface_when_impl_unchanged() {
+        let input = Path::new("tests/main.sg");
+        let snapshot = snapshot_with_root_hashes(input, 111, 222);
+        let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(
+            input,
+            "def main() -> i64 { 1 }",
+            &snapshot,
+            true,
+            Some(222),
+            Some(333),
+        );
+        assert_eq!(impl_hash, 222);
+        assert_eq!(interface_hash, 333);
     }
 
     #[test]
