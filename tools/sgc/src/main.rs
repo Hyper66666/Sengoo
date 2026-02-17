@@ -14,12 +14,13 @@ use sengoo_runtime::{
     ReflectionRuntime, ReflectionSymbolMetadata as RuntimeReflectionSymbolMetadata,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicI8, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -51,6 +52,7 @@ impl Default for ReflectionMode {
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
 const REFLECTION_SCHEMA_VERSION: u32 = 1;
+const FRONTEND_SCHEDULER_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:48765";
 const DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const LINKER_UNKNOWN: i8 = -1;
@@ -98,6 +100,10 @@ fn default_reflection_schema_version() -> u32 {
     REFLECTION_SCHEMA_VERSION
 }
 
+fn default_frontend_scheduler_schema_version() -> u32 {
+    FRONTEND_SCHEDULER_SCHEMA_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DaemonRequest {
     protocol_version: u32,
@@ -114,6 +120,10 @@ enum DaemonCommand {
         opt_level: u8,
         emit_llvm: bool,
         force_rebuild: bool,
+        #[serde(default = "default_frontend_jobs_wire")]
+        frontend_jobs: String,
+        #[serde(default)]
+        frontend_trace: bool,
         reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
@@ -124,6 +134,10 @@ enum DaemonCommand {
         engine: RunEngine,
         force_rebuild: bool,
         args: Vec<String>,
+        #[serde(default = "default_frontend_jobs_wire")]
+        frontend_jobs: String,
+        #[serde(default)]
+        frontend_trace: bool,
         reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
@@ -177,6 +191,70 @@ enum FrontendProbeMode {
     VerifyAll,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontendJobs {
+    Auto,
+    Fixed(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct FrontendSchedulerTelemetry {
+    #[serde(default)]
+    requested_jobs: String,
+    #[serde(default)]
+    selected_jobs: u32,
+    #[serde(default)]
+    serial_mode: bool,
+    #[serde(default)]
+    parse_interface_task_count: u32,
+    #[serde(default)]
+    body_hir_task_count: u32,
+    #[serde(default)]
+    queue_wait_avg_ms: f64,
+    #[serde(default)]
+    queue_wait_max_ms: f64,
+    #[serde(default)]
+    worker_utilization_pct: f64,
+}
+
+impl Default for FrontendSchedulerTelemetry {
+    fn default() -> Self {
+        Self {
+            requested_jobs: "auto".to_string(),
+            selected_jobs: 1,
+            serial_mode: true,
+            parse_interface_task_count: 0,
+            body_hir_task_count: 0,
+            queue_wait_avg_ms: 0.0,
+            queue_wait_max_ms: 0.0,
+            worker_utilization_pct: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FrontendFallbackScope {
+    Symbol,
+    Module,
+    FullFrontend,
+}
+
+fn frontend_fallback_scope_label(scope: FrontendFallbackScope) -> &'static str {
+    match scope {
+        FrontendFallbackScope::Symbol => "symbol",
+        FrontendFallbackScope::Module => "module",
+        FrontendFallbackScope::FullFrontend => "full_frontend",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct FrontendFallbackEvent {
+    stage: String,
+    scope: FrontendFallbackScope,
+    reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FrontendModuleCacheEntryV4 {
     module_id: String,
@@ -185,6 +263,10 @@ struct FrontendModuleCacheEntryV4 {
     interface_hash: u64,
     body_hash: u64,
     hir_hash: u64,
+    #[serde(default)]
+    dependency_digest: u64,
+    #[serde(default = "default_frontend_scheduler_schema_version")]
+    scheduler_schema_version: u32,
     #[serde(default)]
     depends_on: Vec<String>,
     #[serde(default)]
@@ -195,6 +277,10 @@ struct FrontendModuleCacheEntryV4 {
 struct FrontendSessionStoreV4 {
     #[serde(default = "default_build_graph_schema_version")]
     schema_version: u32,
+    #[serde(default = "default_frontend_scheduler_schema_version")]
+    scheduler_schema_version: u32,
+    #[serde(default)]
+    dependency_graph_digest: u64,
     compiler_version: String,
     root_module: String,
     #[serde(default)]
@@ -208,6 +294,9 @@ struct ModuleGraphSnapshot {
     dependency_edges: BTreeMap<String, Vec<String>>,
     reflection_import_modules: Vec<String>,
     diagnostics: Vec<String>,
+    planner_trace: Vec<String>,
+    fallback_events: Vec<FrontendFallbackEvent>,
+    frontend_scheduler: FrontendSchedulerTelemetry,
     frontend_session_store: FrontendSessionStoreV4,
     reused_modules: Vec<String>,
     rebuilt_modules: Vec<String>,
@@ -369,6 +458,16 @@ enum FunctionChangeKind {
     Interface,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct FrontendSchedulerPhaseStats {
+    task_count: u32,
+    queue_wait_total_ms: f64,
+    queue_wait_max_ms: f64,
+    worker_busy_ms: f64,
+    wall_ms: f64,
+    worker_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EditImpact {
     class: EditClass,
@@ -425,6 +524,12 @@ struct BenchCaseResult {
     before_ms: Option<f64>,
     after_ms: Option<f64>,
     cache_reused_modules: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frontend_scheduler: Option<FrontendSchedulerTelemetry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frontend_fallback_events: Option<Vec<FrontendFallbackEvent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frontend_planner_trace: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -497,6 +602,14 @@ enum Commands {
         #[arg(long)]
         force_rebuild: bool,
 
+        /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
+        #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
+        frontend_jobs: FrontendJobs,
+
+        /// Emit deterministic frontend planner trace lines.
+        #[arg(long = "frontend-trace")]
+        frontend_trace: bool,
+
         /// Try dispatching request to local sgc daemon first.
         #[arg(long)]
         daemon: bool,
@@ -540,6 +653,14 @@ enum Commands {
         /// Ignore cached run artifacts and rebuild.
         #[arg(long)]
         force_rebuild: bool,
+
+        /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
+        #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
+        frontend_jobs: FrontendJobs,
+
+        /// Emit deterministic frontend planner trace lines.
+        #[arg(long = "frontend-trace")]
+        frontend_trace: bool,
 
         /// Try dispatching request to local sgc daemon first.
         #[arg(long)]
@@ -686,6 +807,8 @@ async fn main() -> Result<()> {
             opt_level,
             emit_llvm,
             force_rebuild,
+            frontend_jobs,
+            frontend_trace,
             daemon,
             daemon_addr,
             reflect,
@@ -701,6 +824,8 @@ async fn main() -> Result<()> {
                     opt_level,
                     emit_llvm,
                     force_rebuild,
+                    frontend_jobs,
+                    frontend_trace,
                     reflect,
                     &reflect_module,
                     &reflect_symbol,
@@ -716,6 +841,8 @@ async fn main() -> Result<()> {
                 opt_level,
                 emit_llvm,
                 force_rebuild,
+                frontend_jobs,
+                frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
@@ -725,6 +852,8 @@ async fn main() -> Result<()> {
             opt_level,
             engine,
             force_rebuild,
+            frontend_jobs,
+            frontend_trace,
             daemon,
             daemon_addr,
             reflect,
@@ -741,6 +870,8 @@ async fn main() -> Result<()> {
                     engine,
                     force_rebuild,
                     &args,
+                    frontend_jobs,
+                    frontend_trace,
                     reflect,
                     &reflect_module,
                     &reflect_symbol,
@@ -756,6 +887,8 @@ async fn main() -> Result<()> {
                 engine,
                 force_rebuild,
                 &args,
+                frontend_jobs,
+                frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
@@ -796,6 +929,51 @@ fn resolve_daemon_addr(explicit: Option<&str>) -> String {
         .map(str::to_string)
         .or_else(|| std::env::var("SENGOO_DAEMON_ADDR").ok())
         .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
+}
+
+fn parse_frontend_jobs_arg(raw: &str) -> std::result::Result<FrontendJobs, String> {
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("auto") {
+        return Ok(FrontendJobs::Auto);
+    }
+
+    let parsed = trimmed
+        .parse::<usize>()
+        .map_err(|_| "frontend jobs must be 'auto' or an integer >= 1".to_string())?;
+    if parsed == 0 {
+        return Err("frontend jobs must be >= 1".to_string());
+    }
+    Ok(FrontendJobs::Fixed(parsed))
+}
+
+fn frontend_jobs_label(frontend_jobs: FrontendJobs) -> String {
+    match frontend_jobs {
+        FrontendJobs::Auto => "auto".to_string(),
+        FrontendJobs::Fixed(value) => value.to_string(),
+    }
+}
+
+fn parse_frontend_jobs_wire(raw: &str) -> FrontendJobs {
+    parse_frontend_jobs_arg(raw).unwrap_or(FrontendJobs::Auto)
+}
+
+fn default_frontend_jobs_wire() -> String {
+    "auto".to_string()
+}
+
+fn frontend_trace_enabled(explicit_flag: bool) -> bool {
+    if explicit_flag {
+        return true;
+    }
+
+    let Ok(raw) = std::env::var("SENGOO_FRONTEND_TRACE") else {
+        return false;
+    };
+    let normalized = raw.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "1" | "true" | "on" | "yes" | "trace" | "debug"
+    )
 }
 
 fn reflection_options_from_cli(
@@ -917,7 +1095,10 @@ fn resolve_reflection_options_for_snapshot(
     reflection
 }
 
-fn reflection_mode_note(reflection: &ReflectionCliOptions, snapshot: &ModuleGraphSnapshot) -> String {
+fn reflection_mode_note(
+    reflection: &ReflectionCliOptions,
+    snapshot: &ModuleGraphSnapshot,
+) -> String {
     match reflection.mode {
         ReflectionMode::On => "reflection: forced on (--reflect=on)".to_string(),
         ReflectionMode::Off => "reflection: forced off (--reflect=off)".to_string(),
@@ -948,6 +1129,8 @@ fn daemon_request_build(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
@@ -961,6 +1144,8 @@ fn daemon_request_build(
             opt_level,
             emit_llvm,
             force_rebuild,
+            frontend_jobs: frontend_jobs_label(frontend_jobs),
+            frontend_trace,
             reflect,
             reflect_module: reflect_module.to_vec(),
             reflect_symbol: reflect_symbol.to_vec(),
@@ -974,6 +1159,8 @@ fn daemon_request_run(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
@@ -987,6 +1174,8 @@ fn daemon_request_run(
             engine,
             force_rebuild,
             args: args.to_vec(),
+            frontend_jobs: frontend_jobs_label(frontend_jobs),
+            frontend_trace,
             reflect,
             reflect_module: reflect_module.to_vec(),
             reflect_symbol: reflect_symbol.to_vec(),
@@ -1001,6 +1190,8 @@ async fn dispatch_build_via_daemon(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
@@ -1011,6 +1202,8 @@ async fn dispatch_build_via_daemon(
         opt_level,
         emit_llvm,
         force_rebuild,
+        frontend_jobs,
+        frontend_trace_enabled(frontend_trace),
         reflect,
         reflect_module,
         reflect_symbol,
@@ -1025,6 +1218,8 @@ async fn dispatch_run_via_daemon(
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
@@ -1035,6 +1230,8 @@ async fn dispatch_run_via_daemon(
         engine,
         force_rebuild,
         args,
+        frontend_jobs,
+        frontend_trace_enabled(frontend_trace),
         reflect,
         reflect_module,
         reflect_symbol,
@@ -1194,6 +1391,8 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             opt_level,
             emit_llvm,
             force_rebuild,
+            frontend_jobs,
+            frontend_trace,
             reflect,
             reflect_module,
             reflect_symbol,
@@ -1204,6 +1403,8 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 opt_level,
                 emit_llvm,
                 force_rebuild,
+                parse_frontend_jobs_wire(&frontend_jobs),
+                frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
@@ -1214,6 +1415,8 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             engine,
             force_rebuild,
             args,
+            frontend_jobs,
+            frontend_trace,
             reflect,
             reflect_module,
             reflect_symbol,
@@ -1224,6 +1427,8 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 engine,
                 force_rebuild,
                 &args,
+                parse_frontend_jobs_wire(&frontend_jobs),
+                frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
             )
             .await
@@ -2803,10 +3008,18 @@ fn collect_function_changes(
     changes
 }
 
+#[allow(dead_code)]
 fn collect_impl_only_impacted_symbols(
     previous_symbols: &[FunctionFingerprint],
     current_symbols: &[FunctionFingerprint],
 ) -> Vec<String> {
+    collect_impl_only_impacted_symbols_with_fallback(previous_symbols, current_symbols).0
+}
+
+fn collect_impl_only_impacted_symbols_with_fallback(
+    previous_symbols: &[FunctionFingerprint],
+    current_symbols: &[FunctionFingerprint],
+) -> (Vec<String>, Option<String>) {
     let previous_map = previous_symbols
         .iter()
         .map(|function| (function.symbol.clone(), function))
@@ -2842,13 +3055,16 @@ fn collect_impl_only_impacted_symbols(
         let mut all_current = current_map.keys().cloned().collect::<Vec<_>>();
         all_current.sort();
         all_current.dedup();
-        return all_current;
+        return (
+            all_current,
+            Some("symbol signature drift detected, escalate to module scope".to_string()),
+        );
     }
 
     changed_symbols.sort();
     changed_symbols.dedup();
     if changed_symbols.is_empty() {
-        return changed_symbols;
+        return (changed_symbols, None);
     }
 
     let current_symbol_set = current_map.keys().cloned().collect::<HashSet<_>>();
@@ -2884,7 +3100,7 @@ fn collect_impl_only_impacted_symbols(
 
     impacted.sort();
     impacted.dedup();
-    impacted
+    (impacted, None)
 }
 
 fn add_reverse_call_edges(graph: &BuildGraphV2, reverse: &mut HashMap<String, HashSet<String>>) {
@@ -3355,9 +3571,180 @@ fn hir_fragment_fingerprint(functions: &[FunctionFingerprint]) -> u64 {
     hasher.finish()
 }
 
+fn dependency_graph_digest(dependency_edges: &BTreeMap<String, Vec<String>>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for (module, deps) in dependency_edges {
+        module.hash(&mut hasher);
+        let mut unique = deps.clone();
+        unique.sort();
+        unique.dedup();
+        for dep in unique {
+            dep.hash(&mut hasher);
+        }
+        "|".hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn resolve_frontend_job_count(requested: FrontendJobs, task_count: usize) -> usize {
+    let requested = match requested {
+        FrontendJobs::Auto => std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .max(1),
+        FrontendJobs::Fixed(value) => value.max(1),
+    };
+    requested.min(task_count.max(1))
+}
+
+#[derive(Debug, Clone)]
+struct FrontendScheduledTask {
+    id: String,
+    enqueued_at: Instant,
+}
+
+#[derive(Debug)]
+struct FrontendTaskResult<R> {
+    id: String,
+    value: R,
+    wait_ms: f64,
+    busy_ms: f64,
+}
+
+fn merge_frontend_phase_stats(
+    total: &mut FrontendSchedulerPhaseStats,
+    current: FrontendSchedulerPhaseStats,
+) {
+    total.task_count += current.task_count;
+    total.queue_wait_total_ms += current.queue_wait_total_ms;
+    if current.queue_wait_max_ms > total.queue_wait_max_ms {
+        total.queue_wait_max_ms = current.queue_wait_max_ms;
+    }
+    total.worker_busy_ms += current.worker_busy_ms;
+    total.wall_ms += current.wall_ms;
+    total.worker_count += current.worker_count;
+}
+
+fn run_frontend_tasks_deterministic<R, F>(
+    phase_name: &str,
+    task_ids: Vec<String>,
+    jobs: usize,
+    trace_mode: bool,
+    planner_trace: &mut Vec<String>,
+    execute: F,
+) -> (BTreeMap<String, R>, FrontendSchedulerPhaseStats)
+where
+    R: Send,
+    F: Fn(&str) -> R + Sync,
+{
+    let mut results = BTreeMap::<String, R>::new();
+    if task_ids.is_empty() {
+        return (results, FrontendSchedulerPhaseStats::default());
+    }
+
+    let worker_count = jobs.max(1).min(task_ids.len());
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend scheduler: phase={} tasks={} workers={}",
+            phase_name,
+            task_ids.len(),
+            worker_count
+        ));
+    }
+
+    let mut stats = FrontendSchedulerPhaseStats {
+        task_count: task_ids.len() as u32,
+        worker_count: worker_count as u32,
+        ..Default::default()
+    };
+
+    if worker_count == 1 {
+        let phase_start = Instant::now();
+        for id in task_ids {
+            let work_start = Instant::now();
+            let value = execute(&id);
+            let busy_ms = work_start.elapsed().as_secs_f64() * 1000.0;
+            stats.worker_busy_ms += busy_ms;
+            results.insert(id, value);
+        }
+        stats.wall_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+        return (results, stats);
+    }
+
+    let now = Instant::now();
+    let queue = task_ids
+        .into_iter()
+        .map(|id| FrontendScheduledTask {
+            id,
+            enqueued_at: now,
+        })
+        .collect::<VecDeque<_>>();
+    let queue = Arc::new(Mutex::new(queue));
+
+    let phase_start = Instant::now();
+    let mut completed = Vec::<FrontendTaskResult<R>>::with_capacity(stats.task_count as usize);
+
+    std::thread::scope(|scope| {
+        let (tx, rx) = mpsc::channel::<FrontendTaskResult<R>>();
+
+        for _ in 0..worker_count {
+            let queue = Arc::clone(&queue);
+            let tx = tx.clone();
+            let execute = &execute;
+            scope.spawn(move || loop {
+                let task = {
+                    let mut queue = queue.lock().expect("frontend scheduler queue poisoned");
+                    queue.pop_front()
+                };
+                let Some(task) = task else {
+                    break;
+                };
+
+                let wait_ms = task.enqueued_at.elapsed().as_secs_f64() * 1000.0;
+                let work_start = Instant::now();
+                let value = execute(&task.id);
+                let busy_ms = work_start.elapsed().as_secs_f64() * 1000.0;
+                if tx
+                    .send(FrontendTaskResult {
+                        id: task.id,
+                        value,
+                        wait_ms,
+                        busy_ms,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            });
+        }
+
+        drop(tx);
+        for _ in 0..stats.task_count {
+            match rx.recv() {
+                Ok(done) => completed.push(done),
+                Err(_) => break,
+            }
+        }
+    });
+
+    stats.wall_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+    for done in completed {
+        stats.worker_busy_ms += done.busy_ms;
+        stats.queue_wait_total_ms += done.wait_ms;
+        if done.wait_ms > stats.queue_wait_max_ms {
+            stats.queue_wait_max_ms = done.wait_ms;
+        }
+        results.insert(done.id, done.value);
+    }
+
+    (results, stats)
+}
+
 fn frontend_cache_entry_for_module(
     module_path: &str,
     info: &ModuleSourceInfo,
+    dependency_digest: u64,
 ) -> FrontendModuleCacheEntryV4 {
     let mut depends_on = info.depends_on.clone();
     depends_on.sort();
@@ -3378,6 +3765,8 @@ fn frontend_cache_entry_for_module(
         interface_hash: interface_fingerprint(&info.source),
         body_hash: implementation_fingerprint(&info.source),
         hir_hash: hir_fragment_fingerprint(&symbols),
+        dependency_digest,
+        scheduler_schema_version: FRONTEND_SCHEDULER_SCHEMA_VERSION,
         depends_on,
         symbols,
     }
@@ -3389,6 +3778,8 @@ fn collect_module_graph_snapshot(
     previous_graph: Option<&BuildGraphV2>,
     previous_frontend_session: Option<&FrontendSessionStoreV4>,
     probe_mode: FrontendProbeMode,
+    frontend_jobs: FrontendJobs,
+    trace_mode: bool,
 ) -> ModuleGraphSnapshot {
     let root_module = canonical_or_lossy(input_path);
     let module_sources = collect_module_sources_with_edges(input_path, source);
@@ -3410,23 +3801,74 @@ fn collect_module_graph_snapshot(
         .map(|(path, info)| (path.clone(), info.depends_on.clone()))
         .collect::<BTreeMap<_, _>>();
     dependency_edges.entry(root_module.clone()).or_default();
+    let dependency_digest = dependency_graph_digest(&dependency_edges);
 
     let mut diagnostics = Vec::new();
+    let mut planner_trace = Vec::new();
+    let mut fallback_events = Vec::new();
     let mut previous_entry_by_module = HashMap::<String, FrontendModuleCacheEntryV4>::new();
+
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend planner: root={} modules={} probe={:?} requested_jobs={}",
+            root_module,
+            module_sources.len(),
+            probe_mode,
+            frontend_jobs_label(frontend_jobs)
+        ));
+    }
+
     if let Some(previous) = previous_frontend_session {
         if previous.schema_version != BUILD_GRAPH_SCHEMA_VERSION {
-            diagnostics.push(format!(
-                "frontend session fallback: schema mismatch ({} -> {})",
+            let reason = format!(
+                "schema mismatch ({} -> {})",
                 previous.schema_version, BUILD_GRAPH_SCHEMA_VERSION
-            ));
+            );
+            diagnostics.push(format!("frontend session fallback: {}", reason));
+            fallback_events.push(FrontendFallbackEvent {
+                stage: "session_load".to_string(),
+                scope: FrontendFallbackScope::FullFrontend,
+                reason,
+            });
+        } else if previous.scheduler_schema_version != FRONTEND_SCHEDULER_SCHEMA_VERSION {
+            let reason = format!(
+                "scheduler schema mismatch ({} -> {})",
+                previous.scheduler_schema_version, FRONTEND_SCHEDULER_SCHEMA_VERSION
+            );
+            diagnostics.push(format!("frontend session fallback: {}", reason));
+            fallback_events.push(FrontendFallbackEvent {
+                stage: "session_load".to_string(),
+                scope: FrontendFallbackScope::FullFrontend,
+                reason,
+            });
+        } else if previous.dependency_graph_digest != dependency_digest {
+            let reason = "dependency digest mismatch".to_string();
+            diagnostics.push(format!("frontend session fallback: {}", reason));
+            fallback_events.push(FrontendFallbackEvent {
+                stage: "session_load".to_string(),
+                scope: FrontendFallbackScope::FullFrontend,
+                reason,
+            });
         } else if previous.compiler_version != env!("CARGO_PKG_VERSION") {
-            diagnostics.push(format!(
-                "frontend session fallback: compiler version mismatch ({} -> {})",
+            let reason = format!(
+                "compiler version mismatch ({} -> {})",
                 previous.compiler_version,
                 env!("CARGO_PKG_VERSION")
-            ));
+            );
+            diagnostics.push(format!("frontend session fallback: {}", reason));
+            fallback_events.push(FrontendFallbackEvent {
+                stage: "session_load".to_string(),
+                scope: FrontendFallbackScope::FullFrontend,
+                reason,
+            });
         } else if previous.root_module != root_module {
-            diagnostics.push("frontend session fallback: root module changed".to_string());
+            let reason = "root module changed".to_string();
+            diagnostics.push(format!("frontend session fallback: {}", reason));
+            fallback_events.push(FrontendFallbackEvent {
+                stage: "session_load".to_string(),
+                scope: FrontendFallbackScope::FullFrontend,
+                reason,
+            });
         } else {
             for module in &previous.modules {
                 previous_entry_by_module.insert(module.module_id.clone(), module.clone());
@@ -3437,25 +3879,89 @@ fn collect_module_graph_snapshot(
     let mut module_entries = BTreeMap::<String, FrontendModuleCacheEntryV4>::new();
     let mut reused_modules = Vec::new();
     let mut rebuilt_modules = Vec::new();
+    let mut parse_phase_stats = FrontendSchedulerPhaseStats::default();
+    let mut body_hir_phase_stats = FrontendSchedulerPhaseStats::default();
+    let mut utilization_denominator_ms = 0.0;
 
-    for (path, info) in &module_sources {
-        let mut expected_depends_on = info.depends_on.clone();
-        expected_depends_on.sort();
-        expected_depends_on.dedup();
-        let source_hash = source_fingerprint(&info.source);
+    let selected_jobs = resolve_frontend_job_count(frontend_jobs, module_sources.len());
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend scheduler: selected_jobs={} serial_mode={}",
+            selected_jobs,
+            selected_jobs == 1
+        ));
+    }
 
-        let reused = previous_entry_by_module.get(path).filter(|previous| {
-            previous.source_hash == source_hash && previous.depends_on == expected_depends_on
-        });
+    let module_levels = module_dependency_levels(&dependency_edges);
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend scheduler: module_levels={}",
+            module_levels.len()
+        ));
+    }
 
-        if let Some(previous) = reused {
-            module_entries.insert(path.clone(), previous.clone());
-            reused_modules.push(path.clone());
-        } else {
-            let current = frontend_cache_entry_for_module(path, info);
-            module_entries.insert(path.clone(), current);
-            rebuilt_modules.push(path.clone());
+    for level in module_levels {
+        let mut level_rebuild = Vec::<String>::new();
+        for module in level {
+            let Some(info) = module_sources.get(&module) else {
+                continue;
+            };
+            let mut expected_depends_on = info.depends_on.clone();
+            expected_depends_on.sort();
+            expected_depends_on.dedup();
+            let source_hash = source_fingerprint(&info.source);
+            let reused = previous_entry_by_module.get(&module).filter(|previous| {
+                previous.source_hash == source_hash
+                    && previous.depends_on == expected_depends_on
+                    && previous.dependency_digest == dependency_digest
+                    && previous.scheduler_schema_version == FRONTEND_SCHEDULER_SCHEMA_VERSION
+            });
+
+            if let Some(previous) = reused {
+                module_entries.insert(module.clone(), previous.clone());
+                reused_modules.push(module.clone());
+            } else {
+                level_rebuild.push(module.clone());
+            }
         }
+
+        if level_rebuild.is_empty() {
+            continue;
+        }
+
+        let (rebuilt, level_stats) = run_frontend_tasks_deterministic(
+            "parse_interface",
+            level_rebuild,
+            selected_jobs,
+            trace_mode,
+            &mut planner_trace,
+            |module_id| {
+                let info = module_sources
+                    .get(module_id)
+                    .expect("module must exist during parse/interface scheduling");
+                frontend_cache_entry_for_module(module_id, info, dependency_digest)
+            },
+        );
+        merge_frontend_phase_stats(&mut parse_phase_stats, level_stats);
+        utilization_denominator_ms += level_stats.wall_ms * level_stats.worker_count as f64;
+
+        for (module_id, entry) in rebuilt {
+            module_entries.insert(module_id.clone(), entry);
+            rebuilt_modules.push(module_id);
+        }
+    }
+
+    reused_modules.sort();
+    reused_modules.dedup();
+    rebuilt_modules.sort();
+    rebuilt_modules.dedup();
+
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend planner: reused_modules={} rebuilt_modules={}",
+            reused_modules.len(),
+            rebuilt_modules.len()
+        ));
     }
 
     let (verify_full_modules, mut verify_body_symbols) = match probe_mode {
@@ -3486,10 +3992,20 @@ fn collect_module_graph_snapshot(
                 }
 
                 if let Some(previous) = previous {
-                    let impacted =
-                        collect_impl_only_impacted_symbols(&previous.symbols, &current.symbols);
+                    let (impacted, fallback_reason) =
+                        collect_impl_only_impacted_symbols_with_fallback(
+                            &previous.symbols,
+                            &current.symbols,
+                        );
                     if !impacted.is_empty() {
                         body_symbols.insert(module.clone(), impacted);
+                    }
+                    if let Some(reason) = fallback_reason {
+                        fallback_events.push(FrontendFallbackEvent {
+                            stage: "impl_only_invalidation".to_string(),
+                            scope: FrontendFallbackScope::Module,
+                            reason: format!("{}: {}", module, reason),
+                        });
                     }
                 }
             }
@@ -3539,26 +4055,96 @@ fn collect_module_graph_snapshot(
     if !verify_full_modules.is_empty() {
         let mut sorted = verify_full_modules.into_iter().collect::<Vec<_>>();
         sorted.sort();
-        for module in sorted {
-            if let Some(info) = module_sources.get(&module) {
-                if let Err(message) = frontend_probe_module_full(&module, &info.source) {
-                    diagnostics.push(format!("{}: {}", module, message));
-                }
+        let (verify_results, phase_stats) = run_frontend_tasks_deterministic(
+            "verify_full_module",
+            sorted,
+            selected_jobs,
+            trace_mode,
+            &mut planner_trace,
+            |module| {
+                let Some(info) = module_sources.get(module) else {
+                    return Some("module source missing".to_string());
+                };
+                frontend_probe_module_full(module, &info.source).err()
+            },
+        );
+        merge_frontend_phase_stats(&mut body_hir_phase_stats, phase_stats);
+        utilization_denominator_ms += phase_stats.wall_ms * phase_stats.worker_count as f64;
+
+        for (module, maybe_err) in verify_results {
+            if let Some(message) = maybe_err {
+                diagnostics.push(format!("{}: {}", module, message));
+                fallback_events.push(FrontendFallbackEvent {
+                    stage: "verify_full_module".to_string(),
+                    scope: FrontendFallbackScope::FullFrontend,
+                    reason: format!("{}: {}", module, message),
+                });
             }
         }
     }
 
     if !verify_body_symbols.is_empty() {
         let entries = std::mem::take(&mut verify_body_symbols);
-        for (module, impacted_symbols) in entries {
-            if impacted_symbols.is_empty() {
-                continue;
-            }
-            if let Some(info) = module_sources.get(&module) {
-                if let Err(message) =
-                    frontend_probe_module_body_only(&module, &info.source, &impacted_symbols)
-                {
-                    diagnostics.push(format!("{}: {}", module, message));
+        let mut modules = entries.keys().cloned().collect::<Vec<_>>();
+        modules.sort();
+        let (verify_results, phase_stats) = run_frontend_tasks_deterministic(
+            "verify_body_hir_symbol",
+            modules,
+            selected_jobs,
+            trace_mode,
+            &mut planner_trace,
+            |module| {
+                let impacted_symbols = entries.get(module).cloned().unwrap_or_default();
+                if impacted_symbols.is_empty() {
+                    return (None::<String>, None::<String>);
+                }
+                let Some(info) = module_sources.get(module) else {
+                    return (
+                        Some("module source missing".to_string()),
+                        Some("module source missing".to_string()),
+                    );
+                };
+
+                match frontend_probe_module_body_only(module, &info.source, &impacted_symbols) {
+                    Ok(_) => (None, None),
+                    Err(body_message) => {
+                        let full_message = frontend_probe_module_full(module, &info.source).err();
+                        (Some(body_message), full_message)
+                    }
+                }
+            },
+        );
+        merge_frontend_phase_stats(&mut body_hir_phase_stats, phase_stats);
+        utilization_denominator_ms += phase_stats.wall_ms * phase_stats.worker_count as f64;
+
+        for (module, (body_error, full_error)) in verify_results {
+            if let Some(body_error) = body_error {
+                fallback_events.push(FrontendFallbackEvent {
+                    stage: "verify_body_hir_symbol".to_string(),
+                    scope: FrontendFallbackScope::Symbol,
+                    reason: format!("{}: {}", module, body_error),
+                });
+
+                if let Some(full_error) = full_error {
+                    fallback_events.push(FrontendFallbackEvent {
+                        stage: "verify_body_hir_symbol".to_string(),
+                        scope: FrontendFallbackScope::FullFrontend,
+                        reason: format!("{}: {}", module, full_error),
+                    });
+                    diagnostics.push(format!("{}: {}", module, full_error));
+                } else {
+                    fallback_events.push(FrontendFallbackEvent {
+                        stage: "verify_body_hir_symbol".to_string(),
+                        scope: FrontendFallbackScope::Module,
+                        reason: format!(
+                            "{}: module-scope verification succeeded after symbol fallback",
+                            module
+                        ),
+                    });
+                    diagnostics.push(format!(
+                        "{}: symbol verification fallback to module scope ({})",
+                        module, body_error
+                    ));
                 }
             }
         }
@@ -3566,6 +4152,44 @@ fn collect_module_graph_snapshot(
 
     diagnostics.sort();
     diagnostics.dedup();
+    fallback_events.sort_by(|a, b| {
+        a.stage
+            .cmp(&b.stage)
+            .then_with(|| {
+                frontend_fallback_scope_label(a.scope).cmp(frontend_fallback_scope_label(b.scope))
+            })
+            .then_with(|| a.reason.cmp(&b.reason))
+    });
+    fallback_events.dedup();
+
+    let total_tasks = parse_phase_stats.task_count + body_hir_phase_stats.task_count;
+    let total_queue_wait_ms =
+        parse_phase_stats.queue_wait_total_ms + body_hir_phase_stats.queue_wait_total_ms;
+    let queue_wait_avg_ms = if total_tasks == 0 {
+        0.0
+    } else {
+        total_queue_wait_ms / total_tasks as f64
+    };
+    let queue_wait_max_ms = parse_phase_stats
+        .queue_wait_max_ms
+        .max(body_hir_phase_stats.queue_wait_max_ms);
+    let total_busy_ms = parse_phase_stats.worker_busy_ms + body_hir_phase_stats.worker_busy_ms;
+    let worker_utilization_pct = if utilization_denominator_ms > 0.0 {
+        (total_busy_ms / utilization_denominator_ms) * 100.0
+    } else {
+        0.0
+    };
+
+    let frontend_scheduler = FrontendSchedulerTelemetry {
+        requested_jobs: frontend_jobs_label(frontend_jobs),
+        selected_jobs: selected_jobs as u32,
+        serial_mode: selected_jobs == 1,
+        parse_interface_task_count: parse_phase_stats.task_count,
+        body_hir_task_count: body_hir_phase_stats.task_count,
+        queue_wait_avg_ms,
+        queue_wait_max_ms,
+        worker_utilization_pct,
+    };
 
     let mut module_fingerprints = module_entries
         .iter()
@@ -3594,14 +4218,28 @@ fn collect_module_graph_snapshot(
     let mut frontend_modules = module_entries.into_values().collect::<Vec<_>>();
     frontend_modules.sort_by(|a, b| a.module_id.cmp(&b.module_id));
 
+    if trace_mode {
+        planner_trace.push(format!(
+            "frontend planner summary: parse_tasks={} body_tasks={} fallback_events={}",
+            frontend_scheduler.parse_interface_task_count,
+            frontend_scheduler.body_hir_task_count,
+            fallback_events.len()
+        ));
+    }
+
     ModuleGraphSnapshot {
         module_fingerprints,
         module_function_fingerprints,
         dependency_edges,
         reflection_import_modules,
         diagnostics,
+        planner_trace,
+        fallback_events,
+        frontend_scheduler,
         frontend_session_store: FrontendSessionStoreV4 {
             schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+            scheduler_schema_version: FRONTEND_SCHEDULER_SCHEMA_VERSION,
+            dependency_graph_digest: dependency_digest,
             compiler_version: env!("CARGO_PKG_VERSION").to_string(),
             root_module,
             modules: frontend_modules,
@@ -3612,8 +4250,16 @@ fn collect_module_graph_snapshot(
 }
 
 fn module_fingerprints_for_source(input_path: &Path, source: &str) -> Vec<ModuleFingerprint> {
-    collect_module_graph_snapshot(input_path, source, None, None, FrontendProbeMode::VerifyAll)
-        .module_fingerprints
+    collect_module_graph_snapshot(
+        input_path,
+        source,
+        None,
+        None,
+        FrontendProbeMode::VerifyAll,
+        FrontendJobs::Auto,
+        false,
+    )
+    .module_fingerprints
 }
 
 fn object_file_extension() -> &'static str {
@@ -4841,6 +5487,9 @@ async fn cmd_bench_run(suite: &str, opt_level: u8, warmup: u32, iterations: u32)
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
+            frontend_scheduler: None,
+            frontend_fallback_events: None,
+            frontend_planner_trace: None,
         });
     }
 
@@ -4883,6 +5532,15 @@ async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Resul
         let source = fs::read_to_string(&case)
             .into_diagnostic()
             .map_err(|e| miette::miette!("failed to read benchmark case {}: {}", case_name, e))?;
+        let frontend_snapshot = collect_module_graph_snapshot(
+            &case,
+            &source,
+            None,
+            None,
+            FrontendProbeMode::VerifyAll,
+            FrontendJobs::Auto,
+            false,
+        );
 
         let mut sample_ms = Vec::new();
         let mut phase_totals: BTreeMap<String, f64> = BTreeMap::new();
@@ -4937,6 +5595,13 @@ async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Resul
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
+            frontend_scheduler: Some(frontend_snapshot.frontend_scheduler.clone()),
+            frontend_fallback_events: if frontend_snapshot.fallback_events.is_empty() {
+                None
+            } else {
+                Some(frontend_snapshot.fallback_events.clone())
+            },
+            frontend_planner_trace: None,
         });
     }
 
@@ -5065,6 +5730,9 @@ async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations: u32) -> R
             before_ms: Some(before_avg),
             after_ms: Some(after_avg),
             cache_reused_modules: Some(reused_avg),
+            frontend_scheduler: None,
+            frontend_fallback_events: None,
+            frontend_planner_trace: None,
         });
     }
 
@@ -5553,6 +6221,9 @@ async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                frontend_scheduler: None,
+                frontend_fallback_events: None,
+                frontend_planner_trace: None,
             },
             BenchCaseResult {
                 name: "enabled-unused".to_string(),
@@ -5566,6 +6237,9 @@ async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                frontend_scheduler: None,
+                frontend_fallback_events: None,
+                frontend_planner_trace: None,
             },
             BenchCaseResult {
                 name: "enabled-used".to_string(),
@@ -5579,6 +6253,9 @@ async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                frontend_scheduler: None,
+                frontend_fallback_events: None,
+                frontend_planner_trace: None,
             },
         ],
     };
@@ -5597,6 +6274,8 @@ async fn cmd_build(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflection: ReflectionCliOptions,
 ) -> Result<()> {
     println!("Building: {}", input);
@@ -5631,6 +6310,8 @@ async fn cmd_build(
             .and_then(|metadata| metadata.build_graph_v2.as_ref()),
         previous_frontend_session.as_ref(),
         probe_mode,
+        frontend_jobs,
+        frontend_trace,
     );
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
@@ -5646,6 +6327,33 @@ async fn cmd_build(
         graph_snapshot.reused_modules.len(),
         graph_snapshot.rebuilt_modules.len()
     );
+    println!(
+        "frontend scheduler: requested={} selected={} serial={} parse_tasks={} body_tasks={} queue_wait_avg_ms={:.3} util={:.2}%",
+        graph_snapshot.frontend_scheduler.requested_jobs,
+        graph_snapshot.frontend_scheduler.selected_jobs,
+        graph_snapshot.frontend_scheduler.serial_mode,
+        graph_snapshot.frontend_scheduler.parse_interface_task_count,
+        graph_snapshot.frontend_scheduler.body_hir_task_count,
+        graph_snapshot.frontend_scheduler.queue_wait_avg_ms,
+        graph_snapshot.frontend_scheduler.worker_utilization_pct
+    );
+    if !graph_snapshot.fallback_events.is_empty() {
+        println!("frontend fallback events:");
+        for event in &graph_snapshot.fallback_events {
+            println!(
+                "  - stage={} scope={} reason={}",
+                event.stage,
+                frontend_fallback_scope_label(event.scope),
+                event.reason
+            );
+        }
+    }
+    if frontend_trace && !graph_snapshot.planner_trace.is_empty() {
+        println!("frontend planner trace (deterministic):");
+        for line in &graph_snapshot.planner_trace {
+            println!("  - {}", line);
+        }
+    }
     if let Err(err) = save_frontend_session_store(
         &frontend_session_path,
         &graph_snapshot.frontend_session_store,
@@ -5995,6 +6703,8 @@ async fn cmd_run(
     requested_engine: RunEngine,
     force_rebuild: bool,
     _args: &[String],
+    frontend_jobs: FrontendJobs,
+    frontend_trace: bool,
     reflection: ReflectionCliOptions,
 ) -> Result<()> {
     println!("Running: {}", input);
@@ -6035,6 +6745,8 @@ async fn cmd_run(
             .and_then(|metadata| metadata.build_graph_v2.as_ref()),
         previous_frontend_session.as_ref(),
         probe_mode,
+        frontend_jobs,
+        frontend_trace,
     );
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
@@ -6050,6 +6762,33 @@ async fn cmd_run(
         graph_snapshot.reused_modules.len(),
         graph_snapshot.rebuilt_modules.len()
     );
+    println!(
+        "frontend scheduler: requested={} selected={} serial={} parse_tasks={} body_tasks={} queue_wait_avg_ms={:.3} util={:.2}%",
+        graph_snapshot.frontend_scheduler.requested_jobs,
+        graph_snapshot.frontend_scheduler.selected_jobs,
+        graph_snapshot.frontend_scheduler.serial_mode,
+        graph_snapshot.frontend_scheduler.parse_interface_task_count,
+        graph_snapshot.frontend_scheduler.body_hir_task_count,
+        graph_snapshot.frontend_scheduler.queue_wait_avg_ms,
+        graph_snapshot.frontend_scheduler.worker_utilization_pct
+    );
+    if !graph_snapshot.fallback_events.is_empty() {
+        println!("frontend fallback events:");
+        for event in &graph_snapshot.fallback_events {
+            println!(
+                "  - stage={} scope={} reason={}",
+                event.stage,
+                frontend_fallback_scope_label(event.scope),
+                event.reason
+            );
+        }
+    }
+    if frontend_trace && !graph_snapshot.planner_trace.is_empty() {
+        println!("frontend planner trace (deterministic):");
+        for line in &graph_snapshot.planner_trace {
+            println!("  - {}", line);
+        }
+    }
     if let Err(err) = save_frontend_session_store(
         &frontend_session_path,
         &graph_snapshot.frontend_session_store,
@@ -6435,13 +7174,14 @@ mod tests {
         ensure_runtime_object, find_clang, find_runtime_c, handle_daemon_client,
         link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
         module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
-        parse_linker_mode, reflection_options_from_cli, reflection_sidecar_path_for_artifact,
-        resolve_bench_suite_path, resolve_daemon_addr, resolve_engine,
-        select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
-        validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
-        BuildWorksetPlan, CachedNativeRecoveryPlan, Cli, DaemonDispatchOutcome, EditClass,
-        EditImpact, FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint,
-        ReflectionMetadata, ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
+        parse_frontend_jobs_arg, parse_linker_mode, reflection_options_from_cli,
+        reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
+        resolve_engine, select_reflection_i64_zero_arity_symbol, send_daemon_request,
+        signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
+        BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, Cli,
+        DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
+        FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata,
+        ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
         DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use clap::Parser as _;
@@ -6682,6 +7422,34 @@ mod tests {
     }
 
     #[test]
+    fn frontend_jobs_parser_accepts_auto_and_positive_int() {
+        assert_eq!(parse_frontend_jobs_arg("auto").unwrap(), FrontendJobs::Auto);
+        assert_eq!(
+            parse_frontend_jobs_arg(" 4 ").unwrap(),
+            FrontendJobs::Fixed(4)
+        );
+        assert!(parse_frontend_jobs_arg("0").is_err());
+        assert!(parse_frontend_jobs_arg("abc").is_err());
+    }
+
+    #[test]
+    fn frontend_jobs_flag_parses_for_build_and_run() {
+        assert!(
+            Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--frontend-jobs", "auto",])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from([
+            "sgc",
+            "run",
+            "tests/demo.sg",
+            "--frontend-jobs",
+            "1",
+            "--frontend-trace",
+        ])
+        .is_ok());
+    }
+
+    #[test]
     fn daemon_subcommand_parses() {
         assert!(Cli::try_parse_from(["sgc", "daemon"]).is_ok());
         assert!(Cli::try_parse_from(["sgc", "daemon", "--addr", "127.0.0.1:50000"]).is_ok());
@@ -6723,25 +7491,15 @@ mod tests {
             "tests/demo.sg::main",
         ])
         .is_ok());
-        assert!(Cli::try_parse_from([
-            "sgc",
-            "build",
-            "tests/demo.sg",
-            "--reflect=off",
-        ])
-        .is_ok());
-        assert!(Cli::try_parse_from([
-            "sgc",
-            "run",
-            "tests/demo.sg",
-            "--reflect=auto",
-        ])
-        .is_ok());
+        assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--reflect=off",]).is_ok());
+        assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--reflect=auto",]).is_ok());
     }
 
     #[test]
     fn source_requests_reflection_detects_common_import_forms() {
-        assert!(super::source_requests_reflection("import reflect;\ndef main() -> i64 { 0 }\n"));
+        assert!(super::source_requests_reflection(
+            "import reflect;\ndef main() -> i64 { 0 }\n"
+        ));
         assert!(super::source_requests_reflection(
             "import std::reflect;\ndef main() -> i64 { 0 }\n"
         ));
@@ -6755,10 +7513,8 @@ mod tests {
 
     #[test]
     fn reflection_auto_mode_enables_when_dependency_imports_reflect() {
-        let root = std::env::temp_dir().join(format!(
-            "sengoo-sgc-reflect-auto-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("sengoo-sgc-reflect-auto-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
 
@@ -6787,6 +7543,8 @@ mod tests {
             None,
             None,
             super::FrontendProbeMode::FastNoVerify,
+            super::FrontendJobs::Auto,
+            false,
         );
         let dep_id = super::canonical_or_lossy(&dep_module);
         assert!(snapshot.reflection_import_modules.contains(&dep_id));
@@ -7000,6 +7758,8 @@ mod tests {
             2,
             false,
             false,
+            FrontendJobs::Auto,
+            false,
             ReflectionMode::Off,
             &[],
             &[],
@@ -7028,6 +7788,8 @@ mod tests {
             None,
             2,
             false,
+            false,
+            FrontendJobs::Auto,
             false,
             ReflectionMode::Off,
             &[],
@@ -7068,6 +7830,8 @@ mod tests {
             2,
             true,
             false,
+            FrontendJobs::Auto,
+            false,
             super::ReflectionCliOptions::default(),
         )
         .await
@@ -7088,6 +7852,8 @@ mod tests {
             None,
             2,
             true,
+            false,
+            FrontendJobs::Auto,
             false,
             ReflectionMode::Off,
             &[],
@@ -7118,6 +7884,8 @@ mod tests {
             None,
             2,
             false,
+            false,
+            FrontendJobs::Auto,
             false,
             ReflectionMode::Off,
             &[],
@@ -8028,6 +8796,8 @@ def add(x: i64) -> i64 {
             None,
             None,
             FrontendProbeMode::FastNoVerify,
+            FrontendJobs::Auto,
+            false,
         );
         assert!(first.reused_modules.is_empty());
         assert!(!first.rebuilt_modules.is_empty());
@@ -8038,6 +8808,8 @@ def add(x: i64) -> i64 {
             None,
             Some(&first.frontend_session_store),
             FrontendProbeMode::VerifyChangedAndDependents,
+            FrontendJobs::Auto,
+            false,
         );
         assert!(second.diagnostics.is_empty());
         assert_eq!(second.rebuilt_modules.len(), 0);
@@ -8045,6 +8817,132 @@ def add(x: i64) -> i64 {
             second.reused_modules.len(),
             first.frontend_session_store.modules.len()
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn frontend_parallel_and_serial_outputs_are_equivalent() {
+        let root = std::env::temp_dir().join(format!(
+            "sengoo-sgc-frontend-determinism-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let main_path = root.join("main.sg");
+        let dep_a = root.join("dep_a.sg");
+        let dep_b = root.join("dep_b.sg");
+
+        fs::write(
+            &main_path,
+            "import dep_a;\nimport dep_b;\ndef main() -> i64 {\n    dep_a_value() + dep_b_value()\n}\n",
+        )
+        .unwrap();
+        fs::write(&dep_a, "def dep_a_value( -> i64 { 1 }\n").unwrap();
+        fs::write(&dep_b, "def dep_b_value( -> i64 { 2 }\n").unwrap();
+
+        let source = fs::read_to_string(&main_path).unwrap();
+        let serial = collect_module_graph_snapshot(
+            &main_path,
+            &source,
+            None,
+            None,
+            FrontendProbeMode::VerifyAll,
+            FrontendJobs::Fixed(1),
+            true,
+        );
+        let parallel = collect_module_graph_snapshot(
+            &main_path,
+            &source,
+            None,
+            None,
+            FrontendProbeMode::VerifyAll,
+            FrontendJobs::Fixed(4),
+            true,
+        );
+
+        assert_eq!(serial.module_fingerprints, parallel.module_fingerprints);
+        assert_eq!(
+            serial.module_function_fingerprints,
+            parallel.module_function_fingerprints
+        );
+        assert_eq!(serial.diagnostics, parallel.diagnostics);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn frontend_trace_decisions_are_deterministic_for_same_input() {
+        let root =
+            std::env::temp_dir().join(format!("sengoo-sgc-frontend-trace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("main.sg");
+        let source = "def main() -> i64 {\n    1\n}\n";
+        fs::write(&input, source).unwrap();
+
+        let first = collect_module_graph_snapshot(
+            &input,
+            source,
+            None,
+            None,
+            FrontendProbeMode::FastNoVerify,
+            FrontendJobs::Fixed(1),
+            true,
+        );
+        let second = collect_module_graph_snapshot(
+            &input,
+            source,
+            None,
+            None,
+            FrontendProbeMode::FastNoVerify,
+            FrontendJobs::Fixed(1),
+            true,
+        );
+        assert_eq!(first.planner_trace, second.planner_trace);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn frontend_dependency_digest_mismatch_escalates_full_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "sengoo-sgc-frontend-digest-fallback-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("main.sg");
+        let source = "def main() -> i64 {\n    1\n}\n";
+        fs::write(&input, source).unwrap();
+
+        let first = collect_module_graph_snapshot(
+            &input,
+            source,
+            None,
+            None,
+            FrontendProbeMode::FastNoVerify,
+            FrontendJobs::Auto,
+            false,
+        );
+        let mut stale_session = first.frontend_session_store.clone();
+        stale_session.dependency_graph_digest ^= 1;
+
+        let second = collect_module_graph_snapshot(
+            &input,
+            source,
+            None,
+            Some(&stale_session),
+            FrontendProbeMode::VerifyChangedAndDependents,
+            FrontendJobs::Auto,
+            false,
+        );
+        assert!(second
+            .fallback_events
+            .iter()
+            .any(|event| event.scope == FrontendFallbackScope::FullFrontend
+                && event.reason.contains("dependency digest mismatch")));
 
         let _ = fs::remove_dir_all(&root);
     }
