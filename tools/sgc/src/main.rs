@@ -1733,8 +1733,13 @@ fn normalize_source_for_hash(source: &str) -> String {
     out
 }
 
+fn implementation_fingerprint_from_normalized(normalized: &str) -> u64 {
+    source_fingerprint(normalized)
+}
+
 fn implementation_fingerprint(source: &str) -> u64 {
-    source_fingerprint(&normalize_source_for_hash(source))
+    let normalized = normalize_source_for_hash(source);
+    implementation_fingerprint_from_normalized(&normalized)
 }
 
 fn visibility_label(vis: Visibility) -> &'static str {
@@ -2839,7 +2844,15 @@ fn interface_fingerprint(source: &str) -> u64 {
         return source_fingerprint(&interface_repr);
     }
 
+    interface_fingerprint_fast(source)
+}
+
+fn interface_fingerprint_fast(source: &str) -> u64 {
     let normalized = normalize_source_for_hash(source);
+    interface_fingerprint_fast_from_normalized(&normalized)
+}
+
+fn interface_fingerprint_fast_from_normalized(normalized: &str) -> u64 {
     let mut fallback_repr = String::new();
     for line in normalized.lines() {
         let trimmed = line.trim_start();
@@ -3355,6 +3368,10 @@ fn resolve_import_candidates(source_dir: &Path, import_path: &AstPath) -> Vec<Pa
 }
 
 fn resolve_direct_import_dependencies(source_dir: &Path, source: &str) -> Vec<PathBuf> {
+    if !source.contains("import") {
+        return Vec::new();
+    }
+
     let program = match Parser::parse(source) {
         Ok(program) => program,
         Err(_) => return Vec::new(),
@@ -3745,25 +3762,46 @@ fn frontend_cache_entry_for_module(
     module_path: &str,
     info: &ModuleSourceInfo,
     dependency_digest: u64,
+    collect_symbol_fingerprints: bool,
 ) -> FrontendModuleCacheEntryV4 {
     let mut depends_on = info.depends_on.clone();
     depends_on.sort();
     depends_on.dedup();
 
-    let mut symbols = function_fingerprints_for_module(module_path, &info.source);
-    for symbol in &mut symbols {
-        if symbol.module_imports.is_empty() {
-            symbol.module_imports = depends_on.clone();
+    let source_hash = source_fingerprint(&info.source);
+    let (interface_hash, body_hash) = if collect_symbol_fingerprints {
+        (
+            interface_fingerprint(&info.source),
+            implementation_fingerprint(&info.source),
+        )
+    } else {
+        let normalized = normalize_source_for_hash(&info.source);
+        (
+            interface_fingerprint_fast_from_normalized(&normalized),
+            implementation_fingerprint_from_normalized(&normalized),
+        )
+    };
+
+    let mut symbols = if collect_symbol_fingerprints {
+        function_fingerprints_for_module(module_path, &info.source)
+    } else {
+        Vec::new()
+    };
+    if collect_symbol_fingerprints {
+        for symbol in &mut symbols {
+            if symbol.module_imports.is_empty() {
+                symbol.module_imports = depends_on.clone();
+            }
         }
+        symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
     }
-    symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
 
     FrontendModuleCacheEntryV4 {
         module_id: module_path.to_string(),
-        source_hash: source_fingerprint(&info.source),
-        parse_hash: source_fingerprint(&info.source),
-        interface_hash: interface_fingerprint(&info.source),
-        body_hash: implementation_fingerprint(&info.source),
+        source_hash,
+        parse_hash: source_hash,
+        interface_hash,
+        body_hash,
         hir_hash: hir_fragment_fingerprint(&symbols),
         dependency_digest,
         scheduler_schema_version: FRONTEND_SCHEDULER_SCHEMA_VERSION,
@@ -3780,6 +3818,7 @@ fn collect_module_graph_snapshot(
     probe_mode: FrontendProbeMode,
     frontend_jobs: FrontendJobs,
     trace_mode: bool,
+    collect_symbol_fingerprints: bool,
 ) -> ModuleGraphSnapshot {
     let root_module = canonical_or_lossy(input_path);
     let module_sources = collect_module_sources_with_edges(input_path, source);
@@ -3810,11 +3849,12 @@ fn collect_module_graph_snapshot(
 
     if trace_mode {
         planner_trace.push(format!(
-            "frontend planner: root={} modules={} probe={:?} requested_jobs={}",
+            "frontend planner: root={} modules={} probe={:?} requested_jobs={} collect_symbols={}",
             root_module,
             module_sources.len(),
             probe_mode,
-            frontend_jobs_label(frontend_jobs)
+            frontend_jobs_label(frontend_jobs),
+            collect_symbol_fingerprints
         ));
     }
 
@@ -3939,7 +3979,12 @@ fn collect_module_graph_snapshot(
                 let info = module_sources
                     .get(module_id)
                     .expect("module must exist during parse/interface scheduling");
-                frontend_cache_entry_for_module(module_id, info, dependency_digest)
+                frontend_cache_entry_for_module(
+                    module_id,
+                    info,
+                    dependency_digest,
+                    collect_symbol_fingerprints,
+                )
             },
         );
         merge_frontend_phase_stats(&mut parse_phase_stats, level_stats);
@@ -3956,11 +4001,36 @@ fn collect_module_graph_snapshot(
     rebuilt_modules.sort();
     rebuilt_modules.dedup();
 
+    let mut symbol_backfilled_modules = 0usize;
+    if collect_symbol_fingerprints {
+        for (module_id, entry) in &mut module_entries {
+            if !entry.symbols.is_empty() {
+                continue;
+            }
+            let Some(info) = module_sources.get(module_id) else {
+                continue;
+            };
+            entry.symbols = function_fingerprints_for_module(module_id, &info.source);
+            for symbol in &mut entry.symbols {
+                if symbol.module_imports.is_empty() {
+                    symbol.module_imports = entry.depends_on.clone();
+                }
+            }
+            entry.symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+            entry.hir_hash = hir_fragment_fingerprint(&entry.symbols);
+            symbol_backfilled_modules += 1;
+        }
+    }
+
     if trace_mode {
         planner_trace.push(format!(
             "frontend planner: reused_modules={} rebuilt_modules={}",
             reused_modules.len(),
             rebuilt_modules.len()
+        ));
+        planner_trace.push(format!(
+            "frontend planner: symbol_backfilled_modules={}",
+            symbol_backfilled_modules
         ));
     }
 
@@ -4258,6 +4328,7 @@ fn module_fingerprints_for_source(input_path: &Path, source: &str) -> Vec<Module
         FrontendProbeMode::VerifyAll,
         FrontendJobs::Auto,
         false,
+        true,
     )
     .module_fingerprints
 }
@@ -5540,6 +5611,7 @@ async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Resul
             FrontendProbeMode::VerifyAll,
             FrontendJobs::Auto,
             false,
+            true,
         );
 
         let mut sample_ms = Vec::new();
@@ -6312,6 +6384,7 @@ async fn cmd_build(
         probe_mode,
         frontend_jobs,
         frontend_trace,
+        !force_rebuild,
     );
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
@@ -6747,6 +6820,7 @@ async fn cmd_run(
         probe_mode,
         frontend_jobs,
         frontend_trace,
+        !force_rebuild,
     );
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
@@ -7545,6 +7619,7 @@ mod tests {
             super::FrontendProbeMode::FastNoVerify,
             super::FrontendJobs::Auto,
             false,
+            true,
         );
         let dep_id = super::canonical_or_lossy(&dep_module);
         assert!(snapshot.reflection_import_modules.contains(&dep_id));
@@ -8798,6 +8873,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::FastNoVerify,
             FrontendJobs::Auto,
             false,
+            true,
         );
         assert!(first.reused_modules.is_empty());
         assert!(!first.rebuilt_modules.is_empty());
@@ -8810,6 +8886,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::VerifyChangedAndDependents,
             FrontendJobs::Auto,
             false,
+            true,
         );
         assert!(second.diagnostics.is_empty());
         assert_eq!(second.rebuilt_modules.len(), 0);
@@ -8851,6 +8928,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::VerifyAll,
             FrontendJobs::Fixed(1),
             true,
+            true,
         );
         let parallel = collect_module_graph_snapshot(
             &main_path,
@@ -8859,6 +8937,7 @@ def add(x: i64) -> i64 {
             None,
             FrontendProbeMode::VerifyAll,
             FrontendJobs::Fixed(4),
+            true,
             true,
         );
 
@@ -8890,6 +8969,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::FastNoVerify,
             FrontendJobs::Fixed(1),
             true,
+            true,
         );
         let second = collect_module_graph_snapshot(
             &input,
@@ -8898,6 +8978,7 @@ def add(x: i64) -> i64 {
             None,
             FrontendProbeMode::FastNoVerify,
             FrontendJobs::Fixed(1),
+            true,
             true,
         );
         assert_eq!(first.planner_trace, second.planner_trace);
@@ -8925,6 +9006,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::FastNoVerify,
             FrontendJobs::Auto,
             false,
+            true,
         );
         let mut stale_session = first.frontend_session_store.clone();
         stale_session.dependency_graph_digest ^= 1;
@@ -8937,6 +9019,7 @@ def add(x: i64) -> i64 {
             FrontendProbeMode::VerifyChangedAndDependents,
             FrontendJobs::Auto,
             false,
+            true,
         );
         assert!(second
             .fallback_events
