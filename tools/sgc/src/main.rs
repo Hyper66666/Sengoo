@@ -1,6 +1,6 @@
 //! Sengoo CLI compiler (`sgc`).
 
-use clap::{Parser as ClapParser, Subcommand, ValueEnum};
+use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
 use sengoo_compiler::mir::{
     Instruction as MirInstruction, MirFunction, Terminator as MirTerminator,
@@ -27,6 +27,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 use tracing_subscriber::{fmt, EnvFilter};
+
+mod cli;
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -585,360 +587,12 @@ struct BenchBaseline {
     cases: BTreeMap<String, BenchBaselineCase>,
 }
 
-/// Sengoo command-line compiler.
-#[derive(ClapParser, Debug)]
-#[command(name = "sgc")]
-#[command(author = "Sengoo Team")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Sengoo language compiler", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Compile a Sengoo source file.
-    Build {
-        /// Input source file.
-        input: String,
-
-        /// Output file path.
-        #[arg(short, long)]
-        output: Option<String>,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Emit LLVM IR instead of a native executable.
-        #[arg(long)]
-        emit_llvm: bool,
-
-        /// Ignore cached build artifacts and rebuild.
-        #[arg(long)]
-        force_rebuild: bool,
-
-        /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
-        #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
-        frontend_jobs: FrontendJobs,
-
-        /// Emit deterministic frontend planner trace lines.
-        #[arg(long = "frontend-trace")]
-        frontend_trace: bool,
-
-        /// Try dispatching request to local sgc daemon first.
-        #[arg(long)]
-        daemon: bool,
-
-        /// Daemon address (default: 127.0.0.1:48765).
-        #[arg(long)]
-        daemon_addr: Option<String>,
-
-        /// Reflection mode (`auto` by default; `--reflect` is shorthand for `--reflect=on`).
-        #[arg(
-            long,
-            value_enum,
-            default_value_t = ReflectionMode::Auto,
-            num_args = 0..=1,
-            default_missing_value = "on"
-        )]
-        reflect: ReflectionMode,
-
-        /// Restrict reflection to selected module paths (repeatable).
-        #[arg(long = "reflect-module")]
-        reflect_module: Vec<String>,
-
-        /// Restrict reflection to selected symbols (repeatable).
-        #[arg(long = "reflect-symbol")]
-        reflect_symbol: Vec<String>,
-    },
-
-    /// Run a Sengoo source file.
-    Run {
-        /// Input source file.
-        input: String,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Runtime engine policy.
-        #[arg(long, value_enum, default_value_t = RunEngine::Auto)]
-        engine: RunEngine,
-
-        /// Ignore cached run artifacts and rebuild.
-        #[arg(long)]
-        force_rebuild: bool,
-
-        /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
-        #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
-        frontend_jobs: FrontendJobs,
-
-        /// Emit deterministic frontend planner trace lines.
-        #[arg(long = "frontend-trace")]
-        frontend_trace: bool,
-
-        /// Try dispatching request to local sgc daemon first.
-        #[arg(long)]
-        daemon: bool,
-
-        /// Daemon address (default: 127.0.0.1:48765).
-        #[arg(long)]
-        daemon_addr: Option<String>,
-
-        /// Reflection mode (`auto` by default; `--reflect` is shorthand for `--reflect=on`).
-        #[arg(
-            long,
-            value_enum,
-            default_value_t = ReflectionMode::Auto,
-            num_args = 0..=1,
-            default_missing_value = "on"
-        )]
-        reflect: ReflectionMode,
-
-        /// Restrict reflection to selected module paths (repeatable).
-        #[arg(long = "reflect-module")]
-        reflect_module: Vec<String>,
-
-        /// Restrict reflection to selected symbols (repeatable).
-        #[arg(long = "reflect-symbol")]
-        reflect_symbol: Vec<String>,
-
-        /// Arguments passed to program (reserved).
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
-    },
-
-    /// Type-check/compile without generating final output.
-    Check {
-        /// Input source file.
-        input: String,
-    },
-
-    /// Start REPL.
-    Repl,
-
-    /// Dump AST.
-    DumpAst {
-        /// Input source file.
-        input: String,
-    },
-
-    /// Start persistent compiler daemon.
-    Daemon {
-        /// Daemon bind/listen address.
-        #[arg(long, default_value = DEFAULT_DAEMON_ADDR)]
-        addr: String,
-    },
-
-    /// Run benchmark suites.
-    Bench {
-        #[command(subcommand)]
-        command: BenchCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum BenchCommands {
-    /// Runtime-oriented benchmark suite.
-    Run {
-        /// Suite name or path.
-        #[arg(default_value = "runtime")]
-        suite: String,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Warmup runs per case.
-        #[arg(long, default_value_t = 1)]
-        warmup: u32,
-
-        /// Measured runs per case.
-        #[arg(long, default_value_t = 5)]
-        iterations: u32,
-    },
-
-    /// Full compile benchmark suite.
-    Compile {
-        /// Suite name or path.
-        #[arg(default_value = "compile")]
-        suite: String,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Measured runs per case.
-        #[arg(long, default_value_t = 3)]
-        iterations: u32,
-    },
-
-    /// Incremental compile benchmark suite.
-    Incremental {
-        /// Suite name or path.
-        #[arg(default_value = "incremental")]
-        suite: String,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Measured runs per case.
-        #[arg(long, default_value_t = 3)]
-        iterations: u32,
-    },
-
-    /// Reflection overhead benchmark suite.
-    Reflection {
-        /// Suite name or path.
-        #[arg(default_value = "runtime")]
-        suite: String,
-
-        /// Optimization level (0-3).
-        #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
-        opt_level: u8,
-
-        /// Warmup runs per case.
-        #[arg(long, default_value_t = 1)]
-        warmup: u32,
-
-        /// Measured runs per case.
-        #[arg(long, default_value_t = 5)]
-        iterations: u32,
-    },
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::from_default_env().add_directive("sgc=info".parse().unwrap());
     fmt().with_env_filter(filter).with_target(false).init();
 
-    let cli = Cli::parse();
-
-    match cli.command {
-        Commands::Build {
-            input,
-            output,
-            opt_level,
-            emit_llvm,
-            force_rebuild,
-            frontend_jobs,
-            frontend_trace,
-            daemon,
-            daemon_addr,
-            reflect,
-            reflect_module,
-            reflect_symbol,
-        } => {
-            if daemon {
-                let addr = resolve_daemon_addr(daemon_addr.as_deref());
-                let outcome = dispatch_build_via_daemon(
-                    &addr,
-                    &input,
-                    output.as_deref(),
-                    opt_level,
-                    emit_llvm,
-                    force_rebuild,
-                    frontend_jobs,
-                    frontend_trace,
-                    reflect,
-                    &reflect_module,
-                    &reflect_symbol,
-                )
-                .await?;
-                if matches!(outcome, DaemonDispatchOutcome::Handled) {
-                    return Ok(());
-                }
-            }
-            cmd_build(
-                &input,
-                output.as_deref(),
-                opt_level,
-                emit_llvm,
-                force_rebuild,
-                frontend_jobs,
-                frontend_trace_enabled(frontend_trace),
-                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
-            )
-            .await
-        }
-        Commands::Run {
-            input,
-            opt_level,
-            engine,
-            force_rebuild,
-            frontend_jobs,
-            frontend_trace,
-            daemon,
-            daemon_addr,
-            reflect,
-            reflect_module,
-            reflect_symbol,
-            args,
-        } => {
-            if daemon {
-                let addr = resolve_daemon_addr(daemon_addr.as_deref());
-                let outcome = dispatch_run_via_daemon(
-                    &addr,
-                    &input,
-                    opt_level,
-                    engine,
-                    force_rebuild,
-                    &args,
-                    frontend_jobs,
-                    frontend_trace,
-                    reflect,
-                    &reflect_module,
-                    &reflect_symbol,
-                )
-                .await?;
-                if matches!(outcome, DaemonDispatchOutcome::Handled) {
-                    return Ok(());
-                }
-            }
-            cmd_run(
-                &input,
-                opt_level,
-                engine,
-                force_rebuild,
-                &args,
-                frontend_jobs,
-                frontend_trace_enabled(frontend_trace),
-                reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
-            )
-            .await
-        }
-        Commands::Check { input } => cmd_check(&input).await,
-        Commands::Repl => cmd_repl().await,
-        Commands::DumpAst { input } => cmd_dump_ast(&input).await,
-        Commands::Daemon { addr } => cmd_daemon(&addr).await,
-        Commands::Bench { command } => match command {
-            BenchCommands::Run {
-                suite,
-                opt_level,
-                warmup,
-                iterations,
-            } => cmd_bench_run(&suite, opt_level, warmup, iterations).await,
-            BenchCommands::Compile {
-                suite,
-                opt_level,
-                iterations,
-            } => cmd_bench_compile(&suite, opt_level, iterations).await,
-            BenchCommands::Incremental {
-                suite,
-                opt_level,
-                iterations,
-            } => cmd_bench_incremental(&suite, opt_level, iterations).await,
-            BenchCommands::Reflection {
-                suite,
-                opt_level,
-                warmup,
-                iterations,
-            } => cmd_bench_reflection(&suite, opt_level, warmup, iterations).await,
-        },
-    }
+    cli::run().await
 }
 
 fn resolve_daemon_addr(explicit: Option<&str>) -> String {
@@ -3046,6 +2700,49 @@ fn resolve_root_interface_hash(
         }
     }
     interface_fingerprint(source)
+}
+
+fn resolve_root_hashes_for_request(
+    input_path: &Path,
+    source: &str,
+    snapshot: &ModuleGraphSnapshot,
+    force_rebuild: bool,
+    previous_root_implementation_hash: Option<u64>,
+    previous_root_interface_hash: Option<u64>,
+) -> (u64, u64) {
+    let root_module = canonical_or_lossy(input_path);
+    let snapshot_hashes = snapshot
+        .frontend_session_store
+        .modules
+        .iter()
+        .find(|entry| entry.module_id == root_module)
+        .map(|entry| (entry.interface_hash, entry.body_hash));
+
+    let root_implementation_hash = snapshot_hashes
+        .map(|(_, body_hash)| body_hash)
+        .unwrap_or_else(|| implementation_fingerprint(source));
+
+    let root_interface_hash = if force_rebuild {
+        resolve_root_interface_hash(
+            source,
+            root_implementation_hash,
+            previous_root_implementation_hash,
+            previous_root_interface_hash,
+        )
+    } else {
+        snapshot_hashes
+            .map(|(interface_hash, _)| interface_hash)
+            .unwrap_or_else(|| {
+                resolve_root_interface_hash(
+                    source,
+                    root_implementation_hash,
+                    previous_root_implementation_hash,
+                    previous_root_interface_hash,
+                )
+            })
+    };
+
+    (root_interface_hash, root_implementation_hash)
 }
 
 fn module_invalidation_stats(
@@ -6569,18 +6266,6 @@ async fn cmd_build(
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
     let previous_build_metadata_seed = load_build_cache(&cache_path);
     let previous_frontend_session = load_frontend_session_store(&frontend_session_path);
-    let source_hash = implementation_fingerprint(&source);
-    let root_implementation_hash = source_hash;
-    let root_interface_hash = resolve_root_interface_hash(
-        &source,
-        root_implementation_hash,
-        previous_build_metadata_seed
-            .as_ref()
-            .map(|metadata| metadata.root_implementation_hash),
-        previous_build_metadata_seed
-            .as_ref()
-            .map(|metadata| metadata.root_interface_hash),
-    );
     let probe_mode = if force_rebuild {
         FrontendProbeMode::FastNoVerify
     } else {
@@ -6598,6 +6283,19 @@ async fn cmd_build(
         frontend_trace,
         !force_rebuild,
     );
+    let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
+        input_path,
+        &source,
+        &graph_snapshot,
+        force_rebuild,
+        previous_build_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_implementation_hash),
+        previous_build_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_interface_hash),
+    );
+    let source_hash = root_implementation_hash;
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
     let module_fingerprints = graph_snapshot.module_fingerprints.clone();
@@ -7016,18 +6714,6 @@ async fn cmd_run(
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
-    let source_hash = implementation_fingerprint(&source);
-    let root_implementation_hash = source_hash;
-    let root_interface_hash = resolve_root_interface_hash(
-        &source,
-        root_implementation_hash,
-        previous_run_metadata_seed
-            .as_ref()
-            .map(|metadata| metadata.root_implementation_hash),
-        previous_run_metadata_seed
-            .as_ref()
-            .map(|metadata| metadata.root_interface_hash),
-    );
     let probe_mode = if force_rebuild {
         FrontendProbeMode::FastNoVerify
     } else {
@@ -7045,6 +6731,19 @@ async fn cmd_run(
         frontend_trace,
         !force_rebuild,
     );
+    let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
+        input_path,
+        &source,
+        &graph_snapshot,
+        force_rebuild,
+        previous_run_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_implementation_hash),
+        previous_run_metadata_seed
+            .as_ref()
+            .map(|metadata| metadata.root_interface_hash),
+    );
+    let source_hash = root_implementation_hash;
     let reflection = resolve_reflection_options_for_snapshot(reflection, &graph_snapshot);
     println!("{}", reflection_mode_note(&reflection, &graph_snapshot));
     let module_fingerprints = graph_snapshot.module_fingerprints.clone();
@@ -7477,12 +7176,13 @@ mod tests {
         reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
         resolve_engine, select_reflection_i64_zero_arity_symbol, send_daemon_request,
         signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
-        BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, Cli,
+        BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan,
         DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
         FrontendProbeMode, FunctionFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata,
         ReflectionMode, RunCacheMetadata, RunEngine,
         BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
+    use crate::cli::Cli;
     use clap::Parser as _;
     use std::collections::{BTreeMap, HashSet};
     use std::fs;
