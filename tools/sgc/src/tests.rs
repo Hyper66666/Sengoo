@@ -16,9 +16,10 @@
         signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
         BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan,
         DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
-        FrontendModuleCacheEntryV4, FrontendProbeMode, FrontendSchedulerTelemetry,
-        FrontendSessionStoreV4, FunctionFingerprint, LinkerMode, ModuleFingerprint,
-        ModuleGraphSnapshot, ReflectionMetadata, ReflectionMode, RunCacheMetadata, RunEngine,
+        FrontendMemoryMode, FrontendModuleCacheEntryV4, FrontendProbeMode,
+        FrontendSchedulerTelemetry, FrontendSessionStoreV4, FunctionFingerprint, LinkerMode,
+        ModuleFingerprint, ModuleGraphSnapshot, ReflectionMetadata, ReflectionMode,
+        RunCacheMetadata, RunEngine,
         BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
     };
     use crate::cli::Cli;
@@ -306,6 +307,28 @@
     #[test]
     fn build_force_rebuild_flag_parses() {
         assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--force-rebuild"]).is_ok());
+    }
+
+    #[test]
+    fn low_memory_flag_parses_for_build_and_run() {
+        assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--low-memory"]).is_ok());
+        assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--low-memory"]).is_ok());
+    }
+
+    #[test]
+    fn frontend_memory_mode_wire_supports_low_memory_aliases() {
+        assert_eq!(
+            super::parse_frontend_memory_mode_wire("low-memory"),
+            FrontendMemoryMode::LowMemory
+        );
+        assert_eq!(
+            super::parse_frontend_memory_mode_wire("low_memory"),
+            FrontendMemoryMode::LowMemory
+        );
+        assert_eq!(
+            super::parse_frontend_memory_mode_wire("low"),
+            FrontendMemoryMode::LowMemory
+        );
     }
 
     #[test]
@@ -678,6 +701,7 @@
             2,
             false,
             false,
+            false,
             FrontendJobs::Auto,
             false,
             ReflectionMode::Off,
@@ -707,6 +731,7 @@
             input.to_string_lossy().as_ref(),
             None,
             2,
+            false,
             false,
             false,
             FrontendJobs::Auto,
@@ -750,6 +775,7 @@
             2,
             true,
             false,
+            false,
             FrontendJobs::Auto,
             false,
             super::ReflectionCliOptions::default(),
@@ -772,6 +798,7 @@
             None,
             2,
             true,
+            false,
             false,
             FrontendJobs::Auto,
             false,
@@ -803,6 +830,7 @@
             input.to_string_lossy().as_ref(),
             None,
             2,
+            false,
             false,
             false,
             FrontendJobs::Auto,

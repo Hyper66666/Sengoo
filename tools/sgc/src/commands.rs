@@ -9,6 +9,7 @@ pub(crate) async fn cmd_build(
     opt_level: u8,
     emit_llvm: bool,
     force_rebuild: bool,
+    low_memory: bool,
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
     reflection: ReflectionCliOptions,
@@ -27,13 +28,29 @@ pub(crate) async fn cmd_build(
 
     let cache_path = build_dir.join(format!("{}.build-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
-    let previous_build_metadata_seed = load_build_cache(&cache_path);
-    let previous_frontend_session = load_frontend_session_store(&frontend_session_path);
-    let probe_mode = if force_rebuild {
+    let effective_frontend_jobs = if low_memory {
+        FrontendJobs::Fixed(1)
+    } else {
+        frontend_jobs
+    };
+    let previous_build_metadata_seed = if low_memory {
+        None
+    } else {
+        load_build_cache(&cache_path)
+    };
+    let previous_frontend_session = if low_memory {
+        None
+    } else {
+        load_frontend_session_store(&frontend_session_path)
+    };
+    let probe_mode = if force_rebuild || low_memory {
         FrontendProbeMode::FastNoVerify
     } else {
         FrontendProbeMode::VerifyChangedAndDependents
     };
+    if low_memory {
+        println!("low-memory mode: enabled (--low-memory)");
+    }
     let graph_snapshot = collect_module_graph_snapshot(
         input_path,
         &source,
@@ -42,9 +59,9 @@ pub(crate) async fn cmd_build(
             .and_then(|metadata| metadata.build_graph_v2.as_ref()),
         previous_frontend_session.as_ref(),
         probe_mode,
-        frontend_jobs,
+        effective_frontend_jobs,
         frontend_trace,
-        !force_rebuild,
+        !force_rebuild && !low_memory,
     );
     let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
         input_path,
@@ -100,11 +117,13 @@ pub(crate) async fn cmd_build(
             println!("  - {}", line);
         }
     }
-    if let Err(err) = save_frontend_session_store(
-        &frontend_session_path,
-        &graph_snapshot.frontend_session_store,
-    ) {
-        println!("frontend session fallback: {}", err);
+    if !low_memory {
+        if let Err(err) = save_frontend_session_store(
+            &frontend_session_path,
+            &graph_snapshot.frontend_session_store,
+        ) {
+            println!("frontend session fallback: {}", err);
+        }
     }
     let runtime_c = find_runtime_c();
 
@@ -133,15 +152,26 @@ pub(crate) async fn cmd_build(
     } else {
         Some(build_dir.join(format!("{}.{}", stem, object_file_extension())))
     };
-    let graph_v2 = build_graph_v2_with_function_fingerprints_for_source(
-        input_path,
-        &module_fingerprints,
-        &graph_snapshot.module_function_fingerprints,
-        &graph_snapshot.dependency_edges,
-        object_path.as_deref(),
-        root_interface_hash,
-        root_implementation_hash,
-    );
+    let graph_v2 = if low_memory {
+        crate::graph_builder::build_graph_v2_for_source(
+            input_path,
+            &module_fingerprints,
+            &graph_snapshot.dependency_edges,
+            object_path.as_deref(),
+            root_interface_hash,
+            root_implementation_hash,
+        )
+    } else {
+        build_graph_v2_with_function_fingerprints_for_source(
+            input_path,
+            &module_fingerprints,
+            &graph_snapshot.module_function_fingerprints,
+            &graph_snapshot.dependency_edges,
+            object_path.as_deref(),
+            root_interface_hash,
+            root_implementation_hash,
+        )
+    };
     drop(graph_snapshot);
     let key = build_cache_key(
         source_hash,
@@ -153,7 +183,10 @@ pub(crate) async fn cmd_build(
     );
     let mut edit_impact: Option<EditImpact> = None;
 
-    let previous_build_metadata = if force_rebuild {
+    let previous_build_metadata = if low_memory {
+        println!("build cache bypassed: --low-memory");
+        None
+    } else if force_rebuild {
         println!("build cache bypassed: --force-rebuild");
         None
     } else if let Some(metadata) = previous_build_metadata_seed.clone() {
@@ -309,16 +342,22 @@ pub(crate) async fn cmd_build(
         }
     }
 
-    let (_phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings(
-        &source,
-        opt_level,
-        &llvm_ir_path,
-    )
-    .map_err(|e| {
-        eprintln!("Compilation error:");
-        eprintln!("{}", e);
-        miette::miette!("compile failed")
-    })?;
+    let (_phases, effective_memory_mode) =
+        compile_source_to_llvm_file_with_phase_timings_with_mode(
+            &source,
+            opt_level,
+            &llvm_ir_path,
+            if low_memory {
+                Some(FrontendMemoryMode::LowMemory)
+            } else {
+                None
+            },
+        )
+        .map_err(|e| {
+            eprintln!("Compilation error:");
+            eprintln!("{}", e);
+            miette::miette!("compile failed")
+        })?;
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
@@ -453,6 +492,7 @@ pub(crate) async fn cmd_run(
     requested_engine: RunEngine,
     force_rebuild: bool,
     _args: &[String],
+    low_memory: bool,
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
     reflection: ReflectionCliOptions,
@@ -473,17 +513,33 @@ pub(crate) async fn cmd_run(
     };
     let cache_path = build_dir.join(format!("{}.run-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
-    let previous_run_metadata_seed = load_run_cache(&cache_path);
-    let previous_frontend_session = load_frontend_session_store(&frontend_session_path);
+    let effective_frontend_jobs = if low_memory {
+        FrontendJobs::Fixed(1)
+    } else {
+        frontend_jobs
+    };
+    let previous_run_metadata_seed = if low_memory {
+        None
+    } else {
+        load_run_cache(&cache_path)
+    };
+    let previous_frontend_session = if low_memory {
+        None
+    } else {
+        load_frontend_session_store(&frontend_session_path)
+    };
 
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
-    let probe_mode = if force_rebuild {
+    let probe_mode = if force_rebuild || low_memory {
         FrontendProbeMode::FastNoVerify
     } else {
         FrontendProbeMode::VerifyChangedAndDependents
     };
+    if low_memory {
+        println!("low-memory mode: enabled (--low-memory)");
+    }
     let graph_snapshot = collect_module_graph_snapshot(
         input_path,
         &source,
@@ -492,9 +548,9 @@ pub(crate) async fn cmd_run(
             .and_then(|metadata| metadata.build_graph_v2.as_ref()),
         previous_frontend_session.as_ref(),
         probe_mode,
-        frontend_jobs,
+        effective_frontend_jobs,
         frontend_trace,
-        !force_rebuild,
+        !force_rebuild && !low_memory,
     );
     let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
         input_path,
@@ -550,22 +606,35 @@ pub(crate) async fn cmd_run(
             println!("  - {}", line);
         }
     }
-    if let Err(err) = save_frontend_session_store(
-        &frontend_session_path,
-        &graph_snapshot.frontend_session_store,
-    ) {
-        println!("frontend session fallback: {}", err);
+    if !low_memory {
+        if let Err(err) = save_frontend_session_store(
+            &frontend_session_path,
+            &graph_snapshot.frontend_session_store,
+        ) {
+            println!("frontend session fallback: {}", err);
+        }
     }
     let object_path = build_dir.join(format!("{}.{}", stem, object_file_extension()));
-    let graph_v2 = build_graph_v2_with_function_fingerprints_for_source(
-        input_path,
-        &module_fingerprints,
-        &graph_snapshot.module_function_fingerprints,
-        &graph_snapshot.dependency_edges,
-        Some(&object_path),
-        root_interface_hash,
-        root_implementation_hash,
-    );
+    let graph_v2 = if low_memory {
+        crate::graph_builder::build_graph_v2_for_source(
+            input_path,
+            &module_fingerprints,
+            &graph_snapshot.dependency_edges,
+            Some(&object_path),
+            root_interface_hash,
+            root_implementation_hash,
+        )
+    } else {
+        build_graph_v2_with_function_fingerprints_for_source(
+            input_path,
+            &module_fingerprints,
+            &graph_snapshot.module_function_fingerprints,
+            &graph_snapshot.dependency_edges,
+            Some(&object_path),
+            root_interface_hash,
+            root_implementation_hash,
+        )
+    };
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
@@ -584,7 +653,10 @@ pub(crate) async fn cmd_run(
     );
     let mut edit_impact: Option<EditImpact> = None;
 
-    let previous_run_metadata = if force_rebuild {
+    let previous_run_metadata = if low_memory {
+        println!("cache bypassed: --low-memory");
+        None
+    } else if force_rebuild {
         println!("cache bypassed: --force-rebuild");
         None
     } else if let Some(metadata) = previous_run_metadata_seed.clone() {
@@ -756,16 +828,22 @@ pub(crate) async fn cmd_run(
         println!("run workset plan: full rebuild");
     }
 
-    let (_phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings(
-        &source,
-        opt_level,
-        &llvm_ir_path,
-    )
-    .map_err(|e| {
-        eprintln!("Compilation error:");
-        eprintln!("{}", e);
-        miette::miette!("compile failed")
-    })?;
+    let (_phases, effective_memory_mode) =
+        compile_source_to_llvm_file_with_phase_timings_with_mode(
+            &source,
+            opt_level,
+            &llvm_ir_path,
+            if low_memory {
+                Some(FrontendMemoryMode::LowMemory)
+            } else {
+                None
+            },
+        )
+        .map_err(|e| {
+            eprintln!("Compilation error:");
+            eprintln!("{}", e);
+            miette::miette!("compile failed")
+        })?;
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
@@ -892,4 +970,3 @@ pub(crate) async fn cmd_run(
 
     Ok(())
 }
-

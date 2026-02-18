@@ -22,12 +22,16 @@ pub(crate) fn compile_source_with_phase_timings(
     opt_level: u8,
 ) -> Result<(String, BTreeMap<String, f64>)> {
     let resolved_memory_mode = resolve_frontend_memory_mode(source.len());
-    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(source, opt_level)?;
+    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(
+        source,
+        opt_level,
+        matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
+    )?;
 
     let codegen_start = Instant::now();
     let mut codegen = Codegen::new();
     let llvm_ir = match resolved_memory_mode {
-        FrontendMemoryMode::Stream => {
+        FrontendMemoryMode::Stream | FrontendMemoryMode::LowMemory => {
             let mut out = Vec::new();
             codegen
                 .codegen_to_writer(&mir_fns, &mut out)
@@ -50,32 +54,48 @@ pub(crate) fn compile_source_with_phase_timings(
 fn compile_frontend_to_mir_with_phase_timings(
     source: &str,
     opt_level: u8,
+    low_memory_mode: bool,
 ) -> Result<(Vec<MirFunction>, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
 
     let (mut mir_fns, parse_ms, typeck_ms, mir_ms) = {
         let parse_start = Instant::now();
-        let program = Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?;
+        let mut program =
+            Some(Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?);
         let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
 
         let typeck_start = Instant::now();
         let mut checker = TypeChecker::new();
         checker
-            .check_program(&program)
+            .check_program(program.as_ref().expect("program present during typeck"))
             .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
-        let type_env = checker.into_env();
+        let mut type_env = Some(checker.into_env());
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
 
         let mir_start = Instant::now();
-        let hir_module = lower_ast(&program, &type_env);
+        let hir_module = lower_ast(
+            program.as_ref().expect("program present during lowering"),
+            type_env.as_ref().expect("type env present during lowering"),
+        );
+        if low_memory_mode {
+            drop(type_env.take());
+            drop(program.take());
+        }
         let mut mir_fns = lower_hir(&hir_module.items).map_err(|e| miette::miette!("{}", e))?;
         drop(hir_module);
-        drop(type_env);
-        drop(program);
+        if !low_memory_mode {
+            drop(type_env.take());
+            drop(program.take());
+        }
         // Prune unreachable functions before MIR optimization to avoid spending
         // optimization work on dead code in large single-file workloads.
         prune_unreachable_mir_functions(&mut mir_fns);
-        let mir_opt_level = MirOptLevel::from_u8(opt_level)
+        let effective_opt_level = if low_memory_mode {
+            opt_level.min(1)
+        } else {
+            opt_level
+        };
+        let mir_opt_level = MirOptLevel::from_u8(effective_opt_level)
             .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
         let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
         pipeline.run(&mut mir_fns);
@@ -103,17 +123,36 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
     opt_level: u8,
     llvm_path: &Path,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
-    let resolved_memory_mode = resolve_frontend_memory_mode(source.len());
-    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(source, opt_level)?;
+    compile_source_to_llvm_file_with_phase_timings_with_mode(source, opt_level, llvm_path, None)
+}
+
+pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
+    source: &str,
+    opt_level: u8,
+    llvm_path: &Path,
+    forced_memory_mode: Option<FrontendMemoryMode>,
+) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
+    let resolved_memory_mode =
+        forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.len()));
+    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(
+        source,
+        opt_level,
+        matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
+    )?;
 
     let codegen_start = Instant::now();
     let mut effective_mode = resolved_memory_mode;
-    let stream_result = if matches!(resolved_memory_mode, FrontendMemoryMode::Stream) {
-        let file = fs::File::create(llvm_path)
-            .into_diagnostic()
-            .map_err(|e| {
-                miette::miette!("failed to create LLVM IR output {}: {}", llvm_path.display(), e)
-            })?;
+    let stream_result = if matches!(
+        resolved_memory_mode,
+        FrontendMemoryMode::Stream | FrontendMemoryMode::LowMemory
+    ) {
+        let file = fs::File::create(llvm_path).into_diagnostic().map_err(|e| {
+            miette::miette!(
+                "failed to create LLVM IR output {}: {}",
+                llvm_path.display(),
+                e
+            )
+        })?;
         let mut writer = BufWriter::new(file);
         let mut codegen = Codegen::new();
         codegen
