@@ -24,6 +24,7 @@ impl Default for ReflectionMode {
 #[serde(rename_all = "lowercase")]
 enum FrontendMemoryMode {
     Auto,
+    LowMemory,
     Stream,
     Legacy,
 }

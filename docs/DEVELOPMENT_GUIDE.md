@@ -89,8 +89,8 @@ Important context:
 
 `sgc` supports:
 
-- `build <file.sg> [-O 0..3] [--emit-llvm] [--force-rebuild] [--daemon]`
-- `run <file.sg> [-O 0..3] [--engine auto|native|lli] [--force-rebuild] [--daemon]`
+- `build <file.sg> [-O 0..3] [--emit-llvm] [--force-rebuild] [--low-memory] [--daemon]`
+- `run <file.sg> [-O 0..3] [--engine auto|native|lli] [--force-rebuild] [--low-memory] [--daemon]`
 - `check <file.sg>`
 - `dump-ast <file.sg>`
 - `daemon --addr <host:port>`
@@ -101,6 +101,7 @@ Examples:
 ```bash
 target/release/sgc run examples/09_method_call.sg -O 1
 target/release/sgc build examples/08_struct.sg --emit-llvm
+target/release/sgc build examples/08_struct.sg --emit-llvm --low-memory
 target/release/sgc daemon --addr 127.0.0.1:48765
 ```
 

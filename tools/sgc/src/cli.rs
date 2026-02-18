@@ -43,6 +43,10 @@ pub(crate) enum Commands {
         #[arg(long)]
         force_rebuild: bool,
 
+        /// Enable manual low-memory pipeline (trades incremental features for lower RSS).
+        #[arg(long = "low-memory")]
+        low_memory: bool,
+
         /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
         #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
         frontend_jobs: FrontendJobs,
@@ -94,6 +98,10 @@ pub(crate) enum Commands {
         /// Ignore cached run artifacts and rebuild.
         #[arg(long)]
         force_rebuild: bool,
+
+        /// Enable manual low-memory pipeline (trades incremental features for lower RSS).
+        #[arg(long = "low-memory")]
+        low_memory: bool,
 
         /// Frontend scheduler workers (`auto` by default, `1` for serial deterministic mode).
         #[arg(long = "frontend-jobs", default_value = "auto", value_parser = parse_frontend_jobs_arg)]
@@ -247,6 +255,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             opt_level,
             emit_llvm,
             force_rebuild,
+            low_memory,
             frontend_jobs,
             frontend_trace,
             daemon,
@@ -264,6 +273,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     opt_level,
                     emit_llvm,
                     force_rebuild,
+                    low_memory,
                     frontend_jobs,
                     frontend_trace,
                     reflect,
@@ -281,6 +291,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 opt_level,
                 emit_llvm,
                 force_rebuild,
+                low_memory,
                 frontend_jobs,
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
@@ -292,6 +303,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             opt_level,
             engine,
             force_rebuild,
+            low_memory,
             frontend_jobs,
             frontend_trace,
             daemon,
@@ -310,6 +322,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     engine,
                     force_rebuild,
                     &args,
+                    low_memory,
                     frontend_jobs,
                     frontend_trace,
                     reflect,
@@ -327,6 +340,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 engine,
                 force_rebuild,
                 &args,
+                low_memory,
                 frontend_jobs,
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),

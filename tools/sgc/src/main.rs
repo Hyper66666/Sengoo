@@ -11,28 +11,35 @@ use std::sync::Arc;
 use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
 
-mod cli;
+mod bench;
 mod cache;
+mod cli;
+mod commands;
 mod daemon;
+mod fingerprint;
+mod frontend_helpers;
+mod frontend_snapshot;
+mod graph_builder;
+mod impact;
+mod interface;
+mod module_graph;
+mod native_toolchain;
 mod pipeline;
 mod reflection;
 mod reflection_native;
 mod reflection_sidecar;
-mod bench;
-mod interface;
-mod impact;
-mod fingerprint;
-mod module_graph;
-mod frontend_helpers;
-mod frontend_snapshot;
-mod graph_builder;
-mod native_toolchain;
+mod symbol_intern;
 mod toolchain_discovery;
 mod workset;
-mod commands;
-mod symbol_intern;
 pub(crate) use commands::{cmd_build, cmd_run};
 
+#[cfg(test)]
+pub(crate) use bench::bench_root_dir;
+pub(crate) use bench::{
+    cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run,
+};
+#[cfg(test)]
+pub(crate) use bench::{collect_bench_cases, resolve_bench_suite_path};
 pub(crate) use cache::{
     frontend_session_store_path, load_build_cache, load_frontend_session_store, load_run_cache,
     save_build_cache, save_frontend_session_store, save_run_cache,
@@ -43,53 +50,31 @@ pub(crate) use daemon::{
 };
 #[cfg(test)]
 pub(crate) use daemon::{daemon_request_build, handle_daemon_client, send_daemon_request};
-pub(crate) use pipeline::{compile_source, compile_source_to_llvm_file_with_phase_timings};
-#[cfg(test)]
-pub(crate) use pipeline::compile_source_with_phase_timings;
-pub(crate) use reflection::{
-    decl_requests_reflection, reflection_mode_note, reflection_options_from_cli,
-    resolve_reflection_options_for_snapshot,
-};
-#[cfg(test)]
-pub(crate) use reflection::source_requests_reflection;
-pub(crate) use reflection_native::{maybe_prepare_reflection_native_library, measure_reflection_used_ms};
-#[cfg(test)]
-pub(crate) use reflection_native::{select_reflection_i64_zero_arity_symbol, signature_is_zero_arity_i64};
-pub(crate) use reflection_sidecar::{
-    maybe_emit_reflection_sidecar, reflection_sidecar_path_for_artifact, validate_reflection_metadata,
-};
-#[cfg(test)]
-pub(crate) use reflection_sidecar::build_reflection_metadata;
-pub(crate) use bench::{cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run};
-#[cfg(test)]
-pub(crate) use bench::bench_root_dir;
-#[cfg(test)]
-pub(crate) use bench::{collect_bench_cases, resolve_bench_suite_path};
-pub(crate) use interface::{
-    ast_interface_signature, function_fingerprints_for_module, function_fingerprints_for_program,
-    function_signatures_for_module, interface_fingerprint_from_program,
-};
-pub(crate) use impact::{
-    classify_edit_impact, collect_impl_only_impacted_symbols_with_fallback, edit_class_label,
-    format_edit_impact_lines, incremental_link_mode_from_env, module_invalidation_stats,
-};
-#[cfg(test)]
-pub(crate) use impact::collect_impl_only_impacted_symbols;
 pub(crate) use fingerprint::{
     file_fingerprint, implementation_fingerprint, implementation_fingerprint_from_normalized,
     interface_fingerprint, interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
     normalize_source_for_hash, resolve_root_hashes_for_request, source_fingerprint,
 };
-pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use frontend_helpers::{
     dependency_graph_digest, frontend_cache_entry_for_module, frontend_probe_module_body_only,
     frontend_probe_module_full, hir_fragment_fingerprint, merge_frontend_phase_stats,
     resolve_frontend_job_count, run_frontend_tasks_deterministic,
 };
 pub(crate) use frontend_snapshot::{collect_module_graph_snapshot, module_fingerprints_for_source};
-pub(crate) use graph_builder::build_graph_v2_with_function_fingerprints_for_source;
 #[cfg(test)]
 pub(crate) use graph_builder::build_graph_v2_for_source;
+pub(crate) use graph_builder::build_graph_v2_with_function_fingerprints_for_source;
+#[cfg(test)]
+pub(crate) use impact::collect_impl_only_impacted_symbols;
+pub(crate) use impact::{
+    classify_edit_impact, collect_impl_only_impacted_symbols_with_fallback, edit_class_label,
+    format_edit_impact_lines, incremental_link_mode_from_env, module_invalidation_stats,
+};
+pub(crate) use interface::{
+    ast_interface_signature, function_fingerprints_for_module, function_fingerprints_for_program,
+    function_signatures_for_module, interface_fingerprint_from_program,
+};
+pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use native_toolchain::{
     artifact_exists, build_artifact_exists, compile_ir_to_object, compile_native_binary,
     default_build_output_path_for_case, ensure_runtime_object, link_native_binary_from_objects,
@@ -98,6 +83,31 @@ pub(crate) use native_toolchain::{
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
+#[cfg(test)]
+pub(crate) use pipeline::compile_source_with_phase_timings;
+pub(crate) use pipeline::{
+    compile_source, compile_source_to_llvm_file_with_phase_timings,
+    compile_source_to_llvm_file_with_phase_timings_with_mode,
+};
+#[cfg(test)]
+pub(crate) use reflection::source_requests_reflection;
+pub(crate) use reflection::{
+    decl_requests_reflection, reflection_mode_note, reflection_options_from_cli,
+    resolve_reflection_options_for_snapshot,
+};
+pub(crate) use reflection_native::{
+    maybe_prepare_reflection_native_library, measure_reflection_used_ms,
+};
+#[cfg(test)]
+pub(crate) use reflection_native::{
+    select_reflection_i64_zero_arity_symbol, signature_is_zero_arity_i64,
+};
+#[cfg(test)]
+pub(crate) use reflection_sidecar::build_reflection_metadata;
+pub(crate) use reflection_sidecar::{
+    maybe_emit_reflection_sidecar, reflection_sidecar_path_for_artifact,
+    validate_reflection_metadata,
+};
 pub(crate) use toolchain_discovery::{find_clang, find_lli, find_runtime_c};
 pub(crate) use workset::{
     build_cache_key, build_cache_mismatch_reasons, build_metadata_matches, cache_key,
@@ -150,6 +160,7 @@ fn frontend_jobs_label(frontend_jobs: FrontendJobs) -> String {
 fn parse_frontend_memory_mode_wire(raw: &str) -> FrontendMemoryMode {
     let normalized = raw.trim().to_ascii_lowercase();
     match normalized.as_str() {
+        "low-memory" | "low_memory" | "low" => FrontendMemoryMode::LowMemory,
         "stream" => FrontendMemoryMode::Stream,
         "legacy" => FrontendMemoryMode::Legacy,
         _ => FrontendMemoryMode::Auto,
@@ -159,6 +170,7 @@ fn parse_frontend_memory_mode_wire(raw: &str) -> FrontendMemoryMode {
 fn frontend_memory_mode_label(mode: FrontendMemoryMode) -> &'static str {
     match mode {
         FrontendMemoryMode::Auto => "auto",
+        FrontendMemoryMode::LowMemory => "low-memory",
         FrontendMemoryMode::Stream => "stream",
         FrontendMemoryMode::Legacy => "legacy",
     }
@@ -247,5 +259,3 @@ async fn cmd_dump_ast(input: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
-
-
