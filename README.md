@@ -70,38 +70,38 @@ Cross-language scenario matrix snapshot (measured on **February 16, 2026**):
 | Incremental after edit (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | Incremental reduction (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
-Advanced pipeline snapshot (real edits + 100k/1000k scale, measured on **February 16, 2026**):
-`bench/results/1771252338862-advanced-pipeline.json`
+Advanced pipeline snapshot (real edits + 100k/1000k scale, averaged on **February 18, 2026** from two runs):
+`bench/results/1771390773767-advanced-pipeline.json` + `bench/results/1771392747911-advanced-pipeline.json`
 
 Real incremental scenarios (`after_avg_ms`, Sengoo):
 
 | Scenario | After avg (ms) |
 |---|---:|
-| `loop_body_change` | 242.07 |
-| `function_signature_change` | 267.02 |
-| `add_new_function` | 245.44 |
+| `loop_body_change` | 39.77 |
+| `function_signature_change` | 43.81 |
+| `add_new_function` | 36.50 |
 
 100k LOC full pipeline (Sengoo):
 
 | Stage | Avg (ms) |
 |---|---:|
-| Frontend (`compile_frontend_llvm_avg_ms`) | 503.57 |
-| Codegen object (`codegen_obj_avg_ms`) | 57.78 |
-| Link (`link_avg_ms`) | 492.72 |
-| End-to-end (`e2e_avg_ms`) | 1054.08 |
+| Frontend (`compile_frontend_llvm_avg_ms`) | 153.87 |
+| Codegen object (`codegen_obj_avg_ms`) | 90.61 |
+| Link (`link_avg_ms`) | 173.05 |
+| End-to-end (`e2e_avg_ms`) | 417.53 |
 
 10k-1000k four-language e2e compile comparison (`Sengoo / C++ / Rust / Python`):
 
 | LOC | Sengoo (ms) | C++ (ms) | Rust (ms) | Python (ms) |
 |---|---:|---:|---:|---:|
-| 10k | 666.99 | 830.18 | 1225.40 | 81.95 |
-| 100k | 1054.08 | 1145.91 | 4135.55 | 498.95 |
-| 1000k | 6482.95 | 3373.79 | 35292.84 | 5100.83 |
+| 10k | 372.28 | 693.01 | 2246.86 | 157.18 |
+| 100k | 417.53 | 1074.84 | 6625.35 | 832.91 |
+| 1000k | 1827.84 | 4883.70 | 54642.47 | 8283.46 |
 
 Sengoo 1000k stage split:
-- Frontend: `5869.79ms` (`90.54%`)
-- Codegen object: `56.19ms` (`0.87%`)
-- Link: `556.97ms` (`8.59%`)
+- Frontend: `1589.02ms` (`86.93%`)
+- Codegen object: `76.77ms` (`4.20%`)
+- Link: `162.04ms` (`8.86%`)
 
 ## 3) Runtime-Class Performance Track
 
@@ -347,37 +347,37 @@ Sengoo 在运行时提供 Python 互操作层（见 `runtime/src/python.rs`）�
 | 增量收益 (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
 高级流水线快照（真实编辑 + 100k/1000k 规模，测量日期：**2026-02-16**）：
-`bench/results/1771252338862-advanced-pipeline.json`
+`bench/results/1771390773767-advanced-pipeline.json` + `bench/results/1771392747911-advanced-pipeline.json`
 
 真实增量场景（`after_avg_ms`，Sengoo）：
 
 | 场景 | 平均耗时 (ms) |
 |---|---:|
-| `loop_body_change` | 242.07 |
-| `function_signature_change` | 267.02 |
-| `add_new_function` | 245.44 |
+| `loop_body_change` | 39.77 |
+| `function_signature_change` | 43.81 |
+| `add_new_function` | 36.50 |
 
 100k LOC 全流程（Sengoo）：
 
 | 阶段 | 平均耗时 (ms) |
 |---|---:|
-| Frontend (`compile_frontend_llvm_avg_ms`) | 503.57 |
-| Codegen object (`codegen_obj_avg_ms`) | 57.78 |
-| Link (`link_avg_ms`) | 492.72 |
-| End-to-end (`e2e_avg_ms`) | 1054.08 |
+| Frontend (`compile_frontend_llvm_avg_ms`) | 153.87 |
+| Codegen object (`codegen_obj_avg_ms`) | 90.61 |
+| Link (`link_avg_ms`) | 173.05 |
+| End-to-end (`e2e_avg_ms`) | 417.53 |
 
 10k-1000k 四语言 e2e 编译对比（`Sengoo / C++ / Rust / Python`）：
 
 | LOC | Sengoo (ms) | C++ (ms) | Rust (ms) | Python (ms) |
 |---|---:|---:|---:|---:|
-| 10k | 666.99 | 830.18 | 1225.40 | 81.95 |
-| 100k | 1054.08 | 1145.91 | 4135.55 | 498.95 |
-| 1000k | 6482.95 | 3373.79 | 35292.84 | 5100.83 |
+| 10k | 372.28 | 693.01 | 2246.86 | 157.18 |
+| 100k | 417.53 | 1074.84 | 6625.35 | 832.91 |
+| 1000k | 1827.84 | 4883.70 | 54642.47 | 8283.46 |
 
 Sengoo 1000k 阶段占比：
-- Frontend: `5869.79ms`（`90.54%`）
-- Codegen object: `56.19ms`（`0.87%`）
-- Link: `556.97ms`（`8.59%`）
+- Frontend: `1589.02ms`（`86.93%`）
+- Codegen object: `76.77ms`（`4.20%`）
+- Link: `162.04ms`（`8.86%`）
 
 ## 3) 运行时性能等级
 
