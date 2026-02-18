@@ -21,6 +21,7 @@
         ModuleFingerprint, ModuleGraphSnapshot, ReflectionMetadata, ReflectionMode,
         RunCacheMetadata, RunEngine,
         BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
+        FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, LOW_MEMORY_HINT_AVAILABLE_BYTES,
     };
     use crate::cli::Cli;
     use clap::Parser as _;
@@ -329,6 +330,34 @@
             super::parse_frontend_memory_mode_wire("low"),
             FrontendMemoryMode::LowMemory
         );
+    }
+
+    #[test]
+    fn frontend_memory_mode_auto_defaults_to_legacy_for_small_and_large_sources() {
+        assert_eq!(
+            super::resolve_frontend_memory_mode(64),
+            FrontendMemoryMode::Legacy
+        );
+        assert_eq!(
+            super::resolve_frontend_memory_mode(FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES * 8),
+            FrontendMemoryMode::Legacy
+        );
+    }
+
+    #[test]
+    fn low_memory_hint_recommendation_requires_large_source_and_low_available_memory() {
+        assert!(super::low_memory_hint_should_recommend(
+            LOW_MEMORY_HINT_AVAILABLE_BYTES,
+            FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES
+        ));
+        assert!(!super::low_memory_hint_should_recommend(
+            LOW_MEMORY_HINT_AVAILABLE_BYTES + 1,
+            FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES
+        ));
+        assert!(!super::low_memory_hint_should_recommend(
+            LOW_MEMORY_HINT_AVAILABLE_BYTES,
+            FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES - 1
+        ));
     }
 
     #[test]

@@ -1,4 +1,9 @@
 use miette::{IntoDiagnostic, Result};
+use sengoo_compiler::ast::{
+    Block as AstBlock, Decl as AstDecl, DeclKind as AstDeclKind, Expr as AstExpr,
+    ExprKind as AstExprKind, Program as AstProgram, Stmt as AstStmt, StmtKind as AstStmtKind,
+};
+use sengoo_compiler::hir::{HIRBody, HIRExpr, HIRItem, HIRPattern, HIRStmt};
 use sengoo_compiler::mir::{
     Instruction as MirInstruction, MirFunction, Terminator as MirTerminator,
 };
@@ -58,11 +63,29 @@ fn compile_frontend_to_mir_with_phase_timings(
 ) -> Result<(Vec<MirFunction>, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
 
-    let (mut mir_fns, parse_ms, typeck_ms, mir_ms) = {
+    let (
+        mut mir_fns,
+        parse_ms,
+        typeck_ms,
+        mir_ms,
+        ast_prune_ms,
+        ast_pruned_count,
+        hir_prune_ms,
+        hir_pruned_count,
+    ) = {
         let parse_start = Instant::now();
         let mut program =
             Some(Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?);
         let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+
+        let mut ast_prune_ms = 0.0;
+        let mut ast_pruned_count = 0usize;
+        if low_memory_mode {
+            let ast_prune_start = Instant::now();
+            ast_pruned_count =
+                prune_unreachable_ast_functions(program.as_mut().expect("program present"));
+            ast_prune_ms = ast_prune_start.elapsed().as_secs_f64() * 1000.0;
+        }
 
         let typeck_start = Instant::now();
         let mut checker = TypeChecker::new();
@@ -73,10 +96,17 @@ fn compile_frontend_to_mir_with_phase_timings(
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
 
         let mir_start = Instant::now();
-        let hir_module = lower_ast(
+        let mut hir_module = lower_ast(
             program.as_ref().expect("program present during lowering"),
             type_env.as_ref().expect("type env present during lowering"),
         );
+        let mut hir_prune_ms = 0.0;
+        let mut hir_pruned_count = 0usize;
+        if low_memory_mode {
+            let hir_prune_start = Instant::now();
+            hir_pruned_count = prune_unreachable_hir_functions(&mut hir_module.items);
+            hir_prune_ms = hir_prune_start.elapsed().as_secs_f64() * 1000.0;
+        }
         if low_memory_mode {
             drop(type_env.take());
             drop(program.take());
@@ -101,11 +131,26 @@ fn compile_frontend_to_mir_with_phase_timings(
         pipeline.run(&mut mir_fns);
         let mir_ms = mir_start.elapsed().as_secs_f64() * 1000.0;
 
-        (mir_fns, parse_ms, typeck_ms, mir_ms)
+        (
+            mir_fns,
+            parse_ms,
+            typeck_ms,
+            mir_ms,
+            ast_prune_ms,
+            ast_pruned_count,
+            hir_prune_ms,
+            hir_pruned_count,
+        )
     };
 
     phases.insert("parse".to_string(), parse_ms);
     phases.insert("typeck".to_string(), typeck_ms);
+    if low_memory_mode {
+        phases.insert("ast_prune".to_string(), ast_prune_ms);
+        phases.insert("ast_prune_removed".to_string(), ast_pruned_count as f64);
+        phases.insert("hir_prune".to_string(), hir_prune_ms);
+        phases.insert("hir_prune_removed".to_string(), hir_pruned_count as f64);
+    }
     phases.insert("mir".to_string(), mir_ms);
 
     let prune_start = Instant::now();
@@ -116,6 +161,619 @@ fn compile_frontend_to_mir_with_phase_timings(
     );
 
     Ok((mir_fns, phases))
+}
+
+fn prune_unreachable_ast_functions(program: &mut AstProgram) -> usize {
+    let functions: Vec<_> = program
+        .decls
+        .iter()
+        .filter_map(|decl| match &decl.kind {
+            AstDeclKind::Function(fn_decl) => Some(fn_decl),
+            _ => None,
+        })
+        .collect();
+    if functions.len() <= 1 {
+        return 0;
+    }
+
+    let mut index_by_name = HashMap::new();
+    for (idx, fn_decl) in functions.iter().enumerate() {
+        index_by_name.insert(fn_decl.name.name.clone(), idx);
+    }
+
+    let Some(&main_index) = index_by_name.get("main") else {
+        return 0;
+    };
+
+    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
+    for (idx, fn_decl) in functions.iter().enumerate() {
+        edges[idx] = collect_ast_call_targets_from_block(&fn_decl.body, &index_by_name);
+    }
+
+    let mut reachable = vec![false; functions.len()];
+    let mut stack = vec![main_index];
+    while let Some(idx) = stack.pop() {
+        if reachable[idx] {
+            continue;
+        }
+        reachable[idx] = true;
+        for &target in &edges[idx] {
+            if !reachable[target] {
+                stack.push(target);
+            }
+        }
+    }
+
+    let mut removed = 0usize;
+    let mut kept = Vec::with_capacity(program.decls.len());
+    for decl in std::mem::take(&mut program.decls) {
+        match decl.kind {
+            AstDeclKind::Function(fn_decl) => {
+                let is_reachable = index_by_name
+                    .get(&fn_decl.name.name)
+                    .map(|&idx| reachable[idx])
+                    .unwrap_or(true);
+                if is_reachable {
+                    kept.push(AstDecl {
+                        kind: AstDeclKind::Function(fn_decl),
+                        span: decl.span,
+                    });
+                } else {
+                    removed += 1;
+                }
+            }
+            _ => kept.push(decl),
+        }
+    }
+    program.decls = kept;
+    removed
+}
+
+fn collect_ast_call_targets_from_block(
+    block: &AstBlock,
+    index_by_name: &HashMap<String, usize>,
+) -> Vec<usize> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+    for stmt in &block.stmts {
+        collect_ast_call_targets_from_stmt(stmt, index_by_name, &mut targets, &mut seen);
+    }
+    targets
+}
+
+fn collect_ast_call_targets_from_stmt(
+    stmt: &AstStmt,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match &stmt.kind {
+        AstStmtKind::Let { value, .. } => {
+            if let Some(value) = value {
+                collect_ast_call_targets_from_expr(value, index_by_name, targets, seen);
+            }
+        }
+        AstStmtKind::Const { value, .. } | AstStmtKind::Expr(value) => {
+            collect_ast_call_targets_from_expr(value, index_by_name, targets, seen);
+        }
+        AstStmtKind::Item(decl) => {
+            collect_ast_call_targets_from_decl(decl, index_by_name, targets, seen);
+        }
+    }
+}
+
+fn collect_ast_call_targets_from_decl(
+    decl: &AstDecl,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match &decl.kind {
+        AstDeclKind::Function(fn_decl) => {
+            collect_ast_call_targets_from_block(&fn_decl.body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        AstDeclKind::Const(const_decl) => {
+            collect_ast_call_targets_from_expr(&const_decl.value, index_by_name, targets, seen);
+        }
+        AstDeclKind::Static(static_decl) => {
+            collect_ast_call_targets_from_expr(&static_decl.value, index_by_name, targets, seen);
+        }
+        AstDeclKind::Module(module_decl) => {
+            for nested in &module_decl.items {
+                collect_ast_call_targets_from_decl(nested, index_by_name, targets, seen);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_ast_call_targets_from_expr(
+    expr: &AstExpr,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match &expr.kind {
+        AstExprKind::Literal(_) | AstExprKind::Continue => {}
+        AstExprKind::Ident(ident) => {
+            if let Some(&idx) = index_by_name.get(&ident.name) {
+                if seen.insert(idx) {
+                    targets.push(idx);
+                }
+            }
+        }
+        AstExprKind::Path(path) => {
+            if let Some(simple) = path.as_simple() {
+                if let Some(&idx) = index_by_name.get(&simple.name) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                }
+            }
+        }
+        AstExprKind::Unary { operand, .. }
+        | AstExprKind::Await(operand)
+        | AstExprKind::Try(operand)
+        | AstExprKind::Paren(operand) => {
+            collect_ast_call_targets_from_expr(operand, index_by_name, targets, seen);
+        }
+        AstExprKind::Binary { left, right, .. }
+        | AstExprKind::Index {
+            base: left,
+            index: right,
+        }
+        | AstExprKind::Assign {
+            target: left,
+            value: right,
+        }
+        | AstExprKind::AssignOp {
+            target: left,
+            value: right,
+            ..
+        } => {
+            collect_ast_call_targets_from_expr(left, index_by_name, targets, seen);
+            collect_ast_call_targets_from_expr(right, index_by_name, targets, seen);
+        }
+        AstExprKind::Call { func, args } => {
+            collect_ast_call_targets_from_expr(func, index_by_name, targets, seen);
+            for arg in args {
+                collect_ast_call_targets_from_expr(arg, index_by_name, targets, seen);
+            }
+            match &func.kind {
+                AstExprKind::Ident(ident) => {
+                    if let Some(&idx) = index_by_name.get(&ident.name) {
+                        if seen.insert(idx) {
+                            targets.push(idx);
+                        }
+                    }
+                }
+                AstExprKind::Path(path) => {
+                    if let Some(simple) = path.as_simple() {
+                        if let Some(&idx) = index_by_name.get(&simple.name) {
+                            if seen.insert(idx) {
+                                targets.push(idx);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        AstExprKind::MethodCall { receiver, args, .. } => {
+            collect_ast_call_targets_from_expr(receiver, index_by_name, targets, seen);
+            for arg in args {
+                collect_ast_call_targets_from_expr(arg, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Block(block)
+        | AstExprKind::Loop(block)
+        | AstExprKind::AsyncBlock(block)
+        | AstExprKind::ParallelBlock(block) => {
+            collect_ast_call_targets_from_block(block, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        AstExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_ast_call_targets_from_expr(cond, index_by_name, targets, seen);
+            collect_ast_call_targets_from_block(then_branch, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+            if let Some(else_branch) = else_branch {
+                collect_ast_call_targets_from_expr(else_branch, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::While { cond, body } => {
+            collect_ast_call_targets_from_expr(cond, index_by_name, targets, seen);
+            collect_ast_call_targets_from_block(body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        AstExprKind::For { iter, body, .. } => {
+            collect_ast_call_targets_from_expr(iter, index_by_name, targets, seen);
+            collect_ast_call_targets_from_block(body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        AstExprKind::Match { scrutinee, arms } => {
+            collect_ast_call_targets_from_expr(scrutinee, index_by_name, targets, seen);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_ast_call_targets_from_expr(guard, index_by_name, targets, seen);
+                }
+                collect_ast_call_targets_from_expr(&arm.body, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Return(value) | AstExprKind::Break(value) | AstExprKind::Yield(value) => {
+            if let Some(value) = value {
+                collect_ast_call_targets_from_expr(value, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Field { base, .. }
+        | AstExprKind::Cast { expr: base, .. }
+        | AstExprKind::Is { expr: base, .. } => {
+            collect_ast_call_targets_from_expr(base, index_by_name, targets, seen);
+        }
+        AstExprKind::Array(elements) | AstExprKind::Tuple(elements) => {
+            for element in elements {
+                collect_ast_call_targets_from_expr(element, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Struct { fields, base, .. } => {
+            for field in fields {
+                collect_ast_call_targets_from_expr(&field.value, index_by_name, targets, seen);
+            }
+            if let Some(base) = base {
+                collect_ast_call_targets_from_expr(base, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Range { start, end, .. } => {
+            if let Some(start) = start {
+                collect_ast_call_targets_from_expr(start, index_by_name, targets, seen);
+            }
+            if let Some(end) = end {
+                collect_ast_call_targets_from_expr(end, index_by_name, targets, seen);
+            }
+        }
+        AstExprKind::Lambda { body, .. } => {
+            collect_ast_call_targets_from_expr(body, index_by_name, targets, seen);
+        }
+    }
+}
+
+fn prune_unreachable_hir_functions(items: &mut Vec<HIRItem>) -> usize {
+    let functions: Vec<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            HIRItem::Function(fn_item) => Some(fn_item),
+            _ => None,
+        })
+        .collect();
+    if functions.len() <= 1 {
+        return 0;
+    }
+
+    let mut index_by_name = HashMap::new();
+    for (idx, fn_item) in functions.iter().enumerate() {
+        index_by_name.insert(fn_item.name.clone(), idx);
+    }
+
+    let Some(&main_index) = index_by_name.get("main") else {
+        return 0;
+    };
+
+    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
+    for (idx, fn_item) in functions.iter().enumerate() {
+        edges[idx] = collect_hir_call_targets_from_body(&fn_item.body, &index_by_name);
+    }
+
+    let mut reachable = vec![false; functions.len()];
+    let mut stack = vec![main_index];
+    while let Some(idx) = stack.pop() {
+        if reachable[idx] {
+            continue;
+        }
+        reachable[idx] = true;
+        for &target in &edges[idx] {
+            if !reachable[target] {
+                stack.push(target);
+            }
+        }
+    }
+
+    let mut removed = 0usize;
+    let mut kept = Vec::with_capacity(items.len());
+    for item in std::mem::take(items) {
+        match item {
+            HIRItem::Function(fn_item) => {
+                let is_reachable = index_by_name
+                    .get(&fn_item.name)
+                    .map(|&idx| reachable[idx])
+                    .unwrap_or(true);
+                if is_reachable {
+                    kept.push(HIRItem::Function(fn_item));
+                } else {
+                    removed += 1;
+                }
+            }
+            other => kept.push(other),
+        }
+    }
+    *items = kept;
+    removed
+}
+
+fn collect_hir_call_targets_from_body(
+    body: &HIRBody,
+    index_by_name: &HashMap<String, usize>,
+) -> Vec<usize> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+
+    for stmt in &body.stmts {
+        collect_hir_call_targets_from_stmt(stmt, index_by_name, &mut targets, &mut seen);
+    }
+    if let Some(expr) = &body.expr {
+        collect_hir_call_targets_from_expr(expr, index_by_name, &mut targets, &mut seen);
+    }
+
+    targets
+}
+
+fn collect_hir_call_targets_from_stmt(
+    stmt: &HIRStmt,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match stmt {
+        HIRStmt::Let { value, .. } => {
+            if let Some(expr) = value {
+                collect_hir_call_targets_from_expr(expr, index_by_name, targets, seen);
+            }
+        }
+        HIRStmt::Expr(expr) => {
+            collect_hir_call_targets_from_expr(expr, index_by_name, targets, seen);
+        }
+        HIRStmt::Item => {}
+    }
+}
+
+fn collect_hir_call_targets_from_expr(
+    expr: &HIRExpr,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match expr {
+        HIRExpr::Lit(_) | HIRExpr::Continue => {}
+        HIRExpr::Var { name, .. } => {
+            if let Some(&idx) = index_by_name.get(name) {
+                if seen.insert(idx) {
+                    targets.push(idx);
+                }
+            }
+        }
+        HIRExpr::Unary(_, inner)
+        | HIRExpr::Cast(inner, _)
+        | HIRExpr::Ascribe(inner, _)
+        | HIRExpr::Ref(_, inner)
+        | HIRExpr::Deref(inner) => {
+            collect_hir_call_targets_from_expr(inner, index_by_name, targets, seen);
+        }
+        HIRExpr::Binary(_, lhs, rhs)
+        | HIRExpr::And(lhs, rhs)
+        | HIRExpr::Or(lhs, rhs)
+        | HIRExpr::Index {
+            base: lhs,
+            index: rhs,
+        }
+        | HIRExpr::Assign {
+            target: lhs,
+            value: rhs,
+        }
+        | HIRExpr::AssignOp {
+            target: lhs,
+            value: rhs,
+            ..
+        } => {
+            collect_hir_call_targets_from_expr(lhs, index_by_name, targets, seen);
+            collect_hir_call_targets_from_expr(rhs, index_by_name, targets, seen);
+        }
+        HIRExpr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_hir_call_targets_from_expr(cond, index_by_name, targets, seen);
+            collect_hir_call_targets_from_body(then_branch, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+            if let Some(else_branch) = else_branch {
+                collect_hir_call_targets_from_body(else_branch, index_by_name)
+                    .into_iter()
+                    .for_each(|idx| {
+                        if seen.insert(idx) {
+                            targets.push(idx);
+                        }
+                    });
+            }
+        }
+        HIRExpr::Match { scrutinee, arms } => {
+            collect_hir_call_targets_from_expr(scrutinee, index_by_name, targets, seen);
+            for arm in arms {
+                collect_hir_call_targets_from_pattern(&arm.pat, index_by_name, targets, seen);
+                if let Some(guard) = &arm.guard {
+                    collect_hir_call_targets_from_expr(guard, index_by_name, targets, seen);
+                }
+                collect_hir_call_targets_from_expr(&arm.body, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Loop(body) | HIRExpr::Block(body) => {
+            collect_hir_call_targets_from_body(body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        HIRExpr::While { cond, body } => {
+            collect_hir_call_targets_from_expr(cond, index_by_name, targets, seen);
+            collect_hir_call_targets_from_body(body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        HIRExpr::For { iter, body, .. } => {
+            collect_hir_call_targets_from_expr(iter, index_by_name, targets, seen);
+            collect_hir_call_targets_from_body(body, index_by_name)
+                .into_iter()
+                .for_each(|idx| {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                });
+        }
+        HIRExpr::Call { func, args } => {
+            collect_hir_call_targets_from_expr(func, index_by_name, targets, seen);
+            for arg in args {
+                collect_hir_call_targets_from_expr(arg, index_by_name, targets, seen);
+            }
+            if let HIRExpr::Var { name, .. } = func.as_ref() {
+                if let Some(&idx) = index_by_name.get(name) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                }
+            }
+        }
+        HIRExpr::MethodCall { receiver, args, .. } => {
+            collect_hir_call_targets_from_expr(receiver, index_by_name, targets, seen);
+            for arg in args {
+                collect_hir_call_targets_from_expr(arg, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Struct { fields, .. } => {
+            for (_, value) in fields {
+                collect_hir_call_targets_from_expr(value, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Array(items) | HIRExpr::Tuple(items) => {
+            for item in items {
+                collect_hir_call_targets_from_expr(item, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Field { base, .. } => {
+            collect_hir_call_targets_from_expr(base, index_by_name, targets, seen);
+        }
+        HIRExpr::Return(value) | HIRExpr::Break(value) => {
+            if let Some(value) = value {
+                collect_hir_call_targets_from_expr(value, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Range { start, end, .. } => {
+            if let Some(start) = start {
+                collect_hir_call_targets_from_expr(start, index_by_name, targets, seen);
+            }
+            if let Some(end) = end {
+                collect_hir_call_targets_from_expr(end, index_by_name, targets, seen);
+            }
+        }
+        HIRExpr::Lambda { body, .. } => {
+            collect_hir_call_targets_from_expr(body, index_by_name, targets, seen);
+        }
+    }
+}
+
+fn collect_hir_call_targets_from_pattern(
+    pattern: &HIRPattern,
+    index_by_name: &HashMap<String, usize>,
+    targets: &mut Vec<usize>,
+    seen: &mut HashSet<usize>,
+) {
+    match pattern {
+        HIRPattern::Wild | HIRPattern::Lit(_) | HIRPattern::Var { .. } => {}
+        HIRPattern::Struct { fields, .. } => {
+            for (_, sub_pattern) in fields {
+                if let Some(sub_pattern) = sub_pattern {
+                    collect_hir_call_targets_from_pattern(
+                        sub_pattern,
+                        index_by_name,
+                        targets,
+                        seen,
+                    );
+                }
+            }
+        }
+        HIRPattern::Tuple(items) => {
+            for item in items {
+                collect_hir_call_targets_from_pattern(item, index_by_name, targets, seen);
+            }
+        }
+        HIRPattern::Or(lhs, rhs) => {
+            collect_hir_call_targets_from_pattern(lhs, index_by_name, targets, seen);
+            collect_hir_call_targets_from_pattern(rhs, index_by_name, targets, seen);
+        }
+        HIRPattern::Slice {
+            before,
+            rest,
+            after,
+        } => {
+            for item in before {
+                collect_hir_call_targets_from_pattern(item, index_by_name, targets, seen);
+            }
+            if let Some(rest) = rest {
+                collect_hir_call_targets_from_pattern(rest, index_by_name, targets, seen);
+            }
+            for item in after {
+                collect_hir_call_targets_from_pattern(item, index_by_name, targets, seen);
+            }
+        }
+        HIRPattern::Range { start, end } => {
+            if let Some(start) = start {
+                collect_hir_call_targets_from_expr(start, index_by_name, targets, seen);
+            }
+            if let Some(end) = end {
+                collect_hir_call_targets_from_expr(end, index_by_name, targets, seen);
+            }
+        }
+        HIRPattern::Ref(inner) | HIRPattern::RefMut(inner) => {
+            collect_hir_call_targets_from_pattern(inner, index_by_name, targets, seen);
+        }
+    }
 }
 
 pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
@@ -264,4 +922,144 @@ fn collect_mir_call_targets(
         }
     }
     targets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prune_unreachable_ast_functions, prune_unreachable_hir_functions};
+    use sengoo_compiler::ast::DeclKind as AstDeclKind;
+    use sengoo_compiler::ast::Program as AstProgram;
+    use sengoo_compiler::hir::HIRItem;
+    use sengoo_compiler::{lower_ast, Parser, TypeChecker};
+    use std::collections::HashSet;
+
+    fn function_names(items: &[HIRItem]) -> HashSet<String> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                HIRItem::Function(fn_item) => Some(fn_item.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn lower_source_to_hir_items(source: &str) -> Vec<HIRItem> {
+        let program = Parser::parse(source).expect("parse should succeed");
+        let mut checker = TypeChecker::new();
+        checker
+            .check_program(&program)
+            .expect("typecheck should succeed");
+        let env = checker.into_env();
+        let module = lower_ast(&program, &env);
+        module.items
+    }
+
+    fn lower_source_to_ast(source: &str) -> AstProgram {
+        Parser::parse(source).expect("parse should succeed")
+    }
+
+    fn ast_function_names(program: &AstProgram) -> HashSet<String> {
+        program
+            .decls
+            .iter()
+            .filter_map(|decl| match &decl.kind {
+                AstDeclKind::Function(fn_decl) => Some(fn_decl.name.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn prune_unreachable_hir_functions_keeps_only_main_reachable_graph() {
+        let source = r#"
+def keep(x: i64) -> i64 {
+    x + 1
+}
+
+def dead(x: i64) -> i64 {
+    x + 2
+}
+
+def main() -> i64 {
+    keep(1)
+}
+"#;
+        let mut items = lower_source_to_hir_items(source);
+
+        let removed = prune_unreachable_hir_functions(&mut items);
+        let names = function_names(&items);
+
+        assert_eq!(removed, 1);
+        assert!(names.contains("main"));
+        assert!(names.contains("keep"));
+        assert!(!names.contains("dead"));
+    }
+
+    #[test]
+    fn prune_unreachable_hir_functions_skips_when_main_missing() {
+        let source = r#"
+def a(x: i64) -> i64 {
+    x + 1
+}
+
+def b(x: i64) -> i64 {
+    a(x)
+}
+"#;
+        let mut items = lower_source_to_hir_items(source);
+        let before = function_names(&items);
+
+        let removed = prune_unreachable_hir_functions(&mut items);
+        let after = function_names(&items);
+
+        assert_eq!(removed, 0);
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn prune_unreachable_ast_functions_keeps_only_main_reachable_graph() {
+        let source = r#"
+def keep(x: i64) -> i64 {
+    x + 1
+}
+
+def dead(x: i64) -> i64 {
+    x + 2
+}
+
+def main() -> i64 {
+    keep(1)
+}
+"#;
+        let mut program = lower_source_to_ast(source);
+
+        let removed = prune_unreachable_ast_functions(&mut program);
+        let names = ast_function_names(&program);
+
+        assert_eq!(removed, 1);
+        assert!(names.contains("main"));
+        assert!(names.contains("keep"));
+        assert!(!names.contains("dead"));
+    }
+
+    #[test]
+    fn prune_unreachable_ast_functions_skips_when_main_missing() {
+        let source = r#"
+def a(x: i64) -> i64 {
+    x + 1
+}
+
+def b(x: i64) -> i64 {
+    a(x)
+}
+"#;
+        let mut program = lower_source_to_ast(source);
+        let before = ast_function_names(&program);
+
+        let removed = prune_unreachable_ast_functions(&mut program);
+        let after = ast_function_names(&program);
+
+        assert_eq!(removed, 0);
+        assert_eq!(after, before);
+    }
 }
