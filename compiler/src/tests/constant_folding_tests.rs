@@ -16,7 +16,7 @@ use crate::mir::MirConstant;
 fn has_assign_with_int(mir_fns: &[crate::mir::MirFunction], expected: i64) -> bool {
     let main_fn = mir_fns.iter().find(|f| f.name == "main").unwrap();
     main_fn.basic_blocks.iter().any(|bb| {
-        bb.instructions.iter().any(|inst| {
+        main_fn.block_instructions(bb).any(|inst| {
             matches!(
                 inst,
                 Instruction::Assign { value: MirConstant::Int(v), .. } if *v == expected
@@ -29,8 +29,8 @@ fn has_assign_with_int(mir_fns: &[crate::mir::MirFunction], expected: i64) -> bo
 fn has_binary_instruction(mir_fns: &[crate::mir::MirFunction]) -> bool {
     let main_fn = mir_fns.iter().find(|f| f.name == "main").unwrap();
     main_fn.basic_blocks.iter().any(|bb| {
-        bb.instructions
-            .iter()
+        main_fn
+            .block_instructions(bb)
             .any(|inst| matches!(inst, Instruction::Binary { .. }))
     })
 }
@@ -209,8 +209,8 @@ fn test_constant_folding_non_constant_operands_not_folded() {
 
     // Before optimization: should have a Binary instruction in add_one
     let has_binary_before = add_one_fn.basic_blocks.iter().any(|bb| {
-        bb.instructions
-            .iter()
+        add_one_fn
+            .block_instructions(bb)
             .any(|inst| matches!(inst, Instruction::Binary { .. }))
     });
     assert!(
@@ -232,8 +232,8 @@ fn test_constant_folding_non_constant_operands_not_folded() {
     // The Binary instruction should still be present
     let add_one_fn = mir_fns.iter().find(|f| f.name == "add_one").unwrap();
     let has_binary_after = add_one_fn.basic_blocks.iter().any(|bb| {
-        bb.instructions
-            .iter()
+        add_one_fn
+            .block_instructions(bb)
             .any(|inst| matches!(inst, Instruction::Binary { .. }))
     });
     assert!(

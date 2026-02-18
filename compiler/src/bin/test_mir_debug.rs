@@ -23,7 +23,7 @@ fn main() {
         println!("\nBasic Blocks:");
         for bb in &func.basic_blocks {
             println!("\n  Block {}:", bb.id);
-            for inst in &bb.instructions {
+            for inst in func.block_instructions(bb) {
                 println!("    {:?}", inst);
             }
             if let Some(terminator) = &bb.terminator {

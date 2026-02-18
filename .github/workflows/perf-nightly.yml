@@ -57,7 +57,22 @@ jobs:
           python3 ./scripts/reflection-perf-gate.py \
             --mode hard \
             --sample "${{ steps.reports.outputs.reflection }}"
-          python3 ./bench/scripts/advanced-kpi-gate.py --mode hard --fail-fast --require-phase-deltas --require-daemon-comparison --sample "${{ steps.reports.outputs.advanced }}"
+          set +e
+          python3 ./bench/scripts/advanced-kpi-gate.py \
+            --mode hard \
+            --fail-fast \
+            --require-phase-deltas \
+            --require-daemon-comparison \
+            --baseline-profile ./bench/frontend-memory-baseline.json \
+            --sample "${{ steps.reports.outputs.advanced }}" \
+            --decision-out ./bench/results/latest-advanced-gate.json
+          advanced_gate_status=$?
+          set -e
+          python3 ./bench/scripts/frontend-memory-rollback.py \
+            --decision ./bench/results/latest-advanced-gate.json
+          if [ "${advanced_gate_status}" -ne 0 ]; then
+            exit "${advanced_gate_status}"
+          fi
           python3 ./bench/scripts/interop-bootstrap-gate.py \
             --mode hard \
             --fail-fast \

@@ -1,6 +1,6 @@
 //! MIR 基本块定义
 
-use super::{Instruction, Local, MIRType, MirConstant};
+use super::{InstId, Local, MirConstant};
 
 /// 基本块（Basic Block）
 ///
@@ -10,7 +10,7 @@ pub struct BasicBlock {
     /// 基本块索引
     pub id: usize,
     /// 指令列表
-    pub instructions: Vec<Instruction>,
+    pub instructions: Vec<InstId>,
     /// 终止符
     pub terminator: Option<Terminator>,
 }
@@ -25,8 +25,8 @@ impl BasicBlock {
     }
 
     /// 添加指令
-    pub fn push(&mut self, inst: Instruction) {
-        self.instructions.push(inst);
+    pub fn push(&mut self, inst_id: InstId) {
+        self.instructions.push(inst_id);
     }
 
     /// 设置终止符

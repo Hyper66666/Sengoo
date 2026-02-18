@@ -1672,8 +1672,9 @@ proptest! {
 
             // Verify the cache is large enough for all locals
             for (local, _ty) in &mir_fn.locals {
+                let local_idx = local.index();
                 prop_assert!(
-                    local.id < codegen.name_cache.len(),
+                    local_idx < codegen.name_cache.len(),
                     "name_cache is too small: local.id={} but cache len={} in function '{}'",
                     local.id,
                     codegen.name_cache.len(),
@@ -1681,7 +1682,7 @@ proptest! {
                 );
 
                 // The cached name must match the expected name computed from kind + id
-                let cached_name = &codegen.name_cache[local.id];
+                let cached_name = &codegen.name_cache[local_idx];
                 let expected = expected_local_name(*local);
                 prop_assert_eq!(
                     cached_name,
@@ -1794,7 +1795,9 @@ proptest! {
         );
         let main_fn = main_fn.unwrap();
         let has_binary_before = main_fn.basic_blocks.iter().any(|bb| {
-            bb.instructions.iter().any(|inst| matches!(inst, Instruction::Binary { .. }))
+            main_fn
+                .block_instructions(bb)
+                .any(|inst| matches!(inst, Instruction::Binary { .. }))
         });
         prop_assert!(
             has_binary_before,
@@ -1820,7 +1823,9 @@ proptest! {
         // containing the correct computed result
         let main_fn = mir_fns.iter().find(|f| f.name == "main").unwrap();
         let has_binary_after = main_fn.basic_blocks.iter().any(|bb| {
-            bb.instructions.iter().any(|inst| matches!(inst, Instruction::Binary { .. }))
+            main_fn
+                .block_instructions(bb)
+                .any(|inst| matches!(inst, Instruction::Binary { .. }))
         });
         prop_assert!(
             !has_binary_after,
@@ -1833,7 +1838,9 @@ proptest! {
 
         // Verify the folded constant value is present in the MIR
         let has_correct_assign = main_fn.basic_blocks.iter().any(|bb| {
-            bb.instructions.iter().any(|inst| is_assign_with_value(inst, expected_result))
+            main_fn
+                .block_instructions(bb)
+                .any(|inst| is_assign_with_value(inst, expected_result))
         });
         prop_assert!(
             has_correct_assign,
@@ -1842,8 +1849,10 @@ proptest! {
             expected_result,
             source,
             op_name,
-            main_fn.basic_blocks.iter()
-                .flat_map(|bb| bb.instructions.iter())
+            main_fn
+                .basic_blocks
+                .iter()
+                .flat_map(|bb| main_fn.block_instructions(bb))
                 .collect::<Vec<_>>()
         );
     }

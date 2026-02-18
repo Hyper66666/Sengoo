@@ -57,6 +57,11 @@ impl TypeChecker {
         &self.env
     }
 
+    /// Consumes the checker and returns the owned type environment.
+    pub fn into_env(self) -> TypeEnv {
+        self.env
+    }
+
     /// 获取类型推断器
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
