@@ -20,7 +20,6 @@ pub use lowering::lower_hir;
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;
-use std::collections::HashMap;
 
 /// MIR 函数
 #[derive(Debug, Clone)]

@@ -1,4 +1,4 @@
-//! 语句解析
+//! 璇彞瑙ｆ瀽
 
 use crate::ast::*;
 use crate::lexer::TokenKind;
@@ -7,7 +7,7 @@ use crate::Result;
 use super::Parser;
 
 impl<'source> Parser<'source> {
-    /// 解析块
+    /// 瑙ｆ瀽鍧?
     pub(super) fn parse_block(&mut self) -> Result<Block> {
         let lo = self.current_span().lo;
         self.expect(TokenKind::LBrace)?;
@@ -25,14 +25,14 @@ impl<'source> Parser<'source> {
         Ok(Block::new(stmts, self.span_at(lo)))
     }
 
-    /// 解析语句
+    /// 瑙ｆ瀽璇彞
     pub(super) fn parse_stmt(&mut self) -> Result<Stmt> {
         let lo = self.current_span().lo;
         let token = self.current().cloned();
 
         let kind = match token {
             Some(token) => match &token.kind {
-                // let 绑定
+                // let 缁戝畾
                 TokenKind::LetKw => {
                     self.advance();
                     let name = self.expect_ident()?;
@@ -58,7 +58,7 @@ impl<'source> Parser<'source> {
                     }
                 }
 
-                // const 绑定
+                // const 缁戝畾
                 TokenKind::ConstKw => {
                     self.advance();
                     let name = self.expect_ident()?;
@@ -78,16 +78,16 @@ impl<'source> Parser<'source> {
                     }
                 }
 
-                // 表达式语句
+                // 琛ㄨ揪寮忚鍙?
                 _ => {
                     let expr = self.parse_expr()?;
                     let has_semi = self.consume(TokenKind::Semicolon).is_some();
 
                     if has_semi {
-                        // 以分号结尾的语句不产生值
+                        // 浠ュ垎鍙风粨灏剧殑璇彞涓嶄骇鐢熷€?
                         StmtKind::Expr(Box::new(expr))
                     } else {
-                        // 没有 分号，表达式产生值
+                        // 娌℃湁 鍒嗗彿锛岃〃杈惧紡浜х敓鍊?
                         StmtKind::Expr(Box::new(expr))
                     }
                 }
@@ -103,13 +103,33 @@ impl<'source> Parser<'source> {
         Ok(Stmt::new(kind, self.span_at(lo)))
     }
 
-    /// 解析类型
+    /// 瑙ｆ瀽绫诲瀷
     pub(super) fn parse_type(&mut self) -> Result<Type> {
         let lo = self.current_span().lo;
         let kind = self.parse_type_primary()?;
 
-        // 处理泛型参数 `Vec<T>`
-        // TODO: 实现泛型参数
+        // Parse and consume generic arguments syntax `Type<...>`.
+        // Current type AST does not retain generic args, so this is syntax-only.
+        if self.consume(TokenKind::Lt).is_some() {
+            let mut depth = 1usize;
+            while depth > 0 {
+                let token = self.advance().ok_or(crate::error::CompileError::ParseError(
+                    crate::error::ParseError::UnexpectedEof,
+                ))?;
+                match token.kind {
+                    TokenKind::Lt => depth += 1,
+                    TokenKind::Gt => depth -= 1,
+                    TokenKind::Shr => {
+                        if depth >= 2 {
+                            depth -= 2;
+                        } else {
+                            depth = 0;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         Ok(Type::new(kind, self.span_at(lo)))
     }
@@ -119,7 +139,7 @@ impl<'source> Parser<'source> {
 
         let kind = match token {
             Some(token) => match &token.kind {
-                // 括号类型 `(A, B, C)`
+                // 鎷彿绫诲瀷 `(A, B, C)`
                 TokenKind::LParen => {
                     self.advance();
                     let mut types = Vec::new();
@@ -135,20 +155,20 @@ impl<'source> Parser<'source> {
                     }
 
                     if types.len() == 1 {
-                        // `(Type)` 只是括号类型
+                        // `(Type)` 鍙槸鎷彿绫诲瀷
                         TypeKind::Tuple(types)
                     } else {
                         TypeKind::Tuple(types)
                     }
                 }
 
-                // 数组类型 `[Type; N]` 和切片类型 `[Type]`
+                // 鏁扮粍绫诲瀷 `[Type; N]` 鍜屽垏鐗囩被鍨?`[Type]`
                 TokenKind::LBracket => {
                     self.advance();
                     let elem = self.parse_type()?;
 
                     if self.consume(TokenKind::Semicolon).is_some() {
-                        // 数组类型
+                        // 鏁扮粍绫诲瀷
                         let len = if let Some(token) = self.current() {
                             match &token.kind {
                                 TokenKind::Int(Some(n)) if *n >= 0 => {
@@ -171,13 +191,13 @@ impl<'source> Parser<'source> {
                         self.expect(TokenKind::RBracket)?;
                         TypeKind::Array(Box::new(elem), len)
                     } else {
-                        // 切片类型
+                        // 鍒囩墖绫诲瀷
                         self.expect(TokenKind::RBracket)?;
                         TypeKind::Slice(Box::new(elem))
                     }
                 }
 
-                // 指针类型 `*mut Type` 或 `*const Type`
+                // 鎸囬拡绫诲瀷 `*mut Type` 鎴?`*const Type`
                 TokenKind::Star => {
                     self.advance();
                     let is_mut = if self.consume(TokenKind::MutKw).is_some() {
@@ -194,7 +214,7 @@ impl<'source> Parser<'source> {
                     }
                 }
 
-                // 引用类型 `&mut Type` 或 `&Type`
+                // 寮曠敤绫诲瀷 `&mut Type` 鎴?`&Type`
                 TokenKind::And => {
                     self.advance();
                     let is_mut = self.consume(TokenKind::MutKw).is_some();
@@ -205,7 +225,7 @@ impl<'source> Parser<'source> {
                     }
                 }
 
-                // 函数类型 (Python 风格使用 def, 但类型表示仍使用 fn)
+                // 鍑芥暟绫诲瀷 (Python 椋庢牸浣跨敤 def, 浣嗙被鍨嬭〃绀轰粛浣跨敤 fn)
                 TokenKind::FnKw => {
                     self.advance();
                     self.expect(TokenKind::LParen)?;
@@ -231,19 +251,19 @@ impl<'source> Parser<'source> {
                     TypeKind::Fn { params, ret }
                 }
 
-                // Never 类型 `!`
+                // Never 绫诲瀷 `!`
                 TokenKind::Not => {
                     self.advance();
                     TypeKind::Never
                 }
 
-                // Infer 类型 `_`
+                // Infer 绫诲瀷 `_`
                 TokenKind::Underscore => {
                     self.advance();
                     TypeKind::Infer
                 }
 
-                // 简单路径类型
+                // 绠€鍗曡矾寰勭被鍨?
                 TokenKind::Ident => {
                     let path = self.parse_path()?;
                     TypeKind::Path(path)

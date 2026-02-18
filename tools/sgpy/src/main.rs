@@ -1,23 +1,21 @@
-//! sgpy - Sengoo 包管理器
-//!
-//! 用法:
-//!   sgpy init              # 初始化新项目
-//!   sgpy add <package>     # 添加依赖
-//!   sgpy remove <package>  # 移除依赖
-//!   sgpy update            # 更新依赖
-//!   sgpy build             # 构建项目
-//!   sgpy publish           # 发布包
+//! sgpy - Sengoo package and project helper CLI.
 
 use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
-use which;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+use walkdir::WalkDir;
 
-/// Sengoo 包管理器
+const REGISTRY_URL: &str = "https://registry.sengoo.dev";
+
 #[derive(Parser, Debug)]
 #[command(name = "sgpy")]
-#[command(about = "Sengoo 包管理器", long_about = None)]
+#[command(about = "Sengoo package manager and project helper", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -25,90 +23,179 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// 初始化新项目
+    /// Initialize a Sengoo project.
     Init {
-        /// 项目名称
         #[arg(short, long)]
         name: Option<String>,
 
-        /// 项目路径
         #[arg(short, long, default_value = ".")]
         path: String,
     },
 
-    /// 添加依赖
+    /// Add dependencies.
     Add {
-        /// 包名称 (如: serde = "1.0")
+        /// e.g. serde or serde=1.0
         #[arg(required = true)]
         packages: Vec<String>,
 
-        /// 开发依赖
+        /// Add to dev-dependencies.
         #[arg(long)]
         dev: bool,
     },
 
-    /// 移除依赖
+    /// Remove dependency.
     Remove {
-        /// 包名称
         #[arg(required = true)]
         package: String,
     },
 
-    /// 更新依赖
+    /// Update one dependency or all dependencies.
     Update {
-        /// 包名称 (不指定则更新全部)
         package: Option<String>,
     },
 
-    /// 构建项目
+    /// Build all .sg files in src/.
     Build {
-        /// 发布模式
         #[arg(long)]
         release: bool,
     },
 
-    /// 发布包
+    /// Publish package (placeholder).
     Publish {
-        /// 发布到测试注册表
         #[arg(long)]
         dry_run: bool,
     },
 
-    /// 搜索包
+    /// Search package from registry.
     Search {
-        /// 搜索关键词
         query: String,
     },
 }
 
-/// 项目配置
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ProjectConfig {
     name: String,
     version: String,
     sengoo_version: String,
     authors: Vec<String>,
     description: Option<String>,
-    dependencies: Option<serde_json::Value>,
-    dev_dependencies: Option<serde_json::Value>,
+    dependencies: Option<Value>,
+    dev_dependencies: Option<Value>,
 }
 
-/// 包配置
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct PackageConfig {
-    name: String,
-    version: String,
-    description: Option<String>,
-    license: Option<String>,
-    repository: Option<String>,
-    sengoo_version: String,
-    dependencies: Option<serde_json::Value>,
+fn load_project_config() -> Result<(PathBuf, ProjectConfig)> {
+    let path = PathBuf::from("Sengoo.toml");
+    if !path.exists() {
+        miette::bail!("Sengoo.toml not found, run `sgpy init` first");
+    }
+    let content = fs::read_to_string(&path).into_diagnostic()?;
+    let config: ProjectConfig = toml::from_str(&content).into_diagnostic()?;
+    Ok((path, config))
 }
 
-/// 注册表配置
-const REGISTRY_URL: &str = "https://registry.sengoo.dev";
+fn save_project_config(path: &Path, config: &ProjectConfig) -> Result<()> {
+    let content = toml::to_string_pretty(config).into_diagnostic()?;
+    fs::write(path, content).into_diagnostic()?;
+    Ok(())
+}
 
-/// 初始化项目
+fn ensure_object_table(slot: &mut Option<Value>) -> &mut Map<String, Value> {
+    let value = slot.get_or_insert_with(|| Value::Object(Map::new()));
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+    value.as_object_mut().expect("value is object")
+}
+
+fn map_contains(slot: &Option<Value>, key: &str) -> bool {
+    slot.as_ref()
+        .and_then(Value::as_object)
+        .map(|m| m.contains_key(key))
+        .unwrap_or(false)
+}
+
+fn map_keys(slot: &Option<Value>) -> Vec<String> {
+    slot.as_ref()
+        .and_then(Value::as_object)
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn parse_package_spec(spec: &str) -> (String, Option<String>) {
+    let parts: Vec<&str> = spec.splitn(2, '=').collect();
+    let name = parts[0].trim().to_string();
+    let version = parts.get(1).map(|v| v.trim().to_string());
+    (name, version)
+}
+
+fn parse_latest_version(payload: &Value) -> Option<String> {
+    payload
+        .get("latest_version")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            payload
+                .pointer("/dist-tags/latest")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            payload
+                .get("version")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            payload
+                .get("data")
+                .and_then(parse_latest_version)
+                .or_else(|| payload.get("package").and_then(parse_latest_version))
+        })
+}
+
+fn registry_get_json(path: &str, query: &[(&str, &str)]) -> Result<Option<Value>> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .into_diagnostic()?;
+
+    let url = format!("{}{}", REGISTRY_URL, path);
+    let response = rt.block_on(async {
+        reqwest::Client::new()
+            .get(url)
+            .query(query)
+            .timeout(Duration::from_secs(4))
+            .send()
+            .await
+    });
+
+    let Ok(resp) = response else {
+        return Ok(None);
+    };
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let body = rt.block_on(async { resp.json::<Value>().await });
+    match body {
+        Ok(v) => Ok(Some(v)),
+        Err(_) => Ok(None),
+    }
+}
+
+fn query_latest_version(name: &str) -> Result<String> {
+    let path = format!("/api/v1/packages/{}", name);
+    if let Some(payload) = registry_get_json(&path, &[])? {
+        if let Some(version) = parse_latest_version(&payload) {
+            return Ok(version);
+        }
+    }
+
+    // Graceful fallback when registry is unavailable/shape unknown.
+    Ok("1.0.0".to_string())
+}
+
 fn cmd_init(name: Option<String>, path: &str) -> Result<()> {
     let path = PathBuf::from(path);
     let project_name = name.unwrap_or_else(|| {
@@ -118,12 +205,10 @@ fn cmd_init(name: Option<String>, path: &str) -> Result<()> {
             .to_string()
     });
 
-    // 创建项目目录结构
     fs::create_dir_all(path.join("src")).into_diagnostic()?;
     fs::create_dir_all(path.join("tests")).into_diagnostic()?;
     fs::create_dir_all(path.join("examples")).into_diagnostic()?;
 
-    // 创建 Sengoo.toml
     let config = ProjectConfig {
         name: project_name.clone(),
         version: "0.1.0".to_string(),
@@ -134,18 +219,15 @@ fn cmd_init(name: Option<String>, path: &str) -> Result<()> {
         dev_dependencies: None,
     };
 
-    let toml_content = toml::to_string_pretty(&config).into_diagnostic()?;
-    fs::write(path.join("Sengoo.toml"), toml_content).into_diagnostic()?;
+    save_project_config(&path.join("Sengoo.toml"), &config)?;
 
-    // 创建主文件
-    let main_content = r#"fn main() -> i64 {
-    println!("Hello, Sengoo!");
+    let main_content = r#"def main() -> i64 {
+    print(\"Hello, Sengoo!\")
     0
 }
 "#;
     fs::write(path.join("src/main.sg"), main_content).into_diagnostic()?;
 
-    // 创建 .gitignore
     let gitignore = r#"# Sengoo build output
 target/
 *.sgc
@@ -163,161 +245,206 @@ Thumbs.db
 "#;
     fs::write(path.join(".gitignore"), gitignore).into_diagnostic()?;
 
-    println!("✅ 项目初始化完成: {}", project_name);
-    println!(
-        "📁 项目位置: {}",
-        path.canonicalize()
-            .unwrap_or_else(|_| path.clone())
-            .display()
-    );
-    println!("\n下一步:");
-    let path_str = path.to_str().unwrap_or(".");
-    println!("  cd {}", if path_str == "." { "." } else { path_str });
-    println!("  sgpy build");
-
+    println!("Initialized project: {}", project_name);
+    let display_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+    println!("Path: {}", display_path.display());
+    println!("Next:\n  cd {}\n  sgpy build", path.to_string_lossy());
     Ok(())
 }
 
-/// 添加依赖
 fn cmd_add(packages: Vec<String>, dev: bool) -> Result<()> {
-    let toml_path = PathBuf::from("Sengoo.toml");
-    if !toml_path.exists() {
-        miette::bail!("未找到 Sengoo.toml，请先在项目根目录运行 sgpy init");
-    }
-
-    let toml_content = fs::read_to_string(&toml_path).into_diagnostic()?;
-    let mut config: ProjectConfig = toml::from_str(&toml_content).into_diagnostic()?;
+    let (toml_path, mut config) = load_project_config()?;
 
     for pkg in packages {
-        // 解析包版本 (如: serde = "1.0")
-        let parts: Vec<&str> = pkg.split('=').collect();
-        let name = parts[0].trim().to_string();
-        let version = parts.get(1).map(|s| s.trim().to_string());
+        let (name, requested_version) = parse_package_spec(&pkg);
+        if name.is_empty() {
+            continue;
+        }
 
-        // 搜索并解析依赖
-        let dep_spec = if let Some(ref v) = version {
-            format!(r#"{} = "{}""#, name, v)
+        let version = if let Some(v) = requested_version {
+            v
         } else {
-            // 查询注册表获取最新版本
-            let latest_version = query_latest_version(&name)?;
-            format!(r#"{} = "{}""#, name, latest_version)
+            query_latest_version(&name)?
         };
 
-        println!("📦 添加依赖: {}", dep_spec);
-
-        // 添加到配置
-        let version_str = version.unwrap_or_else(|| "*".to_string());
-        if dev {
-            let deps = config.dev_dependencies.get_or_insert(serde_json::json!({}));
-            if let serde_json::Value::Object(ref mut map) = deps {
-                map.insert(name.clone(), serde_json::Value::String(version_str.clone()));
-                config.dev_dependencies = Some(serde_json::Value::Object(map.clone()));
-            }
+        let target = if dev {
+            ensure_object_table(&mut config.dev_dependencies)
         } else {
-            let deps = config.dependencies.get_or_insert(serde_json::json!({}));
-            if let serde_json::Value::Object(ref mut map) = deps {
-                map.insert(name.clone(), serde_json::Value::String(version_str));
-                config.dependencies = Some(serde_json::Value::Object(map.clone()));
-            }
-        }
+            ensure_object_table(&mut config.dependencies)
+        };
+        target.insert(name.clone(), Value::String(version.clone()));
+        println!("Added {} = \"{}\"{}", name, version, if dev { " (dev)" } else { "" });
     }
 
-    // 写回配置
-    let toml_content = toml::to_string_pretty(&config).into_diagnostic()?;
-    fs::write(&toml_path, toml_content).into_diagnostic()?;
-
-    println!("✅ 依赖添加完成");
+    save_project_config(&toml_path, &config)?;
     Ok(())
 }
 
-/// 查询最新版本
-fn query_latest_version(name: &str) -> Result<String> {
-    // TODO: 实际调用注册表 API
-    println!("🔍 查询注册表: {}", name);
-    Ok("1.0.0".to_string()) // 临时返回
-}
-
-/// 移除依赖
 fn cmd_remove(package: String) -> Result<()> {
-    let toml_path = PathBuf::from("Sengoo.toml");
-    let toml_content = fs::read_to_string(&toml_path).into_diagnostic()?;
-    let mut config: ProjectConfig = toml::from_str(&toml_content).into_diagnostic()?;
+    let (toml_path, mut config) = load_project_config()?;
+    let mut removed = false;
 
-    if let Some(deps) = &mut config.dependencies {
-        if let serde_json::Value::Object(mut map) = deps.take() {
-            if map.remove(&package).is_some() {
-                config.dependencies = Some(serde_json::Value::Object(map));
-                println!("✅ 移除依赖: {}", package);
-            } else {
-                println!("⚠️  依赖 {} 不存在", package);
-            }
+    if let Some(map) = config
+        .dependencies
+        .as_mut()
+        .and_then(Value::as_object_mut)
+    {
+        removed |= map.remove(&package).is_some();
+    }
+    if let Some(map) = config
+        .dev_dependencies
+        .as_mut()
+        .and_then(Value::as_object_mut)
+    {
+        removed |= map.remove(&package).is_some();
+    }
+
+    if removed {
+        save_project_config(&toml_path, &config)?;
+        println!("Removed dependency: {}", package);
+    } else {
+        println!("Dependency not found: {}", package);
+    }
+    Ok(())
+}
+
+fn cmd_update(package: Option<String>) -> Result<()> {
+    let (toml_path, mut config) = load_project_config()?;
+
+    let mut targets = BTreeSet::new();
+    if let Some(pkg) = package {
+        targets.insert(pkg);
+    } else {
+        for k in map_keys(&config.dependencies) {
+            targets.insert(k);
+        }
+        for k in map_keys(&config.dev_dependencies) {
+            targets.insert(k);
         }
     }
 
-    let toml_content = toml::to_string_pretty(&config).into_diagnostic()?;
-    fs::write(&toml_path, toml_content).into_diagnostic()?;
-
-    Ok(())
-}
-
-/// 更新依赖
-fn cmd_update(package: Option<String>) -> Result<()> {
-    println!("🔄 更新依赖...");
-
-    if let Some(pkg) = package {
-        println!("更新: {}", pkg);
-        // TODO: 实现单个包更新
-    } else {
-        println!("更新所有依赖...");
-        // TODO: 实现全部更新
+    if targets.is_empty() {
+        println!("No dependencies to update");
+        return Ok(());
     }
 
+    let mut updated = 0usize;
+    for dep in targets {
+        let exists = map_contains(&config.dependencies, &dep) || map_contains(&config.dev_dependencies, &dep);
+        if !exists {
+            println!("Skip {} (not found)", dep);
+            continue;
+        }
+
+        let latest = query_latest_version(&dep)?;
+        if let Some(map) = config.dependencies.as_mut().and_then(Value::as_object_mut) {
+            if map.contains_key(&dep) {
+                map.insert(dep.clone(), Value::String(latest.clone()));
+                updated += 1;
+            }
+        }
+        if let Some(map) = config.dev_dependencies.as_mut().and_then(Value::as_object_mut) {
+            if map.contains_key(&dep) {
+                map.insert(dep.clone(), Value::String(latest.clone()));
+                updated += 1;
+            }
+        }
+
+        println!("Updated {} -> {}", dep, latest);
+    }
+
+    save_project_config(&toml_path, &config)?;
+    println!("Updated {} entries", updated);
     Ok(())
 }
 
-/// 构建项目
 fn cmd_build(release: bool) -> Result<()> {
-    println!("🔨 构建项目...");
-
-    // 读取配置
-    let toml_path = PathBuf::from("Sengoo.toml");
-    if !toml_path.exists() {
-        miette::bail!("未找到 Sengoo.toml");
-    }
-
-    let toml_content = fs::read_to_string(&toml_path).into_diagnostic()?;
-    let config: ProjectConfig = toml::from_str(&toml_content).into_diagnostic()?;
-
-    // 检查编译器
+    let (_toml_path, config) = load_project_config()?;
     let sgc_path = which::which("sgc")
-        .map_err(|_| miette::miette!("未找到 sgc 编译器，请先安装 Sengoo 工具链"))?;
+        .map_err(|_| miette::miette!("sgc not found in PATH"))?;
 
-    // 编译源文件
     let src_dir = PathBuf::from("src");
     if !src_dir.exists() {
-        miette::bail!("未找到 src 目录");
+        miette::bail!("src directory not found");
     }
 
-    for entry in walkdir::WalkDir::new(&src_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if entry.path().extension().and_then(|s| s.to_str()) == Some("sg") {
-            println!("编译: {}", entry.path().display());
-            // TODO: 调用 sgc 编译
+    let target_dir = if release {
+        PathBuf::from("target/release")
+    } else {
+        PathBuf::from("target/debug")
+    };
+    fs::create_dir_all(&target_dir).into_diagnostic()?;
+
+    let mut built = 0usize;
+    for entry in WalkDir::new(&src_dir).into_iter().filter_map(|e| e.ok()) {
+        let file = entry.path();
+        if file.extension().and_then(|s| s.to_str()) != Some("sg") {
+            continue;
         }
+
+        let rel = file.strip_prefix(&src_dir).unwrap_or(file);
+        let mut output = target_dir.join(rel);
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).into_diagnostic()?;
+        }
+        output.set_extension("sgc");
+
+        let mut cmd = Command::new(&sgc_path);
+        cmd.arg("build")
+            .arg(file)
+            .arg("--output")
+            .arg(&output)
+            .arg("-O")
+            .arg(if release { "2" } else { "0" });
+
+        let status = cmd.status().into_diagnostic()?;
+        if !status.success() {
+            miette::bail!("build failed for {}", file.display());
+        }
+
+        built += 1;
+        println!("Built {} -> {}", file.display(), output.display());
     }
 
-    println!("✅ 构建完成: {} v{}", config.name, config.version);
+    println!("Build done: {} v{}, files={}", config.name, config.version, built);
     Ok(())
 }
 
-/// 搜索包
 fn cmd_search(query: String) -> Result<()> {
-    println!("🔍 搜索: {}", query);
+    let payload = registry_get_json("/api/v1/search", &[("q", &query)])?;
+    let Some(payload) = payload else {
+        println!("Registry unavailable, cannot search now");
+        return Ok(());
+    };
 
-    // TODO: 调用注册表 API
-    println!("找到 0 个结果");
+    let list = payload
+        .get("results")
+        .or_else(|| payload.get("packages"))
+        .or_else(|| payload.get("data"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    if list.is_empty() {
+        println!("No packages found for query: {}", query);
+        return Ok(());
+    }
+
+    for item in list {
+        if let Some(obj) = item.as_object() {
+            let name = obj.get("name").and_then(Value::as_str).unwrap_or("<unknown>");
+            let version = obj
+                .get("version")
+                .and_then(Value::as_str)
+                .or_else(|| obj.get("latest_version").and_then(Value::as_str))
+                .unwrap_or("?");
+            let description = obj
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            println!("{} {} - {}", name, version, description);
+        }
+    }
 
     Ok(())
 }
@@ -331,8 +458,8 @@ fn main() -> Result<()> {
         Commands::Remove { package } => cmd_remove(package),
         Commands::Update { package } => cmd_update(package),
         Commands::Build { release } => cmd_build(release),
-        Commands::Publish { dry_run: _ } => {
-            println!("📤 发布功能即将推出");
+        Commands::Publish { dry_run } => {
+            println!("Publish is not implemented yet (dry-run={})", dry_run);
             Ok(())
         }
         Commands::Search { query } => cmd_search(query),

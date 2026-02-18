@@ -5,9 +5,10 @@ use crate::hir::{
 };
 use crate::hir::{HIRTrait, HIRTraitItem};
 use crate::mir::{
-    bb::CallArg, BasicBlock, Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant,
-    MirFunction, MirUnOp, Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
+    Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
+    Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
+use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 /// �?HIRType 转换为类型前缀字符串（用于方法名修饰）
@@ -163,6 +164,7 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
                                         // self_type). Add self with the impl target type.
                                         params.push(HIRParam::new(
                                             "self".to_string(),
+                                            SymbolId::INVALID,
                                             impl_item.target_type.clone(),
                                         ));
                                     }
@@ -225,6 +227,7 @@ fn lower_function(
     for (i, param) in fn_item.params.iter().enumerate() {
         let local = Local::new(i + 1, LocalKind::Param);
         ctx.local_names.insert(param.name.clone(), local);
+        ctx.bind_local_symbol(param.symbol, local);
     }
 
     // 降低函数体到已有的入口块
@@ -258,6 +261,7 @@ struct LoopContext {
 struct FunctionSig {
     ret_type: MIRType,
     /// 捕获的自由变量（名称, 类型�?
+    #[allow(dead_code)]
     env: Vec<(String, MIRType)>,
 }
 
@@ -266,6 +270,7 @@ struct LambdaEnv {
     /// 环境变量名称和对应的 Local
     vars: Vec<(String, Local)>,
     /// 环境结构体类型（用于代码生成�?
+    #[allow(dead_code)]
     env_type: MIRType,
     /// 环境指针�?Local（在调用时使用）
     env_ptr_local: Option<Local>,
@@ -276,6 +281,7 @@ struct LoweringContext<'a> {
     mir_fn: &'a mut MirFunction,
     /// 名称到局部变量的映射
     local_names: HashMap<String, Local>,
+    local_symbols: HashMap<SymbolId, Local>,
     /// 当前基本�?
     current_block: Option<usize>,
     /// 收集的错误信�?
@@ -307,6 +313,7 @@ impl<'a> LoweringContext<'a> {
         Self {
             mir_fn,
             local_names: HashMap::new(),
+            local_symbols: HashMap::new(),
             current_block: None,
             errors: Vec::new(),
             loop_stack: Vec::new(),
@@ -342,8 +349,6 @@ impl<'a> LoweringContext<'a> {
         params: &[String],
         body: &crate::hir::HIRExpr,
     ) -> Vec<(String, Local)> {
-        use crate::hir::HIRExpr;
-
         let param_names: std::collections::HashSet<String> = params.iter().cloned().collect();
 
         let mut free_vars = Vec::new();
@@ -361,7 +366,7 @@ impl<'a> LoweringContext<'a> {
         use crate::hir::HIRExpr;
 
         match expr {
-            HIRExpr::Var(name) => {
+            HIRExpr::Var { name, .. } => {
                 // 如果是变量且不是参数，则是自由变�?
                 if !param_names.contains(name) {
                     if let Some(&local) = self.local_names.get(name) {
@@ -439,11 +444,13 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::Field { base, .. } => {
                 self.collect_vars_from_expr(base, param_names, free_vars);
             }
-            HIRExpr::For { var, iter, body } => {
+            HIRExpr::For {
+                var_name, iter, body, ..
+            } => {
                 self.collect_vars_from_expr(iter, param_names, free_vars);
                 // for 变量在循环体内是绑定的，不算自由变量
                 let mut extended_params = param_names.clone();
-                extended_params.insert(var.clone());
+                extended_params.insert(var_name.clone());
                 self.collect_vars_from_body(body, &extended_params, free_vars);
             }
             HIRExpr::Assign { target, value } => {
@@ -499,7 +506,7 @@ impl<'a> LoweringContext<'a> {
         use crate::hir::HIRStmt;
 
         match stmt {
-            HIRStmt::Let { name, value, .. } => {
+            HIRStmt::Let { name: _, value, .. } => {
                 if let Some(v) = value {
                     self.collect_vars_from_expr(v, param_names, free_vars);
                 }
@@ -536,6 +543,12 @@ impl<'a> LoweringContext<'a> {
         local
     }
 
+    fn bind_local_symbol(&mut self, symbol: SymbolId, local: Local) {
+        if symbol.is_valid() {
+            self.local_symbols.insert(symbol, local);
+        }
+    }
+
     /// 获取局部变量的类型（返回引用，避免不必要的 clone�?
     fn get_local_type(&self, local: Local) -> &MIRType {
         if let Some((_, ty)) = self.mir_fn.locals.get(local.index()) {
@@ -547,7 +560,12 @@ impl<'a> LoweringContext<'a> {
 
     /// 解析局部变�?
     /// 如果变量未定义，记录错误并返回一个占位符 local
-    fn resolve_local(&mut self, name: &str) -> Local {
+    fn resolve_local(&mut self, name: &str, symbol: SymbolId) -> Local {
+        if symbol.is_valid() {
+            if let Some(&local) = self.local_symbols.get(&symbol) {
+                return local;
+            }
+        }
         match self.local_names.get(name) {
             Some(&local) => local,
             None => {
@@ -772,6 +790,7 @@ impl<'a> LoweringContext<'a> {
         match stmt {
             HIRStmt::Let {
                 name,
+                symbol,
                 ty,
                 value,
                 is_mut,
@@ -793,6 +812,7 @@ impl<'a> LoweringContext<'a> {
                     if let Some(ln) = lambda_name {
                         // 这是一�?Lambda，需要创建环境并存储捕获的变�?
                         let local = self.add_local(Some(name.clone()), kind, mir_ty);
+                        self.bind_local_symbol(*symbol, local);
 
                         // �?Lambda 名称映射到新�?local（用于调用时查找�?
                         self.lambda_names.insert(local, ln.clone());
@@ -895,6 +915,7 @@ impl<'a> LoweringContext<'a> {
                                 ));
                                 // Fall through to the normal path with a new local
                                 let local = self.add_local(Some(name.clone()), kind, mir_ty);
+                                self.bind_local_symbol(*symbol, local);
                                 if let Some(type_name) = self.type_names.get(&value_local).cloned()
                                 {
                                     self.type_names.insert(local, type_name);
@@ -913,6 +934,7 @@ impl<'a> LoweringContext<'a> {
                             // 右值是数组类型的用户变量，直接将其重命名为目标变量
                             // �?local_names 中删除旧的映射，添加新的映射
                             self.local_names.insert(name.clone(), value_local);
+                            self.bind_local_symbol(*symbol, value_local);
                             // 不生�?Store 指令
                         } else {
                             // 普通值，创建 local 并存�?
@@ -923,6 +945,7 @@ impl<'a> LoweringContext<'a> {
                                 mir_ty
                             };
                             let local = self.add_local(Some(name.clone()), kind, actual_ty);
+                            self.bind_local_symbol(*symbol, local);
                             // 传播类型名称：如果右值有类型名称，将其传播到新的 local
                             if let Some(type_name) = self.type_names.get(&value_local).cloned() {
                                 self.type_names.insert(local, type_name);
@@ -935,7 +958,8 @@ impl<'a> LoweringContext<'a> {
                     }
                 } else {
                     // 没有初始值的 let 绑定
-                    let _local = self.add_local(Some(name.clone()), kind, mir_ty);
+                    let local = self.add_local(Some(name.clone()), kind, mir_ty);
+                    self.bind_local_symbol(*symbol, local);
                 }
             }
             HIRStmt::Expr(expr) => {
@@ -1017,7 +1041,7 @@ impl<'a> LoweringContext<'a> {
     fn lower_expr(&mut self, expr: &HIRExpr) -> Local {
         match expr {
             HIRExpr::Lit(lit) => self.lower_literal(lit),
-            HIRExpr::Var(name) => self.resolve_local(name),
+            HIRExpr::Var { name, symbol } => self.resolve_local(name, *symbol),
             HIRExpr::Unary(op, operand) => {
                 // 特殊处理引用和解引用运算�?
                 match op {
@@ -1175,7 +1199,7 @@ impl<'a> LoweringContext<'a> {
                 local
             }
             HIRExpr::Block(body) => {
-                let entry = self.lower_body(body);
+                self.lower_body(body);
                 Local::new(0, LocalKind::Return)
             }
             HIRExpr::If {
@@ -1332,7 +1356,9 @@ impl<'a> LoweringContext<'a> {
                 self.set_current_block(exit_block);
                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
             }
-            HIRExpr::For { var, iter, body } => {
+            HIRExpr::For {
+                var_name, iter, body, ..
+            } => {
                 // 检查是否为范围迭代
                 match iter.as_ref() {
                     HIRExpr::Range {
@@ -1372,7 +1398,8 @@ impl<'a> LoweringContext<'a> {
                         };
 
                         // 创建循环变量并初始化�?start
-                        let loop_var = self.add_local(Some(var.clone()), LocalKind::User, MIR_I64);
+                        let loop_var =
+                            self.add_local(Some(var_name.clone()), LocalKind::User, MIR_I64);
                         self.push_inst(Instruction::Store {
                             destination: loop_var,
                             value: start_local,
@@ -1492,7 +1519,7 @@ impl<'a> LoweringContext<'a> {
 
                                 // 创建循环变量（与数组元素类型相同�?
                                 let loop_var = self.add_local(
-                                    Some(var.clone()),
+                                    Some(var_name.clone()),
                                     LocalKind::User,
                                     (*elem_ty).clone(),
                                 );
@@ -1637,7 +1664,7 @@ impl<'a> LoweringContext<'a> {
 
                 // 获取函数名和返回类型，支�?Lambda 调用
                 let (func_name, ret_type, env_ptr_local) = match func.as_ref() {
-                    HIRExpr::Var(name) => {
+                    HIRExpr::Var { name, .. } => {
                         // Prefer local function-valued variables (e.g. lambdas) over builtins.
                         if let Some(&var_local) = self.local_names.get(name) {
                             if let Some(lambda_name) = self.lambda_names.get(&var_local) {
@@ -1740,8 +1767,8 @@ impl<'a> LoweringContext<'a> {
 
                 // 降低左�?�?获取目标变量
                 match target.as_ref() {
-                    HIRExpr::Var(name) => {
-                        let target_local = self.resolve_local(name);
+                    HIRExpr::Var { name, symbol } => {
+                        let target_local = self.resolve_local(name, *symbol);
                         if value_local == target_local {
                             // Skip no-op self-assignment (`x = x`) to reduce temp churn.
                             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
@@ -1797,8 +1824,8 @@ impl<'a> LoweringContext<'a> {
                 let value_local = self.lower_expr(value);
 
                 match target.as_ref() {
-                    HIRExpr::Var(name) => {
-                        let target_local = self.resolve_local(name);
+                    HIRExpr::Var { name, symbol } => {
+                        let target_local = self.resolve_local(name, *symbol);
                         // 加载当前�?
                         let target_ty = self.get_local_type(target_local).clone();
                         let current_val = self.add_local(None, LocalKind::Temp, target_ty.clone());
@@ -2193,87 +2220,95 @@ impl<'a> LoweringContext<'a> {
                 lambda_local
             }
             HIRExpr::Match { scrutinee, arms } => {
-                // 模式匹配 match scrutinee { arms... }
-                // 降低判定表达�?
                 let scrutinee_local = self.lower_expr(scrutinee);
-
-                // 获取判定值的类型，检查是否为枚举
                 let scrutinee_ty = self.get_local_type(scrutinee_local).clone();
 
                 match scrutinee_ty {
-                    MIRType::Enum { ref variants, .. } => {
-                        // 枚举模式匹配
-                        // 提取判别�?
+                    MIRType::Enum { .. } => {
                         let discr_local = self.add_local(None, LocalKind::Temp, MIR_I64);
                         self.push_inst(Instruction::Discriminant {
                             destination: discr_local,
                             source: scrutinee_local,
                         });
 
-                        // 为每个分支创建基本块
-                        let arm_blocks: Vec<usize> =
-                            arms.iter().map(|_| self.new_block()).collect();
+                        let arm_blocks: Vec<usize> = arms.iter().map(|_| self.new_block()).collect();
                         let join_block = self.new_block();
 
-                        // 创建 Switch 终止�?
-                        // 收集 (判别�? 目标�? 映射
                         let mut targets = Vec::new();
+                        let mut otherwise_block = join_block;
                         for (i, arm) in arms.iter().enumerate() {
-                            let discr_value = self.extract_discriminant_from_pattern(&arm.pat);
-                            if let Some(value) = discr_value {
+                            if let Some(value) = self.extract_discriminant_from_pattern(&arm.pat) {
                                 targets.push((value, arm_blocks[i]));
+                            } else {
+                                otherwise_block = arm_blocks[i];
                             }
                         }
 
                         self.set_terminator(Terminator::Switch {
                             discr: discr_local,
                             targets,
-                            otherwise: join_block,
+                            otherwise: otherwise_block,
                         });
 
-                        // 降低每个分支
+                        let mut incoming_values: Vec<(Local, usize)> = Vec::new();
                         for (i, arm) in arms.iter().enumerate() {
                             let arm_block = arm_blocks[i];
                             self.set_current_block(arm_block);
 
-                            // 如果模式绑定了变量，从枚举中提取载荷
                             self.lower_pattern_bindings(&arm.pat, scrutinee_local);
-
-                            // 降低分支主体
                             let arm_result = self.lower_expr(&arm.body);
+                            let arm_end = self.current_block();
 
-                            // 跳转到合并块
-                            if let Some(block) = self.mir_fn.block_mut(arm_block) {
+                            if let Some(block) = self.mir_fn.block_mut(arm_end) {
                                 if block.terminator.is_none() {
                                     block.set_terminator(Terminator::Goto(join_block));
+                                    incoming_values.push((arm_result, arm_end));
                                 }
                             }
                         }
 
-                        // 设置合并�?
                         self.set_current_block(join_block);
-                        // TODO: 实现 phi 指令来正确合并各分支的返回�?
-                        self.add_local(None, LocalKind::Temp, MIR_I64)
+                        if let Some((first_value, _)) = incoming_values.first().copied() {
+                            let result_ty = self.get_local_type(first_value).clone();
+                            let is_void_like = match &result_ty {
+                                MIRType::Unit | MIRType::Never => true,
+                                MIRType::Tuple(fields) if fields.is_empty() => true,
+                                _ => false,
+                            };
+                            if is_void_like {
+                                self.add_local(None, LocalKind::Temp, MIR_UNIT)
+                            } else {
+                                let result = self.add_local(None, LocalKind::Temp, result_ty);
+                                self.push_inst(Instruction::Phi {
+                                    destination: result,
+                                    incoming: incoming_values,
+                                });
+                                result
+                            }
+                        } else {
+                            self.add_local(None, LocalKind::Temp, MIR_UNIT)
+                        }
                     }
                     _ => {
-                        // 非枚举类型的模式匹配 - 简化为 if-else �?
-                        let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
                         let join_block = self.new_block();
+                        let mut incoming_values: Vec<(Local, usize)> = Vec::new();
 
                         for (i, arm) in arms.iter().enumerate() {
                             let is_last = i == arms.len() - 1;
 
                             if is_last {
-                                // 最后一个分支直接执�?
                                 let arm_result = self.lower_expr(&arm.body);
-                                // TODO: 将结果存储到 result_local
+                                let arm_end = self.current_block();
+                                if let Some(block) = self.mir_fn.block_mut(arm_end) {
+                                    if block.terminator.is_none() {
+                                        block.set_terminator(Terminator::Goto(join_block));
+                                        incoming_values.push((arm_result, arm_end));
+                                    }
+                                }
                             } else {
-                                // 非最后分支需要检查条�?
                                 let then_block = self.new_block();
                                 let next_arm_block = self.new_block();
 
-                                // 简化处理：对于字面量模式，检查相�?
-                                // 对于通配符模式，直接跳转
                                 let should_take = self.matches_pattern(&arm.pat, scrutinee_local);
                                 self.set_terminator(Terminator::If {
                                     cond: should_take,
@@ -2281,22 +2316,41 @@ impl<'a> LoweringContext<'a> {
                                     else_block: next_arm_block,
                                 });
 
-                                // 执行当前分支
                                 self.set_current_block(then_block);
-                                self.lower_expr(&arm.body);
-                                if let Some(block) = self.mir_fn.block_mut(then_block) {
+                                let arm_result = self.lower_expr(&arm.body);
+                                let arm_end = self.current_block();
+                                if let Some(block) = self.mir_fn.block_mut(arm_end) {
                                     if block.terminator.is_none() {
                                         block.set_terminator(Terminator::Goto(join_block));
+                                        incoming_values.push((arm_result, arm_end));
                                     }
                                 }
 
-                                // 继续下一个分�?
                                 self.set_current_block(next_arm_block);
                             }
                         }
 
                         self.set_current_block(join_block);
-                        result_local
+                        if let Some((first_value, _)) = incoming_values.first().copied() {
+                            let result_ty = self.get_local_type(first_value).clone();
+                            let is_void_like = match &result_ty {
+                                MIRType::Unit | MIRType::Never => true,
+                                MIRType::Tuple(fields) if fields.is_empty() => true,
+                                _ => false,
+                            };
+                            if is_void_like {
+                                self.add_local(None, LocalKind::Temp, MIR_UNIT)
+                            } else {
+                                let result = self.add_local(None, LocalKind::Temp, result_ty);
+                                self.push_inst(Instruction::Phi {
+                                    destination: result,
+                                    incoming: incoming_values,
+                                });
+                                result
+                            }
+                        } else {
+                            self.add_local(None, LocalKind::Temp, MIR_UNIT)
+                        }
                     }
                 }
             }
@@ -2534,14 +2588,28 @@ impl<'a> LoweringContext<'a> {
                 let _ = self.add_local(Some(name.clone()), LocalKind::User, MIR_I64);
             }
             HIRPattern::Tuple(patterns) => {
-                // 元组模式：从枚举中提取载�?
                 if !patterns.is_empty() {
                     let payload_local = self.add_local(None, LocalKind::Temp, MIR_I64);
                     self.push_inst(Instruction::ExtractPayload {
                         destination: payload_local,
                         source: enum_value,
                     });
-                    // TODO: 绑定元组中的每个元素
+                    for (index, sub_pat) in patterns.iter().enumerate() {
+                        if let HIRPattern::Var { name, .. } = sub_pat {
+                            let field_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+                            self.push_inst(Instruction::Extract {
+                                destination: field_local,
+                                value: payload_local,
+                                index: index as u32,
+                            });
+                            let bound_local =
+                                self.add_local(Some(name.clone()), LocalKind::User, MIR_I64);
+                            self.push_inst(Instruction::Store {
+                                destination: bound_local,
+                                value: field_local,
+                            });
+                        }
+                    }
                 }
             }
             _ => {

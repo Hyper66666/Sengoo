@@ -1,4 +1,4 @@
-﻿//! Tests for shared compiler options.
+//! Tests for shared compiler options.
 
 use crate::{compile_to_ir, compile_to_ir_with_options, CompileOptions, MirOptLevel};
 

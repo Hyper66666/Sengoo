@@ -4,8 +4,7 @@ pub mod jit;
 pub use jit::JITCodegen;
 
 use crate::mir::{
-    self, CallArg, IntrinsicOp, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction,
-    MIR_I64,
+    self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64,
 };
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -609,7 +608,7 @@ impl Codegen {
                 let dest = self.local_name(*destination);
 
                 match ty {
-                    MIRType::Array(elem_ty, len) => {
+                    MIRType::Array(elem_ty, _len) => {
                         // 数组初始化：为每个元素生成 store 指令
                         let elem_llvm_ty = self.mir_type_to_llvm_cached(elem_ty);
                         for (i, field_local) in fields.iter().enumerate() {

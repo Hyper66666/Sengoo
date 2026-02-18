@@ -1,6 +1,7 @@
 //! HIR 表达式定义
 
 use super::{HIRBody, HIRMatchArm, HIRType};
+use crate::symbol::SymbolId;
 
 /// HIR 表达式
 #[derive(Debug, Clone)]
@@ -9,7 +10,7 @@ pub enum HIRExpr {
     Lit(HIRLiteral),
 
     /// 变量引用
-    Var(String),
+    Var { name: String, symbol: SymbolId },
 
     /// 一元运算
     Unary(HIRUnaryOp, Box<HIRExpr>),
@@ -47,7 +48,8 @@ pub enum HIRExpr {
 
     /// 控制流 - for
     For {
-        var: String,
+        var_name: String,
+        var_symbol: SymbolId,
         iter: Box<HIRExpr>,
         body: Box<HIRBody>,
     },

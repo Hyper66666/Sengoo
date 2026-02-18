@@ -1,6 +1,6 @@
 //! 类型
 
-use super::{Ident, Node, Path, Span};
+use super::{Node, Path, Span};
 
 /// 类型
 #[derive(Debug, Clone, PartialEq)]
@@ -177,6 +177,7 @@ impl Node for TraitBound {
 }
 
 /// 预定义的基本类型名称
+#[allow(dead_code)]
 pub mod builtin {
     pub const BOOL: &str = "bool";
     pub const CHAR: &str = "char";

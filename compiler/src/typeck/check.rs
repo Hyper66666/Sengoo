@@ -962,7 +962,7 @@ impl TypeChecker {
                 let elem_ty = self.check_type(elem)?;
                 self.env.slice_ty(elem_ty)
             }
-            TypeKind::Ptr { base, is_mut } => {
+            TypeKind::Ptr { base, is_mut: _ } => {
                 let inner_ty = self.check_type(base)?;
                 self.env.new_ty(TyKind::Ptr(Box::new(inner_ty)))
             }
@@ -1133,8 +1133,18 @@ impl TypeChecker {
 
     /// 检查路径
     fn check_path(&mut self, path: &Path) -> TyResult<Ty> {
-        let name = path.as_simple().map(|i| i.name.as_str()).unwrap_or("");
-        self.check_ident(&Ident::new(name, path.span))
+        if let Some(ident) = path.as_simple() {
+            self.check_ident(ident)
+        } else {
+            Err(TypeckError::UndefinedVariable {
+                name: path
+                    .segments
+                    .iter()
+                    .map(|seg| seg.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            })
+        }
     }
 
     /// 检查二元表达式
@@ -1464,21 +1474,6 @@ impl TypeChecker {
         }
 
         Ok(self.env.array_ty(first_ty, elems.len()))
-    }
-
-    /// 检查重复数组
-    fn check_repeat(&mut self, elem: &Expr, count: &Expr) -> TyResult<Ty> {
-        let elem_ty = self.check_expr(elem)?;
-        let count_ty = self.check_expr(count)?;
-
-        if !count_ty.is_int() {
-            return Err(TypeckError::TypeMismatch {
-                expected: TyKind::Int(IntKind::USize),
-                found: count_ty.kind.clone(),
-            });
-        }
-
-        Ok(self.env.array_ty(elem_ty, 0))
     }
 
     /// 检查 Lambda 闭包表达式 `|params| body`

@@ -1,6 +1,6 @@
 //! 语句
 
-use super::{Block, Expr, Ident, Node, Span, Type, Visibility};
+use super::{Expr, Ident, Node, Span, Type};
 
 /// 语句
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +88,7 @@ pub enum StmtKind {
 
 /// 局部变量定义（用于块内的 let 和 const）
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub struct Local {
     pub is_const: bool,
     pub name: Ident,
@@ -96,6 +97,7 @@ pub struct Local {
     pub span: Span,
 }
 
+#[allow(dead_code)]
 impl Local {
     /// 创建 let 绑定
     pub fn let_(name: Ident, ty: Option<Type>, value: Option<Expr>, span: Span) -> Self {

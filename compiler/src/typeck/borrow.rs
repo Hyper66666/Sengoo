@@ -1,47 +1,48 @@
-//! 借用规则检查
+//! Borrow checking utilities.
 //!
-//! 实现基于非词域生命周期（NLL）的借用检查器
+//! This is a lightweight borrow-rule checker over AST, intended to provide
+//! early diagnostics for obvious mutable/immutable borrow conflicts.
 
+use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
 use crate::typeck::TypeEnv;
-use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
 use std::collections::HashMap;
 
-/// 借用类型
+/// Borrow category.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowKind {
-    /// 不可变借用 (&T)
+    /// Immutable borrow (`&T`)
     Immutable,
-    /// 可变借用 (&mut T)
+    /// Mutable borrow (`&mut T`)
     Mutable,
 }
 
-/// 借用信息
+/// Borrow record.
 #[derive(Debug, Clone)]
 pub struct Borrow {
-    /// 借用类型
+    /// Borrow category.
     pub kind: BorrowKind,
-    /// 借用的生命周期标识（用于 NLL）
+    /// Synthetic lifetime id (NLL placeholder).
     pub lifetime: usize,
-    /// 借用发生的位置
+    /// Source span `(lo, hi)`.
     pub span: (usize, usize),
 }
 
-/// 借用错误
+/// Borrow checking errors.
 #[derive(Debug, Clone)]
 pub enum BorrowError {
-    /// 不能同时有多个可变借用
+    /// Two mutable borrows of same variable overlap.
     MultipleMutableBorrows {
         var: String,
         first_span: (usize, usize),
         second_span: (usize, usize),
     },
-    /// 有可变借用时不能有其他借用
+    /// Mutable borrow overlaps with immutable borrow.
     MutableWithOtherBorrows {
         var: String,
         mutable_span: (usize, usize),
         other_span: (usize, usize),
     },
-    /// 已借用的值不能被移动
+    /// Moving a borrowed value (reserved for future precise tracking).
     CannotMoveBorrowed {
         var: String,
         borrow_span: (usize, usize),
@@ -49,26 +50,25 @@ pub enum BorrowError {
     },
 }
 
-/// 借用检查器
+/// Borrow checker.
 pub struct BorrowChecker {
-    /// 类型环境
-    pub env: TypeEnv,
-    /// 当前作用域中的借用
-    /// 键是变量名，值是借用的列表
+    /// Type environment snapshot used by this pass.
+    _env: TypeEnv,
+    /// Active borrows for current scope.
     borrows: HashMap<String, Vec<Borrow>>,
-    /// 借用栈（用于跟踪嵌套作用域）
+    /// Nested scope borrow snapshots.
     borrow_stack: Vec<HashMap<String, Vec<Borrow>>>,
-    /// 生命周期计数器，用于标识不同的借用
+    /// Synthetic lifetime id counter.
     lifetime_counter: usize,
-    /// 收集的错误
+    /// Collected errors.
     errors: Vec<BorrowError>,
 }
 
 impl BorrowChecker {
-    /// 创建新的借用检查器
+    /// Create a new checker.
     pub fn new(env: TypeEnv) -> Self {
         Self {
-            env,
+            _env: env,
             borrows: HashMap::new(),
             borrow_stack: Vec::new(),
             lifetime_counter: 0,
@@ -76,152 +76,189 @@ impl BorrowChecker {
         }
     }
 
-    /// 进入新的作用域
+    /// Check a whole program.
+    pub fn check_program(&mut self, program: &Program) -> std::result::Result<(), Vec<BorrowError>> {
+        for decl in &program.decls {
+            if let DeclKind::Function(func) = &decl.kind {
+                self.check_block(&func.body);
+            }
+        }
+        self.finish()
+    }
+
+    /// Check one statement.
+    pub fn check_stmt(&mut self, stmt: &Stmt) -> std::result::Result<(), Vec<BorrowError>> {
+        match &stmt.kind {
+            StmtKind::Let { name, value, .. } => {
+                if let Some(value) = value {
+                    self.check_expr(value);
+                    self.track_borrows_in_expr(&name.name, value);
+                }
+            }
+            StmtKind::Const { value, .. } => self.check_expr(value),
+            StmtKind::Expr(expr) => self.check_expr(expr),
+            StmtKind::Item(_) => {}
+        }
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self.errors.clone())
+        }
+    }
+
+    fn finish(&mut self) -> std::result::Result<(), Vec<BorrowError>> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(std::mem::take(&mut self.errors))
+        }
+    }
+
     fn push_scope(&mut self) {
         let current = std::mem::take(&mut self.borrows);
         self.borrow_stack.push(current);
         self.borrows = HashMap::new();
     }
 
-    /// 退出作用域
     fn pop_scope(&mut self) {
         if let Some(prev) = self.borrow_stack.pop() {
             self.borrows = prev;
         }
     }
 
-    /// 检查语句
-    pub fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Vec<BorrowError>> {
-        match &stmt.kind {
-            StmtKind::Let { name, value, .. } => {
-                // 检查初始化表达式
-                self.check_expr(value)?;
-
-                // 如果值是一个借用，记录借用信息
-                self.track_borrows_in_expr(name, value);
-            }
-            StmtKind::Expr(expr) => {
-                self.check_expr(expr)?;
-            }
-            StmtKind::Block(stmts) => {
-                self.push_scope();
-                for s in stmts {
-                    self.check_stmt(s)?;
-                }
-                self.pop_scope();
-            }
-            _ => {}
+    fn check_block(&mut self, block: &Block) {
+        self.push_scope();
+        for stmt in &block.stmts {
+            let _ = self.check_stmt(stmt);
         }
-
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(std::mem::take(&mut self.errors))
-        }
+        self.pop_scope();
     }
 
-    /// 检查表达式
-    fn check_expr(&mut self, expr: &Expr) -> Result<(), Vec<BorrowError>> {
+    fn check_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Unary { op, operand } => {
-                // 检查引用运算符
                 match op {
-                    crate::ast::UnOp::Ref => {
-                        // 不可变借用
-                        self.add_borrow(operand, BorrowKind::Immutable);
-                    }
-                    crate::ast::UnOp::RefMut => {
-                        // 可变借用
-                        self.add_borrow(operand, BorrowKind::Mutable);
-                    }
+                    UnOp::Ref => self.add_borrow(operand, BorrowKind::Immutable),
+                    UnOp::RefMut => self.add_borrow(operand, BorrowKind::Mutable),
                     _ => {}
                 }
-                self.check_expr(operand)?;
+                self.check_expr(operand);
             }
             ExprKind::Binary { left, right, .. } => {
-                self.check_expr(left)?;
-                self.check_expr(right)?;
+                self.check_expr(left);
+                self.check_expr(right);
             }
             ExprKind::Call { func, args } => {
-                self.check_expr(func)?;
+                self.check_expr(func);
                 for arg in args {
-                    self.check_expr(arg)?;
+                    self.check_expr(arg);
                 }
             }
-            ExprKind::Block(stmts) => {
-                self.push_scope();
-                for s in stmts {
-                    self.check_stmt(s)?;
+            ExprKind::MethodCall { receiver, args, .. } => {
+                self.check_expr(receiver);
+                for arg in args {
+                    self.check_expr(arg);
                 }
-                self.pop_scope();
             }
-            ExprKind::If { cond, then_branch, else_branch } => {
-                self.check_expr(cond)?;
-                self.check_block(then_branch)?;
-                if let Some(eb) = else_branch {
-                    self.check_block(eb)?;
+            ExprKind::Block(block) => self.check_block(block),
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.check_expr(cond);
+                self.check_block(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_expr(else_expr);
                 }
             }
             ExprKind::While { cond, body } => {
-                self.check_expr(cond)?;
-                self.check_block(body)?;
+                self.check_expr(cond);
+                self.check_block(body);
             }
-            ExprKind::For { var, iter, body } => {
-                self.check_expr(iter)?;
-                self.check_block(body)?;
+            ExprKind::For { iter, body, .. } => {
+                self.check_expr(iter);
+                self.check_block(body);
+            }
+            ExprKind::Loop(body) => self.check_block(body),
+            ExprKind::Match { scrutinee, arms } => {
+                self.check_expr(scrutinee);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        self.check_expr(guard);
+                    }
+                    self.check_expr(&arm.body);
+                }
             }
             ExprKind::Index { base, index } => {
-                self.check_expr(base)?;
-                self.check_expr(index)?;
+                self.check_expr(base);
+                self.check_expr(index);
             }
-            ExprKind::Field { base, .. } => {
-                self.check_expr(base)?;
+            ExprKind::Field { base, .. } => self.check_expr(base),
+            ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
+                for elem in elems {
+                    self.check_expr(elem);
+                }
             }
-            _ => {}
-        }
-
-        if self.errors.is_empty() {
-            Ok(())
-        } else {
-            Err(std::mem::take(&mut self.errors))
+            ExprKind::Struct { fields, base, .. } => {
+                for field in fields {
+                    self.check_expr(&field.value);
+                }
+                if let Some(base) = base {
+                    self.check_expr(base);
+                }
+            }
+            ExprKind::Assign { target, value } | ExprKind::AssignOp { target, value, .. } => {
+                self.check_expr(target);
+                self.check_expr(value);
+            }
+            ExprKind::Range { start, end, .. } => {
+                if let Some(start) = start {
+                    self.check_expr(start);
+                }
+                if let Some(end) = end {
+                    self.check_expr(end);
+                }
+            }
+            ExprKind::Lambda { body, .. }
+            | ExprKind::Try(body)
+            | ExprKind::Await(body)
+            | ExprKind::Paren(body) => self.check_expr(body),
+            ExprKind::Cast { expr, .. } | ExprKind::Is { expr, .. } => self.check_expr(expr),
+            ExprKind::Return(value) | ExprKind::Break(value) | ExprKind::Yield(value) => {
+                if let Some(value) = value {
+                    self.check_expr(value);
+                }
+            }
+            ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => self.check_block(block),
+            ExprKind::Continue
+            | ExprKind::Literal(_)
+            | ExprKind::Ident(_)
+            | ExprKind::Path(_) => {}
         }
     }
 
-    /// 检查块
-    fn check_block(&mut self, stmts: &[Stmt]) -> Result<(), Vec<BorrowError>> {
-        self.push_scope();
-        for stmt in stmts {
-            self.check_stmt(stmt)?;
-        }
-        self.pop_scope();
-        Ok(())
-    }
-
-    /// 添加借用
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
-        // 获取被借用的变量名
-        if let ExprKind::Var(name) = &expr.kind {
+        if let Some(name) = Self::expr_var_name(expr) {
             let lifetime = self.lifetime_counter;
             self.lifetime_counter += 1;
+            let span = (expr.span.lo as usize, expr.span.hi as usize);
 
-            // 检查借用规则
-            if let Some(existing) = self.borrows.get(name) {
+            if let Some(existing) = self.borrows.get(&name) {
                 for borrow in existing {
                     match (&kind, &borrow.kind) {
                         (BorrowKind::Mutable, BorrowKind::Mutable) => {
-                            // 不能有多个可变借用
                             self.errors.push(BorrowError::MultipleMutableBorrows {
                                 var: name.clone(),
                                 first_span: borrow.span,
-                                second_span: (0, 0),
+                                second_span: span,
                             });
                         }
-                        (BorrowKind::Mutable, BorrowKind::Immutable) |
-                        (BorrowKind::Immutable, BorrowKind::Mutable) => {
-                            // 可变借用与其他借用不能共存
+                        (BorrowKind::Mutable, BorrowKind::Immutable)
+                        | (BorrowKind::Immutable, BorrowKind::Mutable) => {
                             self.errors.push(BorrowError::MutableWithOtherBorrows {
                                 var: name.clone(),
-                                mutable_span: (0, 0),
+                                mutable_span: span,
                                 other_span: borrow.span,
                             });
                         }
@@ -230,50 +267,68 @@ impl BorrowChecker {
                 }
             }
 
-            // 记录借用
             let borrow = Borrow {
                 kind,
                 lifetime,
-                span: (0, 0),
+                span,
             };
-            self.borrows.entry(name.clone()).or_default().push(borrow);
+            self.borrows.entry(name).or_default().push(borrow);
         }
     }
 
-    /// 跟踪表达式中的借用（用于 let 绑定）
-    fn track_borrows_in_expr(&mut self, _name: &str, _expr: &Expr) {
-        // TODO: 实现更精确的借用跟踪
+    fn track_borrows_in_expr(&mut self, name: &str, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Unary { op, operand } => {
+                let kind = match op {
+                    UnOp::Ref => Some(BorrowKind::Immutable),
+                    UnOp::RefMut => Some(BorrowKind::Mutable),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    self.add_borrow(operand, kind);
+                    if let Some(source) = Self::expr_var_name(operand) {
+                        if let Some(existing) = self.borrows.get(&source).cloned() {
+                            self.borrows.insert(name.to_string(), existing);
+                        }
+                    }
+                }
+            }
+            ExprKind::Binary { left, right, .. } => {
+                self.track_borrows_in_expr(name, left);
+                self.track_borrows_in_expr(name, right);
+            }
+            ExprKind::Call { func, args } => {
+                self.track_borrows_in_expr(name, func);
+                for arg in args {
+                    self.track_borrows_in_expr(name, arg);
+                }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                self.track_borrows_in_expr(name, receiver);
+                for arg in args {
+                    self.track_borrows_in_expr(name, arg);
+                }
+            }
+            ExprKind::Assign { target, value } | ExprKind::AssignOp { target, value, .. } => {
+                self.track_borrows_in_expr(name, target);
+                self.track_borrows_in_expr(name, value);
+            }
+            _ => {}
+        }
     }
 
-    /// 结束借用（用于 NLL）
+    fn expr_var_name(expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Ident(ident) => Some(ident.name.clone()),
+            ExprKind::Path(path) => path.as_simple().map(|ident| ident.name.clone()),
+            _ => None,
+        }
+    }
+
+    /// End a borrow lifetime explicitly.
     pub fn end_borrow(&mut self, var: &str, lifetime: usize) {
         if let Some(borrows) = self.borrows.get_mut(var) {
             borrows.retain(|b| b.lifetime != lifetime);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_multiple_immutable_borrows_ok() {
-        // 多个不可变借用应该被允许
-        let env = TypeEnv::new();
-        let mut checker = BorrowChecker::new(env);
-
-        // &x, &y 应该没有问题
-        // (这里只是示例，实际需要构造完整的 AST)
-    }
-
-    #[test]
-    fn test_mutable_borrow_conflict() {
-        // 可变借用冲突检测
-        let env = TypeEnv::new();
-        let mut checker = BorrowChecker::new(env);
-
-        // &mut x, &mut x 应该报错
-        // (这里只是示例，实际需要构造完整的 AST)
     }
 }

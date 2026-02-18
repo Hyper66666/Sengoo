@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn test_overflow() {
         let mut overflow = false;
-        let result = sengoo_add_overflow_i32(2000000000, 2000000000, &mut overflow);
+        let _result = sengoo_add_overflow_i32(2000000000, 2000000000, &mut overflow);
         assert!(overflow);
 
         overflow = false;
