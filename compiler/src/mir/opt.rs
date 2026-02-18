@@ -1,4 +1,4 @@
-﻿//! MIR optimization pass infrastructure.
+//! MIR optimization pass infrastructure.
 
 use std::collections::HashMap;
 

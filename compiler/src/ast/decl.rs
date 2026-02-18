@@ -283,7 +283,7 @@ impl StructField {
         }
     }
 
-    pub fn unnamed(index: usize, ty: Type, span: Span) -> Self {
+    pub fn unnamed(_index: usize, ty: Type, span: Span) -> Self {
         Self {
             vis: Visibility::Private,
             name: None,

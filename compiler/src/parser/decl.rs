@@ -1,8 +1,8 @@
-﻿//! 澹版槑瑙ｆ瀽
+//! 澹版槑瑙ｆ瀽
 
 use crate::ast::*;
 use crate::error::{CompileError, ParseError};
-use crate::lexer::{Keyword, TokenKind};
+use crate::lexer::TokenKind;
 use crate::Result;
 
 use super::Parser;
@@ -227,8 +227,17 @@ impl<'source> Parser<'source> {
 
             let name = self.expect_ident()?;
             let mut param = TypeParam::new(name);
-
-            // TODO: 瑙ｆ瀽绾︽潫 `: Trait`
+            if self.consume(TokenKind::Colon).is_some() {
+                let mut bounds = Vec::new();
+                loop {
+                    let path = self.parse_path()?;
+                    bounds.push(TraitBound::new(path));
+                    if self.consume(TokenKind::Plus).is_none() {
+                        break;
+                    }
+                }
+                param = param.with_bounds(bounds);
+            }
 
             params.push(param);
 
@@ -277,7 +286,6 @@ impl<'source> Parser<'source> {
             }
         } else if self.consume(TokenKind::LParen).is_some() {
             // 鍏冪粍缁撴瀯浣?
-            let mut index = 0;
             while !self.is_eof() {
                 if self.consume(TokenKind::RParen).is_some() {
                     break;
@@ -291,7 +299,6 @@ impl<'source> Parser<'source> {
                     span: self.current_span(),
                 });
 
-                index += 1;
                 self.consume(TokenKind::Comma);
             }
 
@@ -828,30 +835,5 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽妯″潡澹版槑
-    fn parse_module_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
-        let name = self.expect_ident()?;
-
-        let items = if self.consume(TokenKind::LBrace).is_some() {
-            let mut items = Vec::new();
-            while !self.is_eof() {
-                if self.consume(TokenKind::RBrace).is_some() {
-                    break;
-                }
-                items.push(self.parse_decl()?);
-            }
-            items
-        } else {
-            self.expect(TokenKind::Semicolon)?;
-            Vec::new()
-        };
-
-        Ok(DeclKind::Module(Module {
-            vis,
-            name,
-            items,
-            span: self.current_span(),
-        }))
-    }
 }
 

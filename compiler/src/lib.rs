@@ -1,4 +1,4 @@
-﻿//! Sengoo compiler core library.
+//! Sengoo compiler core library.
 
 pub mod ast;
 pub mod codegen;
@@ -8,6 +8,7 @@ pub mod lexer;
 pub mod mir;
 pub mod parser;
 pub mod runtime;
+pub mod symbol;
 pub mod typeck;
 
 pub use ast::*;
@@ -18,6 +19,7 @@ pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};
 pub use mir::lower_hir;
 pub use mir::opt::MirOptLevel;
 pub use parser::Parser;
+pub use symbol::{SymbolId, SymbolInterner};
 pub use typeck::TypeChecker;
 
 /// Compiler version.

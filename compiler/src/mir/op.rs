@@ -143,7 +143,9 @@ impl MirConstant {
             MirConstant::Float(_) => super::MIRType::Float(64),
             MirConstant::Char(_) => super::MIRType::Int(32),
             MirConstant::String(_) => super::MIRType::pointer(super::MIRType::Int(8)),
-            MirConstant::Bytes(_) => super::MIRType::Array(Box::new(super::MIRType::Int(8)), 0),
+            MirConstant::Bytes(bytes) => {
+                super::MIRType::Array(Box::new(super::MIRType::Int(8)), bytes.len() as u64)
+            }
             MirConstant::GlobalRef(_) => super::MIRType::pointer(super::MIRType::Unit),
         }
     }

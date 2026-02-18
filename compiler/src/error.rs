@@ -1,4 +1,5 @@
 //! Compiler error types.
+#![allow(unused_assignments)]
 
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -72,6 +73,7 @@ pub enum LexError {
 
 /// Parser errors.
 #[derive(Debug, Clone, Diagnostic, Error)]
+#[allow(unused_assignments)]
 pub enum ParseError {
     #[error("expected {expected}, found {found}")]
     #[diagnostic(code(parser::unexpected_token))]
@@ -180,6 +182,7 @@ impl ParseError {
 
 /// User-facing type errors.
 #[derive(Debug, Clone, Diagnostic, Error)]
+#[allow(unused_assignments)]
 pub enum TypeError {
     #[error("type mismatch: expected {expected}, found {found}")]
     #[diagnostic(code(typeck::mismatch), help("add an explicit conversion if needed"))]

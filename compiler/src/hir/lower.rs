@@ -4,6 +4,7 @@ use super::item::*;
 use super::*;
 use crate::ast::{self, Decl, Program, VariantField};
 use crate::hir::ty::{FloatKind, IntKind};
+use crate::symbol::SymbolId;
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
 
@@ -104,14 +105,18 @@ fn lower_function_with_self(
     if let Some(_self_param) = &fn_decl.self_param {
         if let Some(ty) = &self_type {
             // self 参数的类型是 impl 块的目标类型
-            params.push(HIRParam::new("self".to_string(), ty.clone()));
+            params.push(HIRParam::new(
+                "self".to_string(),
+                SymbolId::INVALID,
+                ty.clone(),
+            ));
         }
     }
 
     // 处理其他参数
     for p in &fn_decl.params {
         let ty = lower_type(&p.ty, type_env);
-        params.push(HIRParam::new(p.name.name.clone(), ty));
+        params.push(HIRParam::new(p.name.name.clone(), p.name.symbol, ty));
     }
 
     let return_type = fn_decl
@@ -303,7 +308,11 @@ fn resolve_effective_class_fields(
 
         let mut normalized_field = field.clone();
         if normalized_field.name.is_none() {
-            normalized_field.name = Some(ast::Ident::new(field_name, field.span));
+            normalized_field.name = Some(ast::Ident::with_symbol(
+                field_name,
+                SymbolId::INVALID,
+                field.span,
+            ));
         }
         merged_fields.push(normalized_field);
     }
@@ -711,13 +720,6 @@ fn infer_expr_type(expr: &ast::Expr) -> HIRType {
 }
 
 /// 解析整数字面量
-fn parse_int_lit(expr: &ast::Expr) -> usize {
-    match &expr.kind {
-        ast::ExprKind::Literal(ast::Literal::Int(n)) => *n as usize,
-        _ => 0,
-    }
-}
-
 /// 降低 AST 块到 HIR 块
 fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
     let mut hir_body = HIRBody::new();
@@ -758,6 +760,7 @@ fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                 let hir_value = value.as_ref().and_then(|v| lower_expr(v, type_env).ok());
                 hir_body.add_stmt(HIRStmt::Let {
                     name: name.name.clone(),
+                    symbol: name.symbol,
                     ty: hir_ty,
                     value: hir_value,
                     is_mut: false,
@@ -769,6 +772,7 @@ fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                     lower_expr(&value, type_env).unwrap_or_else(|_| HIRExpr::Lit(HIRLiteral::Null));
                 hir_body.add_stmt(HIRStmt::Let {
                     name: name.name.clone(),
+                    symbol: name.symbol,
                     ty: hir_ty,
                     value: Some(hir_value),
                     is_mut: false,
@@ -800,10 +804,22 @@ fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
 fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
     Ok(match &expr.kind {
         ast::ExprKind::Literal(lit) => HIRExpr::Lit(lower_literal(lit)),
-        ast::ExprKind::Ident(name) => HIRExpr::Var(name.name.clone()),
+        ast::ExprKind::Ident(name) => HIRExpr::Var {
+            name: name.name.clone(),
+            symbol: name.symbol,
+        },
         ast::ExprKind::Path(path) => {
-            let name = path.as_simple().map(|i| i.name.clone()).unwrap_or_default();
-            HIRExpr::Var(name)
+            if let Some(ident) = path.as_simple() {
+                HIRExpr::Var {
+                    name: ident.name.clone(),
+                    symbol: ident.symbol,
+                }
+            } else {
+                HIRExpr::Var {
+                    name: String::new(),
+                    symbol: SymbolId::INVALID,
+                }
+            }
         }
         ast::ExprKind::Unary { op, operand } => {
             HIRExpr::Unary(lower_un_op(op), Box::new(lower_expr(operand, type_env)?))
@@ -876,9 +892,10 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
             iter,
             body,
         } => {
-            let var_name = extract_pattern_var_name(pattern);
+            let (var_name, var_symbol) = extract_pattern_var_name(pattern);
             HIRExpr::For {
-                var: var_name,
+                var_name,
+                var_symbol,
                 iter: Box::new(lower_expr(iter, type_env)?),
                 body: Box::new(lower_body(body, type_env)),
             }
@@ -980,7 +997,7 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
                 .map(Box::new),
             inclusive: *inclusive,
         },
-        ast::ExprKind::Is { expr, ty } => {
+        ast::ExprKind::Is { expr, ty: _ } => {
             // 暂时跳过类型断言
             lower_expr(expr, type_env)?
         }
@@ -1005,7 +1022,6 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
             params: params.iter().map(|p| p.name.clone()).collect(),
             body: Box::new(lower_expr(body, type_env)?),
         },
-        _ => HIRExpr::Lit(HIRLiteral::Null),
     })
 }
 
@@ -1086,6 +1102,7 @@ fn lower_pattern(pat: &ast::pattern::Pattern) -> Result<HIRPattern, String> {
         ast::pattern::PatternKind::Literal(lit) => HIRPattern::Lit(lower_literal(lit)),
         ast::pattern::PatternKind::Ident(name) => HIRPattern::Var {
             name: name.name.clone(),
+            symbol: name.symbol,
             mutability: false,
         },
         ast::pattern::PatternKind::Tuple(pats) => {
@@ -1096,10 +1113,10 @@ fn lower_pattern(pat: &ast::pattern::Pattern) -> Result<HIRPattern, String> {
 }
 
 /// 提取模式中的变量名
-fn extract_pattern_var_name(pat: &ast::pattern::Pattern) -> String {
+fn extract_pattern_var_name(pat: &ast::pattern::Pattern) -> (String, SymbolId) {
     match &pat.kind {
-        ast::pattern::PatternKind::Ident(name) => name.name.clone(),
-        ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
-        _ => "_loop".to_string(),
+        ast::pattern::PatternKind::Ident(name) => (name.name.clone(), name.symbol),
+        ast::pattern::PatternKind::Wildcard => ("_loop".to_string(), SymbolId::INVALID),
+        _ => ("_loop".to_string(), SymbolId::INVALID),
     }
 }

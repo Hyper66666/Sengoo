@@ -94,9 +94,6 @@ impl Scope {
         self.symbols.get(name)
     }
 
-    pub fn contains(&self, name: &str) -> bool {
-        self.symbols.contains_key(name)
-    }
 }
 
 /// 类型环境
@@ -165,7 +162,7 @@ impl TypeEnv {
             TyKind::Int(crate::typeck::ty::IntKind::ISize),
         );
 
-        let u8 = Ty::new(
+        let _u8 = Ty::new(
             self.fresh_ty_id(),
             TyKind::Int(crate::typeck::ty::IntKind::U8),
         );
@@ -245,7 +242,7 @@ impl TypeEnv {
         );
 
         // print函数的整数版本：print(n: i64) -> ()
-        let print_fn_i64 = self.fn_ty(vec![i64.clone()], unit.clone());
+        let _print_fn_i64 = self.fn_ty(vec![i64.clone()], unit.clone());
         // 注意：这里使用同一个名字，但实际类型检查时会根据参数类型选择
         // 为了简化，我们先只支持字符串版本
     }

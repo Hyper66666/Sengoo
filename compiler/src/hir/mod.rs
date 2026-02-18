@@ -21,7 +21,6 @@ pub use pattern::{HIRMatchArm, HIRPattern};
 pub use stmt::HIRStmt;
 pub use ty::{FloatKind, HIRType, HIRTypeKind, IntKind};
 
-use crate::typeck::ty::Ty;
 
 /// HIR 模块
 #[derive(Debug, Clone)]

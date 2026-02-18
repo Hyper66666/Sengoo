@@ -1,6 +1,7 @@
 //! HIR 模式定义
 
-use super::{HIRExpr, HIRLiteral, HIRType};
+use super::{HIRExpr, HIRLiteral};
+use crate::symbol::SymbolId;
 
 /// HIR 模式
 #[derive(Debug, Clone)]
@@ -12,7 +13,11 @@ pub enum HIRPattern {
     Lit(HIRLiteral),
 
     /// 变量绑定
-    Var { name: String, mutability: bool },
+    Var {
+        name: String,
+        symbol: SymbolId,
+        mutability: bool,
+    },
 
     /// 结构体模式
     Struct {

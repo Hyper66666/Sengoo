@@ -176,8 +176,17 @@ pub fn mir_constant_to_llvm_str(constant: &MirConstant) -> String {
         MirConstant::Uint(n) => n.to_string(),
         MirConstant::Float(f) => f.to_string(),
         MirConstant::Char(c) => (*c as u32).to_string(),
-        MirConstant::String(_) => "[TODO string]".to_string(),
-        MirConstant::Bytes(_) => "[TODO bytes]".to_string(),
+        // String constants are emitted as globals by codegen backends; direct
+        // literal fallback uses null pointer.
+        MirConstant::String(_) => "null".to_string(),
+        MirConstant::Bytes(bytes) => {
+            if bytes.is_empty() {
+                "zeroinitializer".to_string()
+            } else {
+                let elems: Vec<String> = bytes.iter().map(|b| format!("i8 {}", b)).collect();
+                format!("[{}]", elems.join(", "))
+            }
+        }
         MirConstant::GlobalRef(name) => format!("@{}", name),
     }
 }
@@ -414,7 +423,19 @@ mod tests {
     fn test_mir_constant_string() {
         assert_eq!(
             mir_constant_to_llvm_str(&MirConstant::String("hello".to_string())),
-            "[TODO string]"
+            "null"
+        );
+    }
+
+    #[test]
+    fn test_mir_constant_bytes() {
+        assert_eq!(
+            mir_constant_to_llvm_str(&MirConstant::Bytes(vec![1, 2, 3])),
+            "[i8 1, i8 2, i8 3]"
+        );
+        assert_eq!(
+            mir_constant_to_llvm_str(&MirConstant::Bytes(vec![])),
+            "zeroinitializer"
         );
     }
 

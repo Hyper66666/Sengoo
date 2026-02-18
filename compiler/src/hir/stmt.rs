@@ -1,21 +1,23 @@
-//! HIR 语句定义
+//! HIR 璇彞瀹氫箟
 
 use super::{HIRExpr, HIRType};
+use crate::symbol::SymbolId;
 
-/// HIR 语句
+/// HIR 璇彞
 #[derive(Debug, Clone)]
 pub enum HIRStmt {
-    /// Let 绑定
+    /// Let 缁戝畾
     Let {
         name: String,
+        symbol: SymbolId,
         ty: HIRType,
         value: Option<HIRExpr>,
         is_mut: bool,
     },
 
-    /// 表达式语句
+    /// 琛ㄨ揪寮忚鍙?
     Expr(HIRExpr),
 
-    /// 项声明（嵌套的函数、结构体等）
-    Item, // TODO: 具体的嵌套项类型
+    /// Nested item declaration placeholder.
+    Item,
 }

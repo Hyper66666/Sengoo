@@ -21,6 +21,7 @@ pub use stmt::{Stmt, StmtKind};
 pub use ty::{TraitBound, Type, TypeKind};
 
 use crate::lexer::Span;
+use crate::symbol::SymbolId;
 
 /// AST 节点的通用 trait
 pub trait Node {
@@ -29,20 +30,34 @@ pub trait Node {
 }
 
 /// 标识符
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Ident {
     pub name: String,
+    pub symbol: SymbolId,
     pub span: Span,
 }
 
 impl Ident {
     pub fn new(name: impl Into<String>, span: Span) -> Self {
+        Self::with_symbol(name, SymbolId::INVALID, span)
+    }
+
+    pub fn with_symbol(name: impl Into<String>, symbol: SymbolId, span: Span) -> Self {
         Self {
             name: name.into(),
+            symbol,
             span,
         }
     }
 }
+
+impl PartialEq for Ident {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.span == other.span
+    }
+}
+
+impl Eq for Ident {}
 
 impl Node for Ident {
     fn span(&self) -> Span {

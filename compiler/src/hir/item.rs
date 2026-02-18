@@ -2,8 +2,8 @@
 //!
 //! 定义模块级别的各种声明。
 
-use super::{HIRBody, HIRExpr, HIRMatchArm, HIRPattern, HIRType};
-use crate::typeck::ty::Ty;
+use super::{HIRBody, HIRExpr, HIRType};
+use crate::symbol::SymbolId;
 
 /// HIR 项
 #[derive(Debug, Clone)]
@@ -34,12 +34,13 @@ pub struct HIRFunction {
 #[derive(Debug, Clone)]
 pub struct HIRParam {
     pub name: String,
+    pub symbol: SymbolId,
     pub ty: HIRType,
 }
 
 impl HIRParam {
-    pub fn new(name: String, ty: HIRType) -> Self {
-        Self { name, ty }
+    pub fn new(name: String, symbol: SymbolId, ty: HIRType) -> Self {
+        Self { name, symbol, ty }
     }
 }
 

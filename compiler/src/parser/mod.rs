@@ -7,9 +7,10 @@ mod expr;
 mod pat;
 mod stmt;
 
-use crate::ast::{Decl, Program};
+use crate::ast::Program;
 use crate::error::{CompileError, ParseError};
 use crate::lexer::{Lexer, Span, Token, TokenKind};
+use crate::symbol::SymbolInterner;
 use crate::Result;
 use miette::SourceSpan;
 
@@ -25,6 +26,7 @@ pub struct Parser<'source> {
     errors: Vec<ParseError>,
     /// 是否在条件表达式上下文中（if/while 条件），禁止解析结构体字面量
     in_condition_context: bool,
+    interner: SymbolInterner,
 }
 
 impl<'source> Parser<'source> {
@@ -37,6 +39,7 @@ impl<'source> Parser<'source> {
             source,
             errors: Vec::new(),
             in_condition_context: false,
+            interner: SymbolInterner::default(),
         }
     }
 
@@ -152,10 +155,6 @@ impl<'source> Parser<'source> {
     }
 
     /// 获取从起始位置到当前位置的 span
-    fn span_from(&self, start: Span) -> Span {
-        Span::new(start.lo, self.current_span().hi)
-    }
-
     /// 从指定位置开始的 span
     fn span_at(&self, lo: u32) -> Span {
         Span::new(lo, self.current_span().hi)
@@ -202,6 +201,12 @@ impl<'source> Parser<'source> {
     /// 从 token 的 span 提取标识符文本
     pub fn extract_ident(&self, span: Span) -> String {
         self.source_slice(span).to_string()
+    }
+
+    pub(super) fn intern_ident(&mut self, span: Span) -> crate::ast::Ident {
+        let name = self.extract_ident(span);
+        let symbol = self.interner.intern(&name);
+        crate::ast::Ident::with_symbol(name, symbol, span)
     }
 }
 
