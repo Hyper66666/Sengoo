@@ -72,6 +72,9 @@ fn compile_frontend_to_mir_with_phase_timings(
         drop(hir_module);
         drop(type_env);
         drop(program);
+        // Prune unreachable functions before MIR optimization to avoid spending
+        // optimization work on dead code in large single-file workloads.
+        prune_unreachable_mir_functions(&mut mir_fns);
         let mir_opt_level = MirOptLevel::from_u8(opt_level)
             .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
         let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);

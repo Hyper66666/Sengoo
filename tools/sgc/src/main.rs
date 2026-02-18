@@ -162,7 +162,7 @@ struct ModuleInvalidationStats {
 
 #[derive(Debug, Clone)]
 struct ModuleSourceInfo {
-    source: String,
+    source: Arc<str>,
     depends_on: Vec<String>,
     requests_reflection: bool,
 }
@@ -2543,7 +2543,7 @@ fn collect_module_sources_with_edges(
     root_source: &str,
 ) -> BTreeMap<String, ModuleSourceInfo> {
     let root_path = fs::canonicalize(input_path).unwrap_or_else(|_| input_path.to_path_buf());
-    let mut queue = vec![(root_path, root_source.to_string())];
+    let mut queue = vec![(root_path, Arc::<str>::from(root_source))];
     let mut sources = BTreeMap::new();
 
     while let Some((module_path, source)) = queue.pop() {
@@ -2553,7 +2553,7 @@ fn collect_module_sources_with_edges(
         }
 
         let source_dir = module_path.parent().unwrap_or(Path::new("."));
-        let (deps, requests_reflection) = resolve_direct_import_metadata(source_dir, &source);
+        let (deps, requests_reflection) = resolve_direct_import_metadata(source_dir, source.as_ref());
         let mut dep_keys = deps
             .iter()
             .map(|dep| canonical_or_lossy(dep))
@@ -2564,7 +2564,7 @@ fn collect_module_sources_with_edges(
         sources.insert(
             module_key.clone(),
             ModuleSourceInfo {
-                source: source.clone(),
+                source: Arc::clone(&source),
                 depends_on: dep_keys,
                 requests_reflection,
             },
@@ -2572,7 +2572,7 @@ fn collect_module_sources_with_edges(
 
         for dep in deps.into_iter().rev() {
             if let Ok(dep_source) = fs::read_to_string(&dep) {
-                queue.push((dep, dep_source));
+                queue.push((dep, Arc::<str>::from(dep_source)));
             }
         }
     }
@@ -2913,23 +2913,23 @@ fn frontend_cache_entry_for_module(
     depends_on.sort();
     depends_on.dedup();
 
-    let source_hash = source_fingerprint(&info.source);
+    let source_hash = source_fingerprint(info.source.as_ref());
     let (interface_hash, body_hash, mut symbols) = if collect_symbol_fingerprints {
-        let body_hash = implementation_fingerprint(&info.source);
-        match Parser::parse(&info.source) {
+        let body_hash = implementation_fingerprint(info.source.as_ref());
+        match Parser::parse(info.source.as_ref()) {
             Ok(program) => (
                 interface_fingerprint_from_program(&program),
                 body_hash,
-                function_fingerprints_for_program(module_path, &info.source, &program),
+                function_fingerprints_for_program(module_path, info.source.as_ref(), &program),
             ),
             Err(_) => (
-                interface_fingerprint_fast(&info.source),
+                interface_fingerprint_fast(info.source.as_ref()),
                 body_hash,
                 Vec::new(),
             ),
         }
     } else {
-        let normalized = normalize_source_for_hash(&info.source);
+        let normalized = normalize_source_for_hash(info.source.as_ref());
         (
             interface_fingerprint_fast_from_normalized(&normalized),
             implementation_fingerprint_from_normalized(&normalized),
@@ -3098,7 +3098,7 @@ fn collect_module_graph_snapshot(
             let mut expected_depends_on = info.depends_on.clone();
             expected_depends_on.sort();
             expected_depends_on.dedup();
-            let source_hash = source_fingerprint(&info.source);
+            let source_hash = source_fingerprint(info.source.as_ref());
             let reused = previous_entry_by_module.get(&module).filter(|previous| {
                 previous.source_hash == source_hash
                     && previous.depends_on == expected_depends_on
@@ -3159,7 +3159,7 @@ fn collect_module_graph_snapshot(
             let Some(info) = module_sources.get(module_id) else {
                 continue;
             };
-            entry.symbols = function_fingerprints_for_module(module_id, &info.source);
+            entry.symbols = function_fingerprints_for_module(module_id, info.source.as_ref());
             for symbol in &mut entry.symbols {
                 if symbol.module_imports.is_empty() {
                     symbol.module_imports = entry.depends_on.clone();
@@ -3284,7 +3284,7 @@ fn collect_module_graph_snapshot(
                 let Some(info) = module_sources.get(module) else {
                     return Some("module source missing".to_string());
                 };
-                frontend_probe_module_full(module, &info.source).err()
+                frontend_probe_module_full(module, info.source.as_ref()).err()
             },
         );
         merge_frontend_phase_stats(&mut body_hir_phase_stats, phase_stats);
@@ -3324,10 +3324,15 @@ fn collect_module_graph_snapshot(
                     );
                 };
 
-                match frontend_probe_module_body_only(module, &info.source, &impacted_symbols) {
+                match frontend_probe_module_body_only(
+                    module,
+                    info.source.as_ref(),
+                    &impacted_symbols,
+                ) {
                     Ok(_) => (None, None),
                     Err(body_message) => {
-                        let full_message = frontend_probe_module_full(module, &info.source).err();
+                        let full_message =
+                            frontend_probe_module_full(module, info.source.as_ref()).err();
                         (Some(body_message), full_message)
                     }
                 }
