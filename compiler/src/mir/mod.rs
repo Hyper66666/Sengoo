@@ -15,7 +15,7 @@ mod op;
 pub mod opt;
 
 pub use bb::{BasicBlock, CallArg, Terminator};
-pub use inst::{Instruction, IntrinsicOp, Local, LocalKind};
+pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
 pub use lowering::lower_hir;
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
@@ -35,6 +35,7 @@ pub struct MirFunction {
     pub locals: Vec<(Local, MIRType)>,
     /// 基本块
     pub basic_blocks: Vec<BasicBlock>,
+    pub instructions: Vec<Instruction>,
     /// 起始基本块索引
     pub start_block: usize,
 }
@@ -56,6 +57,7 @@ impl MirFunction {
             return_type,
             locals,
             basic_blocks,
+            instructions: Vec::new(),
             start_block,
         }
     }
@@ -73,6 +75,42 @@ impl MirFunction {
         let id = self.basic_blocks.len();
         self.basic_blocks.push(BasicBlock::new(id));
         id
+    }
+
+    pub fn alloc_inst(&mut self, inst: Instruction) -> InstId {
+        let id = self.instructions.len();
+        assert!(
+            id <= u32::MAX as usize,
+            "instruction arena exhausted (>{} instructions)",
+            u32::MAX
+        );
+        self.instructions.push(inst);
+        InstId(id as u32)
+    }
+
+    pub fn push_inst_to_block(&mut self, block_id: usize, inst: Instruction) {
+        let inst_id = self.alloc_inst(inst);
+        if let Some(block) = self.basic_blocks.get_mut(block_id) {
+            block.push(inst_id);
+        }
+    }
+
+    pub fn instruction(&self, id: InstId) -> &Instruction {
+        &self.instructions[id.0 as usize]
+    }
+
+    pub fn instruction_mut(&mut self, id: InstId) -> &mut Instruction {
+        &mut self.instructions[id.0 as usize]
+    }
+
+    pub fn block_instructions<'a>(
+        &'a self,
+        block: &'a BasicBlock,
+    ) -> impl Iterator<Item = &'a Instruction> + 'a {
+        block
+            .instructions
+            .iter()
+            .map(move |id| self.instruction(*id))
     }
 
     /// 获取基本块的可变引用

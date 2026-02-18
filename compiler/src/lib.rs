@@ -48,12 +48,16 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     // 2. Type checking.
     let mut checker = TypeChecker::new();
     checker.check_program(&program)?;
+    let type_env = checker.into_env();
 
     // 3. HIR lowering.
-    let hir_module = lower_ast(&program, checker.env());
+    let hir_module = lower_ast(&program, &type_env);
 
     // 4. MIR lowering.
     let mut mir_fns = lower_hir(&hir_module.items).map_err(CompileError::MirLower)?;
+    drop(hir_module);
+    drop(type_env);
+    drop(program);
 
     // 5. MIR optimization pipeline for the selected level.
     let pipeline = mir::opt::pipeline_for_level(options.mir_opt_level);
@@ -77,12 +81,17 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     // 2. Type checking.
     let mut checker = TypeChecker::new();
     checker.check_program(&program)?;
+    let type_env = checker.into_env();
 
     // 3. HIR lowering.
-    let hir_module = lower_ast(&program, checker.env());
+    let hir_module = lower_ast(&program, &type_env);
 
     // 4. MIR lowering.
-    lower_hir(&hir_module.items).map_err(CompileError::MirLower)
+    let mir_fns = lower_hir(&hir_module.items).map_err(CompileError::MirLower)?;
+    drop(hir_module);
+    drop(type_env);
+    drop(program);
+    Ok(mir_fns)
 }
 
 #[cfg(test)]

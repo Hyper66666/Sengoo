@@ -2,6 +2,7 @@
 
 pub mod array_assign_tests;
 pub mod codegen_type_tests;
+pub mod codegen_stream_tests;
 pub mod compile_options_tests;
 pub mod constant_folding_tests;
 pub mod class_inheritance_tests;

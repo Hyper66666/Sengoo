@@ -2,16 +2,30 @@
 
 use super::{MIRType, MirBinOp, MirConstant, MirUnOp};
 
+/// MIR instruction identifier into a function-local instruction arena.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InstId(pub u32);
+
 /// 局部变量
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Local {
-    pub id: usize,
+    pub id: u32,
     pub kind: LocalKind,
 }
 
 impl Local {
     pub fn new(id: usize, kind: LocalKind) -> Self {
-        Self { id, kind }
+        assert!(
+            id <= u32::MAX as usize,
+            "local id overflow (>{})",
+            u32::MAX
+        );
+        Self { id: id as u32, kind }
+    }
+
+    #[inline]
+    pub fn index(self) -> usize {
+        self.id as usize
     }
 
     /// 创建返回值局部变量
