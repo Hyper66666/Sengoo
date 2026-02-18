@@ -98,6 +98,27 @@ Real incremental scenarios (`after_avg_ms`, Sengoo):
 | 100k | 417.53 | 1074.84 | 6625.35 | 832.91 |
 | 1000k | 1827.84 | 4883.70 | 54642.47 | 8283.46 |
 
+Low-memory mode e2e snapshot (same 1000k workload, measured on **February 18, 2026**):
+
+| Mode | 1000k e2e avg (ms) | Peak RSS (MB) |
+|---|---:|---:|
+| Default (`sgc build`) | 2331.39 | 1418.61 |
+| Low-memory (`sgc build --low-memory`) | 1737.71 | 672.10 |
+
+Low-memory mode benefits:
+- Reduces peak memory by about `52.62%` in this 1000k case.
+- Improved e2e compile time by about `25.46%` in this same case due to aggressive unreachable-function pruning.
+
+Low-memory mode trade-offs:
+- Disables/bypasses part of incremental cache/session reuse.
+- Uses single-thread frontend and lower MIR optimization cap.
+- On smaller projects or warm incremental loops, it can be slower than default mode.
+
+How to enable:
+```bash
+sgc build your_file.sg --low-memory
+sgc run your_file.sg --low-memory
+```
 
 10k-1000k compile peak-memory comparison (RSS MB, compile-stage only, lower is better):
 

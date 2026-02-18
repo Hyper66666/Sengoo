@@ -183,16 +183,88 @@ fn frontend_memory_mode_from_env() -> Option<FrontendMemoryMode> {
 }
 
 fn resolve_frontend_memory_mode(source_len_bytes: usize) -> FrontendMemoryMode {
+    let _ = source_len_bytes;
     match frontend_memory_mode_from_env().unwrap_or(FrontendMemoryMode::Auto) {
-        FrontendMemoryMode::Auto => {
-            if source_len_bytes >= FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES {
-                FrontendMemoryMode::Stream
-            } else {
-                FrontendMemoryMode::Legacy
-            }
-        }
+        FrontendMemoryMode::Auto => FrontendMemoryMode::Legacy,
         other => other,
     }
+}
+
+fn low_memory_hint_should_recommend(available_bytes: u64, source_len_bytes: usize) -> bool {
+    source_len_bytes >= FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES
+        && available_bytes <= LOW_MEMORY_HINT_AVAILABLE_BYTES
+}
+
+#[cfg(target_os = "windows")]
+fn system_available_memory_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        dw_length: u32,
+        dw_memory_load: u32,
+        ull_total_phys: u64,
+        ull_avail_phys: u64,
+        ull_total_page_file: u64,
+        ull_avail_page_file: u64,
+        ull_total_virtual: u64,
+        ull_avail_virtual: u64,
+        ull_avail_extended_virtual: u64,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalMemoryStatusEx(lp_buffer: *mut MemoryStatusEx) -> i32;
+    }
+
+    let mut status = MemoryStatusEx {
+        dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        dw_memory_load: 0,
+        ull_total_phys: 0,
+        ull_avail_phys: 0,
+        ull_total_page_file: 0,
+        ull_avail_page_file: 0,
+        ull_total_virtual: 0,
+        ull_avail_virtual: 0,
+        ull_avail_extended_virtual: 0,
+    };
+
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status as *mut MemoryStatusEx) };
+    if ok == 0 {
+        None
+    } else {
+        Some(status.ull_avail_phys)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn system_available_memory_bytes() -> Option<u64> {
+    let text = fs::read_to_string("/proc/meminfo").ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with("MemAvailable:") {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let _label = parts.next()?;
+        let kb = parts.next()?.parse::<u64>().ok()?;
+        return Some(kb * 1024);
+    }
+    None
+}
+
+fn maybe_low_memory_mode_hint(source_len_bytes: usize, low_memory_enabled: bool) -> Option<String> {
+    if low_memory_enabled {
+        return None;
+    }
+    let available_bytes = system_available_memory_bytes()?;
+    if !low_memory_hint_should_recommend(available_bytes, source_len_bytes) {
+        return None;
+    }
+    let available_mib = available_bytes as f64 / (1024.0 * 1024.0);
+    let source_mib = source_len_bytes as f64 / (1024.0 * 1024.0);
+    Some(format!(
+        "hint: low-memory environment detected ({:.0} MiB available). Consider `--low-memory` to reduce peak RSS for this build/run (trade-offs: weaker incremental reuse, single-thread frontend, lower MIR opt). source size: {:.2} MiB",
+        available_mib, source_mib
+    ))
 }
 
 fn frontend_trace_enabled(explicit_flag: bool) -> bool {

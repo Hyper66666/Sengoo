@@ -25,6 +25,9 @@ pub(crate) async fn cmd_build(
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
+    if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
+        println!("{}", hint);
+    }
 
     let cache_path = build_dir.join(format!("{}.build-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
@@ -532,6 +535,9 @@ pub(crate) async fn cmd_run(
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
+    if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
+        println!("{}", hint);
+    }
     let probe_mode = if force_rebuild || low_memory {
         FrontendProbeMode::FastNoVerify
     } else {
