@@ -1,3 +1,11 @@
+use crate::{
+    canonical_or_lossy, collect_module_graph_snapshot, compile_native_binary,
+    compile_source_to_llvm_file_with_phase_timings, default_build_output_path_for_case, find_clang,
+    find_runtime_c, maybe_prepare_reflection_native_library, measure_reflection_used_ms,
+    module_fingerprints_for_source, module_invalidation_stats,
+    reflection_sidecar_path_for_artifact, FrontendFallbackEvent, FrontendJobs, FrontendProbeMode,
+    FrontendSchedulerTelemetry,
+};
 use miette::{IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -5,16 +13,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use crate::{
-    canonical_or_lossy, collect_module_graph_snapshot,
-    compile_native_binary,
-    compile_source_to_llvm_file_with_phase_timings, default_build_output_path_for_case,
-    find_clang, find_runtime_c,
-    maybe_prepare_reflection_native_library, measure_reflection_used_ms,
-    module_fingerprints_for_source, module_invalidation_stats,
-    reflection_sidecar_path_for_artifact, FrontendFallbackEvent, FrontendJobs,
-    FrontendProbeMode, FrontendSchedulerTelemetry,
-};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct BenchCaseResult {
@@ -29,6 +27,10 @@ pub(crate) struct BenchCaseResult {
     pub(crate) before_ms: Option<f64>,
     pub(crate) after_ms: Option<f64>,
     pub(crate) cache_reused_modules: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) generic_cache_hit_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) generic_rebuilt_instances: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) frontend_scheduler: Option<FrontendSchedulerTelemetry>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +75,41 @@ struct BenchBaseline {
     cases: BTreeMap<String, BenchBaselineCase>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct WorksetGenericMetrics {
+    #[serde(default)]
+    generic_total_instances: u32,
+    #[serde(default)]
+    generic_cache_hits: u32,
+    #[serde(default)]
+    generic_rebuilt_instances: u32,
+}
+
+fn read_workset_generic_metrics(case: &Path, command_kind: &str) -> Option<WorksetGenericMetrics> {
+    let stem = case.file_stem()?.to_string_lossy().to_string();
+    let build_dir = case.parent()?.join("build").join("workset");
+    let path = build_dir.join(format!("{}.{}.workset.json", stem, command_kind));
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice::<WorksetGenericMetrics>(&bytes).ok()
+}
+
+fn generic_cache_metadata_path(case: &Path) -> Option<PathBuf> {
+    let stem = case.file_stem()?.to_string_lossy().to_string();
+    let build_dir = case.parent()?.join("build").join("workset");
+    Some(build_dir.join(format!("{}.generic-instance-cache.json", stem)))
+}
+
+fn build_cache_metadata_path(case: &Path) -> Option<PathBuf> {
+    let stem = case.file_stem()?.to_string_lossy().to_string();
+    let build_dir = case.parent()?.join("build");
+    Some(build_dir.join(format!("{}.build-cache.json", stem)))
+}
+
+fn frontend_session_metadata_path(case: &Path) -> Option<PathBuf> {
+    let stem = case.file_stem()?.to_string_lossy().to_string();
+    let build_dir = case.parent()?.join("build").join("workset");
+    Some(build_dir.join(format!("{}.frontend-session-v4.json", stem)))
+}
 
 pub(crate) fn now_unix_ms() -> u128 {
     SystemTime::now()
@@ -351,9 +388,12 @@ pub(crate) fn diff_report_against_baseline(report: &BenchReport) -> Vec<String> 
     lines
 }
 
-
-
-pub(crate) async fn cmd_bench_run(suite: &str, opt_level: u8, warmup: u32, iterations: u32) -> Result<()> {
+pub(crate) async fn cmd_bench_run(
+    suite: &str,
+    opt_level: u8,
+    warmup: u32,
+    iterations: u32,
+) -> Result<()> {
     let suite_path = resolve_bench_suite_path("runtime", suite)?;
     let cases = collect_bench_cases(&suite_path)?;
 
@@ -415,6 +455,8 @@ pub(crate) async fn cmd_bench_run(suite: &str, opt_level: u8, warmup: u32, itera
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
+            generic_cache_hit_ratio: None,
+            generic_rebuilt_instances: None,
             frontend_scheduler: None,
             frontend_fallback_events: None,
             frontend_planner_trace: None,
@@ -436,11 +478,7 @@ pub(crate) async fn cmd_bench_run(suite: &str, opt_level: u8, warmup: u32, itera
     Ok(())
 }
 
-pub(crate) async fn cmd_bench_compile(
-    suite: &str,
-    opt_level: u8,
-    iterations: u32,
-) -> Result<()> {
+pub(crate) async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u32) -> Result<()> {
     let suite_path = resolve_bench_suite_path("compile", suite)?;
     let cases = collect_bench_cases(&suite_path)?;
     let clang = find_clang();
@@ -488,11 +526,8 @@ pub(crate) async fn cmd_bench_compile(
                 now_unix_ms(),
                 sample_ms.len()
             ));
-            let (mut phases, _effective_mode) = compile_source_to_llvm_file_with_phase_timings(
-                &source,
-                opt_level,
-                &ll_path,
-            )?;
+            let (mut phases, _effective_mode) =
+                compile_source_to_llvm_file_with_phase_timings(&source, opt_level, &ll_path)?;
             if let Some(clang_exe) = clang.as_deref() {
                 let link_ms = link_ir_file_with_clang_ms(
                     &ll_path,
@@ -505,7 +540,11 @@ pub(crate) async fn cmd_bench_compile(
             }
             let _ = fs::remove_file(&ll_path);
 
-            let total_ms = phases.values().sum();
+            let total_ms = phases
+                .iter()
+                .filter(|(phase, _)| phase_is_timing_metric(phase))
+                .map(|(_, value)| *value)
+                .sum();
             sample_ms.push(total_ms);
             for (phase, value) in phases {
                 *phase_totals.entry(phase).or_insert(0.0) += value;
@@ -541,6 +580,8 @@ pub(crate) async fn cmd_bench_compile(
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
+            generic_cache_hit_ratio: None,
+            generic_rebuilt_instances: None,
             frontend_scheduler: Some(frontend_snapshot.frontend_scheduler.clone()),
             frontend_fallback_events: if frontend_snapshot.fallback_events.is_empty() {
                 None
@@ -566,7 +607,43 @@ pub(crate) async fn cmd_bench_compile(
     Ok(())
 }
 
-pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations: u32) -> Result<()> {
+fn mutate_incremental_source(case_name: &str, original: &str, iter: u32) -> String {
+    if case_name.contains("generic_body_change") {
+        let replacement = format!("x + {}", (iter % 5) + 2);
+        return original.replace("x + 1", &replacement);
+    }
+    if case_name.contains("generic_signature_change") {
+        return original
+            .replace(
+                "def generic_sig<T>(marker: T, x: i64) -> i64 { x + 1 }",
+                "def generic_sig<T>(marker: T, x: i64, y: i64) -> i64 { x + y }",
+            )
+            .replace("generic_sig(0, 1)", "generic_sig(0, 1, 2)")
+            .replace("generic_sig(1)", "generic_sig(1, 2)");
+    }
+    if case_name.contains("generic_new_instantiation") {
+        return original
+            .replace(
+                "    generic_inst(0, 1)",
+                "    let a = generic_inst(0, 1);\n    let b = generic_inst(true, 1);\n    a + b",
+            )
+            .replace("    generic_inst(1)", "    let v = 1;\n    generic_inst(v)");
+    }
+
+    let mut mutated = original.to_string();
+    mutated.push_str(&format!("\n// bench-incremental-mut-{}\n", iter));
+    mutated
+}
+
+fn phase_is_timing_metric(phase: &str) -> bool {
+    !phase.ends_with("_removed")
+}
+
+pub(crate) async fn cmd_bench_incremental(
+    suite: &str,
+    opt_level: u8,
+    iterations: u32,
+) -> Result<()> {
     let suite_path = resolve_bench_suite_path("incremental", suite)?;
     let cases = collect_bench_cases(&suite_path)?
         .into_iter()
@@ -603,8 +680,19 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
         let mut before_samples = Vec::new();
         let mut after_samples = Vec::new();
         let mut reused_module_samples = Vec::new();
+        let mut generic_hit_ratio_samples = Vec::new();
+        let mut generic_rebuilt_samples = Vec::new();
 
         for i in 0..iterations {
+            if let Some(cache_path) = build_cache_metadata_path(&case) {
+                let _ = fs::remove_file(cache_path);
+            }
+            if let Some(cache_path) = generic_cache_metadata_path(&case) {
+                let _ = fs::remove_file(cache_path);
+            }
+            if let Some(session_path) = frontend_session_metadata_path(&case) {
+                let _ = fs::remove_file(session_path);
+            }
             fs::write(&case, &original)
                 .into_diagnostic()
                 .map_err(|e| miette::miette!("failed to reset benchmark case: {}", e))?;
@@ -614,13 +702,11 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
                 case.to_string_lossy().to_string(),
                 "-O".to_string(),
                 opt_level.to_string(),
-                "--force-rebuild".to_string(),
             ];
             before_samples.push(measure_sgc_command_ms(&before_args)?);
             let before_modules = module_fingerprints_for_source(&case, &original);
 
-            let mut mutated = original.clone();
-            mutated.push_str(&format!("\n// bench-incremental-mut-{}\n", i));
+            let mutated = mutate_incremental_source(&case_name, &original, i);
             fs::write(&case, &mutated)
                 .into_diagnostic()
                 .map_err(|e| miette::miette!("failed to mutate benchmark case: {}", e))?;
@@ -636,6 +722,15 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
                 opt_level.to_string(),
             ];
             after_samples.push(measure_sgc_command_ms(&after_args)?);
+            if let Some(metrics) = read_workset_generic_metrics(&case, "build") {
+                let hit_ratio = if metrics.generic_total_instances == 0 {
+                    1.0
+                } else {
+                    metrics.generic_cache_hits as f64 / metrics.generic_total_instances as f64
+                };
+                generic_hit_ratio_samples.push(hit_ratio);
+                generic_rebuilt_samples.push(metrics.generic_rebuilt_instances);
+            }
         }
 
         fs::write(&case, original)
@@ -658,10 +753,32 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
             (reused_module_samples.iter().sum::<u32>() as f64 / reused_module_samples.len() as f64)
                 .round() as u32
         };
+        let generic_hit_ratio_avg = if generic_hit_ratio_samples.is_empty() {
+            None
+        } else {
+            Some(
+                generic_hit_ratio_samples.iter().sum::<f64>()
+                    / generic_hit_ratio_samples.len() as f64,
+            )
+        };
+        let generic_rebuilt_avg = if generic_rebuilt_samples.is_empty() {
+            None
+        } else {
+            Some(
+                (generic_rebuilt_samples.iter().sum::<u32>() as f64
+                    / generic_rebuilt_samples.len() as f64)
+                    .round() as u32,
+            )
+        };
 
         println!(
-            "  - {}: before={:.2}ms after={:.2}ms reused_modules={}",
-            case_name, before_avg, after_avg, reused_avg
+            "  - {}: before={:.2}ms after={:.2}ms reused_modules={} generic_hit_ratio={:.2} generic_rebuilt={}",
+            case_name,
+            before_avg,
+            after_avg,
+            reused_avg,
+            generic_hit_ratio_avg.unwrap_or(0.0),
+            generic_rebuilt_avg.unwrap_or(0),
         );
 
         results.push(BenchCaseResult {
@@ -676,6 +793,8 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
             before_ms: Some(before_avg),
             after_ms: Some(after_avg),
             cache_reused_modules: Some(reused_avg),
+            generic_cache_hit_ratio: generic_hit_ratio_avg,
+            generic_rebuilt_instances: generic_rebuilt_avg,
             frontend_scheduler: None,
             frontend_fallback_events: None,
             frontend_planner_trace: None,
@@ -696,7 +815,6 @@ pub(crate) async fn cmd_bench_incremental(suite: &str, opt_level: u8, iterations
     }
     Ok(())
 }
-
 
 pub(crate) async fn cmd_bench_reflection(
     suite: &str,
@@ -857,6 +975,8 @@ pub(crate) async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                generic_cache_hit_ratio: None,
+                generic_rebuilt_instances: None,
                 frontend_scheduler: None,
                 frontend_fallback_events: None,
                 frontend_planner_trace: None,
@@ -873,6 +993,8 @@ pub(crate) async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                generic_cache_hit_ratio: None,
+                generic_rebuilt_instances: None,
                 frontend_scheduler: None,
                 frontend_fallback_events: None,
                 frontend_planner_trace: None,
@@ -889,6 +1011,8 @@ pub(crate) async fn cmd_bench_reflection(
                 before_ms: None,
                 after_ms: None,
                 cache_reused_modules: None,
+                generic_cache_hit_ratio: None,
+                generic_rebuilt_instances: None,
                 frontend_scheduler: None,
                 frontend_fallback_events: None,
                 frontend_planner_trace: None,
@@ -903,5 +1027,3 @@ pub(crate) async fn cmd_bench_reflection(
     }
     Ok(())
 }
-
-

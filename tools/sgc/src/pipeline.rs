@@ -12,9 +12,190 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::BufWriter;
 use std::path::Path;
+use std::sync::atomic::{AtomicI8, Ordering};
 use std::time::Instant;
 
 use crate::{resolve_frontend_memory_mode, FrontendMemoryMode};
+
+const DEFAULT_HIR_PRUNE_MIN_FUNCTIONS: usize = 20_000;
+const DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS: usize = 120_000;
+const LARGE_PROJECT_MODE_AUTO: i8 = 0;
+const LARGE_PROJECT_MODE_ENABLED: i8 = 1;
+const LARGE_PROJECT_MODE_DISABLED: i8 = -1;
+
+static LARGE_PROJECT_MODE_OVERRIDE: AtomicI8 = AtomicI8::new(LARGE_PROJECT_MODE_AUTO);
+
+fn encode_large_project_mode_override(value: Option<bool>) -> i8 {
+    match value {
+        Some(true) => LARGE_PROJECT_MODE_ENABLED,
+        Some(false) => LARGE_PROJECT_MODE_DISABLED,
+        None => LARGE_PROJECT_MODE_AUTO,
+    }
+}
+
+fn decode_large_project_mode_override(value: i8) -> Option<bool> {
+    match value {
+        LARGE_PROJECT_MODE_ENABLED => Some(true),
+        LARGE_PROJECT_MODE_DISABLED => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn set_large_project_mode_override(value: Option<bool>) -> Option<bool> {
+    let previous = LARGE_PROJECT_MODE_OVERRIDE.swap(
+        encode_large_project_mode_override(value),
+        Ordering::Relaxed,
+    );
+    decode_large_project_mode_override(previous)
+}
+
+fn parse_large_project_mode_env(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" | "enable" | "enabled" => Some(true),
+        "0" | "false" | "off" | "no" | "disable" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
+fn large_project_optimization_enabled() -> bool {
+    if let Some(override_mode) =
+        decode_large_project_mode_override(LARGE_PROJECT_MODE_OVERRIDE.load(Ordering::Relaxed))
+    {
+        return override_mode;
+    }
+
+    std::env::var("SENGOO_LARGE_PROJECT_MODE")
+        .ok()
+        .and_then(|raw| parse_large_project_mode_env(&raw))
+        .unwrap_or(true)
+}
+
+fn hir_prune_min_functions() -> usize {
+    match std::env::var("SENGOO_HIR_PRUNE_MIN_FUNCTIONS")
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+    {
+        Some(0) => usize::MAX,
+        Some(value) => value,
+        None => DEFAULT_HIR_PRUNE_MIN_FUNCTIONS,
+    }
+}
+
+fn typeck_filter_min_functions() -> usize {
+    match std::env::var("SENGOO_TYPECK_FILTER_MIN_FUNCTIONS")
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+    {
+        Some(0) => usize::MAX,
+        Some(value) => value,
+        None => DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS,
+    }
+}
+
+fn hir_function_count(items: &[HIRItem]) -> usize {
+    items
+        .iter()
+        .filter(|item| matches!(item, HIRItem::Function(_)))
+        .count()
+}
+
+fn should_prune_unreachable_hir_in_default_mode(items: &[HIRItem]) -> bool {
+    if !large_project_optimization_enabled() {
+        return false;
+    }
+    hir_function_count(items) >= hir_prune_min_functions()
+}
+
+fn ast_function_count(program: &AstProgram) -> usize {
+    program
+        .decls
+        .iter()
+        .filter(|decl| matches!(decl.kind, AstDeclKind::Function(_)))
+        .count()
+}
+
+fn should_prune_unreachable_ast_in_default_mode(program: &AstProgram) -> bool {
+    if !large_project_optimization_enabled() {
+        return false;
+    }
+    ast_function_count(program) >= hir_prune_min_functions()
+}
+
+fn should_filter_typecheck_function_bodies_in_default_mode(program: &AstProgram) -> bool {
+    if !large_project_optimization_enabled() {
+        return false;
+    }
+    ast_function_count(program) >= typeck_filter_min_functions()
+}
+
+fn reachable_ast_function_names(program: &AstProgram) -> Option<HashSet<String>> {
+    let functions: Vec<_> = program
+        .decls
+        .iter()
+        .filter_map(|decl| match &decl.kind {
+            AstDeclKind::Function(fn_decl) => Some(fn_decl),
+            _ => None,
+        })
+        .collect();
+    if functions.is_empty() {
+        return Some(HashSet::new());
+    }
+
+    let mut index_by_name = HashMap::new();
+    for (idx, fn_decl) in functions.iter().enumerate() {
+        index_by_name.insert(fn_decl.name.name.clone(), idx);
+    }
+    let &main_index = index_by_name.get("main")?;
+
+    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
+    for (idx, fn_decl) in functions.iter().enumerate() {
+        edges[idx] = collect_ast_call_targets_from_block(&fn_decl.body, &index_by_name);
+    }
+
+    let mut reachable = vec![false; functions.len()];
+    let mut stack = vec![main_index];
+    while let Some(idx) = stack.pop() {
+        if reachable[idx] {
+            continue;
+        }
+        reachable[idx] = true;
+        for &target in &edges[idx] {
+            if !reachable[target] {
+                stack.push(target);
+            }
+        }
+    }
+
+    let mut names = HashSet::new();
+    for (idx, fn_decl) in functions.iter().enumerate() {
+        if reachable[idx] {
+            names.insert(fn_decl.name.name.clone());
+        }
+    }
+    Some(names)
+}
+
+fn prune_ast_functions_by_name_set(program: &mut AstProgram, keep_names: &HashSet<String>) -> usize {
+    let mut removed = 0usize;
+    let mut kept = Vec::with_capacity(program.decls.len());
+    for decl in std::mem::take(&mut program.decls) {
+        match decl.kind {
+            AstDeclKind::Function(fn_decl) => {
+                if keep_names.contains(&fn_decl.name.name) {
+                    kept.push(AstDecl {
+                        kind: AstDeclKind::Function(fn_decl),
+                        span: decl.span,
+                    });
+                } else {
+                    removed += 1;
+                }
+            }
+            _ => kept.push(decl),
+        }
+    }
+    program.decls = kept;
+    removed
+}
 
 pub(crate) fn compile_source(source: &str, opt_level: u8) -> std::result::Result<String, String> {
     compile_source_with_phase_timings(source, opt_level)
@@ -70,8 +251,10 @@ fn compile_frontend_to_mir_with_phase_timings(
         mir_ms,
         ast_prune_ms,
         ast_pruned_count,
+        ast_prune_applied,
         hir_prune_ms,
         hir_pruned_count,
+        hir_prune_applied,
     ) = {
         let parse_start = Instant::now();
         let mut program =
@@ -80,11 +263,31 @@ fn compile_frontend_to_mir_with_phase_timings(
 
         let mut ast_prune_ms = 0.0;
         let mut ast_pruned_count = 0usize;
+        let mut ast_prune_applied = false;
         if low_memory_mode {
             let ast_prune_start = Instant::now();
             ast_pruned_count =
                 prune_unreachable_ast_functions(program.as_mut().expect("program present"));
             ast_prune_ms = ast_prune_start.elapsed().as_secs_f64() * 1000.0;
+            ast_prune_applied = true;
+        }
+
+        let reachable_typecheck_bodies = if !low_memory_mode
+            && should_filter_typecheck_function_bodies_in_default_mode(
+                program.as_ref().expect("program present before typecheck"),
+            ) {
+            reachable_ast_function_names(program.as_ref().expect("program present before typecheck"))
+        } else {
+            None
+        };
+
+        if let Some(reachable) = reachable_typecheck_bodies.as_ref() {
+            let ast_prune_start = Instant::now();
+            let removed =
+                prune_ast_functions_by_name_set(program.as_mut().expect("program present"), reachable);
+            ast_prune_ms += ast_prune_start.elapsed().as_secs_f64() * 1000.0;
+            ast_pruned_count += removed;
+            ast_prune_applied = ast_prune_applied || removed > 0;
         }
 
         let typeck_start = Instant::now();
@@ -94,6 +297,17 @@ fn compile_frontend_to_mir_with_phase_timings(
             .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
         let mut type_env = Some(checker.into_env());
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
+        if !low_memory_mode
+            && should_prune_unreachable_ast_in_default_mode(
+                program.as_ref().expect("program present after typeck"),
+            )
+        {
+            let ast_prune_start = Instant::now();
+            ast_pruned_count =
+                prune_unreachable_ast_functions(program.as_mut().expect("program present"));
+            ast_prune_ms = ast_prune_start.elapsed().as_secs_f64() * 1000.0;
+            ast_prune_applied = true;
+        }
 
         let mir_start = Instant::now();
         let mut hir_module = lower_ast(
@@ -102,10 +316,18 @@ fn compile_frontend_to_mir_with_phase_timings(
         );
         let mut hir_prune_ms = 0.0;
         let mut hir_pruned_count = 0usize;
+        let mut hir_prune_applied = false;
         if low_memory_mode {
             let hir_prune_start = Instant::now();
             hir_pruned_count = prune_unreachable_hir_functions(&mut hir_module.items);
             hir_prune_ms = hir_prune_start.elapsed().as_secs_f64() * 1000.0;
+            hir_prune_applied = true;
+        } else if should_prune_unreachable_hir_in_default_mode(&hir_module.items) {
+            // Keep full typechecking, but skip lowering/codegen of cold unreachable functions.
+            let hir_prune_start = Instant::now();
+            hir_pruned_count = prune_unreachable_hir_functions(&mut hir_module.items);
+            hir_prune_ms = hir_prune_start.elapsed().as_secs_f64() * 1000.0;
+            hir_prune_applied = true;
         }
         if low_memory_mode {
             drop(type_env.take());
@@ -138,16 +360,20 @@ fn compile_frontend_to_mir_with_phase_timings(
             mir_ms,
             ast_prune_ms,
             ast_pruned_count,
+            ast_prune_applied,
             hir_prune_ms,
             hir_pruned_count,
+            hir_prune_applied,
         )
     };
 
     phases.insert("parse".to_string(), parse_ms);
     phases.insert("typeck".to_string(), typeck_ms);
-    if low_memory_mode {
+    if ast_prune_applied {
         phases.insert("ast_prune".to_string(), ast_prune_ms);
         phases.insert("ast_prune_removed".to_string(), ast_pruned_count as f64);
+    }
+    if low_memory_mode || hir_prune_applied {
         phases.insert("hir_prune".to_string(), hir_prune_ms);
         phases.insert("hir_prune_removed".to_string(), hir_pruned_count as f64);
     }

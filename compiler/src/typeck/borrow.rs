@@ -77,7 +77,10 @@ impl BorrowChecker {
     }
 
     /// Check a whole program.
-    pub fn check_program(&mut self, program: &Program) -> std::result::Result<(), Vec<BorrowError>> {
+    pub fn check_program(
+        &mut self,
+        program: &Program,
+    ) -> std::result::Result<(), Vec<BorrowError>> {
         for decl in &program.decls {
             if let DeclKind::Function(func) = &decl.kind {
                 self.check_block(&func.body);
@@ -231,10 +234,7 @@ impl BorrowChecker {
                 }
             }
             ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => self.check_block(block),
-            ExprKind::Continue
-            | ExprKind::Literal(_)
-            | ExprKind::Ident(_)
-            | ExprKind::Path(_) => {}
+            ExprKind::Continue | ExprKind::Literal(_) | ExprKind::Ident(_) | ExprKind::Path(_) => {}
         }
     }
 

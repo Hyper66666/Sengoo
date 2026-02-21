@@ -70,6 +70,30 @@ fn lower_decl(decl: &Decl, type_env: &TypeEnv) -> Result<HIRItem, String> {
     }
 }
 
+fn path_to_string(path: &ast::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.name.clone())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn lower_type_param(param: &ast::TypeParam, type_env: &TypeEnv) -> HIRTypeParam {
+    let bounds = param
+        .bounds
+        .iter()
+        .map(|bound| HIRTypeParamBound {
+            trait_path: path_to_string(&bound.path),
+        })
+        .collect::<Vec<_>>();
+    let default = param.default.as_ref().map(|ty| lower_type(ty, type_env));
+    HIRTypeParam {
+        name: param.name.name.clone(),
+        bounds,
+        default,
+    }
+}
+
 /// 降低函数声明
 fn lower_function(fn_decl: &ast::Function, type_env: &TypeEnv) -> Result<HIRFunction, String> {
     lower_function_with_self(fn_decl, type_env, None, None)
@@ -95,7 +119,7 @@ fn lower_function_with_self(
     let type_params = fn_decl
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     // 处理参数：如果有 self_param，先将其转换为普通参数
@@ -144,7 +168,7 @@ fn lower_struct(struct_decl: &ast::Struct, type_env: &TypeEnv) -> Result<HIRStru
     let type_params = struct_decl
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     let fields = struct_decl
@@ -179,7 +203,7 @@ fn lower_enum(enum_decl: &ast::Enum, type_env: &TypeEnv) -> Result<HIREnum, Stri
     let type_params = enum_decl
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     let variants = enum_decl
@@ -277,7 +301,10 @@ fn resolve_effective_class_fields(
 
     if let Some(parent_name) = class_parent_name(class_decl) {
         let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
-            format!("class `{}` extends unknown parent `{}`", class_name, parent_name)
+            format!(
+                "class `{}` extends unknown parent `{}`",
+                class_name, parent_name
+            )
         })?;
         let parent_fields = resolve_effective_class_fields(parent_decl, class_index, visiting)?;
         for parent_field in parent_fields {
@@ -336,7 +363,10 @@ fn resolve_effective_class_methods(
 
     let mut resolved_methods = if let Some(parent_name) = class_parent_name(class_decl) {
         let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
-            format!("class `{}` extends unknown parent `{}`", class_name, parent_name)
+            format!(
+                "class `{}` extends unknown parent `{}`",
+                class_name, parent_name
+            )
         })?;
         resolve_effective_class_methods(parent_decl, class_index, visiting)?
     } else {
@@ -385,7 +415,7 @@ fn lower_class_bundle(
     let type_params = class_decl
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     let mut field_visiting = HashSet::new();
@@ -419,13 +449,8 @@ fn lower_class_bundle(
     let impl_items = effective_methods
         .iter()
         .filter_map(|method| {
-            lower_function_with_self(
-                method,
-                type_env,
-                Some(self_ty.clone()),
-                Some(name.clone()),
-            )
-            .ok()
+            lower_function_with_self(method, type_env, Some(self_ty.clone()), Some(name.clone()))
+                .ok()
         })
         .collect::<Vec<_>>();
 
@@ -457,7 +482,7 @@ fn lower_trait(trait_decl: &ast::Trait, type_env: &TypeEnv) -> Result<HIRTrait, 
     let type_params = trait_decl
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     let items = trait_decl
@@ -571,7 +596,7 @@ fn lower_type_alias(
     let type_params = type_alias
         .type_params
         .iter()
-        .map(|p| p.name.name.clone())
+        .map(|p| lower_type_param(p, type_env))
         .collect();
 
     let alias = lower_type(&type_alias.ty, type_env);
@@ -615,6 +640,14 @@ fn lower_type(ast_type: &ast::Type, type_env: &TypeEnv) -> HIRType {
                 "()" | "unit" => HIRType::unit(),
                 _ => HIRType::named(name.to_string(), vec![]),
             }
+        }
+        ast::TypeKind::PathWithArgs { path, args } => {
+            let name = path
+                .as_simple()
+                .map(|ident| ident.name.as_str())
+                .unwrap_or("");
+            let lowered_args = args.iter().map(|arg| lower_type(arg, type_env)).collect();
+            HIRType::named(name.to_string(), lowered_args)
         }
         ast::TypeKind::Tuple(types) => {
             if types.is_empty() {

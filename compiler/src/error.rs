@@ -11,7 +11,10 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 #[derive(Debug, Diagnostic, Error)]
 pub enum CompileError {
     #[error("lex error: {0}")]
-    #[diagnostic(code(lexer::error), help("check invalid characters or malformed literals"))]
+    #[diagnostic(
+        code(lexer::error),
+        help("check invalid characters or malformed literals")
+    )]
     LexError(#[from] LexError),
 
     #[error("parse error: {0}")]
@@ -206,7 +209,10 @@ pub enum TypeError {
     UndefinedType(String),
 
     #[error("undefined method: {0}")]
-    #[diagnostic(code(typeck::undefined_method), help("check method name and receiver type"))]
+    #[diagnostic(
+        code(typeck::undefined_method),
+        help("check method name and receiver type")
+    )]
     UndefinedMethod(String),
 
     #[error("argument count mismatch: expected {expected}, found {found}")]

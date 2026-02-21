@@ -8,6 +8,72 @@ use crate::Result;
 use super::Parser;
 
 impl<'source> Parser<'source> {
+    fn check_any(&self, kinds: &[TokenKind]) -> bool {
+        kinds.iter().any(|kind| self.check(kind.clone()))
+    }
+
+    fn parse_trait_bounds(&mut self) -> Result<Vec<TraitBound>> {
+        let mut bounds = Vec::new();
+        loop {
+            let path = self.parse_path()?;
+            bounds.push(TraitBound::new(path));
+            if self.consume(TokenKind::Plus).is_none() {
+                break;
+            }
+        }
+        Ok(bounds)
+    }
+
+    fn merge_where_bounds(
+        &self,
+        type_params: &mut [TypeParam],
+        param_name: &Ident,
+        bounds: Vec<TraitBound>,
+    ) -> Result<()> {
+        if let Some(param) = type_params
+            .iter_mut()
+            .find(|param| param.name.name == param_name.name)
+        {
+            param.bounds.extend(bounds);
+            return Ok(());
+        }
+
+        Err(CompileError::ParseError(ParseError::InvalidPattern(
+            format!(
+                "invalid where clause: unknown type parameter `{}`",
+                param_name.name
+            ),
+        )))
+    }
+
+    fn parse_optional_where_clause(
+        &mut self,
+        type_params: &mut Vec<TypeParam>,
+        terminators: &[TokenKind],
+    ) -> Result<()> {
+        if self.consume(TokenKind::WhereKw).is_none() {
+            return Ok(());
+        }
+
+        while !self.is_eof() && !self.check_any(terminators) {
+            let param_name = self.expect_ident()?;
+            self.expect(TokenKind::Colon)?;
+            let bounds = self.parse_trait_bounds()?;
+            self.merge_where_bounds(type_params, &param_name, bounds)?;
+
+            if self.consume(TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+
+        if !self.check_any(terminators) {
+            return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                "invalid where clause: expected declaration body".to_string(),
+            )));
+        }
+
+        Ok(())
+    }
     /// 瑙ｆ瀽澹版槑
     pub(super) fn parse_decl(&mut self) -> Result<Decl> {
         let lo = self.current_span().lo;
@@ -97,7 +163,7 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
@@ -133,6 +199,8 @@ impl<'source> Parser<'source> {
         } else {
             None
         };
+
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
         let body = self.parse_block()?;
 
@@ -228,15 +296,13 @@ impl<'source> Parser<'source> {
             let name = self.expect_ident()?;
             let mut param = TypeParam::new(name);
             if self.consume(TokenKind::Colon).is_some() {
-                let mut bounds = Vec::new();
-                loop {
-                    let path = self.parse_path()?;
-                    bounds.push(TraitBound::new(path));
-                    if self.consume(TokenKind::Plus).is_none() {
-                        break;
-                    }
-                }
+                let bounds = self.parse_trait_bounds()?;
                 param = param.with_bounds(bounds);
+            }
+
+            if self.consume(TokenKind::Assign).is_some() || self.consume(TokenKind::Eq).is_some() {
+                let default_ty = self.parse_type()?;
+                param = param.with_default(default_ty);
             }
 
             params.push(param);
@@ -252,13 +318,18 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
         } else {
             Vec::new()
         };
+
+        self.parse_optional_where_clause(
+            &mut type_params,
+            &[TokenKind::LBrace, TokenKind::LParen, TokenKind::Semicolon],
+        )?;
 
         let mut fields = Vec::new();
 
@@ -322,13 +393,15 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
         } else {
             Vec::new()
         };
+
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
         self.expect(TokenKind::LBrace)?;
 
@@ -416,7 +489,7 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
@@ -445,6 +518,8 @@ impl<'source> Parser<'source> {
             None
         };
 
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+
         // V1: trait conformance is expressed through impl Trait for Type.
         let implements = Vec::new();
 
@@ -463,7 +538,13 @@ impl<'source> Parser<'source> {
             if self.consume(TokenKind::DefKw).is_some() {
                 // 鏂规硶 (Python 椋庢牸: def)
                 let name = self.expect_ident()?;
-                let type_params = Vec::new();
+                let mut type_params = if self.consume(TokenKind::Lt).is_some() {
+                    let params = self.parse_type_params()?;
+                    self.expect(TokenKind::Gt)?;
+                    params
+                } else {
+                    Vec::new()
+                };
 
                 self.expect(TokenKind::LParen)?;
 
@@ -489,6 +570,8 @@ impl<'source> Parser<'source> {
                 } else {
                     None
                 };
+
+                self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
                 let body = self.parse_block()?;
 
@@ -534,7 +617,7 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
@@ -556,6 +639,8 @@ impl<'source> Parser<'source> {
             }
         }
 
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+
         self.expect(TokenKind::LBrace)?;
 
         let mut items = Vec::new();
@@ -568,7 +653,13 @@ impl<'source> Parser<'source> {
             // 鍑芥暟鎴栧父閲?(Python 椋庢牸: def)
             if self.consume(TokenKind::DefKw).is_some() {
                 let name = self.expect_ident()?;
-                let type_params = Vec::new();
+                let mut type_params = if self.consume(TokenKind::Lt).is_some() {
+                    let params = self.parse_type_params()?;
+                    self.expect(TokenKind::Gt)?;
+                    params
+                } else {
+                    Vec::new()
+                };
 
                 self.expect(TokenKind::LParen)?;
 
@@ -594,6 +685,8 @@ impl<'source> Parser<'source> {
                 } else {
                     None
                 };
+
+                self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
                 let body = self.parse_block()?;
 
@@ -640,7 +733,7 @@ impl<'source> Parser<'source> {
     /// 瑙ｆ瀽 impl 鍧?
     fn parse_impl_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
@@ -659,6 +752,7 @@ impl<'source> Parser<'source> {
             // Extract the path from the first type (the trait)
             let trait_path = match first_type.kind {
                 TypeKind::Path(path) => path,
+                TypeKind::PathWithArgs { path, args } if args.is_empty() => path,
                 _ => {
                     return Err(CompileError::ParseError(
                         ParseError::expected_trait_path_in_impl(),
@@ -670,6 +764,8 @@ impl<'source> Parser<'source> {
             // `impl Type` 鈥?inherent impl, no trait
             (first_type, None)
         };
+
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
         self.expect(TokenKind::LBrace)?;
 
@@ -684,7 +780,13 @@ impl<'source> Parser<'source> {
             self.expect(TokenKind::DefKw)?;
 
             let name = self.expect_ident()?;
-            let type_params = Vec::new();
+            let mut type_params = if self.consume(TokenKind::Lt).is_some() {
+                let params = self.parse_type_params()?;
+                self.expect(TokenKind::Gt)?;
+                params
+            } else {
+                Vec::new()
+            };
 
             self.expect(TokenKind::LParen)?;
 
@@ -710,6 +812,8 @@ impl<'source> Parser<'source> {
             } else {
                 None
             };
+
+            self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
             let body = self.parse_block()?;
 
@@ -741,7 +845,7 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
-        let type_params = if self.consume(TokenKind::Lt).is_some() {
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
             params
@@ -749,7 +853,11 @@ impl<'source> Parser<'source> {
             Vec::new()
         };
 
-        self.expect(TokenKind::Eq)?;
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::Assign, TokenKind::Eq])?;
+
+        if self.consume(TokenKind::Assign).is_none() && self.consume(TokenKind::Eq).is_none() {
+            self.expect(TokenKind::Assign)?;
+        }
         let ty = self.parse_type()?;
         self.expect(TokenKind::Semicolon)?;
 
@@ -834,6 +942,4 @@ impl<'source> Parser<'source> {
             span: self.current_span(),
         }))
     }
-
 }
-

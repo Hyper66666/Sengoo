@@ -5,9 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader as StdBufReader, Read};
 use std::path::Path;
 
-use crate::{
-    ast_interface_signature, canonical_or_lossy, ModuleGraphSnapshot,
-};
+use crate::{ast_interface_signature, canonical_or_lossy, ModuleGraphSnapshot};
 
 pub(crate) fn source_fingerprint(source: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -29,9 +27,13 @@ pub(crate) fn implementation_fingerprint_from_normalized(normalized: &str) -> u6
 }
 
 pub(crate) fn file_fingerprint(path: &Path) -> Result<u64> {
-    let file = fs::File::open(path)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to read file for fingerprint {}: {}", path.display(), e))?;
+    let file = fs::File::open(path).into_diagnostic().map_err(|e| {
+        miette::miette!(
+            "failed to read file for fingerprint {}: {}",
+            path.display(),
+            e
+        )
+    })?;
     let mut reader = StdBufReader::new(file);
     let mut hasher = DefaultHasher::new();
     let mut buffer = [0u8; 8192];
@@ -108,7 +110,7 @@ pub(crate) fn resolve_root_hashes_for_request(
     input_path: &Path,
     source: &str,
     snapshot: &ModuleGraphSnapshot,
-    force_rebuild: bool,
+    _force_rebuild: bool,
     previous_root_implementation_hash: Option<u64>,
     previous_root_interface_hash: Option<u64>,
 ) -> (u64, u64) {
@@ -124,25 +126,16 @@ pub(crate) fn resolve_root_hashes_for_request(
         .map(|(_, body_hash)| body_hash)
         .unwrap_or_else(|| implementation_fingerprint(source));
 
-    let root_interface_hash = if force_rebuild {
-        resolve_root_interface_hash(
-            source,
-            root_implementation_hash,
-            previous_root_implementation_hash,
-            previous_root_interface_hash,
-        )
-    } else {
-        snapshot_hashes
-            .map(|(interface_hash, _)| interface_hash)
-            .unwrap_or_else(|| {
-                resolve_root_interface_hash(
-                    source,
-                    root_implementation_hash,
-                    previous_root_implementation_hash,
-                    previous_root_interface_hash,
-                )
-            })
-    };
+    let root_interface_hash = snapshot_hashes
+        .map(|(interface_hash, _)| interface_hash)
+        .unwrap_or_else(|| {
+            resolve_root_interface_hash(
+                source,
+                root_implementation_hash,
+                previous_root_implementation_hash,
+                previous_root_interface_hash,
+            )
+        });
 
     (root_interface_hash, root_implementation_hash)
 }

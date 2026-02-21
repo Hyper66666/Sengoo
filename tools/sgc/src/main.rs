@@ -5,6 +5,7 @@ use miette::{IntoDiagnostic, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::sync::atomic::AtomicI8;
 use std::sync::Arc;
@@ -19,6 +20,7 @@ mod daemon;
 mod fingerprint;
 mod frontend_helpers;
 mod frontend_snapshot;
+mod generic_cache;
 mod graph_builder;
 mod impact;
 mod interface;
@@ -32,6 +34,10 @@ mod symbol_intern;
 mod toolchain_discovery;
 mod workset;
 pub(crate) use commands::{cmd_build, cmd_run};
+#[cfg(test)]
+pub(crate) use commands::{
+    can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
+};
 
 #[cfg(test)]
 pub(crate) use bench::bench_root_dir;
@@ -61,6 +67,10 @@ pub(crate) use frontend_helpers::{
     resolve_frontend_job_count, run_frontend_tasks_deterministic,
 };
 pub(crate) use frontend_snapshot::{collect_module_graph_snapshot, module_fingerprints_for_source};
+pub(crate) use generic_cache::{
+    derive_generic_instance_plan, generic_instance_cache_path, generic_instance_hit_ratio,
+    load_generic_instance_cache, save_generic_instance_cache,
+};
 #[cfg(test)]
 pub(crate) use graph_builder::build_graph_v2_for_source;
 pub(crate) use graph_builder::build_graph_v2_with_function_fingerprints_for_source;
@@ -72,7 +82,8 @@ pub(crate) use impact::{
 };
 pub(crate) use interface::{
     ast_interface_signature, function_fingerprints_for_module, function_fingerprints_for_program,
-    function_signatures_for_module, interface_fingerprint_from_program,
+    function_signatures_for_module, generic_fingerprints_for_module,
+    generic_fingerprints_for_program, interface_fingerprint_from_program,
 };
 pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use native_toolchain::{
@@ -87,7 +98,7 @@ pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_link
 pub(crate) use pipeline::compile_source_with_phase_timings;
 pub(crate) use pipeline::{
     compile_source, compile_source_to_llvm_file_with_phase_timings,
-    compile_source_to_llvm_file_with_phase_timings_with_mode,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, set_large_project_mode_override,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;
@@ -265,6 +276,114 @@ fn maybe_low_memory_mode_hint(source_len_bytes: usize, low_memory_enabled: bool)
         "hint: low-memory environment detected ({:.0} MiB available). Consider `--low-memory` to reduce peak RSS for this build/run (trade-offs: weaker incremental reuse, single-thread frontend, lower MIR opt). source size: {:.2} MiB",
         available_mib, source_mib
     ))
+}
+
+fn symbol_fingerprint_collection_limit_bytes() -> usize {
+    std::env::var("SENGOO_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES)
+}
+
+fn should_collect_symbol_fingerprints(
+    source_len_bytes: usize,
+    _force_rebuild: bool,
+    low_memory_enabled: bool,
+) -> bool {
+    if low_memory_enabled {
+        return false;
+    }
+    let limit = symbol_fingerprint_collection_limit_bytes();
+    if limit == 0 {
+        return true;
+    }
+    source_len_bytes <= limit
+}
+
+fn large_project_prompt_source_threshold_bytes() -> usize {
+    std::env::var("SENGOO_LARGE_PROJECT_PROMPT_MIN_SOURCE_BYTES")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(4 * 1024 * 1024)
+}
+
+fn parse_large_project_mode_toggle(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "y" | "yes" | "on" | "true" | "enable" | "enabled" => Some(true),
+        "2" | "n" | "no" | "off" | "false" | "disable" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
+fn ci_environment_enabled() -> bool {
+    std::env::var("CI")
+        .ok()
+        .is_some_and(|raw| !matches!(raw.trim().to_ascii_lowercase().as_str(), "" | "0" | "false" | "off"))
+}
+
+fn maybe_choose_large_project_optimization_mode(
+    source_len_bytes: usize,
+    low_memory_enabled: bool,
+) -> Option<bool> {
+    if low_memory_enabled {
+        return None;
+    }
+    if source_len_bytes < large_project_prompt_source_threshold_bytes() {
+        return None;
+    }
+
+    if let Ok(raw) = std::env::var("SENGOO_LARGE_PROJECT_MODE") {
+        if let Some(enabled) = parse_large_project_mode_toggle(&raw) {
+            println!(
+                "large-project optimization mode: {} (from SENGOO_LARGE_PROJECT_MODE)",
+                if enabled { "enabled" } else { "disabled" }
+            );
+            return Some(enabled);
+        }
+        println!(
+            "large-project optimization mode: invalid SENGOO_LARGE_PROJECT_MODE='{}', fallback to interactive/default",
+            raw
+        );
+    }
+
+    if ci_environment_enabled() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        println!("large-project optimization mode: enabled (default in non-interactive/CI)");
+        return Some(true);
+    }
+
+    let source_mib = source_len_bytes as f64 / (1024.0 * 1024.0);
+    println!(
+        "detected large project input ({:.2} MiB). choose optimization mode:",
+        source_mib
+    );
+    println!("  1) enable (recommended)");
+    println!("  2) disable");
+    for _ in 0..3 {
+        print!("select [1/2, default 1]: ");
+        let _ = io::stdout().flush();
+
+        let mut line = String::new();
+        if io::stdin().read_line(&mut line).is_err() {
+            println!("input read failed, defaulting to enable");
+            return Some(true);
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            println!("large-project optimization mode: enabled");
+            return Some(true);
+        }
+        if let Some(enabled) = parse_large_project_mode_toggle(trimmed) {
+            println!(
+                "large-project optimization mode: {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
+            return Some(enabled);
+        }
+        println!("invalid selection, enter 1 (enable) or 2 (disable)");
+    }
+
+    println!("too many invalid inputs, defaulting to enable");
+    Some(true)
 }
 
 fn frontend_trace_enabled(explicit_flag: bool) -> bool {

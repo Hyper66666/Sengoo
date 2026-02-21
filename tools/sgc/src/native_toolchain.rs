@@ -44,7 +44,11 @@ fn runtime_object_cache_path(runtime_c_path: &Path, opt_level: u8) -> Result<Pat
     Ok(cache_dir.join(format!("runtime-{}-O{}.{}", key, opt_level, ext)))
 }
 
-pub(crate) fn ensure_runtime_object(clang_exe: &str, runtime_c: &str, opt_level: u8) -> Result<PathBuf> {
+pub(crate) fn ensure_runtime_object(
+    clang_exe: &str,
+    runtime_c: &str,
+    opt_level: u8,
+) -> Result<PathBuf> {
     let runtime_c_path = Path::new(runtime_c);
     let object_path = runtime_object_cache_path(runtime_c_path, opt_level)?;
     if object_path.exists() {

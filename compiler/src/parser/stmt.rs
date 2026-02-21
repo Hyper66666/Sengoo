@@ -1,38 +1,37 @@
-//! 璇彞瑙ｆ瀽
-
 use crate::ast::*;
 use crate::lexer::TokenKind;
 use crate::Result;
+use crate::Span;
 
 use super::Parser;
 
 impl<'source> Parser<'source> {
-    /// 瑙ｆ瀽鍧?
     pub(super) fn parse_block(&mut self) -> Result<Block> {
         let lo = self.current_span().lo;
         self.expect(TokenKind::LBrace)?;
 
         let mut stmts = Vec::new();
+        let mut closed_hi: Option<u32> = None;
 
         while !self.is_eof() {
-            if self.consume(TokenKind::RBrace).is_some() {
+            if let Some(rbrace) = self.consume(TokenKind::RBrace) {
+                closed_hi = Some(rbrace.span.hi);
                 break;
             }
 
             stmts.push(self.parse_stmt()?);
         }
 
-        Ok(Block::new(stmts, self.span_at(lo)))
+        let hi = closed_hi.unwrap_or_else(|| self.current_span().hi);
+        Ok(Block::new(stmts, Span::new(lo, hi)))
     }
 
-    /// 瑙ｆ瀽璇彞
     pub(super) fn parse_stmt(&mut self) -> Result<Stmt> {
         let lo = self.current_span().lo;
         let token = self.current().cloned();
 
         let kind = match token {
             Some(token) => match &token.kind {
-                // let 缁戝畾
                 TokenKind::LetKw => {
                     self.advance();
                     let name = self.expect_ident()?;
@@ -57,8 +56,6 @@ impl<'source> Parser<'source> {
                         value: value.map(Box::new),
                     }
                 }
-
-                // const 缁戝畾
                 TokenKind::ConstKw => {
                     self.advance();
                     let name = self.expect_ident()?;
@@ -77,22 +74,12 @@ impl<'source> Parser<'source> {
                         value: Box::new(value),
                     }
                 }
-
-                // 琛ㄨ揪寮忚鍙?
                 _ => {
                     let expr = self.parse_expr()?;
-                    let has_semi = self.consume(TokenKind::Semicolon).is_some();
-
-                    if has_semi {
-                        // 浠ュ垎鍙风粨灏剧殑璇彞涓嶄骇鐢熷€?
-                        StmtKind::Expr(Box::new(expr))
-                    } else {
-                        // 娌℃湁 鍒嗗彿锛岃〃杈惧紡浜х敓鍊?
-                        StmtKind::Expr(Box::new(expr))
-                    }
+                    self.consume(TokenKind::Semicolon);
+                    StmtKind::Expr(Box::new(expr))
                 }
             },
-
             None => {
                 return Err(crate::error::CompileError::ParseError(
                     crate::error::ParseError::UnexpectedEof,
@@ -103,30 +90,20 @@ impl<'source> Parser<'source> {
         Ok(Stmt::new(kind, self.span_at(lo)))
     }
 
-    /// 瑙ｆ瀽绫诲瀷
     pub(super) fn parse_type(&mut self) -> Result<Type> {
         let lo = self.current_span().lo;
-        let kind = self.parse_type_primary()?;
+        let mut kind = self.parse_type_primary()?;
 
-        // Parse and consume generic arguments syntax `Type<...>`.
-        // Current type AST does not retain generic args, so this is syntax-only.
         if self.consume(TokenKind::Lt).is_some() {
-            let mut depth = 1usize;
-            while depth > 0 {
-                let token = self.advance().ok_or(crate::error::CompileError::ParseError(
-                    crate::error::ParseError::UnexpectedEof,
-                ))?;
-                match token.kind {
-                    TokenKind::Lt => depth += 1,
-                    TokenKind::Gt => depth -= 1,
-                    TokenKind::Shr => {
-                        if depth >= 2 {
-                            depth -= 2;
-                        } else {
-                            depth = 0;
-                        }
-                    }
-                    _ => {}
+            match kind {
+                TypeKind::Path(path) => {
+                    let args = self.parse_type_args()?;
+                    kind = TypeKind::PathWithArgs { path, args };
+                }
+                _ => {
+                    return Err(crate::error::CompileError::ParseError(
+                        crate::error::ParseError::expected_type(),
+                    ));
                 }
             }
         }
@@ -134,12 +111,55 @@ impl<'source> Parser<'source> {
         Ok(Type::new(kind, self.span_at(lo)))
     }
 
+    fn parse_type_args(&mut self) -> Result<Vec<Type>> {
+        let mut args = Vec::new();
+
+        if self.consume_type_arg_end() {
+            return Ok(args);
+        }
+
+        loop {
+            args.push(self.parse_type()?);
+
+            if self.consume(TokenKind::Comma).is_some() {
+                continue;
+            }
+
+            if self.consume_type_arg_end() {
+                break;
+            }
+
+            return Err(crate::error::CompileError::ParseError(
+                crate::error::ParseError::expected_type(),
+            ));
+        }
+
+        Ok(args)
+    }
+
+    fn consume_type_arg_end(&mut self) -> bool {
+        if self.pending_type_arg_gt > 0 {
+            self.pending_type_arg_gt -= 1;
+            return true;
+        }
+
+        if self.consume(TokenKind::Gt).is_some() {
+            return true;
+        }
+
+        if self.consume(TokenKind::Shr).is_some() {
+            self.pending_type_arg_gt += 1;
+            return true;
+        }
+
+        false
+    }
+
     fn parse_type_primary(&mut self) -> Result<TypeKind> {
         let token = self.current().cloned();
 
         let kind = match token {
             Some(token) => match &token.kind {
-                // 鎷彿绫诲瀷 `(A, B, C)`
                 TokenKind::LParen => {
                     self.advance();
                     let mut types = Vec::new();
@@ -150,25 +170,16 @@ impl<'source> Parser<'source> {
                         }
 
                         types.push(self.parse_type()?);
-
                         self.consume(TokenKind::Comma);
                     }
 
-                    if types.len() == 1 {
-                        // `(Type)` 鍙槸鎷彿绫诲瀷
-                        TypeKind::Tuple(types)
-                    } else {
-                        TypeKind::Tuple(types)
-                    }
+                    TypeKind::Tuple(types)
                 }
-
-                // 鏁扮粍绫诲瀷 `[Type; N]` 鍜屽垏鐗囩被鍨?`[Type]`
                 TokenKind::LBracket => {
                     self.advance();
                     let elem = self.parse_type()?;
 
                     if self.consume(TokenKind::Semicolon).is_some() {
-                        // 鏁扮粍绫诲瀷
                         let len = if let Some(token) = self.current() {
                             match &token.kind {
                                 TokenKind::Int(Some(n)) if *n >= 0 => {
@@ -191,30 +202,20 @@ impl<'source> Parser<'source> {
                         self.expect(TokenKind::RBracket)?;
                         TypeKind::Array(Box::new(elem), len)
                     } else {
-                        // 鍒囩墖绫诲瀷
                         self.expect(TokenKind::RBracket)?;
                         TypeKind::Slice(Box::new(elem))
                     }
                 }
-
-                // 鎸囬拡绫诲瀷 `*mut Type` 鎴?`*const Type`
                 TokenKind::Star => {
                     self.advance();
-                    let is_mut = if self.consume(TokenKind::MutKw).is_some() {
-                        true
-                    } else if self.consume(TokenKind::ConstKw).is_some() {
-                        false
-                    } else {
-                        false
-                    };
+                    let is_mut = self.consume(TokenKind::MutKw).is_some();
+                    self.consume(TokenKind::ConstKw);
                     let base = self.parse_type()?;
                     TypeKind::Ptr {
                         base: Box::new(base),
                         is_mut,
                     }
                 }
-
-                // 寮曠敤绫诲瀷 `&mut Type` 鎴?`&Type`
                 TokenKind::And => {
                     self.advance();
                     let is_mut = self.consume(TokenKind::MutKw).is_some();
@@ -224,8 +225,6 @@ impl<'source> Parser<'source> {
                         is_mut,
                     }
                 }
-
-                // 鍑芥暟绫诲瀷 (Python 椋庢牸浣跨敤 def, 浣嗙被鍨嬭〃绀轰粛浣跨敤 fn)
                 TokenKind::FnKw => {
                     self.advance();
                     self.expect(TokenKind::LParen)?;
@@ -238,7 +237,6 @@ impl<'source> Parser<'source> {
                         }
 
                         params.push(self.parse_type()?);
-
                         self.consume(TokenKind::Comma);
                     }
 
@@ -250,32 +248,24 @@ impl<'source> Parser<'source> {
 
                     TypeKind::Fn { params, ret }
                 }
-
-                // Never 绫诲瀷 `!`
                 TokenKind::Not => {
                     self.advance();
                     TypeKind::Never
                 }
-
-                // Infer 绫诲瀷 `_`
                 TokenKind::Underscore => {
                     self.advance();
                     TypeKind::Infer
                 }
-
-                // 绠€鍗曡矾寰勭被鍨?
                 TokenKind::Ident => {
                     let path = self.parse_path()?;
                     TypeKind::Path(path)
                 }
-
                 _ => {
                     return Err(crate::error::CompileError::ParseError(
                         crate::error::ParseError::expected_type(),
                     ));
                 }
             },
-
             None => {
                 return Err(crate::error::CompileError::ParseError(
                     crate::error::ParseError::UnexpectedEof,

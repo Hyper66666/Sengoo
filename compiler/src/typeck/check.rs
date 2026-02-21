@@ -1,7 +1,5 @@
-//! 类型检查
-//!
-//! 对 AST 进行遍历和类型检查。
-
+//! 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡も偓閻ｏ繝骞忛弮鈧惄顖炲春閳ь剚銇勯幒鎴濐仼闁?//!
+//! 闂?AST 闂備礁鎼ˇ顐﹀疾濠婂懐鐭欓柡宥庡幑閳ь兛绶氶獮瀣晜閻ｅ苯濮搁柣搴＄畭閸庨亶骞婃惔銊ラ敜濠电姴娲﹂悡鏇熺節婵犲倸鏆熼柣蹇涗憾閹泛顫濋悡搴濆枈閻庤娲栧﹢閬嶅焵椤掑﹦绉甸柛瀣笒椤繑銈ｉ崘鈺冨幐闁诲繒鍋犻褔宕濆鈧弻?
 use crate::ast::pattern::Pattern;
 use crate::ast::Visibility;
 use crate::ast::*;
@@ -9,12 +7,12 @@ use crate::error::CompileError;
 use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
 use crate::typeck::infer::TypeInfer;
 use crate::typeck::r#trait::{type_key, FunctionTy, ImplRegistry, TraitRegistry};
-use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TypeckError};
+use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
 use std::collections::{HashMap, HashSet};
 
-// 内部类型检查结果（返回 TypeckError）
 type TyResult<T> = std::result::Result<T, TypeckError>;
+
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -23,19 +21,38 @@ struct ClassDeclInfo {
     methods: Vec<Function>,
 }
 
-/// 类型检查器
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+struct GenericTypeParamMeta {
+    name: String,
+    var_id: TyVarId,
+    bounds: Vec<String>,
+    default: Option<Ty>,
+}
+
+#[derive(Debug, Clone)]
+struct GenericFunctionMeta {
+    params: Vec<GenericTypeParamMeta>,
+}
+
+#[derive(Debug, Clone)]
+struct GenericTypeMeta {
+    params: Vec<GenericTypeParamMeta>,
+}
+
+/// 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡も偓閻ｏ繝骞忛弮鈧惄顖炲春閳ь剚銇勯幒鎴濐仼闁藉啰鍠栭弻鏇熷緞閸繂濮曢梺?#[derive(Debug)]
 pub struct TypeChecker {
-    /// 类型环境
+    /// 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡ゅ懏鍊婚柤鎭掑劚娴犮垹顪冮妶鍡欏闁告垵缍婂?
     env: TypeEnv,
-    /// 类型推断器
+    /// 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡ゅ懏鍊婚柦妯侯槺椤斿﹪姊洪棃娑辩叚闂傚嫬瀚伴幃鐐寸鐎ｎ偆鍘?
     infer: TypeInfer,
-    /// Trait 注册表
+    /// Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
     trait_registry: TraitRegistry,
-    /// Impl 注册表
+    /// Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     class_decls: HashMap<String, ClassDeclInfo>,
+    generic_function_metas: HashMap<String, GenericFunctionMeta>,
+    generic_type_metas: HashMap<String, GenericTypeMeta>,
 }
 
 impl TypeChecker {
@@ -49,10 +66,12 @@ impl TypeChecker {
             impl_registry: ImplRegistry::new(),
             struct_field_defs: HashMap::new(),
             class_decls: HashMap::new(),
+            generic_function_metas: HashMap::new(),
+            generic_type_metas: HashMap::new(),
         }
     }
 
-    /// 获取类型环境
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿楠炲啴骞庣粵瀣櫖濠殿喗锚閸氬鈻?
     pub fn env(&self) -> &TypeEnv {
         &self.env
     }
@@ -62,33 +81,35 @@ impl TypeChecker {
         self.env
     }
 
-    /// 获取类型推断器
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿閻涱噣骞掑Δ鈧儫闂佹寧姊婚弲顐﹀礉閻戣姤鈷?
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
     }
 
-    /// 获取 Trait 注册表
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
     pub fn trait_registry(&self) -> &TraitRegistry {
         &self.trait_registry
     }
 
-    /// 获取 Impl 注册表
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
     pub fn impl_registry(&self) -> &ImplRegistry {
         &self.impl_registry
     }
 
-    /// 获取 Trait 注册表的可变引用
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢姹?
     pub fn trait_registry_mut(&mut self) -> &mut TraitRegistry {
         &mut self.trait_registry
     }
 
-    /// 获取 Impl 注册表的可变引用
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢姹?
     pub fn impl_registry_mut(&mut self) -> &mut ImplRegistry {
         &mut self.impl_registry
     }
 
-    /// 检查整个程序
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備礁鎼Λ瀵稿緤閸撗呯煓濠㈣埖鍔﹂弫鍌炴煕閳ュ磭绠查柣鎾跺█閺?
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
+        self.generic_function_metas.clear();
+        self.generic_type_metas.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -107,6 +128,8 @@ impl TypeChecker {
         program: &Program,
         checked_function_names: &HashSet<String>,
     ) -> Result<()> {
+        self.generic_function_metas.clear();
+        self.generic_type_metas.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -120,39 +143,55 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 声明声明（添加到符号表）
+    /// 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸楅亶鏌熺€电浠ч柣婵嗙埣閺岋絽螖閳ь剟鎮ф繝鍥风稏闁哄稁鍘介悡銉︾箾閹寸儐鐒藉褎鐩弻娑滎槻闁挎洦浜滈悾宄扳攽鐎ｎ偄浜归梺鍦帛鐢偤宕㈤幒鏃傜＝濞达綀顕栧▓锝囩磼閻樺啿鐏遍柕鍥ㄥ姉閹瑰嫰濡搁敃鈧禒鎺戭渻閵堝骸骞楅悽顖滃仧缁?
     fn declare_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
                 let name = fn_decl.name.name.clone();
 
-                // 收集实际参数类型和返回类型，支持互递归函数调用
+                // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柟顔筋殜瀹曠兘顢橀悙鐗堫潟婵犵绱曢搹搴ㄥ垂鐠鸿櫣鏆﹂柨婵嗩槸绾惧吋绻涢幋鐐垫噭妞ゆ柨绉剁槐鎾寸瑹閸パ傚嚱濡炪倖娉﹂崶銊モ偓鐢告煟閹达絾顥夋俊鐐垫櫕閳ь剙鍘滈崑鎾绘煕閹板吀绨芥い鏂款樀濮婃椽骞栭悙鎻掑Б闂佺顑囬崰鎾诲箖椤曗偓椤㈡洟鏁冮埀顒勫垂閸岀偞鍊甸柨婵嗘噹椤ｅ磭绱掗埀顒佸緞閹邦厾鍘搁梺閫炲苯澧存い銏＄☉閳藉螣閸忓す銉モ攽閻愯尙鎽犵紒顔肩Ф閺侇噣鏁撻悩鑼姦濡炪倖甯婄粈浣虹箔閹烘梻纾界€广儱鎷戦煬顒傗偓瑙勬礃閻熲晠骞婇悙鍝勎ㄩ柨鏃傜摂閸熲偓闂備浇宕垫慨鎾敄閸涙潙鐤ù鍏兼綑閺?
                 let mut param_types = Vec::new();
                 let mut fallback = false;
-                for param in &fn_decl.params {
-                    match self.check_type(&param.ty) {
-                        Ok(ty) => param_types.push(ty),
-                        Err(_) => {
-                            fallback = true;
-                            break;
+                let mut generic_meta = Vec::new();
+                self.env.push_scope();
+                match self.bind_type_params_with_meta(&fn_decl.type_params) {
+                    Ok(meta) => {
+                        generic_meta = meta;
+                    }
+                    Err(_) => {
+                        fallback = true;
+                    }
+                }
+                if !fallback {
+                    for param in &fn_decl.params {
+                        match self.check_type(&param.ty) {
+                            Ok(ty) => param_types.push(ty),
+                            Err(_) => {
+                                fallback = true;
+                                break;
+                            }
                         }
                     }
                 }
 
                 if fallback {
-                    // 类型解析失败时回退到占位符
+                    self.env.pop_scope();
+                    // 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡や緡妲归幖娣灩閺嬪倿姊洪幐搴ｇ畵婵☆偅鐩崺鈧い鎺戝暙琚氶悗鍨緲鐎氼厼顭囪箛娑辨晝闁靛鍔栧ú鐔煎蓟閿熺姴绀冩い鎾跺枔閵嗘劕鈹戦悙鎻掔骇闁绘濞€瀵宕ㄩ弶鎴犲姦濡炪倖甯掔€氼剛绮堥崱娑欑厸濠㈣泛锕︽禒銏㈢磼閹邦収娈旈棁澶愭煥濠靛棙鍣介懖鏍ь渻?
                     let unit = self.env.unit_ty();
                     let ty = self.env.fn_ty(vec![], unit.clone());
-                    self.env.insert_fn(name, ty, vec![], unit);
+                    self.env.insert_fn(name.clone(), ty, vec![], unit);
+                    self.set_generic_function_meta(name, Vec::new());
                 } else {
                     let ret_ty = if let Some(ret) = &fn_decl.return_type {
                         self.check_type(ret).unwrap_or_else(|_| self.env.unit_ty())
                     } else {
                         self.env.unit_ty()
                     };
+                    self.env.pop_scope();
 
                     let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
-                    self.env.insert_fn(name, fn_ty, param_types, ret_ty);
+                    self.env.insert_fn(name.clone(), fn_ty, param_types, ret_ty);
+                    self.set_generic_function_meta(name, generic_meta);
                 }
             }
             DeclKind::Struct(struct_decl) => {
@@ -162,6 +201,8 @@ impl TypeChecker {
                     args: vec![],
                 });
                 self.env.insert_type(name, ty);
+                let type_meta = self.collect_generic_type_meta(&struct_decl.type_params);
+                self.set_generic_type_meta(struct_decl.name.name.clone(), type_meta);
                 let fields = struct_decl
                     .fields
                     .iter()
@@ -184,6 +225,8 @@ impl TypeChecker {
                     args: vec![],
                 });
                 self.env.insert_type(name, ty);
+                let type_meta = self.collect_generic_type_meta(&enum_decl.type_params);
+                self.set_generic_type_meta(enum_decl.name.name.clone(), type_meta);
             }
             DeclKind::Class(class_decl) => {
                 let name = class_decl.name.name.clone();
@@ -192,11 +235,18 @@ impl TypeChecker {
                     args: vec![],
                 });
                 self.env.insert_type(name, ty);
+                let type_meta = self.collect_generic_type_meta(&class_decl.type_params);
+                self.set_generic_type_meta(class_decl.name.name.clone(), type_meta);
             }
             DeclKind::TypeAlias(type_alias) => {
                 let name = type_alias.name.name.clone();
-                let ty = self.env.error_ty();
+                let ty = self.env.new_ty(TyKind::Adt {
+                    name: name.clone(),
+                    args: vec![],
+                });
                 self.env.insert_type(name, ty);
+                let type_meta = self.collect_generic_type_meta(&type_alias.type_params);
+                self.set_generic_type_meta(type_alias.name.name.clone(), type_meta);
             }
             DeclKind::Const(const_decl) => {
                 let name = const_decl.name.name.clone();
@@ -230,7 +280,35 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查声明
+    fn set_generic_function_meta(&mut self, name: String, params: Vec<GenericTypeParamMeta>) {
+        if params.is_empty() {
+            self.generic_function_metas.remove(&name);
+        } else {
+            self.generic_function_metas
+                .insert(name, GenericFunctionMeta { params });
+        }
+    }
+
+    fn set_generic_type_meta(&mut self, name: String, params: Vec<GenericTypeParamMeta>) {
+        if params.is_empty() {
+            self.generic_type_metas.remove(&name);
+        } else {
+            self.generic_type_metas
+                .insert(name, GenericTypeMeta { params });
+        }
+    }
+
+    fn collect_generic_type_meta(&mut self, type_params: &[TypeParam]) -> Vec<GenericTypeParamMeta> {
+        if type_params.is_empty() {
+            return Vec::new();
+        }
+        self.env.push_scope();
+        let result = self.bind_type_params_with_meta(type_params);
+        self.env.pop_scope();
+        result.unwrap_or_default()
+    }
+
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦瀵х粙鎺楀礉濞嗗浚鍤?
     fn check_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -424,7 +502,10 @@ impl TypeChecker {
         match state.get(class_name).copied() {
             Some(2) => return Ok(()),
             Some(1) => {
-                let cycle_start = stack.iter().position(|name| name == class_name).unwrap_or(0);
+                let cycle_start = stack
+                    .iter()
+                    .position(|name| name == class_name)
+                    .unwrap_or(0);
                 let mut cycle: Vec<String> = stack[cycle_start..].to_vec();
                 cycle.push(class_name.to_string());
                 return Err(TypeckError::Other(format!(
@@ -469,7 +550,10 @@ impl TypeChecker {
         }
 
         let class_info = self.class_decls.get(class_name).ok_or_else(|| {
-            TypeckError::Other(format!("internal error: class `{}` not collected", class_name))
+            TypeckError::Other(format!(
+                "internal error: class `{}` not collected",
+                class_name
+            ))
         })?;
 
         let mut merged = Vec::new();
@@ -516,7 +600,10 @@ impl TypeChecker {
         }
 
         let class_info = self.class_decls.get(class_name).ok_or_else(|| {
-            TypeckError::Other(format!("internal error: class `{}` not collected", class_name))
+            TypeckError::Other(format!(
+                "internal error: class `{}` not collected",
+                class_name
+            ))
         })?;
 
         let mut resolved = HashMap::new();
@@ -542,6 +629,12 @@ impl TypeChecker {
     }
 
     fn class_method_signature(&mut self, method: &Function) -> TyResult<FunctionTy> {
+        self.env.push_scope();
+        if let Err(err) = self.bind_type_params_with_meta(&method.type_params) {
+            self.env.pop_scope();
+            return Err(TypeckError::Other(err.to_string()));
+        }
+
         let mut param_types = Vec::new();
         for param in &method.params {
             param_types.push(self.check_type(&param.ty)?);
@@ -553,34 +646,47 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        Ok(FunctionTy::new(
+        let sig = FunctionTy::new(
             method.self_param.is_some(),
             param_types,
             ret_ty,
-        ))
+        );
+        self.env.pop_scope();
+        Ok(sig)
     }
     fn check_function_signature_decl(&mut self, fn_decl: &Function) -> Result<()> {
-        let mut param_types = Vec::new();
-        for param in &fn_decl.params {
-            let ty = self.check_type(&param.ty).map_err(CompileError::from)?;
-            param_types.push(ty);
-        }
+        self.env.push_scope();
+        let signature = (|| -> Result<(Vec<Ty>, Ty, Vec<GenericTypeParamMeta>)> {
+            let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
 
-        let ret_ty = if let Some(ret) = &fn_decl.return_type {
-            self.check_type(ret).map_err(CompileError::from)?
-        } else {
-            self.env.unit_ty()
-        };
+            let mut param_types = Vec::new();
+            for param in &fn_decl.params {
+                let ty = self.check_type(&param.ty).map_err(CompileError::from)?;
+                param_types.push(ty);
+            }
 
+            let ret_ty = if let Some(ret) = &fn_decl.return_type {
+                self.check_type(ret).map_err(CompileError::from)?
+            } else {
+                self.env.unit_ty()
+            };
+
+            Ok((param_types, ret_ty, generic_meta))
+        })();
+        self.env.pop_scope();
+
+        let (param_types, ret_ty, generic_meta) = signature?;
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
             .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
+        self.set_generic_function_meta(fn_decl.name.name.clone(), generic_meta);
         Ok(())
     }
 
-    /// 检查函数声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦鎮堕崐婵囩鐠轰警鍤曟い鎰剁畱缁狙囨煕閺嶇數纾块柣顓燁殜濮?
     fn check_function_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
+        let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
 
         let mut param_types = Vec::new();
         for param in &fn_decl.params {
@@ -595,7 +701,7 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        // 预注册函数签名，支持递归调用
+        // 婵犵妲呴崑鍛熆濡皷鍋撳鐓庡籍鐎殿噮鍋婇幃娆撳传閸曨収妲伴梺璇茬箳閸嬬姴螞閸曨倣鎺楀箛閻楀牏鍘告繛杈剧悼閹虫捇藟鐎ｎ偁浜滈柟鐑樻煥閸樺鈧娲忛崕閬嶎敇閼规壆鐤€闁哄洨濯Σ鐑芥⒒娴ｅ鈧偓闁稿鎸婚妵鍕冀閵娧€妲堥梺浼欏瘜閸ｏ絽顫忓ú顏嶆晝闁挎繂鎳愰悷銊х磽閸屾氨孝闁挎洩绠撻獮蹇涱敃閿曗偓缁€鍐┿亜韫囨挻鍣烘繛?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env.insert_fn(
             fn_decl.name.name.clone(),
@@ -607,8 +713,7 @@ impl TypeChecker {
         // Function.body is always present (Block)
         let body_ty = self.check_block(&fn_decl.body)?;
 
-        // 特殊处理：对于 main 函数，如果返回类型是整数类型且函数体返回 ()，则允许
-        // 这样 main 函数可以省略最后的 return 0
+        // 闂傚倷鑳剁划顖炪€冩径鎰剁稏濠㈣埖鍔栭崑鈺呮煃閸濆嫬鈧摜娆㈤悙鐑樼厱闁哄洢鍔岄獮妤呮煕婵犲嫬浠遍柡灞诲妼閳藉鈻庨幒鎴婵＄偑鍊栧ú锕傚窗濡ゅ啰鐭?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弬鍨倯闁哄拋鍓熼幃姗€鎮欓悽鍨啒濠电偛鐪伴崐婵嬪蓟閿涘嫧鍋撻敐搴′簽闁活厼娴风槐鎺旂磼濡櫣浼岄悗瑙勬礀閻栧ジ骞冨▎鎰闁告劗鍋撻拺澶愭⒒娴ｈ鍋犻柛鏂跨焸椤㈡牠宕卞顫秮楠炴牗鎷呴崨濠勨偓顒勬煟鎼淬垻鈯曢拑杈ㄧ箾閸繂顣崇紒杈ㄥ浮椤㈡洟濡烽鍏碱唲闂備浇顕ч柊锝夊绩鏉堚晝鐭欏鑸靛姇濡﹢鏌涢…鎴濇灍闁伙讣缍佸鐑樻姜閹殿喚鐛㈠銈忕秶婵″洨妲愰悙纰樺亾閿濆骸浜濆ù婧垮€濋弻锟犲磼濞戞﹩鍤嬬紓浣插亾闁?()闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仜閸ㄥ倹銇勯弽顐粶缂佲偓閸屾褰掓晲閸モ晜鎲橀梺?        // 闂備礁鎼ˇ顐﹀疾濠婂牊鍋￠柨鏇炲€归崑?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弮鍌氬付闁活厽顨嗛妵鍕冀閵娧勫櫏缂備降鍔嬮崡鎶藉蓟閿濆鏁傞柛鎰靛幖閸橈繝姊洪崫鍕棡闁告梹鐟ラ锝夋偨缁嬭法鍔﹀銈嗗笒鐎氼剛鎲撮敃鍌氱閺夊牆澧界粙濠氭煟?return 0
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
             && matches!(ret_ty.kind, TyKind::Int(_));
@@ -621,17 +726,74 @@ impl TypeChecker {
 
         self.env.pop_scope();
 
-        // 重新注册（覆盖预注册），确保最终签名正确
+        // 闂傚倸鍊烽悞锕併亹閸愵亞鐭撻柣銏㈩焾閽冪喎鈹戦悩鎻掆偓鐢稿几閺嶎厽鐓忓┑鐐茬仢閸旀岸鏌￠崒妤€浜鹃梻鍌欑劍鐎笛呯矙閹达附鍋嬮柟鎷屽焽閳ь剙鎳橀、鏇㈡晜閽樺澹嗛梻浣告惈缁嬩線宕ｆ惔銊ユ辈闁哄洨鍠撶粻鎯ь熆鐠鸿櫣澧曞┑鈥炽偢閺屾盯鎮欓幍顔剧厯闂佽桨绀佺粔闈涱嚗閸曨偀妲堟慨姗€纭稿Σ椋庣磽娴ｉ缚妾搁柛娆忛叄瀹曚即寮撮悩鍐插簥濠殿喗顭堝▔娑氣偓姘樀閺屽秷顧侀柛鎾寸〒濡叉劙骞掑Δ鈧柋鍥煏韫囧﹥娅呭┑顔诲嵆濮婃椽宕ㄦ繝鍛棟缂備礁顦遍弫濠氥€佸Δ鈧…銊╁川椤旂厧骞?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
             .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
+        self.set_generic_function_meta(fn_decl.name.name.clone(), generic_meta);
 
         Ok(())
     }
 
-    /// 检查结构体声明
+    fn bind_type_params_with_meta(
+        &mut self,
+        type_params: &[TypeParam],
+    ) -> Result<Vec<GenericTypeParamMeta>> {
+        let mut metas = Vec::with_capacity(type_params.len());
+        for type_param in type_params {
+            let fresh_var = self.env.new_ty_var();
+            let var_id = match fresh_var.kind {
+                TyKind::Var(id) => id,
+                _ => {
+                    return Err(CompileError::from(TypeckError::Other(
+                        "internal error: expected fresh type variable".to_string(),
+                    )))
+                }
+            };
+            self.env.insert_type(type_param.name.name.clone(), fresh_var);
+            metas.push(GenericTypeParamMeta {
+                name: type_param.name.name.clone(),
+                var_id,
+                bounds: Vec::new(),
+                default: None,
+            });
+        }
+
+        // Resolve defaults and trait bound paths inside the same generic scope.
+        for (type_param, meta) in type_params.iter().zip(metas.iter_mut()) {
+            for bound in &type_param.bounds {
+                let trait_name = bound
+                    .path
+                    .as_simple()
+                    .map(|ident| ident.name.clone())
+                    .ok_or_else(|| {
+                        CompileError::from(TypeckError::Other(
+                            "unsupported trait bound path in type parameter".to_string(),
+                        ))
+                    })?;
+                if !matches!(
+                    self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
+                    Some(SymbolKind::Trait { .. })
+                ) {
+                    return Err(CompileError::from(TypeckError::UndefinedType {
+                        name: trait_name,
+                    }));
+                }
+                meta.bounds.push(trait_name);
+            }
+
+            if let Some(default_ty) = &type_param.default {
+                meta.default = Some(self.check_type(default_ty).map_err(CompileError::from)?);
+            }
+        }
+
+        Ok(metas)
+    }
+
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戠紓鍌欑贰閸犳捇宕濋幋婵愬殨闁归棿绀佺粈瀣亜韫囨挻顥犲鍥р攽閻橆喖鐏╂繝鈧潏銊︽珷婵°倐鍋撻崡?
     fn check_struct_decl(&mut self, struct_decl: &Struct) -> Result<()> {
         self.env.push_scope();
+        self.bind_type_params_with_meta(&struct_decl.type_params)?;
 
         for field in &struct_decl.fields {
             self.check_type(&field.ty)?;
@@ -641,8 +803,10 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查枚举声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備浇顕х换鎰洪敂鍓х煓濠㈣埖鍔曠粻姘辨喐濠靛牊顫曢柨婵嗩槹閻?
     fn check_enum_decl(&mut self, enum_decl: &Enum) -> Result<()> {
+        self.env.push_scope();
+        self.bind_type_params_with_meta(&enum_decl.type_params)?;
         for variant in &enum_decl.variants {
             for field in &variant.fields {
                 match field {
@@ -655,12 +819,14 @@ impl TypeChecker {
                 }
             }
         }
+        self.env.pop_scope();
         Ok(())
     }
 
-    /// 检查类声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梺鑽ゅ仦閸戝綊宕戦崨顖滃崥闁绘柨鍚嬮崑瀣煕椤愩倕娅忔繛?
     fn check_class_decl(&mut self, class_decl: &Class) -> Result<()> {
         self.env.push_scope();
+        self.bind_type_params_with_meta(&class_decl.type_params)?;
 
         for member in &class_decl.members {
             match member {
@@ -679,6 +845,7 @@ impl TypeChecker {
 
     fn check_class_method_decl(&mut self, class_name: &str, method: &Function) -> Result<()> {
         self.env.push_scope();
+        self.bind_type_params_with_meta(&method.type_params)?;
 
         if method.self_param.is_some() {
             let self_ty = self
@@ -716,11 +883,14 @@ impl TypeChecker {
     }
 
     fn check_type_alias(&mut self, type_alias: &TypeAlias) -> Result<()> {
+        self.env.push_scope();
+        self.bind_type_params_with_meta(&type_alias.type_params)?;
         self.check_type(&type_alias.ty)?;
+        self.env.pop_scope();
         Ok(())
     }
 
-    /// 检查常量声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶绮悧鏇㈡偉婵傜钃熺€光偓閸愵亞鏉搁梺鐟扮仢鐎氼噣鎯屽Δ鍛拺?
     fn check_const_decl(&mut self, const_decl: &Const) -> Result<()> {
         let ty = self.check_type(&const_decl.ty)?;
         let value_ty = self.check_expr(&const_decl.value)?;
@@ -730,7 +900,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查静态变量声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶曟繝鐢靛仧椤戞洟宕愬┑瀣祦闁逞屽墮闇夐柨婵嗘祩閻掑墽绱撳鍕獢婵﹥妞介獮鎾诲箳閺冨偆鍞堕梻浣瑰缁嬫帡宕濆▎蹇ｅ殨?
     fn check_static_decl(&mut self, static_decl: &Static) -> Result<()> {
         let ty = self.check_type(&static_decl.ty)?;
         // Static.value is always present
@@ -741,11 +911,12 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查 Trait 声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Trait 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸?
     fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         use crate::typeck::r#trait::{MethodSig, TraitInfo};
 
         self.env.push_scope();
+        self.bind_type_params_with_meta(&trait_decl.type_params)?;
 
         let mut trait_info = TraitInfo::new(
             trait_decl.name.name.clone(),
@@ -757,11 +928,13 @@ impl TypeChecker {
             matches!(trait_decl.vis, Visibility::Public),
         );
 
-        // 收集方法签名
+        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х缂備胶铏庨崢鍏兼櫠鎼达絽鍨濋柣銏㈩焾缁犳氨鎲告惔銊ョ９?
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
-                    // 收集参数类型
+                    self.env.push_scope();
+                    self.bind_type_params_with_meta(&method.type_params)?;
+                    // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡灞剧☉閳诲氦绠涢幘顖氫壕鐟滅増甯掑Ч鏌ユ煟閺冨洦顏犻悘蹇曟暬閹綊宕堕鍕闂?
                     let mut param_types = Vec::new();
                     let mut has_self = false;
 
@@ -774,7 +947,7 @@ impl TypeChecker {
                         }
                     }
 
-                    // 获取返回类型
+                    // 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷锝呭濞存嚎鍊濋弻锟犲磼濞戞﹩鍤嬬紓浣插亾闁逞屽墰缁辨挻绗熼崶褌鍑藉銈嗘肠閸ャ劌鈧?
                     let ret_ty = if let Some(ret) = &method.return_type {
                         self.check_type(ret)?
                     } else {
@@ -789,6 +962,7 @@ impl TypeChecker {
                         MethodSig::new(has_self, param_types, ret_ty)
                     };
                     trait_info.add_method(method.name.name.clone(), sig);
+                    self.env.pop_scope();
                 }
                 TraitItem::Const(const_decl) => {
                     let ty = self.check_type(&const_decl.ty)?;
@@ -806,12 +980,13 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查 Impl 声明
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Impl 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸?
     fn check_impl_decl(&mut self, impl_decl: &Impl) -> Result<()> {
         use crate::typeck::r#trait::type_key;
         use crate::typeck::r#trait::{FunctionTy, ImplInfo};
 
         self.env.push_scope();
+        self.bind_type_params_with_meta(&impl_decl.type_params)?;
 
         let target_ty = self.check_type(&impl_decl.target_type)?;
         let target_key = type_key(&target_ty);
@@ -824,8 +999,10 @@ impl TypeChecker {
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name);
 
-        // 收集方法
+        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х缂?
         for item in &impl_decl.items {
+            self.env.push_scope();
+            self.bind_type_params_with_meta(&item.type_params)?;
             let mut param_types = Vec::new();
             let mut has_self = false;
 
@@ -848,9 +1025,10 @@ impl TypeChecker {
                 item.name.name.clone(),
                 FunctionTy::new(has_self, param_types, ret_ty),
             );
+            self.env.pop_scope();
         }
 
-        // 注册到 Impl 注册表
+        // 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩炴繛瀵稿Т椤戝懐绮?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
         if let Some(trait_name) = impl_info.trait_name.clone() {
             // For trait impls, also register default methods from the trait
             // definition that are not overridden by the impl.
@@ -862,7 +1040,7 @@ impl TypeChecker {
                     if !impl_info.has_method(method_name) {
                         if method_sig.has_default {
                             // This method has a default implementation in the trait
-                            // and is not overridden — register it in the impl info
+                            // and is not overridden 闂?register it in the impl info
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::new(
@@ -901,51 +1079,184 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查类型
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梺鑽ゅ仦閸戝綊宕戞繝鍌滄殾?
+    fn path_name(&self, path: &Path) -> TyResult<String> {
+        path.as_simple().map(|ident| ident.name.clone()).ok_or_else(|| {
+            TypeckError::UndefinedType {
+                name: path
+                    .segments
+                    .iter()
+                    .map(|seg| seg.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            }
+        })
+    }
+
+    fn builtin_type_by_name(&mut self, name: &str) -> Option<Ty> {
+        Some(match name {
+            "()" => self.env.unit_ty(),
+            "bool" => self.env.bool_ty(),
+            "i8" => self.env.int_ty(IntKind::I8),
+            "i16" => self.env.int_ty(IntKind::I16),
+            "i32" => self.env.int_ty(IntKind::I32),
+            "i64" => self.env.int_ty(IntKind::I64),
+            "i128" => self.env.int_ty(IntKind::I128),
+            "isize" => self.env.int_ty(IntKind::ISize),
+            "u8" => self.env.int_ty(IntKind::U8),
+            "u16" => self.env.int_ty(IntKind::U16),
+            "u32" => self.env.int_ty(IntKind::U32),
+            "u64" => self.env.int_ty(IntKind::U64),
+            "u128" => self.env.int_ty(IntKind::U128),
+            "usize" => self.env.int_ty(IntKind::USize),
+            "f32" => self.env.float_ty(FloatKind::F32),
+            "f64" => self.env.float_ty(FloatKind::F64),
+            "str" => self.env.str_ty(),
+            "char" => self.env.new_ty(TyKind::Char),
+            "!" => self.env.never_ty(),
+            _ => return None,
+        })
+    }
+
+    fn substitute_ty_vars(&self, ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
+        match &ty.kind {
+            TyKind::Var(var_id) => subst.get(var_id).cloned().unwrap_or_else(|| ty.clone()),
+            TyKind::Tuple(types) => Ty {
+                id: ty.id,
+                kind: TyKind::Tuple(
+                    types
+                        .iter()
+                        .map(|inner| self.substitute_ty_vars(inner, subst))
+                        .collect(),
+                ),
+            },
+            TyKind::Array(elem, len) => Ty {
+                id: ty.id,
+                kind: TyKind::Array(Box::new(self.substitute_ty_vars(elem, subst)), *len),
+            },
+            TyKind::Slice(elem) => Ty {
+                id: ty.id,
+                kind: TyKind::Slice(Box::new(self.substitute_ty_vars(elem, subst))),
+            },
+            TyKind::Ref(is_mut, inner) => Ty {
+                id: ty.id,
+                kind: TyKind::Ref(*is_mut, Box::new(self.substitute_ty_vars(inner, subst))),
+            },
+            TyKind::Ptr(inner) => Ty {
+                id: ty.id,
+                kind: TyKind::Ptr(Box::new(self.substitute_ty_vars(inner, subst))),
+            },
+            TyKind::Fn {
+                params,
+                ret,
+                is_variadic,
+            } => Ty {
+                id: ty.id,
+                kind: TyKind::Fn {
+                    params: params
+                        .iter()
+                        .map(|param| self.substitute_ty_vars(param, subst))
+                        .collect(),
+                    ret: Box::new(self.substitute_ty_vars(ret, subst)),
+                    is_variadic: *is_variadic,
+                },
+            },
+            TyKind::Adt { name, args } => Ty {
+                id: ty.id,
+                kind: TyKind::Adt {
+                    name: name.clone(),
+                    args: args
+                        .iter()
+                        .map(|arg| self.substitute_ty_vars(arg, subst))
+                        .collect(),
+                },
+            },
+            _ => ty.clone(),
+        }
+    }
+
+    fn resolve_generic_type_args(
+        &self,
+        type_name: &str,
+        meta: &GenericTypeMeta,
+        explicit_args: Vec<Ty>,
+    ) -> TyResult<Vec<Ty>> {
+        if explicit_args.len() > meta.params.len() {
+            return Err(TypeckError::Other(format!(
+                "type {} expects at most {} generic arguments, found {}",
+                type_name,
+                meta.params.len(),
+                explicit_args.len()
+            )));
+        }
+
+        let mut resolved = Vec::with_capacity(meta.params.len());
+        let mut subst = HashMap::<TyVarId, Ty>::new();
+
+        for (index, param) in meta.params.iter().enumerate() {
+            let current = if let Some(arg) = explicit_args.get(index) {
+                arg.clone()
+            } else if let Some(default_ty) = &param.default {
+                self.substitute_ty_vars(default_ty, &subst)
+            } else {
+                return Err(TypeckError::Other(format!(
+                    "missing generic argument {} for type {}",
+                    param.name, type_name
+                )));
+            };
+
+            for bound in &param.bounds {
+                let concrete_key = type_key(&current);
+                if !self.impl_registry.implements_trait(bound, &concrete_key) {
+                    return Err(TypeckError::Other(format!(
+                        "generic constraint violated in type {}: {} does not implement {} for {}",
+                        type_name, current, bound, param.name
+                    )));
+                }
+            }
+
+            subst.insert(param.var_id, current.clone());
+            resolved.push(current);
+        }
+
+        Ok(resolved)
+    }
+
+    fn check_path_type(&mut self, path: &Path, explicit_args: Vec<Ty>) -> TyResult<Ty> {
+        let name = self.path_name(path)?;
+
+        if let Some(meta) = self.generic_type_metas.get(&name).cloned() {
+            let args = self.resolve_generic_type_args(&name, &meta, explicit_args)?;
+            return Ok(self.env.new_ty(TyKind::Adt { name, args }));
+        }
+
+        if !explicit_args.is_empty() {
+            return Err(TypeckError::Other(format!("type {} is not generic", name)));
+        }
+
+        if let Some(symbol) = self.env.lookup(&name) {
+            if let Some(ty) = symbol.get_ty() {
+                return Ok(ty.clone());
+            }
+        }
+
+        if let Some(ty) = self.builtin_type_by_name(&name) {
+            return Ok(ty);
+        }
+
+        Err(TypeckError::UndefinedType { name })
+    }
+
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梺鑽ゅ仦閸戝綊宕戞繝鍌滄殾?
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
-            TypeKind::Path(path) => {
-                let name = path
-                    .as_simple()
-                    .map(|ident| ident.name.as_str())
-                    .unwrap_or("");
-
-                if let Some(symbol) = self.env.lookup(name) {
-                    if let Some(ty) = symbol.get_ty() {
-                        ty.clone()
-                    } else {
-                        return Err(TypeckError::UndefinedType {
-                            name: name.to_string(),
-                        });
-                    }
-                } else {
-                    match name {
-                        "()" => self.env.unit_ty(),
-                        "bool" => self.env.bool_ty(),
-                        "i8" => self.env.int_ty(IntKind::I8),
-                        "i16" => self.env.int_ty(IntKind::I16),
-                        "i32" => self.env.int_ty(IntKind::I32),
-                        "i64" => self.env.int_ty(IntKind::I64),
-                        "i128" => self.env.int_ty(IntKind::I128),
-                        "isize" => self.env.int_ty(IntKind::ISize),
-                        "u8" => self.env.int_ty(IntKind::U8),
-                        "u16" => self.env.int_ty(IntKind::U16),
-                        "u32" => self.env.int_ty(IntKind::U32),
-                        "u64" => self.env.int_ty(IntKind::U64),
-                        "u128" => self.env.int_ty(IntKind::U128),
-                        "usize" => self.env.int_ty(IntKind::USize),
-                        "f32" => self.env.float_ty(FloatKind::F32),
-                        "f64" => self.env.float_ty(FloatKind::F64),
-                        "str" => self.env.str_ty(),
-                        "char" => self.env.new_ty(TyKind::Char),
-                        "!" => self.env.never_ty(),
-                        _ => {
-                            return Err(TypeckError::UndefinedType {
-                                name: name.to_string(),
-                            })
-                        }
-                    }
-                }
+            TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
+            TypeKind::PathWithArgs { path, args } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.check_type(arg))
+                    .collect::<TyResult<Vec<_>>>()?;
+                self.check_path_type(path, args)?
             }
             TypeKind::Tuple(types) => {
                 let elem_types = types
@@ -1002,7 +1313,6 @@ impl TypeChecker {
         })
     }
 
-    /// 检查表达式
     fn check_expr(&mut self, expr: &Expr) -> TyResult<Ty> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.check_literal(lit),
@@ -1046,9 +1356,11 @@ impl TypeChecker {
                     .map(|ident| ident.name.clone())
                     .unwrap_or_default();
 
-                let field_defs = self.struct_field_defs.get(&name).cloned().ok_or_else(|| {
-                    TypeckError::UndefinedType { name: name.clone() }
-                })?;
+                let field_defs = self
+                    .struct_field_defs
+                    .get(&name)
+                    .cloned()
+                    .ok_or_else(|| TypeckError::UndefinedType { name: name.clone() })?;
 
                 let mut field_types: HashMap<String, Ty> = HashMap::new();
                 for (field_name, field_ty) in field_defs {
@@ -1094,10 +1406,10 @@ impl TypeChecker {
         }
     }
 
-    /// 检查字面量
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶鍎垫慨宥夊炊椤垶顥堥梻渚€娼х换鍫ュ磹閺囩偐鏋?
     fn check_literal(&mut self, lit: &Literal) -> TyResult<Ty> {
         Ok(match lit {
-            Literal::Int(_) => self.env.int_ty(IntKind::I64), // 默认整数字面量为 i64
+            Literal::Int(_) => self.env.int_ty(IntKind::I64), // 婵犳鍠楃敮妤冪矙閹烘せ鈧箓宕奸妷顔芥櫍婵犵數濮甸懝楣冨几娓氣偓閹鈽夊▍铏灥閳绘捇宕奸弴鐔封偓鍨箾閹寸偟鎳愭繛鍫熺矋缁绘盯姊婚弶鎴濈ギ闂佸搫鑻惌浣虹不濞戞瑦鍎熼柕鍫濇祩濡?i64
             Literal::Float(_) => self.env.float_ty(FloatKind::F64),
             Literal::String(_) => {
                 let str_ty = self.env.str_ty();
@@ -1114,24 +1426,31 @@ impl TypeChecker {
         })
     }
 
-    /// 检查标识符
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備胶绮悧顓犲緤閸ф绠柣妯款嚙楠炪垺绻涢崱妯忣亪宕?
     fn check_ident(&mut self, ident: &Ident) -> TyResult<Ty> {
-        if let Some(symbol) = self.env.lookup(&ident.name) {
-            if let Some(ty) = symbol.get_ty() {
-                Ok(self.infer.instantiate(ty.clone()))
-            } else {
-                Err(TypeckError::UndefinedVariable {
-                    name: ident.name.clone(),
-                })
-            }
+        let symbol = if let Some(symbol) = self.env.lookup(&ident.name) {
+            symbol.clone()
         } else {
-            Err(TypeckError::UndefinedVariable {
+            return Err(TypeckError::UndefinedVariable {
                 name: ident.name.clone(),
-            })
+            });
+        };
+
+        match &symbol.kind {
+            SymbolKind::Function { ty, .. } => Ok(self.infer.instantiate_with_fresh_vars(ty.clone())),
+            _ => {
+                if let Some(ty) = symbol.get_ty() {
+                    Ok(self.infer.instantiate(ty.clone()))
+                } else {
+                    Err(TypeckError::UndefinedVariable {
+                        name: ident.name.clone(),
+                    })
+                }
+            }
         }
     }
 
-    /// 检查路径
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶撻梻浣规た閸樹粙宕曢幎绛嬫晪?
     fn check_path(&mut self, path: &Path) -> TyResult<Ty> {
         if let Some(ident) = path.as_simple() {
             self.check_ident(ident)
@@ -1147,7 +1466,7 @@ impl TypeChecker {
         }
     }
 
-    /// 检查二元表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潚缂傚倷闄嶉崝澶愬疾閻樿尙鏆︽俊銈呮噹缁€鍐┿亜閹炬潙顥氶柛瀣崌瀹曟﹢鍩￠崒婊呅ら梻浣筋嚃閸ㄥ酣宕ㄩ锝嗘暏
     fn check_binary(&mut self, op: &BinOp, left: &Expr, right: &Expr) -> TyResult<Ty> {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
@@ -1170,7 +1489,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查一元表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潚缂傚倷鐒﹀褰掑箰閸愯尙鏆︽俊銈呮噹缁€鍐┿亜閹炬潙顥氶柛瀣崌瀹曟﹢鍩￠崒婊呅ら梻浣筋嚃閸ㄥ酣宕ㄩ锝嗘暏
     fn check_unary(&mut self, op: &UnOp, operand: &Expr) -> TyResult<Ty> {
         let ty = self.check_expr(operand)?;
         Ok(match op {
@@ -1190,7 +1509,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查赋值
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶撶紓鍌欐閻掞箓骞愰崘鑼殾?
     fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
@@ -1198,7 +1517,7 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查复合赋值
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛婵＄偑鍊ч梽鍕偂閳ュ磭鏆﹂柕澶嗘櫅闁卞洭鏌ㄥ┑鍡樺偍闁稿鍋ゅ?
     fn check_assign_op(&mut self, _op: &AssignOp, target: &Expr, value: &Expr) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
@@ -1206,7 +1525,7 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查索引表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梻浣侯焾鐞氼偊宕濆畝鍕垫晪闁挎繂顦崡鎶藉箳閹惰棄鐒垫い鎺嗗亾闁哥噥鍨伴…鍥疀濞戞鐣鹃悷婊冪箳濞戠敻鍩€?
     fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
         let index_ty = self.check_expr(index)?;
@@ -1226,18 +1545,22 @@ impl TypeChecker {
         })
     }
 
-    /// 检查字段访问
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶鍎垫慨宥夊礃閿濆棛浜栧┑鐐舵彧缁蹭粙宕板璺虹柈闊洦绋掗埛?
     fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
 
         match &base_ty.kind {
-            TyKind::Adt { name: type_name, .. } => {
-                let field_defs = self.struct_field_defs.get(type_name).cloned().ok_or_else(|| {
-                    TypeckError::FieldNotFound {
-                        type_name: type_name.clone(),
-                        field_name: name.name.clone(),
-                    }
-                })?;
+            TyKind::Adt {
+                name: type_name, ..
+            } => {
+                let field_defs =
+                    self.struct_field_defs
+                        .get(type_name)
+                        .cloned()
+                        .ok_or_else(|| TypeckError::FieldNotFound {
+                            type_name: type_name.clone(),
+                            field_name: name.name.clone(),
+                        })?;
 
                 let field_ty = field_defs
                     .into_iter()
@@ -1343,7 +1666,34 @@ impl TypeChecker {
             return Ok(self.env.unit_ty());
         }
 
-        let func_ty = self.check_expr(func)?;
+        let direct_fn_name = match &func.kind {
+            ExprKind::Ident(ident) => Some(ident.name.clone()),
+            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.clone()),
+            _ => None,
+        };
+
+        let mut generic_ctx: Option<(String, GenericFunctionMeta, HashMap<TyVarId, TyVarId>)> =
+            None;
+        let func_ty = if let Some(name) = direct_fn_name {
+            match self.env.lookup(&name).cloned() {
+                Some(Symbol {
+                    kind: SymbolKind::Function { ty, .. },
+                    ..
+                }) => {
+                    if let Some(meta) = self.generic_function_metas.get(&name).cloned() {
+                        let (instantiated, var_map) =
+                            self.infer.instantiate_with_fresh_vars_and_map(ty);
+                        generic_ctx = Some((name, meta, var_map));
+                        instantiated
+                    } else {
+                        self.infer.instantiate_with_fresh_vars(ty)
+                    }
+                }
+                _ => self.check_expr(func)?,
+            }
+        } else {
+            self.check_expr(func)?
+        };
 
         if let TyKind::Fn { params, ret, .. } = &func_ty.kind {
             if params.len() != args.len() {
@@ -1358,7 +1708,11 @@ impl TypeChecker {
                 self.infer.unify(arg_ty, &actual_ty)?;
             }
 
-            Ok((**ret).clone())
+            if let Some((name, meta, var_map)) = generic_ctx.as_ref() {
+                self.enforce_generic_function_constraints(name, meta, var_map)?;
+            }
+
+            Ok(self.infer.apply_subst(ret))
         } else {
             Err(TypeckError::UndefinedFunction {
                 name: "closure".to_string(),
@@ -1366,7 +1720,60 @@ impl TypeChecker {
         }
     }
 
-    /// 检查方法调用
+    fn enforce_generic_function_constraints(
+        &mut self,
+        function_name: &str,
+        meta: &GenericFunctionMeta,
+        var_map: &HashMap<TyVarId, TyVarId>,
+    ) -> TyResult<()> {
+        for param in &meta.params {
+            let mut concrete_ty = if let Some(instantiated_var) = var_map.get(&param.var_id) {
+                let placeholder = Ty::new(0, TyKind::Var(*instantiated_var));
+                self.infer.apply_subst(&placeholder)
+            } else if let Some(default_ty) = &param.default {
+                // Generic parameter is not present in function type (phantom generic).
+                // In this case, default type is the only inference source.
+                self.infer.apply_subst(default_ty)
+            } else if param.bounds.is_empty() {
+                // Unused unconstrained generic parameter does not affect call typing.
+                // Keep backward compatibility for benchmark and existing code.
+                continue;
+            } else {
+                return Err(TypeckError::Other(format!(
+                    "cannot infer generic type parameter `{}` in call to `{}`",
+                    param.name, function_name
+                )));
+            };
+
+            if matches!(concrete_ty.kind, TyKind::Var(_)) {
+                if let Some(default_ty) = &param.default {
+                    let default_ty = self.infer.apply_subst(default_ty);
+                    self.infer.unify(&concrete_ty, &default_ty)?;
+                    concrete_ty = self.infer.apply_subst(&default_ty);
+                }
+            }
+
+            if matches!(concrete_ty.kind, TyKind::Var(_)) {
+                return Err(TypeckError::Other(format!(
+                    "cannot infer generic type parameter `{}` in call to `{}`",
+                    param.name, function_name
+                )));
+            }
+
+            for trait_name in &param.bounds {
+                let concrete_key = type_key(&concrete_ty);
+                if !self.impl_registry.implements_trait(trait_name, &concrete_key) {
+                    return Err(TypeckError::Other(format!(
+                        "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
+                        function_name, concrete_key, trait_name, param.name
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備礁鎼惉濂稿窗鎼淬劌鐓濋柡鍐ㄧ墕閸楁娊鏌ㄥ☉妯侯仾妞ゆ柨绉瑰?
     fn check_method_call(
         &mut self,
         receiver: &Expr,
@@ -1375,11 +1782,9 @@ impl TypeChecker {
     ) -> TyResult<Ty> {
         use crate::typeck::r#trait::type_key;
 
-        // 获取接收者类型
         let receiver_ty = self.check_expr(receiver)?;
         let receiver_key = type_key(&receiver_ty);
 
-        // 检查参数类型
         let mut arg_types = Vec::new();
         for arg in args {
             arg_types.push(self.check_expr(arg)?);
@@ -1387,7 +1792,7 @@ impl TypeChecker {
 
         let method_name = &method.name;
 
-        // 0. Built-in string methods: .len() on &str returns i64
+        // Built-in string method: (&str).len() -> i64
         let is_str_ref =
             matches!(&receiver_ty.kind, TyKind::Ref(_, inner) if matches!(inner.kind, TyKind::Str));
         if is_str_ref && method_name == "len" {
@@ -1400,12 +1805,11 @@ impl TypeChecker {
             return Ok(self.env.int_ty(crate::typeck::ty::IntKind::I64));
         }
 
-        // 1. 首先查找固有 impl 的方法
+        // Inherent impl lookup first.
         if let Some(fn_ty) = self
             .impl_registry
             .lookup_inherent_method(&receiver_key, method_name)
         {
-            // 检查参数数量
             if fn_ty.param_types.len() != args.len() {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: fn_ty.param_types.len(),
@@ -1413,22 +1817,19 @@ impl TypeChecker {
                 });
             }
 
-            // 检查参数类型
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
                 self.infer.unify(expected, actual)?;
             }
 
-            return Ok(fn_ty.return_type.clone());
+            return Ok(self.infer.apply_subst(&fn_ty.return_type));
         }
 
-        // 2. 查找 Trait impl 的方法
-        // 遍历所有 Trait，查找实现的方法
+        // Then trait impl lookup.
         for trait_name in self.trait_registry.all_traits() {
             if let Some(fn_ty) =
                 self.impl_registry
                     .lookup_trait_method(&trait_name, &receiver_key, method_name)
             {
-                // 检查参数数量
                 if fn_ty.param_types.len() != args.len() {
                     return Err(TypeckError::ArgumentCountMismatch {
                         expected: fn_ty.param_types.len(),
@@ -1436,23 +1837,20 @@ impl TypeChecker {
                     });
                 }
 
-                // 检查参数类型
                 for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
                     self.infer.unify(expected, actual)?;
                 }
 
-                return Ok(fn_ty.return_type.clone());
+                return Ok(self.infer.apply_subst(&fn_ty.return_type));
             }
         }
 
-        // 3. 未找到方法
         Err(TypeckError::MethodNotFound {
             type_name: receiver_key,
             method_name: method_name.clone(),
         })
     }
 
-    /// 检查元组
     fn check_tuple(&mut self, elems: &[Expr]) -> TyResult<Ty> {
         let elem_types = elems
             .iter()
@@ -1461,7 +1859,7 @@ impl TypeChecker {
         Ok(self.env.tuple_ty(elem_types))
     }
 
-    /// 检查数组
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備礁鎼Λ娑㈠窗閹捐埖顫?
     fn check_array(&mut self, elems: &[Expr]) -> TyResult<Ty> {
         if elems.is_empty() {
             return Ok(self.env.array_ty(self.infer.fresh_ty_var(), 0));
@@ -1476,31 +1874,31 @@ impl TypeChecker {
         Ok(self.env.array_ty(first_ty, elems.len()))
     }
 
-    /// 检查 Lambda 闭包表达式 `|params| body`
-    /// Lambda 的类型是函数类型，参数类型会被推断为新的类型变量
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Lambda 闂傚倸鍊搁崐鎼佸磻閸℃稑鍌ㄩ柤娴嬫杹閸嬫捇宕归顐ゅ姺闂佽鍠曢崡铏繆閹间礁惟闁挎洍鍋撴繛鎳峰洦鍊?`|params| body`
+    /// Lambda 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗛娴滄繄绮幋锔解拺闁告稑锕ら悘鍗炩攽椤斿搫鈧繂顕ｉ幎鑺ュ亜闁惧繒鎳撻弳妤呮煟閻樺弶绌块悘蹇旂懇閸┾偓妞ゆ帒鍊搁崢鎾煛娴ｅ摜肖濞寸媴绠撻幐濠冨緞鐎ｅ灚顥ら梻鍌欐祰濡椼劑鎮為敂鐣岀彾闁糕剝鐟﹂崑鏍ㄣ亜閹板墎鐣遍柛銊ュ€块幃妤呮晲閸屾稒鐝栫紓浣瑰姈椤ㄥ﹪骞冪捄渚僵闁绘挸绨肩花濂告煟閵忊晛鐏犵紓宥咃工椤曪綁顢楅崟鍨櫍濠电娀娼ч敃锕偹囨导瀛樷拺闁告繂瀚埀顒冾潐缁旂喖宕卞缁樼亖闂佺懓顕慨椋庝焊閻㈠憡鍋ｉ柛銉簻閻ㄦ椽鏌嶈閸撴盯宕楀Ο铏规殾闁挎繂鎷嬪銊╂煃瑜滈崜鐔风暦?
     fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
-        // 为每个参数创建新的类型变量
+        // 婵犵數鍋為崹鍫曞箰妤ｅ啫纾块柕鍫濐槹閸庡﹪鏌嶉埡浣告殶闁崇粯姊归妵鍕疀閹炬剚浠煎┑鈽嗗亝閿曘垽寮婚埄鍐╁閻熸瑥瀚崙锟犳⒑閹肩偛濡肩€规洦鍓熼、姘枎閹炬潙鈧粯淇婇婵嗗惞闁告ɑ鍔欏鍝勑ч崶褍顬堥柣搴㈠嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗙凹缁ㄨ崵绱撳鍕獢婵?
         let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
 
-        // 创建新的作用域来绑定参数
+        // 闂傚倷绀侀幉锛勬暜濡ゅ啰鐭欓柟瀵稿Х绾句粙鏌熼幑鎰靛殭婵☆偅锕㈤弻鐔封枔閸喗鐏嶉梺浼欑到瀹曨剟婀侀梺鎸庣箓濡盯鎯屽畝鍕厸濞达綁娼ч埀顒佺箓閻ｅ嘲煤椤忓懎浜滈梺鍛婄☉閿曨亜顬婃搴ｇ＝闁稿本鐟ч崝宥夋煕閵娧勬毈闁诡喚鍋撻妶锝夊礃閵娧呭幀闂備胶顭堥張顒傜矙閹烘垟鏋?
         self.env.push_scope();
 
-        // 将参数绑定到作用域中
+        // 闂備浇顕х换鎰崲閹邦儵娑樜旈埀顒勵敋閿濆鏁嗛柛鏇ㄥ亝閻庮剟姊虹憴鍕靛晱闁哥姵宀搁獮蹇涘Ω閳哄倸鈧敻鎮峰▎蹇擃伂濠㈣锕㈤弻娑㈠煛娴ｈ鎷遍梺鐟板槻閹冲酣鈥﹂妸鈺佸窛妞ゆ棁濮ら褰掓⒒娴ｈ櫣銆婇柡鍛箞瀹曟澘顓兼径瀣畼?
         for (param, ty) in params.iter().zip(param_tys.iter()) {
             self.env.insert_var(param.name.clone(), ty.clone());
         }
 
-        // 检查 body 的类型
+        // 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?body 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕?
         let body_ty = self.check_expr(body)?;
 
-        // 弹出参数作用域
+        // 闂佽瀛╅鏍窗濮樿泛绠犻柟鎹愵嚙閸氳銇勯幘鍗炵仼闁活厽顨婇弻娑氫沪閸撗€濮囧┑鐐茬墣濞夋盯婀侀梺鎸庣箓濡盯鎯屽畝鍕厸濞达綁娼ч埀顒佺箓閻?
         self.env.pop_scope();
 
-        // Lambda 的类型是函数类型 (params -> ret)
+        // Lambda 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗛娴滄繄绮幋锔解拺闁告稑锕ら悘鍗炩攽椤斿搫鈧繂顕ｉ幎鑺ュ亜闁惧繒鎳撻弳妤呮煟閻樺弶绌块悘蹇旂懇閸┾偓?(params -> ret)
         Ok(self.env.fn_ty(param_tys, body_ty))
     }
 
-    /// 检查块
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛婵?
     fn check_block(&mut self, block: &Block) -> TyResult<Ty> {
         self.env.push_scope();
 
@@ -1515,7 +1913,7 @@ impl TypeChecker {
         Ok(result_ty)
     }
 
-    /// 检查语句
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶撴俊鐐€栧ú蹇涘垂閽樺鏆?
     fn check_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
         match &stmt.kind {
             StmtKind::Let {
@@ -1527,7 +1925,7 @@ impl TypeChecker {
                     self.infer.fresh_ty_var()
                 };
 
-                // value 是 Option<Box<Expr>>
+                // value 闂?Option<Box<Expr>>
                 let value_ty = match value {
                     Some(v) => self.check_expr(v)?,
                     None => self.env.unit_ty(),
@@ -1549,7 +1947,7 @@ impl TypeChecker {
                 Ok(Some(ty))
             }
             StmtKind::Item(item) => {
-                // check_decl 返回 Result<()>，需要转换错误
+                // check_decl 闂備礁鎼ˇ顐﹀疾濠婂牆钃熼柕濞垮剭?Result<()>闂傚倷鐒︾€笛呯矙閹达附鍎楅柛灞惧搸閳ь剚甯″畷婊勬媴閻熺増姣囧┑鐐舵彧缂嶁偓濠殿喓鍊楃划濠囶敋閳ь剟寮婚悢鑲╁祦闁割煈鍠氭导鍫ユ⒑鏉炴壆顦﹂柨鏇畵楠?
                 self.check_decl(item)
                     .map_err(|e| TypeckError::Other(e.to_string()))?;
                 Ok(None)
@@ -1557,7 +1955,7 @@ impl TypeChecker {
         }
     }
 
-    /// 检查 if 表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?if 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
     fn check_if(
         &mut self,
         cond: &Expr,
@@ -1578,7 +1976,7 @@ impl TypeChecker {
         Ok(then_ty)
     }
 
-    /// 检查 while 循环
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?while 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
     fn check_while(&mut self, cond: &Expr, body: &Block) -> TyResult<Ty> {
         let cond_ty = self.check_expr(cond)?;
         let bool_ty = self.env.bool_ty();
@@ -1588,14 +1986,14 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查 for 循环
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?for 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
     fn check_for(&mut self, pattern: &Pattern, iter: &Expr, body: &Block) -> TyResult<Ty> {
         self.check_expr(iter)?;
-        let elem_ty = self.env.int_ty(IntKind::I64); // 使用 I64 而不是 I32
+        let elem_ty = self.env.int_ty(IntKind::I64); // 婵犵數鍋犻幓顏嗙礊閳ь剚绻涙径瀣鐎?I64 闂傚倷绀侀崥瀣熆濡崵闄勯柡鍐ㄥ€荤粻鏂款熆閼搁潧濮囬柛?I32
 
         self.env.push_scope();
 
-        // 从 pattern 中提取变量名
+        // 婵?pattern 婵犵數鍋為崹鍫曞箹閳哄懎鍌ㄩ柛濠勫枂娴滅懓銆掑锝呬壕閻庤娲╃紞浣割嚕閸婄噥妲荤紓鍌氱С缁舵艾顫忓ú顏勭闁圭儤姊婚鍥⒑?
         let var_name = match &pattern.kind {
             crate::ast::pattern::PatternKind::Ident(name) => name.name.clone(),
             crate::ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
@@ -1609,13 +2007,13 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查 loop 循环
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?loop 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
     fn check_loop(&mut self, body: &Block) -> TyResult<Ty> {
         self.check_block(body)?;
         Ok(self.env.unit_ty())
     }
 
-    /// 检查 match 表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?match 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
     fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> TyResult<Ty> {
         self.check_expr(scrutinee)?;
 
@@ -1639,7 +2037,7 @@ impl TypeChecker {
         Ok(result_ty)
     }
 
-    /// 检查 return 表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?return 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
     fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         match value {
             Some(v) => {
@@ -1650,7 +2048,7 @@ impl TypeChecker {
         Ok(self.env.never_ty())
     }
 
-    /// 检查 break 表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?break 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
     fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         match value {
             Some(v) => {
@@ -1661,7 +2059,7 @@ impl TypeChecker {
         Ok(self.env.never_ty())
     }
 
-    /// 检查 continue 表达式
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?continue 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
     fn check_continue(&mut self) -> TyResult<Ty> {
         Ok(self.env.never_ty())
     }

@@ -2,8 +2,8 @@
 //!
 //! 对 AST 进行类型分析和检查
 
-mod check;
 mod borrow;
+mod check;
 mod env;
 mod infer;
 pub mod r#trait;

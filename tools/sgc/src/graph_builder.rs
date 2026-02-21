@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::{
-    canonical_or_lossy, BuildGraphNodeV2, BuildGraphV2, FunctionFingerprint, ModuleFingerprint,
+    canonical_or_lossy, BuildGraphNodeV2, BuildGraphV2, FunctionFingerprint,
+    GenericInstanceFingerprint, GenericItemFingerprint, ModuleFingerprint,
     BUILD_GRAPH_SCHEMA_VERSION,
 };
 
@@ -53,6 +54,8 @@ pub(crate) fn build_graph_v2_for_source(
                 None
             },
             functions: Vec::new(),
+            generic_items: Vec::new(),
+            generic_instances: Vec::new(),
         });
     }
 
@@ -67,6 +70,8 @@ pub(crate) fn build_graph_v2_with_function_fingerprints_for_source(
     input_path: &Path,
     module_fingerprints: &[ModuleFingerprint],
     module_function_fingerprints: &BTreeMap<String, Vec<FunctionFingerprint>>,
+    module_generic_items: &BTreeMap<String, Vec<GenericItemFingerprint>>,
+    module_generic_instances: &BTreeMap<String, Vec<GenericInstanceFingerprint>>,
     dependency_edges: &BTreeMap<String, Vec<String>>,
     root_object_path: Option<&Path>,
     root_interface_hash: u64,
@@ -93,6 +98,22 @@ pub(crate) fn build_graph_v2_with_function_fingerprints_for_source(
         }
         functions.sort_by(|a, b| a.symbol.cmp(&b.symbol));
         node.functions = functions;
+
+        let mut generic_items = module_generic_items
+            .get(&node.module_path)
+            .cloned()
+            .unwrap_or_default();
+        generic_items.sort_by(|a, b| a.stable_item_id.cmp(&b.stable_item_id));
+        generic_items.dedup_by(|a, b| a.stable_item_id == b.stable_item_id);
+        node.generic_items = generic_items;
+
+        let mut generic_instances = module_generic_instances
+            .get(&node.module_path)
+            .cloned()
+            .unwrap_or_default();
+        generic_instances.sort_by(|a, b| a.instance_key.cmp(&b.instance_key));
+        generic_instances.dedup_by(|a, b| a.instance_key == b.instance_key);
+        node.generic_instances = generic_instances;
     }
 
     graph

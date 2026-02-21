@@ -3,9 +3,7 @@ pub mod jit;
 
 pub use jit::JITCodegen;
 
-use crate::mir::{
-    self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64,
-};
+use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 

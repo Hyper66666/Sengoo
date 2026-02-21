@@ -93,7 +93,6 @@ impl Scope {
     pub fn get(&self, name: &str) -> Option<&Symbol> {
         self.symbols.get(name)
     }
-
 }
 
 /// 类型环境
