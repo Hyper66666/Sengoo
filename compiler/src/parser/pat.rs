@@ -18,7 +18,6 @@ impl<'source> Parser<'source> {
         let lo = self.current_span().lo;
         let mut kind = self.parse_pattern_primary()?;
 
-
         if self.consume(TokenKind::DotDot).is_some() {
             let inclusive = self.consume(TokenKind::Eq).is_some();
             let end = self.parse_pattern_primary()?;
@@ -317,4 +316,3 @@ impl<'source> Parser<'source> {
         Err(CompileError::ParseError(ParseError::expected_identifier()))
     }
 }
-

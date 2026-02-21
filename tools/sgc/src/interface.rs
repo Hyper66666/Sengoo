@@ -1,12 +1,13 @@
+use crate::{
+    implementation_fingerprint, source_fingerprint, FunctionFingerprint, FunctionSignatureInfo,
+    GenericInstanceFingerprint, GenericItemFingerprint,
+};
 use sengoo_compiler::{
     ClassMember, Decl, DeclKind, Expr, ExprKind, Function, ImportKind, Param, Parser,
     Path as AstPath, Program, SelfParam, Span, Stmt, StmtKind, TraitBound, TraitItem, Type,
-    TypeKind, VariantField, Visibility,
+    TypeKind, TypeParam, VariantField, Visibility,
 };
-use std::collections::HashMap;
-use crate::{
-    implementation_fingerprint, source_fingerprint, FunctionFingerprint, FunctionSignatureInfo,
-};
+use std::collections::{HashMap, HashSet};
 
 fn visibility_label(vis: Visibility) -> &'static str {
     match vis {
@@ -45,6 +46,19 @@ fn trait_bound_signature(bound: &TraitBound) -> String {
 fn type_signature(ty: &Type) -> String {
     match &ty.kind {
         TypeKind::Path(path) => ast_path_signature(path),
+        TypeKind::PathWithArgs { path, args } => {
+            let mut rendered = ast_path_signature(path);
+            rendered.push('<');
+            rendered.push_str(
+                &args
+                    .iter()
+                    .map(type_signature)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            rendered.push('>');
+            rendered
+        }
         TypeKind::Tuple(types) => {
             let inner = types
                 .iter()
@@ -639,7 +653,10 @@ fn collect_function_fingerprints_from_decl(
     }
 }
 
-pub(crate) fn function_fingerprints_for_module(module_path: &str, source: &str) -> Vec<FunctionFingerprint> {
+pub(crate) fn function_fingerprints_for_module(
+    module_path: &str,
+    source: &str,
+) -> Vec<FunctionFingerprint> {
     let program = match Parser::parse(source) {
         Ok(program) => program,
         Err(_) => return Vec::new(),
@@ -752,7 +769,10 @@ fn collect_function_signatures_from_decl(
     }
 }
 
-pub(crate) fn function_signatures_for_module(module_path: &str, source: &str) -> Vec<FunctionSignatureInfo> {
+pub(crate) fn function_signatures_for_module(
+    module_path: &str,
+    source: &str,
+) -> Vec<FunctionSignatureInfo> {
     let program = match Parser::parse(source) {
         Ok(program) => program,
         Err(_) => return Vec::new(),
@@ -767,4 +787,930 @@ pub(crate) fn function_signatures_for_module(module_path: &str, source: &str) ->
     signatures
 }
 
+#[derive(Debug, Clone)]
+struct GenericCallableMeta {
+    stable_item_id: String,
+    module_id: String,
+    interface_hash: u64,
+    body_hash: u64,
+    type_param_count: usize,
+}
 
+fn generic_item_id(module_path: &str, scope: &[String], kind: &str, name: &str) -> String {
+    let mut parts = Vec::with_capacity(scope.len() + 3);
+    parts.push(module_path.to_string());
+    parts.extend(scope.iter().cloned());
+    parts.push(kind.to_string());
+    parts.push(name.to_string());
+    parts.join("::")
+}
+
+fn generic_type_param_signature(type_params: &[TypeParam]) -> String {
+    type_params
+        .iter()
+        .map(|tp| {
+            let mut repr = tp.name.name.clone();
+            if !tp.bounds.is_empty() {
+                repr.push(':');
+                repr.push_str(
+                    &tp.bounds
+                        .iter()
+                        .map(trait_bound_signature)
+                        .collect::<Vec<_>>()
+                        .join("+"),
+                );
+            }
+            if let Some(default) = &tp.default {
+                repr.push('=');
+                repr.push_str(&type_signature(default));
+            }
+            repr
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn push_generic_item(
+    out: &mut Vec<GenericItemFingerprint>,
+    kind: &str,
+    stable_item_id: String,
+    symbol: String,
+    module_id: &str,
+    interface_hash: u64,
+    body_hash: u64,
+    type_param_count: usize,
+    calls: Vec<String>,
+) {
+    out.push(GenericItemFingerprint {
+        stable_item_id,
+        symbol,
+        module_id: module_id.to_string(),
+        kind: kind.to_string(),
+        interface_hash,
+        body_hash,
+        type_param_count: type_param_count as u32,
+        calls,
+    });
+}
+
+fn collect_generic_item_fingerprints_from_decl(
+    out: &mut Vec<GenericItemFingerprint>,
+    module_path: &str,
+    scope: &[String],
+    decl: &Decl,
+    source: &str,
+    inherited_generic_params: usize,
+) {
+    match &decl.kind {
+        DeclKind::Function(function) => {
+            let effective_type_params = inherited_generic_params + function.type_params.len();
+            if effective_type_params > 0 {
+                let mut calls = Vec::new();
+                for stmt in &function.body.stmts {
+                    collect_calls_in_stmt(stmt, &mut calls);
+                }
+                calls.sort();
+                calls.dedup();
+                let symbol = function_symbol(module_path, scope, &function.name.name);
+                let stable_item_id = symbol.clone();
+                let interface_hash = source_fingerprint(&function_signature(function));
+                let body_hash = source_span_slice(source, function.body.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or_else(|| source_fingerprint(&format!("{:?}", function.body.stmts)));
+                push_generic_item(
+                    out,
+                    "function",
+                    stable_item_id,
+                    symbol,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    effective_type_params,
+                    calls,
+                );
+            }
+        }
+        DeclKind::Struct(struct_decl) => {
+            if !struct_decl.type_params.is_empty() {
+                let stable_item_id =
+                    generic_item_id(module_path, scope, "struct", &struct_decl.name.name);
+                let interface_hash = source_fingerprint(&format!(
+                    "struct:{}<{}>",
+                    struct_decl.name.name,
+                    generic_type_param_signature(&struct_decl.type_params)
+                ));
+                let body_hash = source_span_slice(source, struct_decl.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "struct",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    struct_decl.type_params.len(),
+                    Vec::new(),
+                );
+            }
+        }
+        DeclKind::Enum(enum_decl) => {
+            if !enum_decl.type_params.is_empty() {
+                let stable_item_id =
+                    generic_item_id(module_path, scope, "enum", &enum_decl.name.name);
+                let interface_hash = source_fingerprint(&format!(
+                    "enum:{}<{}>",
+                    enum_decl.name.name,
+                    generic_type_param_signature(&enum_decl.type_params)
+                ));
+                let body_hash = source_span_slice(source, enum_decl.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "enum",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    enum_decl.type_params.len(),
+                    Vec::new(),
+                );
+            }
+        }
+        DeclKind::Class(class_decl) => {
+            if !class_decl.type_params.is_empty() {
+                let stable_item_id =
+                    generic_item_id(module_path, scope, "class", &class_decl.name.name);
+                let interface_hash = source_fingerprint(&format!(
+                    "class:{}<{}>",
+                    class_decl.name.name,
+                    generic_type_param_signature(&class_decl.type_params)
+                ));
+                let body_hash = source_span_slice(source, class_decl.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "class",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    class_decl.type_params.len(),
+                    Vec::new(),
+                );
+            }
+
+            let mut scoped = scope.to_vec();
+            scoped.push("class".to_string());
+            scoped.push(class_decl.name.name.clone());
+            for member in &class_decl.members {
+                if let ClassMember::Method(function) = member {
+                    let effective_type_params =
+                        class_decl.type_params.len() + function.type_params.len();
+                    if effective_type_params == 0 {
+                        continue;
+                    }
+                    let mut calls = Vec::new();
+                    for stmt in &function.body.stmts {
+                        collect_calls_in_stmt(stmt, &mut calls);
+                    }
+                    calls.sort();
+                    calls.dedup();
+                    let symbol = function_symbol(module_path, &scoped, &function.name.name);
+                    let stable_item_id = symbol.clone();
+                    let interface_hash = source_fingerprint(&function_signature(function));
+                    let body_hash = source_span_slice(source, function.body.span)
+                        .map(implementation_fingerprint)
+                        .unwrap_or_else(|| {
+                            source_fingerprint(&format!("{:?}", function.body.stmts))
+                        });
+                    push_generic_item(
+                        out,
+                        "method",
+                        stable_item_id,
+                        symbol,
+                        module_path,
+                        interface_hash,
+                        body_hash,
+                        effective_type_params,
+                        calls,
+                    );
+                }
+            }
+        }
+        DeclKind::Trait(trait_decl) => {
+            if !trait_decl.type_params.is_empty() {
+                let stable_item_id =
+                    generic_item_id(module_path, scope, "trait", &trait_decl.name.name);
+                let interface_hash = source_fingerprint(&format!(
+                    "trait:{}<{}>",
+                    trait_decl.name.name,
+                    generic_type_param_signature(&trait_decl.type_params)
+                ));
+                let body_hash = source_span_slice(source, trait_decl.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "trait",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    trait_decl.type_params.len(),
+                    Vec::new(),
+                );
+            }
+            let mut scoped = scope.to_vec();
+            scoped.push("trait".to_string());
+            scoped.push(trait_decl.name.name.clone());
+            for item in &trait_decl.items {
+                if let TraitItem::Function(function) = item {
+                    let effective_type_params =
+                        trait_decl.type_params.len() + function.type_params.len();
+                    if effective_type_params == 0 {
+                        continue;
+                    }
+                    let symbol = function_symbol(module_path, &scoped, &function.name.name);
+                    let stable_item_id = symbol.clone();
+                    let interface_hash = source_fingerprint(&function_signature(function));
+                    let body_hash = source_span_slice(source, function.body.span)
+                        .map(implementation_fingerprint)
+                        .unwrap_or_else(|| {
+                            source_fingerprint(&format!("{:?}", function.body.stmts))
+                        });
+                    push_generic_item(
+                        out,
+                        "trait_method",
+                        stable_item_id,
+                        symbol,
+                        module_path,
+                        interface_hash,
+                        body_hash,
+                        effective_type_params,
+                        Vec::new(),
+                    );
+                }
+            }
+        }
+        DeclKind::Impl(impl_decl) => {
+            if !impl_decl.type_params.is_empty() {
+                let stable_item_id = generic_item_id(
+                    module_path,
+                    scope,
+                    "impl",
+                    &type_signature(&impl_decl.target_type),
+                );
+                let interface_hash = source_fingerprint(&format!(
+                    "impl:{}<{}>",
+                    type_signature(&impl_decl.target_type),
+                    generic_type_param_signature(&impl_decl.type_params)
+                ));
+                let body_hash = source_span_slice(source, impl_decl.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "impl",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    impl_decl.type_params.len(),
+                    Vec::new(),
+                );
+            }
+            let mut scoped = scope.to_vec();
+            scoped.push("impl".to_string());
+            scoped.push(type_signature(&impl_decl.target_type));
+            for function in &impl_decl.items {
+                let effective_type_params =
+                    impl_decl.type_params.len() + function.type_params.len();
+                if effective_type_params == 0 {
+                    continue;
+                }
+                let mut calls = Vec::new();
+                for stmt in &function.body.stmts {
+                    collect_calls_in_stmt(stmt, &mut calls);
+                }
+                calls.sort();
+                calls.dedup();
+                let symbol = function_symbol(module_path, &scoped, &function.name.name);
+                let stable_item_id = symbol.clone();
+                let interface_hash = source_fingerprint(&function_signature(function));
+                let body_hash = source_span_slice(source, function.body.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or_else(|| source_fingerprint(&format!("{:?}", function.body.stmts)));
+                push_generic_item(
+                    out,
+                    "impl_method",
+                    stable_item_id,
+                    symbol,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    effective_type_params,
+                    calls,
+                );
+            }
+        }
+        DeclKind::TypeAlias(alias) => {
+            if !alias.type_params.is_empty() {
+                let stable_item_id =
+                    generic_item_id(module_path, scope, "type_alias", &alias.name.name);
+                let interface_hash = source_fingerprint(&format!(
+                    "type_alias:{}<{}>",
+                    alias.name.name,
+                    generic_type_param_signature(&alias.type_params)
+                ));
+                let body_hash = source_span_slice(source, alias.span)
+                    .map(implementation_fingerprint)
+                    .unwrap_or(interface_hash);
+                push_generic_item(
+                    out,
+                    "type_alias",
+                    stable_item_id.clone(),
+                    stable_item_id,
+                    module_path,
+                    interface_hash,
+                    body_hash,
+                    alias.type_params.len(),
+                    Vec::new(),
+                );
+            }
+        }
+        DeclKind::Module(module_decl) => {
+            let mut scoped = scope.to_vec();
+            scoped.push("mod".to_string());
+            scoped.push(module_decl.name.name.clone());
+            for item in &module_decl.items {
+                collect_generic_item_fingerprints_from_decl(
+                    out,
+                    module_path,
+                    &scoped,
+                    item,
+                    source,
+                    inherited_generic_params,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn infer_expr_type_tag(expr: &Expr) -> String {
+    match &expr.kind {
+        ExprKind::Literal(lit) => match lit {
+            sengoo_compiler::Literal::Int(_) => "i64".to_string(),
+            sengoo_compiler::Literal::Float(_) => "f64".to_string(),
+            sengoo_compiler::Literal::Bool(_) => "bool".to_string(),
+            sengoo_compiler::Literal::String(_) => "str".to_string(),
+            sengoo_compiler::Literal::Char(_) => "char".to_string(),
+            sengoo_compiler::Literal::Bytes(_) => "bytes".to_string(),
+            sengoo_compiler::Literal::Null => "null".to_string(),
+            sengoo_compiler::Literal::Unit => "unit".to_string(),
+        },
+        ExprKind::Array(items) => {
+            if let Some(first) = items.first() {
+                format!("array<{}>", infer_expr_type_tag(first))
+            } else {
+                "array<_>".to_string()
+            }
+        }
+        ExprKind::Tuple(items) => format!("tuple{}", items.len()),
+        ExprKind::Struct { path, .. } => format!("struct:{}", ast_path_signature(path)),
+        ExprKind::Path(path) => format!("path:{}", ast_path_signature(path)),
+        ExprKind::Ident(_) => "_".to_string(),
+        _ => "_".to_string(),
+    }
+}
+
+fn generic_instance_base_key(item_stable_id: &str, canonical_type_args: &[String]) -> String {
+    if canonical_type_args.is_empty() {
+        return format!("{}<>", item_stable_id);
+    }
+    format!("{}<{}>", item_stable_id, canonical_type_args.join(","))
+}
+
+fn resolve_generic_call_symbol(
+    call_name: &str,
+    simple_to_symbol: &HashMap<String, Option<String>>,
+    callable_meta: &HashMap<String, GenericCallableMeta>,
+) -> Option<String> {
+    if callable_meta.contains_key(call_name) {
+        return Some(call_name.to_string());
+    }
+    match simple_to_symbol.get(call_name) {
+        Some(Some(symbol)) => Some(symbol.clone()),
+        _ => None,
+    }
+}
+
+fn push_instance_if_generic_call(
+    out: &mut Vec<GenericInstanceFingerprint>,
+    seen: &mut HashSet<String>,
+    module_path: &str,
+    call_name: &str,
+    args: &[Expr],
+    simple_to_symbol: &HashMap<String, Option<String>>,
+    callable_meta: &HashMap<String, GenericCallableMeta>,
+) {
+    let Some(symbol) = resolve_generic_call_symbol(call_name, simple_to_symbol, callable_meta)
+    else {
+        return;
+    };
+    let Some(meta) = callable_meta.get(&symbol) else {
+        return;
+    };
+    let _ = &meta.module_id;
+
+    let mut canonical_type_args = args
+        .iter()
+        .map(infer_expr_type_tag)
+        .take(meta.type_param_count)
+        .collect::<Vec<_>>();
+    while canonical_type_args.len() < meta.type_param_count {
+        canonical_type_args.push("_".to_string());
+    }
+    let instance_key = generic_instance_base_key(&meta.stable_item_id, &canonical_type_args);
+    if !seen.insert(instance_key.clone()) {
+        return;
+    }
+
+    out.push(GenericInstanceFingerprint {
+        item_stable_id: meta.stable_item_id.clone(),
+        module_id: module_path.to_string(),
+        canonical_type_args,
+        instance_key,
+        interface_hash: meta.interface_hash,
+        body_hash: meta.body_hash,
+    });
+}
+
+fn collect_generic_instances_in_expr(
+    out: &mut Vec<GenericInstanceFingerprint>,
+    seen: &mut HashSet<String>,
+    module_path: &str,
+    expr: &Expr,
+    simple_to_symbol: &HashMap<String, Option<String>>,
+    callable_meta: &HashMap<String, GenericCallableMeta>,
+) {
+    match &expr.kind {
+        ExprKind::Literal(_) | ExprKind::Ident(_) | ExprKind::Path(_) | ExprKind::Continue => {}
+        ExprKind::Unary { operand, .. }
+        | ExprKind::Await(operand)
+        | ExprKind::Try(operand)
+        | ExprKind::Paren(operand) => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                operand,
+                simple_to_symbol,
+                callable_meta,
+            );
+        }
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Assign {
+            target: left,
+            value: right,
+        }
+        | ExprKind::AssignOp {
+            target: left,
+            value: right,
+            ..
+        }
+        | ExprKind::Index {
+            base: left,
+            index: right,
+        } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                left,
+                simple_to_symbol,
+                callable_meta,
+            );
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                right,
+                simple_to_symbol,
+                callable_meta,
+            );
+        }
+        ExprKind::Call { func, args } => {
+            if let Some(target) = call_target_signature(func) {
+                push_instance_if_generic_call(
+                    out,
+                    seen,
+                    module_path,
+                    &target,
+                    args,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                func,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for arg in args {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    arg,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                receiver,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for arg in args {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    arg,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Block(block)
+        | ExprKind::Loop(block)
+        | ExprKind::AsyncBlock(block)
+        | ExprKind::ParallelBlock(block) => {
+            for stmt in &block.stmts {
+                collect_generic_instances_in_stmt(
+                    out,
+                    seen,
+                    module_path,
+                    stmt,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                cond,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for stmt in &then_branch.stmts {
+                collect_generic_instances_in_stmt(
+                    out,
+                    seen,
+                    module_path,
+                    stmt,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+            if let Some(else_expr) = else_branch.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    else_expr,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::While { cond, body } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                cond,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for stmt in &body.stmts {
+                collect_generic_instances_in_stmt(
+                    out,
+                    seen,
+                    module_path,
+                    stmt,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::For { iter, body, .. } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                iter,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for stmt in &body.stmts {
+                collect_generic_instances_in_stmt(
+                    out,
+                    seen,
+                    module_path,
+                    stmt,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                scrutinee,
+                simple_to_symbol,
+                callable_meta,
+            );
+            for arm in arms {
+                if let Some(guard) = arm.guard.as_deref() {
+                    collect_generic_instances_in_expr(
+                        out,
+                        seen,
+                        module_path,
+                        guard,
+                        simple_to_symbol,
+                        callable_meta,
+                    );
+                }
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    &arm.body,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Return(value) | ExprKind::Break(value) | ExprKind::Yield(value) => {
+            if let Some(value) = value.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    value,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Field { base, .. } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                base,
+                simple_to_symbol,
+                callable_meta,
+            );
+        }
+        ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
+            for elem in elements {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    elem,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Struct { fields, base, .. } => {
+            for field in fields {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    &field.value,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+            if let Some(base) = base.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    base,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Range { start, end, .. } => {
+            if let Some(start) = start.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    start,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+            if let Some(end) = end.as_deref() {
+                collect_generic_instances_in_expr(
+                    out,
+                    seen,
+                    module_path,
+                    end,
+                    simple_to_symbol,
+                    callable_meta,
+                );
+            }
+        }
+        ExprKind::Lambda { body, .. } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                body,
+                simple_to_symbol,
+                callable_meta,
+            );
+        }
+        ExprKind::Cast { expr, .. } | ExprKind::Is { expr, .. } => {
+            collect_generic_instances_in_expr(
+                out,
+                seen,
+                module_path,
+                expr,
+                simple_to_symbol,
+                callable_meta,
+            );
+        }
+    }
+}
+
+fn collect_generic_instances_in_stmt(
+    out: &mut Vec<GenericInstanceFingerprint>,
+    seen: &mut HashSet<String>,
+    module_path: &str,
+    stmt: &Stmt,
+    simple_to_symbol: &HashMap<String, Option<String>>,
+    callable_meta: &HashMap<String, GenericCallableMeta>,
+) {
+    match &stmt.kind {
+        StmtKind::Let {
+            value: Some(value), ..
+        } => collect_generic_instances_in_expr(
+            out,
+            seen,
+            module_path,
+            value,
+            simple_to_symbol,
+            callable_meta,
+        ),
+        StmtKind::Const { value, .. } => collect_generic_instances_in_expr(
+            out,
+            seen,
+            module_path,
+            value,
+            simple_to_symbol,
+            callable_meta,
+        ),
+        StmtKind::Expr(expr) => collect_generic_instances_in_expr(
+            out,
+            seen,
+            module_path,
+            expr,
+            simple_to_symbol,
+            callable_meta,
+        ),
+        StmtKind::Item(_) | StmtKind::Let { value: None, .. } => {}
+    }
+}
+
+pub(crate) fn generic_fingerprints_for_module(
+    module_path: &str,
+    source: &str,
+) -> (Vec<GenericItemFingerprint>, Vec<GenericInstanceFingerprint>) {
+    let program = match Parser::parse(source) {
+        Ok(program) => program,
+        Err(_) => return (Vec::new(), Vec::new()),
+    };
+    generic_fingerprints_for_program(module_path, source, &program)
+}
+
+pub(crate) fn generic_fingerprints_for_program(
+    module_path: &str,
+    source: &str,
+    program: &Program,
+) -> (Vec<GenericItemFingerprint>, Vec<GenericInstanceFingerprint>) {
+    let mut items = Vec::new();
+    for decl in &program.decls {
+        collect_generic_item_fingerprints_from_decl(&mut items, module_path, &[], decl, source, 0);
+    }
+    items.sort_by(|a, b| a.stable_item_id.cmp(&b.stable_item_id));
+    items.dedup_by(|a, b| a.stable_item_id == b.stable_item_id);
+
+    let callable_meta = items
+        .iter()
+        .filter_map(|item| {
+            if item.kind != "function" {
+                return None;
+            }
+            Some((
+                item.symbol.clone(),
+                GenericCallableMeta {
+                    stable_item_id: item.stable_item_id.clone(),
+                    module_id: item.module_id.clone(),
+                    interface_hash: item.interface_hash,
+                    body_hash: item.body_hash,
+                    type_param_count: item.type_param_count as usize,
+                },
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut simple_to_symbol = HashMap::<String, Option<String>>::new();
+    for symbol in callable_meta.keys() {
+        let simple = symbol.rsplit("::").next().unwrap_or_default().to_string();
+        match simple_to_symbol.get_mut(&simple) {
+            Some(entry) => *entry = None,
+            None => {
+                simple_to_symbol.insert(simple, Some(symbol.clone()));
+            }
+        }
+    }
+
+    let mut instances = Vec::<GenericInstanceFingerprint>::new();
+    let mut seen_instances = HashSet::<String>::new();
+    for decl in &program.decls {
+        match &decl.kind {
+            DeclKind::Function(function) => {
+                for stmt in &function.body.stmts {
+                    collect_generic_instances_in_stmt(
+                        &mut instances,
+                        &mut seen_instances,
+                        module_path,
+                        stmt,
+                        &simple_to_symbol,
+                        &callable_meta,
+                    );
+                }
+            }
+            DeclKind::Const(const_decl) => {
+                collect_generic_instances_in_expr(
+                    &mut instances,
+                    &mut seen_instances,
+                    module_path,
+                    &const_decl.value,
+                    &simple_to_symbol,
+                    &callable_meta,
+                );
+            }
+            DeclKind::Static(static_decl) => {
+                collect_generic_instances_in_expr(
+                    &mut instances,
+                    &mut seen_instances,
+                    module_path,
+                    &static_decl.value,
+                    &simple_to_symbol,
+                    &callable_meta,
+                );
+            }
+            _ => {}
+        }
+    }
+    instances.sort_by(|a, b| a.instance_key.cmp(&b.instance_key));
+    instances.dedup_by(|a, b| a.instance_key == b.instance_key);
+    (items, instances)
+}

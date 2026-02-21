@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use crate::{
     compile_ir_to_object, ensure_runtime_object, linker_mode_from_env, object_file_extension,
-    validate_reflection_metadata, LinkerMode, ReflectionMetadata, LLD_AVAILABILITY,
-    LINKER_AVAILABLE, LINKER_UNAVAILABLE,
+    validate_reflection_metadata, LinkerMode, ReflectionMetadata, LINKER_AVAILABLE,
+    LINKER_UNAVAILABLE, LLD_AVAILABILITY,
 };
 
 fn reflection_shared_library_extension() -> &'static str {
@@ -39,15 +39,16 @@ fn reflection_native_export_symbols_from_sidecar(sidecar_path: &Path) -> Result<
             e
         )
     })?;
-    let metadata: ReflectionMetadata = serde_json::from_slice(&bytes)
-        .into_diagnostic()
-        .map_err(|e| {
-            miette::miette!(
-                "failed to parse reflection sidecar for native export symbols {}: {}",
-                sidecar_path.to_string_lossy(),
-                e
-            )
-        })?;
+    let metadata: ReflectionMetadata =
+        serde_json::from_slice(&bytes)
+            .into_diagnostic()
+            .map_err(|e| {
+                miette::miette!(
+                    "failed to parse reflection sidecar for native export symbols {}: {}",
+                    sidecar_path.to_string_lossy(),
+                    e
+                )
+            })?;
     validate_reflection_metadata(&metadata)?;
 
     let mut symbols = HashSet::<String>::new();
@@ -303,7 +304,9 @@ pub(crate) fn measure_reflection_used_ms(
     }
     if !native_bound {
         runtime
-            .register_fn(module_id, &symbol, |_args| Ok(sengoo_runtime::ReflectValue::I64(0)))
+            .register_fn(module_id, &symbol, |_args| {
+                Ok(sengoo_runtime::ReflectValue::I64(0))
+            })
             .map_err(|e| miette::miette!("reflection API register failed: {}", e))?;
     }
 

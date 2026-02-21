@@ -1,6 +1,6 @@
-//! 语法分析器 (Parser)
+//! 璇硶鍒嗘瀽鍣?(Parser)
 //!
-//! 将 Token 流转换为 AST。
+//! 灏?Token 娴佽浆鎹负 AST銆?
 
 mod decl;
 mod expr;
@@ -14,23 +14,25 @@ use crate::symbol::SymbolInterner;
 use crate::Result;
 use miette::SourceSpan;
 
-/// 语法分析器
+/// 璇硶鍒嗘瀽鍣?
 pub struct Parser<'source> {
-    /// Token 流
+    /// Token 娴?
     tokens: Vec<Token>,
-    /// 当前位置
+    /// 褰撳墠浣嶇疆
     pos: usize,
-    /// 源代码
+    /// 婧愪唬鐮?
     source: &'source str,
-    /// 错误列表（用于错误恢复）
+    /// 閿欒鍒楄〃锛堢敤浜庨敊璇仮澶嶏級
     errors: Vec<ParseError>,
-    /// 是否在条件表达式上下文中（if/while 条件），禁止解析结构体字面量
+    /// 鏄惁鍦ㄦ潯浠惰〃杈惧紡涓婁笅鏂囦腑锛坕f/while 鏉′欢锛夛紝绂佹瑙ｆ瀽缁撴瀯浣撳瓧闈㈤噺
     in_condition_context: bool,
+    /// Number of virtual > tokens produced when splitting nested generic >> in type argument parsing.
+    pending_type_arg_gt: usize,
     interner: SymbolInterner,
 }
 
 impl<'source> Parser<'source> {
-    /// 创建一个新的语法分析器
+    /// 鍒涘缓涓€涓柊鐨勮娉曞垎鏋愬櫒
     pub fn new(source: &'source str) -> Self {
         let tokens = Lexer::tokenize(source);
         Self {
@@ -39,11 +41,12 @@ impl<'source> Parser<'source> {
             source,
             errors: Vec::new(),
             in_condition_context: false,
+            pending_type_arg_gt: 0,
             interner: SymbolInterner::default(),
         }
     }
 
-    /// 解析源代码，返回程序
+    /// 瑙ｆ瀽婧愪唬鐮侊紝杩斿洖绋嬪簭
     pub fn parse(source: &'source str) -> Result<Program> {
         let mut parser = Self::new(source);
         let program = parser.parse_program()?;
@@ -53,7 +56,7 @@ impl<'source> Parser<'source> {
         Ok(program)
     }
 
-    /// 解析程序
+    /// 瑙ｆ瀽绋嬪簭
     pub fn parse_program(&mut self) -> Result<Program> {
         let mut decls = Vec::new();
 
@@ -68,7 +71,7 @@ impl<'source> Parser<'source> {
             }
         }
 
-        // 如果有解析错误，返回第一个错误
+        // 濡傛灉鏈夎В鏋愰敊璇紝杩斿洖绗竴涓敊璇?
         if !self.errors.is_empty() {
             return Err(CompileError::ParseError(self.errors.remove(0)));
         }
@@ -76,39 +79,39 @@ impl<'source> Parser<'source> {
         Ok(Program { decls })
     }
 
-    /// 检查是否有解析错误
+    /// 妫€鏌ユ槸鍚︽湁瑙ｆ瀽閿欒
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
 
-    /// 获取当前 token
+    /// 鑾峰彇褰撳墠 token
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
 
-    /// 获取下一个 token
+    /// 鑾峰彇涓嬩竴涓?token
     fn peek(&self, n: usize) -> Option<&Token> {
         self.tokens.get(self.pos + n)
     }
 
-    /// 消耗当前 token
+    /// 娑堣€楀綋鍓?token
     fn advance(&mut self) -> Option<Token> {
         let token = self.tokens.get(self.pos).cloned();
         self.pos += 1;
         token
     }
 
-    /// 检查当前 token 是否是指定类型
+    /// 妫€鏌ュ綋鍓?token 鏄惁鏄寚瀹氱被鍨?
     fn check(&self, kind: TokenKind) -> bool {
         self.current().map(|t| t.kind == kind).unwrap_or(false)
     }
 
-    /// 检查下一个 token 是否是指定类型
+    /// 妫€鏌ヤ笅涓€涓?token 鏄惁鏄寚瀹氱被鍨?
     fn check_peek(&self, kind: TokenKind) -> bool {
         self.peek(1).map(|t| t.kind == kind).unwrap_or(false)
     }
 
-    /// 如果当前 token 是指定类型，消耗它
+    /// 濡傛灉褰撳墠 token 鏄寚瀹氱被鍨嬶紝娑堣€楀畠
     fn consume(&mut self, kind: TokenKind) -> Option<Token> {
         if self.check(kind) {
             self.advance()
@@ -117,7 +120,7 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 消耗指定类型的 token，否则返回错误
+    /// 娑堣€楁寚瀹氱被鍨嬬殑 token锛屽惁鍒欒繑鍥為敊璇?
     fn expect(&mut self, kind: TokenKind) -> Result<Token> {
         if let Some(token) = self.consume(kind.clone()) {
             Ok(token)
@@ -139,12 +142,12 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 检查是否到达文件末尾
+    /// 妫€鏌ユ槸鍚﹀埌杈炬枃浠舵湯灏?
     fn is_eof(&self) -> bool {
         self.pos >= self.tokens.len()
     }
 
-    /// 获取当前 token 的 span
+    /// 鑾峰彇褰撳墠 token 鐨?span
     fn current_span(&self) -> Span {
         self.current().map(|t| t.span).unwrap_or_else(|| {
             self.tokens
@@ -154,15 +157,15 @@ impl<'source> Parser<'source> {
         })
     }
 
-    /// 获取从起始位置到当前位置的 span
-    /// 从指定位置开始的 span
+    /// 鑾峰彇浠庤捣濮嬩綅缃埌褰撳墠浣嶇疆鐨?span
+    /// 浠庢寚瀹氫綅缃紑濮嬬殑 span
     fn span_at(&self, lo: u32) -> Span {
         Span::new(lo, self.current_span().hi)
     }
 
-    /// 恢复到下一个声明的开始
+    /// 鎭㈠鍒颁笅涓€涓０鏄庣殑寮€濮?
     fn recover_to_decl(&mut self) {
-        // 跳过 token 直到找到一个声明的开始
+        // 璺宠繃 token 鐩村埌鎵惧埌涓€涓０鏄庣殑寮€濮?
         while !self.is_eof() {
             let kind = self.current().map(|t| &t.kind);
             match kind {
@@ -187,7 +190,7 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 获取源代码片段
+    /// 鑾峰彇婧愪唬鐮佺墖娈?
     pub fn source_slice(&self, span: Span) -> &'source str {
         let lo = span.lo as usize;
         let hi = span.hi as usize;
@@ -198,7 +201,7 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 从 token 的 span 提取标识符文本
+    /// 浠?token 鐨?span 鎻愬彇鏍囪瘑绗︽枃鏈?
     pub fn extract_ident(&self, span: Span) -> String {
         self.source_slice(span).to_string()
     }
@@ -210,7 +213,7 @@ impl<'source> Parser<'source> {
     }
 }
 
-/// 将 AST Span 转换为 miette SourceSpan
+/// 灏?AST Span 杞崲涓?miette SourceSpan
 fn source_span(span: Span) -> SourceSpan {
     (span.lo as usize, span.len() as usize).into()
 }

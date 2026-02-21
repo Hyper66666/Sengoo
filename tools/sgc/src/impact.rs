@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::symbol_intern::SymbolInterner;
 use crate::{
     BuildGraphV2, EditClass, EditImpact, FunctionChangeKind, FunctionFingerprint,
     IncrementalLinkMode, ModuleChangeKind, ModuleFingerprint, ModuleInvalidationStats,
 };
-use crate::symbol_intern::SymbolInterner;
+
+const IMPACT_SYMBOL_PRINT_LIMIT: usize = 64;
 
 pub(crate) fn module_invalidation_stats(
     before: &[ModuleFingerprint],
@@ -118,14 +120,24 @@ fn collect_function_state(graph: &BuildGraphV2) -> HashMap<String, FunctionNodeS
     out
 }
 
+fn graph_has_function_state(graph: &BuildGraphV2) -> bool {
+    graph.nodes.iter().any(|node| !node.functions.is_empty())
+}
+
 fn collect_function_changes(
     previous_graph: Option<&BuildGraphV2>,
     current_graph: &BuildGraphV2,
+    known_modules: &HashSet<String>,
+    interface_changed_modules: &HashSet<String>,
 ) -> Vec<(String, FunctionChangeKind)> {
-    let previous = previous_graph
-        .map(collect_function_state)
-        .unwrap_or_default();
+    let previous = match previous_graph {
+        Some(graph) if graph_has_function_state(graph) => collect_function_state(graph),
+        _ => return Vec::new(),
+    };
     let current = collect_function_state(current_graph);
+    if current.is_empty() {
+        return Vec::new();
+    }
 
     let mut all_symbols = HashSet::new();
     all_symbols.extend(previous.keys().cloned());
@@ -142,7 +154,25 @@ fn collect_function_changes(
             (Some(prev), Some(curr)) if prev.abi_hash == curr.abi_hash => {
                 Some(FunctionChangeKind::ImplOnly)
             }
-            (Some(_), Some(_)) => Some(FunctionChangeKind::Interface),
+            (Some(_prev), Some(_curr)) => Some(FunctionChangeKind::Interface),
+            (Some(prev), None) => {
+                if known_modules.contains(prev.module_path.as_str())
+                    && !interface_changed_modules.contains(prev.module_path.as_str())
+                {
+                    Some(FunctionChangeKind::ImplOnly)
+                } else {
+                    Some(FunctionChangeKind::Interface)
+                }
+            }
+            (None, Some(curr)) => {
+                if known_modules.contains(curr.module_path.as_str())
+                    && !interface_changed_modules.contains(curr.module_path.as_str())
+                {
+                    Some(FunctionChangeKind::ImplOnly)
+                } else {
+                    Some(FunctionChangeKind::Interface)
+                }
+            }
             _ => Some(FunctionChangeKind::Interface),
         };
         if let Some(kind) = change {
@@ -334,7 +364,95 @@ pub(crate) fn classify_edit_impact(
     module_changes.sort_by(|a, b| a.0.cmp(&b.0));
     module_changes.dedup_by(|a, b| a.0 == b.0);
 
-    let function_changes = collect_function_changes(previous_graph, current_graph);
+    let mut known_modules = before_modules
+        .iter()
+        .map(|fp| fp.path.clone())
+        .collect::<HashSet<_>>();
+    known_modules.extend(after_modules.iter().map(|fp| fp.path.clone()));
+    known_modules.insert(current_graph.root_module.clone());
+    let previous_function_state = previous_graph
+        .filter(|graph| graph_has_function_state(graph))
+        .map(collect_function_state);
+    let current_function_state = collect_function_state(current_graph);
+    let mut function_state_modules = current_function_state
+        .values()
+        .map(|state| state.module_path.clone())
+        .collect::<HashSet<_>>();
+    if let Some(previous_state) = &previous_function_state {
+        function_state_modules.extend(previous_state.values().map(|state| state.module_path.clone()));
+    }
+
+    let mut function_symbol_to_module = HashMap::<String, String>::new();
+    if let Some(previous_state) = &previous_function_state {
+        for (symbol, state) in previous_state {
+            function_symbol_to_module
+                .entry(symbol.clone())
+                .or_insert_with(|| state.module_path.clone());
+        }
+    }
+    for (symbol, state) in &current_function_state {
+        function_symbol_to_module.insert(symbol.clone(), state.module_path.clone());
+    }
+
+    let mut interface_changed_modules = module_changes
+        .iter()
+        .filter_map(|(path, kind)| {
+            if matches!(kind, ModuleChangeKind::Interface) {
+                Some(path.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<HashSet<_>>();
+
+    let mut function_changes = collect_function_changes(
+        previous_graph,
+        current_graph,
+        &known_modules,
+        &interface_changed_modules,
+    );
+
+    if !function_state_modules.is_empty() && !interface_changed_modules.is_empty() {
+        let interface_function_modules = function_changes
+            .iter()
+            .filter_map(|(symbol, kind)| {
+                if !matches!(kind, FunctionChangeKind::Interface) {
+                    return None;
+                }
+                function_symbol_to_module.get(symbol).cloned()
+            })
+            .collect::<HashSet<_>>();
+
+        let mut downgraded = false;
+        for (path, kind) in &mut module_changes {
+            if matches!(kind, ModuleChangeKind::Interface)
+                && function_state_modules.contains(path)
+                && !interface_function_modules.contains(path)
+            {
+                *kind = ModuleChangeKind::ImplOnly;
+                downgraded = true;
+            }
+        }
+
+        if downgraded {
+            interface_changed_modules = module_changes
+                .iter()
+                .filter_map(|(path, kind)| {
+                    if matches!(kind, ModuleChangeKind::Interface) {
+                        Some(path.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            function_changes = collect_function_changes(
+                previous_graph,
+                current_graph,
+                &known_modules,
+                &interface_changed_modules,
+            );
+        }
+    }
 
     let has_interface_change = module_changes
         .iter()
@@ -485,16 +603,25 @@ pub(crate) fn format_edit_impact_lines(impact: &EditImpact) -> Vec<String> {
         ));
     }
     if !impact.changed_functions.is_empty() {
-        lines.push(format!(
-            "changed functions: {}",
-            impact.changed_functions.join(", ")
-        ));
+        push_truncated_symbol_lines(&mut lines, "changed functions", &impact.changed_functions);
     }
     if !impact.impacted_functions.is_empty() {
-        lines.push(format!(
-            "impacted functions: {}",
-            impact.impacted_functions.join(", ")
-        ));
+        push_truncated_symbol_lines(&mut lines, "impacted functions", &impact.impacted_functions);
     }
     lines
+}
+
+fn push_truncated_symbol_lines(lines: &mut Vec<String>, label: &str, symbols: &[String]) {
+    if symbols.len() <= IMPACT_SYMBOL_PRINT_LIMIT {
+        lines.push(format!("{}: {}", label, symbols.join(", ")));
+        return;
+    }
+
+    let preview = symbols
+        .iter()
+        .take(IMPACT_SYMBOL_PRINT_LIMIT)
+        .cloned()
+        .collect::<Vec<_>>();
+    lines.push(format!("{}: {} ... (truncated)", label, preview.join(", ")));
+    lines.push(format!("{} total: {}", label, symbols.len()));
 }

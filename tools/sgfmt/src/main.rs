@@ -106,8 +106,7 @@ impl Formatter {
     }
 
     fn normalize_spacing(line: &str) -> String {
-        line
-            .replace("==", " __EQ__ ")
+        line.replace("==", " __EQ__ ")
             .replace("!=", " __NE__ ")
             .replace("<=", " __LE__ ")
             .replace(">=", " __GE__ ")

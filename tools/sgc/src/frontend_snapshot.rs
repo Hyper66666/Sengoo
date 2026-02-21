@@ -5,12 +5,12 @@ use crate::{
     canonical_or_lossy, collect_impl_only_impacted_symbols_with_fallback,
     collect_module_sources_with_edges, dependency_graph_digest, frontend_cache_entry_for_module,
     frontend_fallback_scope_label, frontend_jobs_label, frontend_probe_module_body_only,
-    frontend_probe_module_full, function_fingerprints_for_module, hir_fragment_fingerprint,
-    merge_frontend_phase_stats, module_dependency_levels, resolve_frontend_job_count,
-    run_frontend_tasks_deterministic, source_fingerprint, BuildGraphV2, FrontendFallbackEvent,
-    FrontendFallbackScope, FrontendJobs, FrontendModuleCacheEntryV4, FrontendProbeMode,
-    FrontendSchedulerPhaseStats, FrontendSchedulerTelemetry, FrontendSessionStoreV4,
-    ModuleFingerprint, ModuleGraphSnapshot, BUILD_GRAPH_SCHEMA_VERSION,
+    frontend_probe_module_full, function_fingerprints_for_module, generic_fingerprints_for_module,
+    hir_fragment_fingerprint, merge_frontend_phase_stats, module_dependency_levels,
+    resolve_frontend_job_count, run_frontend_tasks_deterministic, source_fingerprint, BuildGraphV2,
+    FrontendFallbackEvent, FrontendFallbackScope, FrontendJobs, FrontendModuleCacheEntryV4,
+    FrontendProbeMode, FrontendSchedulerPhaseStats, FrontendSchedulerTelemetry,
+    FrontendSessionStoreV4, ModuleFingerprint, ModuleGraphSnapshot, BUILD_GRAPH_SCHEMA_VERSION,
     FRONTEND_SCHEDULER_SCHEMA_VERSION,
 };
 
@@ -208,20 +208,35 @@ pub(crate) fn collect_module_graph_snapshot(
     let mut symbol_backfilled_modules = 0usize;
     if collect_symbol_fingerprints {
         for (module_id, entry) in &mut module_entries {
-            if !entry.symbols.is_empty() {
+            let needs_symbols = entry.symbols.is_empty();
+            let needs_generic =
+                entry.generic_items.is_empty() && entry.generic_instances.is_empty();
+            if !needs_symbols && !needs_generic {
                 continue;
             }
             let Some(info) = module_sources.get(module_id) else {
                 continue;
             };
-            entry.symbols = function_fingerprints_for_module(module_id, info.source.as_ref());
-            for symbol in &mut entry.symbols {
-                if symbol.module_imports.is_empty() {
-                    symbol.module_imports = entry.depends_on.clone();
+            if needs_symbols {
+                entry.symbols = function_fingerprints_for_module(module_id, info.source.as_ref());
+                for symbol in &mut entry.symbols {
+                    if symbol.module_imports.is_empty() {
+                        symbol.module_imports = entry.depends_on.clone();
+                    }
                 }
+                entry.symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                entry.hir_hash = hir_fragment_fingerprint(&entry.symbols);
             }
-            entry.symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
-            entry.hir_hash = hir_fragment_fingerprint(&entry.symbols);
+            if needs_generic {
+                let (mut generic_items, mut generic_instances) =
+                    generic_fingerprints_for_module(module_id, info.source.as_ref());
+                generic_items.sort_by(|a, b| a.stable_item_id.cmp(&b.stable_item_id));
+                generic_items.dedup_by(|a, b| a.stable_item_id == b.stable_item_id);
+                generic_instances.sort_by(|a, b| a.instance_key.cmp(&b.instance_key));
+                generic_instances.dedup_by(|a, b| a.instance_key == b.instance_key);
+                entry.generic_items = generic_items;
+                entry.generic_instances = generic_instances;
+            }
             symbol_backfilled_modules += 1;
         }
     }
@@ -494,6 +509,20 @@ pub(crate) fn collect_module_graph_snapshot(
         .entry(root_module.clone())
         .or_default();
 
+    let mut module_generic_items = module_entries
+        .iter()
+        .map(|(path, entry)| (path.clone(), entry.generic_items.clone()))
+        .collect::<BTreeMap<_, _>>();
+    module_generic_items.entry(root_module.clone()).or_default();
+
+    let mut module_generic_instances = module_entries
+        .iter()
+        .map(|(path, entry)| (path.clone(), entry.generic_instances.clone()))
+        .collect::<BTreeMap<_, _>>();
+    module_generic_instances
+        .entry(root_module.clone())
+        .or_default();
+
     let mut frontend_modules = module_entries.into_values().collect::<Vec<_>>();
     frontend_modules.sort_by(|a, b| a.module_id.cmp(&b.module_id));
 
@@ -509,6 +538,8 @@ pub(crate) fn collect_module_graph_snapshot(
     ModuleGraphSnapshot {
         module_fingerprints,
         module_function_fingerprints,
+        module_generic_items,
+        module_generic_instances,
         dependency_edges,
         reflection_import_modules,
         diagnostics,

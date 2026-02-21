@@ -50,9 +50,7 @@ enum Commands {
     },
 
     /// Update one dependency or all dependencies.
-    Update {
-        package: Option<String>,
-    },
+    Update { package: Option<String> },
 
     /// Build all .sg files in src/.
     Build {
@@ -67,9 +65,7 @@ enum Commands {
     },
 
     /// Search package from registry.
-    Search {
-        query: String,
-    },
+    Search { query: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -273,7 +269,12 @@ fn cmd_add(packages: Vec<String>, dev: bool) -> Result<()> {
             ensure_object_table(&mut config.dependencies)
         };
         target.insert(name.clone(), Value::String(version.clone()));
-        println!("Added {} = \"{}\"{}", name, version, if dev { " (dev)" } else { "" });
+        println!(
+            "Added {} = \"{}\"{}",
+            name,
+            version,
+            if dev { " (dev)" } else { "" }
+        );
     }
 
     save_project_config(&toml_path, &config)?;
@@ -284,11 +285,7 @@ fn cmd_remove(package: String) -> Result<()> {
     let (toml_path, mut config) = load_project_config()?;
     let mut removed = false;
 
-    if let Some(map) = config
-        .dependencies
-        .as_mut()
-        .and_then(Value::as_object_mut)
-    {
+    if let Some(map) = config.dependencies.as_mut().and_then(Value::as_object_mut) {
         removed |= map.remove(&package).is_some();
     }
     if let Some(map) = config
@@ -330,7 +327,8 @@ fn cmd_update(package: Option<String>) -> Result<()> {
 
     let mut updated = 0usize;
     for dep in targets {
-        let exists = map_contains(&config.dependencies, &dep) || map_contains(&config.dev_dependencies, &dep);
+        let exists = map_contains(&config.dependencies, &dep)
+            || map_contains(&config.dev_dependencies, &dep);
         if !exists {
             println!("Skip {} (not found)", dep);
             continue;
@@ -343,7 +341,11 @@ fn cmd_update(package: Option<String>) -> Result<()> {
                 updated += 1;
             }
         }
-        if let Some(map) = config.dev_dependencies.as_mut().and_then(Value::as_object_mut) {
+        if let Some(map) = config
+            .dev_dependencies
+            .as_mut()
+            .and_then(Value::as_object_mut)
+        {
             if map.contains_key(&dep) {
                 map.insert(dep.clone(), Value::String(latest.clone()));
                 updated += 1;
@@ -360,8 +362,7 @@ fn cmd_update(package: Option<String>) -> Result<()> {
 
 fn cmd_build(release: bool) -> Result<()> {
     let (_toml_path, config) = load_project_config()?;
-    let sgc_path = which::which("sgc")
-        .map_err(|_| miette::miette!("sgc not found in PATH"))?;
+    let sgc_path = which::which("sgc").map_err(|_| miette::miette!("sgc not found in PATH"))?;
 
     let src_dir = PathBuf::from("src");
     if !src_dir.exists() {
@@ -406,7 +407,10 @@ fn cmd_build(release: bool) -> Result<()> {
         println!("Built {} -> {}", file.display(), output.display());
     }
 
-    println!("Build done: {} v{}, files={}", config.name, config.version, built);
+    println!(
+        "Build done: {} v{}, files={}",
+        config.name, config.version, built
+    );
     Ok(())
 }
 
@@ -432,16 +436,16 @@ fn cmd_search(query: String) -> Result<()> {
 
     for item in list {
         if let Some(obj) = item.as_object() {
-            let name = obj.get("name").and_then(Value::as_str).unwrap_or("<unknown>");
+            let name = obj
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
             let version = obj
                 .get("version")
                 .and_then(Value::as_str)
                 .or_else(|| obj.get("latest_version").and_then(Value::as_str))
                 .unwrap_or("?");
-            let description = obj
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let description = obj.get("description").and_then(Value::as_str).unwrap_or("");
             println!("{} {} - {}", name, version, description);
         }
     }

@@ -4,10 +4,71 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    canonical_or_lossy, module_invalidation_stats, BuildCacheKey, BuildCacheMetadata,
-    BuildGraphV2, BuildWorksetPlan, CodegenWorksetManifest, EditClass, EditImpact,
+    canonical_or_lossy, module_invalidation_stats, BuildCacheKey, BuildCacheMetadata, BuildGraphV2,
+    BuildWorksetPlan, CodegenWorksetManifest, EditClass, EditImpact, GenericInstancePlanStats,
     ModuleFingerprint, RunCacheKey, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
 };
+
+const DEFAULT_WORKSET_MANIFEST_MAX_ITEMS: usize = 2048;
+
+fn workset_manifest_max_items() -> usize {
+    std::env::var("SGC_WORKSET_MANIFEST_MAX_ITEMS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_WORKSET_MANIFEST_MAX_ITEMS)
+}
+
+fn truncate_manifest_list(values: &mut Vec<String>, label: &str, max_items: usize) {
+    if values.len() <= max_items {
+        return;
+    }
+    let total = values.len();
+    values.truncate(max_items);
+    values.push(format!(
+        "__truncated__:{} total={} kept={}",
+        label, total, max_items
+    ));
+}
+
+fn compact_manifest_for_serialization(
+    manifest: &CodegenWorksetManifest,
+    max_items: usize,
+) -> CodegenWorksetManifest {
+    if max_items == 0 {
+        return manifest.clone();
+    }
+
+    let mut compact = manifest.clone();
+    truncate_manifest_list(&mut compact.changed_modules, "changed_modules", max_items);
+    truncate_manifest_list(&mut compact.impacted_modules, "impacted_modules", max_items);
+    truncate_manifest_list(&mut compact.changed_symbols, "changed_symbols", max_items);
+    truncate_manifest_list(&mut compact.impacted_symbols, "impacted_symbols", max_items);
+    truncate_manifest_list(&mut compact.rebuild_modules, "rebuild_modules", max_items);
+    truncate_manifest_list(&mut compact.reuse_modules, "reuse_modules", max_items);
+    truncate_manifest_list(&mut compact.rebuild_symbols, "rebuild_symbols", max_items);
+    truncate_manifest_list(&mut compact.reuse_symbols, "reuse_symbols", max_items);
+    truncate_manifest_list(
+        &mut compact.generic_rebuild_items,
+        "generic_rebuild_items",
+        max_items,
+    );
+    truncate_manifest_list(
+        &mut compact.generic_rebuild_instance_keys,
+        "generic_rebuild_instance_keys",
+        max_items,
+    );
+    truncate_manifest_list(
+        &mut compact.generic_reuse_items,
+        "generic_reuse_items",
+        max_items,
+    );
+    truncate_manifest_list(
+        &mut compact.generic_reuse_instance_keys,
+        "generic_reuse_instance_keys",
+        max_items,
+    );
+    compact
+}
 
 pub(crate) fn can_use_incremental_link_with_metadata(
     previous: &BuildCacheMetadata,
@@ -168,10 +229,7 @@ pub(crate) fn metadata_matches(metadata: &RunCacheMetadata, key: &RunCacheKey) -
         && metadata.runtime_c == key.runtime_c
 }
 
-pub(crate) fn build_metadata_matches(
-    metadata: &BuildCacheMetadata,
-    key: &BuildCacheKey,
-) -> bool {
+pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildCacheKey) -> bool {
     metadata.cache_schema_version == BUILD_GRAPH_SCHEMA_VERSION
         && metadata.source_hash == key.source_hash
         && metadata.module_fingerprints == key.module_fingerprints
@@ -323,6 +381,7 @@ pub(crate) fn derive_codegen_workset_manifest(
     graph: &BuildGraphV2,
     impact: Option<&EditImpact>,
     plan: BuildWorksetPlan,
+    generic_stats: Option<&GenericInstancePlanStats>,
 ) -> CodegenWorksetManifest {
     let mut all_modules = graph
         .nodes
@@ -414,6 +473,57 @@ pub(crate) fn derive_codegen_workset_manifest(
     rebuild_symbols.sort();
     rebuild_symbols.dedup();
 
+    let generic_stats = generic_stats.cloned().unwrap_or_default();
+    let generic_symbols = graph
+        .nodes
+        .iter()
+        .flat_map(|node| node.generic_items.iter().map(|item| item.symbol.clone()))
+        .collect::<HashSet<_>>();
+    let generic_rebuild_items = {
+        let mut items = generic_stats.rebuild_item_ids.clone();
+        items.sort();
+        items.dedup();
+        items
+    };
+    let generic_reuse_items = {
+        let mut items = generic_stats.reuse_item_ids.clone();
+        items.sort();
+        items.dedup();
+        items
+    };
+    let generic_rebuild_instance_keys = {
+        let mut keys = generic_stats.rebuild_instance_keys.clone();
+        keys.sort();
+        keys.dedup();
+        keys
+    };
+    let generic_reuse_instance_keys = {
+        let mut keys = generic_stats.reuse_instance_keys.clone();
+        keys.sort();
+        keys.dedup();
+        keys
+    };
+
+    if generic_stats.total_instances > 0 {
+        if generic_stats.rebuilt_instances == 0 {
+            rebuild_symbols.retain(|symbol| !generic_symbols.contains(symbol));
+        } else if !generic_rebuild_items.is_empty() {
+            let generic_rebuild_set = generic_rebuild_items
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+            rebuild_symbols.retain(|symbol| {
+                if generic_symbols.contains(symbol) {
+                    generic_rebuild_set.contains(symbol)
+                } else {
+                    true
+                }
+            });
+        }
+    }
+    rebuild_symbols.sort();
+    rebuild_symbols.dedup();
+
     let rebuild_symbol_set = rebuild_symbols.iter().cloned().collect::<HashSet<_>>();
     let reuse_symbols = all_symbols
         .iter()
@@ -434,6 +544,17 @@ pub(crate) fn derive_codegen_workset_manifest(
         reuse_modules,
         rebuild_symbols,
         reuse_symbols,
+        generic_total_instances: generic_stats.total_instances,
+        generic_cache_hits: generic_stats.cache_hits,
+        generic_rebuilt_instances: generic_stats.rebuilt_instances,
+        generic_interface_invalidated: generic_stats.interface_invalidated,
+        generic_body_invalidated: generic_stats.body_invalidated,
+        generic_dependency_invalidated: generic_stats.dependency_invalidated,
+        generic_new_instances: generic_stats.new_instances,
+        generic_rebuild_items,
+        generic_rebuild_instance_keys,
+        generic_reuse_items,
+        generic_reuse_instance_keys,
     }
 }
 
@@ -454,14 +575,18 @@ pub(crate) fn save_codegen_workset_manifest(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    let bytes = serde_json::to_vec_pretty(manifest)
+    let compact_manifest = compact_manifest_for_serialization(manifest, workset_manifest_max_items());
+    let bytes = serde_json::to_vec_pretty(&compact_manifest)
         .map_err(|e| miette::miette!("failed to serialize workset manifest: {}", e))?;
     fs::write(path, bytes)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to write workset manifest: {}", e))
 }
 
-pub(crate) fn cache_mismatch_reasons(metadata: &RunCacheMetadata, key: &RunCacheKey) -> Vec<String> {
+pub(crate) fn cache_mismatch_reasons(
+    metadata: &RunCacheMetadata,
+    key: &RunCacheKey,
+) -> Vec<String> {
     let mut reasons = Vec::new();
 
     if metadata.source_hash != key.source_hash {

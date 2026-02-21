@@ -15,12 +15,11 @@ pub struct Local {
 
 impl Local {
     pub fn new(id: usize, kind: LocalKind) -> Self {
-        assert!(
-            id <= u32::MAX as usize,
-            "local id overflow (>{})",
-            u32::MAX
-        );
-        Self { id: id as u32, kind }
+        assert!(id <= u32::MAX as usize, "local id overflow (>{})", u32::MAX);
+        Self {
+            id: id as u32,
+            kind,
+        }
     }
 
     #[inline]

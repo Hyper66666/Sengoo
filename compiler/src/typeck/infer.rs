@@ -4,6 +4,7 @@
 
 use crate::typeck::env::TypeEnv;
 use crate::typeck::ty::{Subst, Ty, TyKind, TyVarId, TypeckError};
+use std::collections::HashMap;
 
 /// 类型推断器
 #[derive(Debug)]
@@ -75,6 +76,29 @@ impl TypeInfer {
         self.apply_subst(&ty)
     }
 
+    /// Instantiate a polymorphic type with fresh type variables so each
+    /// use-site can infer independently.
+    pub fn instantiate_with_fresh_vars(&mut self, ty: Ty) -> Ty {
+        self.instantiate_with_fresh_vars_and_map(ty).0
+    }
+
+    /// Instantiate and return a map from original type variable id to
+    /// instantiated fresh type variable id.
+    pub fn instantiate_with_fresh_vars_and_map(
+        &mut self,
+        ty: Ty,
+    ) -> (Ty, HashMap<TyVarId, TyVarId>) {
+        let mut var_map = HashMap::new();
+        let instantiated = self.instantiate_fresh_impl(&ty, &mut var_map);
+        let mut id_map = HashMap::new();
+        for (old_id, mapped_ty) in var_map {
+            if let TyKind::Var(new_id) = mapped_ty.kind {
+                id_map.insert(old_id, new_id);
+            }
+        }
+        (instantiated, id_map)
+    }
+
     /// 应用替换到类型
     pub fn apply_subst(&self, ty: &Ty) -> Ty {
         self.subst_apply(&self.subst, ty)
@@ -136,6 +160,71 @@ impl TypeInfer {
                     },
                 )
             }
+            _ => ty.clone(),
+        }
+    }
+
+    fn instantiate_fresh_impl(&mut self, ty: &Ty, var_map: &mut HashMap<TyVarId, Ty>) -> Ty {
+        match &ty.kind {
+            TyKind::Var(id) => {
+                if let Some(mapped) = var_map.get(id) {
+                    mapped.clone()
+                } else {
+                    let fresh = self.fresh_ty_var();
+                    var_map.insert(*id, fresh.clone());
+                    fresh
+                }
+            }
+            TyKind::Ref(m, inner) => Ty::new(
+                ty.id,
+                TyKind::Ref(*m, Box::new(self.instantiate_fresh_impl(inner, var_map))),
+            ),
+            TyKind::Ptr(inner) => Ty::new(
+                ty.id,
+                TyKind::Ptr(Box::new(self.instantiate_fresh_impl(inner, var_map))),
+            ),
+            TyKind::Array(elem, n) => Ty::new(
+                ty.id,
+                TyKind::Array(Box::new(self.instantiate_fresh_impl(elem, var_map)), *n),
+            ),
+            TyKind::Slice(elem) => Ty::new(
+                ty.id,
+                TyKind::Slice(Box::new(self.instantiate_fresh_impl(elem, var_map))),
+            ),
+            TyKind::Tuple(types) => Ty::new(
+                ty.id,
+                TyKind::Tuple(
+                    types
+                        .iter()
+                        .map(|t| self.instantiate_fresh_impl(t, var_map))
+                        .collect(),
+                ),
+            ),
+            TyKind::Fn {
+                params,
+                ret,
+                is_variadic,
+            } => Ty::new(
+                ty.id,
+                TyKind::Fn {
+                    params: params
+                        .iter()
+                        .map(|t| self.instantiate_fresh_impl(t, var_map))
+                        .collect(),
+                    ret: Box::new(self.instantiate_fresh_impl(ret, var_map)),
+                    is_variadic: *is_variadic,
+                },
+            ),
+            TyKind::Adt { name, args } => Ty::new(
+                ty.id,
+                TyKind::Adt {
+                    name: name.clone(),
+                    args: args
+                        .iter()
+                        .map(|t| self.instantiate_fresh_impl(t, var_map))
+                        .collect(),
+                },
+            ),
             _ => ty.clone(),
         }
     }

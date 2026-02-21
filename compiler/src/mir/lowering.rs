@@ -445,7 +445,10 @@ impl<'a> LoweringContext<'a> {
                 self.collect_vars_from_expr(base, param_names, free_vars);
             }
             HIRExpr::For {
-                var_name, iter, body, ..
+                var_name,
+                iter,
+                body,
+                ..
             } => {
                 self.collect_vars_from_expr(iter, param_names, free_vars);
                 // for 变量在循环体内是绑定的，不算自由变量
@@ -1357,7 +1360,10 @@ impl<'a> LoweringContext<'a> {
                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
             }
             HIRExpr::For {
-                var_name, iter, body, ..
+                var_name,
+                iter,
+                body,
+                ..
             } => {
                 // 检查是否为范围迭代
                 match iter.as_ref() {
@@ -2231,7 +2237,8 @@ impl<'a> LoweringContext<'a> {
                             source: scrutinee_local,
                         });
 
-                        let arm_blocks: Vec<usize> = arms.iter().map(|_| self.new_block()).collect();
+                        let arm_blocks: Vec<usize> =
+                            arms.iter().map(|_| self.new_block()).collect();
                         let join_block = self.new_block();
 
                         let mut targets = Vec::new();

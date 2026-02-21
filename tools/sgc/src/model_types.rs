@@ -39,8 +39,10 @@ const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
 const REFLECTION_SCHEMA_VERSION: u32 = 1;
 const FRONTEND_SCHEDULER_SCHEMA_VERSION: u32 = 1;
+const GENERIC_INSTANCE_CACHE_SCHEMA_VERSION: u32 = 1;
 const FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES: usize = 256 * 1024;
 const LOW_MEMORY_HINT_AVAILABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:48765";
 const DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_millis(1200);
 const LINKER_UNKNOWN: i8 = -1;
@@ -90,6 +92,10 @@ fn default_reflection_schema_version() -> u32 {
 
 fn default_frontend_scheduler_schema_version() -> u32 {
     FRONTEND_SCHEDULER_SCHEMA_VERSION
+}
+
+fn default_generic_instance_cache_schema_version() -> u32 {
+    GENERIC_INSTANCE_CACHE_SCHEMA_VERSION
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +211,10 @@ struct FrontendModuleCacheEntryV4 {
     depends_on: Vec<String>,
     #[serde(default)]
     symbols: Vec<FunctionFingerprint>,
+    #[serde(default)]
+    generic_items: Vec<GenericItemFingerprint>,
+    #[serde(default)]
+    generic_instances: Vec<GenericInstanceFingerprint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +235,8 @@ struct FrontendSessionStoreV4 {
 struct ModuleGraphSnapshot {
     module_fingerprints: Vec<ModuleFingerprint>,
     module_function_fingerprints: BTreeMap<String, Vec<FunctionFingerprint>>,
+    module_generic_items: BTreeMap<String, Vec<GenericItemFingerprint>>,
+    module_generic_instances: BTreeMap<String, Vec<GenericInstanceFingerprint>>,
     dependency_edges: BTreeMap<String, Vec<String>>,
     reflection_import_modules: Vec<String>,
     diagnostics: Vec<String>,
@@ -316,6 +328,90 @@ struct FunctionFingerprint {
     module_imports: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GenericItemFingerprint {
+    stable_item_id: String,
+    symbol: String,
+    module_id: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    interface_hash: u64,
+    #[serde(default)]
+    body_hash: u64,
+    #[serde(default)]
+    type_param_count: u32,
+    #[serde(default)]
+    calls: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GenericInstanceFingerprint {
+    item_stable_id: String,
+    module_id: String,
+    #[serde(default)]
+    canonical_type_args: Vec<String>,
+    instance_key: String,
+    #[serde(default)]
+    interface_hash: u64,
+    #[serde(default)]
+    body_hash: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct GenericInstancePlanStats {
+    #[serde(default)]
+    total_instances: u32,
+    #[serde(default)]
+    cache_hits: u32,
+    #[serde(default)]
+    rebuilt_instances: u32,
+    #[serde(default)]
+    interface_invalidated: u32,
+    #[serde(default)]
+    body_invalidated: u32,
+    #[serde(default)]
+    dependency_invalidated: u32,
+    #[serde(default)]
+    new_instances: u32,
+    #[serde(default)]
+    rebuild_item_ids: Vec<String>,
+    #[serde(default)]
+    rebuild_instance_keys: Vec<String>,
+    #[serde(default)]
+    reuse_item_ids: Vec<String>,
+    #[serde(default)]
+    reuse_instance_keys: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GenericInstanceCacheEntry {
+    instance_key: String,
+    item_stable_id: String,
+    module_id: String,
+    #[serde(default)]
+    canonical_type_args: Vec<String>,
+    #[serde(default)]
+    interface_hash: u64,
+    #[serde(default)]
+    body_hash: u64,
+    #[serde(default)]
+    last_seen_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GenericInstanceCacheMetadata {
+    #[serde(default = "default_generic_instance_cache_schema_version")]
+    schema_version: u32,
+    compiler_version: String,
+    target_triple: String,
+    opt_level: u8,
+    #[serde(default)]
+    feature_flags: Vec<String>,
+    #[serde(default)]
+    entries: Vec<GenericInstanceCacheEntry>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FunctionSignatureInfo {
     symbol: String,
@@ -334,6 +430,10 @@ struct BuildGraphNodeV2 {
     object_path: Option<String>,
     #[serde(default)]
     functions: Vec<FunctionFingerprint>,
+    #[serde(default)]
+    generic_items: Vec<GenericItemFingerprint>,
+    #[serde(default)]
+    generic_instances: Vec<GenericInstanceFingerprint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -435,5 +535,27 @@ struct CodegenWorksetManifest {
     rebuild_symbols: Vec<String>,
     #[serde(default)]
     reuse_symbols: Vec<String>,
+    #[serde(default)]
+    generic_total_instances: u32,
+    #[serde(default)]
+    generic_cache_hits: u32,
+    #[serde(default)]
+    generic_rebuilt_instances: u32,
+    #[serde(default)]
+    generic_interface_invalidated: u32,
+    #[serde(default)]
+    generic_body_invalidated: u32,
+    #[serde(default)]
+    generic_dependency_invalidated: u32,
+    #[serde(default)]
+    generic_new_instances: u32,
+    #[serde(default)]
+    generic_rebuild_items: Vec<String>,
+    #[serde(default)]
+    generic_rebuild_instance_keys: Vec<String>,
+    #[serde(default)]
+    generic_reuse_items: Vec<String>,
+    #[serde(default)]
+    generic_reuse_instance_keys: Vec<String>,
 }
 

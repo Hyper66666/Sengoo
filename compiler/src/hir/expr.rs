@@ -10,7 +10,10 @@ pub enum HIRExpr {
     Lit(HIRLiteral),
 
     /// 变量引用
-    Var { name: String, symbol: SymbolId },
+    Var {
+        name: String,
+        symbol: SymbolId,
+    },
 
     /// 一元运算
     Unary(HIRUnaryOp, Box<HIRExpr>),

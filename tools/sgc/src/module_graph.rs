@@ -25,7 +25,10 @@ fn resolve_import_candidates(source_dir: &Path, import_path: &AstPath) -> Vec<Pa
     candidates
 }
 
-fn resolve_direct_import_dependencies_from_program(source_dir: &Path, program: &Program) -> Vec<PathBuf> {
+fn resolve_direct_import_dependencies_from_program(
+    source_dir: &Path,
+    program: &Program,
+) -> Vec<PathBuf> {
     let mut deps = program
         .decls
         .iter()
@@ -75,7 +78,8 @@ pub(crate) fn collect_module_sources_with_edges(
         }
 
         let source_dir = module_path.parent().unwrap_or(Path::new("."));
-        let (deps, requests_reflection) = resolve_direct_import_metadata(source_dir, source.as_ref());
+        let (deps, requests_reflection) =
+            resolve_direct_import_metadata(source_dir, source.as_ref());
         let mut dep_keys = deps
             .iter()
             .map(|dep| canonical_or_lossy(dep))
@@ -103,7 +107,9 @@ pub(crate) fn collect_module_sources_with_edges(
 }
 
 #[allow(dead_code)]
-pub(crate) fn module_dependency_levels(dependency_edges: &BTreeMap<String, Vec<String>>) -> Vec<Vec<String>> {
+pub(crate) fn module_dependency_levels(
+    dependency_edges: &BTreeMap<String, Vec<String>>,
+) -> Vec<Vec<String>> {
     let mut indegree = HashMap::<String, usize>::new();
     let mut reverse = HashMap::<String, Vec<String>>::new();
 

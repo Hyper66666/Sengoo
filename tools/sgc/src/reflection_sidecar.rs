@@ -321,13 +321,15 @@ pub(crate) fn maybe_emit_reflection_sidecar(
     let sidecar_path = reflection_sidecar_path_for_artifact(artifact_path);
     if !reflection.enabled {
         if sidecar_path.exists() {
-            fs::remove_file(&sidecar_path).into_diagnostic().map_err(|e| {
-                miette::miette!(
-                    "failed to remove stale reflection metadata {}: {}",
-                    sidecar_path.to_string_lossy(),
-                    e
-                )
-            })?;
+            fs::remove_file(&sidecar_path)
+                .into_diagnostic()
+                .map_err(|e| {
+                    miette::miette!(
+                        "failed to remove stale reflection metadata {}: {}",
+                        sidecar_path.to_string_lossy(),
+                        e
+                    )
+                })?;
         }
         return Ok(());
     }
@@ -338,19 +340,23 @@ pub(crate) fn maybe_emit_reflection_sidecar(
         None
     };
 
-    let Some(metadata) = build_reflection_metadata(graph_v2, reflection, llvm_defined_symbols.as_ref())? else {
+    let Some(metadata) =
+        build_reflection_metadata(graph_v2, reflection, llvm_defined_symbols.as_ref())?
+    else {
         return Ok(());
     };
     let bytes = serde_json::to_vec_pretty(&metadata)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to serialize reflection metadata sidecar: {}", e))?;
-    fs::write(&sidecar_path, bytes).into_diagnostic().map_err(|e| {
-        miette::miette!(
-            "failed to write reflection metadata sidecar {}: {}",
-            sidecar_path.to_string_lossy(),
-            e
-        )
-    })?;
+    fs::write(&sidecar_path, bytes)
+        .into_diagnostic()
+        .map_err(|e| {
+            miette::miette!(
+                "failed to write reflection metadata sidecar {}: {}",
+                sidecar_path.to_string_lossy(),
+                e
+            )
+        })?;
     println!("Reflection metadata: {}", sidecar_path.to_string_lossy());
     Ok(())
 }

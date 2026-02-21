@@ -5,6 +5,18 @@
 use super::{HIRBody, HIRExpr, HIRType};
 use crate::symbol::SymbolId;
 
+#[derive(Debug, Clone)]
+pub struct HIRTypeParam {
+    pub name: String,
+    pub bounds: Vec<HIRTypeParamBound>,
+    pub default: Option<HIRType>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HIRTypeParamBound {
+    pub trait_path: String,
+}
+
 /// HIR 项
 #[derive(Debug, Clone)]
 pub enum HIRItem {
@@ -22,7 +34,7 @@ pub enum HIRItem {
 #[derive(Debug, Clone)]
 pub struct HIRFunction {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<HIRTypeParam>,
     pub params: Vec<HIRParam>,
     pub return_type: HIRType,
     pub body: HIRBody,
@@ -48,7 +60,7 @@ impl HIRParam {
 #[derive(Debug, Clone)]
 pub struct HIRStruct {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<HIRTypeParam>,
     pub fields: Vec<HIRField>,
     pub is_pub: bool,
 }
@@ -80,7 +92,7 @@ impl HIRField {
 #[derive(Debug, Clone)]
 pub struct HIREnum {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<HIRTypeParam>,
     pub variants: Vec<HIRVariant>,
     pub is_pub: bool,
 }
@@ -100,7 +112,7 @@ pub enum HIRVariant {
 #[derive(Debug, Clone)]
 pub struct HIRTrait {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<HIRTypeParam>,
     pub items: Vec<HIRTraitItem>,
     pub is_pub: bool,
 }
@@ -144,7 +156,7 @@ pub struct HIRStatic {
 #[derive(Debug, Clone)]
 pub struct HIRTypeAlias {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<HIRTypeParam>,
     pub alias: HIRType,
     pub is_pub: bool,
 }

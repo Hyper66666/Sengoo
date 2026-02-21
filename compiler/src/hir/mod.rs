@@ -14,13 +14,12 @@ pub use body::HIRBody;
 pub use expr::{HIRBinaryOp, HIRExpr, HIRLiteral, HIRUnaryOp};
 pub use item::{
     HIRConst, HIREnum, HIRFunction, HIRImpl, HIRItem, HIRParam, HIRStatic, HIRStruct, HIRTrait,
-    HIRTraitItem,
+    HIRTraitItem, HIRTypeParam, HIRTypeParamBound,
 };
 pub use lower::lower_ast;
 pub use pattern::{HIRMatchArm, HIRPattern};
 pub use stmt::HIRStmt;
 pub use ty::{FloatKind, HIRType, HIRTypeKind, IntKind};
-
 
 /// HIR 模块
 #[derive(Debug, Clone)]

@@ -1,7 +1,191 @@
 use crate::*;
 use miette::{IntoDiagnostic, Result};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+struct LargeProjectModeOverrideGuard {
+    previous: Option<bool>,
+}
+
+impl LargeProjectModeOverrideGuard {
+    fn new(previous: Option<bool>) -> Self {
+        Self { previous }
+    }
+}
+
+impl Drop for LargeProjectModeOverrideGuard {
+    fn drop(&mut self) {
+        set_large_project_mode_override(self.previous);
+    }
+}
+
+fn generic_symbol_set(graph: &BuildGraphV2) -> HashSet<String> {
+    graph
+        .nodes
+        .iter()
+        .flat_map(|node| node.generic_items.iter().map(|item| item.symbol.clone()))
+        .collect()
+}
+
+const DEFAULT_UNREACHABLE_PRUNE_MIN_FUNCTIONS: usize = 20_000;
+
+fn configured_hir_prune_min_functions() -> usize {
+    match std::env::var("SENGOO_HIR_PRUNE_MIN_FUNCTIONS")
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+    {
+        Some(0) => usize::MAX,
+        Some(value) => value,
+        None => DEFAULT_UNREACHABLE_PRUNE_MIN_FUNCTIONS,
+    }
+}
+
+fn parse_large_project_mode_env(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" | "enable" | "enabled" => Some(true),
+        "0" | "false" | "off" | "no" | "disable" | "disabled" => Some(false),
+        _ => None,
+    }
+}
+
+fn large_project_mode_effectively_enabled(choice: Option<bool>) -> bool {
+    if let Some(explicit) = choice {
+        return explicit;
+    }
+    std::env::var("SENGOO_LARGE_PROJECT_MODE")
+        .ok()
+        .and_then(|raw| parse_large_project_mode_env(&raw))
+        .unwrap_or(true)
+}
+
+fn root_function_count(graph: &BuildGraphV2) -> usize {
+    graph
+        .nodes
+        .iter()
+        .find(|node| node.module_path == graph.root_module)
+        .map(|node| node.functions.len())
+        .unwrap_or(0)
+}
+
+fn likely_prunes_unreachable_functions(graph: &BuildGraphV2, choice: Option<bool>) -> bool {
+    if !large_project_mode_effectively_enabled(choice) {
+        return false;
+    }
+    let min = configured_hir_prune_min_functions();
+    if min == usize::MAX {
+        return false;
+    }
+    root_function_count(graph) >= min
+}
+
+fn reachable_symbols_from_main(graph: &BuildGraphV2) -> Option<HashSet<String>> {
+    let mut calls_by_symbol = HashMap::<String, Vec<String>>::new();
+    for node in &graph.nodes {
+        for function in &node.functions {
+            calls_by_symbol.insert(function.symbol.clone(), function.calls.clone());
+        }
+    }
+
+    let root_main = format!("{}::main", graph.root_module);
+    if !calls_by_symbol.contains_key(&root_main) {
+        return None;
+    }
+
+    let mut reachable = HashSet::<String>::new();
+    let mut queue = VecDeque::from([root_main]);
+    while let Some(symbol) = queue.pop_front() {
+        if !reachable.insert(symbol.clone()) {
+            continue;
+        }
+        let Some(calls) = calls_by_symbol.get(&symbol) else {
+            continue;
+        };
+        for callee in calls {
+            if calls_by_symbol.contains_key(callee) {
+                queue.push_back(callee.clone());
+            }
+        }
+    }
+
+    Some(reachable)
+}
+
+pub(crate) fn can_reuse_artifacts_for_unreachable_impl_only_changes(
+    impact: Option<&EditImpact>,
+    graph: &BuildGraphV2,
+    large_project_mode_choice: Option<bool>,
+) -> bool {
+    let Some(impact) = impact else {
+        return false;
+    };
+    if !matches!(impact.class, EditClass::ImplOnly) {
+        return false;
+    }
+    if impact.changed_functions.is_empty() {
+        return false;
+    }
+    if !likely_prunes_unreachable_functions(graph, large_project_mode_choice) {
+        return false;
+    }
+
+    let root_prefix = format!("{}::", graph.root_module);
+    let changed_root_functions = impact
+        .changed_functions
+        .iter()
+        .filter(|symbol| symbol.starts_with(&root_prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    if changed_root_functions.is_empty() {
+        return false;
+    }
+
+    let Some(reachable) = reachable_symbols_from_main(graph) else {
+        return false;
+    };
+
+    changed_root_functions
+        .iter()
+        .all(|symbol| !reachable.contains(symbol))
+}
+
+pub(crate) fn can_skip_codegen_via_generic_cache(
+    impact: Option<&EditImpact>,
+    graph: &BuildGraphV2,
+    generic_stats: &GenericInstancePlanStats,
+) -> bool {
+    if generic_stats.total_instances == 0
+        || generic_stats.rebuilt_instances != 0
+        || generic_stats.new_instances != 0
+        || generic_stats.interface_invalidated != 0
+        || generic_stats.body_invalidated != 0
+        || generic_stats.dependency_invalidated != 0
+    {
+        return false;
+    }
+    let Some(impact) = impact else {
+        return false;
+    };
+    if matches!(impact.class, EditClass::InterfaceChange) {
+        return false;
+    }
+
+    let generic_symbols = generic_symbol_set(graph);
+    if generic_symbols.is_empty() {
+        return false;
+    }
+    if impact.changed_functions.is_empty() || impact.impacted_functions.is_empty() {
+        return false;
+    }
+    impact
+        .changed_functions
+        .iter()
+        .all(|symbol| generic_symbols.contains(symbol))
+        && impact
+            .impacted_functions
+            .iter()
+            .all(|symbol| generic_symbols.contains(symbol))
+}
 
 pub(crate) async fn cmd_build(
     input: &str,
@@ -28,9 +212,24 @@ pub(crate) async fn cmd_build(
     if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
         println!("{}", hint);
     }
+    let large_project_mode_choice =
+        maybe_choose_large_project_optimization_mode(source.len(), low_memory);
+    let _large_project_mode_guard = LargeProjectModeOverrideGuard::new(
+        set_large_project_mode_override(large_project_mode_choice),
+    );
+    let collect_symbol_fingerprints =
+        should_collect_symbol_fingerprints(source.len(), force_rebuild, low_memory);
+    if !collect_symbol_fingerprints && !force_rebuild && !low_memory {
+        println!(
+            "symbol fingerprint collection: skipped for large source ({} bytes > limit {} bytes)",
+            source.len(),
+            symbol_fingerprint_collection_limit_bytes()
+        );
+    }
 
     let cache_path = build_dir.join(format!("{}.build-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
+    let generic_cache_path = generic_instance_cache_path(&build_dir, &stem);
     let effective_frontend_jobs = if low_memory {
         FrontendJobs::Fixed(1)
     } else {
@@ -45,6 +244,11 @@ pub(crate) async fn cmd_build(
         None
     } else {
         load_frontend_session_store(&frontend_session_path)
+    };
+    let previous_generic_cache_seed = if low_memory {
+        None
+    } else {
+        load_generic_instance_cache(&generic_cache_path)
     };
     let probe_mode = if force_rebuild || low_memory {
         FrontendProbeMode::FastNoVerify
@@ -64,7 +268,7 @@ pub(crate) async fn cmd_build(
         probe_mode,
         effective_frontend_jobs,
         frontend_trace,
-        !force_rebuild && !low_memory,
+        collect_symbol_fingerprints,
     );
     let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
         input_path,
@@ -169,12 +373,36 @@ pub(crate) async fn cmd_build(
             input_path,
             &module_fingerprints,
             &graph_snapshot.module_function_fingerprints,
+            &graph_snapshot.module_generic_items,
+            &graph_snapshot.module_generic_instances,
             &graph_snapshot.dependency_edges,
             object_path.as_deref(),
             root_interface_hash,
             root_implementation_hash,
         )
     };
+    let generic_feature_flags = vec![
+        format!("emit_llvm={}", emit_llvm),
+        format!("low_memory={}", low_memory),
+        format!("reflection={}", reflection.enabled),
+    ];
+    let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
+        previous_generic_cache_seed.as_ref(),
+        &graph_v2,
+        opt_level,
+        &generic_feature_flags,
+    );
+    println!(
+        "generic instance cache: total={} hits={} rebuilt={} hit_ratio={:.2} interface_invalidated={} body_invalidated={} dependency_invalidated={} new_instances={}",
+        generic_plan_stats.total_instances,
+        generic_plan_stats.cache_hits,
+        generic_plan_stats.rebuilt_instances,
+        generic_instance_hit_ratio(&generic_plan_stats),
+        generic_plan_stats.interface_invalidated,
+        generic_plan_stats.body_invalidated,
+        generic_plan_stats.dependency_invalidated,
+        generic_plan_stats.new_instances
+    );
     drop(graph_snapshot);
     let key = build_cache_key(
         source_hash,
@@ -238,7 +466,7 @@ pub(crate) async fn cmd_build(
         None
     };
 
-    let workset_plan = derive_build_workset_plan(
+    let mut workset_plan = derive_build_workset_plan(
         previous_build_metadata.as_ref(),
         edit_impact.as_ref(),
         &graph_v2.root_module,
@@ -247,8 +475,31 @@ pub(crate) async fn cmd_build(
         &output_file,
         runtime_c.as_deref(),
     );
-    let workset_manifest =
-        derive_codegen_workset_manifest(&graph_v2, edit_impact.as_ref(), workset_plan);
+    if previous_build_metadata.is_some()
+        && can_skip_codegen_via_generic_cache(edit_impact.as_ref(), &graph_v2, &generic_plan_stats)
+    {
+        println!(
+            "generic workset optimization: all impacted generic instances are cache hits, skipping MIR/codegen"
+        );
+        workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
+    } else if previous_build_metadata.is_some()
+        && can_reuse_artifacts_for_unreachable_impl_only_changes(
+            edit_impact.as_ref(),
+            &graph_v2,
+            large_project_mode_choice,
+        )
+    {
+        println!(
+            "workset optimization: impl-only changes are outside root reachable entry set; reusing previous artifacts"
+        );
+        workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
+    }
+    let workset_manifest = derive_codegen_workset_manifest(
+        &graph_v2,
+        edit_impact.as_ref(),
+        workset_plan,
+        Some(&generic_plan_stats),
+    );
     let build_workset_manifest_path = codegen_workset_manifest_path(&build_dir, &stem, "build");
     save_codegen_workset_manifest(&build_workset_manifest_path, &workset_manifest)?;
     println!(
@@ -391,6 +642,12 @@ pub(crate) async fn cmd_build(
             build_graph_v2: Some(graph_v2),
         };
         save_build_cache(&cache_path, &metadata)?;
+        if !low_memory {
+            if let Err(err) = save_generic_instance_cache(&generic_cache_path, &next_generic_cache)
+            {
+                println!("generic instance cache fallback: {}", err);
+            }
+        }
         println!("LLVM IR written to {}", output_file);
         return Ok(());
     }
@@ -484,6 +741,11 @@ pub(crate) async fn cmd_build(
         build_graph_v2: Some(graph_v2),
     };
     save_build_cache(&cache_path, &metadata)?;
+    if !low_memory {
+        if let Err(err) = save_generic_instance_cache(&generic_cache_path, &next_generic_cache) {
+            println!("generic instance cache fallback: {}", err);
+        }
+    }
 
     println!("Build output: {}", output_file);
     Ok(())
@@ -516,6 +778,7 @@ pub(crate) async fn cmd_run(
     };
     let cache_path = build_dir.join(format!("{}.run-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
+    let generic_cache_path = generic_instance_cache_path(&build_dir, &stem);
     let effective_frontend_jobs = if low_memory {
         FrontendJobs::Fixed(1)
     } else {
@@ -531,12 +794,31 @@ pub(crate) async fn cmd_run(
     } else {
         load_frontend_session_store(&frontend_session_path)
     };
+    let previous_generic_cache_seed = if low_memory {
+        None
+    } else {
+        load_generic_instance_cache(&generic_cache_path)
+    };
 
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
     if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
         println!("{}", hint);
+    }
+    let large_project_mode_choice =
+        maybe_choose_large_project_optimization_mode(source.len(), low_memory);
+    let _large_project_mode_guard = LargeProjectModeOverrideGuard::new(
+        set_large_project_mode_override(large_project_mode_choice),
+    );
+    let collect_symbol_fingerprints =
+        should_collect_symbol_fingerprints(source.len(), force_rebuild, low_memory);
+    if !collect_symbol_fingerprints && !force_rebuild && !low_memory {
+        println!(
+            "symbol fingerprint collection: skipped for large source ({} bytes > limit {} bytes)",
+            source.len(),
+            symbol_fingerprint_collection_limit_bytes()
+        );
     }
     let probe_mode = if force_rebuild || low_memory {
         FrontendProbeMode::FastNoVerify
@@ -556,7 +838,7 @@ pub(crate) async fn cmd_run(
         probe_mode,
         effective_frontend_jobs,
         frontend_trace,
-        !force_rebuild && !low_memory,
+        collect_symbol_fingerprints,
     );
     let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
         input_path,
@@ -635,6 +917,8 @@ pub(crate) async fn cmd_run(
             input_path,
             &module_fingerprints,
             &graph_snapshot.module_function_fingerprints,
+            &graph_snapshot.module_generic_items,
+            &graph_snapshot.module_generic_instances,
             &graph_snapshot.dependency_edges,
             Some(&object_path),
             root_interface_hash,
@@ -648,6 +932,29 @@ pub(crate) async fn cmd_run(
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    let generic_feature_flags = vec![
+        format!("run_engine={:?}", requested_engine),
+        format!("resolved_engine={:?}", resolved_engine),
+        format!("low_memory={}", low_memory),
+        format!("reflection={}", reflection.enabled),
+    ];
+    let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
+        previous_generic_cache_seed.as_ref(),
+        &graph_v2,
+        opt_level,
+        &generic_feature_flags,
+    );
+    println!(
+        "generic instance cache: total={} hits={} rebuilt={} hit_ratio={:.2} interface_invalidated={} body_invalidated={} dependency_invalidated={} new_instances={}",
+        generic_plan_stats.total_instances,
+        generic_plan_stats.cache_hits,
+        generic_plan_stats.rebuilt_instances,
+        generic_instance_hit_ratio(&generic_plan_stats),
+        generic_plan_stats.interface_invalidated,
+        generic_plan_stats.body_invalidated,
+        generic_plan_stats.dependency_invalidated,
+        generic_plan_stats.new_instances
+    );
 
     let key = cache_key(
         source_hash,
@@ -732,7 +1039,7 @@ pub(crate) async fn cmd_run(
         None
     };
 
-    let workset_plan = derive_run_workset_plan(
+    let mut workset_plan = derive_run_workset_plan(
         previous_run_metadata.as_ref(),
         edit_impact.as_ref(),
         &graph_v2.root_module,
@@ -741,8 +1048,31 @@ pub(crate) async fn cmd_run(
         resolved_engine,
         runtime_c.as_deref(),
     );
-    let workset_manifest =
-        derive_codegen_workset_manifest(&graph_v2, edit_impact.as_ref(), workset_plan);
+    if previous_run_metadata.is_some()
+        && can_skip_codegen_via_generic_cache(edit_impact.as_ref(), &graph_v2, &generic_plan_stats)
+    {
+        println!(
+            "generic workset optimization: all impacted generic instances are cache hits, skipping MIR/codegen"
+        );
+        workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
+    } else if previous_run_metadata.is_some()
+        && can_reuse_artifacts_for_unreachable_impl_only_changes(
+            edit_impact.as_ref(),
+            &graph_v2,
+            large_project_mode_choice,
+        )
+    {
+        println!(
+            "workset optimization: impl-only changes are outside root reachable entry set; reusing previous artifacts"
+        );
+        workset_plan = BuildWorksetPlan::ReusePreviousArtifacts;
+    }
+    let workset_manifest = derive_codegen_workset_manifest(
+        &graph_v2,
+        edit_impact.as_ref(),
+        workset_plan,
+        Some(&generic_plan_stats),
+    );
     let run_workset_manifest_path = codegen_workset_manifest_path(&build_dir, &stem, "run");
     save_codegen_workset_manifest(&run_workset_manifest_path, &workset_manifest)?;
     println!(
@@ -973,6 +1303,11 @@ pub(crate) async fn cmd_run(
         build_graph_v2: Some(graph_v2),
     };
     save_run_cache(&cache_path, &metadata)?;
+    if !low_memory {
+        if let Err(err) = save_generic_instance_cache(&generic_cache_path, &next_generic_cache) {
+            println!("generic instance cache fallback: {}", err);
+        }
+    }
 
     Ok(())
 }

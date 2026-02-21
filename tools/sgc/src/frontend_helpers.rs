@@ -5,12 +5,12 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use crate::{
-    function_fingerprints_for_program,
-    implementation_fingerprint, implementation_fingerprint_from_normalized,
-    interface_fingerprint, interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
-    interface_fingerprint_from_program, normalize_source_for_hash, source_fingerprint, FrontendJobs,
-    FrontendModuleCacheEntryV4, FrontendSchedulerPhaseStats, FunctionFingerprint, ModuleSourceInfo,
-    FRONTEND_SCHEDULER_SCHEMA_VERSION,
+    function_fingerprints_for_program, generic_fingerprints_for_program,
+    implementation_fingerprint, implementation_fingerprint_from_normalized, interface_fingerprint,
+    interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
+    interface_fingerprint_from_program, normalize_source_for_hash, source_fingerprint,
+    FrontendJobs, FrontendModuleCacheEntryV4, FrontendSchedulerPhaseStats, FunctionFingerprint,
+    ModuleSourceInfo, FRONTEND_SCHEDULER_SCHEMA_VERSION,
 };
 
 pub(crate) fn frontend_probe_module_full(
@@ -262,28 +262,46 @@ pub(crate) fn frontend_cache_entry_for_module(
     depends_on.dedup();
 
     let source_hash = source_fingerprint(info.source.as_ref());
-    let (interface_hash, body_hash, mut symbols) = if collect_symbol_fingerprints {
-        let body_hash = implementation_fingerprint(info.source.as_ref());
-        match Parser::parse(info.source.as_ref()) {
-            Ok(program) => (
-                interface_fingerprint_from_program(&program),
-                body_hash,
-                function_fingerprints_for_program(module_path, info.source.as_ref(), &program),
-            ),
-            Err(_) => (
-                interface_fingerprint_fast(info.source.as_ref()),
-                body_hash,
+    let (interface_hash, body_hash, mut symbols, mut generic_items, mut generic_instances) =
+        if collect_symbol_fingerprints {
+            let body_hash = implementation_fingerprint(info.source.as_ref());
+            match Parser::parse(info.source.as_ref()) {
+                Ok(program) => {
+                    let (generic_items, generic_instances) = generic_fingerprints_for_program(
+                        module_path,
+                        info.source.as_ref(),
+                        &program,
+                    );
+                    (
+                        interface_fingerprint_from_program(&program),
+                        body_hash,
+                        function_fingerprints_for_program(
+                            module_path,
+                            info.source.as_ref(),
+                            &program,
+                        ),
+                        generic_items,
+                        generic_instances,
+                    )
+                }
+                Err(_) => (
+                    interface_fingerprint_fast(info.source.as_ref()),
+                    body_hash,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            }
+        } else {
+            let normalized = normalize_source_for_hash(info.source.as_ref());
+            (
+                interface_fingerprint_fast_from_normalized(&normalized),
+                implementation_fingerprint_from_normalized(&normalized),
                 Vec::new(),
-            ),
-        }
-    } else {
-        let normalized = normalize_source_for_hash(info.source.as_ref());
-        (
-            interface_fingerprint_fast_from_normalized(&normalized),
-            implementation_fingerprint_from_normalized(&normalized),
-            Vec::new(),
-        )
-    };
+                Vec::new(),
+                Vec::new(),
+            )
+        };
     if collect_symbol_fingerprints {
         for symbol in &mut symbols {
             if symbol.module_imports.is_empty() {
@@ -291,6 +309,10 @@ pub(crate) fn frontend_cache_entry_for_module(
             }
         }
         symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+        generic_items.sort_by(|a, b| a.stable_item_id.cmp(&b.stable_item_id));
+        generic_items.dedup_by(|a, b| a.stable_item_id == b.stable_item_id);
+        generic_instances.sort_by(|a, b| a.instance_key.cmp(&b.instance_key));
+        generic_instances.dedup_by(|a, b| a.instance_key == b.instance_key);
     }
 
     FrontendModuleCacheEntryV4 {
@@ -304,5 +326,7 @@ pub(crate) fn frontend_cache_entry_for_module(
         scheduler_schema_version: FRONTEND_SCHEDULER_SCHEMA_VERSION,
         depends_on,
         symbols,
+        generic_items,
+        generic_instances,
     }
 }

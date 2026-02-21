@@ -25,11 +25,15 @@ def main() -> i64 {
     let use_symbol = match &func.body.stmts[1].kind {
         StmtKind::Expr(expr) => match &expr.kind {
             ExprKind::Ident(ident) => ident.symbol,
-            ExprKind::Path(path) => path
-                .as_simple()
-                .expect("path expression should be a single segment")
-                .symbol,
-            other => panic!("expected identifier or simple path expression, got {:?}", other),
+            ExprKind::Path(path) => {
+                path.as_simple()
+                    .expect("path expression should be a single segment")
+                    .symbol
+            }
+            other => panic!(
+                "expected identifier or simple path expression, got {:?}",
+                other
+            ),
         },
         other => panic!("expected expression stmt, got {:?}", other),
     };
@@ -75,7 +79,10 @@ def main(v: i64) -> i64 {
 
     let body_symbol = match main_fn.body.expr.as_deref() {
         Some(HIRExpr::Var { symbol, .. }) => *symbol,
-        other => panic!("expected body expr to be variable reference, got {:?}", other),
+        other => panic!(
+            "expected body expr to be variable reference, got {:?}",
+            other
+        ),
     };
     assert_eq!(
         body_symbol, param_symbol,
