@@ -1,16 +1,14 @@
 use super::{
     bench_root_dir, build_cache_key, build_graph_v2_for_source, build_metadata_matches,
     build_reflection_metadata, cache_key, cache_mismatch_reasons,
-    can_reuse_artifacts_for_unreachable_impl_only_changes,
-    can_skip_codegen_via_generic_cache,
+    can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
     collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
     compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
     derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
     derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_object, find_clang, find_runtime_c,
-    format_edit_impact_lines,
+    edit_class_label, ensure_runtime_object, find_clang, find_runtime_c, format_edit_impact_lines,
     generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
     link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
     module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
@@ -18,7 +16,7 @@ use super::{
     reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
     resolve_engine, select_reflection_i64_zero_arity_symbol, send_daemon_request,
     signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
-    BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan,
+    BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode,
     DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
     FrontendMemoryMode, FrontendModuleCacheEntryV4, FrontendProbeMode, FrontendSchedulerTelemetry,
     FrontendSessionStoreV4, FunctionFingerprint, GenericInstanceCacheEntry,
@@ -26,12 +24,12 @@ use super::{
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, ModuleGraphSnapshot, ReflectionMetadata,
     ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
     DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
-    FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES,
-    GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
+    FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
     LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
 use crate::cli::Cli;
 use clap::Parser as _;
+use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -54,6 +52,7 @@ fn metadata_for_test() -> RunCacheMetadata {
         root_implementation_hash: 123,
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
+        contract_checks: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -225,6 +224,7 @@ fn cache_miss_when_opt_level_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         2,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c".to_string()),
@@ -239,6 +239,7 @@ fn cache_miss_when_engine_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         RunEngine::Auto,
         RunEngine::Lli,
         Some("tools/stdlib/runtime.c".to_string()),
@@ -253,6 +254,7 @@ fn cache_hit_when_key_matches() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c".to_string()),
@@ -267,6 +269,7 @@ fn cache_miss_when_module_dependency_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c".to_string()),
@@ -281,6 +284,7 @@ fn cache_mismatch_reasons_include_module_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c".to_string()),
@@ -299,6 +303,10 @@ fn benchmark_scaffold_exists() {
     assert!(root.join("suites/compile/mod_tree_root.sg").exists());
     assert!(root.join("suites/incremental/change_impl_root.sg").exists());
     assert!(root.join("suites/incremental/math_util.sg").exists());
+    assert!(root
+        .join("templates/generic-benchmark-report-template.md")
+        .exists());
+    assert!(root.join("scripts/sprint01-generic-gate.py").exists());
 }
 
 #[test]
@@ -313,6 +321,26 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     let root = bench_root_dir();
     let gate = fs::read_to_string(root.join("scripts/advanced-kpi-gate.py")).unwrap();
     assert!(gate.contains("DEFAULT_REQUIRED_MEMORY_LOCS = (\"10000\", \"100000\", \"1000000\")"));
+}
+
+#[test]
+fn sprint01_generic_gate_covers_required_cases() {
+    let root = bench_root_dir();
+    let gate = fs::read_to_string(root.join("scripts/sprint01-generic-gate.py")).unwrap();
+    assert!(gate.contains("generic_body_change_root.sg"));
+    assert!(gate.contains("generic_new_instantiation_root.sg"));
+    assert!(gate.contains("generic_signature_change_root.sg"));
+    assert!(gate.contains("choices=(\"soft\", \"hard\")"));
+}
+
+#[test]
+fn generic_benchmark_template_mentions_full_incremental_and_memory() {
+    let root = bench_root_dir();
+    let template =
+        fs::read_to_string(root.join("templates/generic-benchmark-report-template.md")).unwrap();
+    assert!(template.contains("Full Compile Snapshot"));
+    assert!(template.contains("Incremental Generic Scenarios"));
+    assert!(template.contains("Compile Memory"));
 }
 
 #[test]
@@ -332,6 +360,75 @@ fn build_force_rebuild_flag_parses() {
 fn low_memory_flag_parses_for_build_and_run() {
     assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--low-memory"]).is_ok());
     assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--low-memory"]).is_ok());
+}
+
+#[test]
+fn contract_checks_flag_parses_for_build_and_run() {
+    assert!(
+        Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--contract-checks", "auto",])
+            .is_ok()
+    );
+    assert!(
+        Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--contract-checks", "on",]).is_ok()
+    );
+    assert!(
+        Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--contract-checks", "off",]).is_ok()
+    );
+}
+
+#[test]
+fn error_format_flag_parses_for_build_and_run() {
+    assert!(
+        Cli::try_parse_from(["sgc", "--error-format", "json", "build", "tests/demo.sg",]).is_ok()
+    );
+    assert!(
+        Cli::try_parse_from(["sgc", "--error-format", "text", "run", "tests/demo.sg",]).is_ok()
+    );
+}
+
+#[test]
+fn split_compiler_error_stage_detects_common_prefixes() {
+    let (stage_parse, msg_parse) = super::split_compiler_error_stage("parse failed: boom");
+    assert_eq!(stage_parse, "parse");
+    assert_eq!(msg_parse, "boom");
+
+    let (stage_typeck, msg_typeck) =
+        super::split_compiler_error_stage("typecheck failed: mismatch");
+    assert_eq!(stage_typeck, "typecheck");
+    assert_eq!(msg_typeck, "mismatch");
+
+    let (stage_fallback, msg_fallback) = super::split_compiler_error_stage("unexpected failure");
+    assert_eq!(stage_fallback, "compile");
+    assert_eq!(msg_fallback, "unexpected failure");
+}
+
+#[test]
+fn render_compile_error_json_contains_expected_fields() {
+    let raw = "typecheck failed: expected i64, found bool";
+    let json = super::render_compile_error_json(Some("tests/demo.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["ok"], false);
+    assert_eq!(value["kind"], "compile_error");
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["message"], "expected i64, found bool");
+    assert_eq!(value["input"], "tests/demo.sg");
+}
+
+#[test]
+fn render_compile_error_json_keeps_multiline_details() {
+    let raw = "parse failed: unexpected token\nline 1, col 8\nnote: expected `}`";
+    let json = super::render_compile_error_json(Some("tests/broken.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+    let details = value["details"]
+        .as_array()
+        .expect("details should be array");
+
+    assert_eq!(value["stage"], "parse");
+    assert_eq!(value["message"], "unexpected token");
+    assert_eq!(details.len(), 2);
+    assert_eq!(details[0], "line 1, col 8");
+    assert_eq!(details[1], "note: expected `}`");
 }
 
 #[test]
@@ -773,6 +870,7 @@ fn daemon_build_request_uses_protocol_and_version() {
         "tests/demo.sg",
         None,
         2,
+        ContractChecksMode::Auto,
         false,
         false,
         false,
@@ -805,6 +903,7 @@ async fn daemon_happy_path_handles_build_request() {
         input.to_string_lossy().as_ref(),
         None,
         2,
+        ContractChecksMode::Auto,
         false,
         false,
         false,
@@ -847,6 +946,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         &input_string,
         None,
         2,
+        ContractChecksMode::Auto,
         true,
         false,
         false,
@@ -871,6 +971,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         &input_string,
         None,
         2,
+        ContractChecksMode::Auto,
         true,
         false,
         false,
@@ -904,6 +1005,7 @@ async fn daemon_client_fallback_when_server_unavailable() {
         input.to_string_lossy().as_ref(),
         None,
         2,
+        ContractChecksMode::Auto,
         false,
         false,
         false,
@@ -952,6 +1054,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
         false,
+        false,
         Some("tools/stdlib/runtime.c".to_string()),
         "tests/build/a.exe".to_string(),
     );
@@ -962,6 +1065,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         root_implementation_hash: 123,
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
+        contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         llvm_ir_path: "tests/build/a.ll".to_string(),
@@ -997,6 +1101,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         root_implementation_hash: 1,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         llvm_ir_path: "tests/build/main.ll".to_string(),
@@ -1013,6 +1118,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         &graph,
     )
     .unwrap_err();
@@ -1044,6 +1150,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         root_implementation_hash: 1,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         requested_engine: RunEngine::Native,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -1060,6 +1167,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         &object_path,
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         RunEngine::Native,
         RunEngine::Native,
         &graph,
@@ -1396,11 +1504,18 @@ fn function_level_evidence_downgrades_false_module_interface_change() {
     let before = vec![fp("tests/dep.sg", 1, 11)];
     let after = vec![fp("tests/dep.sg", 2, 12)];
 
-    let impact = classify_edit_impact(7, 9, 7, 9, &before, &after, Some(&previous_graph), &current_graph);
+    let impact = classify_edit_impact(
+        7,
+        9,
+        7,
+        9,
+        &before,
+        &after,
+        Some(&previous_graph),
+        &current_graph,
+    );
     assert_eq!(impact.class, EditClass::ImplOnly);
-    assert!(impact
-        .changed_modules
-        .contains(&"tests/dep.sg".to_string()));
+    assert!(impact.changed_modules.contains(&"tests/dep.sg".to_string()));
     assert!(!impact
         .impacted_modules
         .contains(&"tests/main.sg".to_string()));
@@ -1655,6 +1770,96 @@ def add(x: i64) -> i64 {
 }
 
 #[test]
+fn interface_fingerprint_fast_ignores_inline_function_body_changes() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64) -> i64 { x + 2 }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+    let before_impl = super::implementation_fingerprint(before);
+    let after_impl = super::implementation_fingerprint(after);
+
+    assert_eq!(
+        before_interface, after_interface,
+        "fast interface hash should ignore inline body-only edits"
+    );
+    assert_ne!(
+        before_impl, after_impl,
+        "implementation hash should still capture body changes"
+    );
+}
+
+#[test]
+fn interface_fingerprint_fast_detects_inline_function_signature_changes() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64, k: i64) -> i64 { x + k }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+
+    assert_ne!(
+        before_interface, after_interface,
+        "fast interface hash should track inline declaration signature changes"
+    );
+}
+
+#[test]
+fn fast_path_inline_body_change_classifies_as_impl_only() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64) -> i64 { x + 2 }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let before_impl = super::implementation_fingerprint(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+    let after_impl = super::implementation_fingerprint(after);
+
+    let previous_graph = BuildGraphV2 {
+        schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        root_module: "tests/main.sg".to_string(),
+        nodes: vec![BuildGraphNodeV2 {
+            module_path: "tests/main.sg".to_string(),
+            interface_hash: before_interface,
+            implementation_hash: before_impl,
+            depends_on: vec![],
+            object_path: None,
+            functions: vec![],
+            generic_items: Vec::new(),
+            generic_instances: Vec::new(),
+        }],
+    };
+
+    let current_graph = BuildGraphV2 {
+        schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        root_module: "tests/main.sg".to_string(),
+        nodes: vec![BuildGraphNodeV2 {
+            module_path: "tests/main.sg".to_string(),
+            interface_hash: after_interface,
+            implementation_hash: after_impl,
+            depends_on: vec![],
+            object_path: None,
+            functions: vec![],
+            generic_items: Vec::new(),
+            generic_instances: Vec::new(),
+        }],
+    };
+
+    let before_modules = vec![fp("tests/main.sg", before_interface, before_impl)];
+    let after_modules = vec![fp("tests/main.sg", after_interface, after_impl)];
+    let impact = classify_edit_impact(
+        before_interface,
+        before_impl,
+        after_interface,
+        after_impl,
+        &before_modules,
+        &after_modules,
+        Some(&previous_graph),
+        &current_graph,
+    );
+
+    assert_eq!(impact.class, EditClass::ImplOnly);
+}
+
+#[test]
 fn function_fingerprint_signature_change_updates_abi_hash() {
     let before = "def add(x: i64) -> i64 { x + 1 }\n";
     let after = "def add(x: i64, k: i64) -> i64 { x + k }\n";
@@ -1829,7 +2034,10 @@ def main() -> i64 { ga(0, 1) + gb(0, 1) }
         .iter()
         .find(|inst| inst.item_stable_id.ends_with("::gb"))
         .expect("after gb instance");
-    assert_eq!(before_gb_instance.instance_key, after_gb_instance.instance_key);
+    assert_eq!(
+        before_gb_instance.instance_key,
+        after_gb_instance.instance_key
+    );
 }
 
 fn generic_graph_with_items(
@@ -2466,6 +2674,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         root_implementation_hash: 20,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         llvm_ir_path: "tests/build/main.ll".to_string(),
@@ -2488,6 +2697,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         "tests/main.sg",
         false,
         2,
+        false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
     );
@@ -2503,6 +2713,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         root_implementation_hash: 20,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         llvm_ir_path: "tests/build/main.ll".to_string(),
@@ -2525,6 +2736,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         "tests/main.sg",
         false,
         2,
+        false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
     );
@@ -2741,7 +2953,13 @@ fn codegen_workset_manifest_skips_generic_symbols_when_all_generic_instances_hit
                     module_imports: vec![],
                 },
             ],
-            generic_items: vec![generic_item(&generic_symbol, &generic_symbol, 11, 101, vec![])],
+            generic_items: vec![generic_item(
+                &generic_symbol,
+                &generic_symbol,
+                11,
+                101,
+                vec![],
+            )],
             generic_instances: vec![generic_instance(&generic_symbol, &generic_symbol, 11, 101)],
         }],
     };
@@ -2766,9 +2984,7 @@ fn codegen_workset_manifest_skips_generic_symbols_when_all_generic_instances_hit
         BuildWorksetPlan::RebuildImpactedRoot,
         Some(&generic_stats),
     );
-    assert!(manifest
-        .generic_reuse_items
-        .contains(&generic_symbol));
+    assert!(manifest.generic_reuse_items.contains(&generic_symbol));
     assert!(!manifest.rebuild_symbols.contains(&generic_symbol));
 }
 
@@ -2791,7 +3007,13 @@ fn codegen_workset_manifest_keeps_rebuilt_generic_symbols() {
                 calls: vec![],
                 module_imports: vec![],
             }],
-            generic_items: vec![generic_item(&generic_symbol, &generic_symbol, 11, 101, vec![])],
+            generic_items: vec![generic_item(
+                &generic_symbol,
+                &generic_symbol,
+                11,
+                101,
+                vec![],
+            )],
             generic_instances: vec![generic_instance(&generic_symbol, &generic_symbol, 11, 101)],
         }],
     };
@@ -2817,9 +3039,7 @@ fn codegen_workset_manifest_keeps_rebuilt_generic_symbols() {
         BuildWorksetPlan::RebuildImpactedRoot,
         Some(&generic_stats),
     );
-    assert!(manifest
-        .generic_rebuild_items
-        .contains(&generic_symbol));
+    assert!(manifest.generic_rebuild_items.contains(&generic_symbol));
     assert!(manifest.rebuild_symbols.contains(&generic_symbol));
 }
 
@@ -3008,6 +3228,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         root_implementation_hash: 20,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -3030,6 +3251,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         Some(&impact),
         "tests/main.sg",
         2,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c"),
@@ -3045,6 +3267,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         root_implementation_hash: 20,
         module_fingerprints: vec![],
         opt_level: 2,
+        contract_checks: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -3067,6 +3290,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         Some(&impact),
         "tests/main.sg",
         2,
+        false,
         RunEngine::Native,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c"),

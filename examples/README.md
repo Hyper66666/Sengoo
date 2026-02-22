@@ -26,6 +26,9 @@
 ### 08_struct.sg - 结构体
 演示结构体定义和字段访问。
 
+### ffi/ - C FFI 双向调用
+演示 `extern "C"` 声明、导出符号（`export_name`）以及 Sengoo <-> C 的最小闭环。
+
 ## 运行示例
 
 ```bash

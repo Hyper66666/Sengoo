@@ -21,6 +21,7 @@ pub struct HIRTypeParamBound {
 #[derive(Debug, Clone)]
 pub enum HIRItem {
     Function(HIRFunction),
+    ExternBlock(HIRExternBlock),
     Struct(HIRStruct),
     Enum(HIREnum),
     Trait(HIRTrait),
@@ -37,8 +38,45 @@ pub struct HIRFunction {
     pub type_params: Vec<HIRTypeParam>,
     pub params: Vec<HIRParam>,
     pub return_type: HIRType,
+    pub precondition: Option<HIRExpr>,
+    pub postcondition: Option<HIRExpr>,
     pub body: HIRBody,
     pub is_async: bool,
+    pub abi: Option<String>,
+    pub is_unsafe: bool,
+    pub no_mangle: bool,
+    pub export_name: Option<String>,
+    pub is_pub: bool,
+}
+
+/// HIR extern 块
+#[derive(Debug, Clone)]
+pub struct HIRExternBlock {
+    pub abi: String,
+    pub link_name: Option<String>,
+    pub items: Vec<HIRExternItem>,
+}
+
+#[derive(Debug, Clone)]
+pub enum HIRExternItem {
+    Function(HIRExternFunction),
+    Static(HIRExternStatic),
+}
+
+#[derive(Debug, Clone)]
+pub struct HIRExternFunction {
+    pub name: String,
+    pub params: Vec<HIRParam>,
+    pub return_type: HIRType,
+    pub is_unsafe: bool,
+    pub is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct HIRExternStatic {
+    pub name: String,
+    pub ty: HIRType,
+    pub is_mut: bool,
     pub is_pub: bool,
 }
 

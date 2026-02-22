@@ -3,10 +3,11 @@ use miette::Result;
 
 use crate::{
     cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run, cmd_build,
-    cmd_check, cmd_daemon, cmd_dump_ast, cmd_repl, cmd_run, dispatch_build_via_daemon,
-    dispatch_run_via_daemon, frontend_trace_enabled, parse_frontend_jobs_arg,
-    reflection_options_from_cli, resolve_daemon_addr, DaemonDispatchOutcome, FrontendJobs,
-    ReflectionMode, RunEngine, DEFAULT_DAEMON_ADDR,
+    cmd_check, cmd_daemon, cmd_dump_ast, cmd_repl, cmd_run, current_error_format,
+    dispatch_build_via_daemon, dispatch_run_via_daemon, frontend_trace_enabled,
+    parse_frontend_jobs_arg, reflection_options_from_cli, resolve_daemon_addr, set_error_format,
+    ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs, ReflectionMode,
+    RunEngine, DEFAULT_DAEMON_ADDR,
 };
 
 /// Sengoo command-line compiler.
@@ -16,6 +17,10 @@ use crate::{
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Sengoo language compiler", long_about = None)]
 pub(crate) struct Cli {
+    /// Error output format.
+    #[arg(long = "error-format", global = true, value_enum, default_value_t = ErrorFormat::Text)]
+    error_format: ErrorFormat,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -34,6 +39,10 @@ pub(crate) enum Commands {
         /// Optimization level (0-3).
         #[arg(short = 'O', long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(0..=3))]
         opt_level: u8,
+
+        /// Runtime contract checks (`auto` enables in O0/O1).
+        #[arg(long = "contract-checks", value_enum, default_value_t = ContractChecksMode::Auto)]
+        contract_checks: ContractChecksMode,
 
         /// Emit LLVM IR instead of a native executable.
         #[arg(long)]
@@ -90,6 +99,10 @@ pub(crate) enum Commands {
         /// Optimization level (0-3).
         #[arg(short = 'O', long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(0..=3))]
         opt_level: u8,
+
+        /// Runtime contract checks (`auto` enables in O0/O1).
+        #[arg(long = "contract-checks", value_enum, default_value_t = ContractChecksMode::Auto)]
+        contract_checks: ContractChecksMode,
 
         /// Runtime engine policy.
         #[arg(long, value_enum, default_value_t = RunEngine::Auto)]
@@ -244,15 +257,17 @@ pub(crate) enum BenchCommands {
 
 pub(crate) async fn run() -> Result<()> {
     let cli = Cli::parse();
+    set_error_format(cli.error_format);
     dispatch(cli.command).await
 }
 
 async fn dispatch(command: Commands) -> Result<()> {
-    match command {
+    let result = match command {
         Commands::Build {
             input,
             output,
             opt_level,
+            contract_checks,
             emit_llvm,
             force_rebuild,
             low_memory,
@@ -271,6 +286,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     &input,
                     output.as_deref(),
                     opt_level,
+                    contract_checks,
                     emit_llvm,
                     force_rebuild,
                     low_memory,
@@ -289,6 +305,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 &input,
                 output.as_deref(),
                 opt_level,
+                contract_checks,
                 emit_llvm,
                 force_rebuild,
                 low_memory,
@@ -301,6 +318,7 @@ async fn dispatch(command: Commands) -> Result<()> {
         Commands::Run {
             input,
             opt_level,
+            contract_checks,
             engine,
             force_rebuild,
             low_memory,
@@ -319,6 +337,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     &addr,
                     &input,
                     opt_level,
+                    contract_checks,
                     engine,
                     force_rebuild,
                     &args,
@@ -337,6 +356,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             cmd_run(
                 &input,
                 opt_level,
+                contract_checks,
                 engine,
                 force_rebuild,
                 &args,
@@ -375,5 +395,14 @@ async fn dispatch(command: Commands) -> Result<()> {
                 iterations,
             } => cmd_bench_reflection(&suite, opt_level, warmup, iterations).await,
         },
+    };
+
+    if let Err(err) = result {
+        if current_error_format() == ErrorFormat::Json && err.to_string() == "compile failed" {
+            std::process::exit(1);
+        }
+        return Err(err);
     }
+
+    Ok(())
 }

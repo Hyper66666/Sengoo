@@ -5,6 +5,7 @@ use crate::ast::Visibility;
 use crate::ast::*;
 use crate::error::CompileError;
 use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
+use crate::typeck::ffi as ffi_check;
 use crate::typeck::infer::TypeInfer;
 use crate::typeck::r#trait::{type_key, FunctionTy, ImplRegistry, TraitRegistry};
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
@@ -12,7 +13,6 @@ use crate::Result;
 use std::collections::{HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
-
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -149,6 +149,25 @@ impl TypeChecker {
             DeclKind::Function(fn_decl) => {
                 let name = fn_decl.name.name.clone();
 
+                if fn_decl.abi.is_some() {
+                    let mut param_types = Vec::new();
+                    for param in &fn_decl.params {
+                        let ty = self.check_type(&param.ty)?;
+                        param_types.push(ty);
+                    }
+                    let ret_ty = if let Some(ret) = &fn_decl.return_type {
+                        self.check_type(ret)?
+                    } else {
+                        self.env.unit_ty()
+                    };
+                    self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
+
+                    let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
+                    self.env.insert_fn(name.clone(), fn_ty, param_types, ret_ty);
+                    self.set_generic_function_meta(name, Vec::new());
+                    return Ok(());
+                }
+
                 // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柟顔筋殜瀹曠兘顢橀悙鐗堫潟婵犵绱曢搹搴ㄥ垂鐠鸿櫣鏆﹂柨婵嗩槸绾惧吋绻涢幋鐐垫噭妞ゆ柨绉剁槐鎾寸瑹閸パ傚嚱濡炪倖娉﹂崶銊モ偓鐢告煟閹达絾顥夋俊鐐垫櫕閳ь剙鍘滈崑鎾绘煕閹板吀绨芥い鏂款樀濮婃椽骞栭悙鎻掑Б闂佺顑囬崰鎾诲箖椤曗偓椤㈡洟鏁冮埀顒勫垂閸岀偞鍊甸柨婵嗘噹椤ｅ磭绱掗埀顒佸緞閹邦厾鍘搁梺閫炲苯澧存い銏＄☉閳藉螣閸忓す銉モ攽閻愯尙鎽犵紒顔肩Ф閺侇噣鏁撻悩鑼姦濡炪倖甯婄粈浣虹箔閹烘梻纾界€广儱鎷戦煬顒傗偓瑙勬礃閻熲晠骞婇悙鍝勎ㄩ柨鏃傜摂閸熲偓闂備浇宕垫慨鎾敄閸涙潙鐤ù鍏兼綑閺?
                 let mut param_types = Vec::new();
                 let mut fallback = false;
@@ -192,6 +211,42 @@ impl TypeChecker {
                     let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
                     self.env.insert_fn(name.clone(), fn_ty, param_types, ret_ty);
                     self.set_generic_function_meta(name, generic_meta);
+                }
+            }
+            DeclKind::ExternBlock(extern_block) => {
+                ffi_check::validate_abi(&extern_block.abi).map_err(CompileError::from)?;
+                for item in &extern_block.items {
+                    match item {
+                        ExternItem::Function(fn_decl) => {
+                            let mut param_types = Vec::new();
+                            for param in &fn_decl.params {
+                                param_types.push(self.check_type(&param.ty)?);
+                            }
+                            let ret_ty = if let Some(ret) = &fn_decl.return_type {
+                                self.check_type(ret)?
+                            } else {
+                                self.env.unit_ty()
+                            };
+                            ffi_check::validate_signature(
+                                &extern_block.abi,
+                                &param_types,
+                                &ret_ty,
+                                fn_decl.is_unsafe,
+                            )
+                            .map_err(CompileError::from)?;
+                            let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
+                            self.env.insert_fn(
+                                fn_decl.name.name.clone(),
+                                fn_ty,
+                                param_types,
+                                ret_ty,
+                            );
+                        }
+                        ExternItem::Static(static_decl) => {
+                            let ty = self.check_type(&static_decl.ty)?;
+                            self.env.insert_var(static_decl.name.name.clone(), ty);
+                        }
+                    }
                 }
             }
             DeclKind::Struct(struct_decl) => {
@@ -298,7 +353,10 @@ impl TypeChecker {
         }
     }
 
-    fn collect_generic_type_meta(&mut self, type_params: &[TypeParam]) -> Vec<GenericTypeParamMeta> {
+    fn collect_generic_type_meta(
+        &mut self,
+        type_params: &[TypeParam],
+    ) -> Vec<GenericTypeParamMeta> {
         if type_params.is_empty() {
             return Vec::new();
         }
@@ -313,6 +371,9 @@ impl TypeChecker {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
                 self.check_function_decl(fn_decl)?;
+            }
+            DeclKind::ExternBlock(extern_block) => {
+                self.check_extern_block_decl(extern_block)?;
             }
             DeclKind::Struct(struct_decl) => {
                 self.check_struct_decl(struct_decl)?;
@@ -646,14 +707,110 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        let sig = FunctionTy::new(
-            method.self_param.is_some(),
-            param_types,
-            ret_ty,
-        );
+        let sig = FunctionTy::new(method.self_param.is_some(), param_types, ret_ty);
         self.env.pop_scope();
         Ok(sig)
     }
+
+    fn is_result_placeholder(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Ident(ident) => ident.name == "result",
+            ExprKind::Path(path) => path
+                .as_simple()
+                .is_some_and(|segment| segment.name == "result"),
+            _ => false,
+        }
+    }
+
+    fn extract_result_literal_comparison(expr: &Expr) -> Option<(BinOp, Literal)> {
+        let ExprKind::Binary { op, left, right } = &expr.kind else {
+            return None;
+        };
+
+        if !matches!(op, BinOp::Eq | BinOp::NotEq) {
+            return None;
+        }
+
+        if Self::is_result_placeholder(left) {
+            if let ExprKind::Literal(lit) = &right.kind {
+                return Some((*op, lit.clone()));
+            }
+        }
+
+        if Self::is_result_placeholder(right) {
+            if let ExprKind::Literal(lit) = &left.kind {
+                return Some((*op, lit.clone()));
+            }
+        }
+
+        None
+    }
+
+    fn extract_constant_return_literal(fn_decl: &Function) -> Option<Literal> {
+        let stmt = fn_decl.body.stmts.last()?;
+        match &stmt.kind {
+            StmtKind::Expr(expr) => match &expr.kind {
+                ExprKind::Literal(lit) => Some(lit.clone()),
+                ExprKind::Return(Some(value)) => {
+                    if let ExprKind::Literal(lit) = &value.kind {
+                        Some(lit.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn validate_contracts_for_function(&mut self, fn_decl: &Function, ret_ty: &Ty) -> Result<()> {
+        if let Some(precondition) = &fn_decl.precondition {
+            let pre_ty = self.check_expr(precondition).map_err(CompileError::from)?;
+            self.infer
+                .unify(&pre_ty, &self.env.bool_ty())
+                .map_err(CompileError::from)?;
+        }
+
+        if let Some(postcondition) = &fn_decl.postcondition {
+            self.env.push_scope();
+            self.env.insert_var("result".to_string(), ret_ty.clone());
+            let post_ty = self.check_expr(postcondition);
+            self.env.pop_scope();
+
+            let post_ty = post_ty.map_err(CompileError::from)?;
+            self.infer
+                .unify(&post_ty, &self.env.bool_ty())
+                .map_err(CompileError::from)?;
+
+            if matches!(postcondition.kind, ExprKind::Literal(Literal::Bool(false))) {
+                return Err(CompileError::from(TypeckError::Other(format!(
+                    "postcondition for function `{}` is always false",
+                    fn_decl.name.name
+                ))));
+            }
+
+            if let (Some(return_lit), Some((op, ensured_lit))) = (
+                Self::extract_constant_return_literal(fn_decl),
+                Self::extract_result_literal_comparison(postcondition),
+            ) {
+                let contradiction = match op {
+                    BinOp::Eq => return_lit != ensured_lit,
+                    BinOp::NotEq => return_lit == ensured_lit,
+                    _ => false,
+                };
+                if contradiction {
+                    return Err(CompileError::from(TypeckError::Other(format!(
+                        "postcondition contradicts constant return value in function `{}`",
+                        fn_decl.name.name
+                    ))));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn check_function_signature_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
         let signature = (|| -> Result<(Vec<Ty>, Ty, Vec<GenericTypeParamMeta>)> {
@@ -662,6 +819,7 @@ impl TypeChecker {
             let mut param_types = Vec::new();
             for param in &fn_decl.params {
                 let ty = self.check_type(&param.ty).map_err(CompileError::from)?;
+                self.env.insert_var(param.name.name.clone(), ty.clone());
                 param_types.push(ty);
             }
 
@@ -670,6 +828,9 @@ impl TypeChecker {
             } else {
                 self.env.unit_ty()
             };
+
+            self.validate_contracts_for_function(fn_decl, &ret_ty)?;
+            self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
             Ok((param_types, ret_ty, generic_meta))
         })();
@@ -700,6 +861,8 @@ impl TypeChecker {
         } else {
             self.env.unit_ty()
         };
+        self.validate_contracts_for_function(fn_decl, &ret_ty)?;
+        self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
         // 婵犵妲呴崑鍛熆濡皷鍋撳鐓庡籍鐎殿噮鍋婇幃娆撳传閸曨収妲伴梺璇茬箳閸嬬姴螞閸曨倣鎺楀箛閻楀牏鍘告繛杈剧悼閹虫捇藟鐎ｎ偁浜滈柟鐑樻煥閸樺鈧娲忛崕閬嶎敇閼规壆鐤€闁哄洨濯Σ鐑芥⒒娴ｅ鈧偓闁稿鎸婚妵鍕冀閵娧€妲堥梺浼欏瘜閸ｏ絽顫忓ú顏嶆晝闁挎繂鎳愰悷銊х磽閸屾氨孝闁挎洩绠撻獮蹇涱敃閿曗偓缁€鍐┿亜韫囨挻鍣烘繛?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
@@ -735,6 +898,71 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn validate_ffi_function_decl(
+        &mut self,
+        fn_decl: &Function,
+        param_types: &[Ty],
+        ret_ty: &Ty,
+    ) -> Result<()> {
+        if fn_decl.abi.is_none() {
+            if fn_decl.no_mangle || fn_decl.export_name.is_some() {
+                return Err(CompileError::from(TypeckError::Other(
+                    "no_mangle/export_name require `extern \"...\" fn`".to_string(),
+                )));
+            }
+            return Ok(());
+        }
+
+        if !fn_decl.type_params.is_empty() {
+            return Err(CompileError::from(TypeckError::Other(
+                "generic extern functions are not supported in FFI MVP".to_string(),
+            )));
+        }
+
+        let abi = fn_decl.abi.as_deref().unwrap_or("C");
+        ffi_check::validate_signature(abi, param_types, ret_ty, fn_decl.is_unsafe)
+            .map_err(CompileError::from)?;
+
+        if fn_decl.export_name.is_some() && !matches!(fn_decl.vis, Visibility::Public) {
+            return Err(CompileError::from(TypeckError::Other(
+                "export_name requires `pub extern` function".to_string(),
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn check_extern_block_decl(&mut self, extern_block: &ExternBlock) -> Result<()> {
+        ffi_check::validate_abi(&extern_block.abi).map_err(CompileError::from)?;
+        for item in &extern_block.items {
+            match item {
+                ExternItem::Function(fn_decl) => {
+                    let mut param_types = Vec::new();
+                    for param in &fn_decl.params {
+                        param_types.push(self.check_type(&param.ty)?);
+                    }
+                    let ret_ty = if let Some(ret) = &fn_decl.return_type {
+                        self.check_type(ret)?
+                    } else {
+                        self.env.unit_ty()
+                    };
+                    ffi_check::validate_signature(
+                        &extern_block.abi,
+                        &param_types,
+                        &ret_ty,
+                        fn_decl.is_unsafe,
+                    )
+                    .map_err(CompileError::from)?;
+                }
+                ExternItem::Static(static_decl) => {
+                    self.check_type(&static_decl.ty)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn bind_type_params_with_meta(
         &mut self,
         type_params: &[TypeParam],
@@ -750,7 +978,8 @@ impl TypeChecker {
                     )))
                 }
             };
-            self.env.insert_type(type_param.name.name.clone(), fresh_var);
+            self.env
+                .insert_type(type_param.name.name.clone(), fresh_var);
             metas.push(GenericTypeParamMeta {
                 name: type_param.name.name.clone(),
                 var_id,
@@ -1081,16 +1310,16 @@ impl TypeChecker {
 
     /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梺鑽ゅ仦閸戝綊宕戞繝鍌滄殾?
     fn path_name(&self, path: &Path) -> TyResult<String> {
-        path.as_simple().map(|ident| ident.name.clone()).ok_or_else(|| {
-            TypeckError::UndefinedType {
+        path.as_simple()
+            .map(|ident| ident.name.clone())
+            .ok_or_else(|| TypeckError::UndefinedType {
                 name: path
                     .segments
                     .iter()
                     .map(|seg| seg.name.as_str())
                     .collect::<Vec<_>>()
                     .join("::"),
-            }
-        })
+            })
     }
 
     fn builtin_type_by_name(&mut self, name: &str) -> Option<Ty> {
@@ -1437,7 +1666,9 @@ impl TypeChecker {
         };
 
         match &symbol.kind {
-            SymbolKind::Function { ty, .. } => Ok(self.infer.instantiate_with_fresh_vars(ty.clone())),
+            SymbolKind::Function { ty, .. } => {
+                Ok(self.infer.instantiate_with_fresh_vars(ty.clone()))
+            }
             _ => {
                 if let Some(ty) = symbol.get_ty() {
                     Ok(self.infer.instantiate(ty.clone()))
@@ -1762,7 +1993,10 @@ impl TypeChecker {
 
             for trait_name in &param.bounds {
                 let concrete_key = type_key(&concrete_ty);
-                if !self.impl_registry.implements_trait(trait_name, &concrete_key) {
+                if !self
+                    .impl_registry
+                    .implements_trait(trait_name, &concrete_key)
+                {
                     return Err(TypeckError::Other(format!(
                         "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
                         function_name, concrete_key, trait_name, param.name

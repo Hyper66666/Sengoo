@@ -13,6 +13,7 @@ fn compile_with_o0_succeeds() {
     let source = "def main() -> i64 { let x = 1 + 2; x }";
     let options = CompileOptions {
         mir_opt_level: MirOptLevel::O0,
+        runtime_contract_checks: false,
     };
 
     let ir = compile_to_ir_with_options(source, options)
@@ -29,4 +30,47 @@ fn compile_to_ir_matches_default_options_wrapper() {
         .expect("compile_to_ir_with_options(default) should succeed");
 
     assert_eq!(from_wrapper, from_explicit);
+}
+
+#[test]
+fn runtime_contract_checks_option_changes_ir_shape() {
+    let source = r#"
+def bump(x: i64) -> i64
+requires x > 0
+ensures result > x
+{
+    x + 1
+}
+
+def main() -> i64 {
+    bump(1)
+}
+"#;
+
+    let without_checks = compile_to_ir_with_options(
+        source,
+        CompileOptions {
+            mir_opt_level: MirOptLevel::O0,
+            runtime_contract_checks: false,
+        },
+    )
+    .expect("compile without runtime contract checks should succeed");
+
+    let with_checks = compile_to_ir_with_options(
+        source,
+        CompileOptions {
+            mir_opt_level: MirOptLevel::O0,
+            runtime_contract_checks: true,
+        },
+    )
+    .expect("compile with runtime contract checks should succeed");
+
+    assert_ne!(
+        without_checks, with_checks,
+        "runtime contract checks should change generated IR"
+    );
+    assert!(
+        with_checks.contains("unreachable"),
+        "runtime-contract-checked IR should contain trap/unreachable guard"
+    );
 }

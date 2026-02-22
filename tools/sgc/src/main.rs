@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
-use std::sync::atomic::AtomicI8;
+use std::sync::atomic::{AtomicI8, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -33,11 +33,11 @@ mod reflection_sidecar;
 mod symbol_intern;
 mod toolchain_discovery;
 mod workset;
-pub(crate) use commands::{cmd_build, cmd_run};
 #[cfg(test)]
 pub(crate) use commands::{
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
 };
+pub(crate) use commands::{cmd_build, cmd_run};
 
 #[cfg(test)]
 pub(crate) use bench::bench_root_dir;
@@ -98,7 +98,8 @@ pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_link
 pub(crate) use pipeline::compile_source_with_phase_timings;
 pub(crate) use pipeline::{
     compile_source, compile_source_to_llvm_file_with_phase_timings,
-    compile_source_to_llvm_file_with_phase_timings_with_mode, set_large_project_mode_override,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, set_contract_runtime_checks_override,
+    set_large_project_mode_override,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;
@@ -130,12 +131,116 @@ pub(crate) use workset::{
 
 include!("model_types.rs");
 
+const ERROR_FORMAT_TEXT_WIRE: u8 = 0;
+const ERROR_FORMAT_JSON_WIRE: u8 = 1;
+static ERROR_FORMAT_MODE: AtomicU8 = AtomicU8::new(ERROR_FORMAT_TEXT_WIRE);
+
 fn default_build_graph_schema_version() -> u32 {
     BUILD_GRAPH_SCHEMA_VERSION
 }
 
 fn default_build_cache_schema_version() -> u32 {
     1
+}
+
+fn error_format_to_wire(format: ErrorFormat) -> u8 {
+    match format {
+        ErrorFormat::Text => ERROR_FORMAT_TEXT_WIRE,
+        ErrorFormat::Json => ERROR_FORMAT_JSON_WIRE,
+    }
+}
+
+pub(crate) fn set_error_format(format: ErrorFormat) {
+    ERROR_FORMAT_MODE.store(error_format_to_wire(format), Ordering::Relaxed);
+}
+
+pub(crate) fn current_error_format() -> ErrorFormat {
+    match ERROR_FORMAT_MODE.load(Ordering::Relaxed) {
+        ERROR_FORMAT_JSON_WIRE => ErrorFormat::Json,
+        _ => ErrorFormat::Text,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompilerErrorJson {
+    ok: bool,
+    kind: &'static str,
+    stage: &'static str,
+    message: String,
+    input: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    details: Vec<String>,
+}
+
+fn compile_error_details(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .skip(1)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>()
+}
+
+fn compile_error_payload(input: Option<&str>, raw: &str) -> CompilerErrorJson {
+    let (stage, message) = split_compiler_error_stage(raw);
+    CompilerErrorJson {
+        ok: false,
+        kind: "compile_error",
+        stage,
+        message,
+        input: input.map(str::to_owned),
+        hint: Some("use --error-format text for human-friendly diagnostics".to_string()),
+        details: compile_error_details(raw),
+    }
+}
+
+pub(crate) fn render_compile_error_json(input: Option<&str>, raw: &str) -> String {
+    let payload = compile_error_payload(input, raw);
+    if let Ok(encoded) = serde_json::to_string_pretty(&payload) {
+        return encoded;
+    }
+
+    format!(
+        r#"{{"ok":false,"kind":"compile_error","stage":"{}","message":"{}"}}"#,
+        payload.stage,
+        raw.replace('"', "\\\"")
+    )
+}
+
+fn split_compiler_error_stage(raw: &str) -> (&'static str, String) {
+    let text = raw.trim();
+    let mapping: [(&str, &str); 8] = [
+        ("parse failed:", "parse"),
+        ("typecheck failed:", "typecheck"),
+        ("codegen failed:", "codegen"),
+        ("invalid optimization level:", "config"),
+        ("failed to create LLVM IR output", "io"),
+        ("failed to write LLVM IR", "io"),
+        ("MIR lowering failed:", "mir_lower"),
+        ("compile failed", "compile"),
+    ];
+    for (prefix, stage) in mapping {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            let summary = rest.lines().next().unwrap_or(rest).trim().to_string();
+            return (stage, summary);
+        }
+    }
+    let summary = text.lines().next().unwrap_or(text).trim().to_string();
+    ("compile", summary)
+}
+
+pub(crate) fn emit_compile_error(input: Option<&str>, raw: &str) {
+    match current_error_format() {
+        ErrorFormat::Text => {
+            eprintln!("Compilation error:");
+            eprintln!("{}", raw);
+        }
+        ErrorFormat::Json => {
+            eprintln!("{}", render_compile_error_json(input, raw));
+        }
+    }
 }
 
 #[tokio::main]
@@ -316,9 +421,12 @@ fn parse_large_project_mode_toggle(raw: &str) -> Option<bool> {
 }
 
 fn ci_environment_enabled() -> bool {
-    std::env::var("CI")
-        .ok()
-        .is_some_and(|raw| !matches!(raw.trim().to_ascii_lowercase().as_str(), "" | "0" | "false" | "off"))
+    std::env::var("CI").ok().is_some_and(|raw| {
+        !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "off"
+        )
+    })
 }
 
 fn maybe_choose_large_project_optimization_mode(
@@ -429,8 +537,7 @@ async fn cmd_check(input: &str) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            eprintln!("Compilation error:");
-            eprintln!("{}", e);
+            emit_compile_error(Some(input), &e);
             Err(miette::miette!("compile failed"))
         }
     }

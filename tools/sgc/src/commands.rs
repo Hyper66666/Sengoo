@@ -20,6 +20,38 @@ impl Drop for LargeProjectModeOverrideGuard {
     }
 }
 
+struct ContractChecksOverrideGuard {
+    previous: Option<bool>,
+}
+
+impl ContractChecksOverrideGuard {
+    fn new(previous: Option<bool>) -> Self {
+        Self { previous }
+    }
+}
+
+impl Drop for ContractChecksOverrideGuard {
+    fn drop(&mut self) {
+        set_contract_runtime_checks_override(self.previous);
+    }
+}
+
+fn resolve_contract_checks_enabled(mode: ContractChecksMode, opt_level: u8) -> bool {
+    match mode {
+        ContractChecksMode::On => true,
+        ContractChecksMode::Off => false,
+        ContractChecksMode::Auto => opt_level <= 1,
+    }
+}
+
+fn contract_checks_mode_label(mode: ContractChecksMode) -> &'static str {
+    match mode {
+        ContractChecksMode::Auto => "auto",
+        ContractChecksMode::On => "on",
+        ContractChecksMode::Off => "off",
+    }
+}
+
 fn generic_symbol_set(graph: &BuildGraphV2) -> HashSet<String> {
     graph
         .nodes
@@ -191,6 +223,7 @@ pub(crate) async fn cmd_build(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     emit_llvm: bool,
     force_rebuild: bool,
     low_memory: bool,
@@ -216,6 +249,19 @@ pub(crate) async fn cmd_build(
         maybe_choose_large_project_optimization_mode(source.len(), low_memory);
     let _large_project_mode_guard = LargeProjectModeOverrideGuard::new(
         set_large_project_mode_override(large_project_mode_choice),
+    );
+    let contract_checks_enabled = resolve_contract_checks_enabled(contract_checks, opt_level);
+    let _contract_checks_override_guard = ContractChecksOverrideGuard::new(
+        set_contract_runtime_checks_override(Some(contract_checks_enabled)),
+    );
+    println!(
+        "contract runtime checks: {} (mode={})",
+        if contract_checks_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        contract_checks_mode_label(contract_checks)
     );
     let collect_symbol_fingerprints =
         should_collect_symbol_fingerprints(source.len(), force_rebuild, low_memory);
@@ -385,6 +431,7 @@ pub(crate) async fn cmd_build(
         format!("emit_llvm={}", emit_llvm),
         format!("low_memory={}", low_memory),
         format!("reflection={}", reflection.enabled),
+        format!("contract_checks={}", contract_checks_enabled),
     ];
     let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
         previous_generic_cache_seed.as_ref(),
@@ -408,6 +455,7 @@ pub(crate) async fn cmd_build(
         source_hash,
         module_fingerprints.clone(),
         opt_level,
+        contract_checks_enabled,
         emit_llvm,
         runtime_c.clone(),
         output_file.clone(),
@@ -472,6 +520,7 @@ pub(crate) async fn cmd_build(
         &graph_v2.root_module,
         emit_llvm,
         opt_level,
+        contract_checks_enabled,
         &output_file,
         runtime_c.as_deref(),
     );
@@ -608,8 +657,7 @@ pub(crate) async fn cmd_build(
             },
         )
         .map_err(|e| {
-            eprintln!("Compilation error:");
-            eprintln!("{}", e);
+            emit_compile_error(Some(input), &e.to_string());
             miette::miette!("compile failed")
         })?;
     println!(
@@ -633,6 +681,7 @@ pub(crate) async fn cmd_build(
             root_implementation_hash,
             module_fingerprints,
             opt_level,
+            contract_checks: contract_checks_enabled,
             emit_llvm: true,
             runtime_c,
             llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
@@ -677,6 +726,7 @@ pub(crate) async fn cmd_build(
                 &output_file,
                 runtime_c.as_deref(),
                 opt_level,
+                contract_checks_enabled,
                 &graph_v2,
             )
         })
@@ -732,6 +782,7 @@ pub(crate) async fn cmd_build(
         root_implementation_hash,
         module_fingerprints,
         opt_level,
+        contract_checks: contract_checks_enabled,
         emit_llvm: false,
         runtime_c,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
@@ -754,6 +805,7 @@ pub(crate) async fn cmd_build(
 pub(crate) async fn cmd_run(
     input: &str,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     requested_engine: RunEngine,
     force_rebuild: bool,
     _args: &[String],
@@ -810,6 +862,19 @@ pub(crate) async fn cmd_run(
         maybe_choose_large_project_optimization_mode(source.len(), low_memory);
     let _large_project_mode_guard = LargeProjectModeOverrideGuard::new(
         set_large_project_mode_override(large_project_mode_choice),
+    );
+    let contract_checks_enabled = resolve_contract_checks_enabled(contract_checks, opt_level);
+    let _contract_checks_override_guard = ContractChecksOverrideGuard::new(
+        set_contract_runtime_checks_override(Some(contract_checks_enabled)),
+    );
+    println!(
+        "contract runtime checks: {} (mode={})",
+        if contract_checks_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        contract_checks_mode_label(contract_checks)
     );
     let collect_symbol_fingerprints =
         should_collect_symbol_fingerprints(source.len(), force_rebuild, low_memory);
@@ -937,6 +1002,7 @@ pub(crate) async fn cmd_run(
         format!("resolved_engine={:?}", resolved_engine),
         format!("low_memory={}", low_memory),
         format!("reflection={}", reflection.enabled),
+        format!("contract_checks={}", contract_checks_enabled),
     ];
     let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
         previous_generic_cache_seed.as_ref(),
@@ -960,6 +1026,7 @@ pub(crate) async fn cmd_run(
         source_hash,
         module_fingerprints.clone(),
         opt_level,
+        contract_checks_enabled,
         requested_engine,
         resolved_engine,
         runtime_c.clone(),
@@ -1044,6 +1111,7 @@ pub(crate) async fn cmd_run(
         edit_impact.as_ref(),
         &graph_v2.root_module,
         opt_level,
+        contract_checks_enabled,
         requested_engine,
         resolved_engine,
         runtime_c.as_deref(),
@@ -1176,8 +1244,7 @@ pub(crate) async fn cmd_run(
             },
         )
         .map_err(|e| {
-            eprintln!("Compilation error:");
-            eprintln!("{}", e);
+            emit_compile_error(Some(input), &e.to_string());
             miette::miette!("compile failed")
         })?;
     println!(
@@ -1207,6 +1274,7 @@ pub(crate) async fn cmd_run(
                         &object_path,
                         runtime_c.as_deref(),
                         opt_level,
+                        contract_checks_enabled,
                         requested_engine,
                         resolved_engine,
                         &graph_v2,
@@ -1285,6 +1353,7 @@ pub(crate) async fn cmd_run(
         root_implementation_hash,
         module_fingerprints,
         opt_level,
+        contract_checks: contract_checks_enabled,
         requested_engine,
         resolved_engine,
         runtime_c,
