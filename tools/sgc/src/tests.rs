@@ -303,6 +303,10 @@ fn benchmark_scaffold_exists() {
     assert!(root.join("suites/compile/mod_tree_root.sg").exists());
     assert!(root.join("suites/incremental/change_impl_root.sg").exists());
     assert!(root.join("suites/incremental/math_util.sg").exists());
+    assert!(root
+        .join("templates/generic-benchmark-report-template.md")
+        .exists());
+    assert!(root.join("scripts/sprint01-generic-gate.py").exists());
 }
 
 #[test]
@@ -317,6 +321,26 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     let root = bench_root_dir();
     let gate = fs::read_to_string(root.join("scripts/advanced-kpi-gate.py")).unwrap();
     assert!(gate.contains("DEFAULT_REQUIRED_MEMORY_LOCS = (\"10000\", \"100000\", \"1000000\")"));
+}
+
+#[test]
+fn sprint01_generic_gate_covers_required_cases() {
+    let root = bench_root_dir();
+    let gate = fs::read_to_string(root.join("scripts/sprint01-generic-gate.py")).unwrap();
+    assert!(gate.contains("generic_body_change_root.sg"));
+    assert!(gate.contains("generic_new_instantiation_root.sg"));
+    assert!(gate.contains("generic_signature_change_root.sg"));
+    assert!(gate.contains("choices=(\"soft\", \"hard\")"));
+}
+
+#[test]
+fn generic_benchmark_template_mentions_full_incremental_and_memory() {
+    let root = bench_root_dir();
+    let template =
+        fs::read_to_string(root.join("templates/generic-benchmark-report-template.md")).unwrap();
+    assert!(template.contains("Full Compile Snapshot"));
+    assert!(template.contains("Incremental Generic Scenarios"));
+    assert!(template.contains("Compile Memory"));
 }
 
 #[test]
@@ -1743,6 +1767,96 @@ def add(x: i64) -> i64 {
     assert_eq!(after_fp.len(), 1);
     assert_eq!(before_fp[0].abi_hash, after_fp[0].abi_hash);
     assert_eq!(before_fp[0].body_hash, after_fp[0].body_hash);
+}
+
+#[test]
+fn interface_fingerprint_fast_ignores_inline_function_body_changes() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64) -> i64 { x + 2 }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+    let before_impl = super::implementation_fingerprint(before);
+    let after_impl = super::implementation_fingerprint(after);
+
+    assert_eq!(
+        before_interface, after_interface,
+        "fast interface hash should ignore inline body-only edits"
+    );
+    assert_ne!(
+        before_impl, after_impl,
+        "implementation hash should still capture body changes"
+    );
+}
+
+#[test]
+fn interface_fingerprint_fast_detects_inline_function_signature_changes() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64, k: i64) -> i64 { x + k }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+
+    assert_ne!(
+        before_interface, after_interface,
+        "fast interface hash should track inline declaration signature changes"
+    );
+}
+
+#[test]
+fn fast_path_inline_body_change_classifies_as_impl_only() {
+    let before = "def add(x: i64) -> i64 { x + 1 }\n";
+    let after = "def add(x: i64) -> i64 { x + 2 }\n";
+
+    let before_interface = super::interface_fingerprint_fast(before);
+    let before_impl = super::implementation_fingerprint(before);
+    let after_interface = super::interface_fingerprint_fast(after);
+    let after_impl = super::implementation_fingerprint(after);
+
+    let previous_graph = BuildGraphV2 {
+        schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        root_module: "tests/main.sg".to_string(),
+        nodes: vec![BuildGraphNodeV2 {
+            module_path: "tests/main.sg".to_string(),
+            interface_hash: before_interface,
+            implementation_hash: before_impl,
+            depends_on: vec![],
+            object_path: None,
+            functions: vec![],
+            generic_items: Vec::new(),
+            generic_instances: Vec::new(),
+        }],
+    };
+
+    let current_graph = BuildGraphV2 {
+        schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        root_module: "tests/main.sg".to_string(),
+        nodes: vec![BuildGraphNodeV2 {
+            module_path: "tests/main.sg".to_string(),
+            interface_hash: after_interface,
+            implementation_hash: after_impl,
+            depends_on: vec![],
+            object_path: None,
+            functions: vec![],
+            generic_items: Vec::new(),
+            generic_instances: Vec::new(),
+        }],
+    };
+
+    let before_modules = vec![fp("tests/main.sg", before_interface, before_impl)];
+    let after_modules = vec![fp("tests/main.sg", after_interface, after_impl)];
+    let impact = classify_edit_impact(
+        before_interface,
+        before_impl,
+        after_interface,
+        after_impl,
+        &before_modules,
+        &after_modules,
+        Some(&previous_graph),
+        &current_graph,
+    );
+
+    assert_eq!(impact.class, EditClass::ImplOnly);
 }
 
 #[test]

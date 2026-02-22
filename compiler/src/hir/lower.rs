@@ -52,6 +52,9 @@ fn lower_decl(decl: &Decl, type_env: &TypeEnv) -> Result<HIRItem, String> {
         ast::DeclKind::Function(fn_decl) => {
             lower_function(fn_decl, type_env).map(HIRItem::Function)
         }
+        ast::DeclKind::ExternBlock(extern_block) => {
+            lower_extern_block(extern_block, type_env).map(HIRItem::ExternBlock)
+        }
         ast::DeclKind::Struct(struct_decl) => {
             lower_struct(struct_decl, type_env).map(HIRItem::Struct)
         }
@@ -168,7 +171,58 @@ fn lower_function_with_self(
         postcondition,
         body,
         is_async,
+        abi: fn_decl.abi.clone(),
+        is_unsafe: fn_decl.is_unsafe,
+        no_mangle: fn_decl.no_mangle,
+        export_name: fn_decl.export_name.clone(),
         is_pub,
+    })
+}
+
+fn lower_extern_block(
+    extern_block: &ast::ExternBlock,
+    type_env: &TypeEnv,
+) -> Result<HIRExternBlock, String> {
+    let mut items = Vec::new();
+
+    for item in &extern_block.items {
+        match item {
+            ast::ExternItem::Function(fn_decl) => {
+                let params = fn_decl
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let ty = lower_type(&p.ty, type_env);
+                        HIRParam::new(p.name.name.clone(), p.name.symbol, ty)
+                    })
+                    .collect::<Vec<_>>();
+                let return_type = fn_decl
+                    .return_type
+                    .as_ref()
+                    .map_or(HIRType::unit(), |t| lower_type(t, type_env));
+                items.push(HIRExternItem::Function(HIRExternFunction {
+                    name: fn_decl.name.name.clone(),
+                    params,
+                    return_type,
+                    is_unsafe: fn_decl.is_unsafe,
+                    is_pub: matches!(fn_decl.vis, ast::Visibility::Public),
+                }));
+            }
+            ast::ExternItem::Static(static_decl) => {
+                items.push(HIRExternItem::Static(HIRExternStatic {
+                    name: static_decl.name.name.clone(),
+                    ty: lower_type(&static_decl.ty, type_env),
+                    is_mut: static_decl.is_mut,
+                    is_pub: matches!(static_decl.vis, ast::Visibility::Public),
+                }));
+            }
+        }
+    }
+
+    Ok(HIRExternBlock {
+        abi: extern_block.abi.clone(),
+        link_name: extern_block.link_name.clone(),
+        items,
     })
 }
 
