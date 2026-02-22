@@ -6,8 +6,8 @@ use tokio::time::timeout;
 
 use crate::{
     cmd_build, cmd_run, frontend_jobs_label, frontend_trace_enabled, parse_frontend_jobs_arg,
-    reflection_options_from_cli, FrontendJobs, ReflectionMode, RunEngine, DAEMON_CONNECT_TIMEOUT,
-    DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
+    reflection_options_from_cli, ContractChecksMode, FrontendJobs, ReflectionMode, RunEngine,
+    DAEMON_CONNECT_TIMEOUT, DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +24,8 @@ enum DaemonCommand {
         input: String,
         output: Option<String>,
         opt_level: u8,
+        #[serde(default)]
+        contract_checks: ContractChecksMode,
         emit_llvm: bool,
         force_rebuild: bool,
         #[serde(default)]
@@ -39,6 +41,8 @@ enum DaemonCommand {
     Run {
         input: String,
         opt_level: u8,
+        #[serde(default)]
+        contract_checks: ContractChecksMode,
         engine: RunEngine,
         force_rebuild: bool,
         args: Vec<String>,
@@ -88,6 +92,7 @@ pub(super) fn daemon_request_build(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     emit_llvm: bool,
     force_rebuild: bool,
     low_memory: bool,
@@ -104,6 +109,7 @@ pub(super) fn daemon_request_build(
             input: input.to_string(),
             output: output.map(str::to_string),
             opt_level,
+            contract_checks,
             emit_llvm,
             force_rebuild,
             low_memory,
@@ -119,6 +125,7 @@ pub(super) fn daemon_request_build(
 fn daemon_request_run(
     input: &str,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
@@ -135,6 +142,7 @@ fn daemon_request_run(
         command: DaemonCommand::Run {
             input: input.to_string(),
             opt_level,
+            contract_checks,
             engine,
             force_rebuild,
             args: args.to_vec(),
@@ -153,6 +161,7 @@ pub(crate) async fn dispatch_build_via_daemon(
     input: &str,
     output: Option<&str>,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     emit_llvm: bool,
     force_rebuild: bool,
     low_memory: bool,
@@ -166,6 +175,7 @@ pub(crate) async fn dispatch_build_via_daemon(
         input,
         output,
         opt_level,
+        contract_checks,
         emit_llvm,
         force_rebuild,
         low_memory,
@@ -182,6 +192,7 @@ pub(crate) async fn dispatch_run_via_daemon(
     addr: &str,
     input: &str,
     opt_level: u8,
+    contract_checks: ContractChecksMode,
     engine: RunEngine,
     force_rebuild: bool,
     args: &[String],
@@ -195,6 +206,7 @@ pub(crate) async fn dispatch_run_via_daemon(
     let request = daemon_request_run(
         input,
         opt_level,
+        contract_checks,
         engine,
         force_rebuild,
         args,
@@ -358,6 +370,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             input,
             output,
             opt_level,
+            contract_checks,
             emit_llvm,
             force_rebuild,
             low_memory,
@@ -371,6 +384,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 &input,
                 output.as_deref(),
                 opt_level,
+                contract_checks,
                 emit_llvm,
                 force_rebuild,
                 low_memory,
@@ -383,6 +397,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
         DaemonCommand::Run {
             input,
             opt_level,
+            contract_checks,
             engine,
             force_rebuild,
             args,
@@ -396,6 +411,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             cmd_run(
                 &input,
                 opt_level,
+                contract_checks,
                 engine,
                 force_rebuild,
                 &args,

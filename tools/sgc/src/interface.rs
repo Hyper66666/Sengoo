@@ -3,7 +3,7 @@ use crate::{
     GenericInstanceFingerprint, GenericItemFingerprint,
 };
 use sengoo_compiler::{
-    ClassMember, Decl, DeclKind, Expr, ExprKind, Function, ImportKind, Param, Parser,
+    ClassMember, Decl, DeclKind, Expr, ExprKind, ExternItem, Function, ImportKind, Param, Parser,
     Path as AstPath, Program, SelfParam, Span, Stmt, StmtKind, TraitBound, TraitItem, Type,
     TypeKind, TypeParam, VariantField, Visibility,
 };
@@ -134,6 +134,11 @@ fn self_param_signature(self_param: Option<SelfParam>) -> &'static str {
     }
 }
 
+fn contract_signature(expr: Option<&Expr>) -> String {
+    expr.map(|value| format!("{:?}", value.kind))
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn function_signature(function: &Function) -> String {
     let type_params = function
         .type_params
@@ -169,15 +174,24 @@ fn function_signature(function: &Function) -> String {
         .as_ref()
         .map(type_signature)
         .unwrap_or_else(|| "unit".to_string());
+    let abi = function.abi.as_deref().unwrap_or("-");
+    let requires = contract_signature(function.precondition.as_deref());
+    let ensures = contract_signature(function.postcondition.as_deref());
     format!(
-        "{}|{}|async={}|self={}|tp=[{}]|params=[{}]|ret={}",
+        "{}|{}|abi={}|unsafe={}|async={}|no_mangle={}|export_name={}|self={}|tp=[{}]|params=[{}]|ret={}|requires={}|ensures={}",
         visibility_label(function.vis),
         function.name.name,
+        abi,
+        function.is_unsafe,
         function.is_async,
+        function.no_mangle,
+        function.export_name.as_deref().unwrap_or("-"),
         self_param_signature(function.self_param),
         type_params,
         params,
-        ret
+        ret,
+        requires,
+        ensures
     )
 }
 
@@ -385,6 +399,47 @@ fn append_decl_interface_signature(out: &mut String, decl: &Decl) {
                 kind,
                 alias
             ));
+        }
+        DeclKind::ExternBlock(extern_block) => {
+            out.push_str(&format!(
+                "extern|abi={}|link={}\n",
+                extern_block.abi,
+                extern_block.link_name.as_deref().unwrap_or("-")
+            ));
+            for item in &extern_block.items {
+                match item {
+                    ExternItem::Function(func) => {
+                        let params = func
+                            .params
+                            .iter()
+                            .map(param_signature)
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let ret = func
+                            .return_type
+                            .as_ref()
+                            .map(type_signature)
+                            .unwrap_or_else(|| "unit".to_string());
+                        out.push_str(&format!(
+                            "extern_fn|{}|unsafe={}|name={}|params=[{}]|ret={}\n",
+                            visibility_label(func.vis),
+                            func.is_unsafe,
+                            func.name.name,
+                            params,
+                            ret
+                        ));
+                    }
+                    ExternItem::Static(stat) => {
+                        out.push_str(&format!(
+                            "extern_static|{}|mut={}|{}:{}\n",
+                            visibility_label(stat.vis),
+                            stat.is_mut,
+                            stat.name.name,
+                            type_signature(&stat.ty)
+                        ));
+                    }
+                }
+            }
         }
         DeclKind::Module(module_decl) => {
             out.push_str(&format!(

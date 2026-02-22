@@ -9,6 +9,26 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
 
+## AI Handoff Pack (for other LLMs)
+
+To let another model take over quickly, use:
+
+- `docs/AI_FEWSHOT_PLAYBOOK.md` (few-shot examples with code + why)
+- `sgc --error-format json ...` for machine-readable diagnostics
+- function contracts (`requires` / `ensures`) to encode intent before implementation
+- `--contract-checks auto|on|off` to decide whether runtime contract guards are inserted
+
+Contract example:
+
+```sg
+def divide(a: i64, b: i64) -> i64
+requires b != 0
+ensures result * b == a
+{
+    a / b
+}
+```
+
 ## Practical Demos (Developer-Oriented)
 
 If you want business-style proof points instead of only synthetic microbenchmarks, run:
@@ -229,8 +249,14 @@ Useful commands:
 # type check
 sgc check <file.sg>
 
+# type check (JSON diagnostics for automation/agents)
+sgc --error-format json check <file.sg>
+
 # compile and run
 sgc run <file.sg> -O 1
+
+# compile and run with runtime contract guards (auto: on for O0/O1, off for O2/O3)
+sgc run <file.sg> -O 1 --contract-checks auto
 
 # build native binary
 sgc build <file.sg> -O 2
@@ -316,6 +342,26 @@ Sengoo 是一门自研编译型语言，聚焦实际工程落地：
 - 提供默认自动的非侵入式反射（sidecar 元数据）
 
 项目仍在快速迭代，但本地 CLI 开发流程已经可用。
+
+## AI 交接包（给其他大模型）
+
+为减少上下文丢失，建议直接使用：
+
+- `docs/AI_FEWSHOT_PLAYBOOK.md`（Few-shot 示例：代码 + 为什么这么写）
+- `sgc --error-format json ...`（机器可读编译诊断）
+- 契约语法 `requires` / `ensures`（先定义意图，再补实现）
+- `--contract-checks auto|on|off`（控制运行时是否插入契约检查）
+
+契约示例：
+
+```sg
+def divide(a: i64, b: i64) -> i64
+requires b != 0
+ensures result * b == a
+{
+    a / b
+}
+```
 
 ## 实用 Demo（面向开发者）
 
@@ -526,8 +572,14 @@ target/release/sgc build examples/05_loop.sg -O 2
 # 类型检查
 sgc check <file.sg>
 
+# 类型检查（JSON 诊断，便于自动化/智能体）
+sgc --error-format json check <file.sg>
+
 # 编译并运行
 sgc run <file.sg> -O 1
+
+# 编译并运行（运行时契约检查，auto: O0/O1 开启，O2/O3 关闭）
+sgc run <file.sg> -O 1 --contract-checks auto
 
 # 编译为原生二进制
 sgc build <file.sg> -O 2

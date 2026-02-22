@@ -7,7 +7,9 @@ use sengoo_compiler::hir::{HIRBody, HIRExpr, HIRItem, HIRPattern, HIRStmt};
 use sengoo_compiler::mir::{
     Instruction as MirInstruction, MirFunction, Terminator as MirTerminator,
 };
-use sengoo_compiler::{lower_ast, lower_hir, Codegen, MirOptLevel, Parser, TypeChecker};
+use sengoo_compiler::{
+    lower_ast, lower_hir_with_options, Codegen, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::BufWriter;
@@ -22,8 +24,12 @@ const DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS: usize = 120_000;
 const LARGE_PROJECT_MODE_AUTO: i8 = 0;
 const LARGE_PROJECT_MODE_ENABLED: i8 = 1;
 const LARGE_PROJECT_MODE_DISABLED: i8 = -1;
+const CONTRACT_CHECKS_AUTO: i8 = 0;
+const CONTRACT_CHECKS_ENABLED: i8 = 1;
+const CONTRACT_CHECKS_DISABLED: i8 = -1;
 
 static LARGE_PROJECT_MODE_OVERRIDE: AtomicI8 = AtomicI8::new(LARGE_PROJECT_MODE_AUTO);
+static CONTRACT_CHECKS_OVERRIDE: AtomicI8 = AtomicI8::new(CONTRACT_CHECKS_AUTO);
 
 fn encode_large_project_mode_override(value: Option<bool>) -> i8 {
     match value {
@@ -42,11 +48,31 @@ fn decode_large_project_mode_override(value: i8) -> Option<bool> {
 }
 
 pub(crate) fn set_large_project_mode_override(value: Option<bool>) -> Option<bool> {
-    let previous = LARGE_PROJECT_MODE_OVERRIDE.swap(
-        encode_large_project_mode_override(value),
-        Ordering::Relaxed,
-    );
+    let previous = LARGE_PROJECT_MODE_OVERRIDE
+        .swap(encode_large_project_mode_override(value), Ordering::Relaxed);
     decode_large_project_mode_override(previous)
+}
+
+fn encode_contract_checks_override(value: Option<bool>) -> i8 {
+    match value {
+        Some(true) => CONTRACT_CHECKS_ENABLED,
+        Some(false) => CONTRACT_CHECKS_DISABLED,
+        None => CONTRACT_CHECKS_AUTO,
+    }
+}
+
+fn decode_contract_checks_override(value: i8) -> Option<bool> {
+    match value {
+        CONTRACT_CHECKS_ENABLED => Some(true),
+        CONTRACT_CHECKS_DISABLED => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn set_contract_runtime_checks_override(value: Option<bool>) -> Option<bool> {
+    let previous =
+        CONTRACT_CHECKS_OVERRIDE.swap(encode_contract_checks_override(value), Ordering::Relaxed);
+    decode_contract_checks_override(previous)
 }
 
 fn parse_large_project_mode_env(raw: &str) -> Option<bool> {
@@ -55,6 +81,32 @@ fn parse_large_project_mode_env(raw: &str) -> Option<bool> {
         "0" | "false" | "off" | "no" | "disable" | "disabled" => Some(false),
         _ => None,
     }
+}
+
+fn parse_contract_checks_env(raw: &str) -> Option<Option<bool>> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" | "enable" | "enabled" => Some(Some(true)),
+        "0" | "false" | "off" | "no" | "disable" | "disabled" => Some(Some(false)),
+        "auto" => Some(None),
+        _ => None,
+    }
+}
+
+fn contract_runtime_checks_enabled(opt_level: u8) -> bool {
+    if let Some(override_mode) =
+        decode_contract_checks_override(CONTRACT_CHECKS_OVERRIDE.load(Ordering::Relaxed))
+    {
+        return override_mode;
+    }
+
+    if let Some(parsed) = std::env::var("SENGOO_CONTRACT_CHECKS")
+        .ok()
+        .and_then(|raw| parse_contract_checks_env(&raw))
+    {
+        return parsed.unwrap_or(opt_level <= 1);
+    }
+
+    false
 }
 
 fn large_project_optimization_enabled() -> bool {
@@ -175,7 +227,10 @@ fn reachable_ast_function_names(program: &AstProgram) -> Option<HashSet<String>>
     Some(names)
 }
 
-fn prune_ast_functions_by_name_set(program: &mut AstProgram, keep_names: &HashSet<String>) -> usize {
+fn prune_ast_functions_by_name_set(
+    program: &mut AstProgram,
+    keep_names: &HashSet<String>,
+) -> usize {
     let mut removed = 0usize;
     let mut kept = Vec::with_capacity(program.decls.len());
     for decl in std::mem::take(&mut program.decls) {
@@ -276,15 +331,19 @@ fn compile_frontend_to_mir_with_phase_timings(
             && should_filter_typecheck_function_bodies_in_default_mode(
                 program.as_ref().expect("program present before typecheck"),
             ) {
-            reachable_ast_function_names(program.as_ref().expect("program present before typecheck"))
+            reachable_ast_function_names(
+                program.as_ref().expect("program present before typecheck"),
+            )
         } else {
             None
         };
 
         if let Some(reachable) = reachable_typecheck_bodies.as_ref() {
             let ast_prune_start = Instant::now();
-            let removed =
-                prune_ast_functions_by_name_set(program.as_mut().expect("program present"), reachable);
+            let removed = prune_ast_functions_by_name_set(
+                program.as_mut().expect("program present"),
+                reachable,
+            );
             ast_prune_ms += ast_prune_start.elapsed().as_secs_f64() * 1000.0;
             ast_pruned_count += removed;
             ast_prune_applied = ast_prune_applied || removed > 0;
@@ -310,6 +369,7 @@ fn compile_frontend_to_mir_with_phase_timings(
         }
 
         let mir_start = Instant::now();
+        let runtime_contract_checks = contract_runtime_checks_enabled(opt_level);
         let mut hir_module = lower_ast(
             program.as_ref().expect("program present during lowering"),
             type_env.as_ref().expect("type env present during lowering"),
@@ -333,7 +393,13 @@ fn compile_frontend_to_mir_with_phase_timings(
             drop(type_env.take());
             drop(program.take());
         }
-        let mut mir_fns = lower_hir(&hir_module.items).map_err(|e| miette::miette!("{}", e))?;
+        let mut mir_fns = lower_hir_with_options(
+            &hir_module.items,
+            MirLowerOptions {
+                runtime_contract_checks,
+            },
+        )
+        .map_err(|e| miette::miette!("{}", e))?;
         drop(hir_module);
         if !low_memory_mode {
             drop(type_env.take());
@@ -352,6 +418,10 @@ fn compile_frontend_to_mir_with_phase_timings(
         let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
         pipeline.run(&mut mir_fns);
         let mir_ms = mir_start.elapsed().as_secs_f64() * 1000.0;
+        phases.insert(
+            "contract_runtime_checks".to_string(),
+            if runtime_contract_checks { 1.0 } else { 0.0 },
+        );
 
         (
             mir_fns,

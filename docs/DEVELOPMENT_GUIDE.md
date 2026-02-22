@@ -89,9 +89,10 @@ Important context:
 
 `sgc` supports:
 
-- `build <file.sg> [-O 0..3] [--emit-llvm] [--force-rebuild] [--low-memory] [--daemon]`
-- `run <file.sg> [-O 0..3] [--engine auto|native|lli] [--force-rebuild] [--low-memory] [--daemon]`
+- `build <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--emit-llvm] [--force-rebuild] [--low-memory] [--daemon]`
+- `run <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--engine auto|native|lli] [--force-rebuild] [--low-memory] [--daemon]`
 - `check <file.sg>`
+- Global flag: `--error-format text|json` (default: `text`)
 - `dump-ast <file.sg>`
 - `daemon --addr <host:port>`
 - `bench run|compile|incremental ...` (internal benchmark suite entry)
@@ -100,8 +101,10 @@ Examples:
 
 ```bash
 target/release/sgc run examples/09_method_call.sg -O 1
+target/release/sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 target/release/sgc build examples/08_struct.sg --emit-llvm
 target/release/sgc build examples/08_struct.sg --emit-llvm --low-memory
+target/release/sgc --error-format json check examples/09_method_call.sg
 target/release/sgc daemon --addr 127.0.0.1:48765
 ```
 
@@ -288,9 +291,10 @@ target/release/sgc build examples/05_loop.sg -O 2
 
 `sgc` 常用子命令：
 
-- `build <file.sg> [-O 0..3] [--emit-llvm] [--force-rebuild] [--daemon]`
-- `run <file.sg> [-O 0..3] [--engine auto|native|lli] [--force-rebuild] [--daemon]`
+- `build <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--emit-llvm] [--force-rebuild] [--low-memory] [--daemon]`
+- `run <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--engine auto|native|lli] [--force-rebuild] [--low-memory] [--daemon]`
 - `check <file.sg>`
+- 全局参数：`--error-format text|json`（默认 `text`）
 - `dump-ast <file.sg>`
 - `daemon --addr <host:port>`
 - `bench run|compile|incremental ...`
@@ -299,7 +303,10 @@ target/release/sgc build examples/05_loop.sg -O 2
 
 ```bash
 target/release/sgc run examples/09_method_call.sg -O 1
+target/release/sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 target/release/sgc build examples/08_struct.sg --emit-llvm
+target/release/sgc build examples/08_struct.sg --emit-llvm --low-memory
+target/release/sgc --error-format json check examples/09_method_call.sg
 target/release/sgc daemon --addr 127.0.0.1:48765
 ```
 

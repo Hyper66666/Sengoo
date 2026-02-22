@@ -77,6 +77,7 @@ pub(crate) fn can_use_incremental_link_with_metadata(
     output_path: &str,
     runtime_c: Option<&str>,
     opt_level: u8,
+    contract_checks: bool,
     graph_v2: &BuildGraphV2,
 ) -> std::result::Result<(), String> {
     if previous.cache_schema_version != BUILD_GRAPH_SCHEMA_VERSION {
@@ -87,6 +88,9 @@ pub(crate) fn can_use_incremental_link_with_metadata(
     }
     if previous.opt_level != opt_level {
         return Err("optimization level changed".to_string());
+    }
+    if previous.contract_checks != contract_checks {
+        return Err("contract runtime checks changed".to_string());
     }
     if previous.output_path != output_path {
         return Err("output path changed".to_string());
@@ -118,12 +122,16 @@ pub(crate) fn can_use_incremental_link_with_run_metadata(
     object_path: &Path,
     runtime_c: Option<&str>,
     opt_level: u8,
+    contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     graph_v2: &BuildGraphV2,
 ) -> std::result::Result<(), String> {
     if previous.opt_level != opt_level {
         return Err("optimization level changed".to_string());
+    }
+    if previous.contract_checks != contract_checks {
+        return Err("contract runtime checks changed".to_string());
     }
     if previous.requested_engine != requested_engine || previous.resolved_engine != resolved_engine
     {
@@ -188,6 +196,7 @@ pub(crate) fn cache_key(
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
@@ -196,6 +205,7 @@ pub(crate) fn cache_key(
         source_hash,
         module_fingerprints,
         opt_level,
+        contract_checks,
         requested_engine,
         resolved_engine,
         runtime_c,
@@ -206,6 +216,7 @@ pub(crate) fn build_cache_key(
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    contract_checks: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
     output_path: String,
@@ -214,6 +225,7 @@ pub(crate) fn build_cache_key(
         source_hash,
         module_fingerprints,
         opt_level,
+        contract_checks,
         emit_llvm,
         runtime_c,
         output_path,
@@ -224,6 +236,7 @@ pub(crate) fn metadata_matches(metadata: &RunCacheMetadata, key: &RunCacheKey) -
     metadata.source_hash == key.source_hash
         && metadata.module_fingerprints == key.module_fingerprints
         && metadata.opt_level == key.opt_level
+        && metadata.contract_checks == key.contract_checks
         && metadata.requested_engine == key.requested_engine
         && metadata.resolved_engine == key.resolved_engine
         && metadata.runtime_c == key.runtime_c
@@ -234,6 +247,7 @@ pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildC
         && metadata.source_hash == key.source_hash
         && metadata.module_fingerprints == key.module_fingerprints
         && metadata.opt_level == key.opt_level
+        && metadata.contract_checks == key.contract_checks
         && metadata.emit_llvm == key.emit_llvm
         && metadata.runtime_c == key.runtime_c
         && metadata.output_path == key.output_path
@@ -276,6 +290,18 @@ pub(crate) fn build_cache_mismatch_reasons(
             metadata.opt_level, key.opt_level
         ));
     }
+    if metadata.contract_checks != key.contract_checks {
+        reasons.push(format!(
+            "contract runtime checks changed ({} -> {})",
+            metadata.contract_checks, key.contract_checks
+        ));
+    }
+    if metadata.contract_checks != key.contract_checks {
+        reasons.push(format!(
+            "contract runtime checks changed ({} -> {})",
+            metadata.contract_checks, key.contract_checks
+        ));
+    }
     if metadata.emit_llvm != key.emit_llvm {
         reasons.push(format!(
             "emit mode changed (emit_llvm {} -> {})",
@@ -301,6 +327,7 @@ pub(crate) fn derive_build_workset_plan(
     root_module: &str,
     emit_llvm: bool,
     opt_level: u8,
+    contract_checks: bool,
     output_path: &str,
     runtime_c: Option<&str>,
 ) -> BuildWorksetPlan {
@@ -314,6 +341,9 @@ pub(crate) fn derive_build_workset_plan(
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.opt_level != opt_level {
+        return BuildWorksetPlan::FullRebuild;
+    }
+    if previous.contract_checks != contract_checks {
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.output_path != output_path {
@@ -331,6 +361,7 @@ pub(crate) fn derive_run_workset_plan(
     impact: Option<&EditImpact>,
     root_module: &str,
     opt_level: u8,
+    contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<&str>,
@@ -339,6 +370,9 @@ pub(crate) fn derive_run_workset_plan(
         return BuildWorksetPlan::FullRebuild;
     };
     if previous.opt_level != opt_level {
+        return BuildWorksetPlan::FullRebuild;
+    }
+    if previous.contract_checks != contract_checks {
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.requested_engine != requested_engine || previous.resolved_engine != resolved_engine
@@ -575,7 +609,8 @@ pub(crate) fn save_codegen_workset_manifest(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    let compact_manifest = compact_manifest_for_serialization(manifest, workset_manifest_max_items());
+    let compact_manifest =
+        compact_manifest_for_serialization(manifest, workset_manifest_max_items());
     let bytes = serde_json::to_vec_pretty(&compact_manifest)
         .map_err(|e| miette::miette!("failed to serialize workset manifest: {}", e))?;
     fs::write(path, bytes)

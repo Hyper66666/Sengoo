@@ -76,6 +76,11 @@ impl Decl {
         Self::new(DeclKind::Import(import), span)
     }
 
+    pub fn extern_block(extern_block: ExternBlock) -> Self {
+        let span = extern_block.span;
+        Self::new(DeclKind::ExternBlock(extern_block), span)
+    }
+
     /// 创建模块声明
     pub fn module(module: Module) -> Self {
         let span = module.span;
@@ -95,6 +100,7 @@ impl Decl {
             DeclKind::Const(c) => Some(&c.name),
             DeclKind::Static(s) => Some(&s.name),
             DeclKind::Import(_) => None,
+            DeclKind::ExternBlock(_) => None,
             DeclKind::Module(m) => Some(&m.name),
         }
     }
@@ -112,6 +118,7 @@ impl Decl {
             DeclKind::Const(c) => c.vis.is_public(),
             DeclKind::Static(s) => s.vis.is_public(),
             DeclKind::Import(_) => true,
+            DeclKind::ExternBlock(_) => true,
             DeclKind::Module(m) => m.vis.is_public(),
         }
     }
@@ -156,6 +163,9 @@ pub enum DeclKind {
     /// 导入 `import ...`
     Import(Import),
 
+    /// extern block `extern "C" { ... }`
+    ExternBlock(ExternBlock),
+
     /// 模块 `mod name { ... }`
     Module(Module),
 }
@@ -169,8 +179,14 @@ pub struct Function {
     pub params: Vec<Param>,
     pub self_param: Option<SelfParam>,
     pub return_type: Option<Type>,
+    pub precondition: Option<Box<super::Expr>>,
+    pub postcondition: Option<Box<super::Expr>>,
     pub body: Block,
     pub is_async: bool,
+    pub abi: Option<String>,
+    pub is_unsafe: bool,
+    pub no_mangle: bool,
+    pub export_name: Option<String>,
     pub span: Span,
 }
 
@@ -183,8 +199,14 @@ impl Function {
             params: Vec::new(),
             self_param: None,
             return_type: None,
+            precondition: None,
+            postcondition: None,
             body,
             is_async: false,
+            abi: None,
+            is_unsafe: false,
+            no_mangle: false,
+            export_name: None,
             span,
         }
     }
@@ -221,6 +243,72 @@ impl Function {
 }
 
 impl Node for Function {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// extern 声明块
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternBlock {
+    pub abi: String,
+    pub link_name: Option<String>,
+    pub items: Vec<ExternItem>,
+    pub span: Span,
+}
+
+impl ExternBlock {
+    pub fn new(abi: impl Into<String>, span: Span) -> Self {
+        Self {
+            abi: abi.into(),
+            link_name: None,
+            items: Vec::new(),
+            span,
+        }
+    }
+}
+
+impl Node for ExternBlock {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// extern 块条目
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExternItem {
+    Function(ExternFunction),
+    Static(ExternStatic),
+}
+
+/// extern 函数声明
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternFunction {
+    pub vis: Visibility,
+    pub name: Ident,
+    pub params: Vec<Param>,
+    pub return_type: Option<Type>,
+    pub is_unsafe: bool,
+    pub span: Span,
+}
+
+impl Node for ExternFunction {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// extern 静态变量声明
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternStatic {
+    pub vis: Visibility,
+    pub is_mut: bool,
+    pub name: Ident,
+    pub ty: Type,
+    pub span: Span,
+}
+
+impl Node for ExternStatic {
     fn span(&self) -> Span {
         self.span
     }

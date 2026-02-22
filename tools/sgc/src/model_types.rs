@@ -35,6 +35,33 @@ impl Default for FrontendMemoryMode {
     }
 }
 
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ErrorFormat {
+    Text,
+    Json,
+}
+
+impl Default for ErrorFormat {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ContractChecksMode {
+    Auto,
+    On,
+    Off,
+}
+
+impl Default for ContractChecksMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;
 const DAEMON_PROTOCOL_VERSION: u32 = 1;
 const REFLECTION_SCHEMA_VERSION: u32 = 1;
@@ -258,6 +285,8 @@ struct RunCacheMetadata {
     #[serde(default)]
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    #[serde(default)]
+    contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
@@ -276,6 +305,7 @@ struct RunCacheKey {
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
@@ -293,6 +323,8 @@ struct BuildCacheMetadata {
     #[serde(default)]
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    #[serde(default)]
+    contract_checks: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
     llvm_ir_path: String,
@@ -310,6 +342,7 @@ struct BuildCacheKey {
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
+    contract_checks: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
     output_path: String,

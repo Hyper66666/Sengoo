@@ -16,7 +16,7 @@ pub mod opt;
 
 pub use bb::{BasicBlock, CallArg, Terminator};
 pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
-pub use lowering::lower_hir;
+pub use lowering::{lower_hir, lower_hir_with_options, MirLowerOptions};
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;

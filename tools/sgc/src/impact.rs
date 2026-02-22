@@ -379,7 +379,11 @@ pub(crate) fn classify_edit_impact(
         .map(|state| state.module_path.clone())
         .collect::<HashSet<_>>();
     if let Some(previous_state) = &previous_function_state {
-        function_state_modules.extend(previous_state.values().map(|state| state.module_path.clone()));
+        function_state_modules.extend(
+            previous_state
+                .values()
+                .map(|state| state.module_path.clone()),
+        );
     }
 
     let mut function_symbol_to_module = HashMap::<String, String>::new();
