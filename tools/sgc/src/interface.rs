@@ -134,6 +134,11 @@ fn self_param_signature(self_param: Option<SelfParam>) -> &'static str {
     }
 }
 
+fn contract_signature(expr: Option<&Expr>) -> String {
+    expr.map(|value| format!("{:?}", value.kind))
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn function_signature(function: &Function) -> String {
     let type_params = function
         .type_params
@@ -169,15 +174,19 @@ fn function_signature(function: &Function) -> String {
         .as_ref()
         .map(type_signature)
         .unwrap_or_else(|| "unit".to_string());
+    let requires = contract_signature(function.precondition.as_deref());
+    let ensures = contract_signature(function.postcondition.as_deref());
     format!(
-        "{}|{}|async={}|self={}|tp=[{}]|params=[{}]|ret={}",
+        "{}|{}|async={}|self={}|tp=[{}]|params=[{}]|ret={}|requires={}|ensures={}",
         visibility_label(function.vis),
         function.name.name,
         function.is_async,
         self_param_signature(function.self_param),
         type_params,
         params,
-        ret
+        ret,
+        requires,
+        ensures
     )
 }
 

@@ -110,7 +110,7 @@ pub enum TypeKind {
     /// 缁犫偓閸楁洝鐭惧鍕閸?`Name` 閹?`module::Name`
     Path(Path),
 
-    /// 濞夋稑鐎风捄顖氱窞缁鐎?Name<T1, T2> 
+    /// 濞夋稑鐎风捄顖氱窞缁鐎?Name<T1, T2>
     PathWithArgs { path: Path, args: Vec<Type> },
 
     /// 閸忓啰绮嶇猾璇茬€?`(Type1, Type2)`

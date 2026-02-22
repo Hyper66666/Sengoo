@@ -133,7 +133,10 @@ def consume<T>(x: T) -> i64 where U: Showable {
 "#;
 
     let result = Parser::parse(source);
-    assert!(result.is_err(), "unknown type param in where should fail parse");
+    assert!(
+        result.is_err(),
+        "unknown type param in where should fail parse"
+    );
     let msg = format!("{}", result.unwrap_err());
     assert!(
         msg.contains("unknown type parameter") || msg.contains("where"),
