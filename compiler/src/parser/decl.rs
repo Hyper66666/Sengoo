@@ -74,6 +74,82 @@ impl<'source> Parser<'source> {
 
         Ok(())
     }
+
+    fn parse_contract_clause_expr(
+        &mut self,
+        keyword_span: crate::lexer::Span,
+        clause_name: &str,
+    ) -> Result<Expr> {
+        let clause_start = keyword_span.hi as usize;
+        let mut clause_end_index = self.pos;
+        while let Some(token) = self.tokens.get(clause_end_index) {
+            if matches!(
+                token.kind,
+                TokenKind::RequiresKw | TokenKind::EnsuresKw | TokenKind::LBrace
+            ) {
+                break;
+            }
+            clause_end_index += 1;
+        }
+
+        let clause_end = self
+            .tokens
+            .get(clause_end_index)
+            .map(|token| token.span.lo as usize)
+            .unwrap_or_else(|| self.source.len());
+
+        let snippet = self.source[clause_start..clause_end]
+            .trim()
+            .trim_end_matches(';')
+            .trim();
+        if snippet.is_empty() {
+            return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                format!("{} clause requires an expression", clause_name),
+            )));
+        }
+
+        let mut clause_parser = Parser::new(snippet);
+        let expr = clause_parser.parse_expr()?;
+        if !clause_parser.is_eof() {
+            return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                format!("invalid expression in {} clause", clause_name),
+            )));
+        }
+
+        self.pos = clause_end_index;
+        Ok(expr)
+    }
+
+    fn parse_optional_contract_clauses(&mut self) -> Result<(Option<Expr>, Option<Expr>)> {
+        let mut precondition = None;
+        let mut postcondition = None;
+
+        loop {
+            if let Some(keyword) = self.consume(TokenKind::RequiresKw) {
+                if precondition.is_some() {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "duplicate requires clause".to_string(),
+                    )));
+                }
+                precondition = Some(self.parse_contract_clause_expr(keyword.span, "requires")?);
+                continue;
+            }
+
+            if let Some(keyword) = self.consume(TokenKind::EnsuresKw) {
+                if postcondition.is_some() {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "duplicate ensures clause".to_string(),
+                    )));
+                }
+                postcondition = Some(self.parse_contract_clause_expr(keyword.span, "ensures")?);
+                continue;
+            }
+
+            break;
+        }
+
+        Ok((precondition, postcondition))
+    }
     /// 瑙ｆ瀽澹版槑
     pub(super) fn parse_decl(&mut self) -> Result<Decl> {
         let lo = self.current_span().lo;
@@ -201,6 +277,7 @@ impl<'source> Parser<'source> {
         };
 
         self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+        let (precondition, postcondition) = self.parse_optional_contract_clauses()?;
 
         let body = self.parse_block()?;
 
@@ -211,6 +288,8 @@ impl<'source> Parser<'source> {
             params,
             self_param,
             return_type,
+            precondition: precondition.map(Box::new),
+            postcondition: postcondition.map(Box::new),
             body,
             is_async: false,
             span: self.current_span(),
@@ -572,6 +651,7 @@ impl<'source> Parser<'source> {
                 };
 
                 self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+                let (precondition, postcondition) = self.parse_optional_contract_clauses()?;
 
                 let body = self.parse_block()?;
 
@@ -582,6 +662,8 @@ impl<'source> Parser<'source> {
                     params,
                     self_param,
                     return_type,
+                    precondition: precondition.map(Box::new),
+                    postcondition: postcondition.map(Box::new),
                     body,
                     is_async: false,
                     span: self.current_span(),
@@ -687,6 +769,7 @@ impl<'source> Parser<'source> {
                 };
 
                 self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+                let (precondition, postcondition) = self.parse_optional_contract_clauses()?;
 
                 let body = self.parse_block()?;
 
@@ -697,6 +780,8 @@ impl<'source> Parser<'source> {
                     params,
                     self_param,
                     return_type,
+                    precondition: precondition.map(Box::new),
+                    postcondition: postcondition.map(Box::new),
                     body,
                     is_async: false,
                     span: self.current_span(),
@@ -814,6 +899,7 @@ impl<'source> Parser<'source> {
             };
 
             self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
+            let (precondition, postcondition) = self.parse_optional_contract_clauses()?;
 
             let body = self.parse_block()?;
 
@@ -824,6 +910,8 @@ impl<'source> Parser<'source> {
                 params,
                 self_param,
                 return_type,
+                precondition: precondition.map(Box::new),
+                postcondition: postcondition.map(Box::new),
                 body,
                 is_async: false,
                 span: self.current_span(),

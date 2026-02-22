@@ -147,6 +147,16 @@ fn lower_function_with_self(
         .return_type
         .as_ref()
         .map_or(HIRType::unit(), |t| lower_type(t, type_env));
+    let precondition = fn_decl
+        .precondition
+        .as_ref()
+        .map(|expr| lower_expr(expr, type_env))
+        .transpose()?;
+    let postcondition = fn_decl
+        .postcondition
+        .as_ref()
+        .map(|expr| lower_expr(expr, type_env))
+        .transpose()?;
     let body = lower_body(&fn_decl.body, type_env);
 
     Ok(HIRFunction {
@@ -154,6 +164,8 @@ fn lower_function_with_self(
         type_params,
         params,
         return_type,
+        precondition,
+        postcondition,
         body,
         is_async,
         is_pub,

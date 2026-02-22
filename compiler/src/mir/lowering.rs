@@ -12,6 +12,11 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 /// �?HIRType 转换为类型前缀字符串（用于方法名修饰）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MirLowerOptions {
+    pub runtime_contract_checks: bool,
+}
+
 fn hir_type_to_prefix(ty: &HIRType) -> String {
     match &ty.kind {
         HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
@@ -25,6 +30,13 @@ fn hir_type_to_prefix(ty: &HIRType) -> String {
 
 /// �?HIR 模块转换�?MIR 函数集合
 pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
+    lower_hir_with_options(items, MirLowerOptions::default())
+}
+
+pub fn lower_hir_with_options(
+    items: &[HIRItem],
+    options: MirLowerOptions,
+) -> Result<Vec<MirFunction>, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut lambda_counter = 0;
@@ -90,7 +102,7 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
     for item in items {
         match item {
             HIRItem::Function(fn_item) => {
-                match lower_function(fn_item, &mut lambda_counter, &known_functions) {
+                match lower_function(fn_item, &mut lambda_counter, &known_functions, options) {
                     Ok((mir_fn, lambdas)) => {
                         results.push(mir_fn);
                         results.extend(lambdas);
@@ -115,8 +127,12 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
                             format!("{}_{}_{}", type_prefix, trait_name, original_method_name);
                         let mut renamed_method = method.clone();
                         renamed_method.name = three_part_name;
-                        match lower_function(&renamed_method, &mut lambda_counter, &known_functions)
-                        {
+                        match lower_function(
+                            &renamed_method,
+                            &mut lambda_counter,
+                            &known_functions,
+                            options,
+                        ) {
                             Ok((mir_fn, lambdas)) => {
                                 results.push(mir_fn);
                                 results.extend(lambdas);
@@ -125,7 +141,8 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
                         }
                     } else {
                         // Inherent impl: use existing two-part mangled name
-                        match lower_function(method, &mut lambda_counter, &known_functions) {
+                        match lower_function(method, &mut lambda_counter, &known_functions, options)
+                        {
                             Ok((mir_fn, lambdas)) => {
                                 results.push(mir_fn);
                                 results.extend(lambdas);
@@ -175,6 +192,8 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
                                         type_params: trait_fn.type_params.clone(),
                                         params,
                                         return_type: trait_fn.return_type.clone(),
+                                        precondition: trait_fn.precondition.clone(),
+                                        postcondition: trait_fn.postcondition.clone(),
                                         body: trait_fn.body.clone(),
                                         is_async: trait_fn.is_async,
                                         is_pub: trait_fn.is_pub,
@@ -184,6 +203,7 @@ pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
                                         &default_fn,
                                         &mut lambda_counter,
                                         &known_functions,
+                                        options,
                                     ) {
                                         Ok((mir_fn, lambdas)) => {
                                             results.push(mir_fn);
@@ -215,6 +235,7 @@ fn lower_function(
     fn_item: &hir::HIRFunction,
     lambda_counter: &mut usize,
     known_functions: &HashSet<String>,
+    options: MirLowerOptions,
 ) -> Result<(MirFunction, Vec<MirFunction>), String> {
     let params: Vec<MIRType> = fn_item.params.iter().map(|p| p.ty.clone().into()).collect();
     let return_type: MIRType = fn_item.return_type.clone().into();
@@ -228,10 +249,26 @@ fn lower_function(
         let local = Local::new(i + 1, LocalKind::Param);
         ctx.local_names.insert(param.name.clone(), local);
         ctx.bind_local_symbol(param.symbol, local);
+        ctx.contract_param_bindings
+            .push((param.name.clone(), param.symbol, local));
     }
 
     // 降低函数体到已有的入口块
-    ctx.lower_body_to_block(&fn_item.body, start_block);
+    let body_entry = if options.runtime_contract_checks {
+        if let Some(precondition) = fn_item.precondition.as_ref() {
+            ctx.inject_precondition_check(precondition, start_block)
+        } else {
+            start_block
+        }
+    } else {
+        start_block
+    };
+    ctx.lower_body_to_block(&fn_item.body, body_entry);
+    if options.runtime_contract_checks {
+        if let Some(postcondition) = fn_item.postcondition.as_ref() {
+            ctx.inject_postcondition_checks(postcondition);
+        }
+    }
 
     // 检查是否有错误发生
     if !ctx.errors.is_empty() {
@@ -282,6 +319,7 @@ struct LoweringContext<'a> {
     /// 名称到局部变量的映射
     local_names: HashMap<String, Local>,
     local_symbols: HashMap<SymbolId, Local>,
+    contract_param_bindings: Vec<(String, SymbolId, Local)>,
     /// 当前基本�?
     current_block: Option<usize>,
     /// 收集的错误信�?
@@ -314,6 +352,7 @@ impl<'a> LoweringContext<'a> {
             mir_fn,
             local_names: HashMap::new(),
             local_symbols: HashMap::new(),
+            contract_param_bindings: Vec::new(),
             current_block: None,
             errors: Vec::new(),
             loop_stack: Vec::new(),
@@ -703,6 +742,227 @@ impl<'a> LoweringContext<'a> {
         let block_id = self.current_block();
         if let Some(block) = self.mir_fn.block_mut(block_id) {
             block.set_terminator(term);
+        }
+    }
+
+    fn inject_precondition_check(&mut self, precondition: &HIRExpr, entry_block: usize) -> usize {
+        self.set_current_block(entry_block);
+        let cond_local = self.lower_contract_condition(precondition, None);
+        let pass_block = self.new_block();
+        let fail_block = self.new_block();
+        self.set_terminator(Terminator::If {
+            cond: cond_local,
+            then_block: pass_block,
+            else_block: fail_block,
+        });
+        self.set_current_block(fail_block);
+        self.set_terminator(Terminator::Unreachable);
+        pass_block
+    }
+
+    fn inject_postcondition_checks(&mut self, postcondition: &HIRExpr) {
+        let return_sites = self
+            .mir_fn
+            .basic_blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(block_id, block)| match block.terminator.clone() {
+                Some(Terminator::Return(value)) => Some((block_id, value)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        for (return_block, return_value) in return_sites {
+            let Some(return_local) = return_value else {
+                continue;
+            };
+
+            let check_block = self.new_block();
+            let success_block = self.new_block();
+            let fail_block = self.new_block();
+
+            if let Some(block) = self.mir_fn.block_mut(return_block) {
+                block.set_terminator(Terminator::Goto(check_block));
+            }
+
+            self.set_current_block(check_block);
+            let cond_local = self.lower_contract_condition(postcondition, Some(return_local));
+            self.set_terminator(Terminator::If {
+                cond: cond_local,
+                then_block: success_block,
+                else_block: fail_block,
+            });
+
+            self.set_current_block(success_block);
+            self.set_terminator(Terminator::Return(Some(return_local)));
+
+            self.set_current_block(fail_block);
+            self.set_terminator(Terminator::Unreachable);
+        }
+    }
+
+    fn lower_contract_condition(
+        &mut self,
+        condition: &HIRExpr,
+        result_local: Option<Local>,
+    ) -> Local {
+        let mut saved_name_bindings = Vec::<(String, Option<Local>)>::new();
+        let mut saved_symbol_bindings = Vec::<(SymbolId, Option<Local>)>::new();
+
+        for (name, symbol, local) in &self.contract_param_bindings {
+            let previous_name = self.local_names.insert(name.clone(), *local);
+            saved_name_bindings.push((name.clone(), previous_name));
+            if symbol.is_valid() {
+                let previous_symbol = self.local_symbols.insert(*symbol, *local);
+                saved_symbol_bindings.push((*symbol, previous_symbol));
+            }
+        }
+
+        if let Some(result_local) = result_local {
+            let result_name = "result".to_string();
+            let previous_result_name = self.local_names.insert(result_name.clone(), result_local);
+            saved_name_bindings.push((result_name, previous_result_name));
+
+            let mut result_symbols = Vec::new();
+            Self::collect_named_symbols(condition, "result", &mut result_symbols);
+            for symbol in result_symbols {
+                if symbol.is_valid() {
+                    let previous_symbol = self.local_symbols.insert(symbol, result_local);
+                    saved_symbol_bindings.push((symbol, previous_symbol));
+                }
+            }
+        }
+
+        let cond_local = self.lower_expr(condition);
+
+        for (symbol, previous) in saved_symbol_bindings.into_iter().rev() {
+            if let Some(local) = previous {
+                self.local_symbols.insert(symbol, local);
+            } else {
+                self.local_symbols.remove(&symbol);
+            }
+        }
+        for (name, previous) in saved_name_bindings.into_iter().rev() {
+            if let Some(local) = previous {
+                self.local_names.insert(name, local);
+            } else {
+                self.local_names.remove(&name);
+            }
+        }
+
+        cond_local
+    }
+
+    fn collect_named_symbols(expr: &HIRExpr, target_name: &str, out: &mut Vec<SymbolId>) {
+        match expr {
+            HIRExpr::Var { name, symbol } => {
+                if name == target_name {
+                    out.push(*symbol);
+                }
+            }
+            HIRExpr::Unary(_, operand) => Self::collect_named_symbols(operand, target_name, out),
+            HIRExpr::Binary(_, left, right)
+            | HIRExpr::And(left, right)
+            | HIRExpr::Or(left, right) => {
+                Self::collect_named_symbols(left, target_name, out);
+                Self::collect_named_symbols(right, target_name, out);
+            }
+            HIRExpr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_named_symbols(cond, target_name, out);
+                Self::collect_named_symbols_in_body(then_branch, target_name, out);
+                if let Some(else_body) = else_branch {
+                    Self::collect_named_symbols_in_body(else_body, target_name, out);
+                }
+            }
+            HIRExpr::Match { scrutinee, arms } => {
+                Self::collect_named_symbols(scrutinee, target_name, out);
+                for arm in arms {
+                    Self::collect_named_symbols(&arm.body, target_name, out);
+                }
+            }
+            HIRExpr::Loop(body) | HIRExpr::Block(body) => {
+                Self::collect_named_symbols_in_body(body, target_name, out);
+            }
+            HIRExpr::While { cond, body } => {
+                Self::collect_named_symbols(cond, target_name, out);
+                Self::collect_named_symbols_in_body(body, target_name, out);
+            }
+            HIRExpr::For { iter, body, .. } => {
+                Self::collect_named_symbols(iter, target_name, out);
+                Self::collect_named_symbols_in_body(body, target_name, out);
+            }
+            HIRExpr::Call { func, args } => {
+                Self::collect_named_symbols(func, target_name, out);
+                for arg in args {
+                    Self::collect_named_symbols(arg, target_name, out);
+                }
+            }
+            HIRExpr::MethodCall { receiver, args, .. } => {
+                Self::collect_named_symbols(receiver, target_name, out);
+                for arg in args {
+                    Self::collect_named_symbols(arg, target_name, out);
+                }
+            }
+            HIRExpr::Struct { fields, .. } => {
+                for (_, expr) in fields {
+                    Self::collect_named_symbols(expr, target_name, out);
+                }
+            }
+            HIRExpr::Array(items) | HIRExpr::Tuple(items) => {
+                for item in items {
+                    Self::collect_named_symbols(item, target_name, out);
+                }
+            }
+            HIRExpr::Index { base, index } => {
+                Self::collect_named_symbols(base, target_name, out);
+                Self::collect_named_symbols(index, target_name, out);
+            }
+            HIRExpr::Field { base, .. }
+            | HIRExpr::Return(Some(base))
+            | HIRExpr::Break(Some(base))
+            | HIRExpr::Cast(base, _)
+            | HIRExpr::Ascribe(base, _)
+            | HIRExpr::Ref(_, base)
+            | HIRExpr::Deref(base) => Self::collect_named_symbols(base, target_name, out),
+            HIRExpr::Assign { target, value } | HIRExpr::AssignOp { target, value, .. } => {
+                Self::collect_named_symbols(target, target_name, out);
+                Self::collect_named_symbols(value, target_name, out);
+            }
+            HIRExpr::Range { start, end, .. } => {
+                if let Some(start) = start {
+                    Self::collect_named_symbols(start, target_name, out);
+                }
+                if let Some(end) = end {
+                    Self::collect_named_symbols(end, target_name, out);
+                }
+            }
+            HIRExpr::Lambda { body, .. } => {
+                Self::collect_named_symbols(body, target_name, out);
+            }
+            HIRExpr::Lit(_) | HIRExpr::Return(None) | HIRExpr::Break(None) | HIRExpr::Continue => {}
+        }
+    }
+
+    fn collect_named_symbols_in_body(body: &HIRBody, target_name: &str, out: &mut Vec<SymbolId>) {
+        for stmt in &body.stmts {
+            match stmt {
+                HIRStmt::Expr(expr) => {
+                    Self::collect_named_symbols(expr, target_name, out);
+                }
+                HIRStmt::Let { value, .. } => {
+                    if let Some(value) = value {
+                        Self::collect_named_symbols(value, target_name, out);
+                    }
+                }
+                HIRStmt::Item => {}
+            }
+        }
+        if let Some(expr) = &body.expr {
+            Self::collect_named_symbols(expr, target_name, out);
         }
     }
 

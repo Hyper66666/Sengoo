@@ -58,6 +58,36 @@ impl i64 {
 let x = (-21).abs();
 ```
 
+## 2.4 Contracts (`requires` / `ensures`)
+
+```sg
+def divide(a: i64, b: i64) -> i64
+requires b != 0
+ensures result * b == a
+{
+    a / b
+}
+```
+
+Current behavior:
+- `requires` must be `bool`.
+- `ensures` must be `bool`.
+- `ensures` can reference `result`.
+- Some obvious contradictions are rejected during type-check (for constant-return cases).
+- Runtime guards are controlled by `--contract-checks`:
+  - `auto`: enabled for `-O 0/1`, disabled for `-O 2/3`
+  - `on`: always emit runtime contract checks
+  - `off`: never emit runtime contract checks
+
+For AI-assisted workflows, this lets you generate intent first (contract) and implementation second.
+
+Command examples:
+
+```bash
+sgc run examples/09_method_call.sg -O 1 --contract-checks auto
+sgc run examples/09_method_call.sg -O 2 --contract-checks on
+```
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:
@@ -182,6 +212,34 @@ impl i64 {
 }
 
 let x = (-21).abs();
+```
+
+## 2.4 契约（`requires` / `ensures`）
+
+```sg
+def divide(a: i64, b: i64) -> i64
+requires b != 0
+ensures result * b == a
+{
+    a / b
+}
+```
+
+当前行为：
+- `requires` 必须是 `bool`。
+- `ensures` 必须是 `bool`。
+- `ensures` 可以引用 `result`。
+- 对“明显矛盾”的后置条件会在类型检查阶段直接报错（常量返回场景）。
+- 运行时检查由 `--contract-checks` 控制：
+  - `auto`：`-O 0/1` 开启，`-O 2/3` 关闭
+  - `on`：始终开启运行时契约检查
+  - `off`：始终关闭运行时契约检查
+
+示例命令：
+
+```bash
+sgc run examples/09_method_call.sg -O 1 --contract-checks auto
+sgc run examples/09_method_call.sg -O 2 --contract-checks on
 ```
 
 ## 3. 非侵入式反射（按需开启）

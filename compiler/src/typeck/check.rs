@@ -13,7 +13,6 @@ use std::collections::{HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
 
-
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
     parent: Option<String>,
@@ -298,7 +297,10 @@ impl TypeChecker {
         }
     }
 
-    fn collect_generic_type_meta(&mut self, type_params: &[TypeParam]) -> Vec<GenericTypeParamMeta> {
+    fn collect_generic_type_meta(
+        &mut self,
+        type_params: &[TypeParam],
+    ) -> Vec<GenericTypeParamMeta> {
         if type_params.is_empty() {
             return Vec::new();
         }
@@ -646,14 +648,110 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        let sig = FunctionTy::new(
-            method.self_param.is_some(),
-            param_types,
-            ret_ty,
-        );
+        let sig = FunctionTy::new(method.self_param.is_some(), param_types, ret_ty);
         self.env.pop_scope();
         Ok(sig)
     }
+
+    fn is_result_placeholder(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Ident(ident) => ident.name == "result",
+            ExprKind::Path(path) => path
+                .as_simple()
+                .is_some_and(|segment| segment.name == "result"),
+            _ => false,
+        }
+    }
+
+    fn extract_result_literal_comparison(expr: &Expr) -> Option<(BinOp, Literal)> {
+        let ExprKind::Binary { op, left, right } = &expr.kind else {
+            return None;
+        };
+
+        if !matches!(op, BinOp::Eq | BinOp::NotEq) {
+            return None;
+        }
+
+        if Self::is_result_placeholder(left) {
+            if let ExprKind::Literal(lit) = &right.kind {
+                return Some((*op, lit.clone()));
+            }
+        }
+
+        if Self::is_result_placeholder(right) {
+            if let ExprKind::Literal(lit) = &left.kind {
+                return Some((*op, lit.clone()));
+            }
+        }
+
+        None
+    }
+
+    fn extract_constant_return_literal(fn_decl: &Function) -> Option<Literal> {
+        let stmt = fn_decl.body.stmts.last()?;
+        match &stmt.kind {
+            StmtKind::Expr(expr) => match &expr.kind {
+                ExprKind::Literal(lit) => Some(lit.clone()),
+                ExprKind::Return(Some(value)) => {
+                    if let ExprKind::Literal(lit) = &value.kind {
+                        Some(lit.clone())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn validate_contracts_for_function(&mut self, fn_decl: &Function, ret_ty: &Ty) -> Result<()> {
+        if let Some(precondition) = &fn_decl.precondition {
+            let pre_ty = self.check_expr(precondition).map_err(CompileError::from)?;
+            self.infer
+                .unify(&pre_ty, &self.env.bool_ty())
+                .map_err(CompileError::from)?;
+        }
+
+        if let Some(postcondition) = &fn_decl.postcondition {
+            self.env.push_scope();
+            self.env.insert_var("result".to_string(), ret_ty.clone());
+            let post_ty = self.check_expr(postcondition);
+            self.env.pop_scope();
+
+            let post_ty = post_ty.map_err(CompileError::from)?;
+            self.infer
+                .unify(&post_ty, &self.env.bool_ty())
+                .map_err(CompileError::from)?;
+
+            if matches!(postcondition.kind, ExprKind::Literal(Literal::Bool(false))) {
+                return Err(CompileError::from(TypeckError::Other(format!(
+                    "postcondition for function `{}` is always false",
+                    fn_decl.name.name
+                ))));
+            }
+
+            if let (Some(return_lit), Some((op, ensured_lit))) = (
+                Self::extract_constant_return_literal(fn_decl),
+                Self::extract_result_literal_comparison(postcondition),
+            ) {
+                let contradiction = match op {
+                    BinOp::Eq => return_lit != ensured_lit,
+                    BinOp::NotEq => return_lit == ensured_lit,
+                    _ => false,
+                };
+                if contradiction {
+                    return Err(CompileError::from(TypeckError::Other(format!(
+                        "postcondition contradicts constant return value in function `{}`",
+                        fn_decl.name.name
+                    ))));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn check_function_signature_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
         let signature = (|| -> Result<(Vec<Ty>, Ty, Vec<GenericTypeParamMeta>)> {
@@ -662,6 +760,7 @@ impl TypeChecker {
             let mut param_types = Vec::new();
             for param in &fn_decl.params {
                 let ty = self.check_type(&param.ty).map_err(CompileError::from)?;
+                self.env.insert_var(param.name.name.clone(), ty.clone());
                 param_types.push(ty);
             }
 
@@ -670,6 +769,8 @@ impl TypeChecker {
             } else {
                 self.env.unit_ty()
             };
+
+            self.validate_contracts_for_function(fn_decl, &ret_ty)?;
 
             Ok((param_types, ret_ty, generic_meta))
         })();
@@ -700,6 +801,7 @@ impl TypeChecker {
         } else {
             self.env.unit_ty()
         };
+        self.validate_contracts_for_function(fn_decl, &ret_ty)?;
 
         // 婵犵妲呴崑鍛熆濡皷鍋撳鐓庡籍鐎殿噮鍋婇幃娆撳传閸曨収妲伴梺璇茬箳閸嬬姴螞閸曨倣鎺楀箛閻楀牏鍘告繛杈剧悼閹虫捇藟鐎ｎ偁浜滈柟鐑樻煥閸樺鈧娲忛崕閬嶎敇閼规壆鐤€闁哄洨濯Σ鐑芥⒒娴ｅ鈧偓闁稿鎸婚妵鍕冀閵娧€妲堥梺浼欏瘜閸ｏ絽顫忓ú顏嶆晝闁挎繂鎳愰悷銊х磽閸屾氨孝闁挎洩绠撻獮蹇涱敃閿曗偓缁€鍐┿亜韫囨挻鍣烘繛?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
@@ -750,7 +852,8 @@ impl TypeChecker {
                     )))
                 }
             };
-            self.env.insert_type(type_param.name.name.clone(), fresh_var);
+            self.env
+                .insert_type(type_param.name.name.clone(), fresh_var);
             metas.push(GenericTypeParamMeta {
                 name: type_param.name.name.clone(),
                 var_id,
@@ -1081,16 +1184,16 @@ impl TypeChecker {
 
     /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶戦梺鑽ゅ仦閸戝綊宕戞繝鍌滄殾?
     fn path_name(&self, path: &Path) -> TyResult<String> {
-        path.as_simple().map(|ident| ident.name.clone()).ok_or_else(|| {
-            TypeckError::UndefinedType {
+        path.as_simple()
+            .map(|ident| ident.name.clone())
+            .ok_or_else(|| TypeckError::UndefinedType {
                 name: path
                     .segments
                     .iter()
                     .map(|seg| seg.name.as_str())
                     .collect::<Vec<_>>()
                     .join("::"),
-            }
-        })
+            })
     }
 
     fn builtin_type_by_name(&mut self, name: &str) -> Option<Ty> {
@@ -1437,7 +1540,9 @@ impl TypeChecker {
         };
 
         match &symbol.kind {
-            SymbolKind::Function { ty, .. } => Ok(self.infer.instantiate_with_fresh_vars(ty.clone())),
+            SymbolKind::Function { ty, .. } => {
+                Ok(self.infer.instantiate_with_fresh_vars(ty.clone()))
+            }
             _ => {
                 if let Some(ty) = symbol.get_ty() {
                     Ok(self.infer.instantiate(ty.clone()))
@@ -1762,7 +1867,10 @@ impl TypeChecker {
 
             for trait_name in &param.bounds {
                 let concrete_key = type_key(&concrete_ty);
-                if !self.impl_registry.implements_trait(trait_name, &concrete_key) {
+                if !self
+                    .impl_registry
+                    .implements_trait(trait_name, &concrete_key)
+                {
                     return Err(TypeckError::Other(format!(
                         "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
                         function_name, concrete_key, trait_name, param.name

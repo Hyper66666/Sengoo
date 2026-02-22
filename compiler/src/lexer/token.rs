@@ -158,6 +158,10 @@ pub enum TokenKind {
 
     #[token("where")]
     WhereKw,
+    #[token("requires")]
+    RequiresKw,
+    #[token("ensures")]
+    EnsuresKw,
     #[token("Self")]
     SelfKw,
     #[token("self")]
@@ -375,6 +379,8 @@ pub enum Keyword {
     Pub,
     Priv,
     Where,
+    Requires,
+    Ensures,
     SelfKw,
     SelfLower,
     True,
@@ -432,6 +438,8 @@ impl fmt::Display for Keyword {
             Keyword::Pub => "pub",
             Keyword::Priv => "priv",
             Keyword::Where => "where",
+            Keyword::Requires => "requires",
+            Keyword::Ensures => "ensures",
             Keyword::SelfKw => "Self",
             Keyword::SelfLower => "self",
             Keyword::True => "true",
@@ -493,6 +501,8 @@ impl Keyword {
             "pub" => Some(Keyword::Pub),
             "priv" => Some(Keyword::Priv),
             "where" => Some(Keyword::Where),
+            "requires" => Some(Keyword::Requires),
+            "ensures" => Some(Keyword::Ensures),
             "Self" => Some(Keyword::SelfKw),
             "self" => Some(Keyword::SelfLower),
             "true" => Some(Keyword::True),
@@ -579,6 +589,8 @@ impl TokenKind {
                 | TokenKind::PubKw
                 | TokenKind::PrivKw
                 | TokenKind::WhereKw
+                | TokenKind::RequiresKw
+                | TokenKind::EnsuresKw
                 | TokenKind::SelfKw
                 | TokenKind::SelfLowerKw
                 | TokenKind::TrueKw
@@ -637,6 +649,8 @@ impl TokenKind {
             (TokenKind::PubKw, Keyword::Pub) => true,
             (TokenKind::PrivKw, Keyword::Priv) => true,
             (TokenKind::WhereKw, Keyword::Where) => true,
+            (TokenKind::RequiresKw, Keyword::Requires) => true,
+            (TokenKind::EnsuresKw, Keyword::Ensures) => true,
             (TokenKind::SelfKw, Keyword::SelfKw) => true,
             (TokenKind::SelfLowerKw, Keyword::SelfLower) => true,
             (TokenKind::TrueKw, Keyword::True) => true,
@@ -722,6 +736,8 @@ impl TokenKind {
             TokenKind::PubKw => Some(Keyword::Pub),
             TokenKind::PrivKw => Some(Keyword::Priv),
             TokenKind::WhereKw => Some(Keyword::Where),
+            TokenKind::RequiresKw => Some(Keyword::Requires),
+            TokenKind::EnsuresKw => Some(Keyword::Ensures),
             TokenKind::SelfKw => Some(Keyword::SelfKw),
             TokenKind::SelfLowerKw => Some(Keyword::SelfLower),
             TokenKind::TrueKw => Some(Keyword::True),

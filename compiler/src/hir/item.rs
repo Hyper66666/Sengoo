@@ -37,6 +37,8 @@ pub struct HIRFunction {
     pub type_params: Vec<HIRTypeParam>,
     pub params: Vec<HIRParam>,
     pub return_type: HIRType,
+    pub precondition: Option<HIRExpr>,
+    pub postcondition: Option<HIRExpr>,
     pub body: HIRBody,
     pub is_async: bool,
     pub is_pub: bool,

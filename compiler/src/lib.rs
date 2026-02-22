@@ -16,8 +16,8 @@ pub use codegen::{jit::JITCodegen, Codegen};
 pub use error::{CompileError, Result};
 pub use hir::lower_ast;
 pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};
-pub use mir::lower_hir;
 pub use mir::opt::MirOptLevel;
+pub use mir::{lower_hir, lower_hir_with_options, MirLowerOptions};
 pub use parser::Parser;
 pub use symbol::{SymbolId, SymbolInterner};
 pub use typeck::TypeChecker;
@@ -32,12 +32,14 @@ pub const LANGUAGE_VERSION: &str = "0.1.0";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompileOptions {
     pub mir_opt_level: MirOptLevel,
+    pub runtime_contract_checks: bool,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
         Self {
             mir_opt_level: MirOptLevel::O2,
+            runtime_contract_checks: false,
         }
     }
 }
@@ -56,7 +58,13 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     let hir_module = lower_ast(&program, &type_env);
 
     // 4. MIR lowering.
-    let mut mir_fns = lower_hir(&hir_module.items).map_err(CompileError::MirLower)?;
+    let mut mir_fns = lower_hir_with_options(
+        &hir_module.items,
+        MirLowerOptions {
+            runtime_contract_checks: options.runtime_contract_checks,
+        },
+    )
+    .map_err(CompileError::MirLower)?;
     drop(hir_module);
     drop(type_env);
     drop(program);
