@@ -137,6 +137,10 @@ pub enum TokenKind {
     AsKw,
     #[token("export")]
     ExportKw,
+    #[token("extern")]
+    ExternKw,
+    #[token("unsafe")]
+    UnsafeKw,
 
     #[token("try")]
     TryKw,
@@ -302,6 +306,8 @@ pub enum TokenKind {
     Question,
     #[token("$")]
     Dollar,
+    #[token("#")]
+    Hash,
     #[token("_", priority = 10)]
     Underscore,
 
@@ -371,6 +377,8 @@ pub enum Keyword {
     From,
     As,
     Export,
+    Extern,
+    Unsafe,
     Try,
     Except, // Python 风格的 catch
     Finally,
@@ -430,6 +438,8 @@ impl fmt::Display for Keyword {
             Keyword::From => "from",
             Keyword::As => "as",
             Keyword::Export => "export",
+            Keyword::Extern => "extern",
+            Keyword::Unsafe => "unsafe",
             Keyword::Try => "try",
             Keyword::Except => "except",
             Keyword::Finally => "finally",
@@ -493,6 +503,8 @@ impl Keyword {
             "from" => Some(Keyword::From),
             "as" => Some(Keyword::As),
             "export" => Some(Keyword::Export),
+            "extern" => Some(Keyword::Extern),
+            "unsafe" => Some(Keyword::Unsafe),
             "try" => Some(Keyword::Try),
             "except" => Some(Keyword::Except),
             "finally" => Some(Keyword::Finally),
@@ -581,6 +593,8 @@ impl TokenKind {
                 | TokenKind::FromKw
                 | TokenKind::AsKw
                 | TokenKind::ExportKw
+                | TokenKind::ExternKw
+                | TokenKind::UnsafeKw
                 | TokenKind::TryKw
                 | TokenKind::ExceptKw
                 | TokenKind::FinallyKw
@@ -641,6 +655,8 @@ impl TokenKind {
             (TokenKind::FromKw, Keyword::From) => true,
             (TokenKind::AsKw, Keyword::As) => true,
             (TokenKind::ExportKw, Keyword::Export) => true,
+            (TokenKind::ExternKw, Keyword::Extern) => true,
+            (TokenKind::UnsafeKw, Keyword::Unsafe) => true,
             (TokenKind::TryKw, Keyword::Try) => true,
             (TokenKind::ExceptKw, Keyword::Except) => true,
             (TokenKind::FinallyKw, Keyword::Finally) => true,
@@ -728,6 +744,8 @@ impl TokenKind {
             TokenKind::FromKw => Some(Keyword::From),
             TokenKind::AsKw => Some(Keyword::As),
             TokenKind::ExportKw => Some(Keyword::Export),
+            TokenKind::ExternKw => Some(Keyword::Extern),
+            TokenKind::UnsafeKw => Some(Keyword::Unsafe),
             TokenKind::TryKw => Some(Keyword::Try),
             TokenKind::ExceptKw => Some(Keyword::Except),
             TokenKind::FinallyKw => Some(Keyword::Finally),

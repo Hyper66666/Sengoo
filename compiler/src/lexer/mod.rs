@@ -147,6 +147,7 @@ mod tests {
             if else match case default for while loop break continue \
             return yield await async parallel \
             import from as export \
+            extern unsafe \
             try except finally raise throw \
             pub priv where Self self \
             true false null in is";

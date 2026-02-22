@@ -5,6 +5,7 @@
 mod borrow;
 mod check;
 mod env;
+mod ffi;
 mod infer;
 pub mod r#trait;
 pub mod ty;
