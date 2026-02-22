@@ -7,10 +7,32 @@ use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
+#[derive(Debug, Clone)]
+pub struct ExternDecl {
+    pub name: String,
+    pub abi: String,
+    pub link_name: Option<String>,
+    pub params: Vec<MIRType>,
+    pub ret: MIRType,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportSymbol {
+    pub internal_name: String,
+    pub export_name: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FfiCodegenConfig {
+    pub extern_decls: Vec<ExternDecl>,
+    pub export_symbols: Vec<ExportSymbol>,
+}
+
 pub struct Codegen {
     ir: String,
     indent: usize,
     declarations: String,
+    ffi: FfiCodegenConfig,
     /// 字符串常量
     strings: Vec<String>,
     /// 字符串计数器
@@ -25,10 +47,15 @@ pub struct Codegen {
 
 impl Codegen {
     pub fn new() -> Self {
+        Self::with_ffi(FfiCodegenConfig::default())
+    }
+
+    pub fn with_ffi(ffi: FfiCodegenConfig) -> Self {
         let mut cg = Self {
             ir: String::new(),
             indent: 0,
             declarations: String::new(),
+            ffi,
             strings: Vec::new(),
             string_counter: 0,
             name_cache: Vec::new(),
@@ -90,6 +117,44 @@ impl Codegen {
             .push_str("declare i8* @sengoo_str_concat(i8*, i8*)\n");
         self.declarations
             .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
+        self.declarations.push_str("\n");
+
+        self.declare_user_extern_functions();
+    }
+
+    fn declare_user_extern_functions(&mut self) {
+        if self.ffi.extern_decls.is_empty() {
+            return;
+        }
+
+        self.declarations
+            .push_str("; User-declared extern FFI functions\n");
+        let mut seen = HashSet::new();
+        let extern_decls = self.ffi.extern_decls.clone();
+
+        for decl in extern_decls {
+            if !seen.insert(decl.name.clone()) {
+                continue;
+            }
+
+            if let Some(link_name) = &decl.link_name {
+                self.declarations
+                    .push_str(&format!("; link(name = \"{}\")\n", link_name));
+            }
+            self.declarations
+                .push_str(&format!("; ABI: {}\n", decl.abi.as_str()));
+
+            let ret = self.mir_type_to_llvm_cached(&decl.ret);
+            let params = decl
+                .params
+                .iter()
+                .map(|p| self.mir_type_to_llvm_cached(p))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.declarations
+                .push_str(&format!("declare {} @{}({})\n", ret, decl.name, params));
+        }
+
         self.declarations.push_str("\n");
     }
 
@@ -217,7 +282,83 @@ impl Codegen {
         for mir_fn in mir_fns {
             self.codegen_function(mir_fn)?;
         }
+        self.emit_export_symbol_wrappers(mir_fns);
         Ok(())
+    }
+
+    fn emit_export_symbol_wrappers(&mut self, mir_fns: &[MirFunction]) {
+        if self.ffi.export_symbols.is_empty() {
+            return;
+        }
+
+        let mut emitted = HashSet::new();
+        let export_symbols = self.ffi.export_symbols.clone();
+        for export in export_symbols {
+            if export.export_name == export.internal_name {
+                continue;
+            }
+            if !emitted.insert(export.export_name.clone()) {
+                continue;
+            }
+
+            let Some(target) = mir_fns.iter().find(|f| f.name == export.internal_name) else {
+                continue;
+            };
+
+            let ret_ty = self.mir_type_to_llvm_cached(&target.return_type);
+            let params = target
+                .params
+                .iter()
+                .enumerate()
+                .map(|(idx, ty)| {
+                    let llvm = self.mir_type_to_llvm_cached(ty);
+                    format!("{} %arg_{}", llvm, idx)
+                })
+                .collect::<Vec<_>>();
+            let args = target
+                .params
+                .iter()
+                .enumerate()
+                .map(|(idx, ty)| {
+                    let llvm = self.mir_type_to_llvm_cached(ty);
+                    format!("{} %arg_{}", llvm, idx)
+                })
+                .collect::<Vec<_>>();
+
+            self.ir.push_str("\n");
+            self.ir.push_str(&format!(
+                "; Export wrapper: {} -> {}\n",
+                export.internal_name, export.export_name
+            ));
+            self.ir.push_str(&format!(
+                "define {} @{}({}) {{\n",
+                ret_ty,
+                export.export_name,
+                params.join(", ")
+            ));
+            self.indent += 1;
+            self.emit_indent();
+            if ret_ty == "void" {
+                self.ir.push_str(&format!(
+                    "call void @{}({})\n",
+                    export.internal_name,
+                    args.join(", ")
+                ));
+                self.emit_indent();
+                self.ir.push_str("ret void\n");
+            } else {
+                self.ir.push_str(&format!(
+                    "%export_ret = call {} @{}({})\n",
+                    ret_ty,
+                    export.internal_name,
+                    args.join(", ")
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!("ret {} %export_ret\n", ret_ty));
+            }
+            self.indent -= 1;
+            self.ir.push_str("}\n");
+        }
     }
 
     pub fn codegen(&mut self, mir_fns: &[MirFunction]) -> Result<String, String> {
