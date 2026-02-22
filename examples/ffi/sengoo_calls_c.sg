@@ -1,0 +1,9 @@
+extern "C" {
+    pub fn c_add(a: i64, b: i64) -> i64;
+}
+
+def main() -> i64 {
+    let result = c_add(20, 22);
+    print(result);
+    0
+}

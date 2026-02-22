@@ -72,19 +72,57 @@ pub(crate) fn interface_fingerprint_fast(source: &str) -> u64 {
 }
 
 pub(crate) fn interface_fingerprint_fast_from_normalized(normalized: &str) -> u64 {
+    fn line_starts_with_any(line: &str, prefixes: &[&str]) -> bool {
+        prefixes.iter().any(|prefix| line.starts_with(prefix))
+    }
+
+    fn strip_inline_block_signature(line: &str) -> &str {
+        line.split_once('{')
+            .map(|(head, _)| head.trim_end())
+            .unwrap_or(line)
+    }
+
+    let import_prefixes = ["import ", "pub import "];
+    let function_prefixes = ["def ", "pub def ", "async def ", "pub async def "];
+    let impl_prefixes = ["impl ", "pub impl "];
+    let type_prefixes = [
+        "struct ",
+        "pub struct ",
+        "enum ",
+        "pub enum ",
+        "trait ",
+        "pub trait ",
+        "class ",
+        "pub class ",
+        "type ",
+        "pub type ",
+    ];
+
     let mut fallback_repr = String::new();
     for line in normalized.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("import ")
-            || trimmed.starts_with("pub import ")
-            || trimmed.starts_with("def ")
-            || trimmed.starts_with("pub def ")
-            || trimmed.starts_with("async def ")
-            || trimmed.starts_with("struct ")
-            || trimmed.starts_with("enum ")
-            || trimmed.starts_with("trait ")
-            || trimmed.starts_with("impl ")
-        {
+
+        if line_starts_with_any(trimmed, &import_prefixes) {
+            fallback_repr.push_str(trimmed);
+            fallback_repr.push('\n');
+            continue;
+        }
+
+        if line_starts_with_any(trimmed, &function_prefixes) {
+            // Keep declaration signature only so body-only edits do not look like interface drift.
+            fallback_repr.push_str(strip_inline_block_signature(trimmed));
+            fallback_repr.push('\n');
+            continue;
+        }
+
+        if line_starts_with_any(trimmed, &impl_prefixes) {
+            // Impl block body is implementation detail for coarse fallback hashing.
+            fallback_repr.push_str(strip_inline_block_signature(trimmed));
+            fallback_repr.push('\n');
+            continue;
+        }
+
+        if line_starts_with_any(trimmed, &type_prefixes) {
             fallback_repr.push_str(trimmed);
             fallback_repr.push('\n');
         }

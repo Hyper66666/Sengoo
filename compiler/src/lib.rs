@@ -44,6 +44,51 @@ impl Default for CompileOptions {
     }
 }
 
+fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodegenConfig {
+    let mut config = codegen::FfiCodegenConfig::default();
+
+    for item in &hir_module.items {
+        match item {
+            hir::HIRItem::ExternBlock(block) => {
+                for extern_item in &block.items {
+                    if let hir::HIRExternItem::Function(func) = extern_item {
+                        let params = func
+                            .params
+                            .iter()
+                            .map(|p| p.ty.clone().into())
+                            .collect::<Vec<mir::MIRType>>();
+                        let ret = func.return_type.clone().into();
+                        config.extern_decls.push(codegen::ExternDecl {
+                            name: func.name.clone(),
+                            abi: block.abi.clone(),
+                            link_name: block.link_name.clone(),
+                            params,
+                            ret,
+                        });
+                    }
+                }
+            }
+            hir::HIRItem::Function(func) => {
+                if func.abi.as_deref() == Some("C")
+                    && (func.no_mangle || func.export_name.is_some())
+                {
+                    let export_name = func
+                        .export_name
+                        .clone()
+                        .unwrap_or_else(|| func.name.clone());
+                    config.export_symbols.push(codegen::ExportSymbol {
+                        internal_name: func.name.clone(),
+                        export_name,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    config
+}
+
 /// Compile Sengoo source to LLVM IR using explicit options.
 pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Result<String> {
     // 1. Parse source code.
@@ -56,6 +101,7 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
 
     // 3. HIR lowering.
     let hir_module = lower_ast(&program, &type_env);
+    let ffi_codegen = collect_ffi_codegen_config(&hir_module);
 
     // 4. MIR lowering.
     let mut mir_fns = lower_hir_with_options(
@@ -74,7 +120,7 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     pipeline.run(&mut mir_fns);
 
     // 6. Code generation (MIR -> LLVM IR).
-    let mut codegen = Codegen::new();
+    let mut codegen = Codegen::with_ffi(ffi_codegen);
     codegen.codegen(&mir_fns).map_err(CompileError::Codegen)
 }
 

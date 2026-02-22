@@ -170,6 +170,7 @@ impl<'source> Parser<'source> {
             let kind = self.current().map(|t| &t.kind);
             match kind {
                 Some(TokenKind::DefKw)
+                | Some(TokenKind::ExternKw)
                 | Some(TokenKind::StructKw)
                 | Some(TokenKind::EnumKw)
                 | Some(TokenKind::ClassKw)
@@ -178,7 +179,9 @@ impl<'source> Parser<'source> {
                 | Some(TokenKind::TypeKw)
                 | Some(TokenKind::ConstKw)
                 | Some(TokenKind::StaticKw)
-                | Some(TokenKind::ImportKw) => break,
+                | Some(TokenKind::ImportKw)
+                | Some(TokenKind::UnsafeKw)
+                | Some(TokenKind::Hash) => break,
                 Some(TokenKind::Semicolon) => {
                     self.advance();
                     break;

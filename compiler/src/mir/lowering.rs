@@ -196,6 +196,10 @@ pub fn lower_hir_with_options(
                                         postcondition: trait_fn.postcondition.clone(),
                                         body: trait_fn.body.clone(),
                                         is_async: trait_fn.is_async,
+                                        abi: trait_fn.abi.clone(),
+                                        is_unsafe: trait_fn.is_unsafe,
+                                        no_mangle: trait_fn.no_mangle,
+                                        export_name: trait_fn.export_name.clone(),
                                         is_pub: trait_fn.is_pub,
                                     };
 
