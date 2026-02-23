@@ -229,6 +229,60 @@ Current gate defaults:
 - `hard`: enabled-unused overhead <= `15%`, enabled-used overhead <= `30%`
 - disabled regression check compares against `bench/baseline.json` key `reflection/<suite>/disabled` when available
 
+## 5) Runtime Integration Stack (New)
+
+### English
+
+The latest runtime track adds a complete reusable FFI wrapper layer and integration utilities:
+
+- Database runtime MVP (`runtime/src/reflect/runtime_db.rs`)
+  - Lifecycle: `open` / `close` / `ping`
+  - Query path: `exec` / `query` with result handles
+  - Structured status + error-message channel (instead of plain `-1/0`)
+- Full C/C++ wrapper path (`runtime/src/reflect/runtime_ffi.rs`)
+  - C library open/call/close
+  - C++ object lifecycle wrappers: create/call/destroy
+  - Callback bridge: bind/dispatch/unbind
+  - Binary payload bridge: managed buffer handles (`new/from/len/ptr/copy_in/copy_out/free`)
+- Lua bridge
+  - Lightweight runtime subset (`sengoo_lua_*`)
+  - Native Lua 5.4 dynamic-library bridge PoC (`sengoo_lua54_*`)
+- Integration validation lanes
+  - Protobuf wire encode/decode FFI path (`runtime_proto`)
+  - Network bench runtime path with p50/p95/p99 metrics (`runtime_net_bench`)
+
+Related docs:
+- `docs/runtime-ffi-lua.md`
+- `docs/database-runtime.md`
+- `docs/runtime-protobuf-ffi.md`
+- `docs/runtime-network-bench.md`
+
+### 中文
+
+最新运行时能力已补齐“可复用 FFI 封装层 + 集成验证链路”：
+
+- 数据库运行时 MVP（`runtime/src/reflect/runtime_db.rs`）
+  - 生命周期：`open` / `close` / `ping`
+  - 查询接口：`exec` / `query`（带结果句柄）
+  - 结构化错误码与错误消息通道（不再只有 `-1/0`）
+- 完整 C/C++ 封装路径（`runtime/src/reflect/runtime_ffi.rs`）
+  - C 动态库 `open/call/close`
+  - C++ 对象生命周期包装：`create/call/destroy`
+  - 回调桥接：`bind/dispatch/unbind`
+  - 二进制缓冲区桥接：`new/from/len/ptr/copy_in/copy_out/free`
+- Lua 桥接
+  - 轻量子集运行时桥接（`sengoo_lua_*`）
+  - Lua 5.4 原生动态库桥接 PoC（`sengoo_lua54_*`）
+- 集成验证链路
+  - Protobuf 编解码 FFI 路径（`runtime_proto`）
+  - 网络基准运行时路径（含 p50/p95/p99，`runtime_net_bench`）
+
+相关文档：
+- `docs/runtime-ffi-lua.md`
+- `docs/database-runtime.md`
+- `docs/runtime-protobuf-ffi.md`
+- `docs/runtime-network-bench.md`
+
 ## Quick Start
 
 ```bash
