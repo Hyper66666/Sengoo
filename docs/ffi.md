@@ -66,3 +66,16 @@ The folder includes both directions:
 
 - Sengoo -> C
 - C -> Sengoo (exported symbol path)
+
+## Runtime Bridge (MVP)
+
+Runtime-level FFI and Lua bridges are documented in:
+
+- `docs/runtime-ffi-lua.md`
+- `docs/database-runtime.md`
+
+These runtime APIs provide:
+
+- C library open/call/close path
+- Lua load/exec/call path
+- Structured error code + message diagnostics for local integration loops
