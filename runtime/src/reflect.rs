@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use thiserror::Error;
 
 mod runtime_db;
+mod runtime_ffi;
 
 pub const REFLECTION_SCHEMA_VERSION: u32 = 1;
 
