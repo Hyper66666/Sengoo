@@ -9,6 +9,7 @@
 //! - [`python`] - Python 互操作（可选，待实现）
 
 pub mod error;
+pub mod net;
 pub mod reflect;
 
 // TODO: 逐步添加模块
