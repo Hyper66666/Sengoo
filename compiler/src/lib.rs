@@ -108,6 +108,7 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
         &hir_module.items,
         MirLowerOptions {
             runtime_contract_checks: options.runtime_contract_checks,
+            lazy_generic_mono: true,
         },
     )
     .map_err(CompileError::MirLower)?;

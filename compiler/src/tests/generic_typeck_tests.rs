@@ -1,4 +1,4 @@
-use crate::{Parser, TypeChecker};
+use crate::{lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
 use std::collections::HashSet;
 
 #[test]
@@ -191,4 +191,78 @@ def consume(x: Alias<i64>) -> i64 {
     checker
         .check_program(&program)
         .expect("type alias where-clause bounds should typecheck");
+}
+
+#[test]
+fn lazy_monomorphization_skips_uninstantiated_generic_function() {
+    let source = r#"
+def id<T>(x: T) -> T {
+    x
+}
+
+def main() -> i64 {
+    42
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("typecheck should succeed");
+    let env = checker.into_env();
+    let hir = lower_ast(&program, &env);
+
+    let mir = lower_hir_with_options(
+        &hir.items,
+        MirLowerOptions {
+            runtime_contract_checks: false,
+            lazy_generic_mono: true,
+        },
+    )
+    .expect("MIR lowering should succeed");
+
+    let names = mir.iter().map(|f| f.name.as_str()).collect::<HashSet<_>>();
+    assert!(names.contains("main"));
+    assert!(
+        !names.contains("id"),
+        "unused generic function should be skipped in lazy mode"
+    );
+}
+
+#[test]
+fn lazy_monomorphization_keeps_instantiated_generic_function() {
+    let source = r#"
+def id<T>(x: T) -> T {
+    x
+}
+
+def main() -> i64 {
+    id(1)
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("typecheck should succeed");
+    let env = checker.into_env();
+    let hir = lower_ast(&program, &env);
+
+    let mir = lower_hir_with_options(
+        &hir.items,
+        MirLowerOptions {
+            runtime_contract_checks: false,
+            lazy_generic_mono: true,
+        },
+    )
+    .expect("MIR lowering should succeed");
+
+    let names = mir.iter().map(|f| f.name.as_str()).collect::<HashSet<_>>();
+    assert!(names.contains("main"));
+    assert!(
+        names.contains("id"),
+        "instantiated generic function should be kept in lazy mode"
+    );
 }
