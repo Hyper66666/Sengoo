@@ -10,6 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 use thiserror::Error;
 
+mod runtime_db;
+mod runtime_ffi;
+mod runtime_lua54;
+mod runtime_net_bench;
+mod runtime_proto;
+
 pub const REFLECTION_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

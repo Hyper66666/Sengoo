@@ -397,6 +397,7 @@ fn compile_frontend_to_mir_with_phase_timings(
             &hir_module.items,
             MirLowerOptions {
                 runtime_contract_checks,
+                lazy_generic_mono: true,
             },
         )
         .map_err(|e| miette::miette!("{}", e))?;
