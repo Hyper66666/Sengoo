@@ -73,9 +73,13 @@ Runtime-level FFI and Lua bridges are documented in:
 
 - `docs/runtime-ffi-lua.md`
 - `docs/database-runtime.md`
+- `docs/runtime-network-bench.md`
+- `docs/runtime-protobuf-ffi.md`
 
 These runtime APIs provide:
 
 - C library open/call/close path
-- Lua load/exec/call path
+- Lua load/exec/call path (subset + Lua 5.4 native bridge PoC)
+- Loopback network benchmark path with p50/p95/p99 metrics
+- Protobuf wire encode/decode FFI path for integration validation
 - Structured error code + message diagnostics for local integration loops
