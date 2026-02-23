@@ -9,6 +9,7 @@ Deliver a practical runtime networking baseline for compiler/runtime validation 
 - TCP/UDP APIs: complete
 - HTTP baseline over TCP (`http://`): complete (`GET`/`POST`, status/body, chunked decode)
 - WebSocket baseline (`ws://`, text frame path): complete (handshake checks, ping/pong, close path)
+- HTTP server runtime baseline: complete (HTTP/1.1 parsing, route dispatch, middleware guard, WS upgrade echo path)
 - Protocol-level network error mapping: complete (`sengoo_net_last_error` + error-name copy API)
 - Cross-platform smoke coverage (HTTP + WS echo): complete
 
@@ -20,12 +21,10 @@ Deliver a practical runtime networking baseline for compiler/runtime validation 
 
 ## Planned Critical Gap: HTTP Server Runtime
 
-- [ ] HTTP/1.1 server protocol parsing
-- [ ] Route system (method + path dispatch)
-- [ ] Middleware support (ordered pipeline + short-circuit)
-- [ ] WebSocket upgrade from HTTP request path
-
-Planned OpenSpec change: `openspec/sengoo-core-dev/changes/add-http-server-runtime/`
+- [x] HTTP/1.1 server protocol parsing
+- [x] Route system (method + path dispatch)
+- [x] Middleware support (ordered pipeline + short-circuit)
+- [x] WebSocket upgrade from HTTP request path
 
 ## Exit Criteria
 

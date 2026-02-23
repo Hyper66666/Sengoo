@@ -8,6 +8,7 @@ This document defines the current runtime network baseline APIs.
 - UDP bind/connect/send/recv/close
 - HTTP over TCP (HTTP/1.1, `http://` only)
 - WebSocket over TCP (`ws://` only)
+- HTTP server runtime (HTTP/1.1 parse + routing + middleware + WS upgrade)
 - Protocol-level error code mapping for network FFI calls
 
 ## C ABI API Surface
@@ -42,6 +43,17 @@ This document defines the current runtime network baseline APIs.
 - `i64 sengoo_ws_send_text(u64 handle, const u8* data, usize len)`
 - `i64 sengoo_ws_recv_text(u64 handle, u8* buffer, usize capacity, u32 timeout_ms)`
 - `i64 sengoo_ws_close(u64 handle)`
+
+### HTTP Server
+
+- `u64 sengoo_http_server_bind(const u8* host, u16 port)`
+- `i64 sengoo_http_server_local_port(u64 server_handle)`
+- `i64 sengoo_http_server_set_limits(u64 server_handle, u32 max_header_bytes, u32 max_body_bytes)`
+- `i64 sengoo_http_server_add_route(u64 server_handle, const u8* method, const u8* path_pattern, i32 status, const u8* body, usize body_len)`
+- `i64 sengoo_http_server_add_middleware_require_header(u64 server_handle, const u8* name, const u8* expected_value, i32 reject_status, const u8* reject_body, usize reject_body_len)`
+- `i64 sengoo_http_server_add_ws_echo_route(u64 server_handle, const u8* path_pattern)`
+- `i64 sengoo_http_server_serve_once(u64 server_handle, u32 timeout_ms)`
+- `i64 sengoo_http_server_close(u64 server_handle)`
 
 ### Error Mapping
 
@@ -93,11 +105,29 @@ Selected error codes:
 - `ping` frames are auto-answered with `pong`.
 - `close` frame path is supported in both recv and explicit close API.
 
+## HTTP Server Behavior Notes
+
+- Protocol parsing:
+  - parses HTTP/1.1 request line, headers, and body framing (`Content-Length` and chunked requests)
+  - malformed requests return `400 Bad Request`
+- Routing:
+  - method + path pattern dispatch
+  - supports parameter segments like `/hello/:name`
+  - unmatched route returns `404 Not Found`
+- Middleware:
+  - deterministic registration order
+  - current built-in middleware: required header guard (can short-circuit with custom status/body)
+- WebSocket upgrade:
+  - route-level upgrade endpoint via `sengoo_http_server_add_ws_echo_route`
+  - validates upgrade headers and returns `426 Upgrade Required` on invalid upgrade request
+  - WS session supports text echo + ping/pong + close
+
 ## Current Constraints
 
 - HTTPS (`https://`) and secure WebSocket (`wss://`) are not part of this baseline.
 - HTTP keeps baseline behavior (status + body retrieval).
 - WebSocket baseline supports text frames for smoke/e2e paths.
+- HTTP server middleware/handler model is MVP-level (no async middleware chain yet).
 
 ## Verification
 
