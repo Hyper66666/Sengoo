@@ -1,6 +1,6 @@
 # Sengoo Runtime FFI + Lua Bridge MVP
 
-This document describes the runtime C FFI bridge and Lua bridge MVP in branch `feat/db-ffi-a`.
+This document describes the runtime C/C++ FFI wrapper and Lua bridge in branch `feat/db-ffi-a`.
 
 ## Scope
 
@@ -8,6 +8,12 @@ This document describes the runtime C FFI bridge and Lua bridge MVP in branch `f
   - open
   - call symbol (`i64` return, arity 0..=4)
   - close
+- C++ reuse wrapper path (via C shim):
+  - object create
+  - object method call
+  - object destroy
+  - callback bind/dispatch/unbind
+  - byte buffer handle for payload/string/protobuf bridge
 - Lua bridge path (lightweight subset):
   - state open/close
   - load chunk
@@ -33,6 +39,25 @@ This document describes the runtime C FFI bridge and Lua bridge MVP in branch `f
 - `u64 sengoo_ffi_c_open(const u8* path)`
 - `i32 sengoo_ffi_c_close(u64 handle)`
 - `i32 sengoo_ffi_c_call_i64(u64 handle, const u8* symbol, usize argc, const i64* argv, i64* out_value)`
+
+### C++ wrapper primitives (C shim friendly)
+
+- `u64 sengoo_ffi_object_create(u64 lib_handle, const u8* constructor_symbol, usize argc, const i64* argv, const u8* destructor_symbol)`
+- `i64 sengoo_ffi_object_raw_ptr(u64 object_handle)`
+- `i32 sengoo_ffi_object_call_i64(u64 object_handle, const u8* method_symbol, usize argc, const i64* argv, i64* out_value)`
+- `i32 sengoo_ffi_object_destroy(u64 object_handle)`
+
+- `u64 sengoo_ffi_callback_bind_i64(u64 lib_handle, const u8* symbol, usize arity)`
+- `i64 sengoo_ffi_callback_dispatch_i64(u64 callback_id, i64 a0, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5)`
+- `i32 sengoo_ffi_callback_unbind(u64 callback_id)`
+
+- `u64 sengoo_ffi_buffer_new(usize capacity)`
+- `u64 sengoo_ffi_buffer_from_bytes(const u8* data, usize len)`
+- `i64 sengoo_ffi_buffer_len(u64 buffer_handle)`
+- `i64 sengoo_ffi_buffer_ptr(u64 buffer_handle)`
+- `i64 sengoo_ffi_buffer_copy_out(u64 buffer_handle, u8* out_buffer, usize out_capacity)`
+- `i32 sengoo_ffi_buffer_copy_in(u64 buffer_handle, const u8* src_ptr, usize src_len)`
+- `i32 sengoo_ffi_buffer_free(u64 buffer_handle)`
 
 Special test/baseline path:
 
@@ -85,6 +110,7 @@ Key codes:
 - `-2003`: symbol not found
 - `-2004`: call failure
 - `-2005`: parse failure
+- `-2006`: buffer failure
 - `-2099`: internal error
 
 ## Unsafe boundary notes
@@ -94,3 +120,13 @@ Key codes:
 - Caller must ensure symbol signature matches the requested call shape.
 - `sengoo_lua54_*` uses runtime-loaded Lua 5.4 symbols (`luaL_loadstring`, `lua_pcallk/lua_pcall`, etc.).
 - If Lua 5.4 dynamic library is unavailable, `sengoo_lua54_open` reports load diagnostics through the dedicated Lua54 error channel.
+
+## Practical C++ reuse pattern
+
+1. Provide a C shim over C++ classes:
+   - `Counter* counter_new(int64_t init)`
+   - `int64_t counter_add(Counter* ptr, int64_t delta)`
+   - `void counter_drop(Counter* ptr)`
+2. Use `sengoo_ffi_object_create` with constructor and destructor symbols.
+3. Use `sengoo_ffi_object_call_i64` for methods.
+4. Use `sengoo_ffi_buffer_*` for byte payload handoff (protobuf/string/blob).

@@ -82,4 +82,5 @@ These runtime APIs provide:
 - Lua load/exec/call path (subset + Lua 5.4 native bridge PoC)
 - Loopback network benchmark path with p50/p95/p99 metrics
 - Protobuf wire encode/decode FFI path for integration validation
+- C++ reuse wrapper primitives (object lifecycle + callback relay + payload buffer handles)
 - Structured error code + message diagnostics for local integration loops
