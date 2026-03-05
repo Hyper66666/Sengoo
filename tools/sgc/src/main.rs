@@ -1,4 +1,4 @@
-//! Sengoo CLI compiler (`sgc`).
+﻿//! Sengoo CLI compiler (`sgc`).
 
 use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
@@ -7,14 +7,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicI8, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
+use sengoo_compiler::error::{ParseError, TypeError};
+use sengoo_compiler::{compile_to_ir, CompileError};
 
 mod bench;
 mod cache;
 mod cli;
+mod cranelift_fast_jit;
 mod commands;
 mod daemon;
 mod fingerprint;
@@ -50,6 +54,7 @@ pub(crate) use cache::{
     frontend_session_store_path, load_build_cache, load_frontend_session_store, load_run_cache,
     save_build_cache, save_frontend_session_store, save_run_cache,
 };
+pub(crate) use cranelift_fast_jit::run_with_cranelift_fast_jit;
 pub(crate) use daemon::{
     cmd_daemon, dispatch_build_via_daemon, dispatch_run_via_daemon, resolve_daemon_addr,
     DaemonDispatchOutcome,
@@ -95,9 +100,9 @@ pub(crate) use native_toolchain::{
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
 #[cfg(test)]
-pub(crate) use pipeline::compile_source_with_phase_timings;
+pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
-    compile_source, compile_source_to_llvm_file_with_phase_timings,
+    compile_source_to_llvm_file_with_phase_timings,
     compile_source_to_llvm_file_with_phase_timings_with_mode, set_contract_runtime_checks_override,
     set_large_project_mode_override,
 };
@@ -162,6 +167,22 @@ pub(crate) fn current_error_format() -> ErrorFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompilerErrorSpanJson {
+    lo: u32,
+    hi: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CompilerErrorLocationJson {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    column: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    span: Option<CompilerErrorSpanJson>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompilerErrorJson {
     ok: bool,
     kind: &'static str,
@@ -172,6 +193,8 @@ struct CompilerErrorJson {
     hint: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     details: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    location: Option<CompilerErrorLocationJson>,
 }
 
 fn compile_error_details(raw: &str) -> Vec<String> {
@@ -183,7 +206,11 @@ fn compile_error_details(raw: &str) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-fn compile_error_payload(input: Option<&str>, raw: &str) -> CompilerErrorJson {
+fn compile_error_payload(
+    input: Option<&str>,
+    raw: &str,
+    location: Option<CompilerErrorLocationJson>,
+) -> CompilerErrorJson {
     let (stage, message) = split_compiler_error_stage(raw);
     CompilerErrorJson {
         ok: false,
@@ -193,11 +220,16 @@ fn compile_error_payload(input: Option<&str>, raw: &str) -> CompilerErrorJson {
         input: input.map(str::to_owned),
         hint: Some("use --error-format text for human-friendly diagnostics".to_string()),
         details: compile_error_details(raw),
+        location,
     }
 }
 
-pub(crate) fn render_compile_error_json(input: Option<&str>, raw: &str) -> String {
-    let payload = compile_error_payload(input, raw);
+pub(crate) fn render_compile_error_json_with_location(
+    input: Option<&str>,
+    raw: &str,
+    location: Option<CompilerErrorLocationJson>,
+) -> String {
+    let payload = compile_error_payload(input, raw, location);
     if let Ok(encoded) = serde_json::to_string_pretty(&payload) {
         return encoded;
     }
@@ -209,9 +241,13 @@ pub(crate) fn render_compile_error_json(input: Option<&str>, raw: &str) -> Strin
     )
 }
 
+#[cfg(test)]
+pub(crate) fn render_compile_error_json(input: Option<&str>, raw: &str) -> String {
+    render_compile_error_json_with_location(input, raw, None)
+}
 fn split_compiler_error_stage(raw: &str) -> (&'static str, String) {
     let text = raw.trim();
-    let mapping: [(&str, &str); 8] = [
+    let mapping: [(&str, &str); 12] = [
         ("parse failed:", "parse"),
         ("typecheck failed:", "typecheck"),
         ("codegen failed:", "codegen"),
@@ -220,6 +256,10 @@ fn split_compiler_error_stage(raw: &str) -> (&'static str, String) {
         ("failed to write LLVM IR", "io"),
         ("MIR lowering failed:", "mir_lower"),
         ("compile failed", "compile"),
+        ("parse error:", "parse"),
+        ("type check error:", "typecheck"),
+        ("type error:", "typecheck"),
+        ("io error:", "io"),
     ];
     for (prefix, stage) in mapping {
         if let Some(rest) = text.strip_prefix(prefix) {
@@ -231,18 +271,103 @@ fn split_compiler_error_stage(raw: &str) -> (&'static str, String) {
     ("compile", summary)
 }
 
-pub(crate) fn emit_compile_error(input: Option<&str>, raw: &str) {
+fn source_span_from_parse_error(error: &ParseError) -> Option<&miette::SourceSpan> {
+    match error {
+        ParseError::UnexpectedToken { span, .. }
+        | ParseError::UnclosedBlock(span)
+        | ParseError::UnclosedParen(span)
+        | ParseError::InvalidStructField { span, .. }
+        | ParseError::InvalidStructFieldShorthand { span }
+        | ParseError::InvalidPatternAt { span, .. } => Some(span),
+        ParseError::InvalidPattern(_) | ParseError::DuplicateParam(_) | ParseError::UnexpectedEof => {
+            None
+        }
+    }
+}
+
+fn source_span_from_type_error(error: &TypeError) -> Option<&miette::SourceSpan> {
+    match error {
+        TypeError::Mismatch { span, .. } => Some(span),
+        TypeError::UndefinedVar { _span, .. } => Some(_span),
+        TypeError::UndefinedType(_)
+        | TypeError::UndefinedMethod(_)
+        | TypeError::ArgCountMismatch { .. }
+        | TypeError::TraitNotImplemented { .. } => None,
+    }
+}
+
+fn source_span_from_compile_error(error: &CompileError) -> Option<&miette::SourceSpan> {
+    match error {
+        CompileError::ParseError(error) => source_span_from_parse_error(error),
+        CompileError::TypeError(error) => source_span_from_type_error(error),
+        _ => None,
+    }
+}
+
+fn line_column_for_offset(source: &str, offset: usize) -> (u32, u32) {
+    let clamped = offset.min(source.len());
+    let mut line = 1u32;
+    let mut line_start = 0usize;
+
+    for (idx, ch) in source.char_indices() {
+        if idx >= clamped {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+
+    let column = source[line_start..clamped].encode_utf16().count() as u32 + 1;
+    (line, column)
+}
+
+fn location_from_source_span(source: &str, span: &miette::SourceSpan) -> CompilerErrorLocationJson {
+    let lo_usize: usize = span.offset().into();
+    let lo_clamped = lo_usize.min(source.len());
+    let mut hi_clamped = lo_clamped.saturating_add(span.len()).min(source.len());
+    if hi_clamped == lo_clamped && lo_clamped < source.len() {
+        hi_clamped = lo_clamped + 1;
+    }
+
+    let (line, column) = line_column_for_offset(source, lo_clamped);
+    let lo = u32::try_from(lo_clamped).unwrap_or(u32::MAX);
+    let hi = u32::try_from(hi_clamped).unwrap_or(u32::MAX);
+
+    CompilerErrorLocationJson {
+        line: Some(line),
+        column: Some(column),
+        span: Some(CompilerErrorSpanJson { lo, hi }),
+    }
+}
+
+fn location_from_compile_error(source: &str, error: &CompileError) -> Option<CompilerErrorLocationJson> {
+    source_span_from_compile_error(error).map(|span| location_from_source_span(source, span))
+}
+
+pub(crate) fn emit_compile_error_with_location(
+    input: Option<&str>,
+    raw: &str,
+    location: Option<CompilerErrorLocationJson>,
+) {
     match current_error_format() {
         ErrorFormat::Text => {
             eprintln!("Compilation error:");
             eprintln!("{}", raw);
         }
         ErrorFormat::Json => {
-            eprintln!("{}", render_compile_error_json(input, raw));
+            eprintln!(
+                "{}",
+                render_compile_error_json_with_location(input, raw, location)
+            );
         }
     }
 }
 
+pub(crate) fn emit_compile_error(input: Option<&str>, raw: &str) {
+    emit_compile_error_with_location(input, raw, None)
+}
 #[tokio::main]
 async fn main() -> Result<()> {
     let filter = EnvFilter::from_default_env().add_directive("sgc=info".parse().unwrap());
@@ -524,6 +649,55 @@ fn canonical_or_lossy(path: &Path) -> String {
         .to_string()
 }
 
+async fn cmd_fmt(
+    input: &str,
+    write: bool,
+    check: bool,
+    config: Option<&str>,
+    max_width: Option<usize>,
+    indent_width: Option<usize>,
+) -> Result<()> {
+    let mut args = vec![input.to_string()];
+
+    if write {
+        args.push("--write".to_string());
+    }
+    if check {
+        args.push("--check".to_string());
+    }
+    if let Some(config) = config {
+        args.push("--config".to_string());
+        args.push(config.to_string());
+    }
+    if let Some(max_width) = max_width {
+        args.push("--max-width".to_string());
+        args.push(max_width.to_string());
+    }
+    if let Some(indent_width) = indent_width {
+        args.push("--indent-width".to_string());
+        args.push(indent_width.to_string());
+    }
+
+    let status = match Command::new("sgfmt").args(&args).status() {
+        Ok(status) => status,
+        Err(_) => Command::new("cargo")
+            .arg("run")
+            .arg("-q")
+            .arg("-p")
+            .arg("sgfmt")
+            .arg("--")
+            .args(&args)
+            .status()
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("failed to run sgfmt (binary and cargo fallback): {}", e))?,
+    };
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(miette::miette!("sgfmt exited with status {}", status))
+}
+
 async fn cmd_check(input: &str) -> Result<()> {
     println!("Checking: {}", input);
 
@@ -531,13 +705,15 @@ async fn cmd_check(input: &str) -> Result<()> {
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
 
-    match compile_source(&source, 0) {
+    match compile_to_ir(&source) {
         Ok(_) => {
             println!("Type check passed");
             Ok(())
         }
-        Err(e) => {
-            emit_compile_error(Some(input), &e);
+        Err(error) => {
+            let raw = error.to_string();
+            let location = location_from_compile_error(&source, &error);
+            emit_compile_error_with_location(Some(input), &raw, location);
             Err(miette::miette!("compile failed"))
         }
     }
@@ -555,5 +731,193 @@ async fn cmd_dump_ast(input: &str) -> Result<()> {
     Ok(())
 }
 
+fn escape_html(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| match ch {
+            '&' => "&amp;".to_string(),
+            '<' => "&lt;".to_string(),
+            '>' => "&gt;".to_string(),
+            '"' => "&quot;".to_string(),
+            '\'' => "&#39;".to_string(),
+            _ => ch.to_string(),
+        })
+        .collect::<String>()
+}
+
+fn sanitize_doc_name(raw: &str) -> String {
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        out.push_str("module");
+    }
+    out
+}
+
+fn render_doc_index(module_id: &str, module_page_name: &str, fn_count: usize) -> String {
+    let module_id = escape_html(module_id);
+    let module_page_name = escape_html(module_page_name);
+    format!(
+        "<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>Sengoo API Docs</title>
+  <style>
+    body {{ margin: 0; font-family: \"Segoe UI\", sans-serif; background: #f4f7fb; color: #162335; }}
+    main {{ max-width: 980px; margin: 0 auto; padding: 24px; }}
+    h1 {{ margin: 0 0 12px; font-size: 28px; }}
+    p {{ line-height: 1.6; color: #354960; }}
+    .panel {{ background: #fff; border: 1px solid #d9e1ec; border-radius: 12px; padding: 16px; }}
+    a {{ color: #0f4c81; text-decoration: none; font-weight: 600; }}
+    a:hover {{ text-decoration: underline; }}
+    code {{ background: #edf3fb; padding: 2px 6px; border-radius: 6px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sengoo API Docs</h1>
+    <p>Generated by <code>sgc doc</code>. Layout is rustdoc-like: index page + module page.</p>
+    <div class=\"panel\">
+      <p><strong>Module:</strong> <code>{}</code></p>
+      <p><strong>Functions indexed:</strong> {}</p>
+      <p><a href=\"{}\">Open module page</a></p>
+      <p><a href=\"search-index.json\">Open search-index.json</a></p>
+    </div>
+  </main>
+</body>
+</html>
+",
+        module_id, fn_count, module_page_name
+    )
+}
+
+fn render_doc_module(module_id: &str, signatures: &[FunctionSignatureInfo]) -> String {
+    let mut items = String::new();
+    if signatures.is_empty() {
+        items.push_str(
+            "<p>No function signatures discovered. Check source syntax or include function declarations.</p>",
+        );
+    } else {
+        for sig in signatures {
+            items.push_str("<article class=\"item\">");
+            items.push_str(&format!(
+                "<h3>{}</h3><pre>{}</pre>",
+                escape_html(&sig.symbol),
+                escape_html(&sig.signature)
+            ));
+            items.push_str("</article>");
+        }
+    }
+    format!(
+        "<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>Module API - {}</title>
+  <style>
+    body {{ margin: 0; font-family: \"Segoe UI\", sans-serif; background: #f4f7fb; color: #162335; }}
+    main {{ max-width: 980px; margin: 0 auto; padding: 24px; }}
+    h1 {{ margin: 0 0 10px; font-size: 28px; }}
+    p {{ line-height: 1.6; color: #354960; }}
+    .item {{ background: #fff; border: 1px solid #d9e1ec; border-radius: 12px; padding: 14px; margin-bottom: 12px; }}
+    .item h3 {{ margin: 0 0 8px; font-size: 18px; color: #113e68; }}
+    pre {{ margin: 0; background: #edf3fb; border-radius: 8px; padding: 10px; overflow-x: auto; }}
+    a {{ color: #0f4c81; text-decoration: none; font-weight: 600; }}
+    a:hover {{ text-decoration: underline; }}
+    code {{ background: #edf3fb; padding: 2px 6px; border-radius: 6px; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Module API</h1>
+    <p><strong>Module:</strong> <code>{}</code></p>
+    <p><a href=\"index.html\">Back to index</a></p>
+    {}
+  </main>
+</body>
+</html>
+",
+        escape_html(module_id),
+        escape_html(module_id),
+        items
+    )
+}
+
+async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
+    let input_path = Path::new(input);
+    let module_id = canonical_or_lossy(input_path);
+    let source = fs::read_to_string(input)
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
+    let signatures = function_signatures_for_module(&module_id, &source);
+
+    let out_dir = Path::new(out_dir);
+    fs::create_dir_all(out_dir)
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to create doc output directory {}: {}", out_dir.display(), e))?;
+
+    let module_stem = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(sanitize_doc_name)
+        .unwrap_or_else(|| "module".to_string());
+    let module_page_name = format!("{}.html", module_stem);
+    let module_page_path = out_dir.join(&module_page_name);
+    let index_path = out_dir.join("index.html");
+    let search_index_path = out_dir.join("search-index.json");
+
+    let module_html = render_doc_module(&module_id, &signatures);
+    fs::write(&module_page_path, module_html)
+        .into_diagnostic()
+        .map_err(|e| {
+            miette::miette!(
+                "failed to write module doc page {}: {}",
+                module_page_path.display(),
+                e
+            )
+        })?;
+
+    let index_html = render_doc_index(&module_id, &module_page_name, signatures.len());
+    fs::write(&index_path, index_html)
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to write doc index {}: {}", index_path.display(), e))?;
+
+    let search_payload = serde_json::json!({
+        "schema_version": 1,
+        "module": module_id,
+        "items": signatures
+            .iter()
+            .map(|sig| serde_json::json!({
+                "symbol": sig.symbol,
+                "signature": sig.signature
+            }))
+            .collect::<Vec<_>>()
+    });
+    let search_payload_bytes = serde_json::to_vec_pretty(&search_payload)
+        .map_err(|e| miette::miette!("failed to encode search index json: {}", e))?;
+    fs::write(&search_index_path, search_payload_bytes)
+        .into_diagnostic()
+        .map_err(|e| {
+            miette::miette!(
+                "failed to write search index {}: {}",
+                search_index_path.display(),
+                e
+            )
+        })?;
+
+    println!("API docs index: {}", index_path.to_string_lossy());
+    println!("API docs module page: {}", module_page_path.to_string_lossy());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
+

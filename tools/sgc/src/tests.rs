@@ -1,4 +1,4 @@
-use super::{
+﻿use super::{
     bench_root_dir, build_cache_key, build_graph_v2_for_source, build_metadata_matches,
     build_reflection_metadata, cache_key, cache_mismatch_reasons,
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
@@ -201,6 +201,7 @@ fn auto_falls_back_to_lli_when_native_unavailable() {
 fn explicit_engine_is_validated() {
     assert!(resolve_engine(RunEngine::Native, false, true).is_err());
     assert!(resolve_engine(RunEngine::Lli, true, false).is_err());
+    assert!(resolve_engine(RunEngine::Cranelift, false, false).is_ok());
 }
 
 #[test]
@@ -310,6 +311,143 @@ fn benchmark_scaffold_exists() {
 }
 
 #[test]
+fn example_validation_scripts_cover_core_cases() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let sh = fs::read_to_string(workspace_root.join("scripts/validate_examples.sh")).unwrap();
+    let ps = fs::read_to_string(workspace_root.join("scripts/validate_examples.ps1")).unwrap();
+    for case_name in [
+        "examples/01_hello.sg",
+        "examples/05_loop.sg",
+        "examples/08_struct.sg",
+        "examples/09_method_call.sg",
+    ] {
+        assert!(sh.contains(case_name), "missing {case_name} in validate_examples.sh");
+        assert!(ps.contains(case_name), "missing {case_name} in validate_examples.ps1");
+    }
+}
+
+#[test]
+fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+
+    for symbol in [
+        "sengoo_vec_new_i64",
+        "sengoo_vec_free_i64",
+        "sengoo_vec_len_i64",
+        "sengoo_vec_push_i64",
+        "sengoo_vec_get_i64",
+        "sengoo_vec_set_i64",
+        "sengoo_vec_pop_i64",
+        "sengoo_hashmap_new_i64",
+        "sengoo_hashmap_free_i64",
+        "sengoo_hashmap_len_i64",
+        "sengoo_hashmap_insert_i64",
+        "sengoo_hashmap_get_i64",
+        "sengoo_hashmap_contains_i64",
+        "sengoo_hashmap_remove_i64",
+    ] {
+        assert!(runtime_c.contains(symbol), "runtime stdlib missing symbol: {symbol}");
+    }
+}
+
+#[test]
+fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+
+    for symbol in [
+        "sengoo_vec_iter_new_i64",
+        "sengoo_vec_iter_next_i64",
+        "sengoo_vec_iter_map_add_i64",
+        "sengoo_vec_iter_filter_even_i64",
+        "sengoo_option_some_i64",
+        "sengoo_option_none_i64",
+        "sengoo_option_map_add_i64",
+        "sengoo_option_and_then_mul_i64",
+        "sengoo_result_ok_i64",
+        "sengoo_result_err_i64",
+        "sengoo_result_map_add_i64",
+        "sengoo_result_and_then_mul_i64",
+        "sengoo_result_map_err_add_i64",
+    ] {
+        assert!(runtime_c.contains(symbol), "runtime stdlib missing symbol: {symbol}");
+    }
+}
+#[test]
+fn openspec_acceptance_matrix_covers_all_capabilities() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+
+    let matrix = fs::read_to_string(workspace_root.join("docs/openspec-acceptance-matrix.md"))
+        .expect("acceptance matrix should exist");
+
+    for capability in [
+        "lsp-tooling-sglsp",
+        "formatter-tooling-sgfmt",
+        "package-management-sgpm",
+        "generics-core",
+        "async-concurrency-model",
+        "macro-system",
+        "incremental-compilation-accuracy",
+        "jit-aot-execution-modes",
+        "python-interop-embedding",
+        "docs-and-api-reference",
+        "stdlib-core-collections",
+    ] {
+        assert!(
+            matrix.contains(capability),
+            "acceptance matrix missing capability: {capability}"
+        );
+    }
+}
+
+#[test]
+fn openspec_acceptance_scripts_cover_all_capabilities() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+
+    let ps = fs::read_to_string(workspace_root.join("scripts/openspec-acceptance.ps1"))
+        .expect("powershell acceptance script should exist");
+    let sh = fs::read_to_string(workspace_root.join("scripts/openspec-acceptance.sh"))
+        .expect("shell acceptance script should exist");
+
+    for capability in [
+        "lsp-tooling-sglsp",
+        "formatter-tooling-sgfmt",
+        "package-management-sgpm",
+        "generics-core",
+        "async-concurrency-model",
+        "macro-system",
+        "incremental-compilation-accuracy",
+        "jit-aot-execution-modes",
+        "python-interop-embedding",
+        "docs-and-api-reference",
+        "stdlib-core-collections",
+    ] {
+        assert!(ps.contains(capability), "ps1 missing capability: {capability}");
+        assert!(sh.contains(capability), "sh missing capability: {capability}");
+    }
+}
+#[test]
 fn advanced_pipeline_memory_buckets_cover_100k_and_1000k() {
     let root = bench_root_dir();
     let script = fs::read_to_string(root.join("advanced_pipeline_bench.py")).unwrap();
@@ -354,6 +492,91 @@ fn bench_subcommands_parse() {
 #[test]
 fn build_force_rebuild_flag_parses() {
     assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--force-rebuild"]).is_ok());
+}
+
+#[test]
+fn build_aot_package_flag_parses() {
+    assert!(
+        Cli::try_parse_from([
+            "sgc",
+            "build",
+            "tests/demo.sg",
+            "--aot-package",
+            "dist/aot",
+        ])
+        .is_ok()
+    );
+}
+
+#[test]
+fn build_python_extension_flag_parses() {
+    assert!(
+        Cli::try_parse_from([
+            "sgc",
+            "build",
+            "tests/demo.sg",
+            "--python-extension",
+            "dist/pyext",
+        ])
+        .is_ok()
+    );
+}
+
+#[test]
+fn doc_command_parses_with_out_dir() {
+    assert!(
+        Cli::try_parse_from([
+            "sgc",
+            "doc",
+            "tests/demo.sg",
+            "--out-dir",
+            "dist/docs",
+        ])
+        .is_ok()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn doc_command_generates_rustdoc_like_layout() {
+    let root =
+        std::env::temp_dir().join(format!("sengoo-sgc-doc-gen-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let input = root.join("api_demo.sg");
+    fs::write(
+        &input,
+        "def main() -> i64 {\n    0\n}\n\ndef helper(x: i64) -> i64 {\n    x\n}\n",
+    )
+    .unwrap();
+    let out_dir = root.join("docs-out");
+
+    super::cmd_doc(
+        input.to_string_lossy().as_ref(),
+        out_dir.to_string_lossy().as_ref(),
+    )
+    .await
+    .unwrap();
+
+    let index_path = out_dir.join("index.html");
+    let module_path = out_dir.join("api_demo.html");
+    let search_index = out_dir.join("search-index.json");
+    assert!(index_path.exists(), "index page should be generated");
+    assert!(module_path.exists(), "module page should be generated");
+    assert!(search_index.exists(), "search index should be generated");
+
+    let index_html = fs::read_to_string(&index_path).unwrap();
+    let module_html = fs::read_to_string(&module_path).unwrap();
+    assert!(index_html.contains("Sengoo API Docs"));
+    assert!(module_html.contains("main"));
+    assert!(module_html.contains("helper"));
+}
+
+#[test]
+fn run_cranelift_engine_flag_parses() {
+    assert!(
+        Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--engine", "cranelift",]).is_ok()
+    );
 }
 
 #[test]
@@ -429,6 +652,52 @@ fn render_compile_error_json_keeps_multiline_details() {
     assert_eq!(details.len(), 2);
     assert_eq!(details[0], "line 1, col 8");
     assert_eq!(details[1], "note: expected `}`");
+}
+#[test]
+fn render_compile_error_json_with_location_serializes_structured_fields() {
+    let raw = "parse error: unexpected token";
+    let location = super::CompilerErrorLocationJson {
+        line: Some(3),
+        column: Some(9),
+        span: Some(super::CompilerErrorSpanJson { lo: 24, hi: 25 }),
+    };
+    let json = super::render_compile_error_json_with_location(
+        Some("tests/broken.sg"),
+        raw,
+        Some(location),
+    );
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["stage"], "parse");
+    assert_eq!(value["location"]["line"], 3);
+    assert_eq!(value["location"]["column"], 9);
+    assert_eq!(value["location"]["span"]["lo"], 24);
+    assert_eq!(value["location"]["span"]["hi"], 25);
+}
+
+#[test]
+fn location_from_compile_error_extracts_invalid_pattern_span() {
+    let src = "def main() -> i64 {\n    let = 1;\n}\n";
+    let error = super::compile_to_ir(src).expect_err("source should fail parsing");
+    let location =
+        super::location_from_compile_error(src, &error).expect("parse errors should include location");
+
+    assert!(location.line.unwrap_or(0) > 0);
+    assert!(location.column.unwrap_or(0) > 0);
+    let span = location.span.expect("location span should exist");
+    assert!(span.hi >= span.lo);
+}
+
+#[test]
+fn split_compiler_error_stage_understands_compile_error_prefixes() {
+    let (stage_parse, msg_parse) = super::split_compiler_error_stage("parse error: bad token");
+    assert_eq!(stage_parse, "parse");
+    assert_eq!(msg_parse, "bad token");
+
+    let (stage_type, msg_type) =
+        super::split_compiler_error_stage("type error: expected i64, found bool");
+    assert_eq!(stage_type, "typecheck");
+    assert_eq!(msg_type, "expected i64, found bool");
 }
 
 #[test]
@@ -953,6 +1222,8 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         FrontendJobs::Auto,
         false,
         super::ReflectionCliOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -3297,3 +3568,6 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
     );
     assert_eq!(plan, BuildWorksetPlan::FullRebuild);
 }
+
+
+

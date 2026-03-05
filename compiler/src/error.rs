@@ -1,4 +1,4 @@
-//! Compiler error types.
+﻿//! Compiler error types.
 #![allow(unused_assignments)]
 
 use miette::{Diagnostic, SourceSpan};
@@ -99,6 +99,14 @@ pub enum ParseError {
     #[diagnostic(code(parser::invalid_pattern))]
     InvalidPattern(String),
 
+    #[error("invalid pattern: {message}")]
+    #[diagnostic(code(parser::invalid_pattern))]
+    InvalidPatternAt {
+        message: String,
+        #[label("here")]
+        span: SourceSpan,
+    },
+
     #[error("invalid struct field: expected identifier or string key, found {found}")]
     #[diagnostic(
         code(parser::invalid_struct_field),
@@ -132,6 +140,13 @@ pub enum ParseError {
 impl ParseError {
     fn invalid_pattern(message: &str) -> Self {
         Self::InvalidPattern(message.to_string())
+    }
+
+    pub fn with_span(self, span: SourceSpan) -> Self {
+        match self {
+            Self::InvalidPattern(message) => Self::InvalidPatternAt { message, span },
+            other => other,
+        }
     }
 
     pub fn expected_declaration() -> Self {
@@ -240,3 +255,4 @@ impl CompileError {
         CompileError::TypeError(err)
     }
 }
+
