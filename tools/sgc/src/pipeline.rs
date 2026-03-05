@@ -252,12 +252,14 @@ fn prune_ast_functions_by_name_set(
     removed
 }
 
+#[cfg(test)]
 pub(crate) fn compile_source(source: &str, opt_level: u8) -> std::result::Result<String, String> {
     compile_source_with_phase_timings(source, opt_level)
         .map(|(llvm_ir, _)| llvm_ir)
         .map_err(|e| e.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn compile_source_with_phase_timings(
     source: &str,
     opt_level: u8,

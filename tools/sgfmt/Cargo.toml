@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "sgfmt"
 version = "0.1.0"
 edition = "2021"
@@ -8,15 +8,10 @@ name = "sgfmt"
 path = "src/main.rs"
 
 [dependencies]
-# 编译器核心
 sengoo-compiler = { path = "../../compiler" }
-
-# CLI
 clap = { version = "4.5", features = ["derive"] }
-
-# 错误处理
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
 thiserror = { workspace = true }
 miette = { workspace = true }
-
-# 代码格式化
 similar = "2.6"
