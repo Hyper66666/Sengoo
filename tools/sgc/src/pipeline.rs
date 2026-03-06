@@ -206,6 +206,11 @@ fn reachable_ast_function_names(program: &AstProgram) -> Option<HashSet<String>>
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
+    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+        if let Some(&idx) = index_by_name.get(root_async_helper) {
+            stack.push(idx);
+        }
+    }
     while let Some(idx) = stack.pop() {
         if reachable[idx] {
             continue;
@@ -491,6 +496,11 @@ fn prune_unreachable_ast_functions(program: &mut AstProgram) -> usize {
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
+    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+        if let Some(&idx) = index_by_name.get(root_async_helper) {
+            stack.push(idx);
+        }
+    }
     while let Some(idx) = stack.pop() {
         if reachable[idx] {
             continue;
@@ -793,6 +803,11 @@ fn prune_unreachable_hir_functions(items: &mut Vec<HIRItem>) -> usize {
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
+    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+        if let Some(&idx) = index_by_name.get(root_async_helper) {
+            stack.push(idx);
+        }
+    }
     while let Some(idx) = stack.pop() {
         if reachable[idx] {
             continue;
@@ -882,7 +897,8 @@ fn collect_hir_call_targets_from_expr(
         | HIRExpr::Cast(inner, _)
         | HIRExpr::Ascribe(inner, _)
         | HIRExpr::Ref(_, inner)
-        | HIRExpr::Deref(inner) => {
+        | HIRExpr::Deref(inner)
+        | HIRExpr::Await(inner) => {
             collect_hir_call_targets_from_expr(inner, index_by_name, targets, seen);
         }
         HIRExpr::Binary(_, lhs, rhs)
@@ -1167,6 +1183,11 @@ fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) -> usize {
 
     let mut reachable = vec![false; mir_fns.len()];
     let mut stack = vec![main_index];
+    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+        if let Some(&idx) = index_by_name.get(root_async_helper) {
+            stack.push(idx);
+        }
+    }
     while let Some(idx) = stack.pop() {
         if reachable[idx] {
             continue;

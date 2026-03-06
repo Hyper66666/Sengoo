@@ -1,4 +1,4 @@
-﻿//! Sengoo CLI compiler (`sgc`).
+//! Sengoo CLI compiler (`sgc`).
 
 use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
@@ -92,7 +92,7 @@ pub(crate) use interface::{
 };
 pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use native_toolchain::{
-    artifact_exists, build_artifact_exists, compile_ir_to_object, compile_native_binary,
+    append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object, compile_native_binary,
     default_build_output_path_for_case, ensure_runtime_object, link_native_binary_from_objects,
     linker_mode_from_env, recover_native_output_from_cached_artifacts, run_native_binary,
     run_with_lli,

@@ -1,5 +1,5 @@
 //! 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡も偓閻ｏ繝骞忛弮鈧惄顖炲春閳ь剚銇勯幒鎴濐仼闁?//!
-//! 闂?AST 闂備礁鎼ˇ顐﹀疾濠婂懐鐭欓柡宥庡幑閳ь兛绶氶獮瀣晜閻ｅ苯濮搁柣搴＄畭閸庨亶骞婃惔銊ラ敜濠电姴娲﹂悡鏇熺節婵犲倸鏆熼柣蹇涗憾閹泛顫濋悡搴濆枈閻庤娲栧﹢閬嶅焵椤掑﹦绉甸柛瀣笒椤繑銈ｉ崘鈺冨幐闁诲繒鍋犻褔宕濆鈧弻?
+//! �?AST 闂備礁鎼ˇ顐﹀疾濠婂懐鐭欓柡宥庡幑閳ь兛绶氶獮瀣晜閻ｅ苯濮搁柣搴＄畭閸庨亶骞婃惔銊ラ敜濠电姴娲﹂悡鏇熺節婵犲倸鏆熼柣蹇涗憾閹泛顫濋悡搴濆枈閻庤娲栧﹢閬嶅焵椤掑﹦绉甸柛瀣笒椤繑銈ｉ崘鈺冨幐闁诲繒鍋犻褔宕濆鈧�?
 use crate::ast::pattern::Pattern;
 use crate::ast::Visibility;
 use crate::ast::*;
@@ -45,14 +45,16 @@ pub struct TypeChecker {
     env: TypeEnv,
     /// 缂傚倸鍊风欢锟犲磻婢舵劦鏁嬬憸鏃堝箖濡ゅ懏鍊婚柦妯侯槺椤斿﹪姊洪棃娑辩叚闂傚嫬瀚伴幃鐐寸鐎ｎ偆鍘?
     infer: TypeInfer,
-    /// Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
+    /// Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟�?
     trait_registry: TraitRegistry,
-    /// Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
+    /// Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟�?
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     class_decls: HashMap<String, ClassDeclInfo>,
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
     generic_type_metas: HashMap<String, GenericTypeMeta>,
+    async_functions: HashSet<String>,
+    async_context_depth: usize,
 }
 
 impl TypeChecker {
@@ -68,10 +70,12 @@ impl TypeChecker {
             class_decls: HashMap::new(),
             generic_function_metas: HashMap::new(),
             generic_type_metas: HashMap::new(),
+            async_functions: HashSet::new(),
+            async_context_depth: 0,
         }
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿楠炲啴骞庣粵瀣櫖濠殿喗锚閸氬鈻?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿楠炲啴骞庣粵瀣櫖濠殿喗锚閸氬�?
     pub fn env(&self) -> &TypeEnv {
         &self.env
     }
@@ -81,27 +85,27 @@ impl TypeChecker {
         self.env
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿閻涱噣骞掑Δ鈧儫闂佹寧姊婚弲顐﹀礉閻戣姤鈷?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴滃綊鏌涢妷銏℃珖閻忓繒鏁婚幃褰掑炊椤忓嫮姣㈤梺閫炲苯澧伴柛蹇旓耿閻涱噣骞掑Δ鈧儫闂佹寧姊婚弲顐﹀礉閻戣姤�?
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪�?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟�?
     pub fn trait_registry(&self) -> &TraitRegistry {
         &self.trait_registry
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪�?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟�?
     pub fn impl_registry(&self) -> &ImplRegistry {
         &self.impl_registry
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢姹?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪�?Trait 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢�?
     pub fn trait_registry_mut(&mut self) -> &mut TraitRegistry {
         &mut self.trait_registry
     }
 
-    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪娴?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢姹?
+    /// 闂傚倷绀侀崥瀣磿閹惰棄搴婇柤鑹扮堪�?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕戝鈧弻鏇熺箾瑜嶇€氼噣寮抽悩缁樷拺闁告稑锕﹂幊鎰版煕閵婏箑顎滈柕鍥ㄥ姈瀵板嫭绻濇惔鈩冾吙闂備礁鎼ú銊︽叏閻㈢�?
     pub fn impl_registry_mut(&mut self) -> &mut ImplRegistry {
         &mut self.impl_registry
     }
@@ -110,6 +114,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.async_functions.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -130,6 +135,7 @@ impl TypeChecker {
     ) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.async_functions.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -143,11 +149,14 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸楅亶鏌熺€电浠ч柣婵嗙埣閺岋絽螖閳ь剟鎮ф繝鍥风稏闁哄稁鍘介悡銉︾箾閹寸儐鐒藉褎鐩弻娑滎槻闁挎洦浜滈悾宄扳攽鐎ｎ偄浜归梺鍦帛鐢偤宕㈤幒鏃傜＝濞达綀顕栧▓锝囩磼閻樺啿鐏遍柕鍥ㄥ姉閹瑰嫰濡搁敃鈧禒鎺戭渻閵堝骸骞楅悽顖滃仧缁?
+    /// 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸楅亶鏌熺€电浠ч柣婵嗙埣閺岋絽螖閳ь剟鎮ф繝鍥风稏闁哄稁鍘介悡銉︾箾閹寸儐鐒藉褎鐩弻娑滎槻闁挎洦浜滈悾宄扳攽鐎ｎ偄浜归梺鍦帛鐢偤宕㈤幒鏃傜＝濞达綀顕栧▓锝囩磼閻樺啿鐏遍柕鍥ㄥ姉閹瑰嫰濡搁敃鈧禒鎺戭渻閵堝骸骞楅悽顖滃仧�?
     fn declare_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
                 let name = fn_decl.name.name.clone();
+                if fn_decl.is_async {
+                    self.async_functions.insert(name.clone());
+                }
 
                 if fn_decl.abi.is_some() {
                     let mut param_types = Vec::new();
@@ -366,7 +375,7 @@ impl TypeChecker {
         result.unwrap_or_default()
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦瀵х粙鎺楀礉濞嗗浚鍤?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦瀵х粙鎺楀礉濞嗗浚�?
     fn check_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -844,7 +853,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦鎮堕崐婵囩鐠轰警鍤曟い鎰剁畱缁狙囨煕閺嶇數纾块柣顓燁殜濮?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備焦鎮堕崐婵囩鐠轰警鍤曟い鎰剁畱缁狙囨煕閺嶇數纾块柣顓燁殜�?
     fn check_function_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
         let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
@@ -874,9 +883,15 @@ impl TypeChecker {
         );
 
         // Function.body is always present (Block)
-        let body_ty = self.check_block(&fn_decl.body)?;
-
-        // 闂傚倷鑳剁划顖炪€冩径鎰剁稏濠㈣埖鍔栭崑鈺呮煃閸濆嫬鈧摜娆㈤悙鐑樼厱闁哄洢鍔岄獮妤呮煕婵犲嫬浠遍柡灞诲妼閳藉鈻庨幒鎴婵＄偑鍊栧ú锕傚窗濡ゅ啰鐭?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弬鍨倯闁哄拋鍓熼幃姗€鎮欓悽鍨啒濠电偛鐪伴崐婵嬪蓟閿涘嫧鍋撻敐搴′簽闁活厼娴风槐鎺旂磼濡櫣浼岄悗瑙勬礀閻栧ジ骞冨▎鎰闁告劗鍋撻拺澶愭⒒娴ｈ鍋犻柛鏂跨焸椤㈡牠宕卞顫秮楠炴牗鎷呴崨濠勨偓顒勬煟鎼淬垻鈯曢拑杈ㄧ箾閸繂顣崇紒杈ㄥ浮椤㈡洟濡烽鍏碱唲闂備浇顕ч柊锝夊绩鏉堚晝鐭欏鑸靛姇濡﹢鏌涢…鎴濇灍闁伙讣缍佸鐑樻姜閹殿喚鐛㈠銈忕秶婵″洨妲愰悙纰樺亾閿濆骸浜濆ù婧垮€濋弻锟犲磼濞戞﹩鍤嬬紓浣插亾闁?()闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仜閸ㄥ倹銇勯弽顐粶缂佲偓閸屾褰掓晲閸モ晜鎲橀梺?        // 闂備礁鎼ˇ顐﹀疾濠婂牊鍋￠柨鏇炲€归崑?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弮鍌氬付闁活厽顨嗛妵鍕冀閵娧勫櫏缂備降鍔嬮崡鎶藉蓟閿濆鏁傞柛鎰靛幖閸橈繝姊洪崫鍕棡闁告梹鐟ラ锝夋偨缁嬭法鍔﹀銈嗗笒鐎氼剛鎲撮敃鍌氱閺夊牆澧界粙濠氭煟?return 0
+        let body_ty = if fn_decl.is_async {
+            self.async_context_depth += 1;
+            let result = self.check_block(&fn_decl.body);
+            self.async_context_depth = self.async_context_depth.saturating_sub(1);
+            result?
+        } else {
+            self.check_block(&fn_decl.body)?
+        };
+        // 闂傚倷鑳剁划顖炪€冩径鎰剁稏濠㈣埖鍔栭崑鈺呮煃閸濆嫬鈧摜娆㈤悙鐑樼厱闁哄洢鍔岄獮妤呮煕婵犲嫬浠遍柡灞诲妼閳藉鈻庨幒鎴婵＄偑鍊栧ú锕傚窗濡ゅ啰鐭?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弬鍨倯闁哄拋鍓熼幃姗€鎮欓悽鍨啒濠电偛鐪伴崐婵嬪蓟閿涘嫧鍋撻敐搴′簽闁活厼娴风槐鎺旂磼濡櫣浼岄悗瑙勬礀閻栧ジ骞冨▎鎰闁告劗鍋撻拺澶愭⒒娴ｈ鍋犻柛鏂跨焸椤㈡牠宕卞顫秮楠炴牗鎷呴崨濠勨偓顒勬煟鎼淬垻鈯曢拑杈ㄧ箾閸繂顣崇紒杈ㄥ浮椤㈡洟濡烽鍏碱唲闂備浇顕ч柊锝夊绩鏉堚晝鐭欏鑸靛姇濡﹢鏌涢…鎴濇灍闁伙讣缍佸鐑樻姜閹殿喚鐛㈠銈忕秶婵″洨妲愰悙纰樺亾閿濆骸浜濆ù婧垮€濋弻锟犲磼濞戞﹩鍤嬬紓浣插亾�?()闂傚倷鐒︾€笛呯矙閹达附鍤愭い鏍仜閸ㄥ倹銇勯弽顐粶缂佲偓閸屾褰掓晲閸モ晜鎲橀�?        // 闂備礁鎼ˇ顐﹀疾濠婂牊鍋￠柨鏇炲€归崑?main 闂傚倷绀侀幉锟犲垂閸忓吋鍙忛柕鍫濐槸濮规煡鏌ｉ弮鍌氬付闁活厽顨嗛妵鍕冀閵娧勫櫏缂備降鍔嬮崡鎶藉蓟閿濆鏁傞柛鎰靛幖閸橈繝姊洪崫鍕棡闁告梹鐟ラ锝夋偨缁嬭法鍔﹀銈嗗笒鐎氼剛鎲撮敃鍌氱閺夊牆澧界粙濠氭煟?return 0
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
             && matches!(ret_ty.kind, TyKind::Int(_));
@@ -1032,7 +1047,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備浇顕х换鎰洪敂鍓х煓濠㈣埖鍔曠粻姘辨喐濠靛牊顫曢柨婵嗩槹閻?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備浇顕х换鎰洪敂鍓х煓濠㈣埖鍔曠粻姘辨喐濠靛牊顫曢柨婵嗩槹�?
     fn check_enum_decl(&mut self, enum_decl: &Enum) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&enum_decl.type_params)?;
@@ -1119,7 +1134,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶绮悧鏇㈡偉婵傜钃熺€光偓閸愵亞鏉搁梺鐟扮仢鐎氼噣鎯屽Δ鍛拺?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶绮悧鏇㈡偉婵傜钃熺€光偓閸愵亞鏉搁梺鐟扮仢鐎氼噣鎯屽Δ鍛�?
     fn check_const_decl(&mut self, const_decl: &Const) -> Result<()> {
         let ty = self.check_type(&const_decl.ty)?;
         let value_ty = self.check_expr(&const_decl.value)?;
@@ -1129,7 +1144,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶曟繝鐢靛仧椤戞洟宕愬┑瀣祦闁逞屽墮闇夐柨婵嗘祩閻掑墽绱撳鍕獢婵﹥妞介獮鎾诲箳閺冨偆鍞堕梻浣瑰缁嬫帡宕濆▎蹇ｅ殨?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶曟繝鐢靛仧椤戞洟宕愬┑瀣祦闁逞屽墮闇夐柨婵嗘祩閻掑墽绱撳鍕獢婵﹥妞介獮鎾诲箳閺冨偆鍞堕梻浣瑰缁嬫帡宕濆▎蹇ｅ�?
     fn check_static_decl(&mut self, static_decl: &Static) -> Result<()> {
         let ty = self.check_type(&static_decl.ty)?;
         // Static.value is always present
@@ -1140,7 +1155,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Trait 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Trait 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾�?
     fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         use crate::typeck::r#trait::{MethodSig, TraitInfo};
 
@@ -1157,7 +1172,7 @@ impl TypeChecker {
             matches!(trait_decl.vis, Visibility::Public),
         );
 
-        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х缂備胶铏庨崢鍏兼櫠鎼达絽鍨濋柣銏㈩焾缁犳氨鎲告惔銊ョ９?
+        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х缂備胶铏庨崢鍏兼櫠鎼达絽鍨濋柣銏㈩焾缁犳氨鎲告惔銊ョ�?
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
@@ -1209,7 +1224,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Impl 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾閸?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Impl 婵犵數濮伴崹鐟帮耿鏉堛劍娅犳俊銈傚亾�?
     fn check_impl_decl(&mut self, impl_decl: &Impl) -> Result<()> {
         use crate::typeck::r#trait::type_key;
         use crate::typeck::r#trait::{FunctionTy, ImplInfo};
@@ -1228,7 +1243,7 @@ impl TypeChecker {
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name);
 
-        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х缂?
+        // 闂傚倷娴囬妴鈧柛瀣崌閺屾盯顢曢敐鍡欘槰闂佽壈灏欐繛鈧柡宀嬬節瀹曟帒鈹戦幇顓犵Х�?
         for item in &impl_decl.items {
             self.env.push_scope();
             self.bind_type_params_with_meta(&item.type_params)?;
@@ -1257,7 +1272,7 @@ impl TypeChecker {
             self.env.pop_scope();
         }
 
-        // 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩炴繛瀵稿Т椤戝懐绮?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟宕?
+        // 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩炴繛瀵稿Т椤戝懐绮?Impl 濠电姷鏁搁崑娑⑺囬銏犵鐎光偓閸曨偉鍩為梺浼欑到閺堫剟�?
         if let Some(trait_name) = impl_info.trait_name.clone() {
             // For trait impls, also register default methods from the trait
             // definition that are not overridden by the impl.
@@ -1269,7 +1284,7 @@ impl TypeChecker {
                     if !impl_info.has_method(method_name) {
                         if method_sig.has_default {
                             // This method has a default implementation in the trait
-                            // and is not overridden 闂?register it in the impl info
+                            // and is not overridden �?register it in the impl info
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::new(
@@ -1579,6 +1594,22 @@ impl TypeChecker {
             ExprKind::Continue => self.check_continue(),
             ExprKind::Path(path) => self.check_path(path),
             ExprKind::Lambda { params, body } => self.check_lambda(params, body),
+            ExprKind::Await(expr) => {
+                if self.async_context_depth == 0 {
+                    return Err(TypeckError::Other(
+                        "await is only allowed in async contexts".to_string(),
+                    ));
+                }
+                if !self.is_phase1_async_await_operand(expr) {
+                    return Err(TypeckError::Other(
+                        "phase-1 await requires an async call result".to_string(),
+                    ));
+                }
+                self.check_expr(expr)
+            }
+            ExprKind::AsyncBlock(_) => Err(TypeckError::Other(
+                "async blocks are not supported in phase 1".to_string(),
+            )),
             ExprKind::Struct { path, fields, .. } => {
                 let name = path
                     .as_simple()
@@ -1635,10 +1666,10 @@ impl TypeChecker {
         }
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶鍎垫慨宥夊炊椤垶顥堥梻渚€娼х换鍫ュ磹閺囩偐鏋?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛闂備胶鍎垫慨宥夊炊椤垶顥堥梻渚€娼х换鍫ュ磹閺囩偐�?
     fn check_literal(&mut self, lit: &Literal) -> TyResult<Ty> {
         Ok(match lit {
-            Literal::Int(_) => self.env.int_ty(IntKind::I64), // 婵犳鍠楃敮妤冪矙閹烘せ鈧箓宕奸妷顔芥櫍婵犵數濮甸懝楣冨几娓氣偓閹鈽夊▍铏灥閳绘捇宕奸弴鐔封偓鍨箾閹寸偟鎳愭繛鍫熺矋缁绘盯姊婚弶鎴濈ギ闂佸搫鑻惌浣虹不濞戞瑦鍎熼柕鍫濇祩濡?i64
+            Literal::Int(_) => self.env.int_ty(IntKind::I64), // 婵犳鍠楃敮妤冪矙閹烘せ鈧箓宕奸妷顔芥櫍婵犵數濮甸懝楣冨几娓氣偓閹鈽夊▍铏灥閳绘捇宕奸弴鐔封偓鍨箾閹寸偟鎳愭繛鍫熺矋缁绘盯姊婚弶鎴濈ギ闂佸搫鑻惌浣虹不濞戞瑦鍎熼柕鍫濇祩�?i64
             Literal::Float(_) => self.env.float_ty(FloatKind::F64),
             Literal::String(_) => {
                 let str_ty = self.env.str_ty();
@@ -1656,6 +1687,23 @@ impl TypeChecker {
     }
 
     /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備胶绮悧顓犲緤閸ф绠柣妯款嚙楠炪垺绻涢崱妯忣亪宕?
+    fn is_phase1_async_await_operand(&self, expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Call { func, .. } => self.is_phase1_async_callable(func),
+            _ => false,
+        }
+    }
+
+    fn is_phase1_async_callable(&self, expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Ident(name) => self.async_functions.contains(&name.name),
+            ExprKind::Path(path) => path
+                .as_simple()
+                .is_some_and(|ident| self.async_functions.contains(&ident.name)),
+            _ => false,
+        }
+    }
+
     fn check_ident(&mut self, ident: &Ident) -> TyResult<Ty> {
         let symbol = if let Some(symbol) = self.env.lookup(&ident.name) {
             symbol.clone()
@@ -1748,7 +1796,7 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛婵＄偑鍊ч梽鍕偂閳ュ磭鏆﹂柕澶嗘櫅闁卞洭鏌ㄥ┑鍡樺偍闁稿鍋ゅ?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潛婵＄偑鍊ч梽鍕偂閳ュ磭鏆﹂柕澶嗘櫅闁卞洭鏌ㄥ┑鍡樺偍闁稿鍋ゅ�?
     fn check_assign_op(&mut self, _op: &AssignOp, target: &Expr, value: &Expr) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
@@ -2093,7 +2141,7 @@ impl TypeChecker {
         Ok(self.env.tuple_ty(elem_types))
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備礁鎼Λ娑㈠窗閹捐埖顫?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥闂備礁鎼Λ娑㈠窗閹捐埖�?
     fn check_array(&mut self, elems: &[Expr]) -> TyResult<Ty> {
         if elems.is_empty() {
             return Ok(self.env.array_ty(self.infer.fresh_ty_var(), 0));
@@ -2111,18 +2159,18 @@ impl TypeChecker {
     /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?Lambda 闂傚倸鍊搁崐鎼佸磻閸℃稑鍌ㄩ柤娴嬫杹閸嬫捇宕归顐ゅ姺闂佽鍠曢崡铏繆閹间礁惟闁挎洍鍋撴繛鎳峰洦鍊?`|params| body`
     /// Lambda 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗛娴滄繄绮幋锔解拺闁告稑锕ら悘鍗炩攽椤斿搫鈧繂顕ｉ幎鑺ュ亜闁惧繒鎳撻弳妤呮煟閻樺弶绌块悘蹇旂懇閸┾偓妞ゆ帒鍊搁崢鎾煛娴ｅ摜肖濞寸媴绠撻幐濠冨緞鐎ｅ灚顥ら梻鍌欐祰濡椼劑鎮為敂鐣岀彾闁糕剝鐟﹂崑鏍ㄣ亜閹板墎鐣遍柛銊ュ€块幃妤呮晲閸屾稒鐝栫紓浣瑰姈椤ㄥ﹪骞冪捄渚僵闁绘挸绨肩花濂告煟閵忊晛鐏犵紓宥咃工椤曪綁顢楅崟鍨櫍濠电娀娼ч敃锕偹囨导瀛樷拺闁告繂瀚埀顒冾潐缁旂喖宕卞缁樼亖闂佺懓顕慨椋庝焊閻㈠憡鍋ｉ柛銉簻閻ㄦ椽鏌嶈閸撴盯宕楀Ο铏规殾闁挎繂鎷嬪銊╂煃瑜滈崜鐔风暦?
     fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
-        // 婵犵數鍋為崹鍫曞箰妤ｅ啫纾块柕鍫濐槹閸庡﹪鏌嶉埡浣告殶闁崇粯姊归妵鍕疀閹炬剚浠煎┑鈽嗗亝閿曘垽寮婚埄鍐╁閻熸瑥瀚崙锟犳⒑閹肩偛濡肩€规洦鍓熼、姘枎閹炬潙鈧粯淇婇婵嗗惞闁告ɑ鍔欏鍝勑ч崶褍顬堥柣搴㈠嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗙凹缁ㄨ崵绱撳鍕獢婵?
+        // 婵犵數鍋為崹鍫曞箰妤ｅ啫纾块柕鍫濐槹閸庡﹪鏌嶉埡浣告殶闁崇粯姊归妵鍕疀閹炬剚浠煎┑鈽嗗亝閿曘垽寮婚埄鍐╁閻熸瑥瀚崙锟犳⒑閹肩偛濡肩€规洦鍓熼、姘枎閹炬潙鈧粯淇婇婵嗗惞闁告ɑ鍔欏鍝勑ч崶褍顬堥柣搴㈠嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕归崒鐐村€甸柨婵嗙凹缁ㄨ崵绱撳鍕獢�?
         let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
 
-        // 闂傚倷绀侀幉锛勬暜濡ゅ啰鐭欓柟瀵稿Х绾句粙鏌熼幑鎰靛殭婵☆偅锕㈤弻鐔封枔閸喗鐏嶉梺浼欑到瀹曨剟婀侀梺鎸庣箓濡盯鎯屽畝鍕厸濞达綁娼ч埀顒佺箓閻ｅ嘲煤椤忓懎浜滈梺鍛婄☉閿曨亜顬婃搴ｇ＝闁稿本鐟ч崝宥夋煕閵娧勬毈闁诡喚鍋撻妶锝夊礃閵娧呭幀闂備胶顭堥張顒傜矙閹烘垟鏋?
+        // 闂傚倷绀侀幉锛勬暜濡ゅ啰鐭欓柟瀵稿Х绾句粙鏌熼幑鎰靛殭婵☆偅锕㈤弻鐔封枔閸喗鐏嶉梺浼欑到瀹曨剟婀侀梺鎸庣箓濡盯鎯屽畝鍕厸濞达綁娼ч埀顒佺箓閻ｅ嘲煤椤忓懎浜滈梺鍛婄☉閿曨亜顬婃搴ｇ＝闁稿本鐟ч崝宥夋煕閵娧勬毈闁诡喚鍋撻妶锝夊礃閵娧呭幀闂備胶顭堥張顒傜矙閹烘垟�?
         self.env.push_scope();
 
-        // 闂備浇顕х换鎰崲閹邦儵娑樜旈埀顒勵敋閿濆鏁嗛柛鏇ㄥ亝閻庮剟姊虹憴鍕靛晱闁哥姵宀搁獮蹇涘Ω閳哄倸鈧敻鎮峰▎蹇擃伂濠㈣锕㈤弻娑㈠煛娴ｈ鎷遍梺鐟板槻閹冲酣鈥﹂妸鈺佸窛妞ゆ棁濮ら褰掓⒒娴ｈ櫣銆婇柡鍛箞瀹曟澘顓兼径瀣畼?
+        // 闂備浇顕х换鎰崲閹邦儵娑樜旈埀顒勵敋閿濆鏁嗛柛鏇ㄥ亝閻庮剟姊虹憴鍕靛晱闁哥姵宀搁獮蹇涘Ω閳哄倸鈧敻鎮峰▎蹇擃伂濠㈣锕㈤弻娑㈠煛娴ｈ鎷遍梺鐟板槻閹冲酣鈥﹂妸鈺佸窛妞ゆ棁濮ら褰掓⒒娴ｈ櫣銆婇柡鍛箞瀹曟澘顓兼径瀣�?
         for (param, ty) in params.iter().zip(param_tys.iter()) {
             self.env.insert_var(param.name.clone(), ty.clone());
         }
 
-        // 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?body 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟宕?
+        // 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?body 闂傚倷鐒﹂惇褰掑礉瀹€鈧埀顒佸嚬閸犳岸骞冮鈧、鏇㈡晝閳ь剟�?
         let body_ty = self.check_expr(body)?;
 
         // 闂佽瀛╅鏍窗濮樿泛绠犻柟鎹愵嚙閸氳銇勯幘鍗炵仼闁活厽顨婇弻娑氫沪閸撗€濮囧┑鐐茬墣濞夋盯婀侀梺鎸庣箓濡盯鎯屽畝鍕厸濞达綁娼ч埀顒佺箓閻?
@@ -2147,7 +2195,7 @@ impl TypeChecker {
         Ok(result_ty)
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶撴俊鐐€栧ú蹇涘垂閽樺鏆?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺懶撴俊鐐€栧ú蹇涘垂閽樺�?
     fn check_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
         match &stmt.kind {
             StmtKind::Let {
@@ -2159,7 +2207,7 @@ impl TypeChecker {
                     self.infer.fresh_ty_var()
                 };
 
-                // value 闂?Option<Box<Expr>>
+                // value �?Option<Box<Expr>>
                 let value_ty = match value {
                     Some(v) => self.check_expr(v)?,
                     None => self.env.unit_ty(),
@@ -2181,7 +2229,7 @@ impl TypeChecker {
                 Ok(Some(ty))
             }
             StmtKind::Item(item) => {
-                // check_decl 闂備礁鎼ˇ顐﹀疾濠婂牆钃熼柕濞垮剭?Result<()>闂傚倷鐒︾€笛呯矙閹达附鍎楅柛灞惧搸閳ь剚甯″畷婊勬媴閻熺増姣囧┑鐐舵彧缂嶁偓濠殿喓鍊楃划濠囶敋閳ь剟寮婚悢鑲╁祦闁割煈鍠氭导鍫ユ⒑鏉炴壆顦﹂柨鏇畵楠?
+                // check_decl 闂備礁鎼ˇ顐﹀疾濠婂牆钃熼柕濞垮剭?Result<()>闂傚倷鐒︾€笛呯矙閹达附鍎楅柛灞惧搸閳ь剚甯″畷婊勬媴閻熺増姣囧┑鐐舵彧缂嶁偓濠殿喓鍊楃划濠囶敋閳ь剟寮婚悢鑲╁祦闁割煈鍠氭导鍫ユ⒑鏉炴壆顦﹂柨鏇畵�?
                 self.check_decl(item)
                     .map_err(|e| TypeckError::Other(e.to_string()))?;
                 Ok(None)
@@ -2189,7 +2237,7 @@ impl TypeChecker {
         }
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?if 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?if 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌�?
     fn check_if(
         &mut self,
         cond: &Expr,
@@ -2210,7 +2258,7 @@ impl TypeChecker {
         Ok(then_ty)
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?while 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?while 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰�?
     fn check_while(&mut self, cond: &Expr, body: &Block) -> TyResult<Ty> {
         let cond_ty = self.check_expr(cond)?;
         let bool_ty = self.env.bool_ty();
@@ -2220,14 +2268,14 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?for 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?for 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰�?
     fn check_for(&mut self, pattern: &Pattern, iter: &Expr, body: &Block) -> TyResult<Ty> {
         self.check_expr(iter)?;
-        let elem_ty = self.env.int_ty(IntKind::I64); // 婵犵數鍋犻幓顏嗙礊閳ь剚绻涙径瀣鐎?I64 闂傚倷绀侀崥瀣熆濡崵闄勯柡鍐ㄥ€荤粻鏂款熆閼搁潧濮囬柛?I32
+        let elem_ty = self.env.int_ty(IntKind::I64); // 婵犵數鍋犻幓顏嗙礊閳ь剚绻涙径瀣鐎?I64 闂傚倷绀侀崥瀣熆濡崵闄勯柡鍐ㄥ€荤粻鏂款熆閼搁潧濮囬�?I32
 
         self.env.push_scope();
 
-        // 婵?pattern 婵犵數鍋為崹鍫曞箹閳哄懎鍌ㄩ柛濠勫枂娴滅懓銆掑锝呬壕閻庤娲╃紞浣割嚕閸婄噥妲荤紓鍌氱С缁舵艾顫忓ú顏勭闁圭儤姊婚鍥⒑?
+        // �?pattern 婵犵數鍋為崹鍫曞箹閳哄懎鍌ㄩ柛濠勫枂娴滅懓銆掑锝呬壕閻庤娲╃紞浣割嚕閸婄噥妲荤紓鍌氱С缁舵艾顫忓ú顏勭闁圭儤姊婚鍥�?
         let var_name = match &pattern.kind {
             crate::ast::pattern::PatternKind::Ident(name) => name.name.clone(),
             crate::ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
@@ -2241,13 +2289,13 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?loop 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰瀹?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?loop 闂佽娴烽弫濠氬磻婵犲啰顩查柣鎰�?
     fn check_loop(&mut self, body: &Block) -> TyResult<Ty> {
         self.check_block(body)?;
         Ok(self.env.unit_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?match 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?match 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌�?
     fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> TyResult<Ty> {
         self.check_expr(scrutinee)?;
 
@@ -2271,7 +2319,7 @@ impl TypeChecker {
         Ok(result_ty)
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?return 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?return 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌�?
     fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         match value {
             Some(v) => {
@@ -2282,7 +2330,7 @@ impl TypeChecker {
         Ok(self.env.never_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?break 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?break 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌�?
     fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         match value {
             Some(v) => {
@@ -2293,7 +2341,7 @@ impl TypeChecker {
         Ok(self.env.never_ty())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?continue 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌闁?
+    /// 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡?continue 闂備浇宕甸崑鐐电矙韫囨稑绀夐煫鍥ㄧ☉缁犲灚銇勮箛鎾愁伌�?
     fn check_continue(&mut self) -> TyResult<Ty> {
         Ok(self.env.never_ty())
     }
@@ -2304,3 +2352,7 @@ impl Default for TypeChecker {
         Self::new()
     }
 }
+
+
+
+

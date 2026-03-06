@@ -1112,7 +1112,7 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
                 .and_then(|v| lower_expr(v, type_env).ok())
                 .unwrap_or_else(|| HIRExpr::Lit(HIRLiteral::Null))
         }
-        ast::ExprKind::Await(expr) => lower_expr(expr, type_env)?,
+        ast::ExprKind::Await(expr) => HIRExpr::Await(Box::new(lower_expr(expr, type_env)?)),
         ast::ExprKind::AsyncBlock(block) => HIRExpr::Block(Box::new(lower_body(block, type_env))),
         ast::ExprKind::ParallelBlock(block) => {
             HIRExpr::Block(Box::new(lower_body(block, type_env)))

@@ -5,6 +5,9 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[lib]
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 # 错误处理
 thiserror = { workspace = true }
@@ -18,4 +21,5 @@ serde_json = { workspace = true }
 
 [features]
 default = []
+native-bridge = []
 python = ["pyo3"]

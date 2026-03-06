@@ -1,30 +1,24 @@
 //! # Sengoo Runtime
 //!
-//! Sengoo 语言的运行时库。
-//!
-//! ## 模块组织
-//!
-//! - [`value`] - 值表示（待实现）
-//! - [`memory`] - 内存管理（待实现）
-//! - [`python`] - Python 互操作（可选，待实现）
+//! Sengoo runtime crate.
 
+pub mod async_runtime;
 pub mod error;
+#[cfg(not(feature = "native-bridge"))]
 pub mod net;
+#[cfg(not(feature = "native-bridge"))]
 pub mod reflect;
-
-// TODO: 逐步添加模块
-// pub mod value;
-// pub mod memory;
 
 #[cfg(feature = "python")]
 pub mod python;
 
+pub use async_runtime::{CoroutineScheduler, CoroutineTask, SchedulerStats, TaskId, TaskState};
 pub use error::{Result, RuntimeError};
+#[cfg(not(feature = "native-bridge"))]
 pub use reflect::{
     ReflectInvokeError, ReflectValue, ReflectionLoadError, ReflectionMetadata,
     ReflectionModuleMetadata, ReflectionRuntime, ReflectionSymbolMetadata,
     REFLECTION_SCHEMA_VERSION,
 };
 
-/// 运行时版本
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
