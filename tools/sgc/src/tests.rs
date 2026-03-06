@@ -1,14 +1,14 @@
-﻿use super::{
+use super::{
     bench_root_dir, build_cache_key, build_graph_v2_for_source, build_metadata_matches,
     build_reflection_metadata, cache_key, cache_mismatch_reasons,
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
-    collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
+    append_native_runtime_inputs, collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
     compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
     derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
     derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_object, find_clang, find_runtime_c, format_edit_impact_lines,
+    edit_class_label, find_clang, find_runtime_c, format_edit_impact_lines,
     generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
     link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
     module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
@@ -1489,9 +1489,7 @@ fn incremental_link_output_matches_full_link_output() {
     compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
 
     let mut object_paths = vec![obj_path.clone()];
-    if let Some(runtime_c) = runtime_c.as_deref() {
-        object_paths.push(ensure_runtime_object(&clang, runtime_c, 2).unwrap());
-    }
+    append_native_runtime_inputs(&clang, &mut object_paths, runtime_c.as_deref(), 2).unwrap();
     link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
 
     let full_out = Command::new(&full_exe).output().unwrap();
@@ -1504,6 +1502,68 @@ fn incremental_link_output_matches_full_link_output() {
     let _ = fs::remove_file(&obj_path);
     let _ = fs::remove_file(&full_exe);
     let _ = fs::remove_file(&inc_exe);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cmd_run_executes_async_native_main_via_runtime_bridge() {
+    let Some(_clang) = find_clang() else {
+        return;
+    };
+
+    let root = std::env::temp_dir().join(format!(
+        "sengoo-sgc-async-run-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let input = root.join("main.sg");
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+
+async def main() -> i64 {
+    let value = await add_one(41);
+    print(value);
+    value
+}
+"#;
+    fs::write(&input, source).unwrap();
+
+    let input_string = input.to_string_lossy().to_string();
+    let result = super::cmd_run(
+        &input_string,
+        2,
+        ContractChecksMode::Auto,
+        RunEngine::Native,
+        true,
+        &[],
+        false,
+        FrontendJobs::Auto,
+        false,
+        super::ReflectionCliOptions::default(),
+    )
+    .await;
+    assert!(result.is_ok(), "async native run failed: {:?}", result.err());
+
+    let executable_path = root.join("build").join(if cfg!(windows) { "main.exe" } else { "main" });
+    assert!(
+        executable_path.exists(),
+        "cmd_run should emit a native executable at {}",
+        executable_path.display()
+    );
+
+    let output = Command::new(&executable_path).output().unwrap();
+    assert_eq!(output.status.code(), Some(42));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("42"),
+        "async executable should print 42, got stdout: {}",
+        stdout
+    );
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Test modules for the Sengoo compiler
 
 pub mod array_assign_tests;
+pub mod async_tests;
 pub mod class_inheritance_tests;
 pub mod codegen_stream_tests;
 pub mod codegen_type_tests;
@@ -31,3 +32,4 @@ pub mod symbol_and_borrow_tests;
 pub mod trait_tests;
 pub mod type_mismatch_tests;
 pub mod while_loop_tests;
+

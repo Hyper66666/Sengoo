@@ -1,10 +1,24 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+fn workspace_root_from_manifest_dir() -> Option<PathBuf> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .map(Path::to_path_buf)
+}
 
 pub(crate) fn find_runtime_c() -> Option<String> {
     if let Ok(path) = std::env::var("SENGOO_RUNTIME") {
         if Path::new(&path).exists() {
             return Some(path);
+        }
+    }
+
+    if let Some(workspace_root) = workspace_root_from_manifest_dir() {
+        let candidate = workspace_root.join("tools").join("stdlib").join("runtime.c");
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().to_string());
         }
     }
 

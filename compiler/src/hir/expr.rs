@@ -141,6 +141,8 @@ pub enum HIRExpr {
         params: Vec<String>,
         body: Box<HIRExpr>,
     },
+
+    Await(Box<HIRExpr>),
 }
 
 /// HIR 字面量
