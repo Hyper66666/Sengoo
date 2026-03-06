@@ -243,6 +243,13 @@ impl<'source> Parser<'source> {
         let attrs = self.parse_outer_attributes()?;
         let vis = self.parse_visibility()?;
         let leading_unsafe = self.consume(TokenKind::UnsafeKw).is_some();
+        let leading_async = self.consume(TokenKind::AsyncKw).is_some();
+
+        if leading_async && !matches!(self.current().map(|t| &t.kind), Some(TokenKind::DefKw)) {
+            return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                "`async` is only supported on function declarations".to_string(),
+            )));
+        }
 
         let kind = match self.current().map(|t| &t.kind) {
             Some(TokenKind::ExternKw) => {
@@ -263,7 +270,7 @@ impl<'source> Parser<'source> {
                     )));
                 }
                 self.advance();
-                self.parse_function_decl(vis)?
+                self.parse_function_decl(vis, leading_async)?
             }
 
             // 缁撴瀯浣?
@@ -560,7 +567,7 @@ impl<'source> Parser<'source> {
     }
 
     /// 瑙ｆ瀽鍑芥暟澹版槑
-    fn parse_function_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
+    fn parse_function_decl(&mut self, vis: Visibility, is_async: bool) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
         // 绫诲瀷鍙傛暟
@@ -616,7 +623,7 @@ impl<'source> Parser<'source> {
             precondition: precondition.map(Box::new),
             postcondition: postcondition.map(Box::new),
             body,
-            is_async: false,
+            is_async,
             abi: None,
             is_unsafe: false,
             no_mangle: false,

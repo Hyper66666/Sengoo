@@ -201,7 +201,7 @@ fn auto_falls_back_to_lli_when_native_unavailable() {
 fn explicit_engine_is_validated() {
     assert!(resolve_engine(RunEngine::Native, false, true).is_err());
     assert!(resolve_engine(RunEngine::Lli, true, false).is_err());
-    assert!(resolve_engine(RunEngine::Cranelift, false, false).is_ok());
+    assert!(resolve_engine(RunEngine::Native, true, true).is_ok());
 }
 
 #[test]
@@ -1222,8 +1222,6 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         FrontendJobs::Auto,
         false,
         super::ReflectionCliOptions::default(),
-        None,
-        None,
     )
     .await
     .unwrap();

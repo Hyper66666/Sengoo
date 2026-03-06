@@ -116,6 +116,11 @@ impl<'source> Parser<'source> {
                         operand: Box::new(operand),
                     }
                 }
+                TokenKind::AwaitKw => {
+                    self.advance();
+                    let operand = self.parse_simple_expr_prec(PREC_UNARY)?;
+                    ExprKind::Await(Box::new(operand))
+                }
                 TokenKind::LParen => {
                     self.advance();
                     let expr = self.parse_simple_expr()?;
@@ -248,6 +253,11 @@ impl<'source> Parser<'source> {
                         op: UnOp::Deref,
                         operand: Box::new(operand),
                     }
+                }
+                TokenKind::AwaitKw => {
+                    self.advance();
+                    let operand = self.parse_expr_prec(PREC_UNARY)?;
+                    ExprKind::Await(Box::new(operand))
                 }
 
                 // 闂傚倸鍊搁崐鎼佸磹閻戣姤鍤勯柛顐ｆ礀缁犵娀鏌熼悙顒傛菇闁逞屽墮閸燁垶骞嗛弮鍫澪╅柕澹本肖濠电姷鏁搁崑娑樜涘▎鎴炴殰闁搞儯鍔庨々?
@@ -970,6 +980,7 @@ impl<'source> Parser<'source> {
                     | TokenKind::BreakKw
                     | TokenKind::ContinueKw
                     | TokenKind::YieldKw
+                    | TokenKind::AwaitKw
                     | TokenKind::AsyncKw
                     | TokenKind::ParallelKw
                     | TokenKind::Minus
