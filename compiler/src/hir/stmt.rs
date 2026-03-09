@@ -1,12 +1,12 @@
-//! HIR 璇彞瀹氫箟
+//! HIR 语句定义。
 
 use super::{HIRExpr, HIRType};
 use crate::symbol::SymbolId;
 
-/// HIR 璇彞
+/// HIR 语句。
 #[derive(Debug, Clone)]
 pub enum HIRStmt {
-    /// Let 缁戝畾
+    /// Let 绑定语句。
     Let {
         name: String,
         symbol: SymbolId,
@@ -15,9 +15,9 @@ pub enum HIRStmt {
         is_mut: bool,
     },
 
-    /// 琛ㄨ揪寮忚鍙?
+    /// 表达式语句。
     Expr(HIRExpr),
 
-    /// Nested item declaration placeholder.
+    /// 嵌套条目声明占位符。
     Item,
 }

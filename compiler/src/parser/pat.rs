@@ -1,4 +1,4 @@
-//! 濡€崇础鐟欙絾鐎?
+//! 模式解析。
 
 use crate::ast::pattern::{Pattern, PatternKind, RangeEnd, StructPatternField};
 use crate::ast::{Ident, Literal, Path};
@@ -9,7 +9,7 @@ use crate::Result;
 use super::Parser;
 
 impl<'source> Parser<'source> {
-    /// 鐟欙絾鐎藉Ο鈥崇础
+    /// 解析模式表达式。
     pub(super) fn parse_pattern(&mut self) -> Result<Pattern> {
         self.parse_pattern_impl(0)
     }
@@ -34,7 +34,7 @@ impl<'source> Parser<'source> {
             );
         }
 
-        // 婢跺嫮鎮婇幋鏍佸?`A | B`
+        // 解析或模式 `A | B`。
         while precedence < 1 && self.consume(TokenKind::BitOr).is_some() {
             let right = self.parse_pattern_impl(1)?;
             let span = self.span_at(lo);
@@ -50,13 +50,13 @@ impl<'source> Parser<'source> {
 
         let kind = match token {
             Some(token) => match &token.kind {
-                // 闁岸鍘ょ粭?`_`
+                // 解析通配符 `_`。
                 TokenKind::Underscore => {
                     self.advance();
                     PatternKind::Wildcard
                 }
 
-                // 鐎涙娼伴柌?
+                // 解析字面量模式。
                 TokenKind::Int(Some(n)) => {
                     self.advance();
                     PatternKind::Literal(Literal::Int(*n))
@@ -86,24 +86,24 @@ impl<'source> Parser<'source> {
                     PatternKind::Literal(Literal::Null)
                 }
 
-                // 閺嶅洩鐦戠粭锔藉灗鐠侯垰绶?
+                // 解析标识符、路径或构造模式。
                 TokenKind::Ident => {
-                    // 鐏忔繆鐦憴锝嗙€界捄顖氱窞
+                    // 先解析路径，再根据后续 Token 判断具体模式形态。
                     let path = self.parse_path()?;
                     if let Some(token) = self.current() {
                         match &token.kind {
-                            // 缂佹挻鐎担鎾茨佸?`Point { x, y }`
+                            // 结构体模式 `Point { x, y }`。
                             TokenKind::LBrace => {
                                 return self.parse_struct_pattern(path);
                             }
-                            // 閸忓啰绮嶇紒鎾寸€担鎾茨佸?`Some(x)`
+                            // 元组结构体模式 `Some(x)`。
                             TokenKind::LParen => {
                                 return self.parse_tuple_struct_pattern(path);
                             }
                             _ => {}
                         }
                     }
-                    // 缁犫偓閸楁洘鐖ｇ拠鍡欘儊
+                    // 简单路径在模式中优先视为标识符绑定。
                     if path.is_simple() {
                         PatternKind::Ident(path.as_simple().unwrap().clone())
                     } else {
@@ -111,17 +111,17 @@ impl<'source> Parser<'source> {
                     }
                 }
 
-                // 閸忓啰绮嶅Ο鈥崇础 `(a, b, c)`
+                // 元组模式 `(a, b, c)`。
                 TokenKind::LParen => {
                     return self.parse_tuple_pattern();
                 }
 
-                // 閸掑洨澧栧Ο鈥崇础 `[a, b, ..rest]`
+                // 切片模式 `[a, b, ..rest]`。
                 TokenKind::LBracket => {
                     return self.parse_slice_pattern();
                 }
 
-                // 閼煎啫娲垮Ο鈥崇础 `1..=100`
+                // 前缀范围模式 `..100` / `..=100`。
                 TokenKind::DotDot => {
                     return self.parse_range_pattern();
                 }
@@ -141,7 +141,7 @@ impl<'source> Parser<'source> {
         Ok(kind)
     }
 
-    /// 鐟欙絾鐎界捄顖氱窞
+    /// 解析路径。
     pub(super) fn parse_path(&mut self) -> Result<Path> {
         let lo = self.current_span().lo;
         let mut segments = Vec::new();
@@ -171,7 +171,7 @@ impl<'source> Parser<'source> {
         Ok(Path::new(segments, self.span_at(lo)))
     }
 
-    /// 鐟欙絾鐎界紒鎾寸€担鎾茨佸?`Point { x, y: y2, .. }`
+    /// 解析结构体模式 `Point { x, y: y2, .. }`。
     fn parse_struct_pattern(&mut self, path: Path) -> Result<PatternKind> {
         self.expect(TokenKind::LBrace)?;
 
@@ -193,7 +193,7 @@ impl<'source> Parser<'source> {
             let (pattern, shorthand) = if self.consume(TokenKind::Colon).is_some() {
                 (self.parse_pattern()?, false)
             } else {
-                // 缁犫偓閸愭瑥鑸板?`{ x }` 缁涘鐜禍?`{ x: x }`
+                // 简写字段 `{ x }` 等价于 `{ x: x }`。
                 (
                     Pattern::new(PatternKind::Ident(name.clone()), name.span),
                     true,
@@ -208,7 +208,7 @@ impl<'source> Parser<'source> {
         Ok(PatternKind::Struct { path, fields, rest })
     }
 
-    /// 鐟欙絾鐎介崗鍐矋缂佹挻鐎担鎾茨佸?`Some(x, y)`
+    /// 解析元组结构体模式 `Some(x, y)`。
     fn parse_tuple_struct_pattern(&mut self, path: Path) -> Result<PatternKind> {
         self.expect(TokenKind::LParen)?;
 
@@ -227,7 +227,7 @@ impl<'source> Parser<'source> {
         Ok(PatternKind::TupleStruct { path, patterns })
     }
 
-    /// 鐟欙絾鐎介崗鍐矋濡€崇础 `(a, b, c)`
+    /// 解析元组模式 `(a, b, c)`。
     fn parse_tuple_pattern(&mut self) -> Result<PatternKind> {
         self.advance(); // LParen
 
@@ -246,7 +246,7 @@ impl<'source> Parser<'source> {
         Ok(PatternKind::Tuple(patterns))
     }
 
-    /// 鐟欙絾鐎介崚鍥╁濡€崇础 `[a, b, ..rest]`
+    /// 解析切片模式 `[a, b, ..rest]`。
     fn parse_slice_pattern(&mut self) -> Result<PatternKind> {
         self.advance(); // LBracket
 
@@ -259,7 +259,7 @@ impl<'source> Parser<'source> {
             }
 
             if self.consume(TokenKind::DotDot).is_some() {
-                // `..` 閹?`..rest`
+                // 支持 `..` 或 `..rest`。
                 if let Some(token) = self.current() {
                     if matches!(token.kind, TokenKind::Ident) {
                         let span = token.span;
@@ -282,8 +282,8 @@ impl<'source> Parser<'source> {
         Ok(PatternKind::Slice(patterns, rest_pattern))
     }
 
-    /// 鐟欙絾鐎介懠鍐ㄦ纯濡€崇础 `1..100`
-    /// 瑙ｆ瀽鑼冨洿妯″紡 `..100` 鎴?`..=100`
+    /// 解析前缀范围模式 `..100`。
+    /// 也支持闭区间 `..=100`。
     fn parse_range_pattern(&mut self) -> Result<PatternKind> {
         self.expect(TokenKind::DotDot)?;
         let inclusive = self.consume(TokenKind::Eq).is_some();
@@ -301,10 +301,10 @@ impl<'source> Parser<'source> {
         ))
     }
 
-    /// 閺堢喐婀滈弽鍥槕缁?
+    /// 期望并解析一个标识符。
     pub(super) fn expect_ident(&mut self) -> Result<Ident> {
         if let Some(token) = self.current() {
-            // 閸氬本妞傞幒銉ュ綀閺咁噣鈧碍鐖ｇ拠鍡欘儊閸?self 閸忔娊鏁€?
+            // 允许 `self` 作为特殊标识符被消费。
             let is_ident = token.kind == TokenKind::Ident || token.kind == TokenKind::SelfLowerKw;
             if is_ident {
                 let span = token.span;
