@@ -1,8 +1,8 @@
-//! 缁鐎?
+//! 类型定义
 
 use super::{Node, Path, Span};
 
-/// 缁鐎?
+/// 类型节点
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type {
     pub kind: TypeKind,
@@ -14,33 +14,33 @@ impl Type {
         Self { kind, span }
     }
 
-    /// 閸掓稑缂撶粻鈧崡鏇犺閸?
+    /// 创建简单路径类型
     pub fn simple(name: impl Into<String>, span: Span) -> Self {
         Self::new(TypeKind::Path(Path::from_str(name, span)), span)
     }
 
-    /// 閸掓稑缂撶捄顖氱窞缁鐎?
+    /// 创建路径类型
     pub fn path(path: Path) -> Self {
         let span = path.span();
         Self::new(TypeKind::Path(path), span)
     }
 
-    /// 閸掓稑缂撻崗鍐矋缁鐎?
+    /// 创建元组类型
     pub fn tuple(types: Vec<Type>, span: Span) -> Self {
         Self::new(TypeKind::Tuple(types), span)
     }
 
-    /// 閸掓稑缂撻弫鎵矋缁鐎?
+    /// 创建数组类型
     pub fn array(elem: Type, len: u64, span: Span) -> Self {
         Self::new(TypeKind::Array(Box::new(elem), len), span)
     }
 
-    /// 閸掓稑缂撻崚鍥╁缁鐎?
+    /// 创建切片类型
     pub fn slice(elem: Type, span: Span) -> Self {
         Self::new(TypeKind::Slice(Box::new(elem)), span)
     }
 
-    /// 閸掓稑缂撻幐鍥嫛缁鐎?
+    /// 创建指针类型
     pub fn ptr(elem: Type, is_mut: bool, span: Span) -> Self {
         Self::new(
             TypeKind::Ptr {
@@ -51,7 +51,7 @@ impl Type {
         )
     }
 
-    /// 閸掓稑缂撳鏇犳暏缁鐎?
+    /// 创建引用类型
     pub fn ref_(elem: Type, is_mut: bool, span: Span) -> Self {
         Self::new(
             TypeKind::Ref {
@@ -62,37 +62,37 @@ impl Type {
         )
     }
 
-    /// 閸掓稑缂撻崙鑺ユ殶缁鐎?
+    /// 创建函数类型
     pub fn fn_(params: Vec<Type>, ret: Option<Box<Type>>, span: Span) -> Self {
         Self::new(TypeKind::Fn { params, ret }, span)
     }
 
-    /// 閸掓稑缂?never 缁鐎?
+    /// 创建 never 类型
     pub fn never(span: Span) -> Self {
         Self::new(TypeKind::Never, span)
     }
 
-    /// 閸掓稑缂撻崡鏇炲帗缁鐎?
+    /// 创建单元类型
     pub fn unit(span: Span) -> Self {
         Self::new(TypeKind::Tuple(Vec::new()), span)
     }
 
-    /// 閺勵垰鎯侀弰顖氬礋閸忓啰琚崹?
+    /// 判断是否是单元类型
     pub fn is_unit(&self) -> bool {
         matches!(&self.kind, TypeKind::Tuple(types) if types.is_empty())
     }
 
-    /// 閺勵垰鎯侀弰?never 缁鐎?
+    /// 判断是否是 never 类型
     pub fn is_never(&self) -> bool {
         matches!(self.kind, TypeKind::Never)
     }
 
-    /// 閺勵垰鎯侀弰顖氱穿閻劎琚崹?
+    /// 判断是否是引用类型
     pub fn is_ref(&self) -> bool {
         matches!(self.kind, TypeKind::Ref { .. })
     }
 
-    /// 閺勵垰鎯侀弰顖氬讲閸欐ê绱╅悽?
+    /// 判断是否是可变引用类型
     pub fn is_mut_ref(&self) -> bool {
         matches!(self.kind, TypeKind::Ref { is_mut: true, .. })
     }
@@ -104,50 +104,50 @@ impl Node for Type {
     }
 }
 
-/// 缁鐎风粔宥囪
+/// 类型种类枚举
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    /// 缁犫偓閸楁洝鐭惧鍕閸?`Name` 閹?`module::Name`
+    /// 简单路径类型，如  或 
     Path(Path),
 
-    /// 濞夋稑鐎风捄顖氱窞缁鐎?Name<T1, T2>
+    /// 带泛型参数的路径类型，如 
     PathWithArgs { path: Path, args: Vec<Type> },
 
-    /// 閸忓啰绮嶇猾璇茬€?`(Type1, Type2)`
+    /// 元组类型，如 
     Tuple(Vec<Type>),
 
-    /// 閺佹壆绮嶇猾璇茬€?`[Type; N]`
+    /// 数组类型，如 
     Array(Box<Type>, u64),
 
-    /// 閸掑洨澧栫猾璇茬€?`[Type]`
+    /// 切片类型，如 
     Slice(Box<Type>),
 
-    /// 閹稿洭鎷＄猾璇茬€?`*mut Type` 閹?`*const Type`
+    /// 裸指针类型，如  或 
     Ptr { base: Box<Type>, is_mut: bool },
 
-    /// 瀵洜鏁ょ猾璇茬€?`&mut Type` 閹?`&Type`
+    /// 引用类型，如  或 
     Ref { base: Box<Type>, is_mut: bool },
 
-    /// 閸戣姤鏆熺猾璇茬€?`fn(Type1, Type2) -> ReturnType`
+    /// 函数类型，如 
     Fn {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
     },
 
-    /// Never 缁鐎?`!`
+    /// Never 类型 
     Never,
 
-    /// Infer 缁鐎?`_`
+    /// 类型推断占位符 
     Infer,
 
-    /// 閸斻劍鈧胶琚崹?`dyn Trait`
+    /// 动态分发类型，如 
     Dyn(Vec<TraitBound>),
 
-    /// Impl 閸楃姳缍呯粭锔捐閸?`impl Trait`
+    /// Impl Trait 类型，如 
     ImplTrait(Vec<TraitBound>),
 }
 
-/// Trait 缁撅附娼?
+/// Trait 约束
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitBound {
     pub path: Path,
@@ -167,7 +167,7 @@ impl TraitBound {
         self
     }
 
-    /// 閺勵垰鎯侀弰顖滅暆閸楁洜瀹抽弶鐕傜礄閺冪姴寮弫甯礆
+    /// 判断是否是简单约束（不含泛型参数）
     pub fn is_simple(&self) -> bool {
         self.params.is_empty()
     }
@@ -179,7 +179,7 @@ impl Node for TraitBound {
     }
 }
 
-/// 妫板嫬鐣炬稊澶屾畱閸╃儤婀扮猾璇茬€烽崥宥囆?
+/// 内置基本类型名称常量
 #[allow(dead_code)]
 pub mod builtin {
     pub const BOOL: &str = "bool";

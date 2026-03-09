@@ -1,4 +1,4 @@
-//! 澹版槑瑙ｆ瀽
+//! 声明解析。
 
 use crate::ast::*;
 use crate::error::{CompileError, ParseError};
@@ -237,7 +237,7 @@ impl<'source> Parser<'source> {
         Ok(attrs)
     }
 
-    /// 瑙ｆ瀽澹版槑
+    /// 解析顶层声明。
     pub(super) fn parse_decl(&mut self) -> Result<Decl> {
         let lo = self.current_span().lo;
         let attrs = self.parse_outer_attributes()?;
@@ -245,19 +245,13 @@ impl<'source> Parser<'source> {
         let leading_unsafe = self.consume(TokenKind::UnsafeKw).is_some();
         let leading_async = self.consume(TokenKind::AsyncKw).is_some();
 
-        if leading_async && !matches!(self.current().map(|t| &t.kind), Some(TokenKind::DefKw)) {
-            return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                "`async` is only supported on function declarations".to_string(),
-            )));
-        }
-
         let kind = match self.current().map(|t| &t.kind) {
             Some(TokenKind::ExternKw) => {
                 self.advance();
                 self.parse_extern_decl(vis, attrs.clone(), leading_unsafe)?
             }
 
-            // 鍑芥暟 (Python 椋庢牸: def)
+            // 兼容 Python 风格的 `def`。
             Some(TokenKind::DefKw) => {
                 if leading_unsafe {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -273,7 +267,13 @@ impl<'source> Parser<'source> {
                 self.parse_function_decl(vis, leading_async)?
             }
 
-            // 缁撴瀯浣?
+            _ if leading_async => {
+                return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                    "`async` is only supported on function declarations".to_string(),
+                )));
+            }
+
+            // 解析 `struct`。
             Some(TokenKind::StructKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -284,7 +284,7 @@ impl<'source> Parser<'source> {
                 self.parse_struct_decl(vis)?
             }
 
-            // 鏋氫妇
+            // 解析 `enum`。
             Some(TokenKind::EnumKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -295,7 +295,7 @@ impl<'source> Parser<'source> {
                 self.parse_enum_decl(vis)?
             }
 
-            // 绫?
+            // 解析 `class`。
             Some(TokenKind::ClassKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -306,7 +306,7 @@ impl<'source> Parser<'source> {
                 self.parse_class_decl(vis)?
             }
 
-            // trait
+            // 解析 `trait`。
             Some(TokenKind::TraitKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -317,7 +317,7 @@ impl<'source> Parser<'source> {
                 self.parse_trait_decl(vis)?
             }
 
-            // impl 鍧?
+            // 解析 `impl` 声明。
             Some(TokenKind::ImplKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -328,7 +328,7 @@ impl<'source> Parser<'source> {
                 self.parse_impl_decl(vis)?
             }
 
-            // 绫诲瀷鍒悕
+            // 解析类型别名。
             Some(TokenKind::TypeKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -340,7 +340,7 @@ impl<'source> Parser<'source> {
                 self.parse_type_alias_decl(vis)?
             }
 
-            // 甯搁噺
+            // 解析 `const`。
             Some(TokenKind::ConstKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -351,7 +351,7 @@ impl<'source> Parser<'source> {
                 self.parse_const_decl(vis)?
             }
 
-            // 闈欐€佸彉閲?
+            // 解析 `static`。
             Some(TokenKind::StaticKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -362,7 +362,7 @@ impl<'source> Parser<'source> {
                 self.parse_static_decl(vis)?
             }
 
-            // 瀵煎叆
+            // 解析 `import`。
             Some(TokenKind::ImportKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
@@ -381,7 +381,7 @@ impl<'source> Parser<'source> {
         Ok(Decl::new(kind, self.span_at(lo)))
     }
 
-    /// 瑙ｆ瀽鍙鎬?
+    /// 解析可见性修饰符。
     fn parse_visibility(&mut self) -> Result<Visibility> {
         if self.consume(TokenKind::PubKw).is_some() {
             Ok(Visibility::Public)
@@ -566,11 +566,11 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽鍑芥暟澹版槑
+    /// 解析函数声明。
     fn parse_function_decl(&mut self, vis: Visibility, is_async: bool) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -584,11 +584,11 @@ impl<'source> Parser<'source> {
         let mut params = Vec::new();
         let mut self_param = None;
 
-        // 妫€鏌?self 鍙傛暟
+        // 先处理可能出现的 self 参数。
         if self.check_self_param() {
             self_param = Some(self.parse_self_param()?);
             if self.consume(TokenKind::Comma).is_some() {
-                // 缁х画瑙ｆ瀽鍏朵粬鍙傛暟
+                // 允许 `self` 后面跟逗号继续解析普通参数。
             }
         }
 
@@ -632,12 +632,12 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 妫€鏌ユ槸鍚︽槸 self 鍙傛暟
+    /// 检查当前位置是否是 self 参数。
     fn check_self_param(&self) -> bool {
         if let Some(token) = self.current() {
             match &token.kind {
                 TokenKind::SelfLowerKw | TokenKind::MutKw => {
-                    // 妫€鏌ュ悗闈㈡槸鍚︽槸 self
+                    // 处理 `mut self`。
                     if let TokenKind::MutKw = &token.kind {
                         self.check_peek(TokenKind::SelfLowerKw)
                     } else {
@@ -645,7 +645,7 @@ impl<'source> Parser<'source> {
                     }
                 }
                 TokenKind::BitAnd => {
-                    // &self 鎴?&mut self
+                    // 处理 `&self` 或 `&mut self`。
                     if let Some(next) = self.peek(1) {
                         matches!(next.kind, TokenKind::SelfLowerKw | TokenKind::MutKw)
                     } else {
@@ -659,10 +659,10 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 瑙ｆ瀽 self 鍙傛暟
+    /// 解析 self 参数。
     fn parse_self_param(&mut self) -> Result<SelfParam> {
         if self.consume(TokenKind::BitAnd).is_some() {
-            // &self 鎴?&mut self
+            // 处理 `&self` 或 `&mut self`。
             let is_mut = self.consume(TokenKind::MutKw).is_some();
             self.expect(TokenKind::SelfLowerKw)?;
             Ok(if is_mut {
@@ -671,7 +671,7 @@ impl<'source> Parser<'source> {
                 SelfParam::Borrowed
             })
         } else {
-            // self, mut self
+            // 处理 `self` 与 `mut self`。
             let is_mut = self.consume(TokenKind::MutKw).is_some();
             self.expect(TokenKind::SelfLowerKw)?;
             Ok(if is_mut {
@@ -682,7 +682,7 @@ impl<'source> Parser<'source> {
         }
     }
 
-    /// 瑙ｆ瀽鍙傛暟
+    /// 解析普通参数。
     fn parse_param(&mut self) -> Result<Param> {
         let lo = self.current_span().lo;
         let is_mut = self.consume(TokenKind::MutKw).is_some();
@@ -699,7 +699,7 @@ impl<'source> Parser<'source> {
         })
     }
 
-    /// 瑙ｆ瀽绫诲瀷鍙傛暟
+    /// 解析泛型参数列表。
     fn parse_type_params(&mut self) -> Result<Vec<TypeParam>> {
         let mut params = Vec::new();
 
@@ -728,11 +728,11 @@ impl<'source> Parser<'source> {
         Ok(params)
     }
 
-    /// 瑙ｆ瀽缁撴瀯浣撳０鏄?
+    /// 解析结构体声明。
     fn parse_struct_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -749,7 +749,7 @@ impl<'source> Parser<'source> {
         let mut fields = Vec::new();
 
         if self.consume(TokenKind::LBrace).is_some() {
-            // 鍛藉悕瀛楁缁撴瀯浣?
+            // 具名字段结构体。
             while !self.is_eof() {
                 if self.consume(TokenKind::RBrace).is_some() {
                     break;
@@ -771,7 +771,7 @@ impl<'source> Parser<'source> {
                 self.consume(TokenKind::Comma);
             }
         } else if self.consume(TokenKind::LParen).is_some() {
-            // 鍏冪粍缁撴瀯浣?
+            // 元组结构体。
             while !self.is_eof() {
                 if self.consume(TokenKind::RParen).is_some() {
                     break;
@@ -790,7 +790,7 @@ impl<'source> Parser<'source> {
 
             self.consume(TokenKind::Semicolon);
         } else {
-            // 鍗曞厓缁撴瀯浣?
+            // 单元结构体。
             self.expect(TokenKind::Semicolon)?;
         }
 
@@ -803,11 +803,11 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽鏋氫妇澹版槑
+    /// 解析枚举声明。
     fn parse_enum_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -830,7 +830,7 @@ impl<'source> Parser<'source> {
             let name = self.expect_ident()?;
 
             let (fields, discriminant) = if self.consume(TokenKind::LBrace).is_some() {
-                // 缁撴瀯浣撳彉浣?
+                // 结构体变体，如 `Point { x: T }`。
                 let mut struct_fields = Vec::new();
                 while !self.is_eof() {
                     if self.consume(TokenKind::RBrace).is_some() {
@@ -860,7 +860,7 @@ impl<'source> Parser<'source> {
                     None,
                 )
             } else if self.consume(TokenKind::LParen).is_some() {
-                // 鍏冪粍鍙樹綋
+                // 元组变体，如 `Some(T)`。
                 let mut types = Vec::new();
                 while !self.is_eof() {
                     if self.consume(TokenKind::RParen).is_some() {
@@ -872,12 +872,12 @@ impl<'source> Parser<'source> {
                 }
                 (types.into_iter().map(VariantField::Unnamed).collect(), None)
             } else if self.consume(TokenKind::Eq).is_some() {
-                // 甯﹀垽鍒€肩殑鍙樹綋
+                // 显式判别值变体，如 `A = 1`。
                 let value = self.parse_expr()?;
                 self.consume(TokenKind::Comma);
                 (Vec::new(), Some(Box::new(value)))
             } else {
-                // 鍗曞厓鍙樹綋
+                // 无载荷变体，如 `A`。
                 self.consume(TokenKind::Comma);
                 (Vec::new(), None)
             };
@@ -899,11 +899,11 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽绫诲０鏄?
+    /// 解析类声明。
     fn parse_class_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -912,7 +912,7 @@ impl<'source> Parser<'source> {
             Vec::new()
         };
 
-        // 缁ф壙
+        // 解析继承列表。
         let extends = if self.consume(TokenKind::Colon).is_some() {
             let parent = self.parse_path()?;
 
@@ -935,7 +935,7 @@ impl<'source> Parser<'source> {
 
         self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
-        // V1: trait conformance is expressed through impl Trait for Type.
+        // V1 中 trait 适配通过 `impl Trait for Type` 表达。
         let implements = Vec::new();
 
         self.expect(TokenKind::LBrace)?;
@@ -947,11 +947,12 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-            // 鍙互鏄瓧娈垫垨鏂规硶
+            // 解析类成员的可见性与 async 修饰。
             let member_vis = self.parse_visibility()?;
+            let member_async = self.consume(TokenKind::AsyncKw).is_some();
 
             if self.consume(TokenKind::DefKw).is_some() {
-                // 鏂规硶 (Python 椋庢牸: def)
+                // 兼容 Python 风格的 `def`。
                 let name = self.expect_ident()?;
                 let mut type_params = if self.consume(TokenKind::Lt).is_some() {
                     let params = self.parse_type_params()?;
@@ -1001,7 +1002,7 @@ impl<'source> Parser<'source> {
                     precondition: precondition.map(Box::new),
                     postcondition: postcondition.map(Box::new),
                     body,
-                    is_async: false,
+                    is_async: member_async,
                     abi: None,
                     is_unsafe: false,
                     no_mangle: false,
@@ -1009,11 +1010,16 @@ impl<'source> Parser<'source> {
                     span: self.current_span(),
                 }));
             } else {
-                // 瀛楁
+                // 解析字段成员。
                 let name = self.expect_ident()?;
                 self.expect(TokenKind::Colon)?;
                 let ty = self.parse_type()?;
                 self.consume(TokenKind::Semicolon);
+                if member_async {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "`async` is only supported on class methods".to_string(),
+                    )));
+                }
                 members.push(ClassMember::Field(StructField {
                     vis: member_vis,
                     name: Some(name),
@@ -1034,11 +1040,11 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽 trait 澹版槑
+    /// 解析 trait 声明。
     fn parse_trait_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -1047,7 +1053,7 @@ impl<'source> Parser<'source> {
             Vec::new()
         };
 
-        // 绾︽潫
+        // 解析 trait 继承约束。
         let mut bounds = Vec::new();
         if self.consume(TokenKind::Colon).is_some() {
             loop {
@@ -1072,7 +1078,8 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-            // 鍑芥暟鎴栧父閲?(Python 椋庢牸: def)
+            let trait_fn_async = self.consume(TokenKind::AsyncKw).is_some();
+            // trait 方法也兼容 Python 风格的 `def`。
             if self.consume(TokenKind::DefKw).is_some() {
                 let name = self.expect_ident()?;
                 let mut type_params = if self.consume(TokenKind::Lt).is_some() {
@@ -1123,7 +1130,7 @@ impl<'source> Parser<'source> {
                     precondition: precondition.map(Box::new),
                     postcondition: postcondition.map(Box::new),
                     body,
-                    is_async: false,
+                    is_async: trait_fn_async,
                     abi: None,
                     is_unsafe: false,
                     no_mangle: false,
@@ -1131,6 +1138,11 @@ impl<'source> Parser<'source> {
                     span: self.current_span(),
                 }));
             } else if self.consume(TokenKind::ConstKw).is_some() {
+                if trait_fn_async {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "`async` is only supported on trait methods".to_string(),
+                    )));
+                }
                 let name = self.expect_ident()?;
                 self.expect(TokenKind::Colon)?;
                 let ty = self.parse_type()?;
@@ -1159,9 +1171,9 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽 impl 鍧?
+    /// 解析 impl 声明。
     fn parse_impl_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -1170,15 +1182,15 @@ impl<'source> Parser<'source> {
             Vec::new()
         };
 
-        // Parse the first type. For `impl Type { ... }` this is the target type.
-        // For `impl Trait for Type { ... }` this is actually the trait path, and
-        // the real target type comes after `for`.
+        // 先解析第一个类型。对 `impl Type { ... }` 来说，它就是目标类型。
+        // 对 `impl Trait for Type { ... }` 来说，这里实际上是 trait 路径，
+        // 真正的目标类型在 `for` 之后。
         let first_type = self.parse_type()?;
 
         let (target_type, trait_path) = if self.consume(TokenKind::ForKw).is_some() {
-            // `impl Trait for Type` 鈥?first_type is the trait, parse the real target type
+            // `impl Trait for Type` 中，`first_type` 实际上是 trait 路径。
             let actual_target = self.parse_type()?;
-            // Extract the path from the first type (the trait)
+            // 从第一个类型里提取 trait 路径。
             let trait_path = match first_type.kind {
                 TypeKind::Path(path) => path,
                 TypeKind::PathWithArgs { path, args } if args.is_empty() => path,
@@ -1190,7 +1202,7 @@ impl<'source> Parser<'source> {
             };
             (actual_target, Some(trait_path))
         } else {
-            // `impl Type` 鈥?inherent impl, no trait
+            // `impl Type` 表示固有 impl，不带 trait。
             (first_type, None)
         };
 
@@ -1206,6 +1218,7 @@ impl<'source> Parser<'source> {
             }
 
             self.consume(TokenKind::PubKw);
+            let method_async = self.consume(TokenKind::AsyncKw).is_some();
             self.expect(TokenKind::DefKw)?;
 
             let name = self.expect_ident()?;
@@ -1257,7 +1270,7 @@ impl<'source> Parser<'source> {
                 precondition: precondition.map(Box::new),
                 postcondition: postcondition.map(Box::new),
                 body,
-                is_async: false,
+                is_async: method_async,
                 abi: None,
                 is_unsafe: false,
                 no_mangle: false,
@@ -1276,11 +1289,11 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽绫诲瀷鍒悕
+    /// 解析类型别名声明。
     fn parse_type_alias_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
 
-        // 绫诲瀷鍙傛暟
+        // 解析泛型参数。
         let mut type_params = if self.consume(TokenKind::Lt).is_some() {
             let params = self.parse_type_params()?;
             self.expect(TokenKind::Gt)?;
@@ -1306,7 +1319,7 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽甯搁噺澹版槑
+    /// 解析常量声明。
     fn parse_const_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let name = self.expect_ident()?;
         self.expect(TokenKind::Colon)?;
@@ -1324,7 +1337,7 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽闈欐€佸彉閲忓０鏄?
+    /// 解析静态变量声明。
     fn parse_static_decl(&mut self, vis: Visibility) -> Result<DeclKind> {
         let is_mut = self.consume(TokenKind::MutKw).is_some();
         let name = self.expect_ident()?;
@@ -1344,14 +1357,14 @@ impl<'source> Parser<'source> {
         }))
     }
 
-    /// 瑙ｆ瀽瀵煎叆澹版槑
+    /// 解析导入声明。
     fn parse_import_decl(&mut self) -> Result<DeclKind> {
         let path = self.parse_path()?;
 
         let (kind, alias) = if self.consume(TokenKind::AsKw).is_some() {
             (ImportKind::Simple, Some(self.expect_ident()?))
         } else if self.consume(TokenKind::LBrace).is_some() {
-            // 閫夋嫨鎬у鍏?
+            // 选择性导入。
             let mut names = Vec::new();
             while !self.is_eof() {
                 if self.consume(TokenKind::RBrace).is_some() {
@@ -1362,7 +1375,7 @@ impl<'source> Parser<'source> {
             }
             (ImportKind::Selective(names), None)
         } else if self.consume(TokenKind::Star).is_some() {
-            // 閫氶厤绗﹀鍏?
+            // 通配符导入。
             self.expect(TokenKind::FromKw)?;
             (ImportKind::Wildcard, None)
         } else {

@@ -1,4 +1,4 @@
-//! HIR 闁?MIR 闁汇劌瀚ù鍡涙晸?
+//! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
 use crate::hir::{
     self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRParam, HIRStmt, HIRType, HIRTypeKind,
@@ -19,7 +19,7 @@ use super::generic_methods::{
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
-/// 闁?HIRType 閺夌儐鍓氬畷鍙夌▔閾忕顫﹂柛銊ヮ儏婢х姷绱撻埀顒傗偓娑欘殘椤戜焦绋夌拠褏绀勯柣顫妺缁剟寮憴鍕€婇柛姘С閹便劍顨滅敮顔剧
+/// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirLowerOptions {
     pub runtime_contract_checks: bool,
@@ -1456,7 +1456,7 @@ fn lower_function(
         trait_method_templates,
     );
 
-    // 闁告瑥鍊归弳鐔奉啅閼碱剛鐥呴悶姘煎亝閸у﹪宕濋悩鎻掔厒 locals 濞戞搩鍙忕槐婵嬫閳ь剛鎲版担绛嬪敹鐟滅増娲栭悾鐘崇椤掑倹鐣遍柛姘Ф琚?
+    // 为函数参数创建局部变量并绑定到符号。
     for (i, param) in fn_item.params.iter().enumerate() {
         let local = Local::new(i + 1, LocalKind::Param);
         ctx.local_names.insert(param.name.clone(), local);
@@ -1468,7 +1468,7 @@ fn lower_function(
             .push((param.name.clone(), param.symbol, local));
     }
 
-    // 闂傚嫬绉崇紞鍡涘礄閼恒儲娈跺ù锝嗘尭閸╁苯顔忛崣澶嬬畳闁汇劌瀚崣鍡涘矗閿濆懏鍋?
+    // 设置函数体入口块，可能包含运行时合约检查。
     let body_entry = if options.runtime_contract_checks {
         if let Some(precondition) = fn_item.precondition.as_ref() {
             ctx.inject_precondition_check(precondition, start_block)
@@ -1485,7 +1485,7 @@ fn lower_function(
         }
     }
 
-    // 婵☆偀鍋撻柡灞诲劜濡叉悂宕ラ敂鑺ョ畳闂佹寧鐟ㄩ銈夊矗閹寸姵鏅?
+    // 降级结束后检查是否有错误需要报告。
     if !ctx.errors.is_empty() {
         return Err(format!(
             "MIR lowering errors in function '{}':\n  {}",
@@ -1494,67 +1494,67 @@ fn lower_function(
         ));
     }
 
-    // 闁圭粯鍔曡ぐ?lambda_functions闁挎稑鐭傞崳鎾绩閹屽殸 mir_fn 闁汇劌瀚埀顒傚枔閺?
+    // 将lambda函数从上下文中取出并返回。
     let lambda_functions = ctx.lambda_functions;
     Ok((mir_fn, lambda_functions))
 }
 
-/// 鐎甸偊浜為獮鍡樼▔婵犱胶鐟撻柡鍌氭祫缁辨繈鎮介妸銈囪壘 break/continue
+/// 循环上下文，记录 `break/continue` 目标基本块。
 #[derive(Debug, Clone, Copy)]
 struct LoopContext {
-    /// break 閻犲搫鐤囧ù鍡涘礆閹殿喗鐣遍柣鈺婂枟閻栵綁鏁?
+    /// break目标基本块的索引。
     break_block: usize,
-    /// continue 閻犲搫鐤囧ù鍡涘礆閹殿喗鐣遍柣鈺婂枟閻栵綁鏁?
+    /// continue目标基本块的索引。
     continue_block: usize,
 }
 
-/// 闁告垼濮ら弳鐔虹驳閹勫€冲ǎ鍥ｅ墲娴煎懘鏁嶉崼锝囩闁搞儳鍋熺悮顐﹀垂鐎ｅ墎绀?
+/// 函数签名信息，存储函数名、参数数量和参数类型。
 #[derive(Clone)]
 struct FunctionSig {
     ret_type: MIRType,
     param_count: usize,
-    /// 闁硅娲濋獮蹇涙儍閸曨喖娈伴柣銏犲船瑜板鏌岃箛銉х闁告艾绉惰ⅷ, 缂侇偉顕ч悗鐑芥晸?
+    /// 函数参数数量（不含环境指针参数）。
     #[allow(dead_code)]
     env: Vec<(String, MIRType)>,
 }
 
-/// Lambda 闁绘粠鍨伴。銊︾┍閳╁啩绱?
+/// Lambda 捕获环境。
 struct LambdaEnv {
-    /// 闁绘粠鍨伴。銊╁矗濮椻偓閸ｆ椽宕ュ鍥嗙偤宕仦绛嬪殸閹煎瓨姊诲▓?Local
+    /// 捕获变量列表，保存变量名及其对应的局部变量 `Local`。
     vars: Vec<(String, Local)>,
-    /// 闁绘粠鍨伴。銊х磼閹惧鈧垱鎷呴幘鎯邦潶闁搞劌顑戠槐娆撴偨閵娿倗鑹惧ù鐙呯悼閻栨粓鎮介悢绋跨亣闁?
+    /// 自由变量列表，用于lambda捕获分析。
     #[allow(dead_code)]
     env_type: MIRType,
-    /// 闁绘粠鍨伴。銊╁箰閸ヮ剚瀚涢柨?Local闁挎稑鐗嗗﹢顏嗘嫬閸愵亝鏆忛柡鍐╂构婵炲洭鎮介…鎺旂
+    /// 捕获环境数组对应的MIR局部变量（Local句柄）。
     env_ptr_local: Option<Local>,
 }
 
-/// 閺夌儐鍓氬畷鍙夌▔婵犱胶鐟撻柨?
+/// MIR lowering 上下文。
 struct LoweringContext<'a> {
     mir_fn: &'a mut MirFunction,
-    /// 闁告艾绉惰ⅷ闁告帗婢橀惇顒勬焾閵娿儱缍侀梺鎻掔箳濞堟垿寮伴悩鑼
+    /// 当前正在降级的MIR函数的可变引用。
     local_names: HashMap<String, Local>,
     local_symbols: HashMap<SymbolId, Local>,
     contract_param_bindings: Vec<(String, SymbolId, Local)>,
-    /// 鐟滅増鎸告晶鐘诲春閻戞ɑ鎷遍柨?
+    /// 当前基本块的索引（None表示未设置）。
     current_block: Option<usize>,
-    /// 闁衡偓閸洘鑲犻柣銊ュ閺佸﹦鎷犻娆庣箚闁?
+    /// 错误信息列表，记录降级过程中遇到的错误。
     errors: Vec<String>,
-    /// 鐎甸偊浜為獮鍡涘冀閸剛绀夐柣顫妺缁剚寰勯崟顓熷€?break/continue
+    /// 循环上下文栈，记录嵌套循环的 `break/continue` 目标。
     loop_stack: Vec<LoopContext>,
-    /// Lambda 閻犱讲鍓濋弳鐔煎闯椤帞绀勯柣顫妺缁剟鎮介悢绋跨亣闁哥儐鍨粩鎾触瀹ュ泦鐐烘晸?
+    /// 循环嵌套栈，支持多层循环的break/continue。
     lambda_counter: &'a mut usize,
-    /// 闁汇垻鍠愰崹姘舵晸?Lambda 閺夊牆鎳庢慨顏堝礄閼恒儲娈?
+    /// 存储lambda上下文中Lambda函数计数器的引用。
     lambda_functions: Vec<MirFunction>,
-    /// Local 闁?Lambda 闁告垼濮ら弳鐔煎触瀹ュ洦鐣遍柡鍕Т閻?
+    /// lambda名称到Local的映射，用于lambda引用解析。
     lambda_names: HashMap<Local, String>,
-    /// 闁告垼濮ら弳鐔煎触瀹ュ懎鐓傜紒娑欏劤閹洟鎯冮崟顒佇侀柨?
+    /// lambda函数集合，存储生成的所有lambda MIR函数。
     function_sigs: HashMap<String, FunctionSig>,
-    /// Lambda 闁告垼濮ら弳鐔煎触瀹ュ懎鐓傞柣婊庡灠椤ｃ劍绌遍埄鍐х礀闁汇劌瀚Σ褔鏁?
+    /// lambda环境信息表，按名称索引。
     lambda_environments: HashMap<String, LambdaEnv>,
-    /// 闁哄嫮濮撮惃?Local 闁?闁告鍠庨～鎰尵鐠囪尙鈧兘宕ュ鍥嗙偤鏁嶉崼銏℃殢濞存粌娴风划銊╁几閸曨亞绉奸柡鍌濐潐绾墎鎷崘顏呮殢閻熸瑱绲鹃悗浠嬫晸?
+    /// 局部变量名与MIR类型的映射表。
     type_names: HashMap<Local, String>,
-    /// 鐎规瓕灏欓悡锟犳儍閸曨偄姣愰柡浣规緲閹洟姊块崱妤佸€ら柨娑樼墢閺併倖绂嶆惔銏＄厵婵炲娲濋惃鐔兼偨閵娾晝宕ｉ悹鍥︾筏缁?
+    /// 已知函数名集合，用于快速判断标识符是否表示函数调用。
     known_functions: HashSet<String>,
     struct_defs: &'a HashMap<String, &'a hir::HIRStruct>,
     concrete_type_registry: ConcreteTypeRegistry,
@@ -2061,7 +2061,7 @@ impl<'a> LoweringContext<'a> {
         name
     }
 
-    /// 閺夆晜绋戦崣鍡楊嚗椤忓棗绠氶柨娑樿嫰閻?break/continue 闁烩晩鍠楅悥锝夊箳閵娿儱寮抽柨?
+    /// 将循环上下文压入循环嵌套栈。
     fn push_loop(&mut self, break_block: usize, continue_block: usize) {
         self.loop_stack.push(LoopContext {
             break_block,
@@ -2069,8 +2069,8 @@ impl<'a> LoweringContext<'a> {
         });
     }
 
-    /// 闁衡偓閸洘鑲?Lambda body 濞戞搩鍘烘繛鍥偨閵娧勭暠闁煎浜為弫閬嶅矗濮椻偓閸ｆ椽鏁嶉崼銉﹀闁告瑥鍊归弳鐔兼儍閸曨偒妯嗛梺顔哄妼瑜板鏌岃箛銉х
-    /// 閺夆晜鏌ㄥú鏍嚊椤忓棙鏆犻柛娆愶耿閸ｆ椽宕ュ鍥嗙偤宕氬Δ鍕┾偓鍐椽鐏炵瓔鍤犻幖瀛樻⒒濞?Local
+    /// 返回当前上下文的指令列表的可变引用。
+    /// 根据参数列表收集表达式中的自由变量及其对应 `Local`。
     fn collect_free_vars(
         &self,
         params: &[String],
@@ -2083,7 +2083,7 @@ impl<'a> LoweringContext<'a> {
         free_vars
     }
 
-    /// 闂侇偅甯掔紞濠囧绩閸洘鑲犻悶娑栧姀閹活亜顕ｈ箛搴ゅ幀濞达綀娉曢弫銈夋儍閸曨喖娈伴柣銏犲船瑜板鏁?
+    /// 从表达式中收集自由变量（捕获的外部变量）。
     fn collect_vars_from_expr(
         &self,
         expr: &crate::hir::HIRExpr,
@@ -2094,7 +2094,7 @@ impl<'a> LoweringContext<'a> {
 
         match expr {
             HIRExpr::Var { name, .. } => {
-                // 濠碘€冲€归悘澶愬及椤栨艾缍侀梺鎻掔箣缁楁牗绋夊鍡樞﹂柛娆忓€归弳鐔兼晬鐏炶棄鐏熼柡鍕靛灥閸ゆ粓鎮介崡鐐茬秮闁?
+            // 若变量不在参数列表中，则为自由变量（需捕获）。
                 if !param_names.contains(name) {
                     if let Some(&local) = self.local_names.get(name) {
                         if !free_vars.iter().any(|(n, _)| n == name) {
@@ -2121,7 +2121,7 @@ impl<'a> LoweringContext<'a> {
                 params: inner_params,
                 body: inner_body,
             } => {
-                // 闁告劕鎳橀崕?Lambda 闁哄牆顦抽崵婊冾啅鏉堚晜鐣遍柛娆忓€归弳鐔兼⒖閸℃鍊?
+                // 处理嵌套lambda表达式内部的自由变量收集。
                 let inner_param_names: std::collections::HashSet<String> =
                     inner_params.iter().cloned().collect();
                 self.collect_vars_from_expr(inner_body, &inner_param_names, free_vars);
@@ -2140,7 +2140,7 @@ impl<'a> LoweringContext<'a> {
                 else_branch,
             } => {
                 self.collect_vars_from_expr(cond, param_names, free_vars);
-                // then_branch 闁?else_branch 闁?HIRBody闁挎稑鐭傚〒鍓佹啺娴ｅ搫顥楁繛鍫濓工椤︹晠鏁?
+                // 收集then_branch和else_branch（HIRBody）中的自由变量。
                 self.collect_vars_from_body(then_branch, param_names, free_vars);
                 if let Some(else_b) = else_branch {
                     self.collect_vars_from_body(else_b, param_names, free_vars);
@@ -2178,7 +2178,7 @@ impl<'a> LoweringContext<'a> {
                 ..
             } => {
                 self.collect_vars_from_expr(iter, param_names, free_vars);
-                // for 闁告瑦锕㈤崳娲捶閵娿儲鍎曢柣婊庡灟缂嶅宕橀崨顔叫︾紓浣瑰灥閻ｉ箖鎯冮崟鍓佺濞戞挸绉堕悾濠氭嚊椤忓棙鏆犻柛娆愶耿閸?
+                // 收集for循环中自由变量，排除已绑定的迭代变量。
                 let mut extended_params = param_names.clone();
                 extended_params.insert(var_name.clone());
                 self.collect_vars_from_body(body, &extended_params, free_vars);
@@ -2212,12 +2212,12 @@ impl<'a> LoweringContext<'a> {
                 self.collect_vars_from_body(body, param_names, free_vars);
             }
             _ => {
-                // 闁稿繑婀圭划顒傛偘閵娿劍褰х€殿喖绻掔悮顐﹀垂鐎ｎ偅鐣☉鎾崇Т椤︹晠鏁?
+                // 其余表达式节点当前不会引入新的自由变量。
             }
         }
     }
 
-    /// 闁?HIRBody 濞戞搩鍘介弫褰掓⒖閸℃缍侀柨?
+    /// 从语句列表中收集自由变量引用。
     fn collect_vars_from_body(
         &self,
         body: &crate::hir::HIRBody,
@@ -2232,7 +2232,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 濞寸姴姘﹂銏ゅ矗閵夈倛鍘柡鈧崼鏇熻偁闁告瑦锕㈤崳?
+    /// 从语句列表中收集自由变量引用（lambda捕获分析）。
     fn collect_vars_from_stmt(
         &self,
         stmt: &crate::hir::HIRStmt,
@@ -2246,7 +2246,7 @@ impl<'a> LoweringContext<'a> {
                 if let Some(v) = value {
                     self.collect_vars_from_expr(v, param_names, free_vars);
                 }
-                // let 缂備焦鍨甸悾楣冩儍閸曨偄缍侀梺鎻掔箣缁楀寮伴婵嗘闁汇垹宕ぐ澶愭晸?
+                // 对let绑定语句中的初始值表达式进行自由变量分析。
             }
             HIRStmt::Expr(expr) => {
                 self.collect_vars_from_expr(expr, param_names, free_vars);
@@ -2255,22 +2255,22 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂侇偀鍋撻柛鎴濇惈閹﹪鏁?
+    /// 弹出当前循环的break/continue目标。
     fn pop_loop(&mut self) {
         self.loop_stack.pop();
     }
 
-    /// 闁兼儳鍢茶ぐ鍥亹閹惧啿顤呯€甸偊浜為獮鍡涙晸?break 闁烩晩鍠楅悥锝夋晸?
+    /// 获取当前循环的break目标块索引。
     fn get_break_target(&self) -> Option<usize> {
         self.loop_stack.last().map(|ctx| ctx.break_block)
     }
 
-    /// 闁兼儳鍢茶ぐ鍥亹閹惧啿顤呯€甸偊浜為獮鍡涙晸?continue 闁烩晩鍠楅悥锝夋晸?
+    /// 获取当前循环的continue目标块索引。
     fn get_continue_target(&self) -> Option<usize> {
         self.loop_stack.last().map(|ctx| ctx.continue_block)
     }
 
-    /// 婵烇綀顕ф慨鐐哄棘閹殿喗鐣遍悘鐐╁亾闂侇喓鍔岃ぐ澶愭晸?
+    /// 添加一个新的局部变量并返回其Local句柄。
     fn add_local(&mut self, name: Option<String>, kind: LocalKind, ty: MIRType) -> Local {
         let local = self.mir_fn.add_local(kind, ty);
         if let Some(name) = name {
@@ -2285,7 +2285,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闁兼儳鍢茶ぐ鍥╀沪閳ь剟鏌堥妸銉ョ秮闂佹彃绻掑▓鎴犵尵鐠囪尙鈧兘鏁嶉崼锝囩闁搞儳鍋涚槐鈺呮偨椤帞绀夐梺顒€鐏濋崢銈嗙▔瀹ュ懐绠戦悷鏇氳兌濞?clone闁?
+    /// 获取局部变量的MIR类型。
     fn get_local_type(&self, local: Local) -> &MIRType {
         if let Some((_, ty)) = self.mir_fn.locals.get(local.index()) {
             ty
@@ -2294,8 +2294,8 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 閻熸瑱绲鹃悗鐣屼沪閳ь剟鏌堥妸銉ョ秮闁?
-    /// 濠碘€冲€归悘澶愬矗濮椻偓閸ｆ椽寮甸鍕毎濞戞柨顧€缁辨繄鎷嬮弶璺ㄧЭ闂佹寧鐟ㄩ銈夌嵁閹壆绠查柛銉у仒缁斿瓨绋夐鍕獥濞达絽绉堕?local
+    /// 获取局部变量的类型信息。
+    /// 解析名称和符号ID对应的局部变量，或创建新的局部变量。
     fn resolve_local(&mut self, name: &str, symbol: SymbolId) -> Local {
         if symbol.is_valid() {
             if let Some(&local) = self.local_symbols.get(&symbol) {
@@ -2305,25 +2305,25 @@ impl<'a> LoweringContext<'a> {
         match self.local_names.get(name) {
             Some(&local) => local,
             None => {
-                // 閻犱焦婢樼紞宥夋煥濞嗘帩鍤?
+                // 变量未定义时报告错误并返回临时变量。
                 self.errors.push(format!("undefined variable: '{}'", name));
-                // 閺夆晜鏌ㄥú鏍ㄧ▔閳ь剚绋夐鍕獥濞达絽绉堕?local闁挎稑鐭侀鈧紓鍌涚墳閻ρ呯磼瑜忛悽?
+                // 错误处理：返回一个unit类型的临时local。
                 self.mir_fn.add_local(LocalKind::Temp, MIR_UNIT)
             }
         }
     }
 
-    /// 闁告帗绋戠紓鎾诲棘閹殿喗鐣遍柛鈺冨劋濠€浼存晸?
+    /// 创建一个新的基本块并返回其索引。
     fn new_block(&mut self) -> usize {
         self.mir_fn.add_block()
     }
 
-    /// 閻犱礁澧介悿鍡氥亹閹惧啿顤呴柛鈺冨劋濠€浼存晸?
+    /// 设置当前基本块为指定块。
     fn set_current_block(&mut self, block: usize) {
         self.current_block = Some(block);
     }
 
-    /// 闁兼儳鍢茶ぐ鍥亹閹惧啿顤呴柛鈺冨劋濠€浼存晸?
+    /// 返回当前正在生成的基本块索引。
     fn current_block(&self) -> usize {
         self.current_block.expect("no current block set")
     }
@@ -2336,7 +2336,7 @@ impl<'a> LoweringContext<'a> {
         let left_ty = self.get_local_type(left).clone();
         let right_ty = self.get_local_type(right).clone();
 
-        // Types already match 闁?nothing to do.
+        // 若两侧类型已经相同，无需调和。
         if left_ty == right_ty {
             return (left, right);
         }
@@ -2344,7 +2344,7 @@ impl<'a> LoweringContext<'a> {
         // Determine if a cast between two types is valid and, if so,
         // which direction to cast (returns the common target type).
         match (&left_ty, &right_ty) {
-            // Int widening: smaller int 闁?larger int
+        // 对整数和浮点数类型进行隐式类型提升（宽化）。
             (MIRType::Int(a), MIRType::Int(b)) => {
                 let target_bits = std::cmp::max(*a, *b);
                 let target_ty = MIRType::Int(target_bits);
@@ -2361,7 +2361,7 @@ impl<'a> LoweringContext<'a> {
                 (new_left, new_right)
             }
 
-            // Float widening: smaller float 闁?larger float
+        // 两个浮点数操作数：选择较大位宽的类型。
             (MIRType::Float(a), MIRType::Float(b)) => {
                 let target_bits = std::cmp::max(*a, *b);
                 let target_ty = MIRType::Float(target_bits);
@@ -2378,7 +2378,7 @@ impl<'a> LoweringContext<'a> {
                 (new_left, new_right)
             }
 
-            // Int 闁?Float promotion (either direction)
+        // 整数与浮点数混合：将整数转为浮点数。
             (MIRType::Int(_), MIRType::Float(b)) => {
                 let target_ty = MIRType::Float(*b);
                 let new_left = self.insert_cast(left, target_ty);
@@ -2390,7 +2390,7 @@ impl<'a> LoweringContext<'a> {
                 (left, new_right)
             }
 
-            // Bool 闁?Int promotion (either direction)
+        // 布尔与整数混合：将bool转为对应位宽的整数。
             (MIRType::Bool, MIRType::Int(b)) => {
                 let target_ty = MIRType::Int(*b);
                 let new_left = self.insert_cast(left, target_ty);
@@ -2402,7 +2402,7 @@ impl<'a> LoweringContext<'a> {
                 (left, new_right)
             }
 
-            // Incompatible types 闁?report an error and return originals.
+        // 其他类型组合：无需自动转换，直接返回左侧类型。
             _ => {
                 self.errors.push(format!(
                     "type mismatch in binary operation: left operand has type {:?}, right operand has type {:?}",
@@ -2425,13 +2425,13 @@ impl<'a> LoweringContext<'a> {
         dest
     }
 
-    /// 婵烇綀顕ф慨鐐哄箰閸ワ附濮㈤柛鎺撴緲缂嶅宕滃鍛敤闁哄牜鍓欏?
+    /// 向当前基本块追加一条MIR指令。
     fn push_inst(&mut self, inst: Instruction) {
         let block_id = self.current_block();
         self.mir_fn.push_inst_to_block(block_id, inst);
     }
 
-    /// 閻犱礁澧介悿鍡氥亹閹惧啿顤呴柛鈺冨劋濠€浼村锤濡ゅ啯鐣辩紓浣哥墛椤掓盯鏁?
+    /// 向当前基本块追加terminator终止指令。
     fn set_terminator(&mut self, term: Terminator) {
         let block_id = self.current_block();
         if let Some(block) = self.mir_fn.block_mut(block_id) {
@@ -2662,12 +2662,12 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞?HIR 闁秆勵殔閸╁矂骞愰崶褏鏆伴柨?
+    /// 将HIR函数体降级为基本块（不计算返回值）。
     fn lower_body_to_block(&mut self, body: &HIRBody, target_block: usize) {
         self.lower_body_to_block_with_return(body, target_block, true);
     }
 
-    /// 闂傚嫬绉崇紞?HIR 闁秆勵殔閸╁矂骞愰崶褏鏆伴柛褎顨愮槐婵囩▔瀹ュ棗娼戦柨?return闁挎稑鐭佺换鎴﹀炊閻愬瓨浠樼紓浣哥墣閵嗗啯娼忛幆褏纭€闁?Local闁挎稑鐗嗛々褔寮稿鍕畳闁?
+    /// 将HIR函数体降级为基本块，计算块值（返回最后一个表达式）。
     fn lower_body_to_block_val(&mut self, body: &HIRBody, target_block: usize) -> Local {
         self.set_current_block(target_block);
 
@@ -2682,7 +2682,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞?HIR 闁秆勵殔閸╁矂骞愰崶褏鏆伴柛褎顨愮槐娆撳箳瑜嶉崺妤呭及椤栨碍鍎婃繛锝堫嚙婵?return闁?
+    /// 将HIR函数体降级为基本块，并在末尾插入return指令。
     fn lower_body_to_block_with_return(
         &mut self,
         body: &HIRBody,
@@ -2691,12 +2691,12 @@ impl<'a> LoweringContext<'a> {
     ) {
         self.set_current_block(target_block);
 
-        // 闂傚嫬绉崇紞鍡涘箥閳ь剟寮垫径搴殧闁?
+        // 降级函数体的所有语句到当前基本块。
         for stmt in &body.stmts {
             self.lower_stmt(stmt);
         }
 
-        // 濠㈣泛瀚幃濠囧嫉閳ь剛绱掗崼锝冣偓鍐╂綇閹呯
+        // 若块尾存在表达式，则先降级该表达式并视情况插入 return。
         if let Some(expr) = &body.expr {
             let result_local = self.lower_expr(expr);
             if add_return {
@@ -2708,8 +2708,8 @@ impl<'a> LoweringContext<'a> {
                     .block_mut(cur)
                     .map_or(false, |b| b.terminator.is_some());
                 if !already_terminated {
-                    // 婵☆偀鍋撻柡灞诲劜濡叉悂宕ラ敂鑺バ?main 闁告垼濮ら弳鐔哥▔閺冨洨绠查柛銉у仧鐞氼偊宕圭€ｎ偅笑闁轰礁鐡ㄩ弳?
-                    // 濠碘€冲€归悘澶愬及椤栨瑧鐟悶娑栧姀閹活亜顕ｈ箛鏇犳尝闁哄绮嶅Σ?unit 缂侇偉顕ч悗鐑芥晬鐏炶棄鐏熷☉鎾崇Х缁绘垿鏁?unit 闁稿﹦銆嬬槐婵嬫嚀鐏炵偓笑閺夆晜鏌ㄥú?None闁挎稑鐗呴崬顒勬儘娴ｇ儤鏅搁柟瀛樺姇濞呮帗瀵煎宕囩闁?0闁?
+                    // 为函数体末尾生成隐式return指令。
+                    // 检查是否为main函数的隐式返回情况。
                     let is_main_with_unit_body = self.mir_fn.name == "main"
                         && matches!(self.mir_fn.return_type, MIRType::Int(_))
                         && matches!(*self.get_local_type(result_local), MIRType::Unit);
@@ -2721,9 +2721,9 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
             }
-            // 濠碘€冲€归悘?add_return = false闁挎稑濂旂粭澶娗庣拠鎻掝潱 terminator闁挎稑鐗忛弫杈╂偘閵娿劍褰х€殿喖绻楅崵婊冾啅鏉堫偒鍟庣紓鍐惧櫙缁辨繈鏁?break闁?
+        // 若需要添加return终止符则插入return指令。
         } else if add_return {
-            // 婵炲备鍓濆﹢浣烘偘閵娿劍褰х€殿喖绻嬬徊楣冩閳ь剟鏁?return闁挎稑鏈崸濠囧礉閻樼鏁?return
+            // 当需要添加return且最后一个块未终止时，插入return指令。
             // Only set return if the current block doesn't already have a
             // terminator (e.g. set by break/continue/return in a statement).
             let cur = self.current_block();
@@ -2737,14 +2737,14 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞?HIR 闁?
+    /// 将HIR函数体降级为新基本块并返回块索引。
     fn lower_body(&mut self, body: &HIRBody) -> usize {
         let entry_block = self.new_block();
         self.lower_body_to_block(body, entry_block);
         entry_block
     }
 
-    /// 闂傚嫬绉崇紞?HIR 閻犲浂鍘艰ぐ?
+    /// 将单条HIR语句降级为MIR指令序列。
     fn lower_stmt(&mut self, stmt: &HIRStmt) {
         match stmt {
             HIRStmt::Let {
@@ -2762,10 +2762,10 @@ impl<'a> LoweringContext<'a> {
                 let mir_ty = ty.clone().into();
 
                 if let Some(value_expr) = value {
-                    // 闁稿繐鐗撳閿嬫媴鎼淬們鈧啯娼忛幆褏纭€鐎电増顨呴崺宀勬晸?
+                    // 先降级 `let` 初始化表达式，再决定绑定策略。
                     let value_local = self.lower_expr(value_expr);
 
-                    // 婵☆偀鍋撻柡灞诲劜濡叉悂宕ラ敂鑺バ?Lambda闁挎稑鐗嗛崢鐘绘⒕閸℃洑绨伴梺顒€鐏濋崢銈夊磹閻旂儤鏆忛柛鎰皺閻涘﹪鏁?
+                // 处理let绑定，确定变量种类并降级初始值。
                     let lambda_name = self.lambda_names.get(&value_local).cloned();
 
                     if let Some(ln) = lambda_name {
@@ -2783,22 +2783,22 @@ impl<'a> LoweringContext<'a> {
                             self.bind_local_symbol(*symbol, local);
                             self.lambda_names.insert(local, ln.clone());
 
-                            // 闁告帗绋戠紓鎾绘偝椤栨凹鏆旂紓浣规尰閻庮垶鏁?
-                            // 闁绘粠鍨伴。銊╁及椤栨瑧顏卞☉鎿冧簼閺嗙喓绱掗崟鍓佺婵絽绻嬮柌婊堝箲閺団€崇闁汇劌瀚ぐ澶愭煂韫囨柨鐦诲銈呮惈缁厾鈧稒锚閸?
+                // 若初始值为lambda，需要为其生成捕获环境。
+                            // 为lambda捕获环境分配数组局部变量。
                             let env_elem_ty = MIR_I64;
                             let env_ty = MIRType::Array(
                                 Box::new(env_elem_ty.clone()),
                                 env_vars.len() as u64,
                             );
 
-                            // 闁告帒妫濋崢銈夋偝椤栨凹鏆旂紒灞炬そ濡?- 濞达綀娉曢弫?User 缂侇偉顕ч悗閿嬬閵夈倗鈹掓慨婵撶悼閳?alloca
+                            // 创建lambda捕获环境数组local。
                             let env_local = self.mir_fn.add_local(LocalKind::User, env_ty);
 
-                            // 閻庢稒锚閸嬪秴袙韫囧酣鍤嬮柟瑙勬礉楠炲繘鎯冮崟顐㈢秮闂佹彃绻愰崺宀勬偝椤栨凹鏆旈柨?
+                            // 遍历lambda环境变量，存入捕获数组。
                             for (i, (var_name, _var_local)) in env_vars.iter().enumerate() {
-                                // 濞寸姴楠哥紞瀣礈瀹ュ嫮鐟愬☉鎾愁儐閺嬪啴鎳㈠畡鏉跨悼闁硅娲濋獮蹇涘矗濮椻偓閸ｆ椽鏁?local
+                                // 若变量已在当前上下文中绑定，则把它加入 lambda 捕获环境。
                                 if let Some(&captured_local) = self.local_names.get(var_name) {
-                                    // 闁兼儳鍢茶ぐ鍥偝椤栨凹鏆旈柛娆愶耿閸ｆ椽鎯冮崟顐ｅ嬀闁秆€鍋?
+                                // 计算被捕获变量的元素地址并存入环境。
                                     let elem_addr_local = self.add_local(
                                         None,
                                         LocalKind::Temp,
@@ -2816,7 +2816,7 @@ impl<'a> LoweringContext<'a> {
                                         index: index_local,
                                     });
 
-                                    // 闁告梻濮惧ù鍥箲閺団€崇闁汇劌瀚ぐ澶愭煂韫囥儲瀚?
+                                // 从外层上下文加载被捕获的变量值。
                                     let captured_value_local =
                                         self.add_local(None, LocalKind::Temp, env_elem_ty.clone());
                                     self.push_inst(Instruction::Load {
@@ -2824,7 +2824,7 @@ impl<'a> LoweringContext<'a> {
                                         source: captured_local,
                                     });
 
-                                    // 閻庢稒锚閸嬪秹宕氶幍顔肩畾闁?
+                // 将捕获变量的值逐一存入环境数组中。
                                     self.push_inst(Instruction::Store {
                                         destination: elem_addr_local,
                                         value: captured_value_local,
@@ -2832,8 +2832,8 @@ impl<'a> LoweringContext<'a> {
                                 }
                             }
 
-                            // 闁兼儳鍢茶ぐ鍥偝椤栨凹鏆旈柣銊ュ濠€鎾锤閳ь剟鏁嶉崼婊呯▕濞戞挾鍎ょ€垫岸鏌﹂崼婊呯倞闂侇偅甯炵划?Lambda闁?
-                            // 闁烩晛鐡ㄧ敮瀛樻媴鐠恒劍鏆?mir_fn.add_local 闁兼澘濂旂粭澶愭晸?add_local闁挎稑鐭傛导鈺呭礂瀹ュ懐娈洪柣婊庡灠椤ｃ劑宕ｅ鈧崳鍝勄庣拠鎻掝潱闁?local_names
+                            // 分配指向lambda捕获环境的指针。
+                            // 分配指向lambda捕获环境的指针局部变量。
                             let env_ptr_local = self
                                 .mir_fn
                                 .add_local(LocalKind::Temp, MIRType::Ptr(Box::new(env_elem_ty)));
@@ -2842,7 +2842,7 @@ impl<'a> LoweringContext<'a> {
                                 source: env_local,
                             });
 
-                            // 閻忓繐妫涢獮鍡樻櫠閸愨晛鐦归梺钘夌墕閻°劑宕掗妸銉ョ厒 lambda_environments 濞戞搩鍙忕槐婵囩閵夈倗鈹掗柛锔哄姀閻ㄧ喖鎮介妸锔筋槯濞达綀娉曢弫?
+                            // 更新lambda环境中的env_ptr_local字段。
                             if let Some(env_mut) = self.lambda_environments.get_mut(&ln) {
                                 env_mut.env_ptr_local = Some(env_ptr_local);
                             } else {
@@ -2853,8 +2853,8 @@ impl<'a> LoweringContext<'a> {
                             }
                         }
                     } else {
-                        // 闁哄拋鍣ｉ埀顒佽壘閳ь剛銆嬬槐婵嬪礆濞戞绱?local 妤犵偠娉涢悺銊╂晸?
-                        // 闁绘顫夐悾鈺傚緞閸曨厽鍊為柨娑欒壘椤┭囧几濠婂啫绀侀柛濠傚悑濡叉悂寮幍顔剧煁缂侇偉顕ч悗鐑芥儍閸曨厽鏆忛柟鏉戝槻瑜板鏌岃箛銉х闁烩晛鐡ㄧ敮鎾煂瀹ュ懏鍤掗柛姘Т閻ｇ娀鎳撶仦鑲╃憹闁哄嫷鍨伴崹鍗烆嚈閻戞ɑ鐓€闁告瑦锕㈤崳?
+                    // 若为lambda引用，处理捕获环境传递。
+                        // 若捕获变量为数组类型，直接存储引用。
                         let value_ty = self.get_local_type(value_local).clone();
                         let value_info_opt = self
                             .mir_fn
@@ -2892,18 +2892,18 @@ impl<'a> LoweringContext<'a> {
                         if matches!(value_ty, MIRType::Array(_, _))
                             && value_info.kind == LocalKind::User
                         {
-                            // 闁告瑥鍟块埀顒€鍚嬪Σ鎼佸极閹殿喚鐭嬬紒顐ヮ嚙閻庣兘鎯冮崟顓熸殢闁规潙鍢茶ぐ澶愭煂韫囥儳绀夐柣鈺佺摠鐢浜搁崱妤€寰撻梺鎻掔Т閹筹繝宕ュ鍕闁烩晩鍠楅悥锝夊矗濮椻偓閸?
-                            // 闁?local_names 濞戞搩鍘奸崹褰掓⒔閵堝棙锛嬮柣銊ュ濡惭呬焊閸曞墎绀夋繛锝堫嚙婵偤寮幍顔界暠闁哄嫮濮撮惃?
+                            // 将数组类型变量直接加入local_names映射。
+                            // 数组类型直接复用local，加入名称映射。
                             self.local_names.insert(name.clone(), value_local);
                             self.bind_local_symbol(*symbol, value_local);
-                            // 濞戞挸绉堕弫鎾绘晸?Store 闁圭娲ｉ幎?
+                            // 绑定符号到local并传播类型名。
                         } else {
-                            // 闁哄拋鍣ｉ埀顒佽壘閳ь剛銆嬬槐婵嬪礆濞戞绱?local 妤犵偠娉涢悺銊╂晸?
-                            // 濞达綀娉曢弫銈夊磹閼测晜鐣遍悗鍦仱濡绢垳鐚剧拠鑼偓鐑芥晬閸繍娲ら柨?HIR 缂侇偉顕ч悗閿嬬▔瀹ュ拋妾紒顔煎⒔閳ユ﹢鏁嶇仦鑲╀紣濠碘€冲€荤划銊╁几閸曨亞绉肩紒顐ヮ嚙閻庣兘鏁?
+                            // 普通类型：创建新local并生成Store指令。
+                            // 否则创建新局部变量并生成Store指令。
                             let actual_ty = value_ty.clone();
                             let local = self.add_local(Some(name.clone()), kind, actual_ty);
                             self.bind_local_symbol(*symbol, local);
-                            // 濞磋偐濮甸幐杈╃尵鐠囪尙鈧兘宕ュ鍥嗙偤鏁嶅顒夋搐闁哄绮岃ぐ鎼佸磹閸忓吋绠掔紒顐ヮ嚙閻庣兘宕ュ鍥嗙偤鏁嶇仦鐣屾闁稿繑婀圭槐鍫曞箻椤撶偛鐓傞柡鍌涘濞?local
+                            // 将类型名传播给新创建的局部变量。
                             if let Some(type_name) = self.type_names.get(&value_local).cloned() {
                                 self.type_names.insert(local, type_name);
                             }
@@ -2918,7 +2918,7 @@ impl<'a> LoweringContext<'a> {
                         }
                     }
                 } else {
-                    // 婵炲备鍓濆﹢渚€宕氬┑鍡╂綏闁稿﹨鍋愬▓?let 缂備焦鍨甸悾?
+                    // 普通（非异步）let 绑定，直接添加局部变量。
                     let local = self.add_local(Some(name.clone()), kind, mir_ty);
                     self.bind_local_symbol(*symbol, local);
                 }
@@ -2930,7 +2930,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞?HIR 閻炴稏鍔忛幓顏堟晸?
+    /// 生成运行时打印调用的指令（用于调试输出）。
     fn emit_runtime_print_call(&mut self, func: &str, arg_local: Local) {
         let call_local = self.add_local(None, LocalKind::Temp, MIR_UNIT);
         self.push_inst(Instruction::Call {
@@ -3004,18 +3004,18 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::Lit(lit) => self.lower_literal(lit),
             HIRExpr::Var { name, symbol } => self.resolve_local(name, *symbol),
             HIRExpr::Unary(op, operand) => {
-                // 闁绘顫夐悾鈺傚緞閸曨厽鍊炵€殿喗娲滈弫銈夊椽瀹€鍐冩帒顕ｉ弴鐘虫殢閺夆晜鍔楅悾濠氭晸?
+                // 一元表达式先区分取引用这类需要地址语义的特殊分支。
                 match op {
                     hir::HIRUnaryOp::Ref | hir::HIRUnaryOp::RefMut => {
-                        // &expr - 闁兼儳鍢茶ぐ鍥╂偘閵娿劍褰х€殿喖绻掑▓鎴﹀捶閺夋寧绲?
+                    // 取引用操作：获取操作数的地址。
                         let expr_local = self.lower_expr(operand);
                         let expr_ty = self.get_local_type(expr_local).clone();
 
-                        // 闁告帗绋戠紓鎾诲箰閸ヮ剚瀚涚紒顐ヮ嚙閻?
+                        // 取引用操作：生成指针类型的局部变量。
                         let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
                         let ptr_local = self.add_local(None, LocalKind::Temp, ptr_ty);
 
-                        // 濞达綀娉曢弫?AddrOf 闁圭娲ｉ幎銈夋嚔瀹勬澘绲块柛锔芥緲濞?
+                        // 生成AddrOf指令，创建指针类型local。
                         self.push_inst(Instruction::AddrOf {
                             destination: ptr_local,
                             source: expr_local,
@@ -3024,7 +3024,7 @@ impl<'a> LoweringContext<'a> {
                         ptr_local
                     }
                     hir::HIRUnaryOp::Deref => {
-                        // *ptr - 閻熸瑱绲界槐鈺呮晸?
+                    // 解引用操作：通过Load指令读取指针指向的值。
                         let ptr_local = self.lower_expr(operand);
                         let ptr_ty = self.get_local_type(ptr_local).clone();
 
@@ -3042,7 +3042,7 @@ impl<'a> LoweringContext<'a> {
                         result_local
                     }
                     _ => {
-                        // 闁稿繑婀圭划顒佺▔閳ь剟宕楅崘顓犵缂佺姵顨堥?
+                        // 其余一元运算按普通值语义降级。
                         let operand_local = self.lower_expr(operand);
                         let mir_op = self.lower_un_op(op);
                         let local = self.add_local(None, LocalKind::Temp, MIR_I64);
@@ -3111,8 +3111,8 @@ impl<'a> LoweringContext<'a> {
                         });
 
                         // Convert i64 result to bool:
-                        // For Eq: result != 0 means strings are equal 闁?true
-                        // For Ne: result == 0 means strings are not equal 闁?true
+                        // 字符串比较：将比较结果转换为bool。
+                        // Eq时非零表示相等，Ne时零表示不等。
                         let cmp_op = if mir_op == MirBinOp::Eq {
                             MirBinOp::Ne
                         } else {
@@ -3130,7 +3130,7 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
 
-                // 婵絾妫佺欢婵嬪椽瀹€鍕ㄥ亾閺勫繒甯嗛柟鍨С缂嶆梹娼婚弬鎸庣 bool闁挎稑鑻崣鐐閺嶃劍鎯欏ù锝嗙矎缁绘垿鏁?int(64)
+                // 在生成二元指令前，调和两个操作数的类型。
                 // Before generating the binary instruction, reconcile operand
                 // types: insert Cast instructions for compatible mismatches or
                 // record an error for incompatible types (Requirement 7.4).
@@ -3179,7 +3179,7 @@ impl<'a> LoweringContext<'a> {
                     else_block,
                 });
 
-                // 闂傚嫬绉崇紞?then 闁告帒妫欓弫?
+                // 降级then分支到新基本块，并获取其值。
                 let then_val = self.lower_body_to_block_val(then_branch, then_block);
                 let then_end = self.current_block();
                 if let Some(block) = self.mir_fn.block_mut(then_end) {
@@ -3188,7 +3188,7 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
 
-                // 闂傚嫬绉崇紞?else 闁告帒妫欓弫?
+                // 降级else分支（如存在）到新基本块。
                 if let Some(e) = else_branch {
                     let else_val = self.lower_body_to_block_val(e, else_block);
                     let else_end = self.current_block();
@@ -3198,8 +3198,8 @@ impl<'a> LoweringContext<'a> {
                         }
                     }
 
-                    // 闁?join_block 闁告艾鐗嗛懟鐔哥▔閵堝嫰鍤嬮柛鎺戞閺侇喚绱掗幘瀵镐函闁?
-                    // 婵炲鍔嶉崜浼存晬濮濃偓LVM 濞戞挸绉撮崢鎴犳媼?`phi void`闁挎稑鑻ú婊冾潰?Unit 缂侇偉顕ч悗閿嬬▔瀹ュ洦鏅搁柟?Phi闁?
+                    // if表达式结果合并：插入Phi或直接赋值。
+                    // 合并if-else分支到join块，插入Phi节点。
                     self.set_current_block(join_block);
                     let then_ty = self.get_local_type(then_val).clone();
                     let is_void_like = match &then_ty {
@@ -3218,7 +3218,7 @@ impl<'a> LoweringContext<'a> {
                         result
                     }
                 } else {
-                    // 婵炲备鍓濆﹢?else 闁告帒妫欓弫顕€鏁嶇€规攳se_block 闁烩晛鐡ㄧ敮瀵告崉鐎圭姵绁柨?join_block
+                    // 更新else分支的末尾块并插入跳转指令。
                     if let Some(block) = self.mir_fn.block_mut(else_block) {
                         if block.terminator.is_none() {
                             block.set_terminator(Terminator::Goto(join_block));
@@ -3234,13 +3234,13 @@ impl<'a> LoweringContext<'a> {
 
                 self.set_terminator(Terminator::Goto(loop_block));
 
-                // 閺夆晜绋戦崣鍡楊嚗椤忓棗绠氬☉鎾筹梗缁楀懘寮崶椋庣獥break -> exit_block, continue -> loop_block
+                // 压入循环上下文，约定 `break -> exit_block`，`continue -> loop_block`。
                 self.push_loop(exit_block, loop_block);
 
-                // 闂傚嫬绉崇紞?body 闁?loop_block闁挎稑鐗呯粭澶娗庣拠鎻掝潱 return闁?
+                // 将loop循环体降级为基本块，设置到loop_block。
                 self.lower_body_to_block_with_return(body, loop_block, false);
 
-                // 闂侇偀鍋撻柛鎴濇惈閹﹪鎮抽娆戠憪濞戞挸顑嗛弸?
+                // 弹出循环栈，更新break目标信息。
                 self.pop_loop();
 
                 // After lowering the body, the current block may differ from
@@ -3277,7 +3277,7 @@ impl<'a> LoweringContext<'a> {
 
                 self.set_terminator(Terminator::Goto(cond_block));
 
-                // 闂傚嫬绉崇紞鍡涘级閳ュ弶顐介悶娑栧姀閹活亜顕ｈ箛鎾崇厒 cond_block
+                // 设置当前基本块为while的条件判断块。
                 self.set_current_block(cond_block);
                 let cond_local = self.lower_expr(cond);
                 self.set_terminator(Terminator::If {
@@ -3286,28 +3286,28 @@ impl<'a> LoweringContext<'a> {
                     else_block: exit_block,
                 });
 
-                // 閺夆晜绋戦崣鍡楊嚗椤忓棗绠氬☉鎾筹梗缁楀懘寮崶椋庣獥break -> exit_block, continue -> cond_block
+                // 压入循环上下文，约定 `break -> exit_block`，`continue -> cond_block`。
                 self.push_loop(exit_block, cond_block);
 
-                // 闂傚嫬绉崇紞?body 闁?body_block闁挎稑鐗呯粭澶娗庣拠鎻掝潱 return闁?
+                // 将while循环体降级，设置到body_block。
                 self.lower_body_to_block_with_return(body, body_block, false);
 
-                // 闂侇偀鍋撻柛鎴濇惈閹﹪鎮抽娆戠憪濞戞挸顑嗛弸?
+                // 弹出循环栈，更新break目标信息。
                 self.pop_loop();
 
-                // body 缂備焦鎸诲顐﹀触鎼淬倗鍎查弶鐑嗗墮濞?cond_block
-                // 婵炲鍔嶉崜浼存晬濮濇笝dy 闁告瑯鍨甸崗姗€宕犻崨顓熷創闁硅矇鍐ㄧ厬婵炵繝绶ょ槐娆撴晸?if/else闁挎稑顧€缁辨繄鈧絻澹堥崵?current_block 濞戞挸绉撮崯鈧柨?body_block
-                // 闂傚洠鍋撻悷鏇氱濠€?body 闁汇劌瀚〒鍫曞触鎼存繄顏卞☉鎿冧簼濡炶法鎹勯崘銊﹀仴濞戞挸锕ㄩ鏇㈡晸?Goto(cond_block)
+                // 若 body 末尾块尚未终止，则回跳到 `cond_block`。
+                // 当前循环体结束，收集body末尾块的信息。
+                // 降级结束后将body末尾块跳转回循环条件块。
                 let body_end_block = self.current_block();
                 if body_end_block != body_block {
-                    // body 闁告牕鎳庨幆鍫ュ箳瑜嶉崺妤€霉娓氬﹦绀夐柡鍫氬亾闁告艾绨肩粩瀛樼▔椤忓嫭鍋ュ☉鎾崇У濡?body_block
+                // 循环体结束后若未终止，添加跳回条件块的跳转。
                     if let Some(block) = self.mir_fn.block_mut(body_end_block) {
                         if block.terminator.is_none() {
                             block.set_terminator(Terminator::Goto(cond_block));
                         }
                     }
                 }
-                // 濞戞梻鍠愰ˉ鍛存晸?body_block 闁哄牜鍓濋棅鈺呮晬閸垻鏆嗛柨?body 闁汇劌瀚崕蹇涘礃绾板绀?
+                // 若循环体块未被终止，添加到back-edge跳转。
                 if let Some(block) = self.mir_fn.block_mut(body_block) {
                     if block.terminator.is_none() {
                         block.set_terminator(Terminator::Goto(cond_block));
@@ -3323,24 +3323,25 @@ impl<'a> LoweringContext<'a> {
                 body,
                 ..
             } => {
-                // 婵☆偀鍋撻柡灞诲劜濡叉悂宕ラ敂鑳闁肩厧鍟ú鎸庢交椤撴繂鏁?
+                // 根据迭代对象形态分别处理 `for` lowering。
                 match iter.as_ref() {
                     HIRExpr::Range {
                         start,
                         end,
                         inclusive,
                     } => {
-                        // for x in start..end { body }  闂傚嫬绉崇紞鍡涙晸?while 鐎甸偊浜為獮?
+                    // for x in start..end语句，生成对应的范围循环MIR。
                         let cond_block = self.new_block();
                         let body_block = self.new_block();
-                        let inc_block = self.new_block(); // 濠⒀呭仜婵偛顕ラ鍡楃畾闁告瑦锕㈤崳娲儍閸曨偅鍋?
+                        let inc_block = self.new_block();
+                        // 生成for x in 0..N形式的范围循环。
                         let exit_block = self.new_block();
 
-                        // 闂傚嫬绉崇紞?start 闁?end
+                        // 降级start和end表达式并存入局部变量。
                         let start_local = if let Some(s) = start {
                             self.lower_expr(s)
                         } else {
-                            // 濮掓稒顭堥濠氭晸?0 鐎殿喒鍋撻柨?
+                            // 缺省起点时使用 `0` 作为范围起始。
                             let zero = self.add_local(None, LocalKind::Temp, MIR_I64);
                             self.push_inst(Instruction::Assign {
                                 destination: zero,
@@ -3352,7 +3353,7 @@ impl<'a> LoweringContext<'a> {
                         let end_local = if let Some(e) = end {
                             self.lower_expr(e)
                         } else {
-                            // 婵炲备鍓濆﹢浣虹磼閹惧瓨灏嗛柛濠勩€嬬槐婵嬪礆濞戞绱﹀☉鎾亾濞戞搩浜滃畷鐗堟媴瀹ュ浂鍎婇柨娑樼墛濡倝姊介幇顒佸剷闁绘粠鍨界槐?
+                            // 计算范围上界（未指定时使用数组长度）。
                             let max = self.add_local(None, LocalKind::Temp, MIR_I64);
                             self.push_inst(Instruction::Assign {
                                 destination: max,
@@ -3361,7 +3362,7 @@ impl<'a> LoweringContext<'a> {
                             max
                         };
 
-                        // 闁告帗绋戠紓鎾愁嚗椤忓棗绠氶柛娆愶耿閸ｆ椽鐛捄鍝勭仴濠殿喖顑呯€垫煡鏁?start
+                        // 为范围循环生成循环变量和步进逻辑。
                         let loop_var =
                             self.add_local(Some(var_name.clone()), LocalKind::User, MIR_I64);
                         self.push_inst(Instruction::Store {
@@ -3369,10 +3370,10 @@ impl<'a> LoweringContext<'a> {
                             value: start_local,
                         });
 
-                        // 閻犲搫鐤囧ù鍡涘礆閻楀牊钂嬪ù鐘烘硾濞?
+                        // 条件块循环回while条件判断。
                         self.set_terminator(Terminator::Goto(cond_block));
 
-                        // 闁哄鈧弶顐介柛褎顨愮槐鏉课涢埀顒勫蓟閵夈儲鍎曢柣婊庡灠瑜板鏁?< end
+                        // 生成范围循环的步进增量指令。
                         self.set_current_block(cond_block);
                         let loop_var_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
                         self.push_inst(Instruction::Load {
@@ -3386,7 +3387,7 @@ impl<'a> LoweringContext<'a> {
                             source: end_local,
                         });
 
-                        // 婵絾妫佺欢婵嬪箼瀹ュ嫮绋?
+                        // 生成范围比较条件。
                         let cond_local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
                         let compare_op = if *inclusive {
                             MirBinOp::Le
@@ -3406,23 +3407,23 @@ impl<'a> LoweringContext<'a> {
                             else_block: exit_block,
                         });
 
-                        // 閺夆晜绋戦崣鍡楊嚗椤忓棗绠氬☉鎾筹梗缁楀懘寮崶椋庣獥break -> exit_block, continue -> inc_block
+                        // 压入循环上下文，约定 `break -> exit_block`，`continue -> inc_block`。
                         self.push_loop(exit_block, inc_block);
 
-                        // 鐎甸偊浜為獮鍡樻媴閹垮嫮绀勫☉鎾崇У閸у﹪鏁?return闁?
+                        // 降级for-in（迭代器）循环体到body_block。
                         self.lower_body_to_block_with_return(body, body_block, false);
 
-                        // 闂侇偀鍋撻柛鎴濇惈閹﹪鎮抽娆戠憪濞戞挸顑嗛弸?
+                        // 弹出循环栈，更新break目标信息。
                         self.pop_loop();
 
-                        // body_block 缂備焦鎸诲顐﹀触鎼淬倗鍎查弶鐑嗗墮閸?inc_block
+                        // 若 body_block 尚未终止，则跳到 `inc_block`。
                         if let Some(block) = self.mir_fn.block_mut(body_block) {
                             if block.terminator.is_none() {
                                 block.set_terminator(Terminator::Goto(inc_block));
                             }
                         }
 
-                        // 濠⒀呭仜婵偤宕稿Δ瀣獥濠⒀呭仜婵偛顕ラ鍡楃畾闁告瑦锕㈤崳?
+                        // 设置步进块并增加索引变量。
                         self.set_current_block(inc_block);
                         let inc_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
                         self.push_inst(Instruction::Load {
@@ -3449,27 +3450,27 @@ impl<'a> LoweringContext<'a> {
                             value: inc_result,
                         });
 
-                        // 閻犲搫鐤囧ù鍡涘炊閻愬瓨钂嬪ù鐘烘硾濞?
+                        // 设置条件块跳转回for条件判断块。
                         self.set_terminator(Terminator::Goto(cond_block));
 
                         self.set_current_block(exit_block);
                         self.add_local(None, LocalKind::Temp, MIR_UNIT)
                     }
                     _ => {
-                        // 閻忓繑绻嗛惁顖炲极閹殿喚鐭嬮弶鈺婂幒閸? for x in [1, 2, 3] 闁?for x in arr
+                    // 处理非范围类型的for-in循环（迭代器模式）。
                         let iter_local = self.lower_expr(iter);
                         let iter_ty = self.get_local_type(iter_local).clone();
 
                         match iter_ty {
                             MIRType::Array(elem_ty, len) => {
-                                // 闁轰焦澹嗙划宥嗘交椤撴繂鏁? for x in arr { body }
+                                // 处理数组形式的 `for x in arr { body }`。
                                 let cond_block = self.new_block();
                                 let body_block = self.new_block();
                                 let inc_block = self.new_block();
                                 let exit_block = self.new_block();
 
-                                // 闁告帗绋戠紓鎾舵閵忕姷绌块柛娆愶耿閸ｆ椽鐛捄鍝勭仴濠殿喖顑呯€垫煡鏁?0
-                                // 缂佷究鍨圭槐鈺呭矗濮椻偓閸ｆ椽妫侀埀顒傛啺娴ｅ憡韬€甸偊浜為獮鍡樼▔椤撶喐绾柡鍌氬簻缁辨繃鎷呯捄銊︽殢 User 缂侇偉顕ч悗?
+                                // 初始化for循环的索引变量。
+                                // 为for循环创建索引变量和初始值。
                                 let index_var = self.add_local(None, LocalKind::User, MIR_I64);
                                 let init_val = self.add_local(None, LocalKind::Temp, MIR_I64);
                                 self.push_inst(Instruction::Assign {
@@ -3481,24 +3482,24 @@ impl<'a> LoweringContext<'a> {
                                     value: init_val,
                                 });
 
-                                // 闁告帗绋戠紓鎾愁嚗椤忓棗绠氶柛娆愶耿閸ｆ椽鏁嶉崼婊呯憿闁轰焦澹嗙划宥夊礂閸愵亞顦辩紒顐ヮ嚙閻庣兘鎯勭粙鎸庡€遍柨?
+                                // 为for循环创建循环变量并绑定。
                                 let loop_var = self.add_local(
                                     Some(var_name.clone()),
                                     LocalKind::User,
                                     (*elem_ty).clone(),
                                 );
 
-                                // 闁告帗绋戠紓鎾诲极閹殿喚鐭嬮梻鈧崹顔碱唺閻㈩垱鎮傞崳?
+                                // 获取数组/切片的长度用于边界检查。
                                 let len_local = self.add_local(None, LocalKind::Temp, MIR_I64);
                                 self.push_inst(Instruction::Assign {
                                     destination: len_local,
                                     value: MirConstant::Int(len as i64),
                                 });
 
-                                // 閻犲搫鐤囧ù鍡涘礆閻楀牊钂嬪ù鐘烘硾濞?
+                                // 设置循环条件块并添加跳转。
                                 self.set_terminator(Terminator::Goto(cond_block));
 
-                                // 闁哄鈧弶顐介柛褎顨愮槐鏉课涢埀顒勬晸?index < len
+                                // 生成数组for循环的条件检查跳转。
                                 self.set_current_block(cond_block);
                                 let index_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
                                 self.push_inst(Instruction::Load {
@@ -3512,7 +3513,7 @@ impl<'a> LoweringContext<'a> {
                                     source: len_local,
                                 });
 
-                                // 婵絾妫佺欢?index < len
+                                // 生成边界检查条件 `index < len`。
                                 let cond_local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
                                 self.push_inst(Instruction::Binary {
                                     destination: cond_local,
@@ -3527,14 +3528,14 @@ impl<'a> LoweringContext<'a> {
                                     else_block: exit_block,
                                 });
 
-                                // 閺夆晜绋戦崣鍡楊嚗椤忓棗绠氬☉鎾筹梗缁楀懘鏁?
+                                // 压入循环上下文，约定 `break -> exit_block`，`continue -> inc_block`。
                                 self.push_loop(exit_block, inc_block);
 
-                                // 鐎甸偊浜為獮鍡樻媴閹垮嫮绐楀Λ锝嗙墪閸樻盯宕濋悩鐑樼グ arr[index] 闁告帗婢橀幆濠囨偝椤栨艾缍侀柨?
+                                // 设置循环体块并绑定当前元素。
                                 self.set_current_block(body_block);
 
-                                // 閻犱緤绱曢悾濠氬礂閸愵亞顦遍柛锔芥緲濞? &arr[index]
-                                // 闁?load index_var闁挎稑婀秙er local闁挎稑顦崺?Temp闁挎稑鑻崯鈧ù鑲╁Х缁?IndexAddr
+                                // 从循环索引变量加载当前值。
+                                // 加载索引变量后，计算元素地址。
                                 let index_for_addr = self.add_local(None, LocalKind::Temp, MIR_I64);
                                 self.push_inst(Instruction::Load {
                                     destination: index_for_addr,
@@ -3551,7 +3552,7 @@ impl<'a> LoweringContext<'a> {
                                     index: index_for_addr,
                                 });
 
-                                // 闁告梻濮惧ù鍥礂閸愵亞顦遍柛濠勫帶閸╁苯顕ラ鍡楃畾闁告瑦锕㈤崳?
+                                // 通过Load指令从数组加载当前元素。
                                 let elem_loaded =
                                     self.add_local(None, LocalKind::Temp, (*elem_ty).clone());
                                 self.push_inst(Instruction::Load {
@@ -3559,26 +3560,26 @@ impl<'a> LoweringContext<'a> {
                                     source: elem_addr_local,
                                 });
 
-                                // 閻庢稒锚閸嬪秹宕氶弶鎸庡剷闁绘粠鍨拌ぐ澶愭晸?
+                                // 将元素值存入循环变量local。
                                 self.push_inst(Instruction::Store {
                                     destination: loop_var,
                                     value: elem_loaded,
                                 });
 
-                                // 闂傚嫬绉崇紞鍡楊嚗椤忓棗绠氶柨?
+                                // 降级for循环体到新基本块。
                                 self.lower_body_to_block_with_return(body, body_block, false);
 
-                                // 闂侇偀鍋撻柛鎴濇惈閹﹪鎮抽娆戠憪濞戞挸顑嗛弸?
+                                // 弹出循环栈，更新break目标信息。
                                 self.pop_loop();
 
-                                // body_block 缂備焦鎸诲顐﹀触鎼淬倗鍎查弶鐑嗗墮閸?inc_block
+                                // 若 body_block 尚未终止，则跳到 `inc_block`。
                                 if let Some(block) = self.mir_fn.block_mut(body_block) {
                                     if block.terminator.is_none() {
                                         block.set_terminator(Terminator::Goto(inc_block));
                                     }
                                 }
 
-                                // 濠⒀呭仜婵偤宕稿Δ瀣獥index++
+                                // 生成索引自增逻辑 `index++`。
                                 self.set_current_block(inc_block);
                                 let inc_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
                                 self.push_inst(Instruction::Load {
@@ -3605,14 +3606,14 @@ impl<'a> LoweringContext<'a> {
                                     value: inc_result,
                                 });
 
-                                // 閻犲搫鐤囧ù鍡涘炊閻愬瓨钂嬪ù鐘烘硾濞?
+                                // 跳回条件检查块继续循环。
                                 self.set_terminator(Terminator::Goto(cond_block));
 
                                 self.set_current_block(exit_block);
                                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
                             }
                             _ => {
-                                // 濞戞挸绉甸弫顕€骞愭担鐑樼暠閺夆晩鍘洪崬顒勫闯閵娧嗩潶闁?
+                            // 捕获变量解析失败，生成错误信息。
                                 self.errors.push(format!(
                                     "for loop: unsupported iterator type: {:?}",
                                     iter_ty
@@ -3626,7 +3627,7 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::Call { func, args } => {
                 let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
 
-                // 闁兼儳鍢茶ぐ鍥礄閼恒儲娈堕柛姘Т閹风増娼婚弬鎸庣缂侇偉顕ч悗鐑芥晬鐏炵偓鏆滈柨?Lambda 閻犲鍟伴弫?
+                // 解析函数表达式、函数名、返回类型和环境指针。
                 let (func_name, ret_type, env_ptr_local) = match func.as_ref() {
                     HIRExpr::Var { name, .. } => {
                         // Prefer local function-valued variables (e.g. lambdas) over builtins.
@@ -3676,7 +3677,7 @@ impl<'a> LoweringContext<'a> {
                     self.type_names.insert(local, name.clone());
                 }
 
-                // 濠碘€冲€归悘澶愬嫉婢跺苯绠氬褍鍟€垫岸鏌﹂崼顒傜閻忓繐妫楅崣鐐媴濠娾偓鐠愮喓绮璺伇濞戞搩浜滃顒勫极妫颁胶鐐婇柨?
+                // 调用lambda时将环境指针作为第一个参数传入。
                 let mut final_args = Vec::new();
                 if let Some(env_ptr) = env_ptr_local {
                     final_args.push(env_ptr);
@@ -3701,7 +3702,7 @@ impl<'a> LoweringContext<'a> {
                 local
             }
             HIRExpr::And(left, right) => {
-                // 闁活収鍙€閻箖鏌呴弰蹇曞竼闁?- 缂佺姭鍋撻柛鏍ㄧ墧鐠愮喐绂嶇仦钘夊笚閺夆晜鍔楅悾?
+                // 短路逻辑AND：左侧为false时直接跳过右侧。
                 let left_local = self.lower_expr(left);
                 let right_local = self.lower_expr(right);
                 let local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
@@ -3714,7 +3715,7 @@ impl<'a> LoweringContext<'a> {
                 local
             }
             HIRExpr::Or(left, right) => {
-                // 闁活収鍙€閻箖鏌呴弰蹇曞竼闁?- 缂佺姭鍋撻柛鏍ㄧ墧鐠愮喐绂嶇仦钘夊笚閺夆晜鍔楅悾?
+                // 短路逻辑OR：左侧为true时直接跳过右侧。
                 let left_local = self.lower_expr(left);
                 let right_local = self.lower_expr(right);
                 let local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
@@ -3727,14 +3728,14 @@ impl<'a> LoweringContext<'a> {
                 local
             }
             HIRExpr::Break(value) => {
-                // 濠㈣泛瀚幃?break
+                // 处理 `break` 表达式。
                 if let Some(target) = self.get_break_target() {
-                    // 闂傚嫬绉崇紞鍡涘矗椤栫偐鍋撴径灞剧暠閺夆晜鏌ㄥú鏍晸?
+                    // 若有break目标，生成到目标块的跳转指令。
                     if let Some(v) = value {
                         self.lower_expr(v);
                     }
                     self.set_terminator(Terminator::Break { target });
-                    // break 闁告艾绨肩粭澶愬矗椤栨繃褰ч柨娑樼焷缁绘垿宕堕悙鎵伇濞戞搩浜滃畷鐗堟媴瀹ュ浂鍎?Local
+                    // break语句：设置跳转目标并返回unit。
                     self.add_local(None, LocalKind::Temp, MIR_UNIT)
                 } else {
                     self.errors.push("break outside of loop".to_string());
@@ -3742,10 +3743,10 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             HIRExpr::Continue => {
-                // 濠㈣泛瀚幃?continue
+                // 处理 `continue` 表达式。
                 if let Some(target) = self.get_continue_target() {
                     self.set_terminator(Terminator::Continue { target });
-                    // continue 闁告艾绨肩粭澶愬矗椤栨繃褰ч柨娑樼焷缁绘垿宕堕悙鎵伇濞戞搩浜滃畷鐗堟媴瀹ュ浂鍎?Local
+                    // continue语句：设置跳转目标并返回unit。
                     self.add_local(None, LocalKind::Temp, MIR_UNIT)
                 } else {
                     self.errors.push("continue outside of loop".to_string());
@@ -3753,11 +3754,11 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             HIRExpr::Assign { target, value } => {
-                // 閻犙冾儏閳ь剝澹堥妴鍐╂綇閹呯: target = value
-                // 闂傚嫬绉崇紞鍡涘矗缁涜瀚?
+                // 普通赋值：降级目标和值，生成Store或Assign指令。
+                // 降级赋值语句，获取目标局部变量。
                 let value_local = self.lower_expr(value);
 
-                // 闂傚嫬绉崇紞鍡楊啅閿斿吋瀚?闁?闁兼儳鍢茶ぐ鍥儎椤旂晫鍨奸柛娆愶耿閸?
+                // 根据赋值目标类型分别生成Store或Assign指令。
                 match target.as_ref() {
                     HIRExpr::Var { name, symbol } => {
                         let target_local = self.resolve_local(name, *symbol);
@@ -3765,7 +3766,7 @@ impl<'a> LoweringContext<'a> {
                             // Skip no-op self-assignment (`x = x`) to reduce temp churn.
                             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
                         }
-                        // 濞磋偐濮甸幐杈╃尵鐠囪尙鈧兘宕ュ鍥嗙偤鏁嶅顒夋搐闁哄绮岃ぐ鎼佸磹閸忓吋绠掔紒顐ヮ嚙閻庣兘宕ュ鍥嗙偤鏁嶇仦鐣屾闁稿繑婀圭槐鍫曞箻椤撶偛鐓傞柣鈺婂枟閻?local
+                        // 复制类型名到目标局部变量的映射中。
                         if let Some(type_name) = self.type_names.get(&value_local).cloned() {
                             self.type_names.insert(target_local, type_name);
                         }
@@ -3775,11 +3776,11 @@ impl<'a> LoweringContext<'a> {
                         });
                     }
                     HIRExpr::Index { base, index } => {
-                        // 闁轰焦澹嗙划宥夊礂閸愵亞顦遍悹褍顑戦幏? arr[i] = value
+                        // 处理索引赋值：`arr[i] = value`。
                         let base_local = self.lower_expr(base);
                         let index_local = self.lower_expr(index);
 
-                        // 閻犱緤绱曢悾濠氬礂閸愵亞顦遍柛锔芥緲濞?
+                        // 结构体字段赋值：计算字段偏移并Store。
                         let base_ty = self.get_local_type(base_local).clone();
                         let elem_ty = match &base_ty {
                             MIRType::Array(elem, _) => (**elem).clone(),
@@ -3798,7 +3799,7 @@ impl<'a> LoweringContext<'a> {
                             index: index_local,
                         });
 
-                        // 閻庢稒锚閸嬪秹宕愰悡搴＄厒閻犱緤绱曢悾濠氬礄閾忚鐣遍柛锔芥緲濞?
+                        // 数组索引赋值：计算元素地址并Store。
                         self.push_inst(Instruction::Store {
                             destination: addr_local,
                             value: value_local,
@@ -3811,21 +3812,21 @@ impl<'a> LoweringContext<'a> {
                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
             }
             HIRExpr::AssignOp { target, op, value } => {
-                // 濠㈣泛绉撮幃搴ｆ導鐎ｎ亖鍋撻懝鑸偓鍐╂綇閹呯: target op= value (e.g., x += 1)
-                // 闂傚嫬绉崇紞鍡涘矗缁涜瀚?
+                // 处理复合赋值：`target op= value`，例如 `x += 1`。
+                // 降级赋值语句，获取目标局部变量。
                 let value_local = self.lower_expr(value);
 
                 match target.as_ref() {
                     HIRExpr::Var { name, symbol } => {
                         let target_local = self.resolve_local(name, *symbol);
-                        // 闁告梻濮惧ù鍥亹閹惧啿顤呴柨?
+                        // 解析赋值目标并获取目标local类型。
                         let target_ty = self.get_local_type(target_local).clone();
                         let current_val = self.add_local(None, LocalKind::Temp, target_ty.clone());
                         self.push_inst(Instruction::Load {
                             destination: current_val,
                             source: target_local,
                         });
-                        // 闁圭瑳鍡╂斀閺夆晜鍔楅悾?
+                        // 生成复合赋值的二元运算并Store。
                         let mir_op = self.lower_bin_op(op);
                         let result = self.add_local(None, LocalKind::Temp, target_ty);
                         self.push_inst(Instruction::Binary {
@@ -3834,18 +3835,18 @@ impl<'a> LoweringContext<'a> {
                             left: current_val,
                             right: value_local,
                         });
-                        // 閻庢稒锚閸嬪秶绱掗幘瀵镐函
+                        // 将数组元素类型名传播到被赋值的局部变量。
                         self.push_inst(Instruction::Store {
                             destination: target_local,
                             value: result,
                         });
                     }
                     HIRExpr::Index { base, index } => {
-                        // 闁轰焦澹嗙划宥夊礂閸愵亞顦卞璺虹Т閹海鎸х€ｈ埖瀚? arr[i] += value
+                        // 处理索引复合赋值：`arr[i] += value`。
                         let base_local = self.lower_expr(base);
                         let index_local = self.lower_expr(index);
 
-                        // 閻犱緤绱曢悾濠氬礂閸愵亞顦遍柛锔芥緲濞?
+                        // 元组字段赋值：计算字段偏移并Store。
                         let base_ty = self.get_local_type(base_local).clone();
                         let elem_ty = match &base_ty {
                             MIRType::Array(elem, _) => (**elem).clone(),
@@ -3868,14 +3869,14 @@ impl<'a> LoweringContext<'a> {
                             index: index_local,
                         });
 
-                        // 闁告梻濮惧ù鍥亹閹惧啿顤呴柛蹇撳暟缁€宀勬晸?
+                        // 复合赋值操作：先加载当前值再计算新值。
                         let current_val = self.add_local(None, LocalKind::Temp, elem_ty.clone());
                         self.push_inst(Instruction::Load {
                             destination: current_val,
                             source: addr_local,
                         });
 
-                        // 闁圭瑳鍡╂斀閺夆晜鍔楅悾?
+                        // 生成索引赋值的二元运算并Store到元素地址。
                         let mir_op = self.lower_bin_op(op);
                         let result = self.add_local(None, LocalKind::Temp, elem_ty);
                         self.push_inst(Instruction::Binary {
@@ -3885,7 +3886,7 @@ impl<'a> LoweringContext<'a> {
                             right: value_local,
                         });
 
-                        // 閻庢稒锚閸嬪秶绱掗幘瀵镐函闁搞儳鍋涢崢鎾舵閻樺弶鍕鹃柛褉鍋?
+                        // 将值存入元组字段对应的内存地址。
                         self.push_inst(Instruction::Store {
                             destination: addr_local,
                             value: result,
@@ -3899,11 +3900,11 @@ impl<'a> LoweringContext<'a> {
                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
             }
             HIRExpr::Array(elems) => {
-                // 闁轰焦澹嗙划宥団偓娑欘殜濞间即鏁?[a, b, c]
-                // 闂傚嫬绉崇紞鍡椥掕箛搴ㄥ殝闁稿繐鍟扮粈宀勭嵁閼稿灚鏆梻鍡楁閻ｇ姵绂掗鍌涚暠 locals
+                // 处理数组字面量 `[a, b, c]`。
+                // 降级数组字面量，为每个元素生成局部变量。
                 let elem_locals: Vec<Local> = elems.iter().map(|e| self.lower_expr(e)).collect();
 
-                // 缁绢収鍠栭悾楣冨礂閸愵亞顦辩紒顐ヮ嚙閻庣兘宕仦鐐缂備礁瀚悮顐︽晸?
+                // 确定数组元素类型（从第一个元素推断）。
                 let elem_ty = if let Some(first_local) = elem_locals.first() {
                     self.get_local_type(*first_local).clone()
                 } else {
@@ -3911,7 +3912,7 @@ impl<'a> LoweringContext<'a> {
                 };
                 let array_ty = MIRType::Array(Box::new(elem_ty), elems.len() as u64);
 
-                // 闁轰焦澹嗙划宥夋閳ь剛鎲版担鍛婅含闁告劕鎳庨悺銊︾▔椤撶偛鐎婚梺鏉跨Ф閳规牠姊绘潏鍓х濞达綀娉曢弫?User 缂侇偉顕ч悗?
+                // 将数组元素local列表打包成MIR Array指令。
                 let array_local = self.add_local(None, LocalKind::User, array_ty.clone());
                 self.push_inst(Instruction::Aggregate {
                     destination: array_local,
@@ -3922,18 +3923,18 @@ impl<'a> LoweringContext<'a> {
                 array_local
             }
             HIRExpr::Index { base, index } => {
-                // 闁轰焦澹嗙划宥囨閵忕姷绌?arr[i]
+                // 处理索引表达式 `arr[i]`。
                 let base_local = self.lower_expr(base);
                 let index_local = self.lower_expr(index);
 
-                // 闁兼儳鍢茶ぐ鍥极閹殿喚鐭嬬紒顐ヮ嚙閻庨攱绂掗妷褉鈧鈧鑹鹃崢鎾舵閻樹絻顫﹂柨?
+                // 处理索引表达式：获取数组元素地址并加载。
                 let base_ty = self.get_local_type(base_local).clone();
                 let elem_ty = match base_ty {
                     MIRType::Array(elem, _) => *elem,
                     _ => MIR_UNIT,
                 };
 
-                // 闁告帗绋戠紓?IndexAddr 闁圭娲ｉ幎銈夊级閵夘煈鍚€缂佺姵顨呴崢鎾舵閻樺弶鍕鹃柛褉鍋?
+                // 计算元素地址，用GEP（地址偏移）方式索引。
                 let addr_local = self.add_local(
                     None,
                     LocalKind::Temp,
@@ -3945,7 +3946,7 @@ impl<'a> LoweringContext<'a> {
                     index: index_local,
                 });
 
-                // 濞寸姴楠稿﹢鎾锤閳ь剟宕濋悩鐑樼グ闁?
+                // 生成加法运算用于指针偏移计算。
                 let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
                 self.push_inst(Instruction::Load {
                     destination: result_local,
@@ -3998,11 +3999,11 @@ impl<'a> LoweringContext<'a> {
                 struct_local
             }
             HIRExpr::Field { base, field } => {
-                // 閻庢稒顨嗛宀€鎷嬮崸妤侊紪 obj.field
+                // 字段访问：获取基础表达式local后查字段偏移。
                 let base_local = self.lower_expr(base);
 
-                // 閻庣敻鈧稓鑹惧ù锝堟硶閺?Tuple 閻炴稏鍔庨妵姘舵儍閸曨厾娉㈤柡瀣缂嶅鏁嶇仦鐓庘枏闁活潿鍔庨崒銊ヮ嚕閺団槅鍟忛柨?
-                // 濞戞挸鐡ㄥ鍌炲棘鐟欏嫷鏀抽柨娑欐皑閳ユ牜绱撻弽顐ゅ灣閻㈩垱鐡曢～鍡欌偓娑欘殕椤斿矂宕ュ鍛厒缂佷究鍨圭槐鈺呮儍閸曨剚衼闁?
+                // 计算字段偏移并通过Load指令读取字段值。
+                // 处理结构体或Tuple字段访问，计算字段偏移。
                 let base_ty = self.get_local_type(base_local).clone();
                 let field_index = match &base_ty {
                     MIRType::Struct { fields, .. } => fields
@@ -4026,7 +4027,7 @@ impl<'a> LoweringContext<'a> {
                     _ => MIR_I64,
                 };
 
-                // 缂備焦鎸婚悗顖炴晸?闁稿繐鍟扮划宥夊及椤栨埃鍋撻懖鈺勵潶闁搞劌顑戠槐婵囨媴鐠恒劍鏆?Extract (extractvalue) 闁兼澘鐭傚?FieldAddr+Load
+                // 生成二元运算结果的local并添加指令。
                 let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
                 self.push_inst(Instruction::Extract {
                     destination: result_local,
@@ -4037,15 +4038,15 @@ impl<'a> LoweringContext<'a> {
                 result_local
             }
             HIRExpr::Ref(_is_mut, expr) => {
-                // 鐎殿喗娲滈弫?&expr - 闁哄棗鍊瑰鍌涙交閺傛寧绀€閻炴稏鍔忛幓顏勵嚕韫囨洘鐣遍柛锔芥緲濞?
+                // 取引用（Ref）：获取表达式的地址。
                 let expr_local = self.lower_expr(expr);
                 let expr_ty = self.get_local_type(expr_local).clone();
 
-                // 闁告帗绋戠紓鎾诲箰閸ヮ剚瀚涚紒顐ヮ嚙閻?
+                // 创建指针类型的局部变量存储地址。
                 let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
                 let ptr_local = self.add_local(None, LocalKind::Temp, ptr_ty);
 
-                // 閻庣敻鈧稓鑹鹃悘鐐╁亾闂侇喓鍔岃ぐ澶愭煂韫囥儳绀夐柤鎯у槻瑜板洭宕楃捄鐑樺嬀闁秆€鍋撻柨娑樼墔婵炲洭鏁?IndexAddr with index 0闁?
+                // 获取表达式地址：创建指针局部变量并赋值。
                 let zero_index = self.add_local(None, LocalKind::Temp, MIR_I64);
                 self.push_inst(Instruction::Assign {
                     destination: zero_index,
@@ -4061,7 +4062,7 @@ impl<'a> LoweringContext<'a> {
                 ptr_local
             }
             HIRExpr::Deref(expr) => {
-                // 閻熸瑱绲界槐鈺呮晸?*ptr
+                // 解引用（Deref）：通过Load读取指针值。
                 let ptr_local = self.lower_expr(expr);
                 let ptr_ty = self.get_local_type(ptr_local).clone();
 
@@ -4079,30 +4080,30 @@ impl<'a> LoweringContext<'a> {
                 result_local
             }
             HIRExpr::Lambda { params, body } => {
-                // Lambda 闂傚偆鍘肩€?|args| body
-                // 闁告帗绋戠紓鎾寸▔閳ь剚绋夐鍥╃闁告柡鏅涢崵閬嶅极閺夎儻瀚欓弶鈺傛煥濞叉牠宕欓懞銉︽鐎殿喗娲滈弫?
+                // Lambda表达式降级，形如|args| body。
+                // 收集lambda自由变量（闭包捕获分析）。
 
-                // 闁汇垻鍠愰崹姘跺船椤栨瑧顏遍柨?Lambda 闁告垼濮ら弳鐔兼晸?
+                // 获取并递增lambda计数器生成唯一名称。
                 let lambda_name = self.lambda_name();
 
-                // 闁衡偓閸洘鑲犻柤濂変簽閺侀亶宕ｅ鈧崳娲晬閸垹绠氬褍鍟畷鐔兼嚔閸戙倗绀?
+                // 收集 lambda 自由变量，决定是否需要闭包环境。
                 let free_vars = self.collect_free_vars(params, body);
 
-                // Lambda 缂侇偉顕ч悗鐑芥晬濮樺墎甯涢悹浣靛€曞顒勫极閺夋寧瀚查弶鈺傛煥濞叉牜鐚剧拠鑼偓鐑芥焾閼恒儲笑 i64
+                // Lambda 当前统一推断为 `fn(i64, ...) -> i64` 风格的内部表示。
                 let mut param_types: Vec<MIRType> = (0..params.len()).map(|_| MIR_I64).collect();
                 let ret_type = MIR_I64;
 
-                // 濠碘€冲€归悘澶愬嫉婢跺骸娈伴柣銏犲船瑜板鏌岃箛銉х婵烇綀顕ф慨鐐烘偝椤栨凹鏆旈柛娆忓€归弳鐔告媴濠娾偓鐠愮喓绮璺伇濞戞搩浜滃顒勬晸?
+                // 构建lambda的参数类型列表和返回类型。
                 let env_param_offset = if free_vars.is_empty() {
                     0
                 } else {
-                    // 闁绘粠鍨伴。銊╁矗閸屾稒娈堕柨娑欑煯婵炲洭鎮介妸褏娉㈤柡瀣缂嶅鐚剧拠鑼偓椋庢偘閵娧佷粵闁硅娲濋獮蹇涙儍閸曨厼绠氶柨?
-                    // 缂佺姭鍋撻柛鏍ㄧ壄缁辩増鎷呯捄銊︽殢 i64* 闁圭娲幏锟犲箰閸パ勫€婚柣婊庡灠椤?
+                    // 有捕获变量时在参数列表头部插入环境指针（i64指针）。
+                    // 若有捕获环境，在lambda参数列表前插入env指针。
                     param_types.insert(0, MIRType::Ptr(Box::new(MIR_I64)));
                     1
                 };
 
-                // 闁告帗绋戠紓?Lambda 閺夊牆鎳庢慨顏堝礄閼恒儲娈?
+                // 构建lambda的MIR函数对象。
                 let mut lambda_fn =
                     MirFunction::new(lambda_name.clone(), param_types.clone(), ret_type.clone());
                 let lambda_start = lambda_fn.start_block;
@@ -4121,24 +4122,24 @@ impl<'a> LoweringContext<'a> {
                 // Set current block for Lambda function entry
                 lambda_ctx.current_block = Some(lambda_start);
 
-                // 缂備焦鍨甸悾楣冩偝椤栨凹鏆旈柛娆忓€归弳鐔兼晸?Lambda 闁告瑥鍊归弳鐔兼晸?Lambda 闁告垼濮ら弳?
+                // 在子上下文中执行lambda体的降级。
                 if !free_vars.is_empty() {
-                    // 缂佹鍏涚粩瀛樼▔椤忓嫬妫橀柡浣哄濡叉悂鎮抽姘兼殧闁挎稑鐗婄€垫岸鏌﹂崼顒傜
+                // 构建lambda子上下文并降级函数体。
                     let env_local = Local::new(1, LocalKind::Param);
                     let env_ptr_name = "__env".to_string();
                     lambda_ctx
                         .local_names
                         .insert(env_ptr_name.clone(), env_local);
 
-                    // 濞寸姴娴烽獮鍡樻櫠閸愩劌顫ｉ弶鐐跺Г瀹曠喖鎳㈡搴㈢暠闁告瑦锕㈤崳?
-                    // 闁绘粠鍨伴。銊╁及椤栨瑧顏卞☉鎿冧簽缁劑寮搁崟顏嗙Ъ闁挎稑鏈惁鈩冪▔椤忓懎绀嬮柤楣冾棑濞堟垿宕ｅ鈧崳娲箰婢舵劑鈧孩鎯旇箛鎾舵憼闁?
+                // 将lambda的返回值传出，处理捕获环境。
+                    // 将所有捕获变量的值存入环境数组中。
                     for (i, (var_name, _)) in free_vars.iter().enumerate() {
-                        // 濞戞挾鍎ゅ畷鐔兼嚔妞嬪孩鐣遍柛娆愶耿閸ｆ椽宕氬☉妯肩处濞戞挴鍋撻柨?local
+                        // 为每个捕获变量在 lambda 上下文中创建对应的局部变量。
                         let captured_local =
                             lambda_ctx.add_local(Some(var_name.clone()), LocalKind::Temp, MIR_I64);
 
-                        // 濞寸姴娴烽獮鍡樻櫠閸愨晛鐦归梺钘夌墕婵偞娼挊澶婄秮闁?
-                        // 濞达綀娉曢弫?getelementptr 闁?load
+                        // 使用getelementptr和load读取捕获变量。
+                        // 从lambda环境数组按索引加载捕获变量。
                         let index_local = lambda_ctx.add_local(None, LocalKind::Temp, MIR_I64);
                         lambda_ctx.push_inst(Instruction::Assign {
                             destination: index_local,
@@ -4156,33 +4157,33 @@ impl<'a> LoweringContext<'a> {
                             index: index_local,
                         });
 
-                        // 闁告梻濮惧ù鍥晸?
+                        // 加载捕获变量的值到lambda上下文。
                         lambda_ctx.push_inst(Instruction::Load {
                             destination: captured_local,
                             source: ptr_local,
                         });
 
-                        // 閻忓繐妫欏畷鐔兼嚔妞嬪孩鐣遍柛娆愶耿閸ｈ櫣绱掗幋婵堟毎闁告帗婢橀幃鏇犵矓鐢喚绀勯弶鈺傜懄閻?body 濞戞搩鍘煎銊╁矗椤栨瑤绨伴柣鈺佺摠鐢瓨鎷呯捄銊︽殢濞存粌妫寸槐?
+                    // 将捕获变量绑定到lambda上下文的局部变量中。
                         lambda_ctx
                             .local_names
                             .insert(var_name.clone(), captured_local);
                     }
 
-                    // 缂備焦鍨甸悾?Lambda 闁告瑥鍊归弳鐔兼晬閸繀鐒婇柨?1闁挎稑鑻ú婊勭▔閾忕懓绠氬褍鍟顒勫极閺夊灝绐楅柣顫妺缁ㄢ剝鎷呭鍥╂瀭 1闁?
+                    // 将函数参数绑定到lambda上下文的局部变量中。
                     for (i, param_name) in params.iter().enumerate() {
                         let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
                         lambda_ctx.local_names.insert(param_name.clone(), local);
                     }
                 } else {
-                    // 婵炲备鍓濆﹢渚€鎮抽姘兼殧闁挎稑鏈婊呮暜閸濄儳鎷ㄩ悗瑙勮壘瀵剟鏁?
+                    // 不带捕获变量时，直接绑定函数参数。
                     for (i, param_name) in params.iter().enumerate() {
                         let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
                         lambda_ctx.local_names.insert(param_name.clone(), local);
                     }
                 }
 
-                // 闂傚嫬绉崇紞?body 闁?Lambda 闁告垼濮ら弳?
-                // Lambda body 闁?HIRExpr闁挎稑鐭傚〒鍓佹啺娴ｇ鐦堕悷浣告噺閸?HIRBody
+                // 降级lambda体，在lambda上下文中执行。
+                    // 在lambda上下文中降级函数体（HIRBody）。
                 use crate::hir::HIRBody;
                 let lambda_body = HIRBody {
                     stmts: vec![],
@@ -4190,10 +4191,10 @@ impl<'a> LoweringContext<'a> {
                 };
                 lambda_ctx.lower_body_to_block(&lambda_body, lambda_start);
 
-                // 閻忓繐妫涢弫鎾诲箣閹邦喗鐣?Lambda 闁告垼濮ら弳鐔非庣拠鎻掝潱闁告帗婢橀崹顏嗘偘閵娿倛鍘?
+                // 将生成的lambda函数加入函数列表。
                 self.lambda_functions.push(lambda_fn);
 
-                // 閻犱焦婢樼紞宥夋偝椤栨凹鏆斿ǎ鍥ｅ墲娴?
+                // 注册lambda函数签名（带环境参数或不带）。
                 if !free_vars.is_empty() {
                     let env_var_types: Vec<(String, MIRType)> = free_vars
                         .iter()
@@ -4204,11 +4205,11 @@ impl<'a> LoweringContext<'a> {
                         LambdaEnv {
                             vars: free_vars.clone(),
                             env_type: MIRType::Ptr(Box::new(MIR_I64)),
-                            env_ptr_local: None, // 缂佸绉撮幃妤呮晸?Let lowering 濞戞搩鍙€椤旀洟鏁?
+                            env_ptr_local: None, // 由 Let lowering 阶段补回实际 `env_ptr_local`。
                         },
                     );
 
-                    // 閻犱焦婢樼紞宥夊礄閼恒儲娈剁紒娑欏劤閹洟鏁嶉崼婵嗙樁闁告凹鍋嗛獮鍡樻櫠閸愌傜箚闁诡収鍨界槐?
+                    // 带捕获环境的lambda函数签名注册。
                     self.function_sigs.insert(
                         lambda_name.clone(),
                         FunctionSig {
@@ -4218,7 +4219,7 @@ impl<'a> LoweringContext<'a> {
                         },
                     );
                 } else {
-                    // 閻犱焦婢樼紞宥夊礄閼恒儲娈剁紒娑欏劤閹洟鏁嶉崼鐔革骏闁绘粠鍨伴。銊╂晸?
+                    // 不带捕获环境的lambda函数签名注册。
                     self.function_sigs.insert(
                         lambda_name.clone(),
                         FunctionSig {
@@ -4229,8 +4230,8 @@ impl<'a> LoweringContext<'a> {
                     );
                 }
 
-                // 闁告帗绋戠紓鎾寸▔閳ь剚绋夐鍐槻闁?local 闁哄鍎遍悺銊╂晸?Lambda 闁告垼濮ら弳鐔兼晸?
-                // 濞达綀娉曢弫銈夊极鐎涙ɑ娈剁紒顐ヮ嚙閻庨攱鎷呭鈧拹?Lambda 闁汇劌瀚妴鍐矆閻氬绀勯柛鎴ｅГ閺嗙喖骞愰崶顒佸珱闁?
+                // 若无捕获变量，直接返回lambda函数引用。
+                // 检查捕获变量列表并获取环境指针。
                 let lambda_local = if free_vars.is_empty() {
                     let fn_ty = MIRType::Fn {
                         params: param_types.clone(),
@@ -4246,7 +4247,7 @@ impl<'a> LoweringContext<'a> {
                     self.add_local(None, LocalKind::Temp, MIR_I64)
                 };
 
-                // ??? Local -> Lambda ?????????
+                // 记录 `Local -> Lambda 名称` 的映射，便于后续引用解析。
                 self.lambda_names.insert(lambda_local, lambda_name.clone());
 
                 lambda_local
@@ -4392,14 +4393,14 @@ impl<'a> LoweringContext<'a> {
                 method,
                 args,
             } => {
-                // 闁哄倽顫夌涵鍓佹嫬閸愵亝鏆?receiver.method(args)
-                // 闂傚嫬绉崇紞鍡樼▔閻戞ɑ鐝梺顐ｈ壘閸ら亶寮幏宀€娈堕柨? TypeName_method(receiver, args)
+                // 方法调用表达式降级（receiver.method(args)形式）。
+                // 进行receiver方法调用的分派解析。
 
-                // 闂傚嫬绉崇紞鍡涘箳閵夛附鏆柨?
+                // 获取方法名，支持路径和标识符形式。
                 let receiver_local = self.lower_expr(receiver);
                 let receiver_ty = self.get_local_type(receiver_local).clone();
 
-                // 闂傚嫬绉崇紞鍡涘矗閸屾稒娈?
+                // 降级所有参数表达式为局部变量列表。
                 let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
 
                 // String built-in method handling: when receiver is a string
@@ -4419,9 +4420,9 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
 
-                // 闁汇垻鍠愰崹姘跺棘鐟欏嫮銆婇柛鎴ｅГ閺嗙喖宕ュ蹇曠獥TypeName_method
-                // 闂侇剟娼ч幆?Sengoo 闁告稖妫勯幃鏇犵棯閿曗偓閻?
-                // 濡絾鐗曢崢娑樜涢埀顒勬晸?type_names 濞寸姰鍎撮獮蹇涘矗閺嵮呮澖闂傚嫬鎳愬▓鎴犵磼閹惧鈧垱鎷呴幘鎯邦潶闁搞劌顑呴幃鏇㈡晸?
+                // 解析方法调用目标并获取函数签名。
+                // 使用Sengoo的方法解析逻辑确定最终调用目标。
+                // 解析方法调用的目标函数名称（含trait分派逻辑）。
                 let resolved_func_name = match self.resolve_method_call_target(
                     receiver_local,
                     &receiver_ty,
@@ -4437,7 +4438,7 @@ impl<'a> LoweringContext<'a> {
 
 
 
-                // 缁绢収鍠栭悾鐐交閺傛寧绀€缂侇偉顕ч悗鐑芥晬閸儳甯涢柨?i64闁?
+                // 获取方法调用的返回类型信息。
                 let ret_type = self
                     .function_sigs
                     .get(&resolved_func_name)
@@ -4448,11 +4449,11 @@ impl<'a> LoweringContext<'a> {
                     self.type_names.insert(result_local, name.clone());
                 }
 
-                // 闁哄瀚紓鎾诲矗閸屾稒娈堕柛鎺擃殙閵嗗啴鏁嶅鐮甤eiver + args
+                // 构造调用参数列表，包含receiver和其他参数。
                 let mut call_args = vec![receiver_local];
                 call_args.extend(arg_locals);
 
-                // 闁汇垻鍠愰崹?Call 闁圭娲ｉ幎?
+                // 生成Call指令并返回结果local。
                 self.push_inst(Instruction::Call {
                     destination: result_local,
                     func: resolved_func_name,
@@ -4461,7 +4462,7 @@ impl<'a> LoweringContext<'a> {
 
                 result_local
             }
-            // 闁稿繑婀圭划顒勫嫉椤忓嫮鏉介柣婊勫濞?HIR 閻炴稏鍔忛幓顏勵嚕韫囨洝顫﹂柛銊ヮ儜缁辨繃娼婚弬鎸庣闁告濮崇紞鍛存晸?
+                // 处理await表达式（仅用于类型系统，无实际异步支持）。
             HIRExpr::Await(inner) => {
                 let future_handle = self.lower_expr(inner);
                 let func_name = self.resolve_async_base_name(future_handle);
@@ -4543,8 +4544,8 @@ impl<'a> LoweringContext<'a> {
         self.infer_poll_func_from_last_call()
     }
 
-    /// 濞寸姴瀛╄啯鐎殿喖绻嬮懙鎴﹀箵閹邦剙绲块柛鎺嬪€曢崺鍡涙晸?
-    /// 閻庣敻鈧稓鑹鹃悗娑欘殜濞间即鏌岃箛鏂堜礁顕ｈ箛姘辩闁?Some(value)闁挎稑鑻崣鐐閺嶎剛绠查柨?None
+    /// 从模式中提取可用于匹配的枚举判别值。
+    /// 从枚举模式中提取判别值（discriminant）用于匹配检查。
     fn extract_discriminant_from_pattern(&self, pat: &crate::hir::HIRPattern) -> Option<u32> {
         use crate::hir::HIRPattern;
         match pat {
@@ -4558,15 +4559,15 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 婵☆偀鍋撻柡灞诲劚閳ь剙鍚嬪Σ鎼佸触閿曗偓鐏忣噣鏌婂鍠ｄ線鏁?
-    /// 閺夆晜鏌ㄥú鏍ㄧ▔閳ь剚绋夐鍕樁闁告凹鍋勭粩椋庝焊閺冨倻娉㈤柡瀣矌濞?Local
+    /// 根据给定值生成与 HIR 模式匹配的判断逻辑。
+    /// 判断值是否匹配给定的HIR模式，用于运行时合约检查。
     fn matches_pattern(&mut self, pat: &crate::hir::HIRPattern, value: Local) -> Local {
         use crate::hir::HIRPattern;
         let result = self.add_local(None, LocalKind::Temp, MIR_BOOL);
 
         match pat {
             HIRPattern::Wild => {
-                // 闂侇偅宀搁崢銈囩箔閿旇В鍋撶紒妯恍﹂柛鏍х秺閸?
+                // 处理通配符模式（_），忽略绑定。
                 self.push_inst(Instruction::Assign {
                     destination: result,
                     value: MirConstant::Bool(true),
@@ -4574,7 +4575,7 @@ impl<'a> LoweringContext<'a> {
                 result
             }
             HIRPattern::Lit(lit) => {
-                // 閻庢稒顨婂浼存煂韫囨枅浣割嚕韫囥儳绐楁慨锝嗘缁舵繈鏁?
+                // 字面量模式：生成常量对比指令。
                 let lit_local = self.lower_literal(lit);
                 self.push_inst(Instruction::Binary {
                     destination: result,
@@ -4585,7 +4586,7 @@ impl<'a> LoweringContext<'a> {
                 result
             }
             HIRPattern::Var { .. } => {
-                // 闁告瑦锕㈤崳鍝勎熼垾宕囩闁诡剛绮Σ鎼佸礌瑜版帒甯?
+                // 变量模式：将值赋给对应的局部变量。
                 self.push_inst(Instruction::Assign {
                     destination: result,
                     value: MirConstant::Bool(true),
@@ -4593,7 +4594,7 @@ impl<'a> LoweringContext<'a> {
                 result
             }
             _ => {
-                // 闁稿繑婀圭划顒€螣閳ュ磭纭€闁哄棗鍊风粭澶屸偓鍦仧楠?
+                // 默认模式：不生成绑定指令。
                 self.push_inst(Instruction::Assign {
                     destination: result,
                     value: MirConstant::Bool(true),
@@ -4603,13 +4604,13 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞鍡椢熼垾宕囩缂備焦鍨甸悾?
-    /// 濠碘€冲€归悘澶娢熼垾宕囩闁告牕鎳庨幆鍫ュ矗濮椻偓閸ｈ櫣绱掗幋婵堟毎闁挎稑濂旂划鐘诲几濮橆偄顩☉鎿冨幗瑜颁線宕ｉ弽顒佺グ闁艰棄鍢查懟鐔虹磼閹存繄鏆?
+    /// 将HIR模式绑定降级为MIR，生成对应的局部变量绑定指令。
+    /// 将模式绑定降级到MIR，生成模式匹配的局部变量绑定指令。
     fn lower_pattern_bindings(&mut self, pat: &crate::hir::HIRPattern, enum_value: Local) {
         use crate::hir::HIRPattern;
         match pat {
             HIRPattern::Var { name, .. } => {
-                // 缂佺姭鍋撻柛妤佹礀瑜板鏌岃箛鏇犳嫧閻庤鐔槐浼村极缂堢娀鍤嬮柡瀣煯婵″洭宕愰懖鈺冩嫧閻庤鑹鹃崺宀勫矗濮椻偓閸?
+                // 变量绑定模式：为捕获的变量创建局部变量。
                 let _ = self.add_local(Some(name.clone()), LocalKind::User, MIR_I64);
             }
             HIRPattern::Tuple(patterns) => {
@@ -4638,12 +4639,12 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             _ => {
-                // 闁稿繑婀圭划顒€螣閳ュ磭纭€闁哄棗鍊风粭澶嬪緞閸曨厽鍊?
+            // 未知或不需要转换的字面量类型，返回unit。
             }
         }
     }
 
-    /// 闂傚嫬绉崇紞鍡欌偓娑欘殜濞间即鏁?
+    /// 将HIR字面量降级为MIR常量指令。
     fn lower_literal(&mut self, lit: &HIRLiteral) -> Local {
         let constant = match lit {
             HIRLiteral::Int(n) => MirConstant::Int(*n),
@@ -4664,7 +4665,7 @@ impl<'a> LoweringContext<'a> {
         local
     }
 
-    /// 闂傚嫬绉崇紞鍡樼▔閳ь剟宕楅崘鈺傛儥濞达絾绮庨?
+    /// 将HIR一元运算符转换为MIR一元运算符。
     fn lower_un_op(&self, op: &hir::HIRUnaryOp) -> MirUnOp {
         match op {
             hir::HIRUnaryOp::Neg => MirUnOp::Neg,
@@ -4674,7 +4675,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// 闂傚嫬绉崇紞鍡樼鐏炶棄甯楅柟鍨С缂嶆棃鏁?
+    /// 将HIR二元运算符转换为MIR二元运算符。
     fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
         match op {
             hir::HIRBinaryOp::Add => MirBinOp::Add,
