@@ -35,7 +35,7 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
         }
         MIRType::Fn { params, ret } => {
             let param_str: Vec<String> = params.iter().map(|p| mir_type_to_llvm_str(p)).collect();
-            format!("{} ({})", mir_type_to_llvm_str(ret), param_str.join(", "))
+            format!("{} ({})*", mir_type_to_llvm_str(ret), param_str.join(", "))
         }
         MIRType::Struct { name, .. } => {
             format!("%{}", name)
@@ -43,6 +43,10 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
         MIRType::Enum { .. } => {
             // Enums are represented as { discriminant, payload }
             "{ i64, i64 }".to_string()
+        }
+        MIRType::Future(_) => {
+            // Future<T> is an opaque i64 handle at runtime
+            "i64".to_string()
         }
     }
 }
@@ -262,7 +266,7 @@ mod tests {
             params: vec![MIRType::Int(64), MIRType::Bool],
             ret: Box::new(MIRType::Int(64)),
         };
-        assert_eq!(mir_type_to_llvm_str(&fn_ty), "i64 (i64, i1)");
+        assert_eq!(mir_type_to_llvm_str(&fn_ty), "i64 (i64, i1)*");
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod codegen;
 pub mod error;
 pub mod hir;
 pub mod lexer;
+mod method_resolution;
 pub mod mir;
 pub mod parser;
 pub mod runtime;
@@ -97,6 +98,7 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     // 2. Type checking.
     let mut checker = TypeChecker::new();
     checker.check_program(&program)?;
+    let async_functions = checker.async_function_names().clone();
     let type_env = checker.into_env();
 
     // 3. HIR lowering.
@@ -109,12 +111,19 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
         MirLowerOptions {
             runtime_contract_checks: options.runtime_contract_checks,
             lazy_generic_mono: true,
+            async_functions: async_functions.clone(),
         },
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);
     drop(type_env);
     drop(program);
+
+    // 4b. Expand async functions into frame-backed helpers.
+    if !async_functions.is_empty() {
+        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns);
+        mir_fns.extend(async_helpers);
+    }
 
     // 5. MIR optimization pipeline for the selected level.
     let pipeline = mir::opt::pipeline_for_level(options.mir_opt_level);
@@ -138,16 +147,30 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     // 2. Type checking.
     let mut checker = TypeChecker::new();
     checker.check_program(&program)?;
+    let async_functions = checker.async_function_names().clone();
     let type_env = checker.into_env();
 
     // 3. HIR lowering.
     let hir_module = lower_ast(&program, &type_env);
 
     // 4. MIR lowering.
-    let mir_fns = lower_hir(&hir_module.items).map_err(CompileError::MirLower)?;
+    let mut mir_fns = lower_hir_with_options(
+        &hir_module.items,
+        mir::MirLowerOptions {
+            runtime_contract_checks: false,
+            lazy_generic_mono: true,
+            async_functions: async_functions.clone(),
+        },
+    )
+    .map_err(CompileError::MirLower)?;
     drop(hir_module);
     drop(type_env);
     drop(program);
+
+    if !async_functions.is_empty() {
+        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns);
+        mir_fns.extend(async_helpers);
+    }
     Ok(mir_fns)
 }
 

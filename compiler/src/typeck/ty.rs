@@ -94,6 +94,19 @@ impl Ty {
     pub fn is_var(&self) -> bool {
         matches!(self.kind, TyKind::Var(_))
     }
+
+    /// 是否为 Future 类型
+    pub fn is_future(&self) -> bool {
+        matches!(self.kind, TyKind::Future(_))
+    }
+
+    /// 获取 Future 内部类型
+    pub fn future_inner(&self) -> Option<&Ty> {
+        match &self.kind {
+            TyKind::Future(inner) => Some(inner),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Ty {
@@ -149,6 +162,8 @@ pub enum TyKind {
     Dyn(Vec<String>),
     /// impl Trait
     ImplTrait(Vec<String>),
+    /// Future type (async function return type)
+    Future(Box<Ty>),
     /// Self 类型
     SelfType,
     /// 推断类型 `_`
@@ -207,6 +222,7 @@ impl fmt::Display for TyKind {
             }
             TyKind::Dyn(traits) => write!(f, "dyn {}", traits.join(" + ")),
             TyKind::ImplTrait(traits) => write!(f, "impl {}", traits.join(" + ")),
+            TyKind::Future(inner) => write!(f, "Future<{}>", inner),
             TyKind::SelfType => write!(f, "Self"),
             TyKind::Inferred => write!(f, "_"),
         }

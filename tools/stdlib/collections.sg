@@ -1,0 +1,489 @@
+extern "C" {
+    fn sengoo_vec_new_i64() -> i64;
+    fn sengoo_vec_len_i64(handle: i64) -> i64;
+    fn sengoo_vec_clear_i64_status(handle: i64) -> i64;
+    fn sengoo_vec_contains_i64(handle: i64, value: i64) -> i64;
+    fn sengoo_vec_remove_or_default_i64(handle: i64, index: i64, fallback: i64) -> i64;
+    fn sengoo_vec_free_i64_status(handle: i64) -> i64;
+    fn sengoo_vec_push_i64(handle: i64, value: i64) -> i64;
+    fn sengoo_vec_get_or_default_i64(handle: i64, index: i64, fallback: i64) -> i64;
+    fn sengoo_vec_set_i64(handle: i64, index: i64, value: i64) -> i64;
+    fn sengoo_vec_pop_or_default_i64(handle: i64, fallback: i64) -> i64;
+    fn sengoo_vec_iter_new_i64(vec_handle: i64) -> i64;
+    fn sengoo_vec_iter_done_i64(iter_handle: i64) -> i64;
+    fn sengoo_vec_iter_free_i64_status(iter_handle: i64) -> i64;
+    fn sengoo_vec_iter_reset_i64_status(iter_handle: i64) -> i64;
+    fn sengoo_vec_iter_next_or_default_i64(iter_handle: i64, fallback: i64) -> i64;
+
+    fn sengoo_hashmap_new_i64() -> i64;
+    fn sengoo_hashmap_len_i64(handle: i64) -> i64;
+    fn sengoo_hashmap_clear_i64_status(handle: i64) -> i64;
+    fn sengoo_hashmap_free_i64_status(handle: i64) -> i64;
+    fn sengoo_hashmap_insert_i64(handle: i64, key: i64, value: i64) -> i64;
+    fn sengoo_hashmap_contains_i64(handle: i64, key: i64) -> i64;
+    fn sengoo_hashmap_get_or_default_i64(handle: i64, key: i64, fallback: i64) -> i64;
+    fn sengoo_hashmap_remove_i64(handle: i64, key: i64) -> i64;
+    fn sengoo_hashmap_iter_new_i64(map_handle: i64) -> i64;
+    fn sengoo_hashmap_iter_done_i64(iter_handle: i64) -> i64;
+    fn sengoo_hashmap_iter_next_or_default_i64(iter_handle: i64, fallback: i64) -> i64;
+    fn sengoo_hashmap_iter_reset_i64_status(iter_handle: i64) -> i64;
+    fn sengoo_hashmap_iter_free_i64_status(iter_handle: i64) -> i64;
+    fn sengoo_panic_option_unwrap_i64() -> i64;
+    fn sengoo_panic_result_unwrap_i64() -> i64;
+}
+
+struct Vec<T> {
+    handle: i64,
+    marker: T,
+}
+
+struct VecIter<T> {
+    handle: i64,
+    marker: T,
+}
+
+struct HashMap<K, V> {
+    handle: i64,
+    key_marker: K,
+    value_marker: V,
+}
+
+struct HashMapIter<V> {
+    handle: i64,
+    marker: V,
+}
+
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+trait Iterator {
+    def next(self) -> Option<i64> {
+        option_none_i64()
+    }
+
+
+    def map_add(self, delta: i64) -> Option<i64> {
+        option_none_i64()
+    }
+
+    def filter_even(self) -> Option<i64> {
+        option_none_i64()
+    }
+
+    def map_with(self, f: fn(i64) -> i64) -> Option<i64> {
+        option_none_i64()
+    }
+
+    def filter_with(self, pred: fn(i64) -> i64) -> Option<i64> {
+        option_none_i64()
+    }
+}
+
+def vec_new_i64() -> Vec<i64> {
+    Vec { handle: sengoo_vec_new_i64(), marker: 0 }
+}
+
+def hashmap_new_i64_i64() -> HashMap<i64, i64> {
+    HashMap { handle: sengoo_hashmap_new_i64(), key_marker: 0, value_marker: 0 }
+}
+
+def option_some_i64(value: i64) -> Option<i64> {
+    Option { is_some: true, value: value }
+}
+
+def option_none_i64() -> Option<i64> {
+    Option { is_some: false, value: 0 }
+}
+
+def result_ok_i64(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 }
+}
+
+def result_err_i64(error: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: error }
+}
+
+impl<T> Vec<T> {
+    def len(self) -> i64 {
+        sengoo_vec_len_i64(self.handle)
+    }
+
+    def clear(self) -> bool {
+        sengoo_vec_clear_i64_status(self.handle) != 0
+    }
+
+    def is_empty(self) -> bool {
+        sengoo_vec_len_i64(self.handle) == 0
+    }
+
+    def free(self) -> bool {
+        sengoo_vec_free_i64_status(self.handle) != 0
+    }
+}
+
+impl Vec<i64> {
+    def push(self, value: i64) -> bool {
+        sengoo_vec_push_i64(self.handle, value) != 0
+    }
+
+    def get(self, index: i64) -> Option<i64> {
+        if index < 0 {
+            option_none_i64()
+        } else if index >= sengoo_vec_len_i64(self.handle) {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_vec_get_or_default_i64(self.handle, index, 0))
+        }
+    }
+
+    def set(self, index: i64, value: i64) -> bool {
+        sengoo_vec_set_i64(self.handle, index, value) != 0
+    }
+
+    def pop(self) -> Option<i64> {
+        if sengoo_vec_len_i64(self.handle) == 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_vec_pop_or_default_i64(self.handle, 0))
+        }
+    }
+
+    def iter(self) -> VecIter<i64> {
+        VecIter { handle: sengoo_vec_iter_new_i64(self.handle), marker: self.marker }
+    }
+
+    def contains(self, value: i64) -> bool {
+        sengoo_vec_contains_i64(self.handle, value) != 0
+    }
+
+    def remove(self, index: i64) -> Option<i64> {
+        if index < 0 {
+            option_none_i64()
+        } else if index >= sengoo_vec_len_i64(self.handle) {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_vec_remove_or_default_i64(self.handle, index, 0))
+        }
+    }
+}
+
+impl<T> VecIter<T> {
+    def reset(self) -> bool {
+        sengoo_vec_iter_reset_i64_status(self.handle) != 0
+    }
+
+    def free(self) -> bool {
+        sengoo_vec_iter_free_i64_status(self.handle) != 0
+    }
+}
+
+impl Iterator for VecIter<i64> {
+    def next(self) -> Option<i64> {
+        if sengoo_vec_iter_done_i64(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_vec_iter_next_or_default_i64(self.handle, 0))
+        }
+    }
+
+    def map_add(self, delta: i64) -> Option<i64> {
+        if sengoo_vec_iter_done_i64(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_vec_iter_next_or_default_i64(self.handle, 0) + delta)
+        }
+    }
+
+    def filter_even(self) -> Option<i64> {
+        while sengoo_vec_iter_done_i64(self.handle) == 0 {
+            let value = sengoo_vec_iter_next_or_default_i64(self.handle, 0);
+            if (value % 2) == 0 {
+                return option_some_i64(value);
+            }
+        }
+        option_none_i64()
+    }
+
+    def map_with(self, f: fn(i64) -> i64) -> Option<i64> {
+        if sengoo_vec_iter_done_i64(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            let value = sengoo_vec_iter_next_or_default_i64(self.handle, 0);
+            option_some_i64(f(value))
+        }
+    }
+
+    def filter_with(self, pred: fn(i64) -> i64) -> Option<i64> {
+        let found = 0;
+        let matched = 0;
+        while sengoo_vec_iter_done_i64(self.handle) == 0 {
+            if found != 0 {
+                break;
+            }
+            let value = sengoo_vec_iter_next_or_default_i64(self.handle, 0);
+            if pred(value) != 0 {
+                matched = value;
+                found = 1;
+            }
+        }
+        if found != 0 {
+            option_some_i64(matched)
+        } else {
+            option_none_i64()
+        }
+    }
+}
+
+impl<K, V> HashMap<K, V> {
+    def len(self) -> i64 {
+        sengoo_hashmap_len_i64(self.handle)
+    }
+
+    def clear(self) -> bool {
+        sengoo_hashmap_clear_i64_status(self.handle) != 0
+    }
+
+    def is_empty(self) -> bool {
+        sengoo_hashmap_len_i64(self.handle) == 0
+    }
+
+    def free(self) -> bool {
+        sengoo_hashmap_free_i64_status(self.handle) != 0
+    }
+}
+
+impl HashMap<i64, i64> {
+    def insert(self, key: i64, value: i64) -> bool {
+        sengoo_hashmap_insert_i64(self.handle, key, value) != 0
+    }
+
+    def contains(self, key: i64) -> bool {
+        sengoo_hashmap_contains_i64(self.handle, key) != 0
+    }
+
+    def get(self, key: i64) -> Option<i64> {
+        if sengoo_hashmap_contains_i64(self.handle, key) != 0 {
+            option_some_i64(sengoo_hashmap_get_or_default_i64(self.handle, key, 0))
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def remove(self, key: i64) -> bool {
+        sengoo_hashmap_remove_i64(self.handle, key) != 0
+    }
+
+    def iter(self) -> HashMapIter<i64> {
+        HashMapIter { handle: sengoo_hashmap_iter_new_i64(self.handle), marker: self.value_marker }
+    }
+}
+
+impl<T> Option<T> {
+    def is_some(self) -> bool {
+        self.is_some
+    }
+
+    def is_none(self) -> bool {
+        if self.is_some {
+            false
+        } else {
+            true
+        }
+    }
+
+    def unwrap_or(self, fallback: T) -> T {
+        if self.is_some {
+            self.value
+        } else {
+            fallback
+        }
+    }
+
+    def ok_or<E>(self, error: E) -> Result<T, E> {
+        if self.is_some {
+            Result { is_ok: true, value: self.value, error: error }
+        } else {
+            Result { is_ok: false, value: self.value, error: error }
+        }
+    }
+}
+
+impl Option<i64> {
+    def expect(self, msg: &str) -> i64 {
+        if self.is_some {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_option_unwrap_i64()
+        }
+    }
+
+    def unwrap(self) -> i64 {
+        if self.is_some {
+            self.value
+        } else {
+            sengoo_panic_option_unwrap_i64()
+        }
+    }
+
+    def map_add(self, delta: i64) -> Option<i64> {
+        if self.is_some {
+            option_some_i64(self.value + delta)
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def and_then_mul(self, factor: i64) -> Option<i64> {
+        if self.is_some {
+            option_some_i64(self.value * factor)
+        } else {
+            option_none_i64()
+        }
+    }
+}
+
+impl<T, E> Result<T, E> {
+    def is_ok(self) -> bool {
+        self.is_ok
+    }
+
+    def is_err(self) -> bool {
+        if self.is_ok {
+            false
+        } else {
+            true
+        }
+    }
+
+    def unwrap_or(self, fallback: T) -> T {
+        if self.is_ok {
+            self.value
+        } else {
+            fallback
+        }
+    }
+
+    def ok(self) -> Option<T> {
+        if self.is_ok {
+            Option { is_some: true, value: self.value }
+        } else {
+            Option { is_some: false, value: self.value }
+        }
+    }
+
+    def err(self) -> Option<E> {
+        if self.is_ok {
+            Option { is_some: false, value: self.error }
+        } else {
+            Option { is_some: true, value: self.error }
+        }
+    }
+}
+
+impl Result<i64, i64> {
+    def expect(self, msg: &str) -> i64 {
+        if self.is_ok {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_result_unwrap_i64()
+        }
+    }
+
+    def unwrap(self) -> i64 {
+        if self.is_ok {
+            self.value
+        } else {
+            sengoo_panic_result_unwrap_i64()
+        }
+    }
+
+
+    def map_add(self, delta: i64) -> Result<i64, i64> {
+        if self.is_ok {
+            result_ok_i64(self.value + delta)
+        } else {
+            result_err_i64(self.error)
+        }
+    }
+
+    def and_then_mul(self, factor: i64) -> Result<i64, i64> {
+        if self.is_ok {
+            result_ok_i64(self.value * factor)
+        } else {
+            result_err_i64(self.error)
+        }
+    }
+
+    def map_err_add(self, delta: i64) -> Result<i64, i64> {
+        if self.is_ok {
+            result_ok_i64(self.value)
+        } else {
+            result_err_i64(self.error + delta)
+        }
+    }
+}
+
+impl<V> HashMapIter<V> {
+    def reset(self) -> bool {
+        sengoo_hashmap_iter_reset_i64_status(self.handle) != 0
+    }
+
+    def free(self) -> bool {
+        sengoo_hashmap_iter_free_i64_status(self.handle) != 0
+    }
+}
+
+impl Iterator for HashMapIter<i64> {
+    def next(self) -> Option<i64> {
+        if sengoo_hashmap_iter_done_i64(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_hashmap_iter_next_or_default_i64(self.handle, 0))
+        }
+    }
+
+    def map_with(self, f: fn(i64) -> i64) -> Option<i64> {
+        if sengoo_hashmap_iter_done_i64(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            let value = sengoo_hashmap_iter_next_or_default_i64(self.handle, 0);
+            option_some_i64(f(value))
+        }
+    }
+
+    def filter_with(self, pred: fn(i64) -> i64) -> Option<i64> {
+        let found = 0;
+        let matched = 0;
+        while sengoo_hashmap_iter_done_i64(self.handle) == 0 {
+            if found != 0 {
+                break;
+            }
+            let value = sengoo_hashmap_iter_next_or_default_i64(self.handle, 0);
+            if pred(value) != 0 {
+                matched = value;
+                found = 1;
+            }
+        }
+        if found != 0 {
+            option_some_i64(matched)
+        } else {
+            option_none_i64()
+        }
+    }
+}
+
+
+
+
+
+
