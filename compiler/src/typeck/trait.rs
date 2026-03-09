@@ -2,7 +2,7 @@
 //!
 //! 管理 Trait 定义和 Impl 块的注册和查询。
 
-use crate::typeck::ty::Ty;
+use crate::typeck::ty::{Ty, TyVarId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -64,37 +64,44 @@ impl TraitInfo {
 /// 方法签名
 #[derive(Debug, Clone)]
 pub struct MethodSig {
-    /// 是否有 self 参数
     pub has_self: bool,
-    /// 参数类型（不含 self）
     pub param_types: Vec<Ty>,
-    /// 返回类型
     pub return_type: Ty,
-    /// 是否有默认实现
+    pub generic_params: Vec<TyVarId>,
     pub has_default: bool,
 }
 
 impl MethodSig {
-    pub fn new(has_self: bool, param_types: Vec<Ty>, return_type: Ty) -> Self {
+    pub fn new(
+        has_self: bool,
+        param_types: Vec<Ty>,
+        return_type: Ty,
+        generic_params: Vec<TyVarId>,
+    ) -> Self {
         Self {
             has_self,
             param_types,
             return_type,
+            generic_params,
             has_default: false,
         }
     }
 
-    pub fn with_default(has_self: bool, param_types: Vec<Ty>, return_type: Ty) -> Self {
+    pub fn with_default(
+        has_self: bool,
+        param_types: Vec<Ty>,
+        return_type: Ty,
+        generic_params: Vec<TyVarId>,
+    ) -> Self {
         Self {
             has_self,
             param_types,
             return_type,
+            generic_params,
             has_default: true,
         }
     }
-}
-
-/// Impl 信息
+}/// Impl 信息
 #[derive(Debug, Clone)]
 pub struct ImplInfo {
     /// 目标类型
@@ -155,6 +162,7 @@ pub struct FunctionTy {
     pub param_types: Vec<Ty>,
     /// 返回类型
     pub return_type: Ty,
+    pub generic_params: Vec<TyVarId>,
 }
 
 impl FunctionTy {
@@ -163,6 +171,21 @@ impl FunctionTy {
             has_self,
             param_types,
             return_type,
+            generic_params: Vec::new(),
+        }
+    }
+
+    pub fn with_generic_params(
+        has_self: bool,
+        param_types: Vec<Ty>,
+        return_type: Ty,
+        generic_params: Vec<TyVarId>,
+    ) -> Self {
+        Self {
+            has_self,
+            param_types,
+            return_type,
+            generic_params,
         }
     }
 }

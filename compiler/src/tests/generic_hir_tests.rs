@@ -120,3 +120,51 @@ trait Mapper {
     assert_eq!(method.type_params.len(), 1);
     assert_eq!(method.type_params[0].name, "T");
 }
+
+
+#[test]
+fn lower_ast_infers_string_let_as_ref_str() {
+    let source = r#"
+def main() -> i64 {
+    let s = "hello";
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("typecheck should succeed");
+    let env = checker.into_env();
+    let module = lower_ast(&program, &env);
+
+    let function = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HIRItem::Function(function) if function.name == "main" => Some(function),
+            _ => None,
+        })
+        .expect("expected function main in HIR");
+
+    let stmt = function
+        .body
+        .stmts
+        .iter()
+        .find_map(|stmt| match stmt {
+            crate::hir::HIRStmt::Let { name, ty, .. } if name == "s" => Some(ty),
+            _ => None,
+        })
+        .expect("expected let binding for s");
+
+    assert!(
+        matches!(
+            stmt.kind,
+            crate::hir::HIRTypeKind::Ref(false, ref inner)
+                if matches!(inner.kind, crate::hir::HIRTypeKind::Str)
+        ),
+        "expected let s to lower as &str, got {:?}",
+        stmt
+    );
+}

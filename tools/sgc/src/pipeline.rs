@@ -361,6 +361,7 @@ fn compile_frontend_to_mir_with_phase_timings(
         checker
             .check_program(program.as_ref().expect("program present during typeck"))
             .map_err(|e| miette::miette!("typecheck failed: {}", e))?;
+        let async_functions = checker.async_function_names().clone();
         let mut type_env = Some(checker.into_env());
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
         if !low_memory_mode
@@ -405,9 +406,16 @@ fn compile_frontend_to_mir_with_phase_timings(
             MirLowerOptions {
                 runtime_contract_checks,
                 lazy_generic_mono: true,
+                async_functions: async_functions.clone(),
             },
         )
         .map_err(|e| miette::miette!("{}", e))?;
+
+        // Expand async functions into frame-backed __start/__poll/__result helpers
+        if !async_functions.is_empty() {
+            let async_helpers = sengoo_compiler::mir::async_lowering::expand_async_functions(&mut mir_fns);
+            mir_fns.extend(async_helpers);
+        }
         drop(hir_module);
         if !low_memory_mode {
             drop(type_env.take());
@@ -1030,6 +1038,17 @@ fn collect_hir_call_targets_from_expr(
         HIRExpr::Lambda { body, .. } => {
             collect_hir_call_targets_from_expr(body, index_by_name, targets, seen);
         }
+        HIRExpr::Await(inner) => {
+            collect_hir_call_targets_from_expr(inner, index_by_name, targets, seen);
+        }
+        HIRExpr::AsyncBlock(body) => {
+            for stmt in &body.stmts {
+                collect_hir_call_targets_from_stmt(stmt, index_by_name, targets, seen);
+            }
+            if let Some(expr) = &body.expr {
+                collect_hir_call_targets_from_expr(expr, index_by_name, targets, seen);
+            }
+        }
     }
 }
 
@@ -1233,12 +1252,34 @@ fn collect_mir_call_targets(
                 }
             }
         }
-        if let Some(MirTerminator::Call { func, .. }) = &block.terminator {
-            if let Some(&idx) = index_by_name.get(func) {
-                if seen.insert(idx) {
-                    targets.push(idx);
+        match &block.terminator {
+            Some(MirTerminator::Call { func, .. }) => {
+                if let Some(&idx) = index_by_name.get(func) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
                 }
             }
+            Some(MirTerminator::Suspend { poll_func, .. }) => {
+                if let Some(&idx) = index_by_name.get(poll_func) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                }
+                let result_func = poll_func.replace("__poll", "__result");
+                if let Some(&idx) = index_by_name.get(&result_func) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                }
+                let start_func = poll_func.replace("__poll", "__start");
+                if let Some(&idx) = index_by_name.get(&start_func) {
+                    if seen.insert(idx) {
+                        targets.push(idx);
+                    }
+                }
+            }
+            _ => {}
         }
     }
     targets

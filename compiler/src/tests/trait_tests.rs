@@ -165,10 +165,125 @@ def main() -> i64 {
         err_msg.contains("nonexistent"),
         "Error message should mention the method name 'nonexistent', got: {}",
         err_msg
+    );}
+
+#[test]
+fn test_ambiguous_trait_method_call_reports_error() {
+    let source = r#"
+trait Printable {
+    def show(self) -> i64 {
+        1
+    }
+}
+
+trait Debuggable {
+    def show(self) -> i64 {
+        2
+    }
+}
+
+impl Printable for i64 {
+}
+
+impl Debuggable for i64 {
+}
+
+def main() -> i64 {
+    let x: i64 = 42;
+    x.show()
+}
+"#;
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_err(),
+        "ambiguous trait method call should error, but got Ok:\n{}",
+        result.unwrap_or_default()
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("ambiguous"),
+        "error should mention ambiguity, got: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("show"),
+        "error should mention method name ''show'', got: {}",
+        err_msg
     );
 }
 
-/// Test that a default trait method is used when the impl doesn't override it.
+#[test]
+fn test_trait_method_resolution_ignores_different_arity_candidates() {
+    let source = r#"
+trait ZeroArgShow {
+    def show(self) -> i64 {
+        1
+    }
+}
+
+trait OneArgShow {
+    def show(self, extra: i64) -> i64 {
+        extra
+    }
+}
+
+impl ZeroArgShow for i64 {
+}
+
+impl OneArgShow for i64 {
+}
+
+def main() -> i64 {
+    let x: i64 = 42;
+    x.show()
+}
+"#;
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "trait method resolution should ignore different-arity candidates, but got error: {}",
+        result.unwrap_err()
+    );
+    let ir = result.unwrap();
+    assert!(
+        ir.contains("i64_ZeroArgShow_show"),
+        "IR should resolve to the zero-arg trait method, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn test_trait_method_wrong_arity_reports_argument_count_mismatch() {
+    let source = r#"
+trait OneArgShow {
+    def show(self, extra: i64) -> i64 {
+        extra
+    }
+}
+
+impl OneArgShow for i64 {
+}
+
+def main() -> i64 {
+    let x: i64 = 42;
+    x.show()
+}
+"#;
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_err(),
+        "wrong-arity trait method call should error, but got Ok:\n{}",
+        result.unwrap_or_default()
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("参数数量错误") || err.contains("ArgumentCountMismatch") || err.contains("期望 1 个, 找到 0 个"),
+        "error should report argument count mismatch, got: {}",
+        err
+    );
+}
+
+/// Test that a default trait method is used when the impl doesn''t override it.
 ///
 /// When a trait defines `def default_method(self) -> i64 { 42 }` and the impl
 /// does not provide an override, the compiler should generate a function with
@@ -204,6 +319,52 @@ def main() -> i64 {
     assert!(
         ir.contains("i64_HasDefault_default_val"),
         "IR should contain the three-part mangled name 'i64_HasDefault_default_val' for the default method, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn test_default_trait_method_with_method_generic_emits_specialized_function() {
+    let source = r#"
+struct Wrap<T> {
+    value: T,
+}
+
+trait WrapValue {
+    def wrap<T>(self, value: T) -> Wrap<T> {
+        Wrap { value: value }
+    }
+}
+
+impl WrapValue for i64 {
+}
+
+def main() -> i64 {
+    let wrapped = 1.wrap(true);
+    if wrapped.value {
+        1
+    } else {
+        0
+    }
+}
+"#;
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "generic default trait method should compile successfully, but got error: {}",
+        result.unwrap_err()
+    );
+    let ir = result.unwrap();
+    assert!(
+        ir.contains("; Function: i64_WrapValue_wrap_bool"),
+        "IR should contain specialized generic default trait method 'i64_WrapValue_wrap_bool', got:
+{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define %Wrap_i64 @i64_WrapValue_wrap("),
+        "unspecialized trait generic method should not leak into IR, got:
+{}",
         ir
     );
 }
@@ -415,3 +576,5 @@ def main() -> i64 {
         result.unwrap_err()
     );
 }
+
+

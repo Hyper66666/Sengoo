@@ -752,7 +752,7 @@ fn infer_expr_type(expr: &ast::Expr) -> HIRType {
             ast::Literal::Int(_) => HIRType::int(IntKind::I64),
             ast::Literal::Float(_) => HIRType::float(FloatKind::F64),
             ast::Literal::Bool(_) => HIRType::bool(),
-            ast::Literal::String(_) => HIRType::pointer(HIRType::int(IntKind::I8)),
+            ast::Literal::String(_) => HIRType::reference(false, HIRType::str()),
             ast::Literal::Char(_) => HIRType::int(IntKind::I32),
             ast::Literal::Bytes(_) => HIRType::pointer(HIRType::int(IntKind::U8)),
             ast::Literal::Null => HIRType::pointer(HIRType::unit()),
@@ -1113,7 +1113,9 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
                 .unwrap_or_else(|| HIRExpr::Lit(HIRLiteral::Null))
         }
         ast::ExprKind::Await(expr) => HIRExpr::Await(Box::new(lower_expr(expr, type_env)?)),
-        ast::ExprKind::AsyncBlock(block) => HIRExpr::Block(Box::new(lower_body(block, type_env))),
+        ast::ExprKind::AsyncBlock(block) => {
+            HIRExpr::AsyncBlock(Box::new(lower_body(block, type_env)))
+        }
         ast::ExprKind::ParallelBlock(block) => {
             HIRExpr::Block(Box::new(lower_body(block, type_env)))
         }

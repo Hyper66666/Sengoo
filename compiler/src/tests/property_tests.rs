@@ -778,6 +778,7 @@ fn impl_method_name_strategy() -> impl Strategy<Value = String> {
                 | "as"
                 | "in"
                 | "is"
+                | "mut"
         )
     })
 }
@@ -987,6 +988,7 @@ fn trait_method_name_strategy() -> impl Strategy<Value = String> {
                 | "as"
                 | "in"
                 | "is"
+                | "mut"
         )
     })
 }
