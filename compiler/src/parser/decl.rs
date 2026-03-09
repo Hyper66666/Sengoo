@@ -644,7 +644,7 @@ impl<'source> Parser<'source> {
                         true
                     }
                 }
-                TokenKind::And => {
+                TokenKind::BitAnd => {
                     // &self 鎴?&mut self
                     if let Some(next) = self.peek(1) {
                         matches!(next.kind, TokenKind::SelfLowerKw | TokenKind::MutKw)
@@ -661,7 +661,7 @@ impl<'source> Parser<'source> {
 
     /// 瑙ｆ瀽 self 鍙傛暟
     fn parse_self_param(&mut self) -> Result<SelfParam> {
-        if self.consume(TokenKind::And).is_some() {
+        if self.consume(TokenKind::BitAnd).is_some() {
             // &self 鎴?&mut self
             let is_mut = self.consume(TokenKind::MutKw).is_some();
             self.expect(TokenKind::SelfLowerKw)?;

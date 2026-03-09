@@ -1,6 +1,5 @@
 ---
 source: compiler/src/tests/snapshot_tests.rs
-assertion_line: 66
 expression: output
 ---
 ; Sengoo LLVM IR
@@ -22,6 +21,13 @@ declare void @sengoo_print_str(i8*)
 declare i64 @sengoo_str_len(i8*)
 declare i8* @sengoo_str_concat(i8*, i8*)
 declare i64 @sengoo_str_eq(i8*, i8*)
+
+; Sengoo async runtime functions
+declare i64 @sengoo_async_frame_alloc(i64)
+declare void @sengoo_async_frame_free(i64)
+declare void @sengoo_async_frame_store(i64, i64, i64)
+declare i64 @sengoo_async_frame_load(i64, i64)
+declare i64 @sengoo_async_run_main_i64(i64)
 
 
 ; Function: main

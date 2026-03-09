@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc c23cc70f93bb3699c3562da4fc9e87b80a13912e6f6b619317ab97021fba9a73 # shrinks to source = "def main() -> i64 { print(0.1); 0 }"
 cc a4cab05b7d99e3031613a7fc492c512e2c99ad2d9b2b8a4cd20d813ba78b8a6d # shrinks to source = "def main() -> i64 { print(0); 0 }"
+cc cc5e2d6d14d0932a8dc35593cd54332ad3459fdb2b232a2d69e2107eee444a1c # shrinks to (source, trait_name, method_name) = ("trait Aaa { def mut(self) -> i64 { 0 } }\nimpl Aaa for i64 { def mut(self) -> i64 { self } }\ndef main() -> i64 { let x: i64 = 42; x.mut() }", "Aaa", "mut")

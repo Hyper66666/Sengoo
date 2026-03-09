@@ -9,10 +9,12 @@
 //! - **接近机器码**：易于映射到目标架构
 
 mod bb;
+mod generic_methods;
 mod inst;
 mod lowering;
 mod op;
 pub mod opt;
+pub mod async_lowering;
 
 pub use bb::{BasicBlock, CallArg, Terminator};
 pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
@@ -37,6 +39,8 @@ pub struct MirFunction {
     pub instructions: Vec<Instruction>,
     /// 起始基本块索引
     pub start_block: usize,
+    /// Whether this function was declared `async def`
+    pub is_async: bool,
 }
 
 impl MirFunction {
@@ -58,6 +62,7 @@ impl MirFunction {
             basic_blocks,
             instructions: Vec::new(),
             start_block,
+            is_async: false,
         }
     }
 
@@ -159,6 +164,8 @@ pub enum MIRType {
         /// Some(类型) 表示携带数据的变体（如 Some(T)）
         variants: Vec<(u32, Option<MIRType>)>,
     },
+    /// Future type (opaque i64 handle at runtime)
+    Future(Box<MIRType>),
 }
 
 /// Common MIR type constants to avoid repeated construction
@@ -221,8 +228,12 @@ impl From<HIRType> for MIRType {
             HIRTypeKind::Unit => MIRType::Unit,
             HIRTypeKind::Never => MIRType::Never,
             HIRTypeKind::Bool => MIRType::Bool,
+            HIRTypeKind::Str => MIRType::Ptr(Box::new(MIRType::Int(8))),
             HIRTypeKind::Int(ik) => MIRType::Int(ik.bits() as u8),
             HIRTypeKind::Float(fk) => MIRType::Float(fk.bits() as u8),
+            HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
+                MIRType::Ptr(Box::new(MIRType::Int(8)))
+            }
             HIRTypeKind::Ref(_, inner) => MIRType::Ref(Box::new((*inner).into())),
             HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new((*inner).into())),
             HIRTypeKind::Array(elem, len) => MIRType::Array(Box::new((*elem).into()), len as u64),

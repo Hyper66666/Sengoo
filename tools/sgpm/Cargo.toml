@@ -1,10 +1,10 @@
 [package]
-name = "sgpy"
+name = "sgpm"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "sgpy"
+name = "sgpm"
 path = "src/main.rs"
 
 [dependencies]

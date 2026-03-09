@@ -142,7 +142,11 @@ pub enum HIRExpr {
         body: Box<HIRExpr>,
     },
 
+    /// Await expression (consumes a Future<T> and yields T)
     Await(Box<HIRExpr>),
+
+    /// Async block (currently rejected at typeck, reserved for future use)
+    AsyncBlock(Box<HIRBody>),
 }
 
 /// HIR 字面量

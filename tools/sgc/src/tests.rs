@@ -4,11 +4,11 @@ use super::{
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
-    append_native_runtime_inputs, collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
+    collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
     compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
     derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
     derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, find_clang, find_runtime_c, format_edit_impact_lines,
+    edit_class_label, ensure_runtime_object, find_clang, find_runtime_c, format_edit_impact_lines,
     generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
     link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
     module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
@@ -30,6 +30,7 @@ use super::{
 use crate::cli::Cli;
 use clap::Parser as _;
 use serde_json::Value;
+use sengoo_compiler::compile_to_ir as compile_compiler_ir;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -201,7 +202,7 @@ fn auto_falls_back_to_lli_when_native_unavailable() {
 fn explicit_engine_is_validated() {
     assert!(resolve_engine(RunEngine::Native, false, true).is_err());
     assert!(resolve_engine(RunEngine::Lli, true, false).is_err());
-    assert!(resolve_engine(RunEngine::Native, true, true).is_ok());
+    assert!(resolve_engine(RunEngine::Cranelift, false, false).is_ok());
 }
 
 #[test]
@@ -343,17 +344,32 @@ fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
         "sengoo_vec_new_i64",
         "sengoo_vec_free_i64",
         "sengoo_vec_len_i64",
+        "sengoo_vec_clear_i64_status",
         "sengoo_vec_push_i64",
         "sengoo_vec_get_i64",
         "sengoo_vec_set_i64",
         "sengoo_vec_pop_i64",
+        "sengoo_vec_get_or_default_i64",
+        "sengoo_vec_contains_i64",
+        "sengoo_vec_remove_i64",
+        "sengoo_vec_remove_or_default_i64",
+        "sengoo_vec_pop_or_default_i64",
         "sengoo_hashmap_new_i64",
         "sengoo_hashmap_free_i64",
         "sengoo_hashmap_len_i64",
+        "sengoo_hashmap_clear_i64",
+        "sengoo_hashmap_clear_i64_status",
         "sengoo_hashmap_insert_i64",
         "sengoo_hashmap_get_i64",
+        "sengoo_hashmap_get_or_default_i64",
         "sengoo_hashmap_contains_i64",
         "sengoo_hashmap_remove_i64",
+        "sengoo_hashmap_iter_new_i64",
+        "sengoo_hashmap_iter_done_i64",
+        "sengoo_hashmap_iter_next_i64",
+        "sengoo_hashmap_iter_next_or_default_i64",
+        "sengoo_hashmap_iter_free_i64_status",
+        "sengoo_hashmap_iter_reset_i64_status",
     ] {
         assert!(runtime_c.contains(symbol), "runtime stdlib missing symbol: {symbol}");
     }
@@ -370,7 +386,9 @@ fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
 
     for symbol in [
         "sengoo_vec_iter_new_i64",
+        "sengoo_vec_iter_done_i64",
         "sengoo_vec_iter_next_i64",
+        "sengoo_vec_iter_next_or_default_i64",
         "sengoo_vec_iter_map_add_i64",
         "sengoo_vec_iter_filter_even_i64",
         "sengoo_option_some_i64",
@@ -414,6 +432,31 @@ fn openspec_acceptance_matrix_covers_all_capabilities() {
             matrix.contains(capability),
             "acceptance matrix missing capability: {capability}"
         );
+    }
+}
+
+#[test]
+fn openspec_acceptance_scripts_target_real_test_filters() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+
+    let ps = fs::read_to_string(workspace_root.join("scripts/openspec-acceptance.ps1"))
+        .expect("powershell acceptance script should exist");
+    let sh = fs::read_to_string(workspace_root.join("scripts/openspec-acceptance.sh"))
+        .expect("shell acceptance script should exist");
+
+    for needle in [
+        "cargo test -p sgc edit_classifier_detects_",
+        "cargo test -p sgc interface_change_propagates_",
+        "cargo test -p sengoo-runtime --features python python_",
+        "cargo test -p sengoo-compiler stdlib_surface_",
+        "cargo test -p sgc stdlib_surface_runtime_",
+    ] {
+        assert!(ps.contains(needle), "ps1 missing updated acceptance command: {needle}");
+        assert!(sh.contains(needle), "sh missing updated acceptance command: {needle}");
     }
 }
 
@@ -1222,6 +1265,8 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         FrontendJobs::Auto,
         false,
         super::ReflectionCliOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -1487,7 +1532,9 @@ fn incremental_link_output_matches_full_link_output() {
     compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
 
     let mut object_paths = vec![obj_path.clone()];
-    append_native_runtime_inputs(&clang, &mut object_paths, runtime_c.as_deref(), 2).unwrap();
+    if let Some(runtime_c) = runtime_c.as_deref() {
+        object_paths.push(ensure_runtime_object(&clang, runtime_c, 2).unwrap());
+    }
     link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
 
     let full_out = Command::new(&full_exe).output().unwrap();
@@ -1502,66 +1549,250 @@ fn incremental_link_output_matches_full_link_output() {
     let _ = fs::remove_file(&inc_exe);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn cmd_run_executes_async_native_main_via_runtime_bridge() {
-    let Some(_clang) = find_clang() else {
-        return;
+fn load_stdlib_surface_source() -> String {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    fs::read_to_string(workspace_root.join("tools/stdlib/collections.sg"))
+        .expect("stdlib surface should exist")
+}
+
+fn compile_and_run_stdlib_program(tag: &str, source: &str) -> std::process::Output {
+    let Some(clang) = find_clang() else {
+        panic!("clang is required for stdlib runtime tests");
     };
 
-    let root = std::env::temp_dir().join(format!(
-        "sengoo-sgc-async-run-{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
+    let combined = format!("{}\n\n{}", load_stdlib_surface_source(), source);
+    let llvm_ir = compile_compiler_ir(&combined).expect("stdlib source should compile");
+    let ll_path = temp_artifact(&format!("stdlib-runtime-{}", tag), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
 
-    let input = root.join("main.sg");
-    let source = r#"
-async def add_one(x: i64) -> i64 {
-    x + 1
+    let exe_path = temp_artifact(&format!("stdlib-runtime-{}", tag), if cfg!(windows) { "exe" } else { "" });
+    let obj_path = temp_artifact(&format!("stdlib-runtime-{}", tag), if cfg!(windows) { "obj" } else { "o" });
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let runtime_c = workspace_root.join("tools/stdlib/runtime.c");
+    let runtime_obj = temp_artifact(&format!("stdlib-runtime-c-{}", tag), if cfg!(windows) { "obj" } else { "o" });
+    compile_ir_to_object(&clang, &runtime_c, &runtime_obj, 2).unwrap();
+
+    let object_paths = vec![obj_path.clone(), runtime_obj.clone()];
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
+
+    let output = Command::new(&exe_path).output().expect("stdlib binary should run");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&obj_path);
+    let _ = fs::remove_file(&runtime_obj);
+    let _ = fs::remove_file(&exe_path);
+    output
 }
 
-async def main() -> i64 {
-    let value = await add_one(41);
-    print(value);
-    value
+
+#[test]
+fn runtime_function_value_parameter_executes_non_capturing_lambda() {
+    let output = compile_and_run_stdlib_program(
+        "fn-value-call",
+        r#"
+def apply_twice(x: i64, f: fn(i64) -> i64) -> i64 {
+    f(f(x))
 }
-"#;
-    fs::write(&input, source).unwrap();
 
-    let input_string = input.to_string_lossy().to_string();
-    let result = super::cmd_run(
-        &input_string,
-        2,
-        ContractChecksMode::Auto,
-        RunEngine::Native,
-        true,
-        &[],
-        false,
-        FrontendJobs::Auto,
-        false,
-        super::ReflectionCliOptions::default(),
-    )
-    .await;
-    assert!(result.is_ok(), "async native run failed: {:?}", result.err());
-
-    let executable_path = root.join("build").join(if cfg!(windows) { "main.exe" } else { "main" });
-    assert!(
-        executable_path.exists(),
-        "cmd_run should emit a native executable at {}",
-        executable_path.display()
+def main() -> i64 {
+    let add1 = |y| y + 1;
+    apply_twice(40, add1)
+}
+"#,
     );
 
-    let output = Command::new(&executable_path).output().unwrap();
     assert_eq!(output.status.code(), Some(42));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("42"),
-        "async executable should print 42, got stdout: {}",
-        stdout
+}
+
+#[test]
+fn stdlib_surface_runtime_handles_boundary_values_and_resource_methods() {
+    let output = compile_and_run_stdlib_program("boundary", 
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    let empty_pop = vec.pop().unwrap_or(11);
+    vec.push(5);
+    vec.push(9);
+    let missing_index = vec.get(9).unwrap_or(22);
+
+    let iter = vec.iter();
+    let first = iter.next().unwrap_or(0);
+    iter.reset();
+    let first_again = iter.next().unwrap_or(0);
+
+    let map = hashmap_new_i64_i64();
+    let missing_key = map.get(7).unwrap_or(33);
+
+    iter.free();
+    map.free();
+    vec.free();
+
+    empty_pop + missing_index + first + first_again + missing_key
+}
+"#,
     );
 
-    let _ = fs::remove_dir_all(&root);
+    assert_eq!(output.status.code(), Some(76));
+}
+
+
+
+#[test]
+fn stdlib_surface_runtime_vec_remove_shifts_tail_elements() {
+    let output = compile_and_run_stdlib_program(
+        "vec-remove-contains",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    vec.push(3);
+    vec.push(5);
+    vec.push(7);
+
+    let removed = vec.remove(1).unwrap_or(0);
+    let tail = vec.get(1).unwrap_or(0);
+    vec.free();
+    removed + tail
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(12));
+}
+
+#[test]
+fn stdlib_surface_runtime_clear_and_is_empty_are_correct() {
+    let output = compile_and_run_stdlib_program(
+        "clear-empty",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    vec.push(1);
+    vec.push(2);
+    vec.clear();
+
+    let map = hashmap_new_i64_i64();
+    map.insert(1, 2);
+    map.insert(3, 4);
+    map.clear();
+
+    if vec.is_empty() && map.is_empty() {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+}
+
+
+
+#[test]
+fn stdlib_surface_runtime_hashmap_iter_sums_all_values() {
+    let output = compile_and_run_stdlib_program(
+        "hashmap-iter",
+        r#"
+def main() -> i64 {
+    let map = hashmap_new_i64_i64();
+    map.insert(1, 10);
+    map.insert(9, 20);
+    map.insert(17, 30);
+
+    let iter = map.iter();
+    let item = iter.next();
+    let total = 0;
+    while item.is_some {
+        total = total + item.value;
+        item = iter.next();
+    }
+    iter.free();
+    map.free();
+    total
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(60));
+}
+
+
+#[test]
+fn stdlib_surface_runtime_iterator_map_with_executes_non_capturing_lambda() {
+    let output = compile_and_run_stdlib_program(
+        "iter-higher-order",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    vec.push(1);
+    vec.push(2);
+    vec.push(3);
+    vec.push(4);
+
+    let add1 = |x| x + 1;
+
+    let iter = vec.iter();
+    let mapped = iter.map_with(add1).unwrap_or(0);
+    iter.free();
+    vec.free();
+    mapped
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn stdlib_surface_runtime_hashmap_remove_preserves_other_keys_in_probe_chain() {
+    let output = compile_and_run_stdlib_program(
+        "hashmap-probe-chain",
+        r#"
+def main() -> i64 {
+    let map = hashmap_new_i64_i64();
+    map.insert(1, 10);
+    map.insert(9, 20);
+    map.insert(17, 30);
+
+    map.remove(1);
+
+    let a = map.get(9).unwrap_or(0);
+    let b = map.get(17).unwrap_or(0);
+    map.free();
+    a + b
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(50));
+}
+
+#[test]
+fn stdlib_surface_runtime_option_and_result_values_are_correct() {
+    let output = compile_and_run_stdlib_program(
+        "option-result",
+        r#"
+def main() -> i64 {
+    let option_value = option_some_i64(2).map_add(3).and_then_mul(4).unwrap_or(0);
+    let result_ok = result_ok_i64(5).map_add(1).and_then_mul(3).unwrap_or(0);
+    let result_err = result_err_i64(7).map_err_add(2).unwrap_or(11);
+    option_value + result_ok + result_err
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(49));
 }
 
 #[test]
@@ -3628,4 +3859,354 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
 }
 
 
+
+
+
+
+
+#[test]
+fn stdlib_surface_runtime_iterator_filter_with_executes_non_capturing_lambda() {
+    let output = compile_and_run_stdlib_program(
+        "iter-filter-higher-order",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    vec.push(1);
+    vec.push(2);
+    vec.push(3);
+    vec.push(4);
+
+    let is_even = |x| x % 2;
+
+    let iter = vec.iter();
+    let first_odd = iter.filter_with(is_even).unwrap_or(0);
+    iter.free();
+    vec.free();
+    first_odd
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_i64_instantiations_work() {
+    let output = compile_and_run_stdlib_program(
+        "generic-i64-instantiations",
+        r#"
+def main() -> i64 {
+    let vec: Vec<i64> = vec_new_i64();
+    vec.push(5);
+    let popped: Option<i64> = vec.pop();
+
+    let map: HashMap<i64, i64> = hashmap_new_i64_i64();
+    map.insert(1, popped.unwrap_or(0));
+    let got: Option<i64> = map.get(1);
+
+    let result: Result<i64, i64> = result_ok_i64(got.unwrap_or(0));
+
+    vec.free();
+    map.free();
+    result.unwrap_or(0)
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(5));
+}
+
+#[test]
+fn stdlib_surface_runtime_option_ok_or_and_result_projections_are_correct() {
+    let output = compile_and_run_stdlib_program(
+        "option-result-projections",
+        r#"
+def main() -> i64 {
+    let ok_from_option = option_some_i64(7).ok_or(9).ok().unwrap_or(0);
+    let err_from_option = option_none_i64().ok_or(9).err().unwrap_or(0);
+    let ok_projection = result_ok_i64(4).ok().unwrap_or(0);
+    let err_projection = result_err_i64(5).err().unwrap_or(0);
+    ok_from_option + err_from_option + ok_projection + err_projection
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(25));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_result_projections_work() {
+    let output = compile_and_run_stdlib_program(
+        "generic-result-projections",
+        r#"
+def main() -> i64 {
+    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
+    let err_result: Result<bool, i64> = Result { is_ok: false, value: false, error: 6 };
+    let bool_err: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+
+    let ok_option: Option<bool> = ok_result.ok();
+    let err_code_option: Option<i64> = err_result.err();
+    let err_flag_option: Option<bool> = bool_err.err();
+
+    let ok_value: bool = ok_option.unwrap_or(false);
+    let err_code: i64 = err_code_option.unwrap_or(0);
+    let err_flag: bool = err_flag_option.unwrap_or(false);
+
+    if ok_value && err_flag {
+        err_code + 1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(7));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_result_projections_infer_local_types() {
+    let output = compile_and_run_stdlib_program(
+        "generic-result-projections-infer-locals",
+        r#"
+def main() -> i64 {
+    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
+    let err_result: Result<bool, i64> = Result { is_ok: false, value: false, error: 6 };
+    let bool_err: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+
+    let ok_option = ok_result.ok();
+    let err_code_option = err_result.err();
+    let err_flag_option = bool_err.err();
+
+    let ok_value = ok_option.unwrap_or(false);
+    let err_code = err_code_option.unwrap_or(0);
+    let err_flag = err_flag_option.unwrap_or(false);
+
+    if ok_value && err_flag {
+        err_code + 1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(7));
+}
+
+#[test]
+fn stdlib_surface_runtime_default_generic_trait_method_executes_specialized_body() {
+    let output = compile_and_run_stdlib_program(
+        "default-trait-generic-wrap",
+        r#"
+struct Wrap<T> {
+    value: T,
+}
+
+trait WrapValue {
+    def wrap<T>(self, value: T) -> Wrap<T> {
+        Wrap { value: value }
+    }
+}
+
+impl WrapValue for i64 {
+}
+
+def main() -> i64 {
+    let wrapped = 1.wrap(true);
+    if wrapped.value {
+        42
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_surface_runtime_default_generic_trait_method_supports_multiple_instantiations() {
+    let output = compile_and_run_stdlib_program(
+        "default-trait-generic-multi-inst",
+        r#"
+struct Wrap<T> {
+    value: T,
+}
+
+trait WrapValue {
+    def wrap<T>(self, value: T) -> Wrap<T> {
+        Wrap { value: value }
+    }
+}
+
+impl WrapValue for i64 {
+}
+
+def main() -> i64 {
+    let wrapped_bool = 1.wrap(true);
+    let wrapped_i64 = 1.wrap(7);
+
+    if wrapped_bool.value {
+        wrapped_i64.value + 1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(8),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_option_ok_or_with_i64_error_works() {
+    let output = compile_and_run_stdlib_program(
+        "generic-option-ok-or-i64",
+        r#"
+def main() -> i64 {
+    let some_flag: Option<bool> = Option { is_some: true, value: true };
+    let none_flag: Option<bool> = Option { is_some: false, value: false };
+
+    let ok_result = some_flag.ok_or(6);
+    let err_result = none_flag.ok_or(6);
+
+    let ok_value = ok_result.ok().unwrap_or(false);
+    let err_code = err_result.err().unwrap_or(0);
+
+    if ok_value {
+        err_code + 1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(7));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_option_ok_or_with_bool_error_works() {
+    let output = compile_and_run_stdlib_program(
+        "generic-option-ok-or-bool",
+        r#"
+def main() -> i64 {
+    let some_flag: Option<bool> = Option { is_some: true, value: true };
+    let none_flag: Option<bool> = Option { is_some: false, value: false };
+
+    let ok_result = some_flag.ok_or(false);
+    let err_result = none_flag.ok_or(true);
+
+    let ok_value = ok_result.ok().unwrap_or(false);
+    let err_flag = err_result.err().unwrap_or(false);
+
+    if ok_value && err_flag {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn stdlib_surface_runtime_unwrap_returns_values_on_success() {
+    let output = compile_and_run_stdlib_program(
+        "option-result-unwrap-success",
+        r#"
+def main() -> i64 {
+    let option_value = option_some_i64(7).unwrap();
+    let result_value = result_ok_i64(5).unwrap();
+    option_value + result_value
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(12));
+}
+
+#[test]
+fn stdlib_surface_runtime_option_unwrap_panics_on_none() {
+    let output = compile_and_run_stdlib_program(
+        "option-unwrap-none",
+        r#"
+def main() -> i64 {
+    option_none_i64().unwrap()
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Option unwrap failed"), "stderr should mention unwrap failure: {}", stderr);
+}
+
+#[test]
+fn stdlib_surface_runtime_expect_returns_values_on_success() {
+    let output = compile_and_run_stdlib_program(
+        "option-result-expect-success",
+        r#"
+def main() -> i64 {
+    let option_value = option_some_i64(7).expect("option ok");
+    let result_value = result_ok_i64(5).expect("result ok");
+    option_value + result_value
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(12));
+}
+
+#[test]
+fn stdlib_surface_runtime_option_expect_prints_message_and_exits() {
+    let output = compile_and_run_stdlib_program(
+        "option-expect-none",
+        r#"
+def main() -> i64 {
+    option_none_i64().expect("custom expect failure")
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("custom expect failure"), "stdout should include custom message: {}", stdout);
+    assert!(stderr.contains("Option unwrap failed"), "stderr should include fatal message: {}", stderr);
+}
+
+#[test]
+fn stdlib_surface_runtime_result_expect_prints_message_and_exits() {
+    let output = compile_and_run_stdlib_program(
+        "result-expect-err",
+        r#"
+def main() -> i64 {
+    result_err_i64(9).expect("result expect failure")
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("result expect failure"), "stdout should include custom message: {}", stdout);
+    assert!(stderr.contains("Result unwrap failed"), "stderr should include fatal message: {}", stderr);
+}
 

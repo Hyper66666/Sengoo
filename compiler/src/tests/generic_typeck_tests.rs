@@ -1,4 +1,4 @@
-use crate::{lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
+use crate::{compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
 use std::collections::HashSet;
 
 #[test]
@@ -218,6 +218,7 @@ def main() -> i64 {
         MirLowerOptions {
             runtime_contract_checks: false,
             lazy_generic_mono: true,
+            async_functions: std::collections::HashSet::new(),
         },
     )
     .expect("MIR lowering should succeed");
@@ -255,6 +256,7 @@ def main() -> i64 {
         MirLowerOptions {
             runtime_contract_checks: false,
             lazy_generic_mono: true,
+            async_functions: std::collections::HashSet::new(),
         },
     )
     .expect("MIR lowering should succeed");
@@ -266,3 +268,61 @@ def main() -> i64 {
         "instantiated generic function should be kept in lazy mode"
     );
 }
+
+#[test]
+fn generic_impl_method_on_box_typechecks() {
+    let source = r#"
+struct Box<T> {
+    value: T,
+}
+
+impl<T> Box<T> {
+    def get(self) -> T {
+        self.value
+    }
+}
+
+def unwrap_box_i64(boxed: Box<i64>) -> i64 {
+    boxed.get()
+}
+
+def main() -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("generic impl method should typecheck");
+}
+
+#[test]
+fn generic_impl_method_on_box_lowers_to_ir() {
+    let source = r#"
+struct Box<T> {
+    value: T,
+}
+
+impl<T> Box<T> {
+    def get(self) -> T {
+        self.value
+    }
+}
+
+def unwrap_box_i64(boxed: Box<i64>) -> i64 {
+    boxed.get()
+}
+
+def main() -> i64 {
+    0
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("generic impl method should compile to IR");
+    assert!(ir.contains("Box_i64_get"), "expected monomorphized method call in IR\n{}", ir);
+}
+
+
+
