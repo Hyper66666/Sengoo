@@ -216,7 +216,7 @@ impl<'source> Parser<'source> {
                         is_mut,
                     }
                 }
-                TokenKind::And => {
+                TokenKind::BitAnd => {
                     self.advance();
                     let is_mut = self.consume(TokenKind::MutKw).is_some();
                     let base = self.parse_type()?;
@@ -276,3 +276,4 @@ impl<'source> Parser<'source> {
         Ok(kind)
     }
 }
+

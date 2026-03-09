@@ -85,6 +85,19 @@ pub enum Terminator {
     },
     /// 不可达
     Unreachable,
+    /// Async suspend point: poll a child future
+    Suspend {
+        /// The poll function to call (e.g. "foo__poll")
+        poll_func: String,
+        /// The future handle local
+        future_handle: Local,
+        /// Where to store the poll result (0=pending, 1=ready)
+        destination: Local,
+        /// Block to jump to when ready
+        ready_block: usize,
+        /// Block to jump to when pending
+        pending_block: usize,
+    },
 }
 
 /// 调用参数

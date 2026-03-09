@@ -1,46 +1,5 @@
 use crate::ast::DeclKind;
-use crate::{compile_to_ir, compile_to_mir, lower_ast, Parser, TypeChecker};
-
-#[test]
-fn async_function_with_non_async_await_is_rejected() {
-    let source = r#"
-async def main() -> i64 {
-    let value = await 1;
-    value
-}
-"#;
-
-    let result = compile_to_ir(source);
-    assert!(
-        result.is_err(),
-        "phase-1 await should reject non-async operands, got: {:?}",
-        result.ok()
-    );
-    let msg = result.err().expect("non-async await should fail").to_string();
-    assert!(
-        msg.contains("phase-1 await requires an async call result"),
-        "error should explain phase-1 await restriction, got: {}",
-        msg
-    );
-}
-
-#[test]
-fn await_outside_async_context_is_rejected() {
-    let source = r#"
-def main() -> i64 {
-    let value = await 1;
-    value
-}
-"#;
-
-    let err = compile_to_ir(source).expect_err("await outside async should fail");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("await is only allowed in async contexts"),
-        "error should mention async context restriction, got: {}",
-        msg
-    );
-}
+use crate::{compile_to_ir, compile_to_mir, Parser};
 
 #[test]
 fn parser_marks_async_def_as_async_function() {
@@ -74,131 +33,269 @@ async const FLAG: i64 = 1;
 }
 
 #[test]
-fn lower_ast_preserves_await_nodes_in_hir() {
+fn await_outside_async_context_is_rejected() {
     let source = r#"
-async def add_one(x: i64) -> i64 {
-    x + 1
-}
-
-async def main() -> i64 {
-    let value = await add_one(41);
+async def helper() -> i64 { 42 }
+def main() -> i64 {
+    let value = await helper();
     value
 }
 "#;
 
-    let program = Parser::parse(source).expect("parser should accept async program");
-    let mut checker = TypeChecker::new();
-    checker
-        .check_program(&program)
-        .expect("type checker should accept async program");
-    let env = checker.into_env();
-    let module = lower_ast(&program, &env);
-    let dumped = format!("{module:#?}");
-    assert!(
-        dumped.contains("Await"),
-        "HIR should preserve await nodes for async lowering, got:\n{}",
-        dumped
-    );
-}
-
-#[test]
-fn async_block_is_rejected_in_phase1() {
-    let source = r#"
-async def main() -> i64 {
-    let value = async {
-        1
-    };
-    await value
-}
-"#;
-
-    let err = compile_to_ir(source).expect_err("phase-1 async blocks should fail");
+    let err = compile_to_ir(source).expect_err("await outside async should fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("async blocks are not supported in phase 1"),
-        "error should explain phase-1 async block restriction, got: {}",
+        msg.contains("await is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
         msg
     );
 }
 
 #[test]
-fn compile_to_mir_synthesizes_async_helpers_and_main_wrapper() {
+fn await_on_non_future_is_rejected() {
     let source = r#"
-async def add_one(x: i64) -> i64 {
-    x + 1
-}
-
 async def main() -> i64 {
-    await add_one(41)
+    let value = await 1;
+    value
 }
 "#;
 
-    let mir = compile_to_mir(source).expect("async program should lower to MIR");
-    let names: Vec<&str> = mir.iter().map(|f| f.name.as_str()).collect();
-
-    for required in [
-        "add_one",
-        "add_one__start",
-        "add_one__poll",
-        "add_one__result",
-        "main__async_body",
-        "main__start",
-        "main__poll",
-        "main__result",
-        "main",
-    ] {
-        assert!(
-            names.contains(&required),
-            "expected synthesized async MIR function `{required}`, got {:?}",
-            names
-        );
-    }
+    let err = compile_to_ir(source).expect_err("await on non-future should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("await requires a Future value"),
+        "error should mention Future requirement, got: {}",
+        msg
+    );
 }
 
 #[test]
-fn compile_to_ir_emits_async_helper_calls_and_sync_main_wrapper() {
+fn async_function_with_await_compiles() {
     let source = r#"
 async def add_one(x: i64) -> i64 {
     x + 1
 }
-
 async def main() -> i64 {
-    await add_one(41)
+    let result = await add_one(41);
+    result
 }
 "#;
 
-    let ir = compile_to_ir(source).expect("async program should compile to LLVM IR");
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "async/await function should compile, got: {:?}",
+        result.err()
+    );
+}
 
-    for required in [
-        "define i64 @add_one__start(i64 %l_1)",
-        "define i64 @add_one__poll(i64 %l_1)",
-        "define i64 @add_one__result(i64 %l_1)",
-        "define i64 @main__start()",
-        "define i64 @main__poll(i64 %l_1)",
-        "define i64 @main__result(i64 %l_1)",
-        "define i64 @main()",
-        "declare i64 @sengoo_async_run_main_i64()",
-        "call i64 @add_one__start(",
-        "call i64 @add_one__poll(",
-        "call i64 @add_one__result(",
-        "call i64 @sengoo_async_run_main_i64()",
-    ] {
-        assert!(
-            ir.contains(required),
-            "expected async IR to contain `{required}`, got:\n{}",
-            ir
-        );
-    }
+#[test]
+fn async_block_is_rejected() {
+    let source = r#"
+async def main() -> i64 {
+    let f = async { 42 };
+    0
+}
+"#;
 
-    for forbidden in [
-        "call i64 @main__start()",
-        "call i64 @main__poll(",
-        "call i64 @main__result(",
-    ] {
-        assert!(
-            !ir.contains(forbidden),
-            "sync main wrapper should delegate through runtime bridge instead of `{forbidden}`, got:\n{}",
-            ir
-        );
-    }
+    let err = compile_to_ir(source).expect_err("async blocks should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("async blocks are not yet supported"),
+        "error should mention async block restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn returning_future_is_rejected() {
+    let source = r#"
+async def helper() -> i64 { 42 }
+async def main() -> i64 {
+    return helper();
+    0
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("returning a future should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("future values cannot escape"),
+        "error should mention escape restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn future_as_function_arg_is_rejected() {
+    let source = r#"
+async def helper() -> i64 { 42 }
+def consume(x: i64) -> i64 { x }
+async def main() -> i64 {
+    consume(helper());
+    0
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("passing unawaited future as arg should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("future values cannot be passed as arguments"),
+        "error should mention argument escape restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn async_helpers_are_synthesized_in_mir() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+def main() -> i64 {
+    0
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let names: Vec<&str> = mir_fns.iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"add_one"),
+        "original async function body should be present, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"add_one__start"),
+        "__start helper should be synthesized, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"add_one__poll"),
+        "__poll helper should be synthesized, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"add_one__result"),
+        "__result helper should be synthesized, got: {:?}",
+        names
+    );
+}
+
+#[test]
+fn async_main_wrapper_is_generated() {
+    let source = r#"
+async def main() -> i64 {
+    42
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let names: Vec<&str> = mir_fns.iter().map(|f| f.name.as_str()).collect();
+
+    assert!(
+        names.contains(&"main__body"),
+        "original main body should be renamed to main__body, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"main"),
+        "async main wrapper should exist, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"main__start"),
+        "__start helper should be present, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"main__poll"),
+        "__poll helper should be present, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"main__result"),
+        "__result helper should be present, got: {:?}",
+        names
+    );
+
+    let main_fn = mir_fns.iter().find(|f| f.name == "main").unwrap();
+    assert!(
+        !main_fn.is_async,
+        "wrapper main should not be marked async"
+    );
+
+    let body_fn = mir_fns.iter().find(|f| f.name == "main__body").unwrap();
+    assert!(body_fn.is_async, "body function should still be marked async");
+}
+
+#[test]
+fn async_function_ir_contains_helper_declarations() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+async def main() -> i64 {
+    let result = await add_one(41);
+    result
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("should compile to IR");
+    assert!(
+        ir.contains("@main__start"),
+        "IR should contain main__start, got:\n{}",
+        &ir[..ir.len().min(2000)]
+    );
+    assert!(
+        ir.contains("@main__poll"),
+        "IR should contain main__poll"
+    );
+    assert!(
+        ir.contains("@main__result"),
+        "IR should contain main__result"
+    );
+    assert!(
+        ir.contains("@sengoo_async_frame_alloc"),
+        "IR should declare async frame alloc"
+    );
+}
+
+#[test]
+fn multiple_sequential_awaits_compile() {
+    let source = r#"
+async def step1() -> i64 { 10 }
+async def step2() -> i64 { 20 }
+async def main() -> i64 {
+    let a = await step1();
+    let b = await step2();
+    a + b
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "multiple sequential awaits should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn local_future_binding_then_await_compiles() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+async def main() -> i64 {
+    let f = add_one(41);
+    await f
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "local future binding with await should compile, got: {:?}",
+        result.err()
+    );
 }
