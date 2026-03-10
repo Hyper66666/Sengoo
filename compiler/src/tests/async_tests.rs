@@ -1,4 +1,5 @@
 use crate::ast::DeclKind;
+use crate::mir::Instruction;
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
 #[test]
@@ -333,5 +334,49 @@ async def main() -> i64 {
         result.is_ok(),
         "local future binding with await should compile, got: {:?}",
         result.err()
+    );
+}
+
+#[test]
+fn multi_await_poll_helper_polls_child_futures_without_reinvoking_body() {
+    let source = r#"
+async def step1() -> i64 { 10 }
+async def step2(x: i64) -> i64 { x + 20 }
+async def main() -> i64 {
+    let a = await step1();
+    let b = await step2(a);
+    a + b
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+
+    let call_names = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        call_names.contains(&"step1__poll"),
+        "main__poll should poll step1 future, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        call_names.contains(&"step2__poll"),
+        "main__poll should poll step2 future, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        !call_names.contains(&"main__body"),
+        "main__poll should not re-enter main__body once state-machine lowering is in place, got calls: {:?}",
+        call_names
     );
 }
