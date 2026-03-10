@@ -1,4 +1,4 @@
-use sengoo_compiler::{lower_ast, lower_hir, Parser, TypeChecker};
+use sengoo_compiler::{lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::{mpsc, Arc, Mutex};
@@ -22,10 +22,19 @@ pub(crate) fn frontend_probe_module_full(
     checker
         .check_program(&parsed)
         .map_err(|e| format!("typecheck failed: {}", e))?;
+    let async_functions = checker.async_function_names().clone();
     let type_env = checker.into_env();
     let hir = lower_ast(&parsed, &type_env);
     drop(type_env);
-    let _ = lower_hir(&hir.items).map_err(|e| format!("lower failed: {}", e))?;
+    let _ = lower_hir_with_options(
+        &hir.items,
+        MirLowerOptions {
+            runtime_contract_checks: false,
+            lazy_generic_mono: true,
+            async_functions,
+        },
+    )
+    .map_err(|e| format!("lower failed: {}", e))?;
 
     Ok((
         interface_fingerprint(source),

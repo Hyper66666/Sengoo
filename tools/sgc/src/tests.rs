@@ -1467,6 +1467,52 @@ fn cached_native_recovery_requires_cached_ir_or_object() {
 }
 
 #[test]
+fn async_native_runtime_executes_async_main_end_to_end() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+
+async def main() -> i64 {
+    let f = add_one(40);
+    let a = await f;
+    let b = await add_one(a);
+    b + 1
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-native-main", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-native-main",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async native executable should run");
+    assert_eq!(output.status.code(), Some(43));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;
@@ -1795,6 +1841,27 @@ fn runtime_suite_name_prefers_bench_directory() {
     assert!(suite_path.ends_with(Path::new("bench").join("suites").join("runtime")));
     let cases = collect_bench_cases(&suite_path).unwrap();
     assert!(!cases.is_empty());
+}
+
+#[test]
+fn frontend_probe_module_full_accepts_async_sources() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+
+async def main() -> i64 {
+    let f = add_one(41);
+    await f
+}
+"#;
+
+    let result = super::frontend_probe_module_full("tests/async.sg", source);
+    assert!(
+        result.is_ok(),
+        "frontend probe should accept async sources, got: {:?}",
+        result.err()
+    );
 }
 
 #[test]

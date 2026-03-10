@@ -261,6 +261,42 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_helper_ir_uses_void_frame_runtime_calls() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+
+async def main() -> i64 {
+    let result = await add_one(41);
+    result
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("should compile to IR");
+    assert!(
+        ir.contains("call void @sengoo_async_frame_store"),
+        "async frame store should be emitted as void call, got:
+{}",
+        &ir[..ir.len().min(4000)]
+    );
+    assert!(
+        ir.contains("call void @sengoo_async_frame_free"),
+        "async frame free should be emitted as void call, got:
+{}",
+        &ir[..ir.len().min(4000)]
+    );
+    assert!(
+        !ir.contains("call i64 @sengoo_async_frame_store"),
+        "async frame store should not be emitted as i64 call"
+    );
+    assert!(
+        !ir.contains("call i64 @sengoo_async_frame_free"),
+        "async frame free should not be emitted as i64 call"
+    );
+}
+
+#[test]
 fn multiple_sequential_awaits_compile() {
     let source = r#"
 async def step1() -> i64 { 10 }

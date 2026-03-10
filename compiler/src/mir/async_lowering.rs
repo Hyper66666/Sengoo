@@ -7,7 +7,7 @@
 
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirConstant,
-    MirFunction, Terminator, MIR_I64,
+    MirFunction, Terminator, MIR_I64, MIR_UNIT,
 };
 
 /// Per-async-function frame layout (logical, not physical — fields stored at offsets in a malloc'd block)
@@ -194,7 +194,7 @@ fn synthesize_start(layout: &AsyncFrameLayout) -> MirFunction {
     });
     f.basic_blocks[bb0].push(zero_inst);
 
-    let store_dest = f.add_local(LocalKind::Temp, MIR_I64);
+    let store_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
     let store_state = f.alloc_inst(Instruction::Call {
         destination: store_dest,
         func: "sengoo_async_frame_store".to_string(),
@@ -212,7 +212,7 @@ fn synthesize_start(layout: &AsyncFrameLayout) -> MirFunction {
         });
         f.basic_blocks[bb0].push(offset_inst);
 
-        let sp_dest = f.add_local(LocalKind::Temp, MIR_I64);
+        let sp_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
         let store_param = f.alloc_inst(Instruction::Call {
             destination: sp_dest,
             func: "sengoo_async_frame_store".to_string(),
@@ -302,7 +302,7 @@ fn synthesize_poll(layout: &AsyncFrameLayout) -> MirFunction {
         });
         f.basic_blocks[body_block].push(one_inst);
 
-        let sr_dest = f.add_local(LocalKind::Temp, MIR_I64);
+        let sr_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
         let store_result = f.alloc_inst(Instruction::Call {
             destination: sr_dest,
             func: "sengoo_async_frame_store".to_string(),
@@ -318,7 +318,7 @@ fn synthesize_poll(layout: &AsyncFrameLayout) -> MirFunction {
         });
         f.basic_blocks[body_block].push(final_state_inst);
 
-        let sfs_dest = f.add_local(LocalKind::Temp, MIR_I64);
+        let sfs_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
         let store_final_state = f.alloc_inst(Instruction::Call {
             destination: sfs_dest,
             func: "sengoo_async_frame_store".to_string(),
@@ -395,7 +395,7 @@ fn synthesize_poll(layout: &AsyncFrameLayout) -> MirFunction {
             });
             f.basic_blocks[sb].push(one_inst);
 
-            let sres_dest = f.add_local(LocalKind::Temp, MIR_I64);
+            let sres_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
             let store_res = f.alloc_inst(Instruction::Call {
                 destination: sres_dest,
                 func: "sengoo_async_frame_store".to_string(),
@@ -411,7 +411,7 @@ fn synthesize_poll(layout: &AsyncFrameLayout) -> MirFunction {
             });
             f.basic_blocks[sb].push(next_inst);
 
-            let snext_dest = f.add_local(LocalKind::Temp, MIR_I64);
+            let snext_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
             let store_next = f.alloc_inst(Instruction::Call {
                 destination: snext_dest,
                 func: "sengoo_async_frame_store".to_string(),
@@ -463,7 +463,7 @@ fn synthesize_result(layout: &AsyncFrameLayout) -> MirFunction {
     f.basic_blocks[bb0].push(load_result);
 
     // Free the frame
-    let free_dest = f.add_local(LocalKind::Temp, MIR_I64);
+    let free_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
     let free_inst = f.alloc_inst(Instruction::Call {
         destination: free_dest,
         func: "sengoo_async_frame_free".to_string(),
