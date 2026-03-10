@@ -3,7 +3,7 @@
 use crate::hir::{
     self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRParam, HIRStmt, HIRType, HIRTypeKind,
 };
-use crate::hir::{HIRTrait, HIRTraitItem};
+use crate::hir::HIRTrait;
 use crate::method_resolution::{
     ambiguous_method_error, explicit_hir_method_param_count, explicit_hir_method_params,
     select_method_candidate, MethodCandidate, MethodCandidateMatch,
@@ -1155,6 +1155,7 @@ pub fn lower_hir_with_options(
     let concrete_type_registry = ConcreteTypeRegistry::new(&struct_defs, &concrete_named_types);
     let inherent_method_templates = collect_inherent_method_templates(items);
     let mut trait_method_templates: Vec<TraitMethodTemplate> = Vec::new();
+    let mut eager_trait_functions: Vec<hir::HIRFunction> = Vec::new();
 
     let mut known_functions: HashSet<String> = HashSet::new();
     let mut known_function_sigs: HashMap<String, FunctionSig> = HashMap::new();
@@ -1184,57 +1185,24 @@ pub fn lower_hir_with_options(
                             trait_defs.get(trait_name.as_str()).copied(),
                             &type_prefix,
                         );
-                        trait_method_templates.extend(collected.templates);
-                        let impl_method_names = collected.implemented_method_names;
-                        for method in &impl_item.items {
-                            let original_method_name = method
-                                .name
-                                .strip_prefix(&format!("{}_", type_prefix))
-                                .unwrap_or(&method.name);
-                            if !method.type_params.is_empty() {
-                                continue;
-                            }
-                            let three_part_name =
-                                format!("{}_{}_{}", type_prefix, trait_name, original_method_name);
+                        for eager_method in &collected.eager_methods {
+                            let function = &eager_method.function;
                             known_function_sigs.insert(
-                                three_part_name.clone(),
+                                function.name.clone(),
                                 FunctionSig {
                                     ret_type: hir_type_to_mir_with_structs(
-                                        &method.return_type,
+                                        &function.return_type,
                                         &struct_defs,
                                     ),
-                                    param_count: explicit_hir_method_param_count(method),
+                                    param_count: eager_method.explicit_param_count,
                                     env: vec![],
                                 },
                             );
-                            known_functions.insert(three_part_name);
+                            known_functions.insert(function.name.clone());
                         }
-
-                        if let Some(trait_def) = trait_defs.get(trait_name.as_str()) {
-                            for trait_item in &trait_def.items {
-                                if let HIRTraitItem::Function(trait_fn) = trait_item {
-                                    if !impl_method_names.contains(&trait_fn.name) {
-                                        if !trait_fn.type_params.is_empty() {
-                                            continue;
-                                        }
-                                        let three_part_name =
-                                            format!("{}_{}_{}", type_prefix, trait_name, trait_fn.name);
-                                        known_function_sigs.insert(
-                                            three_part_name.clone(),
-                                            FunctionSig {
-                                                ret_type: hir_type_to_mir_with_structs(
-                                                    &trait_fn.return_type,
-                                                    &struct_defs,
-                                                ),
-                                                param_count: explicit_hir_method_params(&trait_fn.params).len(),
-                                                env: vec![],
-                                            },
-                                        );
-                                        known_functions.insert(three_part_name);
-                                    }
-                                }
-                            }
-                        }
+                        eager_trait_functions
+                            .extend(collected.eager_methods.into_iter().map(|method| method.function));
+                        trait_method_templates.extend(collected.templates);
                     } else {
                         for method in &impl_item.items {
                             if !method.type_params.is_empty() {
@@ -1293,126 +1261,54 @@ pub fn lower_hir_with_options(
                     &concrete_named_types,
                     &known_named_types,
                 ) {
-                    let type_prefix = impl_type_prefix(&impl_item.target_type);
-                    let mut impl_method_names: HashSet<String> = HashSet::new();
-                    for method in &impl_item.items {
-                        if let Some(trait_name) = &impl_item.trait_name {
-                            let original_method_name = method
-                                .name
-                                .strip_prefix(&format!("{}_", type_prefix))
-                                .unwrap_or(&method.name);
-                            impl_method_names.insert(original_method_name.to_string());
-                            if !method.type_params.is_empty() {
-                                continue;
-                            }
-                            let three_part_name =
-                                format!("{}_{}_{}", type_prefix, trait_name, original_method_name);
-                            let mut renamed_method = method.clone();
-                            renamed_method.name = three_part_name;
-                            match lower_function(
-                                &renamed_method,
-                                &mut lambda_counter,
-                                &known_functions,
-                                &known_function_sigs,
-                                &struct_defs,
-                                concrete_type_registry.clone(),
-                                &options,
-                                &inherent_method_templates,
-                                &trait_method_templates,
-                            ) {
-                                Ok((mir_fn, lambdas)) => {
-                                    results.push(mir_fn);
-                                    results.extend(lambdas);
-                                }
-                                Err(e) => errors.push(e),
-                            }
-                        } else {
-                            if !method.type_params.is_empty() {
-                                continue;
-                            }
-                            match lower_function(
-                                method,
-                                &mut lambda_counter,
-                                &known_functions,
-                                &known_function_sigs,
-                                &struct_defs,
-                                concrete_type_registry.clone(),
-                                &options,
-                                &inherent_method_templates,
-                                &trait_method_templates,
-                            ) {
-                                Ok((mir_fn, lambdas)) => {
-                                    results.push(mir_fn);
-                                    results.extend(lambdas);
-                                }
-                                Err(e) => errors.push(e),
-                            }
-                        }
+                    if impl_item.trait_name.is_some() {
+                        continue;
                     }
-
-                    if let Some(trait_name) = &impl_item.trait_name {
-                        if let Some(trait_def) = trait_defs.get(trait_name.as_str()) {
-                            for trait_item in &trait_def.items {
-                                if let HIRTraitItem::Function(trait_fn) = trait_item {
-                                    if !impl_method_names.contains(&trait_fn.name) {
-                                        if !trait_fn.type_params.is_empty() {
-                                            continue;
-                                        }
-                                        let three_part_name =
-                                            format!("{}_{}_{}", type_prefix, trait_name, trait_fn.name);
-
-                                        let mut params = Vec::new();
-                                        let has_self = trait_fn.params.iter().any(|p| p.name == "self");
-                                        if !has_self {
-                                            params.push(HIRParam::new(
-                                                "self".to_string(),
-                                                SymbolId::INVALID,
-                                                impl_item.target_type.clone(),
-                                            ));
-                                        }
-                                        params.extend(trait_fn.params.iter().cloned());
-
-                                        let default_fn = hir::HIRFunction {
-                                            name: three_part_name,
-                                            type_params: trait_fn.type_params.clone(),
-                                            params,
-                                            return_type: trait_fn.return_type.clone(),
-                                            precondition: trait_fn.precondition.clone(),
-                                            postcondition: trait_fn.postcondition.clone(),
-                                            body: trait_fn.body.clone(),
-                                            is_async: trait_fn.is_async,
-                                            abi: trait_fn.abi.clone(),
-                                            is_unsafe: trait_fn.is_unsafe,
-                                            no_mangle: trait_fn.no_mangle,
-                                            export_name: trait_fn.export_name.clone(),
-                                            is_pub: trait_fn.is_pub,
-                                        };
-
-                                        match lower_function(
-                                            &default_fn,
-                                            &mut lambda_counter,
-                                            &known_functions,
-                                            &known_function_sigs,
-                                            &struct_defs,
-                                            concrete_type_registry.clone(),
-                                            &options,
-                                            &inherent_method_templates,
-                                            &trait_method_templates,
-                                        ) {
-                                            Ok((mir_fn, lambdas)) => {
-                                                results.push(mir_fn);
-                                                results.extend(lambdas);
-                                            }
-                                            Err(e) => errors.push(e),
-                                        }
-                                    }
-                                }
+                    for method in &impl_item.items {
+                        if !method.type_params.is_empty() {
+                            continue;
+                        }
+                        match lower_function(
+                            method,
+                            &mut lambda_counter,
+                            &known_functions,
+                            &known_function_sigs,
+                            &struct_defs,
+                            concrete_type_registry.clone(),
+                            &options,
+                            &inherent_method_templates,
+                            &trait_method_templates,
+                        ) {
+                            Ok((mir_fn, lambdas)) => {
+                                results.push(mir_fn);
+                                results.extend(lambdas);
                             }
+                            Err(e) => errors.push(e),
                         }
                     }
                 }
             }
             _ => {}
+        }
+    }
+
+    for function in eager_trait_functions {
+        match lower_function(
+            &function,
+            &mut lambda_counter,
+            &known_functions,
+            &known_function_sigs,
+            &struct_defs,
+            concrete_type_registry.clone(),
+            &options,
+            &inherent_method_templates,
+            &trait_method_templates,
+        ) {
+            Ok((mir_fn, lambdas)) => {
+                results.push(mir_fn);
+                results.extend(lambdas);
+            }
+            Err(e) => errors.push(e),
         }
     }
 

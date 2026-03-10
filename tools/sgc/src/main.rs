@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
-use std::process::Command;
 use std::sync::atomic::{AtomicI8, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::time::Duration;
@@ -54,7 +53,6 @@ pub(crate) use cache::{
     frontend_session_store_path, load_build_cache, load_frontend_session_store, load_run_cache,
     save_build_cache, save_frontend_session_store, save_run_cache,
 };
-pub(crate) use cranelift_fast_jit::run_with_cranelift_fast_jit;
 pub(crate) use daemon::{
     cmd_daemon, dispatch_build_via_daemon, dispatch_run_via_daemon, resolve_daemon_addr,
     DaemonDispatchOutcome,
@@ -649,55 +647,6 @@ fn canonical_or_lossy(path: &Path) -> String {
         .to_string()
 }
 
-async fn cmd_fmt(
-    input: &str,
-    write: bool,
-    check: bool,
-    config: Option<&str>,
-    max_width: Option<usize>,
-    indent_width: Option<usize>,
-) -> Result<()> {
-    let mut args = vec![input.to_string()];
-
-    if write {
-        args.push("--write".to_string());
-    }
-    if check {
-        args.push("--check".to_string());
-    }
-    if let Some(config) = config {
-        args.push("--config".to_string());
-        args.push(config.to_string());
-    }
-    if let Some(max_width) = max_width {
-        args.push("--max-width".to_string());
-        args.push(max_width.to_string());
-    }
-    if let Some(indent_width) = indent_width {
-        args.push("--indent-width".to_string());
-        args.push(indent_width.to_string());
-    }
-
-    let status = match Command::new("sgfmt").args(&args).status() {
-        Ok(status) => status,
-        Err(_) => Command::new("cargo")
-            .arg("run")
-            .arg("-q")
-            .arg("-p")
-            .arg("sgfmt")
-            .arg("--")
-            .args(&args)
-            .status()
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("failed to run sgfmt (binary and cargo fallback): {}", e))?,
-    };
-    if status.success() {
-        return Ok(());
-    }
-
-    Err(miette::miette!("sgfmt exited with status {}", status))
-}
-
 async fn cmd_check(input: &str) -> Result<()> {
     println!("Checking: {}", input);
 
@@ -920,4 +869,5 @@ async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
 
