@@ -1513,6 +1513,50 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_preserves_live_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 10 }
+async def step2(x: i64) -> i64 { x + 20 }
+
+async def main() -> i64 {
+    let a = await step1();
+    let b = await step2(a);
+    a + b
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-live-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-live-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async native executable should run");
+    assert_eq!(output.status.code(), Some(40));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;

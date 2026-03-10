@@ -1,5 +1,5 @@
 use crate::ast::DeclKind;
-use crate::mir::Instruction;
+use crate::mir::{Instruction, LocalKind};
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
 #[test]
@@ -378,5 +378,40 @@ async def main() -> i64 {
         !call_names.contains(&"main__body"),
         "main__poll should not re-enter main__body once state-machine lowering is in place, got calls: {:?}",
         call_names
+    );
+}
+
+#[test]
+fn multi_await_poll_helper_only_spills_live_user_locals() {
+    let source = r#"
+async def step1() -> i64 { 10 }
+async def step2(x: i64) -> i64 { x + 20 }
+async def main() -> i64 {
+    let dead = 99;
+    let a = await step1();
+    let b = await step2(a);
+    b
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+
+    let spilled_user_loads = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Load { source, .. } if source.kind == LocalKind::User => Some(*source),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        spilled_user_loads.is_empty(),
+        "dead user locals should not be spilled across await, got loads from: {:?}",
+        spilled_user_loads
     );
 }
