@@ -6,7 +6,7 @@
 //!   - `foo__result(handle: i64) -> T`  — reads the result from the frame, frees it, returns T
 
 use crate::mir::{
-    Instruction, Local, LocalKind, MIRType, MirConstant,
+    CallArg, Instruction, Local, LocalKind, MIRType, MirConstant,
     MirFunction, Terminator, MIR_I64, MIR_UNIT,
 };
 use std::collections::{HashMap, HashSet};
@@ -245,6 +245,12 @@ struct LinearAsyncPlan {
     suspend_points: Vec<LinearSuspendPoint>,
 }
 
+#[derive(Debug, Clone)]
+struct LiveUserSlot {
+    slot_index: usize,
+    local: Local,
+}
+
 fn collect_user_locals(mir_fn: &MirFunction) -> Vec<(Local, MIRType)> {
     mir_fn
         .locals
@@ -297,6 +303,178 @@ fn build_linear_async_plan(mir_fn: &MirFunction) -> Option<LinearAsyncPlan> {
         ordered_blocks,
         suspend_points,
     })
+}
+
+fn push_user_local(set: &mut HashSet<Local>, local: Local) {
+    if matches!(local.kind, LocalKind::User) {
+        set.insert(local);
+    }
+}
+
+fn instruction_user_uses(inst: &Instruction) -> HashSet<Local> {
+    let mut uses = HashSet::new();
+    match inst {
+        Instruction::Assign { .. } | Instruction::Nop => {}
+        Instruction::Unary { operand, .. } => push_user_local(&mut uses, *operand),
+        Instruction::Binary { left, right, .. } => {
+            push_user_local(&mut uses, *left);
+            push_user_local(&mut uses, *right);
+        }
+        Instruction::Load { source, .. } => push_user_local(&mut uses, *source),
+        Instruction::Store { value, .. } => push_user_local(&mut uses, *value),
+        Instruction::AddrOf { source, .. } => push_user_local(&mut uses, *source),
+        Instruction::FieldAddr { base, .. } => push_user_local(&mut uses, *base),
+        Instruction::IndexAddr { base, index, .. } => {
+            push_user_local(&mut uses, *base);
+            push_user_local(&mut uses, *index);
+        }
+        Instruction::Extract { value, .. } => push_user_local(&mut uses, *value),
+        Instruction::Insert {
+            value, new_value, ..
+        } => {
+            push_user_local(&mut uses, *value);
+            push_user_local(&mut uses, *new_value);
+        }
+        Instruction::Cast { value, .. } => push_user_local(&mut uses, *value),
+        Instruction::Aggregate { fields, .. } => {
+            for field in fields {
+                push_user_local(&mut uses, *field);
+            }
+        }
+        Instruction::Call { args, .. } | Instruction::Intrinsic { args, .. } => {
+            for arg in args {
+                push_user_local(&mut uses, *arg);
+            }
+        }
+        Instruction::Discriminant { source, .. }
+        | Instruction::ExtractPayload { source, .. } => push_user_local(&mut uses, *source),
+        Instruction::EnumConstruct { payload, .. } => {
+            if let Some(payload) = payload {
+                push_user_local(&mut uses, *payload);
+            }
+        }
+        Instruction::Phi { incoming, .. } => {
+            for (local, _) in incoming {
+                push_user_local(&mut uses, *local);
+            }
+        }
+    }
+    uses
+}
+
+fn instruction_user_defs(inst: &Instruction) -> HashSet<Local> {
+    let mut defs = HashSet::new();
+    if let Some(destination) = inst.destination() {
+        push_user_local(&mut defs, destination);
+    }
+    if let Instruction::Store { destination, .. } = inst {
+        push_user_local(&mut defs, *destination);
+    }
+    defs
+}
+
+fn terminator_user_uses(term: &Terminator) -> HashSet<Local> {
+    let mut uses = HashSet::new();
+    match term {
+        Terminator::Return(Some(local)) => push_user_local(&mut uses, *local),
+        Terminator::If { cond, .. } | Terminator::Switch { discr: cond, .. } => {
+            push_user_local(&mut uses, *cond);
+        }
+        Terminator::Call { args, .. } => {
+            for arg in args {
+                if let CallArg::Local(local) = arg {
+                    push_user_local(&mut uses, *local);
+                }
+            }
+        }
+        Terminator::Suspend { future_handle, .. } => push_user_local(&mut uses, *future_handle),
+        Terminator::Return(None)
+        | Terminator::Goto(_)
+        | Terminator::Break { .. }
+        | Terminator::Continue { .. }
+        | Terminator::Unreachable => {}
+    }
+    uses
+}
+
+fn terminator_user_defs(term: &Terminator) -> HashSet<Local> {
+    let mut defs = HashSet::new();
+    match term {
+        Terminator::Call { destination, .. } | Terminator::Suspend { destination, .. } => {
+            push_user_local(&mut defs, *destination);
+        }
+        Terminator::Return(_)
+        | Terminator::Goto(_)
+        | Terminator::If { .. }
+        | Terminator::Switch { .. }
+        | Terminator::Break { .. }
+        | Terminator::Continue { .. }
+        | Terminator::Unreachable => {}
+    }
+    defs
+}
+
+fn collect_live_user_slots(
+    mir_fn: &MirFunction,
+    plan: &LinearAsyncPlan,
+    user_locals: &[(Local, MIRType)],
+) -> HashMap<usize, Vec<LiveUserSlot>> {
+    let slot_map = user_locals
+        .iter()
+        .enumerate()
+        .map(|(slot_index, (local, ty))| (*local, (slot_index, ty.clone())))
+        .collect::<HashMap<_, _>>();
+    let mut live_in = HashMap::<usize, HashSet<Local>>::new();
+
+    for block in plan.ordered_blocks.iter().rev() {
+        let basic_block = &mir_fn.basic_blocks[*block];
+        let terminator = basic_block
+            .terminator
+            .as_ref()
+            .expect("linear async block should terminate");
+        let mut live = match terminator {
+            Terminator::Suspend { ready_block, .. } => {
+                live_in.get(ready_block).cloned().unwrap_or_default()
+            }
+            Terminator::Return(_) => HashSet::new(),
+            other => panic!("unsupported terminator in linear liveness: {:?}", other),
+        };
+
+        for local in terminator_user_defs(terminator) {
+            live.remove(&local);
+        }
+        live.extend(terminator_user_uses(terminator));
+
+        for inst_id in basic_block.instructions.iter().rev() {
+            let inst = mir_fn.instruction(*inst_id);
+            for local in instruction_user_defs(inst) {
+                live.remove(&local);
+            }
+            live.extend(instruction_user_uses(inst));
+        }
+
+        live_in.insert(*block, live);
+    }
+
+    let mut live_slots = HashMap::new();
+    for point in &plan.suspend_points {
+        let mut slots = live_in
+            .get(&point.ready_block)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|local| {
+                slot_map.get(&local).map(|(slot_index, _)| LiveUserSlot {
+                    slot_index: *slot_index,
+                    local,
+                })
+            })
+            .collect::<Vec<_>>();
+        slots.sort_by_key(|slot| slot.slot_index);
+        live_slots.insert(point.block, slots);
+    }
+
+    live_slots
 }
 
 fn frame_user_slot(layout: &AsyncFrameLayout, index: usize) -> i64 {
@@ -542,18 +720,24 @@ fn emit_pending_return(
     state_index: usize,
     future_handle: Local,
     await_slot_index: usize,
-    user_locals: &[(Local, MIRType)],
+    live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
 ) {
-    for (user_idx, (user_local, _)) in user_locals.iter().enumerate() {
-        let remapped = remap_local(*user_local, local_map);
+    for slot in live_user_slots {
+        let remapped = remap_local(slot.local, local_map);
         let loaded = f.add_local(LocalKind::Temp, MIR_I64);
         let load_inst = f.alloc_inst(Instruction::Load {
             destination: loaded,
             source: remapped,
         });
         f.basic_blocks[block].push(load_inst);
-        push_frame_store(f, block, handle, frame_user_slot(layout, user_idx), loaded);
+        push_frame_store(
+            f,
+            block,
+            handle,
+            frame_user_slot(layout, slot.slot_index),
+            loaded,
+        );
     }
 
     push_frame_store(
@@ -581,7 +765,7 @@ fn emit_suspend_transition(
     pending_block: usize,
     state_index: usize,
     await_slot_index: usize,
-    user_locals: &[(Local, MIRType)],
+    live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
 ) {
     let poll_result = f.add_local(LocalKind::Temp, MIR_I64);
@@ -605,7 +789,7 @@ fn emit_suspend_transition(
         state_index,
         future_handle,
         await_slot_index,
-        user_locals,
+        live_user_slots,
         local_map,
     );
 }
@@ -621,6 +805,7 @@ fn synthesize_linear_poll(
     let bb0 = f.start_block;
 
     let user_locals = collect_user_locals(mir_fn);
+    let live_user_slots = collect_live_user_slots(mir_fn, plan, &user_locals);
     let mut local_map = HashMap::new();
     for (local, ty) in mir_fn.locals.iter().skip(1) {
         let remapped = f.add_local(clone_local_kind(local.kind), ty.clone());
@@ -701,7 +886,10 @@ fn synthesize_linear_poll(
                     pending_blocks[block],
                     point.state_index,
                     point.state_index - 1,
-                    &user_locals,
+                    live_user_slots
+                        .get(block)
+                        .map(|slots| slots.as_slice())
+                        .unwrap_or(&[]),
                     &local_map,
                 );
             }
@@ -711,9 +899,19 @@ fn synthesize_linear_poll(
 
     for point in &plan.suspend_points {
         let resume_block = resume_blocks[&point.block];
-        for (user_idx, (user_local, _)) in user_locals.iter().enumerate() {
-            let restored = push_frame_load(&mut f, resume_block, handle, frame_user_slot(layout, user_idx), MIR_I64);
-            let remapped_user = remap_local(*user_local, &local_map);
+        for slot in live_user_slots
+            .get(&point.block)
+            .map(|slots| slots.as_slice())
+            .unwrap_or(&[])
+        {
+            let restored = push_frame_load(
+                &mut f,
+                resume_block,
+                handle,
+                frame_user_slot(layout, slot.slot_index),
+                MIR_I64,
+            );
+            let remapped_user = remap_local(slot.local, &local_map);
             let store_inst = f.alloc_inst(Instruction::Store {
                 destination: remapped_user,
                 value: restored,
@@ -740,7 +938,10 @@ fn synthesize_linear_poll(
             pending_blocks[&point.block],
             point.state_index,
             point.state_index - 1,
-            &user_locals,
+            live_user_slots
+                .get(&point.block)
+                .map(|slots| slots.as_slice())
+                .unwrap_or(&[]),
             &local_map,
         );
     }
