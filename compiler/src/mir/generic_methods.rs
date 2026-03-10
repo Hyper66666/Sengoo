@@ -1,5 +1,6 @@
 use super::MIRType;
 use crate::hir::{self, HIRItem, HIRParam, HIRTrait, HIRTraitItem, HIRType};
+use crate::method_resolution::explicit_hir_method_param_count;
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -102,8 +103,16 @@ pub(crate) struct TraitMethodTemplate {
     pub(crate) method: hir::HIRFunction,
 }
 
-pub(crate) struct TraitMethodTemplateCollection {
+#[derive(Clone)]
+pub(crate) struct EagerTraitMethod {
+    pub(crate) function: hir::HIRFunction,
+    pub(crate) explicit_param_count: usize,
+}
+
+pub(crate) struct TraitMethodLoweringPlan {
     pub(crate) templates: Vec<TraitMethodTemplate>,
+    pub(crate) eager_methods: Vec<EagerTraitMethod>,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) implemented_method_names: HashSet<String>,
 }
 
@@ -111,15 +120,17 @@ pub(crate) fn collect_trait_method_templates_for_impl(
     impl_item: &hir::HIRImpl,
     trait_def: Option<&HIRTrait>,
     type_prefix: &str,
-) -> TraitMethodTemplateCollection {
+) -> TraitMethodLoweringPlan {
     let Some(trait_name) = impl_item.trait_name.as_ref() else {
-        return TraitMethodTemplateCollection {
+        return TraitMethodLoweringPlan {
             templates: Vec::new(),
+            eager_methods: Vec::new(),
             implemented_method_names: HashSet::new(),
         };
     };
 
     let mut templates = Vec::new();
+    let mut eager_methods = Vec::new();
     let mut implemented_method_names = HashSet::new();
 
     for method in &impl_item.items {
@@ -128,7 +139,14 @@ pub(crate) fn collect_trait_method_templates_for_impl(
             .strip_prefix(&format!("{}_", type_prefix))
             .unwrap_or(&method.name);
         implemented_method_names.insert(original_method_name.to_string());
+
         if method.type_params.is_empty() {
+            let mut eager_method = method.clone();
+            eager_method.name = format!("{}_{}_{}", type_prefix, trait_name, original_method_name);
+            eager_methods.push(EagerTraitMethod {
+                explicit_param_count: explicit_hir_method_param_count(&eager_method),
+                function: eager_method,
+            });
             continue;
         }
 
@@ -146,7 +164,7 @@ pub(crate) fn collect_trait_method_templates_for_impl(
             let HIRTraitItem::Function(trait_fn) = trait_item else {
                 continue;
             };
-            if implemented_method_names.contains(&trait_fn.name) || trait_fn.type_params.is_empty() {
+            if implemented_method_names.contains(&trait_fn.name) {
                 continue;
             }
 
@@ -160,6 +178,29 @@ pub(crate) fn collect_trait_method_templates_for_impl(
                 ));
             }
             params.extend(trait_fn.params.iter().cloned());
+
+            if trait_fn.type_params.is_empty() {
+                let eager_function = hir::HIRFunction {
+                    name: format!("{}_{}_{}", type_prefix, trait_name, trait_fn.name),
+                    type_params: Vec::new(),
+                    params,
+                    return_type: trait_fn.return_type.clone(),
+                    precondition: trait_fn.precondition.clone(),
+                    postcondition: trait_fn.postcondition.clone(),
+                    body: trait_fn.body.clone(),
+                    is_async: trait_fn.is_async,
+                    abi: trait_fn.abi.clone(),
+                    is_unsafe: trait_fn.is_unsafe,
+                    no_mangle: trait_fn.no_mangle,
+                    export_name: trait_fn.export_name.clone(),
+                    is_pub: trait_fn.is_pub,
+                };
+                eager_methods.push(EagerTraitMethod {
+                    explicit_param_count: explicit_hir_method_param_count(&eager_function),
+                    function: eager_function,
+                });
+                continue;
+            }
 
             templates.push(TraitMethodTemplate {
                 target_type: impl_item.target_type.clone(),
@@ -183,8 +224,9 @@ pub(crate) fn collect_trait_method_templates_for_impl(
         }
     }
 
-    TraitMethodTemplateCollection {
+    TraitMethodLoweringPlan {
         templates,
+        eager_methods,
         implemented_method_names,
     }
 }
@@ -304,4 +346,115 @@ mod tests {
         assert_eq!(collected.templates[1].method.name, "mix");
         assert_eq!(collected.templates[1].method.params[0].name, "self");
     }
+
+    #[test]
+    fn collect_trait_method_templates_for_impl_collects_eager_trait_functions() {
+        let trait_def = HIRTrait {
+            name: "WrapValue".to_string(),
+            type_params: Vec::new(),
+            items: vec![
+                HIRTraitItem::Function(hir::HIRFunction {
+                    name: "id".to_string(),
+                    type_params: Vec::new(),
+                    params: vec![HIRParam::new(
+                        "self".to_string(),
+                        SymbolId::INVALID,
+                        i64_ty(),
+                    )],
+                    return_type: i64_ty(),
+                    precondition: None,
+                    postcondition: None,
+                    body: empty_body(),
+                    is_async: false,
+                    abi: None,
+                    is_unsafe: false,
+                    no_mangle: false,
+                    export_name: None,
+                    is_pub: false,
+                }),
+                HIRTraitItem::Function(hir::HIRFunction {
+                    name: "fallback".to_string(),
+                    type_params: Vec::new(),
+                    params: vec![HIRParam::new(
+                        "self".to_string(),
+                        SymbolId::INVALID,
+                        i64_ty(),
+                    )],
+                    return_type: i64_ty(),
+                    precondition: None,
+                    postcondition: None,
+                    body: empty_body(),
+                    is_async: false,
+                    abi: None,
+                    is_unsafe: false,
+                    no_mangle: false,
+                    export_name: None,
+                    is_pub: false,
+                }),
+                HIRTraitItem::Function(hir::HIRFunction {
+                    name: "wrap".to_string(),
+                    type_params: vec![HIRTypeParam {
+                        name: "T".to_string(),
+                        bounds: Vec::new(),
+                        default: None,
+                    }],
+                    params: vec![HIRParam::new(
+                        "value".to_string(),
+                        SymbolId::INVALID,
+                        HIRType::named("T".to_string(), Vec::new()),
+                    )],
+                    return_type: HIRType::named(
+                        "Wrap".to_string(),
+                        vec![HIRType::named("T".to_string(), Vec::new())],
+                    ),
+                    precondition: None,
+                    postcondition: None,
+                    body: empty_body(),
+                    is_async: false,
+                    abi: None,
+                    is_unsafe: false,
+                    no_mangle: false,
+                    export_name: None,
+                    is_pub: false,
+                }),
+            ],
+            is_pub: false,
+        };
+
+        let impl_item = hir::HIRImpl {
+            target_type: i64_ty(),
+            trait_name: Some("WrapValue".to_string()),
+            items: vec![hir::HIRFunction {
+                name: "i64_id".to_string(),
+                type_params: Vec::new(),
+                params: vec![HIRParam::new("self".to_string(), SymbolId::INVALID, i64_ty())],
+                return_type: i64_ty(),
+                precondition: None,
+                postcondition: None,
+                body: empty_body(),
+                is_async: false,
+                abi: None,
+                is_unsafe: false,
+                no_mangle: false,
+                export_name: None,
+                is_pub: false,
+            }],
+        };
+
+        let collected =
+            collect_trait_method_templates_for_impl(&impl_item, Some(&trait_def), "i64");
+
+        let eager_names = collected
+            .eager_methods
+            .iter()
+            .map(|method| method.function.name.as_str())
+            .collect::<HashSet<_>>();
+
+        assert!(eager_names.contains("i64_WrapValue_id"));
+        assert!(eager_names.contains("i64_WrapValue_fallback"));
+        assert!(!eager_names.contains("i64_WrapValue_wrap"));
+        assert_eq!(collected.templates.len(), 1);
+        assert_eq!(collected.templates[0].method.name, "wrap");
+    }
 }
+

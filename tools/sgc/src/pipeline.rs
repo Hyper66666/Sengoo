@@ -1038,9 +1038,6 @@ fn collect_hir_call_targets_from_expr(
         HIRExpr::Lambda { body, .. } => {
             collect_hir_call_targets_from_expr(body, index_by_name, targets, seen);
         }
-        HIRExpr::Await(inner) => {
-            collect_hir_call_targets_from_expr(inner, index_by_name, targets, seen);
-        }
         HIRExpr::AsyncBlock(body) => {
             for stmt in &body.stmts {
                 collect_hir_call_targets_from_stmt(stmt, index_by_name, targets, seen);
