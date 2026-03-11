@@ -13,7 +13,10 @@
     "Debuggers"
   ],
   "files": [
-    "out/**",
+    "out/extension.js",
+    "out/extension.js.map",
+    "out/toolPaths.js",
+    "out/toolPaths.js.map",
     "snippets/**",
     "syntaxes/**",
     "language-configuration.json",
@@ -236,6 +239,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "test": "npm run compile && node ./out/toolPaths.test.js",
     "watch": "tsc -watch -p ./",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-vsix.ps1"
   },

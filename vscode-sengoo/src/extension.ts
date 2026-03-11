@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
+import { resolveBundledToolPath, resolveConfiguredToolPath } from './toolPaths';
 
 type LspClientLike = {
     start(): Promise<void>;
@@ -12,6 +13,8 @@ let client: LspClientLike | undefined;
 let outputChannel: vscode.OutputChannel;
 let warnedInvalidConfiguredSgcPath = false;
 let warnedFallbackToPathSgc = false;
+let warnedInvalidConfiguredLspPath = false;
+let warnedFallbackToPathLsp = false;
 
 export function activate(context: vscode.ExtensionContext) {
     outputChannel = vscode.window.createOutputChannel('Sengoo');
@@ -113,36 +116,13 @@ function resolveWorkspaceRoot(filePath?: string): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-function uniquePathKey(p: string): string {
-    return process.platform === 'win32' ? p.toLowerCase() : p;
-}
-
-function findBundledSgcUnderRoot(root: string): string | undefined {
-    const exe = process.platform === 'win32' ? 'sgc.exe' : 'sgc';
-    const debugPath = path.join(root, 'target', 'debug', exe);
-    if (fs.existsSync(debugPath)) {
-        return debugPath;
-    }
-    const releasePath = path.join(root, 'target', 'release', exe);
-    if (fs.existsSync(releasePath)) {
-        return releasePath;
-    }
-    return undefined;
-}
-
-function resolveBundledSgcPath(filePath?: string): string | undefined {
+function collectToolSearchRoots(filePath?: string): string[] {
     const roots: string[] = [];
-    const seen = new Set<string>();
     const pushRoot = (candidate?: string) => {
         if (!candidate) {
             return;
         }
-        const normalized = path.normalize(candidate);
-        const key = uniquePathKey(normalized);
-        if (!seen.has(key)) {
-            seen.add(key);
-            roots.push(normalized);
-        }
+        roots.push(candidate);
     };
 
     pushRoot(resolveWorkspaceRoot(filePath));
@@ -158,48 +138,22 @@ function resolveBundledSgcPath(filePath?: string): string | undefined {
         }
     }
 
-    for (const root of roots) {
-        const found = findBundledSgcUnderRoot(root);
-        if (found) {
-            return found;
-        }
-    }
-    return undefined;
+    return roots;
 }
 
-function isLikelyPath(value: string): boolean {
-    return value.includes('\\') || value.includes('/') || value.endsWith('.exe') || value.startsWith('.');
+function resolveConfiguredTool(configured: string, filePath?: string): string | undefined {
+    return resolveConfiguredToolPath(configured, resolveWorkspaceRoot(filePath), filePath);
 }
 
-function resolveConfiguredSgcPath(configured: string, filePath?: string): string | undefined {
-    if (!configured) {
-        return undefined;
-    }
-    if (!isLikelyPath(configured)) {
-        return configured;
-    }
-
-    if (path.isAbsolute(configured)) {
-        if (fs.existsSync(configured)) {
-            return configured;
-        }
-        return undefined;
-    }
-
-    const workspaceRoot = resolveWorkspaceRoot(filePath);
-    const base = workspaceRoot || (filePath ? path.dirname(filePath) : process.cwd());
-    const resolved = path.resolve(base, configured);
-    if (fs.existsSync(resolved)) {
-        return resolved;
-    }
-    return undefined;
+function resolveBundledTool(toolName: 'sgc' | 'sglsp', filePath?: string): string | undefined {
+    return resolveBundledToolPath(collectToolSearchRoots(filePath), toolName);
 }
 
 function getSgcPath(filePath?: string): string {
     const config = vscode.workspace.getConfiguration('sengoo');
     const configured = config.get<string>('sgc.path', '').trim();
     if (configured) {
-        const configuredResolved = resolveConfiguredSgcPath(configured, filePath);
+        const configuredResolved = resolveConfiguredTool(configured, filePath);
         if (configuredResolved) {
             return configuredResolved;
         }
@@ -211,7 +165,7 @@ function getSgcPath(filePath?: string): string {
         }
     }
 
-    const bundled = resolveBundledSgcPath(filePath);
+    const bundled = resolveBundledTool('sgc', filePath);
     if (bundled) {
         return bundled;
     }
@@ -223,6 +177,36 @@ function getSgcPath(filePath?: string): string {
         );
     }
     return 'sgc';
+}
+
+function getLspPath(filePath?: string): string {
+    const config = vscode.workspace.getConfiguration('sengoo');
+    const configured = config.get<string>('lsp.path', '').trim();
+    if (configured) {
+        const configuredResolved = resolveConfiguredTool(configured, filePath);
+        if (configuredResolved) {
+            return configuredResolved;
+        }
+        if (!warnedInvalidConfiguredLspPath) {
+            warnedInvalidConfiguredLspPath = true;
+            vscode.window.showWarningMessage(
+                `Sengoo 配置项 sengoo.lsp.path 无效：${configured}，将回退到自动探测。`
+            );
+        }
+    }
+
+    const bundled = resolveBundledTool('sglsp', filePath);
+    if (bundled) {
+        return bundled;
+    }
+
+    if (!warnedFallbackToPathLsp) {
+        warnedFallbackToPathLsp = true;
+        vscode.window.showWarningMessage(
+            'Sengoo 未在项目内找到可用的 sglsp，将回退到 PATH 中的 sglsp。'
+        );
+    }
+    return 'sglsp';
 }
 
 function getActiveFile(): string | undefined {
@@ -623,8 +607,9 @@ function startLspClient(
         return;
     }
 
-    const lspPath = config.get<string>('lsp.path', '');
-    const command = lspPath || 'sglsp';
+    const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
+    const command = getLspPath(activeFilePath);
+    outputChannel.appendLine(`[Sengoo LSP] Using server: ${command}`);
 
     const serverOptions = {
         run: { command, transport: languageClientModule.TransportKind.stdio },
@@ -647,7 +632,10 @@ function startLspClient(
     ) as LspClientLike;
 
     client.start().catch((err) => {
-        console.warn('Sengoo LSP 启动失败:', err.message);
+        const message = `Sengoo LSP failed to start: ${err.message}`;
+        outputChannel.appendLine(message);
+        vscode.window.showWarningMessage(message);
+        console.warn(message);
     });
 
     context.subscriptions.push({

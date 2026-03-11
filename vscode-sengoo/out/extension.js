@@ -37,12 +37,14 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
 const cp = __importStar(require("child_process"));
+const toolPaths_1 = require("./toolPaths");
 let client;
 let outputChannel;
 let warnedInvalidConfiguredSgcPath = false;
 let warnedFallbackToPathSgc = false;
+let warnedInvalidConfiguredLspPath = false;
+let warnedFallbackToPathLsp = false;
 function activate(context) {
     outputChannel = vscode.window.createOutputChannel('Sengoo');
     outputChannel.appendLine('Sengoo 扩展已激活');
@@ -104,34 +106,13 @@ function resolveWorkspaceRoot(filePath) {
     }
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
-function uniquePathKey(p) {
-    return process.platform === 'win32' ? p.toLowerCase() : p;
-}
-function findBundledSgcUnderRoot(root) {
-    const exe = process.platform === 'win32' ? 'sgc.exe' : 'sgc';
-    const debugPath = path.join(root, 'target', 'debug', exe);
-    if (fs.existsSync(debugPath)) {
-        return debugPath;
-    }
-    const releasePath = path.join(root, 'target', 'release', exe);
-    if (fs.existsSync(releasePath)) {
-        return releasePath;
-    }
-    return undefined;
-}
-function resolveBundledSgcPath(filePath) {
+function collectToolSearchRoots(filePath) {
     const roots = [];
-    const seen = new Set();
     const pushRoot = (candidate) => {
         if (!candidate) {
             return;
         }
-        const normalized = path.normalize(candidate);
-        const key = uniquePathKey(normalized);
-        if (!seen.has(key)) {
-            seen.add(key);
-            roots.push(normalized);
-        }
+        roots.push(candidate);
     };
     pushRoot(resolveWorkspaceRoot(filePath));
     if (filePath) {
@@ -145,43 +126,19 @@ function resolveBundledSgcPath(filePath) {
             dir = parent;
         }
     }
-    for (const root of roots) {
-        const found = findBundledSgcUnderRoot(root);
-        if (found) {
-            return found;
-        }
-    }
-    return undefined;
+    return roots;
 }
-function isLikelyPath(value) {
-    return value.includes('\\') || value.includes('/') || value.endsWith('.exe') || value.startsWith('.');
+function resolveConfiguredTool(configured, filePath) {
+    return (0, toolPaths_1.resolveConfiguredToolPath)(configured, resolveWorkspaceRoot(filePath), filePath);
 }
-function resolveConfiguredSgcPath(configured, filePath) {
-    if (!configured) {
-        return undefined;
-    }
-    if (!isLikelyPath(configured)) {
-        return configured;
-    }
-    if (path.isAbsolute(configured)) {
-        if (fs.existsSync(configured)) {
-            return configured;
-        }
-        return undefined;
-    }
-    const workspaceRoot = resolveWorkspaceRoot(filePath);
-    const base = workspaceRoot || (filePath ? path.dirname(filePath) : process.cwd());
-    const resolved = path.resolve(base, configured);
-    if (fs.existsSync(resolved)) {
-        return resolved;
-    }
-    return undefined;
+function resolveBundledTool(toolName, filePath) {
+    return (0, toolPaths_1.resolveBundledToolPath)(collectToolSearchRoots(filePath), toolName);
 }
 function getSgcPath(filePath) {
     const config = vscode.workspace.getConfiguration('sengoo');
     const configured = config.get('sgc.path', '').trim();
     if (configured) {
-        const configuredResolved = resolveConfiguredSgcPath(configured, filePath);
+        const configuredResolved = resolveConfiguredTool(configured, filePath);
         if (configuredResolved) {
             return configuredResolved;
         }
@@ -190,7 +147,7 @@ function getSgcPath(filePath) {
             vscode.window.showWarningMessage(`Sengoo 配置项 sengoo.sgc.path 无效：${configured}，将回退到自动探测。`);
         }
     }
-    const bundled = resolveBundledSgcPath(filePath);
+    const bundled = resolveBundledTool('sgc', filePath);
     if (bundled) {
         return bundled;
     }
@@ -199,6 +156,29 @@ function getSgcPath(filePath) {
         vscode.window.showWarningMessage('Sengoo 未在项目内找到 target/debug/sgc，已回退到 PATH 中的 sgc（可能是旧版本）。');
     }
     return 'sgc';
+}
+function getLspPath(filePath) {
+    const config = vscode.workspace.getConfiguration('sengoo');
+    const configured = config.get('lsp.path', '').trim();
+    if (configured) {
+        const configuredResolved = resolveConfiguredTool(configured, filePath);
+        if (configuredResolved) {
+            return configuredResolved;
+        }
+        if (!warnedInvalidConfiguredLspPath) {
+            warnedInvalidConfiguredLspPath = true;
+            vscode.window.showWarningMessage(`Sengoo 配置项 sengoo.lsp.path 无效：${configured}，将回退到自动探测。`);
+        }
+    }
+    const bundled = resolveBundledTool('sglsp', filePath);
+    if (bundled) {
+        return bundled;
+    }
+    if (!warnedFallbackToPathLsp) {
+        warnedFallbackToPathLsp = true;
+        vscode.window.showWarningMessage('Sengoo 未在项目内找到可用的 sglsp，将回退到 PATH 中的 sglsp。');
+    }
+    return 'sglsp';
 }
 function getActiveFile() {
     const editor = vscode.window.activeTextEditor;
@@ -536,8 +516,9 @@ function startLspClient(context, config) {
         vscode.window.showWarningMessage(msg);
         return;
     }
-    const lspPath = config.get('lsp.path', '');
-    const command = lspPath || 'sglsp';
+    const activeFilePath = vscode.window.activeTextEditor?.document.fileName;
+    const command = getLspPath(activeFilePath);
+    outputChannel.appendLine(`[Sengoo LSP] Using server: ${command}`);
     const serverOptions = {
         run: { command, transport: languageClientModule.TransportKind.stdio },
         debug: { command, transport: languageClientModule.TransportKind.stdio },
@@ -551,7 +532,10 @@ function startLspClient(context, config) {
     };
     client = new languageClientModule.LanguageClient('sengoo-lsp', 'Sengoo Language Server', serverOptions, clientOptions);
     client.start().catch((err) => {
-        console.warn('Sengoo LSP 启动失败:', err.message);
+        const message = `Sengoo LSP failed to start: ${err.message}`;
+        outputChannel.appendLine(message);
+        vscode.window.showWarningMessage(message);
+        console.warn(message);
     });
     context.subscriptions.push({
         dispose: () => stopLspClient(),
