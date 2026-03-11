@@ -283,7 +283,44 @@ Related docs:
 - `docs/runtime-protobuf-ffi.md`
 - `docs/runtime-network-bench.md`
 
-## Quick Start
+## 快速开始
+
+```bash
+cargo build --release
+```
+
+```bash
+target/release/sgc run examples/01_hello.sg
+```
+
+```bash
+target/release/sgc build examples/05_loop.sg -O 2
+```
+
+常用命令：
+
+```bash
+# 类型检查
+sgc check <file.sg>
+
+# 类型检查（JSON 诊断，便于自动化/智能体）
+sgc --error-format json check <file.sg>
+
+# 编译并运行
+sgc run <file.sg> -O 1
+
+# 编译并运行（运行时契约检查，auto: O0/O1 开启，O2/O3 关闭）
+sgc run <file.sg> -O 1 --contract-checks auto
+
+# 编译为原生二进制
+sgc build <file.sg> -O 2
+
+# 强制全量重建
+sgc build <file.sg> -O 2 --force-rebuild
+
+# 可选 daemon 模式
+sgc daemon --addr 127.0.0.1:48765
+```
 
 ```bash
 cargo build --release
@@ -454,7 +491,7 @@ ensures result * b == a
 
 ## 实用 Demo（面向开发者）
 
-如果你希望看到业务风格的可落地证明，而不是仅有合成微基准，可直接运行�?
+如果你希望看到业务风格的可落地证明，而不是仅有合成微基准，可直接运行：
 ```bash
 # Sengoo vs Python 热点性能 Demo
 python bench/demos/hotpath-risk-scoring/run_demo.py
@@ -509,7 +546,7 @@ Sengoo 在运行时提供 Python 互操作层（见 `runtime/src/python.rs`）�
 | 指标（平均） | Sengoo | C++ | Rust | Python |
 |---|---:|---:|---:|---:|
 | 全量编译 (ms) | 835.92 | 1669.41 | 972.98 | 67.48 |
-| 增量编辑后编�?(ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
+| 增量编辑后编译 (ms) | 33.71 | 1702.23 | 1088.19 | 65.52 |
 | 增量收益 (%) | 95.99% | -2.28% | -4.95% | 2.61% |
 
 高级流水线快照（真实编辑 + 100k/1000k 规模，测量日期：**2026-02-16**）：
@@ -540,12 +577,12 @@ Sengoo 在运行时提供 Python 互操作层（见 `runtime/src/python.rs`）�
 | 100k | 417.53 | 1074.84 | 6625.35 | 832.91 |
 | 1000k | 1827.84 | 4883.70 | 54642.47 | 8283.46 |
 
-低内存模�?e2e 快照（同一�?1000k 工作负载，测量日�?**2026-02-18**）：
+低内存模式 e2e 快照（同一个 1000k 工作负载，测量日期：**2026-02-18**）：
 
-| 模式 | 1000k e2e 平均 (ms) | 峰�?RSS (MB) |
+| 模式 | 1000k e2e 平均 (ms) | 峰值 RSS (MB) |
 |---|---:|---:|
-| 默认（`sgc build`�?| 2331.39 | 1418.61 |
-| 低内存（`sgc build --low-memory`�?| 1737.71 | 672.10 |
+| 默认（`sgc build`） | 2331.39 | 1418.61 |
+| 低内存（`sgc build --low-memory`） | 1737.71 | 672.10 |
 
 低内存模式优势：
 - 在该 1000k 场景中，峰值内存下降约 `52.62%`。
@@ -638,7 +675,21 @@ cargo run -p sgc -- bench reflection runtime --warmup 1 --iterations 5
 python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<latest-reflection-report>.json
 ```
 
-## 快速开始
+反射基准测试用例：
+
+- `disabled`：完全关闭反射编译（基线路径）
+- `enabled-unused`：使用 `--reflect=on` 编译，但不调用运行时反射 API
+- `enabled-used`：使用 `--reflect=on` 编译，执行运行时符号列举和类型化反射调用
+
+当前门禁默认值：
+
+- `soft`：enabled-unused 开销 <= `25%`，enabled-used 开销 <= `45%`
+- `hard`：enabled-unused 开销 <= `15%`，enabled-used 开销 <= `30%`
+- disabled 回归检查会与 `bench/baseline.json` 中的 `reflection/<suite>/disabled` 键比较（如果可用）
+
+## 5) 运行时集成栈（新增）
+
+最新运行时能力已补齐"可复用 FFI 封装层 + 集成验证链路"：
 
 ```bash
 cargo build --release
@@ -675,6 +726,42 @@ sgc build <file.sg> -O 2 --force-rebuild
 
 # 可选 daemon 模式
 sgc daemon --addr 127.0.0.1:48765
+```
+
+## Phase-1 异步执行
+
+`sgc run` 现在支持原生 phase-1 异步路径，当入口点是 `async def main()` 时自动启用。
+
+当前阶段支持：
+- `async def`
+- `await async_fn(...)`
+- 通过 `sgc run` 使用的运行时桥接进行原生执行
+
+当前阶段不支持：
+- `async { ... }`
+- await 非异步操作数
+- `spawn` / `join` / `select`
+- 定时器或 IO 唤醒
+- 用户自定义 awaitable / 完整 Future 风格抽象
+
+最小示例：
+
+```sg
+async def add1(x: i64) -> i64 {
+    x + 1
+}
+
+async def main() -> i64 {
+    let y = await add1(41);
+    print(y);
+    y
+}
+```
+
+运行方式与同步程序相同：
+
+```bash
+sgc run <file.sg> -O 1
 ```
 
 ## VS Code 插件
