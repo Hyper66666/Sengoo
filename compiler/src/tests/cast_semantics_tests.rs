@@ -75,3 +75,48 @@ fn verify_llvm_backend_cast_semantics() {
 
     assert!(true, "Cast semantics are documented in the code");
 }
+
+/// Verify that MIR contains Cast instructions for mixed-width operations.
+/// This test checks that reconcile_binary_operand_types() is working correctly.
+#[test]
+fn verify_mir_contains_cast_for_mixed_width() {
+    let source = r#"
+extern "C" {
+    fn get_i32() -> i32;
+}
+def main() -> i64 {
+    let x = get_i32();
+    let y: i64 = 100;
+    x + y
+}
+"#;
+    let mir_fns = compile_to_mir(source).expect("should compile to MIR");
+    let main_fn = mir_fns.iter().find(|f| f.name == "main").expect("should have main function");
+
+    // Print MIR for debugging
+    println!("\nMIR for main:");
+    println!("Locals:");
+    for (local, ty) in &main_fn.locals {
+        println!("  {:?}: {:?}", local, ty);
+    }
+    println!("\nInstructions:");
+    for (idx, inst) in main_fn.instructions.iter().enumerate() {
+        println!("  [{}] {:?}", idx, inst);
+    }
+    println!("\nBasic blocks:");
+    for (bb_idx, bb) in main_fn.basic_blocks.iter().enumerate() {
+        println!("  bb_{}:", bb_idx);
+        for inst_id in &bb.instructions {
+            let inst = &main_fn.instructions[inst_id.0 as usize];
+            println!("    {:?}", inst);
+        }
+        println!("    terminator: {:?}", bb.terminator);
+    }
+
+    // Check that there's a Cast instruction in the MIR
+    let has_cast = main_fn.instructions.iter().any(|inst| {
+        matches!(inst, crate::mir::Instruction::Cast { .. })
+    });
+
+    assert!(has_cast, "MIR should contain Cast instruction for mixed-width operation");
+}
