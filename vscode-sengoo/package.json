@@ -12,6 +12,13 @@
     "Snippets",
     "Debuggers"
   ],
+  "files": [
+    "out/**",
+    "snippets/**",
+    "syntaxes/**",
+    "language-configuration.json",
+    "README.md"
+  ],
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:sengoo",
@@ -230,7 +237,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-vsix.ps1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
