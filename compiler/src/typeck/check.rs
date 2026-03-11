@@ -1985,21 +1985,91 @@ impl TypeChecker {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
 
-        self.infer
-            .unify(&left_ty, &right_ty)
-            .map_err(|_| TypeckError::TypeMismatch {
-                expected: right_ty.kind.clone(),
-                found: left_ty.kind.clone(),
-            })?;
+        // For arithmetic and bitwise operations, allow compatible integer types
+        // The actual type reconciliation will happen in MIR lowering
+        let types_compatible = match (&left_ty.kind, &right_ty.kind) {
+            // Same types are always compatible
+            _ if left_ty.kind == right_ty.kind => true,
+            // Different integer widths are compatible for arithmetic/bitwise ops
+            (TyKind::Int(_), TyKind::Int(_)) => matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::Eq
+                    | BinOp::NotEq
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+            ),
+            // Different float widths are compatible for arithmetic ops
+            (TyKind::Float(_), TyKind::Float(_)) => matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::Eq
+                    | BinOp::NotEq
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+            ),
+            _ => false,
+        };
+
+        if !types_compatible {
+            self.infer
+                .unify(&left_ty, &right_ty)
+                .map_err(|_| TypeckError::TypeMismatch {
+                    expected: right_ty.kind.clone(),
+                    found: left_ty.kind.clone(),
+                })?;
+        }
+
+        // For mixed-width operations, return the wider type
+        let result_ty = match (&left_ty.kind, &right_ty.kind) {
+            (TyKind::Int(a), TyKind::Int(b)) if a != b => {
+                // Return the wider integer type
+                use crate::typeck::ty::IntKind;
+                let wider = match (a, b) {
+                    (IntKind::I64, _) | (_, IntKind::I64) => IntKind::I64,
+                    (IntKind::I32, _) | (_, IntKind::I32) => IntKind::I32,
+                    (IntKind::I16, _) | (_, IntKind::I16) => IntKind::I16,
+                    _ => IntKind::I8,
+                };
+                self.env.int_ty(wider)
+            }
+            (TyKind::Float(a), TyKind::Float(b)) if a != b => {
+                // F64 is wider than F32
+                use crate::typeck::ty::FloatKind;
+                let wider = match (a, b) {
+                    (FloatKind::F64, _) | (_, FloatKind::F64) => FloatKind::F64,
+                    _ => FloatKind::F32,
+                };
+                self.env.float_ty(wider)
+            }
+            _ => left_ty.clone(),
+        };
 
         Ok(match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => left_ty,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => result_ty,
             BinOp::And | BinOp::Or => self.env.bool_ty(),
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => left_ty,
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => result_ty,
             BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 self.env.bool_ty()
             }
-            BinOp::Pipe | BinOp::Compose | BinOp::Range | BinOp::RangeInclusive => left_ty,
+            BinOp::Pipe | BinOp::Compose | BinOp::Range | BinOp::RangeInclusive => result_ty,
         })
     }
 

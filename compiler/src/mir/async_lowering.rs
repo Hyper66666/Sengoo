@@ -9,6 +9,7 @@ use crate::mir::{
     CallArg, Instruction, Local, LocalKind, MIRType, MirConstant,
     MirFunction, Terminator, MIR_I64, MIR_UNIT,
 };
+use crate::CompileError;
 use std::collections::{HashMap, HashSet};
 
 /// Per-async-function frame layout (logical, not physical — fields stored at offsets in a malloc'd block)
@@ -19,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct AsyncFrameLayout {
     pub func_name: String,
-    pub param_count: usize,
+    pub param_types: Vec<MIRType>,
     pub return_type: MIRType,
     pub await_count: usize,
     pub user_local_count: usize,
@@ -27,7 +28,7 @@ pub struct AsyncFrameLayout {
 
 impl AsyncFrameLayout {
     pub fn total_slots(&self) -> usize {
-        2 + self.param_count + self.user_local_count + self.await_count
+        2 + self.param_types.len() + self.user_local_count + self.await_count
     }
 }
 
@@ -45,7 +46,9 @@ pub fn count_await_points(mir_fn: &MirFunction) -> usize {
 ///
 /// For async `main`, the original body is renamed to `main__body` and a new
 /// `main` wrapper is generated that drives the async helpers.
-pub fn expand_async_functions(mir_fns: &mut Vec<MirFunction>) -> Vec<MirFunction> {
+pub fn expand_async_functions(
+    mir_fns: &mut Vec<MirFunction>,
+) -> Result<Vec<MirFunction>, CompileError> {
     let async_fn_names: Vec<String> = mir_fns
         .iter()
         .filter(|f| f.is_async)
@@ -70,15 +73,15 @@ pub fn expand_async_functions(mir_fns: &mut Vec<MirFunction>) -> Vec<MirFunction
 
         let layout = AsyncFrameLayout {
             func_name: body_name,
-            param_count: mir_fn.params.len(),
+            param_types: mir_fn.params.clone(),
             return_type: mir_fn.return_type.clone(),
             await_count: count_await_points(mir_fn),
             user_local_count: collect_user_locals(mir_fn).len(),
         };
 
-        let mut start = synthesize_start(&layout);
-        let mut poll = synthesize_poll(&layout, mir_fn);
-        let mut result = synthesize_result(&layout);
+        let mut start = synthesize_start(&layout)?;
+        let mut poll = synthesize_poll(&layout, mir_fn)?;
+        let mut result = synthesize_result(&layout)?;
 
         if name == "main" {
             start.name = "main__start".to_string();
@@ -98,7 +101,7 @@ pub fn expand_async_functions(mir_fns: &mut Vec<MirFunction>) -> Vec<MirFunction
         new_fns.push(synthesize_async_main_wrapper());
     }
 
-    new_fns
+    Ok(new_fns)
 }
 
 /// Generate a `main` wrapper that drives async main through the helper ABI:
@@ -161,10 +164,9 @@ fn synthesize_async_main_wrapper() -> MirFunction {
 }
 
 /// Generate `foo__start(params...) -> i64`
-fn synthesize_start(layout: &AsyncFrameLayout) -> MirFunction {
+fn synthesize_start(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileError> {
     let name = format!("{}__start", layout.func_name);
-    let params: Vec<MIRType> = (0..layout.param_count).map(|_| MIR_I64).collect();
-    let mut f = MirFunction::new(name, params, MIR_I64);
+    let mut f = MirFunction::new(name, layout.param_types.clone(), MIR_I64);
 
     let total_slots = layout.total_slots();
 
@@ -206,28 +208,22 @@ fn synthesize_start(layout: &AsyncFrameLayout) -> MirFunction {
     f.basic_blocks[bb0].push(store_state);
 
     // Store each parameter at offset 2+i
-    for i in 0..layout.param_count {
+    for i in 0..layout.param_types.len() {
         let param_local = Local::new(i + 1, LocalKind::Param);
-        let offset = f.add_local(LocalKind::Temp, MIR_I64);
-        let offset_inst = f.alloc_inst(Instruction::Assign {
-            destination: offset,
-            value: MirConstant::Int((2 + i) as i64),
-        });
-        f.basic_blocks[bb0].push(offset_inst);
-
-        let sp_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
-        let store_param = f.alloc_inst(Instruction::Call {
-            destination: sp_dest,
-            func: "sengoo_async_frame_store".to_string(),
-            args: vec![handle_local, offset, param_local],
-        });
-        f.basic_blocks[bb0].push(store_param);
+        push_frame_store_typed(
+            &mut f,
+            bb0,
+            handle_local,
+            (2 + i) as i64,
+            param_local,
+            &layout.param_types[i],
+        )?;
     }
 
     // Return the handle
     f.basic_blocks[bb0].set_terminator(Terminator::Return(Some(handle_local)));
 
-    f
+    Ok(f)
 }
 
 #[derive(Debug, Clone)]
@@ -249,6 +245,70 @@ struct LinearAsyncPlan {
 struct LiveUserSlot {
     slot_index: usize,
     local: Local,
+    ty: MIRType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsyncFrameValueKind {
+    I64,
+    NarrowInt,
+    Bool,
+    PointerLike,
+}
+
+fn describe_async_frame_type(ty: &MIRType) -> String {
+    match ty {
+        MIRType::Unit => "unit".to_string(),
+        MIRType::Never => "never".to_string(),
+        MIRType::Bool => "bool".to_string(),
+        MIRType::Int(bits) => format!("i{}", bits),
+        MIRType::Float(bits) => format!("f{}", bits),
+        MIRType::Ref(inner) => format!("&{}", describe_async_frame_type(inner)),
+        MIRType::Ptr(inner) => format!("*{}", describe_async_frame_type(inner)),
+        MIRType::Array(elem, len) => format!("[{}; {}]", describe_async_frame_type(elem), len),
+        MIRType::Tuple(types) => format!(
+            "({})",
+            types
+                .iter()
+                .map(describe_async_frame_type)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        MIRType::Fn { .. } => "fn".to_string(),
+        MIRType::Struct { name, .. } => name.clone(),
+        MIRType::Enum { .. } => "enum".to_string(),
+        MIRType::Future(inner) => format!("Future<{}>", describe_async_frame_type(inner)),
+    }
+}
+
+fn unsupported_async_frame_type(ty: &MIRType, reason: &str) -> CompileError {
+    CompileError::AsyncUnsupportedType {
+        ty: describe_async_frame_type(ty),
+        reason: reason.to_string(),
+    }
+}
+
+fn classify_async_frame_type(ty: &MIRType) -> Result<AsyncFrameValueKind, CompileError> {
+    match ty {
+        MIRType::Bool => Ok(AsyncFrameValueKind::Bool),
+        MIRType::Int(8 | 16 | 32) => Ok(AsyncFrameValueKind::NarrowInt),
+        MIRType::Int(64) | MIRType::Future(_) => Ok(AsyncFrameValueKind::I64),
+        MIRType::Ref(_) | MIRType::Ptr(_) => Ok(AsyncFrameValueKind::PointerLike),
+        MIRType::Float(_) => Err(unsupported_async_frame_type(
+            ty,
+            "float types require bitcast support which is not yet implemented in MIR",
+        )),
+        MIRType::Tuple(_) | MIRType::Struct { .. } | MIRType::Array(_, _) | MIRType::Enum { .. } => {
+            Err(unsupported_async_frame_type(
+                ty,
+                "aggregate types (tuple/struct/array/enum) cannot cross await points yet",
+            ))
+        }
+        _ => Err(unsupported_async_frame_type(
+            ty,
+            "only bool, i8/i16/i32/i64, ref/ptr, and Future handles are supported in async frames yet",
+        )),
+    }
 }
 
 fn collect_user_locals(mir_fn: &MirFunction) -> Vec<(Local, MIRType)> {
@@ -464,9 +524,10 @@ fn collect_live_user_slots(
             .unwrap_or_default()
             .into_iter()
             .filter_map(|local| {
-                slot_map.get(&local).map(|(slot_index, _)| LiveUserSlot {
+                slot_map.get(&local).map(|(slot_index, ty)| LiveUserSlot {
                     slot_index: *slot_index,
                     local,
+                    ty: ty.clone(),
                 })
             })
             .collect::<Vec<_>>();
@@ -478,11 +539,11 @@ fn collect_live_user_slots(
 }
 
 fn frame_user_slot(layout: &AsyncFrameLayout, index: usize) -> i64 {
-    (2 + layout.param_count + index) as i64
+    (2 + layout.param_types.len() + index) as i64
 }
 
 fn frame_await_slot(layout: &AsyncFrameLayout, index: usize) -> i64 {
-    (2 + layout.param_count + layout.user_local_count + index) as i64
+    (2 + layout.param_types.len() + layout.user_local_count + index) as i64
 }
 
 fn push_i64_const(f: &mut MirFunction, block: usize, value: i64) -> Local {
@@ -512,6 +573,40 @@ fn push_frame_store(
     f.basic_blocks[block].push(inst);
 }
 
+fn encode_async_frame_value(
+    f: &mut MirFunction,
+    block: usize,
+    value: Local,
+    ty: &MIRType,
+) -> Result<Local, CompileError> {
+    match classify_async_frame_type(ty)? {
+        AsyncFrameValueKind::I64 => Ok(value),
+        AsyncFrameValueKind::Bool | AsyncFrameValueKind::NarrowInt | AsyncFrameValueKind::PointerLike => {
+            let encoded = f.add_local(LocalKind::Temp, MIR_I64);
+            let cast = f.alloc_inst(Instruction::Cast {
+                destination: encoded,
+                value,
+                to: MIR_I64,
+            });
+            f.basic_blocks[block].push(cast);
+            Ok(encoded)
+        }
+    }
+}
+
+fn push_frame_store_typed(
+    f: &mut MirFunction,
+    block: usize,
+    handle: Local,
+    offset: i64,
+    value: Local,
+    ty: &MIRType,
+) -> Result<(), CompileError> {
+    let encoded = encode_async_frame_value(f, block, value, ty)?;
+    push_frame_store(f, block, handle, offset, encoded);
+    Ok(())
+}
+
 fn push_frame_load_into(
     f: &mut MirFunction,
     block: usize,
@@ -528,6 +623,29 @@ fn push_frame_load_into(
     f.basic_blocks[block].push(inst);
 }
 
+fn push_frame_load_into_typed(
+    f: &mut MirFunction,
+    block: usize,
+    handle: Local,
+    offset: i64,
+    destination: Local,
+    ty: &MIRType,
+) -> Result<(), CompileError> {
+    match classify_async_frame_type(ty)? {
+        AsyncFrameValueKind::I64 => push_frame_load_into(f, block, handle, offset, destination),
+        AsyncFrameValueKind::Bool | AsyncFrameValueKind::NarrowInt | AsyncFrameValueKind::PointerLike => {
+            let encoded = push_frame_load(f, block, handle, offset, MIR_I64);
+            let cast = f.alloc_inst(Instruction::Cast {
+                destination,
+                value: encoded,
+                to: ty.clone(),
+            });
+            f.basic_blocks[block].push(cast);
+        }
+    }
+    Ok(())
+}
+
 fn push_frame_load(
     f: &mut MirFunction,
     block: usize,
@@ -538,6 +656,18 @@ fn push_frame_load(
     let destination = f.add_local(LocalKind::Temp, ty);
     push_frame_load_into(f, block, handle, offset, destination);
     destination
+}
+
+fn push_frame_load_typed(
+    f: &mut MirFunction,
+    block: usize,
+    handle: Local,
+    offset: i64,
+    ty: MIRType,
+) -> Result<Local, CompileError> {
+    let destination = f.add_local(LocalKind::Temp, ty.clone());
+    push_frame_load_into_typed(f, block, handle, offset, destination, &ty)?;
+    Ok(destination)
 }
 
 fn clone_local_kind(kind: LocalKind) -> LocalKind {
@@ -722,36 +852,39 @@ fn emit_pending_return(
     await_slot_index: usize,
     live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
-) {
+) -> Result<(), CompileError> {
     for slot in live_user_slots {
         let remapped = remap_local(slot.local, local_map);
-        let loaded = f.add_local(LocalKind::Temp, MIR_I64);
+        let loaded = f.add_local(LocalKind::Temp, slot.ty.clone());
         let load_inst = f.alloc_inst(Instruction::Load {
             destination: loaded,
             source: remapped,
         });
         f.basic_blocks[block].push(load_inst);
-        push_frame_store(
+        push_frame_store_typed(
             f,
             block,
             handle,
             frame_user_slot(layout, slot.slot_index),
             loaded,
-        );
+            &slot.ty,
+        )?;
     }
 
-    push_frame_store(
+    push_frame_store_typed(
         f,
         block,
         handle,
         frame_await_slot(layout, await_slot_index),
         future_handle,
-    );
+        &MIR_I64,
+    )?;
     let next_state = push_i64_const(f, block, state_index as i64);
     push_frame_store(f, block, handle, 0, next_state);
 
     let pending = push_i64_const(f, block, 0);
     f.basic_blocks[block].set_terminator(Terminator::Return(Some(pending)));
+    Ok(())
 }
 
 fn emit_suspend_transition(
@@ -767,7 +900,7 @@ fn emit_suspend_transition(
     await_slot_index: usize,
     live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
-) {
+) -> Result<(), CompileError> {
     let poll_result = f.add_local(LocalKind::Temp, MIR_I64);
     let poll_call = f.alloc_inst(Instruction::Call {
         destination: poll_result,
@@ -791,14 +924,15 @@ fn emit_suspend_transition(
         await_slot_index,
         live_user_slots,
         local_map,
-    );
+    )?;
+    Ok(())
 }
 
 fn synthesize_linear_poll(
     layout: &AsyncFrameLayout,
     mir_fn: &MirFunction,
     plan: &LinearAsyncPlan,
-) -> MirFunction {
+) -> Result<MirFunction, CompileError> {
     let name = format!("{}__poll", layout.func_name);
     let mut f = MirFunction::new(name, vec![MIR_I64], MIR_I64);
     let handle = Local::new(1, LocalKind::Param);
@@ -827,10 +961,17 @@ fn synthesize_linear_poll(
     let state = f.add_local(LocalKind::Temp, MIR_I64);
     push_frame_load_into(&mut f, bb0, handle, 0, state);
 
-    for i in 0..layout.param_count {
+    for i in 0..layout.param_types.len() {
         let original = Local::new(i + 1, LocalKind::Param);
         let remapped = remap_local(original, &local_map);
-        push_frame_load_into(&mut f, bb0, handle, (2 + i) as i64, remapped);
+        push_frame_load_into_typed(
+            &mut f,
+            bb0,
+            handle,
+            (2 + i) as i64,
+            remapped,
+            &layout.param_types[i],
+        )?;
     }
 
     let mut targets = vec![(0, translated_blocks[&mir_fn.start_block])];
@@ -857,9 +998,20 @@ fn synthesize_linear_poll(
             Terminator::Return(value) => {
                 if let Some(value) = value {
                     let remapped = remap_local(*value, &local_map);
-                    push_frame_store(&mut f, translated, handle, 1, remapped);
+                    push_frame_store_typed(
+                        &mut f,
+                        translated,
+                        handle,
+                        1,
+                        remapped,
+                        &layout.return_type,
+                    )?;
                 }
-                let completed_state = push_i64_const(&mut f, translated, (plan.suspend_points.len() + 1) as i64);
+                let completed_state = push_i64_const(
+                    &mut f,
+                    translated,
+                    (plan.suspend_points.len() + 1) as i64,
+                );
                 push_frame_store(&mut f, translated, handle, 0, completed_state);
                 emit_ready_return(&mut f, translated);
             }
@@ -891,7 +1043,7 @@ fn synthesize_linear_poll(
                         .map(|slots| slots.as_slice())
                         .unwrap_or(&[]),
                     &local_map,
-                );
+                )?;
             }
             other => panic!("unsupported terminator in linear async plan: {:?}", other),
         }
@@ -904,13 +1056,13 @@ fn synthesize_linear_poll(
             .map(|slots| slots.as_slice())
             .unwrap_or(&[])
         {
-            let restored = push_frame_load(
+            let restored = push_frame_load_typed(
                 &mut f,
                 resume_block,
                 handle,
                 frame_user_slot(layout, slot.slot_index),
-                MIR_I64,
-            );
+                slot.ty.clone(),
+            )?;
             let remapped_user = remap_local(slot.local, &local_map);
             let store_inst = f.alloc_inst(Instruction::Store {
                 destination: remapped_user,
@@ -920,13 +1072,14 @@ fn synthesize_linear_poll(
         }
 
         let remapped_handle = remap_local(point.future_handle, &local_map);
-        push_frame_load_into(
+        push_frame_load_into_typed(
             &mut f,
             resume_block,
             handle,
             frame_await_slot(layout, point.state_index - 1),
             remapped_handle,
-        );
+            &MIR_I64,
+        )?;
         emit_suspend_transition(
             &mut f,
             resume_block,
@@ -943,15 +1096,18 @@ fn synthesize_linear_poll(
                 .map(|slots| slots.as_slice())
                 .unwrap_or(&[]),
             &local_map,
-        );
+        )?;
     }
 
-    f
+    Ok(f)
 }
 
 /// Generate `foo__poll(handle: i64) -> i64`
 /// Returns 0 = pending, 1 = ready
-fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFunction {
+fn synthesize_poll(
+    layout: &AsyncFrameLayout,
+    mir_fn: &MirFunction,
+) -> Result<MirFunction, CompileError> {
     let name = format!("{}__poll", layout.func_name);
     let mut f = MirFunction::new(name, vec![MIR_I64], MIR_I64);
 
@@ -976,6 +1132,10 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
     f.basic_blocks[bb0].push(load_state);
 
     let n_states = layout.await_count.max(1);
+    let result_storage_ty = match &layout.return_type {
+        MIRType::Unit => MIR_I64,
+        other => other.clone(),
+    };
 
     if n_states <= 1 {
         // Single-await or no-await: call the original function body, store result, return ready
@@ -986,11 +1146,11 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
         f.basic_blocks[bb0].set_terminator(Terminator::Goto(body_block));
 
         // Body block: load params, call original, store result
-        let result_val = f.add_local(LocalKind::Temp, MIR_I64);
+        let result_val = f.add_local(LocalKind::Temp, result_storage_ty.clone());
 
         // Load params from frame
         let mut param_locals = Vec::new();
-        for i in 0..layout.param_count {
+        for i in 0..layout.param_types.len() {
             let off = f.add_local(LocalKind::Temp, MIR_I64);
             let off_inst = f.alloc_inst(Instruction::Assign {
                 destination: off,
@@ -998,13 +1158,15 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
             });
             f.basic_blocks[body_block].push(off_inst);
 
-            let p = f.add_local(LocalKind::Temp, MIR_I64);
-            let load_p = f.alloc_inst(Instruction::Call {
-                destination: p,
-                func: "sengoo_async_frame_load".to_string(),
-                args: vec![handle, off],
-            });
-            f.basic_blocks[body_block].push(load_p);
+            let p = f.add_local(LocalKind::Temp, layout.param_types[i].clone());
+            push_frame_load_into_typed(
+                &mut f,
+                body_block,
+                handle,
+                (2 + i) as i64,
+                p,
+                &layout.param_types[i],
+            )?;
             param_locals.push(p);
         }
 
@@ -1022,13 +1184,14 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
         });
         f.basic_blocks[body_block].push(one_inst);
 
-        let sr_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
-        let store_result = f.alloc_inst(Instruction::Call {
-            destination: sr_dest,
-            func: "sengoo_async_frame_store".to_string(),
-            args: vec![handle, one, result_val],
-        });
-        f.basic_blocks[body_block].push(store_result);
+        push_frame_store_typed(
+            &mut f,
+            body_block,
+            handle,
+            1,
+            result_val,
+            &result_storage_ty,
+        )?;
 
         let final_state = f.add_local(LocalKind::Temp, MIR_I64);
         let final_state_inst = f.alloc_inst(Instruction::Assign {
@@ -1054,7 +1217,7 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
         });
         f.basic_blocks[done_block].push(ready_inst);
         f.basic_blocks[done_block].set_terminator(Terminator::Return(Some(ready)));
-        return f;
+        return Ok(f);
     }
 
     if let Some(plan) = build_linear_async_plan(mir_fn) {
@@ -1080,9 +1243,9 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
     });
 
     for &sb in &state_blocks {
-        let result_val = f.add_local(LocalKind::Temp, MIR_I64);
+        let result_val = f.add_local(LocalKind::Temp, result_storage_ty.clone());
         let mut param_locals = Vec::new();
-        for pi in 0..layout.param_count {
+        for pi in 0..layout.param_types.len() {
             let off = f.add_local(LocalKind::Temp, MIR_I64);
             let off_inst = f.alloc_inst(Instruction::Assign {
                 destination: off,
@@ -1090,13 +1253,15 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
             });
             f.basic_blocks[sb].push(off_inst);
 
-            let p = f.add_local(LocalKind::Temp, MIR_I64);
-            let load_p = f.alloc_inst(Instruction::Call {
-                destination: p,
-                func: "sengoo_async_frame_load".to_string(),
-                args: vec![handle, off],
-            });
-            f.basic_blocks[sb].push(load_p);
+            let p = f.add_local(LocalKind::Temp, layout.param_types[pi].clone());
+            push_frame_load_into_typed(
+                &mut f,
+                sb,
+                handle,
+                (2 + pi) as i64,
+                p,
+                &layout.param_types[pi],
+            )?;
             param_locals.push(p);
         }
 
@@ -1114,13 +1279,14 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
         });
         f.basic_blocks[sb].push(one_inst);
 
-        let sres_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
-        let store_res = f.alloc_inst(Instruction::Call {
-            destination: sres_dest,
-            func: "sengoo_async_frame_store".to_string(),
-            args: vec![handle, one, result_val],
-        });
-        f.basic_blocks[sb].push(store_res);
+        push_frame_store_typed(
+            &mut f,
+            sb,
+            handle,
+            1,
+            result_val,
+            &result_storage_ty,
+        )?;
 
         let next = f.add_local(LocalKind::Temp, MIR_I64);
         let next_inst = f.alloc_inst(Instruction::Assign {
@@ -1148,17 +1314,17 @@ fn synthesize_poll(layout: &AsyncFrameLayout, mir_fn: &MirFunction) -> MirFuncti
     f.basic_blocks[done_block].push(ready_inst);
     f.basic_blocks[done_block].set_terminator(Terminator::Return(Some(ready)));
 
-    f
+    Ok(f)
 }
 
 /// Generate `foo__result(handle: i64) -> T`
-fn synthesize_result(layout: &AsyncFrameLayout) -> MirFunction {
+fn synthesize_result(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileError> {
     let name = format!("{}__result", layout.func_name);
     let ret = match &layout.return_type {
         MIRType::Unit => MIR_I64,
         other => other.clone(),
     };
-    let mut f = MirFunction::new(name, vec![MIR_I64], ret);
+    let mut f = MirFunction::new(name, vec![MIR_I64], ret.clone());
 
     let handle = Local::new(1, LocalKind::Param);
     let bb0 = f.start_block;
@@ -1171,13 +1337,8 @@ fn synthesize_result(layout: &AsyncFrameLayout) -> MirFunction {
     });
     f.basic_blocks[bb0].push(one_inst);
 
-    let result = f.add_local(LocalKind::Temp, MIR_I64);
-    let load_result = f.alloc_inst(Instruction::Call {
-        destination: result,
-        func: "sengoo_async_frame_load".to_string(),
-        args: vec![handle, one],
-    });
-    f.basic_blocks[bb0].push(load_result);
+    let result = f.add_local(LocalKind::Temp, ret.clone());
+    push_frame_load_into_typed(&mut f, bb0, handle, 1, result, &ret)?;
 
     // Free the frame
     let free_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
@@ -1191,5 +1352,99 @@ fn synthesize_result(layout: &AsyncFrameLayout) -> MirFunction {
     // Return result
     f.basic_blocks[bb0].set_terminator(Terminator::Return(Some(result)));
 
-    f
+    Ok(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_async_functions_rejects_tuple_local_crossing_await() {
+        let tuple_ty = MIRType::Tuple(vec![MIR_I64, MIR_I64]);
+        let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
+        mir_fn.is_async = true;
+
+        let tuple_local = mir_fn.add_local(LocalKind::User, tuple_ty.clone());
+        let future_handle_1 = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let future_handle_2 = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let suspend_result_1 = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let suspend_result_2 = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+
+        let one = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let one_inst = mir_fn.alloc_inst(Instruction::Assign {
+            destination: one,
+            value: MirConstant::Int(1),
+        });
+        mir_fn.basic_blocks[mir_fn.start_block].push(one_inst);
+
+        let two = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let two_inst = mir_fn.alloc_inst(Instruction::Assign {
+            destination: two,
+            value: MirConstant::Int(2),
+        });
+        mir_fn.basic_blocks[mir_fn.start_block].push(two_inst);
+
+        let tuple_value = mir_fn.add_local(LocalKind::Temp, tuple_ty.clone());
+        let aggregate = mir_fn.alloc_inst(Instruction::Aggregate {
+            destination: tuple_value,
+            fields: vec![one, two],
+            ty: tuple_ty.clone(),
+        });
+        mir_fn.basic_blocks[mir_fn.start_block].push(aggregate);
+
+        let store_tuple = mir_fn.alloc_inst(Instruction::Store {
+            destination: tuple_local,
+            value: tuple_value,
+        });
+        mir_fn.basic_blocks[mir_fn.start_block].push(store_tuple);
+
+        let first_ready = mir_fn.add_block();
+        let first_pending = mir_fn.add_block();
+        let second_ready = mir_fn.add_block();
+        let second_pending = mir_fn.add_block();
+
+        mir_fn.basic_blocks[mir_fn.start_block].set_terminator(Terminator::Suspend {
+            poll_func: "child1__poll".to_string(),
+            future_handle: future_handle_1,
+            destination: suspend_result_1,
+            ready_block: first_ready,
+            pending_block: first_pending,
+        });
+        mir_fn.basic_blocks[first_pending].set_terminator(Terminator::Goto(first_pending));
+
+        mir_fn.basic_blocks[first_ready].set_terminator(Terminator::Suspend {
+            poll_func: "child2__poll".to_string(),
+            future_handle: future_handle_2,
+            destination: suspend_result_2,
+            ready_block: second_ready,
+            pending_block: second_pending,
+        });
+        mir_fn.basic_blocks[second_pending].set_terminator(Terminator::Goto(second_pending));
+
+        let loaded_tuple = mir_fn.add_local(LocalKind::Temp, tuple_ty);
+        let load_tuple = mir_fn.alloc_inst(Instruction::Load {
+            destination: loaded_tuple,
+            source: tuple_local,
+        });
+        mir_fn.basic_blocks[second_ready].push(load_tuple);
+
+        let result = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let result_inst = mir_fn.alloc_inst(Instruction::Assign {
+            destination: result,
+            value: MirConstant::Int(0),
+        });
+        mir_fn.basic_blocks[second_ready].push(result_inst);
+        mir_fn.basic_blocks[second_ready].set_terminator(Terminator::Return(Some(result)));
+
+        let mut mir_fns = vec![mir_fn];
+        let err = expand_async_functions(&mut mir_fns)
+            .expect_err("tuple local crossing await should be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("aggregate types (tuple/struct/array/enum) cannot cross await points yet"),
+            "tuple-crossing-await error should mention aggregate async restriction, got: {}",
+            msg
+        );
+    }
 }

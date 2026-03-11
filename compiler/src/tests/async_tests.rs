@@ -415,3 +415,201 @@ async def main() -> i64 {
         spilled_user_loads
     );
 }
+
+#[test]
+fn async_bool_local_survives_await() {
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let keep: bool = true;
+    let first = await step1();
+    let value = await step2(first);
+    if keep { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "bool local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_i32_local_survives_await() {
+    let source = r#"
+extern "C" {
+    fn get_i32() -> i32;
+}
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let keep = get_i32();
+    let mirror = get_i32();
+    let first = await step1();
+    let value = await step2(first);
+    if keep == mirror { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "i32 local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_ref_local_survives_await() {
+    let source = r#"
+async def step1() -> i64 { 0 }
+async def step2(x: i64) -> i64 { x + 42 }
+async def main() -> i64 {
+    let base = 41;
+    let keep = &base;
+    let first = await step1();
+    let value = await step2(first);
+    if *keep == 41 { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "ref local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_struct_local_across_await_rejected() {
+    let source = r#"
+struct Point { x: i64, y: i64 }
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let point = Point { x: 1, y: 2 };
+    let first = await step1();
+    let value = await step2(first);
+    let copy = point;
+    value
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("struct crossing await should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("aggregate types (tuple/struct/array/enum) cannot cross await points yet"),
+        "struct-crossing-await error should mention aggregate async restriction, got: {}",
+        msg
+    );
+}
+
+/// Test that i8 locals can survive across await points.
+/// i8 values should be encoded/decoded correctly through the async frame.
+#[test]
+fn async_i8_local_survives_await() {
+    let source = r#"
+extern "C" {
+    fn get_i8() -> i8;
+}
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let keep = get_i8();
+    let mirror = get_i8();
+    let first = await step1();
+    let value = await step2(first);
+    if keep == mirror { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "i8 local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+/// Test that i16 locals can survive across await points.
+/// i16 values should be encoded/decoded correctly through the async frame.
+#[test]
+fn async_i16_local_survives_await() {
+    let source = r#"
+extern "C" {
+    fn get_i16() -> i16;
+}
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let keep = get_i16();
+    let mirror = get_i16();
+    let first = await step1();
+    let value = await step2(first);
+    if keep == mirror { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "i16 local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+/// Test that f64 locals crossing await are currently rejected.
+/// Float types require bitcast support which is not yet implemented in MIR.
+#[test]
+fn async_f64_local_across_await_rejected() {
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def main() -> f64 {
+    let keep: f64 = 3.14;
+    let first = await step1();
+    keep
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("f64 crossing await should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("float types require bitcast support"),
+        "f64-crossing-await error should mention bitcast requirement, got: {}",
+        msg
+    );
+}
+
+/// Test that nested Future handles can survive across await points.
+/// This tests that Future<T> handles are treated as pointer-like values.
+#[test]
+fn async_nested_future_handle_survives_await() {
+    let source = r#"
+async def inner() -> i64 { 42 }
+async def middle() -> i64 {
+    await inner()
+}
+async def outer() -> i64 {
+    let fut = middle();
+    let x = await inner();
+    let y = await fut;
+    x + y
+}
+async def main() -> i64 {
+    await outer()
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "nested Future handle crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+
