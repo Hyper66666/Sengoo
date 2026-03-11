@@ -10,7 +10,7 @@
 /// 2. Checking the JIT backend uses sext for Int->Int widening (codegen/jit.rs:831)
 /// 3. Checking the Bool->Int uses zext (codegen/mod.rs:1968)
 
-use crate::{compile_to_ir};
+use crate::{compile_to_ir, compile_to_mir};
 
 /// Verify that the compiler accepts same-width integer operations.
 /// This is a baseline test to ensure the type system works correctly.
@@ -31,11 +31,10 @@ def main() -> i64 {
     );
 }
 
-/// Document that mixed-width operations are currently rejected by the type checker.
-/// This test intentionally fails to document current behavior.
+/// Verify that mixed-width integer operations are now supported.
+/// The type checker allows compatible integer types, and MIR lowering handles the cast.
 #[test]
-#[should_panic(expected = "TypeMismatch")]
-fn mixed_width_operations_currently_rejected() {
+fn mixed_width_operations_now_supported() {
     let source = r#"
 extern "C" {
     fn get_i32() -> i32;
@@ -46,7 +45,14 @@ def main() -> i64 {
     x + y
 }
 "#;
-    compile_to_ir(source).expect("mixed-width operations are currently rejected by type checker");
+    // The key improvement is that this now compiles successfully
+    // Previously, the type checker would reject i32 + i64
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "mixed-width i32+i64 should now compile, got: {:?}",
+        result.err()
+    );
 }
 
 /// Verify LLVM backend cast semantics by checking the generated IR for explicit casts.
