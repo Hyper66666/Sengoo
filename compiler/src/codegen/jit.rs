@@ -828,7 +828,7 @@ impl JITCodegen {
                                         ));
                                     } else if llvm_ty == "i32" && llvm_target_ty == "i64" {
                                         self.ir.push_str(&format!(
-                                            "{} = zext i32 {} to i64\n",
+                                            "{} = sext i32 {} to i64\n",
                                             converted, arg_temp
                                         ));
                                     } else {
