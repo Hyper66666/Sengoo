@@ -1601,6 +1601,36 @@ impl Codegen {
 
                     }
 
+                    MIRType::Enum { .. } => {
+
+                        let llvm_ty = self.mir_type_to_llvm_cached(ty);
+                        let discr_local = fields
+                            .first()
+                            .copied()
+                            .ok_or_else(|| "enum aggregate missing discriminant field".to_string())?;
+                        let discr_val = self.operand_value(discr_local, mir_fn);
+                        let discr_temp = format!("{}.discr", dest);
+
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = insertvalue {} undef, i64 {}, 0\n",
+                            discr_temp, llvm_ty, discr_val
+                        ));
+
+                        let payload_val = if let Some(payload_local) = fields.get(1).copied() {
+                            self.operand_value(payload_local, mir_fn)
+                        } else {
+                            "0".to_string()
+                        };
+
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = insertvalue {} {}, i64 {}, 1\n",
+                            dest, llvm_ty, discr_temp, payload_val
+                        ));
+
+                    }
+
                     _ => {
 
                         // 其他类型暂时跳过

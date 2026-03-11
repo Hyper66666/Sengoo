@@ -1557,6 +1557,147 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_executes_if_structured_multi_await_body() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 1 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let flag: bool = false;
+    let seed = if flag { 40 } else { 41 };
+    let a = await step1();
+    let b = await step2(a + seed);
+    b
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("if-structured async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-if-structured", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-if-structured",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("if-structured async executable should run");
+    assert_eq!(output.status.code(), Some(43));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_executes_loop_with_await_body() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step() -> i64 { 1 }
+
+async def main() -> i64 {
+    let x = 0;
+    while x < 3 {
+        let y = await step();
+        x = x + y;
+    }
+    x
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("loop async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-loop-body", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-loop-body",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("loop async executable should run");
+    assert_eq!(output.status.code(), Some(3));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_executes_match_with_await_arms() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def a() -> i64 { 10 }
+async def b() -> i64 { 20 }
+
+async def main() -> i64 {
+    let x = 0;
+    let y = match x {
+        0 => await a(),
+        _ => await b(),
+    };
+    y + 1
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("match-shaped async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-match-arms", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-match-arms",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("match-shaped async executable should run");
+    assert_eq!(output.status.code(), Some(11));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_preserves_bool_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;
@@ -1641,6 +1782,98 @@ async def main() -> i64 {
     let output = Command::new(&exe_path)
         .output()
         .expect("async ref executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_preserves_struct_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+struct Point { x: i64, y: i64 }
+
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let point = Point { x: 1, y: 2 };
+    let first = await step1();
+    let value = await step2(first);
+    if point.x + point.y == 3 { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async struct source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-struct-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-struct-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async struct executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_preserves_array_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let values = [1, 2, 3];
+    let first = await step1();
+    let value = await step2(first);
+    if values[0] + values[2] == 4 { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async array source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-array-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-array-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async array executable should run");
     assert_eq!(output.status.code(), Some(42));
 
     let _ = fs::remove_file(&ll_path);

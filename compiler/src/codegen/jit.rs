@@ -991,6 +991,61 @@ impl JITCodegen {
                             ));
                         }
                     }
+                    MIRType::Enum { .. } => {
+                        let llvm_enum_ty = self.mir_type_to_llvm_str(ty);
+                        let dest = self.local_name(*destination);
+
+                        let discr_reg = fields
+                            .first()
+                            .map(|local| self.local_reg(*local))
+                            .ok_or_else(|| "enum aggregate missing discriminant field".to_string())?;
+                        let discr_loaded = format!("%.enum.discr.{}", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = load i64, i64* {}\n",
+                            discr_loaded, discr_reg
+                        ));
+
+                        let payload_loaded = if let Some(payload_local) = fields.get(1) {
+                            let payload_reg = self.local_reg(*payload_local);
+                            let payload_loaded = format!("%.enum.payload.{}", destination.id);
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{} = load i64, i64* {}\n",
+                                payload_loaded, payload_reg
+                            ));
+                            payload_loaded
+                        } else {
+                            "0".to_string()
+                        };
+
+                        self.emit_indent();
+                        self.ir.push_str(&format!("{} = alloca {}\n", dest, llvm_enum_ty));
+
+                        let discr_ptr = format!("%.ptr.{}.0", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                            discr_ptr, llvm_enum_ty, llvm_enum_ty, dest
+                        ));
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "store i64 {}, i64* {}\n",
+                            discr_loaded, discr_ptr
+                        ));
+
+                        let payload_ptr = format!("%.ptr.{}.1", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            payload_ptr, llvm_enum_ty, llvm_enum_ty, dest
+                        ));
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "store i64 {}, i64* {}\n",
+                            payload_loaded, payload_ptr
+                        ));
+                    }
                     _ => {
                         // 鍏朵粬鑱氬悎绫诲瀷锛堢粨鏋勪綋绛夛級
                         let _dest = self.local_name(*destination);

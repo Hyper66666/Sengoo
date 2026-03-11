@@ -417,6 +417,137 @@ async def main() -> i64 {
 }
 
 #[test]
+fn if_structured_multi_await_poll_helper_polls_child_futures_without_reinvoking_body() {
+    let source = r#"
+async def step1() -> i64 { 1 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main(flag: bool) -> i64 {
+    let seed = if flag { 40 } else { 41 };
+    let a = await step1();
+    let b = await step2(a + seed);
+    b
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+
+    let call_names = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        call_names.contains(&"step1__poll"),
+        "main__poll should poll step1 future in if-structured async bodies, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        call_names.contains(&"step2__poll"),
+        "main__poll should poll step2 future in if-structured async bodies, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        !call_names.contains(&"main__body"),
+        "main__poll should not re-enter main__body for if-structured async bodies, got calls: {:?}",
+        call_names
+    );
+}
+
+#[test]
+fn loop_with_await_polls_child_future_without_reinvoking_body() {
+    let source = r#"
+async def step() -> i64 { 1 }
+async def main() -> i64 {
+    let x = 0;
+    while x < 2 {
+        let y = await step();
+        x = x + y;
+    }
+    x
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("cyclic async cfg should lower to MIR");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+    let call_names = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        call_names.contains(&"step__poll"),
+        "main__poll should poll loop child futures, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        !call_names.contains(&"main__body"),
+        "main__poll should not re-enter main__body for loop async bodies, got calls: {:?}",
+        call_names
+    );
+}
+
+#[test]
+fn match_with_await_arms_polls_child_futures_without_reinvoking_body() {
+    let source = r#"
+async def a() -> i64 { 10 }
+async def b() -> i64 { 20 }
+async def main() -> i64 {
+    let x = 0;
+    let y = match x {
+        0 => await a(),
+        _ => await b(),
+    };
+    y
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("switch-shaped async cfg should lower to MIR");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+    let call_names = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        call_names.contains(&"a__poll"),
+        "main__poll should poll match arm future a, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        call_names.contains(&"b__poll"),
+        "main__poll should poll match arm future b, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        !call_names.contains(&"main__body"),
+        "main__poll should not re-enter main__body for match-shaped async bodies, got calls: {:?}",
+        call_names
+    );
+}
+
+#[test]
 fn async_bool_local_survives_await() {
     let source = r#"
 async def step1() -> i64 { 41 }
@@ -485,7 +616,7 @@ async def main() -> i64 {
 }
 
 #[test]
-fn async_struct_local_across_await_rejected() {
+fn async_struct_local_survives_await() {
     let source = r#"
 struct Point { x: i64, y: i64 }
 async def step1() -> i64 { 41 }
@@ -494,17 +625,36 @@ async def main() -> i64 {
     let point = Point { x: 1, y: 2 };
     let first = await step1();
     let value = await step2(first);
-    let copy = point;
-    value
+    if point.x == 1 { value } else { 0 }
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("struct crossing await should fail");
-    let msg = err.to_string();
+    let result = compile_to_ir(source);
     assert!(
-        msg.contains("aggregate types (tuple/struct/array/enum) cannot cross await points yet"),
-        "struct-crossing-await error should mention aggregate async restriction, got: {}",
-        msg
+        result.is_ok(),
+        "struct local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_array_local_survives_await() {
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let values = [1, 2, 3];
+    let first = await step1();
+    let value = await step2(first);
+    if values[0] == 1 { value } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "array local crossing await should compile, got: {:?}",
+        result.err()
     );
 }
 
