@@ -121,7 +121,7 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
 
     // 4b. Expand async functions into frame-backed helpers.
     if !async_functions.is_empty() {
-        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns);
+        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns)?;
         mir_fns.extend(async_helpers);
     }
 
@@ -168,7 +168,7 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     drop(program);
 
     if !async_functions.is_empty() {
-        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns);
+        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns)?;
         mir_fns.extend(async_helpers);
     }
     Ok(mir_fns)
