@@ -1,0 +1,158 @@
+id: verify-mixed-width-type-correctness
+title: Verify Mixed-Width Integer Type Correctness
+status: completed
+priority: high
+created: 2026-03-11
+updated: 2026-03-11
+completed: 2026-03-11
+
+summary: |
+  Verify that the recently relaxed type checker correctly preserves type information
+  through HIR → MIR → LLVM IR pipeline, and that mixed-width integer operations
+  generate correct cast instructions.
+
+motivation: |
+  We recently modified the type checker to allow mixed-width integer operations
+  (e.g., i32 + i64). However, initial testing revealed that the generated LLVM IR
+  shows `call i64 @get_i32()` instead of `call i32 @get_i32()`, suggesting that
+  type information may be lost during compilation.
+
+  This needs immediate verification because:
+  1. It's a newly introduced change that affects core type system behavior
+  2. Incorrect type handling could cause subtle bugs in all mixed-width operations
+  3. It blocks further work on cast semantics and async improvements
+
+problem: |
+  Current issues observed:
+
+  1. **Type Information Loss**: External function `get_i32() -> i32` appears to
+     return i64 in generated LLVM IR
+
+  2. **Missing Cast Instructions**: Expected `sext i32 ... to i64` instructions
+     are not present in the generated IR
+
+  3. **Unclear MIR State**: Unknown whether MIR lowering's reconcile_binary_operand_types
+     is being called and generating Cast instructions correctly
+
+goals:
+  - Verify type information is preserved through all compilation stages
+  - Ensure MIR contains correct Cast instructions for mixed-width operations
+  - Ensure LLVM IR contains correct sext/zext/trunc instructions
+  - Add comprehensive tests to lock down correct behavior
+  - Fix any issues discovered during verification
+
+non_goals:
+  - Implementing new type coercion rules beyond integer widening
+  - Supporting implicit conversions between fundamentally different types
+  - Optimizing away unnecessary casts (that's a later optimization pass)
+
+design:
+  approach: |
+    Three-stage verification process:
+
+    **Stage 1: HIR Type Preservation**
+    - Verify that HIR maintains original type annotations
+    - Check that external function signatures are preserved
+    - Ensure local variable types match their declarations
+
+    **Stage 2: MIR Cast Insertion**
+    - Verify reconcile_binary_operand_types is called for mixed-width ops
+    - Check that Cast instructions are inserted in MIR
+    - Validate cast direction (narrow → wide uses sext, wide → narrow uses trunc)
+
+    **Stage 3: LLVM IR Generation**
+    - Verify LLVM IR contains correct cast instructions
+    - Check function call types match declarations
+    - Ensure binary operations use correctly cast operands
+
+  components:
+    - compiler/src/typeck/check.rs: Type checker (recently modified)
+    - compiler/src/mir/lowering.rs: MIR lowering with reconcile_binary_operand_types
+    - compiler/src/codegen/mod.rs: LLVM IR generation
+    - compiler/src/tests/: New verification tests
+
+  test_strategy: |
+    Add comprehensive tests at each compilation stage:
+
+    1. **HIR Tests**: Verify type annotations are preserved
+    2. **MIR Tests**: Check Cast instructions are generated
+    3. **IR Tests**: Validate LLVM IR contains correct casts
+    4. **Integration Tests**: End-to-end mixed-width operation tests
+
+tasks:
+  - id: investigate-type-loss
+    title: Investigate where type information is lost
+    description: |
+      Debug the compilation pipeline to find where i32 becomes i64:
+      - Add debug logging to HIR → MIR lowering
+      - Check external function signature handling
+      - Verify Call instruction type handling
+    estimate: 2 hours
+
+  - id: add-mir-cast-tests
+    title: Add MIR-level cast verification tests
+    description: |
+      Create tests that inspect MIR directly:
+      - Test that reconcile_binary_operand_types inserts Cast
+      - Verify Cast instruction has correct source and target types
+      - Check that both operands are cast to wider type
+    estimate: 1 hour
+
+  - id: add-ir-cast-tests
+    title: Add LLVM IR cast verification tests
+    description: |
+      Create tests that verify generated LLVM IR:
+      - Check for presence of sext/zext/trunc instructions
+      - Verify function call types match declarations
+      - Ensure binary operations use correctly typed operands
+    estimate: 1 hour
+
+  - id: fix-type-preservation
+    title: Fix type information preservation
+    description: |
+      Based on investigation, fix the root cause:
+      - May need to fix HIR → MIR type mapping
+      - May need to fix Call instruction type handling
+      - May need to fix external function signature handling
+    estimate: 3 hours
+
+  - id: verify-all-cast-paths
+    title: Verify all cast code paths
+    description: |
+      Ensure all cast scenarios work correctly:
+      - i8/i16/i32 → i64 (sext)
+      - i64 → i8/i16/i32 (trunc)
+      - bool → int (zext)
+      - int → bool (trunc)
+    estimate: 1 hour
+
+acceptance_criteria:
+  - External function `get_i32()` generates `call i32 @get_i32()` in LLVM IR ✅
+  - Mixed-width operation `i32 + i64` generates `sext i32 ... to i64` in LLVM IR ✅
+  - MIR contains Cast instruction for mixed-width binary operations ✅
+  - All cast semantics tests pass with correct IR generation ✅
+  - No regression in existing 323 compiler tests ✅
+
+implementation_notes: |
+  Root cause: External functions (HIRItem::ExternBlock) were not being added to
+  known_function_sigs during MIR lowering, causing their return types to default
+  to i64.
+
+  Fix: Added HIRItem::ExternBlock handling in lower_hir_with_options() to register
+  external function signatures in known_function_sigs.
+
+  Commit: 7f2f68c "fix: preserve external function return types in MIR lowering"
+
+risks:
+  - May require significant refactoring of type handling in MIR lowering
+  - Could uncover deeper issues in type system design
+  - Might need to revert type checker changes if issues are too complex
+
+dependencies:
+  - Depends on: cast-semantics-fix-2026-03-11 (completed)
+  - Blocks: mir-bitcast-instruction (needs correct type handling first)
+
+references:
+  - compiler/src/typeck/check.rs:1984 (check_binary function)
+  - compiler/src/mir/lowering.rs:2231 (reconcile_binary_operand_types)
+  - docs/cast-semantics-fix-2026-03-11.md
