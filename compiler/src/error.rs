@@ -1,4 +1,4 @@
-﻿//! Compiler error types.
+//! Compiler error types.
 #![allow(unused_assignments)]
 
 use miette::{Diagnostic, SourceSpan};
@@ -44,6 +44,10 @@ pub enum CompileError {
     #[error("codegen error: {0}")]
     #[diagnostic(code(codegen::error))]
     Codegen(String),
+
+    #[error("async frame lowering does not yet support `{ty}`: {reason}")]
+    #[diagnostic(code(async_unsupported_type))]
+    AsyncUnsupportedType { ty: String, reason: String },
 }
 
 /// Lexer errors.
@@ -255,4 +259,3 @@ impl CompileError {
         CompileError::TypeError(err)
     }
 }
-

@@ -1557,6 +1557,97 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_preserves_bool_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let keep: bool = true;
+    let first = await step1();
+    let value = await step2(first);
+    if keep { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async bool source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-bool-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-bool-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async bool executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_preserves_ref_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 0 }
+async def step2(x: i64) -> i64 { x + 42 }
+
+async def main() -> i64 {
+    let base = 41;
+    let keep = &base;
+    let first = await step1();
+    let value = await step2(first);
+    if *keep == 41 { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async ref source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-ref-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-ref-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async ref executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;

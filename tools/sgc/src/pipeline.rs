@@ -38,7 +38,6 @@ fn encode_large_project_mode_override(value: Option<bool>) -> i8 {
         None => LARGE_PROJECT_MODE_AUTO,
     }
 }
-
 fn decode_large_project_mode_override(value: i8) -> Option<bool> {
     match value {
         LARGE_PROJECT_MODE_ENABLED => Some(true),
@@ -413,7 +412,8 @@ fn compile_frontend_to_mir_with_phase_timings(
 
         // Expand async functions into frame-backed __start/__poll/__result helpers
         if !async_functions.is_empty() {
-            let async_helpers = sengoo_compiler::mir::async_lowering::expand_async_functions(&mut mir_fns);
+            let async_helpers = sengoo_compiler::mir::async_lowering::expand_async_functions(&mut mir_fns)
+                .map_err(|e| miette::miette!("{}", e))?;
             mir_fns.extend(async_helpers);
         }
         drop(hir_module);
@@ -1421,3 +1421,4 @@ def b(x: i64) -> i64 {
         assert_eq!(after, before);
     }
 }
+
