@@ -1985,31 +1985,34 @@ impl TypeChecker {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
 
-        // For arithmetic and bitwise operations, allow compatible integer types
-        // The actual type reconciliation will happen in MIR lowering
+        // Mixed-width arithmetic is currently only guaranteed for signed integers.
+        // MIR erases integer signedness, so keep the accepted surface aligned with
+        // what lowering/codegen can preserve correctly today.
         let types_compatible = match (&left_ty.kind, &right_ty.kind) {
             // Same types are always compatible
             _ if left_ty.kind == right_ty.kind => true,
-            // Different integer widths are compatible for arithmetic/bitwise ops
-            (TyKind::Int(_), TyKind::Int(_)) => matches!(
-                op,
-                BinOp::Add
-                    | BinOp::Sub
-                    | BinOp::Mul
-                    | BinOp::Div
-                    | BinOp::Mod
-                    | BinOp::BitAnd
-                    | BinOp::BitOr
-                    | BinOp::BitXor
-                    | BinOp::Shl
-                    | BinOp::Shr
-                    | BinOp::Eq
-                    | BinOp::NotEq
-                    | BinOp::Lt
-                    | BinOp::Le
-                    | BinOp::Gt
-                    | BinOp::Ge
-            ),
+            // Different signed integer widths are compatible for arithmetic/bitwise ops.
+            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
+                matches!(
+                    op,
+                    BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Mod
+                        | BinOp::BitAnd
+                        | BinOp::BitOr
+                        | BinOp::BitXor
+                        | BinOp::Shl
+                        | BinOp::Shr
+                        | BinOp::Eq
+                        | BinOp::NotEq
+                        | BinOp::Lt
+                        | BinOp::Le
+                        | BinOp::Gt
+                        | BinOp::Ge
+                )
+            }
             // Different float widths are compatible for arithmetic ops
             (TyKind::Float(_), TyKind::Float(_)) => matches!(
                 op,
@@ -2037,17 +2040,10 @@ impl TypeChecker {
                 })?;
         }
 
-        // For mixed-width operations, return the wider type
+        // For mixed-width operations, return the wider type within the supported surface.
         let result_ty = match (&left_ty.kind, &right_ty.kind) {
-            (TyKind::Int(a), TyKind::Int(b)) if a != b => {
-                // Return the wider integer type
-                use crate::typeck::ty::IntKind;
-                let wider = match (a, b) {
-                    (IntKind::I64, _) | (_, IntKind::I64) => IntKind::I64,
-                    (IntKind::I32, _) | (_, IntKind::I32) => IntKind::I32,
-                    (IntKind::I16, _) | (_, IntKind::I16) => IntKind::I16,
-                    _ => IntKind::I8,
-                };
+            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
+                let wider = if a.bits() >= b.bits() { *a } else { *b };
                 self.env.int_ty(wider)
             }
             (TyKind::Float(a), TyKind::Float(b)) if a != b => {

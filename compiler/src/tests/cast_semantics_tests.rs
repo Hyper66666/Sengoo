@@ -1,15 +1,5 @@
-/// Cast semantics tests
-///
-/// NOTE: The Sengoo type checker currently requires exact type matches in binary operations.
-/// Implicit integer widening only happens at the MIR lowering stage, but the type checker
-/// rejects mixed-width operations before they reach MIR.
-///
-/// This means we cannot currently test the cast semantics through source code compilation.
-/// Instead, we verify the cast instruction generation is correct by:
-/// 1. Checking the LLVM backend uses sext for Int->Int widening (codegen/mod.rs:1888)
-/// 2. Checking the JIT backend uses sext for Int->Int widening (codegen/jit.rs:831)
-/// 3. Checking the Bool->Int uses zext (codegen/mod.rs:1968)
-
+use crate::codegen::{Codegen, JITCodegen};
+use crate::mir::{Instruction, LocalKind, MIRType, MirConstant, MirFunction, Terminator};
 use crate::{compile_to_ir, compile_to_mir};
 
 /// Verify that the compiler accepts same-width integer operations.
@@ -31,10 +21,8 @@ def main() -> i64 {
     );
 }
 
-/// Verify that mixed-width integer operations are now supported.
-/// The type checker allows compatible integer types, and MIR lowering handles the cast.
 #[test]
-fn mixed_width_operations_now_supported() {
+fn mixed_width_signed_operations_are_supported() {
     let source = r#"
 extern "C" {
     fn get_i32() -> i32;
@@ -55,31 +43,31 @@ def main() -> i64 {
     );
 }
 
-/// Verify LLVM backend cast semantics by checking the generated IR for explicit casts.
-/// When the MIR contains a Cast instruction, verify it generates the correct LLVM instruction.
 #[test]
-fn verify_llvm_backend_cast_semantics() {
-    // This test documents the expected behavior:
-    // - Int(smaller) -> Int(larger) should use sext (sign extension)
-    // - Bool -> Int should use zext (zero extension)
-    // - Int(larger) -> Int(smaller) should use trunc (truncation)
-    // - Int -> Bool should use trunc
-
-    // The actual implementation is in:
-    // - compiler/src/codegen/mod.rs lines 1888-1900 (Int->Int sext)
-    // - compiler/src/codegen/mod.rs lines 1968-1978 (Bool->Int zext)
-    // - compiler/src/codegen/mod.rs lines 1982-1992 (Int->Bool trunc)
-
-    // The JIT backend was fixed to match:
-    // - compiler/src/codegen/jit.rs line 831 (i32->i64 now uses sext, was zext)
-
-    assert!(true, "Cast semantics are documented in the code");
+fn mixed_width_unsigned_operations_are_rejected_for_now() {
+    let source = r#"
+extern "C" {
+    fn get_u32() -> u32;
+    fn get_u64() -> u64;
+}
+def main() -> i64 {
+    let left = get_u32();
+    let right = get_u64();
+    let _mixed = left + right;
+    0
+}
+"#;
+    let err = compile_to_ir(source).expect_err("mixed-width unsigned arithmetic should be rejected for now");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type check error"),
+        "unsigned mixed-width rejection should surface as a type-check failure, got: {}",
+        msg
+    );
 }
 
-/// Verify that MIR contains Cast instructions for mixed-width operations.
-/// This test checks that reconcile_binary_operand_types() is working correctly.
 #[test]
-fn verify_mir_contains_cast_for_mixed_width() {
+fn mixed_width_signed_operations_insert_casts_in_mir() {
     let source = r#"
 extern "C" {
     fn get_i32() -> i32;
@@ -91,32 +79,97 @@ def main() -> i64 {
 }
 "#;
     let mir_fns = compile_to_mir(source).expect("should compile to MIR");
-    let main_fn = mir_fns.iter().find(|f| f.name == "main").expect("should have main function");
+    let main_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main")
+        .expect("should have main function");
 
-    // Print MIR for debugging
-    println!("\nMIR for main:");
-    println!("Locals:");
-    for (local, ty) in &main_fn.locals {
-        println!("  {:?}: {:?}", local, ty);
-    }
-    println!("\nInstructions:");
-    for (idx, inst) in main_fn.instructions.iter().enumerate() {
-        println!("  [{}] {:?}", idx, inst);
-    }
-    println!("\nBasic blocks:");
-    for (bb_idx, bb) in main_fn.basic_blocks.iter().enumerate() {
-        println!("  bb_{}:", bb_idx);
-        for inst_id in &bb.instructions {
-            let inst = &main_fn.instructions[inst_id.0 as usize];
-            println!("    {:?}", inst);
-        }
-        println!("    terminator: {:?}", bb.terminator);
-    }
+    let has_cast = main_fn
+        .instructions
+        .iter()
+        .any(|inst| matches!(inst, Instruction::Cast { .. }));
 
-    // Check that there's a Cast instruction in the MIR
-    let has_cast = main_fn.instructions.iter().any(|inst| {
-        matches!(inst, crate::mir::Instruction::Cast { .. })
-    });
+    assert!(has_cast, "MIR should contain Cast instructions for signed mixed-width arithmetic");
+}
 
-    assert!(has_cast, "MIR should contain Cast instruction for mixed-width operation");
+fn build_cast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant) -> MirFunction {
+    let mut func = MirFunction::new("main".to_string(), vec![], target_ty.clone());
+    let source = func.add_local(LocalKind::Temp, source_ty);
+    let casted = func.add_local(LocalKind::Temp, target_ty);
+    let entry = func.start_block;
+
+    func.push_inst_to_block(
+        entry,
+        Instruction::Assign {
+            destination: source,
+            value,
+        },
+    );
+    func.push_inst_to_block(
+        entry,
+        Instruction::Cast {
+            destination: casted,
+            value: source,
+            to: func.return_type.clone(),
+        },
+    );
+    func.block_mut(entry)
+        .expect("entry block should exist")
+        .set_terminator(Terminator::Return(Some(casted)));
+
+    func
+}
+
+#[test]
+fn llvm_codegen_lowers_cast_with_real_instructions() {
+    let mut codegen = Codegen::new();
+    let signed_widen_ir = codegen
+        .codegen(&[build_cast_fixture(
+            MIRType::Int(32),
+            MIRType::Int(64),
+            MirConstant::Int(-7),
+        )])
+        .expect("LLVM codegen should succeed");
+    assert!(
+        signed_widen_ir.contains("sext i32"),
+        "LLVM IR should sign-extend i32 -> i64 casts, got:\n{}",
+        signed_widen_ir
+    );
+
+    let mut codegen = Codegen::new();
+    let bool_widen_ir = codegen
+        .codegen(&[build_cast_fixture(
+            MIRType::Bool,
+            MIRType::Int(64),
+            MirConstant::Bool(true),
+        )])
+        .expect("LLVM codegen should succeed");
+    assert!(
+        bool_widen_ir.contains("zext i1"),
+        "LLVM IR should zero-extend bool -> i64 casts, got:\n{}",
+        bool_widen_ir
+    );
+}
+
+#[test]
+fn jit_codegen_handles_cast_instructions_without_falling_back_to_comments() {
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&[build_cast_fixture(
+            MIRType::Int(32),
+            MIRType::Int(64),
+            MirConstant::Int(-7),
+        )])
+        .expect("JIT codegen should succeed");
+
+    assert!(
+        !ir.contains("unhandled instruction: Cast"),
+        "JIT should lower Cast instructions instead of dropping them, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("sext i32"),
+        "JIT should sign-extend i32 -> i64 casts, got:\n{}",
+        ir
+    );
 }
