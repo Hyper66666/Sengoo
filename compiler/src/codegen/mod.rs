@@ -1131,7 +1131,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 濡傛灉鎿嶄綔鏁版槸鐢ㄦ埛鍙橀噺锛岄渶瑕佸厛 load
+                // 如果操作数是用户变量，需要先 load
 
                 let left_val = self.operand_value(*left, mir_fn);
 
@@ -1335,7 +1335,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 浣跨敤 id 鐩存帴绱㈠紩锛孫(1) 鏌ユ壘
+                // 使用 id 直接索引，O(1) 查找
 
                 let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
@@ -1603,7 +1603,7 @@ impl Codegen {
 
                     _ => {
 
-                        // 鍏朵粬绫诲瀷鏆傛椂璺宠繃
+                        // 其他类型暂时跳过
 
                     }
 
@@ -2474,7 +2474,7 @@ impl Codegen {
 
 
 
-                // 鐢熸垚 switch 鎸囦护
+                // 生成 switch 指令
 
                 self.ir.push_str(&format!(
 
@@ -2486,7 +2486,7 @@ impl Codegen {
 
 
 
-                // 娣诲姞姣忎釜 case
+                // 添加每个 case
 
                 for (value, target) in targets {
 
@@ -2817,7 +2817,7 @@ impl Codegen {
 
             _ => {
 
-                // 鍙傛暟銆佷复鏃跺彉閲忕瓑鐩存帴浣跨敤瀵勫瓨鍣ㄥ悕
+                // 参数、临时变量等直接使用寄存器名
 
                 self.local_name(local)
 
