@@ -56,6 +56,7 @@ fn async_frame_slot_count(ty: &MIRType) -> Result<usize, CompileError> {
     match &storage_ty {
         MIRType::Bool
         | MIRType::Int(8 | 16 | 32 | 64)
+        | MIRType::Float(32 | 64)
         | MIRType::Ref(_)
         | MIRType::Ptr(_)
         | MIRType::Future(_) => Ok(1),
@@ -73,10 +74,6 @@ fn async_frame_slot_count(ty: &MIRType) -> Result<usize, CompileError> {
         MIRType::Enum { .. } => Err(unsupported_async_frame_type(
             &storage_ty,
             "payload-carrying enum values cannot cross await points yet",
-        )),
-        MIRType::Float(_) => Err(unsupported_async_frame_type(
-            &storage_ty,
-            "float types require bitcast support which is not yet implemented in MIR",
         )),
         _ => Err(unsupported_async_frame_type(
             &storage_ty,
@@ -135,6 +132,15 @@ pub fn count_await_points(mir_fn: &MirFunction) -> usize {
         .count()
 }
 
+pub fn async_spawn_kind_id(name: &str) -> i64 {
+    let mut hash = 0x811c9dc5u32;
+    for byte in name.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    i64::from(hash)
+}
+
 /// Given a list of MIR functions, expand each async function into its original body
 /// plus three synthesized helpers. Returns additional functions to add.
 ///
@@ -152,6 +158,8 @@ pub fn expand_async_functions(
     let has_async_main = async_fn_names.iter().any(|n| n == "main");
 
     let mut new_fns = Vec::new();
+    let mut spawn_dispatch_entries = Vec::new();
+    let mut result_dispatch_i64_entries = Vec::new();
 
     for name in &async_fn_names {
         let mir_fn = match mir_fns.iter().find(|f| &f.name == name) {
@@ -193,9 +201,21 @@ pub fn expand_async_functions(
             result.name = "main__result".to_string();
         }
 
+        spawn_dispatch_entries.push((name.clone(), poll.name.clone()));
+        if matches!(mir_fn.return_type, MIRType::Int(64)) {
+            result_dispatch_i64_entries.push((name.clone(), result.name.clone()));
+        }
+
         new_fns.push(start);
         new_fns.push(poll);
         new_fns.push(result);
+    }
+
+    if !spawn_dispatch_entries.is_empty() {
+        new_fns.push(synthesize_spawn_poll_dispatch(&spawn_dispatch_entries));
+    }
+    if !result_dispatch_i64_entries.is_empty() {
+        new_fns.push(synthesize_result_dispatch_i64(&result_dispatch_i64_entries));
     }
 
     if has_async_main {
@@ -206,6 +226,92 @@ pub fn expand_async_functions(
     }
 
     Ok(new_fns)
+}
+
+fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
+    let mut f = MirFunction::new(
+        "sengoo_async_poll_dispatch".to_string(),
+        vec![MIR_I64, MIR_I64],
+        MIR_I64,
+    );
+
+    let bb0 = f.start_block;
+    let kind_local = Local::new(1, LocalKind::Param);
+    let handle_local = Local::new(2, LocalKind::Param);
+    let default_block = f.add_block();
+    let mut targets = Vec::with_capacity(entries.len());
+
+    for (base_name, poll_name) in entries {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_I64);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: poll_name.clone(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+    }
+
+    f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+        discr: kind_local,
+        targets,
+        otherwise: default_block,
+    });
+
+    let ready_local = f.add_local(LocalKind::Temp, MIR_I64);
+    let ready_inst = f.alloc_inst(Instruction::Assign {
+        destination: ready_local,
+        value: MirConstant::Int(1),
+    });
+    f.basic_blocks[default_block].push(ready_inst);
+    f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(ready_local)));
+
+    f
+}
+
+fn synthesize_result_dispatch_i64(entries: &[(String, String)]) -> MirFunction {
+    let mut f = MirFunction::new(
+        "sengoo_async_result_dispatch_i64".to_string(),
+        vec![MIR_I64, MIR_I64],
+        MIR_I64,
+    );
+
+    let bb0 = f.start_block;
+    let kind_local = Local::new(1, LocalKind::Param);
+    let handle_local = Local::new(2, LocalKind::Param);
+    let default_block = f.add_block();
+    let mut targets = Vec::with_capacity(entries.len());
+
+    for (base_name, result_name) in entries {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_I64);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: result_name.clone(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+    }
+
+    f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+        discr: kind_local,
+        targets,
+        otherwise: default_block,
+    });
+
+    let zero_local = f.add_local(LocalKind::Temp, MIR_I64);
+    let zero_inst = f.alloc_inst(Instruction::Assign {
+        destination: zero_local,
+        value: MirConstant::Int(0),
+    });
+    f.basic_blocks[default_block].push(zero_inst);
+    f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(zero_local)));
+
+    f
 }
 
 /// Generate a `main` wrapper that drives async main through the helper ABI:
@@ -357,6 +463,8 @@ enum AsyncFrameValueKind {
     I64,
     NarrowInt,
     Bool,
+    Float32,
+    Float64,
     PointerLike,
 }
 
@@ -397,11 +505,9 @@ fn classify_async_frame_type(ty: &MIRType) -> Result<AsyncFrameValueKind, Compil
         MIRType::Bool => Ok(AsyncFrameValueKind::Bool),
         MIRType::Int(8 | 16 | 32) => Ok(AsyncFrameValueKind::NarrowInt),
         MIRType::Int(64) | MIRType::Future(_) => Ok(AsyncFrameValueKind::I64),
+        MIRType::Float(32) => Ok(AsyncFrameValueKind::Float32),
+        MIRType::Float(64) => Ok(AsyncFrameValueKind::Float64),
         MIRType::Ref(_) | MIRType::Ptr(_) => Ok(AsyncFrameValueKind::PointerLike),
-        MIRType::Float(_) => Err(unsupported_async_frame_type(
-            ty,
-            "float types require bitcast support which is not yet implemented in MIR",
-        )),
         MIRType::Tuple(_) | MIRType::Struct { .. } | MIRType::Array(_, _) | MIRType::Enum { .. } => {
             Err(unsupported_async_frame_type(
                 ty,
@@ -410,7 +516,7 @@ fn classify_async_frame_type(ty: &MIRType) -> Result<AsyncFrameValueKind, Compil
         }
         _ => Err(unsupported_async_frame_type(
             ty,
-            "only bool, i8/i16/i32/i64, ref/ptr, and Future handles are supported in async frames yet",
+            "only bool, i8/i16/i32/i64, f32/f64, ref/ptr, and Future handles are supported in async frames yet",
         )),
     }
 }
@@ -656,7 +762,9 @@ fn instruction_user_uses(inst: &Instruction) -> HashSet<Local> {
             push_user_local(&mut uses, *value);
             push_user_local(&mut uses, *new_value);
         }
-        Instruction::Cast { value, .. } => push_user_local(&mut uses, *value),
+        Instruction::Cast { value, .. } | Instruction::Bitcast { value, .. } => {
+            push_user_local(&mut uses, *value)
+        }
         Instruction::Aggregate { fields, .. } => {
             for field in fields {
                 push_user_local(&mut uses, *field);
@@ -821,6 +929,34 @@ fn encode_async_frame_value(
             f.basic_blocks[block].push(cast);
             Ok(encoded)
         }
+        AsyncFrameValueKind::Float32 => {
+            let bitcast_i32 = f.add_local(LocalKind::Temp, MIRType::Int(32));
+            let bitcast = f.alloc_inst(Instruction::Bitcast {
+                destination: bitcast_i32,
+                value,
+                to: MIRType::Int(32),
+            });
+            f.basic_blocks[block].push(bitcast);
+
+            let encoded = f.add_local(LocalKind::Temp, MIR_I64);
+            let cast = f.alloc_inst(Instruction::Cast {
+                destination: encoded,
+                value: bitcast_i32,
+                to: MIR_I64,
+            });
+            f.basic_blocks[block].push(cast);
+            Ok(encoded)
+        }
+        AsyncFrameValueKind::Float64 => {
+            let encoded = f.add_local(LocalKind::Temp, MIR_I64);
+            let bitcast = f.alloc_inst(Instruction::Bitcast {
+                destination: encoded,
+                value,
+                to: MIR_I64,
+            });
+            f.basic_blocks[block].push(bitcast);
+            Ok(encoded)
+        }
     }
 }
 
@@ -964,6 +1100,31 @@ fn push_frame_load_into_typed(
                     to: storage_ty,
                 });
                 f.basic_blocks[block].push(cast);
+            }
+            AsyncFrameValueKind::Float32 => {
+                let encoded = push_frame_load(f, block, handle, offset, MIR_I64);
+                let narrowed = f.add_local(LocalKind::Temp, MIRType::Int(32));
+                let cast = f.alloc_inst(Instruction::Cast {
+                    destination: narrowed,
+                    value: encoded,
+                    to: MIRType::Int(32),
+                });
+                f.basic_blocks[block].push(cast);
+                let bitcast = f.alloc_inst(Instruction::Bitcast {
+                    destination,
+                    value: narrowed,
+                    to: storage_ty,
+                });
+                f.basic_blocks[block].push(bitcast);
+            }
+            AsyncFrameValueKind::Float64 => {
+                let encoded = push_frame_load(f, block, handle, offset, MIR_I64);
+                let bitcast = f.alloc_inst(Instruction::Bitcast {
+                    destination,
+                    value: encoded,
+                    to: storage_ty,
+                });
+                f.basic_blocks[block].push(bitcast);
             }
         },
     }
@@ -1143,6 +1304,15 @@ fn remap_instruction(
             value,
             to,
         } => Instruction::Cast {
+            destination: remap_local(*destination, local_map),
+            value: remap_local(*value, local_map),
+            to: to.clone(),
+        },
+        Instruction::Bitcast {
+            destination,
+            value,
+            to,
+        } => Instruction::Bitcast {
             destination: remap_local(*destination, local_map),
             value: remap_local(*value, local_map),
             to: to.clone(),

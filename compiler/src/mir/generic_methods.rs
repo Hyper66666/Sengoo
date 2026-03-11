@@ -109,11 +109,31 @@ pub(crate) struct EagerTraitMethod {
     pub(crate) explicit_param_count: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EagerTraitMethodRegistration {
+    pub(crate) name: String,
+    pub(crate) return_type: HIRType,
+    pub(crate) explicit_param_count: usize,
+}
+
 pub(crate) struct TraitMethodLoweringPlan {
     pub(crate) templates: Vec<TraitMethodTemplate>,
     pub(crate) eager_methods: Vec<EagerTraitMethod>,
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) implemented_method_names: HashSet<String>,
+}
+
+impl TraitMethodLoweringPlan {
+    pub(crate) fn eager_registrations(&self) -> Vec<EagerTraitMethodRegistration> {
+        self.eager_methods
+            .iter()
+            .map(|method| EagerTraitMethodRegistration {
+                name: method.function.name.clone(),
+                return_type: method.function.return_type.clone(),
+                explicit_param_count: method.explicit_param_count,
+            })
+            .collect()
+    }
 }
 
 pub(crate) fn collect_trait_method_templates_for_impl(
@@ -455,6 +475,90 @@ mod tests {
         assert!(!eager_names.contains("i64_WrapValue_wrap"));
         assert_eq!(collected.templates.len(), 1);
         assert_eq!(collected.templates[0].method.name, "wrap");
+    }
+
+    #[test]
+    fn collect_trait_method_templates_for_impl_exposes_eager_registrations() {
+        let trait_def = HIRTrait {
+            name: "WrapValue".to_string(),
+            type_params: Vec::new(),
+            items: vec![
+                HIRTraitItem::Function(hir::HIRFunction {
+                    name: "id".to_string(),
+                    type_params: Vec::new(),
+                    params: vec![HIRParam::new(
+                        "self".to_string(),
+                        SymbolId::INVALID,
+                        i64_ty(),
+                    )],
+                    return_type: i64_ty(),
+                    precondition: None,
+                    postcondition: None,
+                    body: empty_body(),
+                    is_async: false,
+                    abi: None,
+                    is_unsafe: false,
+                    no_mangle: false,
+                    export_name: None,
+                    is_pub: false,
+                }),
+                HIRTraitItem::Function(hir::HIRFunction {
+                    name: "fallback".to_string(),
+                    type_params: Vec::new(),
+                    params: vec![HIRParam::new(
+                        "self".to_string(),
+                        SymbolId::INVALID,
+                        i64_ty(),
+                    )],
+                    return_type: i64_ty(),
+                    precondition: None,
+                    postcondition: None,
+                    body: empty_body(),
+                    is_async: false,
+                    abi: None,
+                    is_unsafe: false,
+                    no_mangle: false,
+                    export_name: None,
+                    is_pub: false,
+                }),
+            ],
+            is_pub: false,
+        };
+
+        let impl_item = hir::HIRImpl {
+            target_type: i64_ty(),
+            trait_name: Some("WrapValue".to_string()),
+            items: vec![hir::HIRFunction {
+                name: "i64_id".to_string(),
+                type_params: Vec::new(),
+                params: vec![HIRParam::new("self".to_string(), SymbolId::INVALID, i64_ty())],
+                return_type: i64_ty(),
+                precondition: None,
+                postcondition: None,
+                body: empty_body(),
+                is_async: false,
+                abi: None,
+                is_unsafe: false,
+                no_mangle: false,
+                export_name: None,
+                is_pub: false,
+            }],
+        };
+
+        let collected =
+            collect_trait_method_templates_for_impl(&impl_item, Some(&trait_def), "i64");
+        let registrations = collected.eager_registrations();
+
+        assert!(registrations.contains(&EagerTraitMethodRegistration {
+            name: "i64_WrapValue_id".to_string(),
+            return_type: i64_ty(),
+            explicit_param_count: 0,
+        }));
+        assert!(registrations.contains(&EagerTraitMethodRegistration {
+            name: "i64_WrapValue_fallback".to_string(),
+            return_type: i64_ty(),
+            explicit_param_count: 0,
+        }));
     }
 }
 

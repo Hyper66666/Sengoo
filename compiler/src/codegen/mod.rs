@@ -68,22 +68,19 @@ pub struct Codegen {
 
     ffi: FfiCodegenConfig,
 
-    /// 字符串常量池。
+    /// Collected string literals emitted for the current module.
     strings: Vec<String>,
 
-    /// 字符串常量计数器。
-
+    /// 鐎涙顑佹稉鎻掔埗闁插繗顓搁弫鏉挎珤閵?
     string_counter: usize,
 
-    /// 按 `local.id` 缓存生成好的局部变量名，避免重复拼接。
+    /// Cache local names for O(1) lookup during code generation.
     pub(crate) name_cache: Vec<String>,
 
-    /// 缓存 MIR 类型到 LLVM 类型字符串的映射。
-
+    /// 缂傛挸鐡?MIR 缁鐎烽崚?LLVM 缁鐎风€涙顑佹稉鑼畱閺勭姴鐨犻妴?
     type_str_cache: HashMap<MIRType, String>,
 
-    /// 为 `load` 指令生成唯一的 SSA 临时寄存器名。
-
+    /// 娑?`load` 閹稿洣鎶ら悽鐔稿灇閸烆垯绔撮惃?SSA 娑撳瓨妞傜€靛嫬鐡ㄩ崳銊ユ倳閵?
     load_counter: usize,
 
 }
@@ -136,7 +133,7 @@ impl Codegen {
 
     fn emit_header(&mut self) {
 
-        // 模块级头信息先写入 declarations 缓冲区，保证位于函数 IR 之前。
+        // Start module output with a stable banner used by snapshots.
         self.declarations.push_str("; Sengoo LLVM IR\n");
 
         self.declarations
@@ -145,8 +142,7 @@ impl Codegen {
 
 
 
-        // 根据目标平台设置 target triple，避免 clang 报 `-Woverride-module`。
-
+        // 閺嶈宓侀惄顔界垼楠炲啿褰寸拋鍓х枂 target triple閿涘矂浼╅崗?clang 閹?`-Woverride-module`閵?
         if cfg!(target_os = "windows") {
 
             self.declarations
@@ -171,7 +167,7 @@ impl Codegen {
 
 
 
-    /// 声明运行时和外部 C 函数。
+    /// Declare external runtime functions used by generated LLVM IR.
     fn declare_runtime_functions(&mut self) {
 
         self.declarations
@@ -328,7 +324,45 @@ impl Codegen {
 
 
 
-    /// 输出字符串常量定义。
+    /// Declare the async spawn runtime hook only when the module actually uses it.
+    fn maybe_declare_spawn_runtime_function(&mut self, mir_fns: &[MirFunction]) {
+        let needs_spawn = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_async_spawn_raw",
+                _ => false,
+            })
+        });
+        if !needs_spawn
+            || self
+                .declarations
+                .contains("declare i64 @sengoo_async_spawn_raw(i64, i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
+    }
+
+    /// Declare the async select runtime hook only when the module actually uses it.
+    fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
+        let needs_select = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_async_select_i64",
+                _ => false,
+            })
+        });
+        if !needs_select
+            || self
+                .declarations
+                .contains("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
+    }
     fn emit_string_constants(&mut self) {
 
         if !self.strings.is_empty() {
@@ -337,8 +371,8 @@ impl Codegen {
 
             for (i, s) in self.strings.iter().enumerate() {
 
-                // 转义反斜杠和双引号。
-                let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                // Escape string contents before emitting LLVM string constants.
+                let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
 
                 self.declarations.push_str(&format!(
 
@@ -362,8 +396,7 @@ impl Codegen {
 
 
 
-    /// 注册字符串常量并返回其全局符号名。
-
+    /// 濞夈劌鍞界€涙顑佹稉鎻掔埗闁插繐鑻熸潻鏂挎礀閸忚泛鍙忕仦鈧粭锕€褰块崥宥冣偓?
     fn add_string(&mut self, s: &str) -> String {
 
         let idx = self.string_counter;
@@ -378,8 +411,7 @@ impl Codegen {
 
 
 
-    /// 扫描 MIR 中出现的结构体类型，并预先生成 LLVM named struct type。
-
+    /// 閹殿偅寮?MIR 娑擃厼鍤悳鎵畱缂佹挻鐎担鎾惰閸ㄥ绱濋獮鍫曨暕閸忓牏鏁撻幋?LLVM named struct type閵?
     fn emit_struct_types(&mut self, mir_fns: &[MirFunction]) {
 
         let mut seen = HashSet::new();
@@ -398,8 +430,7 @@ impl Codegen {
 
 
 
-    /// 递归收集结构体字段中嵌套的 LLVM named type。
-
+    /// 闁帒缍婇弨鍫曟肠缂佹挻鐎担鎾崇摟濞堝吀鑵戝畵灞筋殰閻?LLVM named type閵?
     fn collect_struct_types(&mut self, ty: &MIRType, seen: &mut HashSet<String>) {
 
         match ty {
@@ -408,8 +439,7 @@ impl Codegen {
 
                 if seen.insert(name.clone()) {
 
-                    // 先递归处理字段里的嵌套结构体类型。
-
+                    // 閸忓牓鈧帒缍婃径鍕倞鐎涙顔岄柌宀€娈戝畵灞筋殰缂佹挻鐎担鎾惰閸ㄥ鈧?
                     for (_, ft) in fields {
 
                         self.collect_struct_types(ft, seen);
@@ -546,26 +576,26 @@ impl Codegen {
 
 
 
-        // 棣栧厛鏀堕泦鎵€鏈夊瓧绗︿覆甯搁噺
-
+        // 濡絾鐗曢崢娑㈠绩閸洘鑲犻柟纰樺亾闁哄牆顦悺褏绮敂鑳洬閻㈩垱鎮傞崳?
         for mir_fn in mir_fns {
 
             self.collect_string_constants(mir_fn);
 
         }
 
-        // 输出收集到的字符串常量。
+        // collect string constants declarations
+        self.maybe_declare_spawn_runtime_function(mir_fns);
+        self.maybe_declare_select_runtime_function(mir_fns);
         self.emit_string_constants();
 
 
 
-        // 输出 MIR 中引用到的结构体类型定义。
+        // Emit aggregate type declarations before function bodies.
         self.emit_struct_types(mir_fns);
 
 
 
-        // 为模块中的每个函数生成 LLVM IR。
-
+        // 娑撶儤膩閸фぞ鑵戦惃鍕槨娑擃亜鍤遍弫鎵晸閹?LLVM IR閵?
         for mir_fn in mir_fns {
 
             self.codegen_function(mir_fn)?;
@@ -782,7 +812,7 @@ impl Codegen {
 
 
 
-    /// 收集函数中使用到的字符串常量。
+    /// Collect string literals referenced by a MIR function.
     fn collect_string_constants(&mut self, mir_fn: &MirFunction) {
 
         for bb in &mir_fn.basic_blocks {
@@ -1019,8 +1049,7 @@ impl Codegen {
 
                     mir::MirConstant::String(s) => {
 
-                        // 将字符串常量映射到已注册的全局字符串符号。
-
+                        // 鐏忓棗鐡х粭锔胯鐢悂鍣洪弰鐘茬殸閸掓澘鍑″▔銊ュ斀閻ㄥ嫬鍙忕仦鈧€涙顑佹稉鑼儊閸欐灚鈧?
                         let str_idx = self.strings.iter().position(|x| x == s).unwrap_or(0);
 
                         let str_ref = format!("@.str.{}", str_idx);
@@ -1131,7 +1160,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 如果操作数是用户变量，需要先 load
+                // 婵″倹鐏夐幙宥勭稊閺佺増妲搁悽銊﹀煕閸欐﹢鍣洪敍宀勬付鐟曚礁鍘?load
 
                 let left_val = self.operand_value(*left, mir_fn);
 
@@ -1335,7 +1364,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 使用 id 直接索引，O(1) 查找
+                // 娴ｈ法鏁?id 閻╁瓨甯寸槐銏犵穿閿涘(1) 閺屻儲澹?
 
                 let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
@@ -1343,11 +1372,8 @@ impl Codegen {
 
                 self.emit_indent();
 
-                // 根据源 local 的 kind 和类型判断这一条是否需要真正发出 load。
-                // 1. 用户变量通常对应 alloca，读取时需要 load。
-
-                // 2. 指针或引用类型也需要 load，才能得到其指向的值。
-
+                // 閺嶈宓佸┃?local 閻?kind 閸滃瞼琚崹瀣灲閺傤叀绻栨稉鈧弶鈩冩Ц閸氾箓娓剁憰浣烘埂濮濓絽褰傞崙?load閵?                // 1. 閻劍鍩涢崣姗€鍣洪柅姘埗鐎电懓绨?alloca閿涘矁顕伴崣鏍ㄦ闂団偓鐟?load閵?
+                // 2. 閹稿洭鎷￠幋鏍х穿閻劎琚崹瀣╃瘍闂団偓鐟?load閿涘本澧犻懗钘夌繁閸掓澘鍙鹃幐鍥ф倻閻ㄥ嫬鈧鈧?
                 let needs_load = local_info.kind == LocalKind::User
 
                     || matches!(src_ty, MIRType::Ptr(_) | MIRType::Ref(_));
@@ -1360,8 +1386,7 @@ impl Codegen {
 
                     let llvm_ty = self.mir_type_to_llvm_cached(src_ty);
 
-                    // load 的类型取决于源操作数实际指向的元素类型。
-
+                    // load 閻ㄥ嫮琚崹瀣絿閸愬厖绨┃鎰惙娴ｆ粍鏆熺€圭偤妾幐鍥ф倻閻ㄥ嫬鍘撶槐鐘佃閸ㄥ鈧?
                     let load_ty = match src_ty {
 
                         MIRType::Ptr(inner) | MIRType::Ref(inner) => {
@@ -1384,7 +1409,7 @@ impl Codegen {
 
                 } else {
 
-                    // 若源值已经是 SSA 临时值，则用 `add 0, value` 模拟 move。
+                    // Materialize a move by forwarding the SSA name directly.
                     let src = self.local_name(*source);
 
                     self.ir
@@ -1441,8 +1466,7 @@ impl Codegen {
 
 
 
-                // 根据 index local 的 kind 决定是否需要先 load 索引值。
-
+                // 閺嶈宓?index local 閻?kind 閸愬啿鐣鹃弰顖氭儊闂団偓鐟曚礁鍘?load 缁便垹绱╅崐绗衡偓?
                 let idx_local_info = &mir_fn.locals[index.index()].0;
 
 
@@ -1451,8 +1475,7 @@ impl Codegen {
 
                 if idx_local_info.kind == LocalKind::User {
 
-                    // 用户索引变量需要先 load。
-
+                    // 閻劍鍩涚槐銏犵穿閸欐﹢鍣洪棁鈧憰浣稿帥 load閵?
                     let idx_reg = self.local_name(*index);
 
                     let idx_temp = format!("%idx.{}", destination.id);
@@ -1473,8 +1496,7 @@ impl Codegen {
 
                 } else {
 
-                    // 临时索引值可直接作为 getelementptr 偏移。
-
+                    // 娑撳瓨妞傜槐銏犵穿閸婄厧褰查惄瀛樺复娴ｆ粈璐?getelementptr 閸嬪繒些閵?
                     let idx_reg = self.local_name(*index);
 
                     self.ir.push_str(&format!(
@@ -1499,8 +1521,7 @@ impl Codegen {
 
             } => {
 
-                // 处理数组/结构体聚合。
-
+                // 婢跺嫮鎮婇弫鎵矋/缂佹挻鐎担鎾逛粵閸氬牄鈧?
                 let dest = self.local_name(*destination);
 
 
@@ -1509,14 +1530,12 @@ impl Codegen {
 
                     MIRType::Array(elem_ty, _len) => {
 
-                        // 数组聚合按元素逐个写入目标地址，使用 store 完成。
-
+                        // 閺佹壆绮嶉懕姘値閹稿鍘撶槐鐘烩偓鎰嚋閸愭瑥鍙嗛惄顔界垼閸︽澘娼冮敍灞煎▏閻?store 鐎瑰本鍨氶妴?
                         let elem_llvm_ty = self.mir_type_to_llvm_cached(elem_ty);
 
                         for (i, field_local) in fields.iter().enumerate() {
 
-                            // 计算当前元素的地址。
-
+                            // 鐠侊紕鐣昏ぐ鎾冲閸忓啰绀岄惃鍕勾閸р偓閵?
                             let elem_ptr = format!("{}.elem.{}", dest, i);
 
                             self.emit_indent();
@@ -1531,7 +1550,7 @@ impl Codegen {
 
 
 
-                            // 取出当前元素的值。
+                            // Evaluate each field value before storing it into the aggregate slot.
                             let field_val = self.operand_value(*field_local, mir_fn);
 
                             self.emit_indent();
@@ -1550,7 +1569,7 @@ impl Codegen {
 
                     MIRType::Struct { .. } => {
 
-                        // 结构体聚合使用 insertvalue 逐字段构造。
+                        // Build struct values incrementally with insertvalue.
                         let llvm_ty = self.mir_type_to_llvm_cached(ty);
 
                         if fields.is_empty() {
@@ -1633,7 +1652,7 @@ impl Codegen {
 
                     _ => {
 
-                        // 其他类型暂时跳过
+                        // 閸忔湹绮猾璇茬€烽弳鍌涙鐠哄疇绻?
 
                     }
 
@@ -1649,7 +1668,7 @@ impl Codegen {
 
             } => {
 
-                // 将局部变量地址 bitcast 成 i64 句柄。
+                // Bitcast keeps the same bits while changing only the LLVM view of the value.
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
@@ -1672,8 +1691,7 @@ impl Codegen {
 
             } => {
 
-                // 生成函数调用。
-
+                // 閻㈢喐鍨氶崙鑺ユ殶鐠嬪啰鏁ら妴?
                 let dest = self.local_name(*destination);
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
@@ -1682,8 +1700,7 @@ impl Codegen {
 
 
 
-                // 对 `print` 做特殊处理，实际降到 `puts`。
-
+                // 鐎?`print` 閸嬫氨澹掑▓濠傤槱閻炲棴绱濈€圭偤妾梽宥呭煂 `puts`閵?
                 let is_print = func == "print";
 
                 let actual_func = if is_print { "puts" } else { func };
@@ -1700,7 +1717,7 @@ impl Codegen {
 
 
 
-                // 收集调用参数；参数值通过 operand_value 按需 load。
+                // Resolve call operands through operand_value so loads happen consistently.
                 let mut arg_strs: Vec<String> = Vec::new();
 
                 for arg in args {
@@ -1723,12 +1740,12 @@ impl Codegen {
 
                 if is_print {
 
-                    // print 调用实际映射到 puts，返回的 i32 可直接忽略。
+                    // print lowers to puts and discards the C return code.
                     self.ir
 
                         .push_str(&format!("call i32 @puts({})\n", arg_strs.join(", ")));
 
-                    // print 在语言层返回 `()`，这里写回一个 unit 值。
+                    // Model print as returning unit in Sengoo.
                     self.ir.push_str(&format!("{} = add i8 0, 0\n", dest));
 
                 } else if ret_ty == "void" {
@@ -1771,18 +1788,14 @@ impl Codegen {
 
             } => {
 
-                // 读取枚举判别值。
-                // 当前 LLVM 中的枚举统一表示为 `{ 判别值, 载荷 }` 结构。
-
-                // 判别值位于结构的第 0 个字段。
+                // Construct an enum as `{ discr, payload }`, leaving payload undef when absent.
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
 
 
 
-                // 使用 extractvalue 取出判别值。
-                self.emit_indent();
+                // 娴ｈ法鏁?extractvalue 閸欐牕鍤崚銈呭焼閸婄鈧?                self.emit_indent();
 
                 self.ir.push_str(&format!(
 
@@ -1806,14 +1819,12 @@ impl Codegen {
 
             } => {
 
-                // 构造枚举值。
-                // 当前 LLVM 中的枚举表示为 `{ 判别值, 载荷 }`。
-
+                // 閺嬪嫰鈧姵鐏囨稉鎯р偓绗衡偓?                // 瑜版挸澧?LLVM 娑擃厾娈戦弸姘鐞涖劎銇氭稉?`{ 閸掋倕鍩嗛崐? 鏉炲€熷祹 }`閵?
                 let dest = self.local_name(*destination);
 
 
 
-                // 先写入判别值字段。
+                // Materialize the discriminant first.
                 let discr_value = format!("{}.discr", dest);
 
                 self.emit_indent();
@@ -1828,7 +1839,7 @@ impl Codegen {
 
 
 
-                // 若存在 payload，则写入第 1 个字段。
+                // Fill payload slot 1 when the enum variant carries data.
                 if let Some(payload_local) = payload {
 
                     let payload_val = self.operand_value(*payload_local, mir_fn);
@@ -1845,7 +1856,7 @@ impl Codegen {
 
                 } else {
 
-                    // 无 payload 时将第 1 个字段填为 `undef`。
+                    // Keep payload slot 1 as undef for payloadless variants.
                     self.emit_indent();
 
                     self.ir.push_str(&format!(
@@ -1868,16 +1879,14 @@ impl Codegen {
 
             } => {
 
-                // 提取枚举载荷。
-
+                // 閹绘劕褰囬弸姘鏉炲€熷祹閵?
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
 
 
 
-                // 载荷位于结构的第 1 个字段。
-                self.emit_indent();
+                // 鏉炲€熷祹娴ｅ秳绨紒鎾寸€惃鍕儑 1 娑擃亜鐡у▓鐐光偓?                self.emit_indent();
 
                 self.ir.push_str(&format!(
 
@@ -1915,8 +1924,7 @@ impl Codegen {
 
                 match (&src_ty, to) {
 
-                    // Int -> Int：扩宽用 sext，缩窄用 trunc。
-
+                    // Int -> Int閿涙碍澧跨€圭晫鏁?sext閿涘瞼缂夌粣鍕暏 trunc閵?
                     (MIRType::Int(a), MIRType::Int(b)) if a < b => {
 
                         self.ir.push_str(&format!(
@@ -1941,8 +1949,7 @@ impl Codegen {
 
                     }
 
-                    // Float -> Float：扩宽用 fpext，缩窄用 fptrunc。
-
+                    // Float -> Float閿涙碍澧跨€圭晫鏁?fpext閿涘瞼缂夌粣鍕暏 fptrunc閵?
                     (MIRType::Float(a), MIRType::Float(b)) if a < b => {
 
                         self.ir.push_str(&format!(
@@ -1967,8 +1974,7 @@ impl Codegen {
 
                     }
 
-                    // Int -> Float：使用 sitofp（有符号整数转浮点）。
-
+                    // Int -> Float閿涙矮濞囬悽?sitofp閿涘牊婀佺粭锕€褰块弫瀛樻殶鏉烆剚璇為悙鐧哥礆閵?
                     (MIRType::Int(_), MIRType::Float(_)) => {
 
                         self.ir.push_str(&format!(
@@ -1981,8 +1987,7 @@ impl Codegen {
 
                     }
 
-                    // Float -> Int：使用 fptosi（浮点转有符号整数）。
-
+                    // Float -> Int閿涙矮濞囬悽?fptosi閿涘牊璇為悙纭呮祮閺堝顑侀崣閿嬫殻閺佸府绱氶妴?
                     (MIRType::Float(_), MIRType::Int(_)) => {
 
                         self.ir.push_str(&format!(
@@ -1995,8 +2000,7 @@ impl Codegen {
 
                     }
 
-                    // Bool -> Int：使用 zext（i1 扩到 iN）。
-
+                    // Bool -> Int閿涙矮濞囬悽?zext閿涘潟1 閹碘晛鍩?iN閿涘鈧?
                     (MIRType::Bool, MIRType::Int(_)) => {
 
                         self.ir.push_str(&format!(
@@ -2009,8 +2013,7 @@ impl Codegen {
 
                     }
 
-                    // Int -> Bool：使用 trunc（iN 截到 i1）。
-
+                    // Int -> Bool閿涙矮濞囬悽?trunc閿涘潟N 閹搭亜鍩?i1閿涘鈧?
                     (MIRType::Int(_), MIRType::Bool) => {
 
                         self.ir.push_str(&format!(
@@ -2038,6 +2041,52 @@ impl Codegen {
                     }
 
                 }
+
+            }
+
+            mir::Instruction::Bitcast {
+
+                destination,
+
+                value,
+
+                to,
+
+            } => {
+
+                let dest = self.local_name(*destination);
+
+                let src_val = self.operand_value(*value, mir_fn);
+
+                let src_ty = self.get_local_type(mir_fn, *value);
+
+                if !common::supports_mir_bitcast(src_ty, to) {
+
+                    return Err(format!(
+
+                        "invalid MIR bitcast from {} to {}",
+
+                        self.mir_type_to_llvm_cached(src_ty),
+
+                        self.mir_type_to_llvm_cached(to)
+
+                    ));
+
+                }
+
+                let src_llvm = self.mir_type_to_llvm_cached(src_ty);
+
+                let dst_llvm = self.mir_type_to_llvm_cached(to);
+
+                self.emit_indent();
+
+                self.ir.push_str(&format!(
+
+                    "{} = bitcast {} {} to {}\n",
+
+                    dest, src_llvm, src_val, dst_llvm
+
+                ));
 
             }
 
@@ -2397,7 +2446,7 @@ impl Codegen {
 
                     let ty = self.get_local_type(mir_fn, *v);
 
-                    // 特判 `main` 返回 unit 的情况，按约定返回整数 0。
+                    // `main` returning unit still lowers to exit code 0.
                     let is_main_returning_unit =
 
                         mir_fn.name == "main" && matches!(ty, MIRType::Unit);
@@ -2412,12 +2461,10 @@ impl Codegen {
 
                     } else {
 
-                        // 返回非 unit 值时，通过 operand_value 按需加载返回寄存器。
-
+                        // 鏉╂柨娲栭棃?unit 閸婂吋妞傞敍宀勨偓姘崇箖 operand_value 閹稿娓堕崝鐘烘祰鏉╂柨娲栫€靛嫬鐡ㄩ崳銊ｂ偓?
                         let reg = self.operand_value(*v, mir_fn);
 
-                        // unit 在 LLVM 中用 i8 0 表示，而不是 void。
-
+                        // unit 閸?LLVM 娑擃厾鏁?i8 0 鐞涖劎銇氶敍宀冣偓灞肩瑝閺?void閵?
                         let llvm_ty = if matches!(ty, MIRType::Unit) {
 
                             "i8".to_string()
@@ -2436,8 +2483,7 @@ impl Codegen {
 
                 } else {
 
-                    // 无显式返回值时，`main` 默认返回 0。
-
+                    // 閺冪姵妯夊蹇氱箲閸ョ偛鈧吋妞傞敍瀹峬ain` 姒涙顓绘潻鏂挎礀 0閵?
                     if mir_fn.name == "main" {
 
                         self.emit_indent();
@@ -2504,7 +2550,7 @@ impl Codegen {
 
 
 
-                // 生成 switch 指令
+                // 閻㈢喐鍨?switch 閹稿洣鎶?
 
                 self.ir.push_str(&format!(
 
@@ -2516,7 +2562,7 @@ impl Codegen {
 
 
 
-                // 添加每个 case
+                // 濞ｈ濮炲В蹇庨嚋 case
 
                 for (value, target) in targets {
 
@@ -2698,7 +2744,7 @@ impl Codegen {
 
 
 
-    /// 为 `codegen_function` 预先构建 local 名称缓存。
+    /// Build the local-name cache used during code generation.
     pub(crate) fn build_name_cache(&mut self, mir_fn: &MirFunction) {
 
         self.name_cache.clear();
@@ -2759,8 +2805,7 @@ impl Codegen {
 
 
 
-    /// 缓存 MIR 类型到 LLVM 类型字符串，避免重复分配与递归转换。
-
+    /// 缂傛挸鐡?MIR 缁鐎烽崚?LLVM 缁鐎风€涙顑佹稉璇х礉闁灝鍘ら柌宥咁槻閸掑棝鍘ゆ稉搴ㄢ偓鎺戠秺鏉烆剚宕查妴?
     fn mir_type_to_llvm_cached(&mut self, ty: &MIRType) -> String {
 
         if let Some(cached) = self.type_str_cache.get(ty) {
@@ -2783,8 +2828,7 @@ impl Codegen {
 
     fn get_local_type<'a>(&self, mir_fn: &'a MirFunction, local: Local) -> &'a MIRType {
 
-        // 根据 `local.id` 从 locals 表中取类型，缺省回退到 `MIR_I64`。
-
+        // 閺嶈宓?`local.id` 娴?locals 鐞涖劋鑵戦崣鏍閸ㄥ绱濈紓铏规阜閸ョ偤鈧偓閸?`MIR_I64`閵?
         mir_fn
 
             .locals
@@ -2799,14 +2843,11 @@ impl Codegen {
 
 
 
-    /// 获取操作数对应的 SSA 值表示。
-
-    /// 对用户变量会先从 alloca 中发出 `load`，再返回临时寄存器名。
-    /// 其余情况直接返回局部变量名。
-
+    /// 閼惧嘲褰囬幙宥勭稊閺佹澘顕惔鏃傛畱 SSA 閸婅壈銆冪粈鎭掆偓?
+    /// Resolve an operand to an LLVM value, loading from stack slots when needed.
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
 
-        // 根据 `local.id` 读取该 local 的元信息。
+        // Look up the local metadata before choosing the lowering path.
         let local_info = &mir_fn.locals[local.index()].0;
 
 
@@ -2815,8 +2856,7 @@ impl Codegen {
 
             LocalKind::User => {
 
-                // 用户变量需要先 load，因为 MIR 中它们通常表示为地址值。
-
+                // 閻劍鍩涢崣姗€鍣洪棁鈧憰浣稿帥 load閿涘苯娲滄稉?MIR 娑擃厼鐣犳禒顒勨偓姘埗鐞涖劎銇氭稉鍝勬勾閸р偓閸婄鈧?
                 let ty = self.get_local_type(mir_fn, local);
 
                 let llvm_ty = self.mir_type_to_llvm_cached(ty);
@@ -2847,7 +2887,7 @@ impl Codegen {
 
             _ => {
 
-                // 参数、临时变量等直接使用寄存器名
+                // 閸欏倹鏆熼妴浣峰閺冭泛褰夐柌蹇曠搼閻╁瓨甯存担璺ㄦ暏鐎靛嫬鐡ㄩ崳銊ユ倳
 
                 self.local_name(local)
 

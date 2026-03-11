@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 #[cfg(feature = "native-bridge")]
+use std::cell::Cell;
+#[cfg(feature = "native-bridge")]
 use std::sync::{Arc, Mutex};
 
 pub type TaskId = u64;
@@ -116,6 +118,13 @@ unsafe extern "C" {
     fn main__start() -> i64;
     fn main__poll(handle: i64) -> i64;
     fn main__result(handle: i64) -> i64;
+    fn sengoo_async_poll_dispatch(kind: i64, handle: i64) -> i64;
+    fn sengoo_async_result_dispatch_i64(kind: i64, handle: i64) -> i64;
+}
+
+#[cfg(feature = "native-bridge")]
+thread_local! {
+    static CURRENT_SCHEDULER: Cell<*mut CoroutineScheduler> = const { Cell::new(std::ptr::null_mut()) };
 }
 
 #[cfg(feature = "native-bridge")]
@@ -146,6 +155,23 @@ impl CoroutineTask for RootAsyncMainI64Task {
 }
 
 #[cfg(feature = "native-bridge")]
+struct ForeignAsyncTask {
+    kind: i64,
+    handle: i64,
+}
+
+#[cfg(feature = "native-bridge")]
+impl CoroutineTask for ForeignAsyncTask {
+    fn poll(&mut self) -> TaskState {
+        if unsafe { sengoo_async_poll_dispatch(self.kind, self.handle) } == 0 {
+            TaskState::Pending
+        } else {
+            TaskState::Complete
+        }
+    }
+}
+
+#[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub extern "C" fn sengoo_async_scheduler_new() -> *mut CoroutineScheduler {
     Box::into_raw(Box::new(CoroutineScheduler::new()))
@@ -171,7 +197,42 @@ pub unsafe extern "C" fn sengoo_async_scheduler_run_until_idle(
     if scheduler.is_null() {
         return 0;
     }
-    (&mut *scheduler).run_until_idle(max_ticks).len()
+    CURRENT_SCHEDULER.with(|cell| {
+        let previous = cell.replace(scheduler);
+        let finished = (&mut *scheduler).run_until_idle(max_ticks).len();
+        cell.set(previous);
+        finished
+    })
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
+    CURRENT_SCHEDULER.with(|cell| {
+        let scheduler = cell.get();
+        if scheduler.is_null() {
+            return 0;
+        }
+        unsafe { (&mut *scheduler).spawn(ForeignAsyncTask { kind, handle }) as i64 }
+    })
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub extern "C" fn sengoo_async_select_i64(
+    first_kind: i64,
+    first_handle: i64,
+    second_kind: i64,
+    second_handle: i64,
+) -> i64 {
+    loop {
+        if unsafe { sengoo_async_poll_dispatch(first_kind, first_handle) } != 0 {
+            return unsafe { sengoo_async_result_dispatch_i64(first_kind, first_handle) };
+        }
+        if unsafe { sengoo_async_poll_dispatch(second_kind, second_handle) } != 0 {
+            return unsafe { sengoo_async_result_dispatch_i64(second_kind, second_handle) };
+        }
+    }
 }
 
 #[cfg(feature = "native-bridge")]
@@ -181,9 +242,13 @@ pub extern "C" fn sengoo_async_run_main_i64() -> i64 {
     let mut scheduler = CoroutineScheduler::new();
     scheduler.spawn(RootAsyncMainI64Task::new(result.clone()));
 
-    while !scheduler.is_empty() {
-        scheduler.tick();
-    }
+    CURRENT_SCHEDULER.with(|cell| {
+        let previous = cell.replace(&mut scheduler);
+        while !scheduler.is_empty() {
+            scheduler.tick();
+        }
+        cell.set(previous);
+    });
 
     let final_result = result
         .lock()
@@ -218,6 +283,16 @@ mod tests {
     #[no_mangle]
     pub extern "C" fn main__result(handle: i64) -> i64 {
         assert_eq!(handle, 7);
+        42
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_poll_dispatch(_kind: i64, _handle: i64) -> i64 {
+        1
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_i64(_kind: i64, _handle: i64) -> i64 {
         42
     }
 
