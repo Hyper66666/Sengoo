@@ -1172,6 +1172,21 @@ pub fn lower_hir_with_options(
                     },
                 );
             }
+            HIRItem::ExternBlock(extern_block) => {
+                for extern_item in &extern_block.items {
+                    if let hir::HIRExternItem::Function(extern_fn) = extern_item {
+                        known_functions.insert(extern_fn.name.clone());
+                        known_function_sigs.insert(
+                            extern_fn.name.clone(),
+                            FunctionSig {
+                                ret_type: hir_type_to_mir_with_structs(&extern_fn.return_type, &struct_defs),
+                                param_count: extern_fn.params.len(),
+                                env: vec![],
+                            },
+                        );
+                    }
+                }
+            }
             HIRItem::Impl(impl_item) => {
                 for impl_item in expand_impl_variants(
                     impl_item,
