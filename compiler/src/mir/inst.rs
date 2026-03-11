@@ -117,6 +117,13 @@ pub enum Instruction {
         to: MIRType,
     },
 
+    /// 位重解释转换，保持底层位模式不变。
+    Bitcast {
+        destination: Local,
+        value: Local,
+        to: MIRType,
+    },
+
     /// 聚合值初始化
     Aggregate {
         destination: Local,
@@ -200,6 +207,7 @@ impl Instruction {
             | Instruction::Extract { destination, .. }
             | Instruction::Insert { destination, .. }
             | Instruction::Cast { destination, .. }
+            | Instruction::Bitcast { destination, .. }
             | Instruction::Aggregate { destination, .. }
             | Instruction::Call { destination, .. }
             | Instruction::Discriminant { destination, .. }

@@ -16,6 +16,7 @@ use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
 };
+use super::async_lowering::async_spawn_kind_id;
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -1200,20 +1201,19 @@ pub fn lower_hir_with_options(
                             trait_defs.get(trait_name.as_str()).copied(),
                             &type_prefix,
                         );
-                        for eager_method in &collected.eager_methods {
-                            let function = &eager_method.function;
+                        for registration in collected.eager_registrations() {
                             known_function_sigs.insert(
-                                function.name.clone(),
+                                registration.name.clone(),
                                 FunctionSig {
                                     ret_type: hir_type_to_mir_with_structs(
-                                        &function.return_type,
+                                        &registration.return_type,
                                         &struct_defs,
                                     ),
-                                    param_count: eager_method.explicit_param_count,
+                                    param_count: registration.explicit_param_count,
                                     env: vec![],
                                 },
                             );
-                            known_functions.insert(function.name.clone());
+                            known_functions.insert(registration.name);
                         }
                         eager_trait_functions
                             .extend(collected.eager_methods.into_iter().map(|method| method.function));
@@ -1972,6 +1972,12 @@ impl<'a> LoweringContext<'a> {
         name
     }
 
+    fn async_block_name(&mut self) -> String {
+        let name = format!("$__async_block{}", self.lambda_counter);
+        *self.lambda_counter += 1;
+        name
+    }
+
     /// 将循环上下文压入循环嵌套栈。
     fn push_loop(&mut self, break_block: usize, continue_block: usize) {
         self.loop_stack.push(LoopContext {
@@ -1991,6 +1997,13 @@ impl<'a> LoweringContext<'a> {
 
         let mut free_vars = Vec::new();
         self.collect_vars_from_expr(body, &param_names, &mut free_vars);
+        free_vars
+    }
+
+    fn collect_async_block_free_vars(&self, body: &crate::hir::HIRBody) -> Vec<(String, Local)> {
+        let param_names = std::collections::HashSet::new();
+        let mut free_vars = Vec::new();
+        self.collect_vars_from_body(body, &param_names, &mut free_vars);
         free_vars
     }
 
@@ -2135,12 +2148,111 @@ impl<'a> LoweringContext<'a> {
         param_names: &std::collections::HashSet<String>,
         free_vars: &mut Vec<(String, Local)>,
     ) {
+        let mut scoped_names = param_names.clone();
         for stmt in &body.stmts {
-            self.collect_vars_from_stmt(stmt, param_names, free_vars);
+            self.collect_vars_from_stmt(stmt, &scoped_names, free_vars);
+            if let crate::hir::HIRStmt::Let { name, .. } = stmt {
+                scoped_names.insert(name.clone());
+            }
         }
         if let Some(expr) = &body.expr {
-            self.collect_vars_from_expr(expr, param_names, free_vars);
+            self.collect_vars_from_expr(expr, &scoped_names, free_vars);
         }
+    }
+
+    fn lower_async_block(&mut self, body: &HIRBody) -> Local {
+        let async_block_name = self.async_block_name();
+        let free_vars = self.collect_async_block_free_vars(body);
+        let capture_types: Vec<MIRType> = free_vars
+            .iter()
+            .map(|(_, local)| self.get_local_type(*local).clone())
+            .collect();
+        let capture_args: Vec<Local> = free_vars.iter().map(|(_, local)| *local).collect();
+
+        let mut async_fn = MirFunction::new(async_block_name.clone(), capture_types.clone(), MIR_UNIT);
+        async_fn.is_async = true;
+        let async_start = async_fn.start_block;
+
+        let mut async_ctx = LoweringContext::new(
+            &mut async_fn,
+            self.lambda_counter,
+            &self.known_functions,
+            &self.function_sigs,
+            self.struct_defs,
+            self.concrete_type_registry.clone(),
+            self.options.clone(),
+            self.inherent_method_templates,
+            self.trait_method_templates,
+        );
+        async_ctx.current_block = Some(async_start);
+
+        for (index, (var_name, outer_local)) in free_vars.iter().enumerate() {
+            let param_local = Local::new(index + 1, LocalKind::Param);
+            async_ctx.local_names.insert(var_name.clone(), param_local);
+            if let Some(type_name) = self.type_names.get(outer_local).cloned() {
+                async_ctx.type_names.insert(param_local, type_name);
+            }
+            if let Some(origin) = self.future_origins.get(outer_local).cloned() {
+                async_ctx.future_origins.insert(param_local, origin);
+            }
+        }
+
+        let result_local = async_ctx.lower_body_to_block_val(body, async_start);
+        let result_ty = async_ctx.get_local_type(result_local).clone();
+        async_ctx.mir_fn.return_type = result_ty.clone();
+        if let Some((_, slot_ty)) = async_ctx.mir_fn.locals.get_mut(0) {
+            *slot_ty = result_ty.clone();
+        }
+
+        let cur = async_ctx.current_block();
+        let already_terminated = async_ctx
+            .mir_fn
+            .block_mut(cur)
+            .is_some_and(|block| block.terminator.is_some());
+        if !already_terminated {
+            if matches!(result_ty, MIRType::Unit) {
+                async_ctx.set_terminator(Terminator::Return(None));
+            } else {
+                async_ctx.set_terminator(Terminator::Return(Some(result_local)));
+            }
+        }
+
+        let async_errors = std::mem::take(&mut async_ctx.errors);
+        let nested_functions = std::mem::take(&mut async_ctx.lambda_functions);
+        drop(async_ctx);
+
+        if !async_errors.is_empty() {
+            self.errors.push(format!(
+                "async block lowering failed for '{}':\n  {}",
+                async_block_name,
+                async_errors.join("\n  ")
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        self.known_functions.insert(async_block_name.clone());
+        self.options.async_functions.insert(async_block_name.clone());
+        self.function_sigs.insert(
+            async_block_name.clone(),
+            FunctionSig {
+                ret_type: result_ty.clone(),
+                param_count: capture_types.len(),
+                env: vec![],
+            },
+        );
+
+        self.lambda_functions.push(async_fn);
+        self.lambda_functions.extend(nested_functions);
+
+        let future_local = self.add_local(None, LocalKind::Temp, result_ty);
+        self.push_inst(Instruction::Call {
+            destination: future_local,
+            func: format!("{}__start", async_block_name),
+            args: capture_args,
+        });
+        self.future_origins
+            .insert(future_local, async_block_name);
+        future_local
     }
 
     /// 从语句列表中收集自由变量引用（lambda捕获分析）。
@@ -2910,6 +3022,146 @@ impl<'a> LoweringContext<'a> {
         self.add_local(None, LocalKind::Temp, MIR_UNIT)
     }
 
+    fn lower_builtin_spawn(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "spawn expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let future_handle = arg_locals[0];
+        let base_name = self.resolve_async_base_name(future_handle);
+        if base_name == "unknown" {
+            self.errors.push(
+                "spawn requires a future produced by an async function or async block".to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: kind_local,
+            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+        });
+
+        let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: task_id,
+            func: "sengoo_async_spawn_raw".to_string(),
+            args: vec![kind_local, future_handle],
+        });
+
+        future_handle
+    }
+
+    fn async_await_result_type(&self, future_handle: Local) -> MIRType {
+        match self.get_local_type(future_handle) {
+            MIRType::Future(inner) => (**inner).clone(),
+            _ => MIR_I64,
+        }
+    }
+
+    fn lower_async_wait(&mut self, future_handle: Local) -> Local {
+        let func_name = self.resolve_async_base_name(future_handle);
+        if func_name == "unknown" {
+            self.errors.push(
+                "unable to resolve async future origin during MIR lowering".to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let result_ty = self.async_await_result_type(future_handle);
+        let result_local = self.add_local(None, LocalKind::Temp, result_ty);
+        let poll_result = self.add_local(None, LocalKind::Temp, MIR_I64);
+        let ready_block = self.new_block();
+        let pending_block = self.new_block();
+
+        self.set_terminator(Terminator::Suspend {
+            poll_func: format!("{}__poll", func_name),
+            future_handle,
+            destination: poll_result,
+            ready_block,
+            pending_block,
+        });
+
+        self.set_current_block(pending_block);
+        self.set_terminator(Terminator::Goto(self.current_block()));
+
+        self.set_current_block(ready_block);
+        self.push_inst(Instruction::Call {
+            destination: result_local,
+            func: format!("{}__result", func_name),
+            args: vec![future_handle],
+        });
+        result_local
+    }
+
+    fn lower_builtin_join(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 2 {
+            self.errors.push(format!(
+                "join expects exactly two arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let _first_result = self.lower_async_wait(arg_locals[0]);
+        let _second_result = self.lower_async_wait(arg_locals[1]);
+        self.add_local(None, LocalKind::Temp, MIR_UNIT)
+    }
+
+    fn lower_builtin_select(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 2 {
+            self.errors.push(format!(
+                "select expects exactly two arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let first_handle = arg_locals[0];
+        let second_handle = arg_locals[1];
+        let first_name = self.resolve_async_base_name(first_handle);
+        let second_name = self.resolve_async_base_name(second_handle);
+        if first_name == "unknown" || second_name == "unknown" {
+            self.errors.push(
+                "select requires futures produced by async functions or async blocks".to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let result_ty = self.async_await_result_type(first_handle);
+        if !matches!(result_ty, MIRType::Int(64)) {
+            self.errors.push(
+                "select currently only supports Future<i64> values during MIR lowering"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let first_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: first_kind,
+            value: MirConstant::Int(async_spawn_kind_id(&first_name)),
+        });
+
+        let second_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: second_kind,
+            value: MirConstant::Int(async_spawn_kind_id(&second_name)),
+        });
+
+        let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_select_i64".to_string(),
+            args: vec![first_kind, first_handle, second_kind, second_handle],
+        });
+        result_local
+    }
+
     fn lower_expr(&mut self, expr: &HIRExpr) -> Local {
         match expr {
             HIRExpr::Lit(lit) => self.lower_literal(lit),
@@ -3571,6 +3823,12 @@ impl<'a> LoweringContext<'a> {
                             }
                         } else if name == "print" {
                             return self.lower_builtin_print(&arg_locals);
+                        } else if name == "spawn" {
+                            return self.lower_builtin_spawn(&arg_locals);
+                        } else if name == "join" {
+                            return self.lower_builtin_join(&arg_locals);
+                        } else if name == "select" {
+                            return self.lower_builtin_select(&arg_locals);
                         } else {
                             let ret = self
                                 .function_sigs
@@ -4376,42 +4634,9 @@ impl<'a> LoweringContext<'a> {
                 // 处理await表达式（仅用于类型系统，无实际异步支持）。
             HIRExpr::Await(inner) => {
                 let future_handle = self.lower_expr(inner);
-                let func_name = self.resolve_async_base_name(future_handle);
-                if func_name == "unknown" {
-                    self.errors.push(
-                        "unable to resolve async future origin during MIR lowering".to_string(),
-                    );
-                    return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-                }
-                let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                let poll_result = self.add_local(None, LocalKind::Temp, MIR_I64);
-                let ready_block = self.new_block();
-                let pending_block = self.new_block();
-
-                self.set_terminator(Terminator::Suspend {
-                    poll_func: format!("{}__poll", func_name),
-                    future_handle,
-                    destination: poll_result,
-                    ready_block,
-                    pending_block,
-                });
-
-                self.set_current_block(pending_block);
-                self.set_terminator(Terminator::Goto(self.current_block()));
-
-                self.set_current_block(ready_block);
-                self.push_inst(Instruction::Call {
-                    destination: result_local,
-                    func: format!("{}__result", func_name),
-                    args: vec![future_handle],
-                });
-                result_local
+                self.lower_async_wait(future_handle)
             }
-            HIRExpr::AsyncBlock(_) => {
-                self.errors
-                    .push("async blocks are not supported in MIR lowering".to_string());
-                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-            }
+            HIRExpr::AsyncBlock(body) => self.lower_async_block(body),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }

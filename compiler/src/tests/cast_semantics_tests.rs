@@ -120,6 +120,34 @@ fn build_cast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant
     func
 }
 
+fn build_bitcast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant) -> MirFunction {
+    let mut func = MirFunction::new("main".to_string(), vec![], target_ty.clone());
+    let source = func.add_local(LocalKind::Temp, source_ty);
+    let casted = func.add_local(LocalKind::Temp, target_ty);
+    let entry = func.start_block;
+
+    func.push_inst_to_block(
+        entry,
+        Instruction::Assign {
+            destination: source,
+            value,
+        },
+    );
+    func.push_inst_to_block(
+        entry,
+        Instruction::Bitcast {
+            destination: casted,
+            value: source,
+            to: func.return_type.clone(),
+        },
+    );
+    func.block_mut(entry)
+        .expect("entry block should exist")
+        .set_terminator(Terminator::Return(Some(casted)));
+
+    func
+}
+
 #[test]
 fn llvm_codegen_lowers_cast_with_real_instructions() {
     let mut codegen = Codegen::new();
@@ -170,6 +198,47 @@ fn jit_codegen_handles_cast_instructions_without_falling_back_to_comments() {
     assert!(
         ir.contains("sext i32"),
         "JIT should sign-extend i32 -> i64 casts, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn llvm_codegen_lowers_bitcast_with_real_instructions() {
+    let mut codegen = Codegen::new();
+    let ir = codegen
+        .codegen(&[build_bitcast_fixture(
+            MIRType::Float(64),
+            MIRType::Int(64),
+            MirConstant::Float(3.25),
+        )])
+        .expect("LLVM codegen should succeed");
+
+    assert!(
+        ir.contains("bitcast double"),
+        "LLVM IR should emit bitcast for f64 -> i64 reinterpretation, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn jit_codegen_lowers_bitcast_with_real_instructions() {
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&[build_bitcast_fixture(
+            MIRType::Float(64),
+            MIRType::Int(64),
+            MirConstant::Float(3.25),
+        )])
+        .expect("JIT codegen should succeed");
+
+    assert!(
+        !ir.contains("unhandled instruction: Bitcast"),
+        "JIT should lower Bitcast instructions instead of dropping them, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("bitcast double"),
+        "JIT IR should emit bitcast for f64 -> i64 reinterpretation, got:\n{}",
         ir
     );
 }

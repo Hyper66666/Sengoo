@@ -13,7 +13,7 @@ use crate::typeck::infer::TypeInfer;
 use crate::typeck::r#trait::{type_key, FunctionTy, ImplRegistry, TraitRegistry};
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
 
@@ -1777,10 +1777,12 @@ impl TypeChecker {
                     )),
                 }
             }
-            ExprKind::AsyncBlock(_block) => {
-                Err(TypeckError::Other(
-                    "async blocks are not yet supported in this phase".to_string(),
-                ))
+            ExprKind::AsyncBlock(block) => {
+                self.async_context_depth += 1;
+                let result = self.check_block(block);
+                self.async_context_depth = self.async_context_depth.saturating_sub(1);
+                let inner_ty = result?;
+                Ok(Ty::new(0, TyKind::Future(Box::new(inner_ty))))
             }
             ExprKind::Struct { path, fields, .. } => {
                 let name = path
@@ -1793,10 +1795,11 @@ impl TypeChecker {
                     .get(&name)
                     .cloned()
                     .ok_or_else(|| TypeckError::UndefinedType { name: name.clone() })?;
+                let type_params = self.struct_type_params.get(&name).cloned().unwrap_or_default();
 
-                if let Some(type_params) = self.struct_type_params.get(&name).cloned() {
-                    if !type_params.is_empty() {
-                        self.env.push_scope();
+                if !type_params.is_empty() {
+                    self.env.push_scope();
+                    let result = (|| -> TyResult<Ty> {
                         let generic_meta = self
                             .bind_type_params_with_meta(&type_params)
                             .map_err(|err| TypeckError::Other(err.to_string()))?;
@@ -1806,31 +1809,7 @@ impl TypeChecker {
                             field_types.insert(field_name.clone(), self.check_type(field_ty)?);
                         }
 
-                        let mut seen = HashSet::new();
-                        for field_value in fields {
-                            let field_name = match &field_value.name {
-                                crate::ast::FieldName::Ident(ident) => ident.name.clone(),
-                                crate::ast::FieldName::String(name) => name.clone(),
-                            };
-
-                            if !seen.insert(field_name.clone()) {
-                                self.env.pop_scope();
-                                return Err(TypeckError::Other(format!(
-                                    "duplicate struct literal field `{}` for `{}`",
-                                    field_name, name
-                                )));
-                            }
-
-                            let expected_ty = field_types.get(&field_name).cloned().ok_or_else(|| {
-                                TypeckError::FieldNotFound {
-                                    type_name: name.clone(),
-                                    field_name: field_name.clone(),
-                                }
-                            })?;
-
-                            let value_ty = self.check_expr(&field_value.value)?;
-                            self.infer.unify(&expected_ty, &value_ty)?;
-                        }
+                        self.check_struct_literal_fields(&name, fields, &field_types)?;
 
                         let mut args = Vec::with_capacity(generic_meta.len());
                         for param in &generic_meta {
@@ -1838,9 +1817,9 @@ impl TypeChecker {
                             let mut concrete_ty = self.infer.apply_subst(&placeholder);
                             if matches!(concrete_ty.kind, TyKind::Var(_)) {
                                 if let Some(default_ty) = &param.default {
-                                    concrete_ty = self.substitute_ty_vars(default_ty, &HashMap::new());
+                                    concrete_ty =
+                                        self.substitute_ty_vars(default_ty, &HashMap::new());
                                 } else {
-                                    self.env.pop_scope();
                                     return Err(TypeckError::Other(format!(
                                         "cannot infer generic argument `{}` for struct `{}` literal",
                                         param.name, name
@@ -1850,7 +1829,6 @@ impl TypeChecker {
                             for bound in &param.bounds {
                                 let concrete_key = type_key(&concrete_ty);
                                 if !self.impl_registry.implements_trait(bound, &concrete_key) {
-                                    self.env.pop_scope();
                                     return Err(TypeckError::Other(format!(
                                         "generic constraint violated in struct `{}` literal: `{}` does not implement `{}` for `{}`",
                                         name, concrete_key, bound, param.name
@@ -1860,47 +1838,17 @@ impl TypeChecker {
                             args.push(concrete_ty);
                         }
 
-                        self.env.pop_scope();
                         Ok(self.env.new_ty(TyKind::Adt { name, args }))
-                    } else if let Some(symbol) = self.env.lookup(&name) {
-                        if let Some(ty) = symbol.get_ty() {
-                            Ok(ty.clone())
-                        } else {
-                            Ok(self.env.new_ty(TyKind::Adt { name, args: vec![] }))
-                        }
-                    } else {
-                        Err(TypeckError::UndefinedType { name })
-                    }
+                    })();
+                    self.env.pop_scope();
+                    result
                 } else {
                     let mut field_types: HashMap<String, Ty> = HashMap::new();
                     for (field_name, field_ty) in field_defs {
                         field_types.insert(field_name, self.check_type(&field_ty)?);
                     }
 
-                    let mut seen = HashSet::new();
-                    for field_value in fields {
-                        let field_name = match &field_value.name {
-                            crate::ast::FieldName::Ident(ident) => ident.name.clone(),
-                            crate::ast::FieldName::String(name) => name.clone(),
-                        };
-
-                        if !seen.insert(field_name.clone()) {
-                            return Err(TypeckError::Other(format!(
-                                "duplicate struct literal field `{}` for `{}`",
-                                field_name, name
-                            )));
-                        }
-
-                        let expected_ty = field_types.get(&field_name).cloned().ok_or_else(|| {
-                            TypeckError::FieldNotFound {
-                                type_name: name.clone(),
-                                field_name: field_name.clone(),
-                            }
-                        })?;
-
-                        let value_ty = self.check_expr(&field_value.value)?;
-                        self.infer.unify(&expected_ty, &value_ty)?;
-                    }
+                    self.check_struct_literal_fields(&name, fields, &field_types)?;
 
                     if let Some(symbol) = self.env.lookup(&name) {
                         if let Some(ty) = symbol.get_ty() {
@@ -1915,6 +1863,102 @@ impl TypeChecker {
             }
             _ => Ok(self.env.error_ty()),
         }
+    }
+
+    fn check_struct_literal_fields(
+        &mut self,
+        struct_name: &str,
+        fields: &[FieldValue],
+        field_types: &HashMap<String, Ty>,
+    ) -> TyResult<()> {
+        let mut seen = HashSet::new();
+        let mut provided_known = HashSet::new();
+        let mut missing = BTreeSet::new();
+        let mut duplicates = BTreeSet::new();
+        let mut unknown = BTreeSet::new();
+
+        for field_value in fields {
+            let field_name = match &field_value.name {
+                crate::ast::FieldName::Ident(ident) => ident.name.clone(),
+                crate::ast::FieldName::String(name) => name.clone(),
+            };
+
+            let is_first = seen.insert(field_name.clone());
+            if !is_first {
+                duplicates.insert(field_name.clone());
+            }
+
+            let Some(expected_ty) = field_types.get(&field_name).cloned() else {
+                unknown.insert(field_name);
+                continue;
+            };
+
+            if !is_first {
+                continue;
+            }
+
+            provided_known.insert(field_name);
+            let value_ty = self.check_expr(&field_value.value)?;
+            self.infer.unify(&expected_ty, &value_ty)?;
+        }
+
+        for field_name in field_types.keys() {
+            if !provided_known.contains(field_name) {
+                missing.insert(field_name.clone());
+            }
+        }
+
+        if missing.is_empty() && duplicates.is_empty() && unknown.is_empty() {
+            return Ok(());
+        }
+
+        Err(Self::invalid_struct_literal_error(
+            struct_name,
+            &missing,
+            &duplicates,
+            &unknown,
+        ))
+    }
+
+    fn invalid_struct_literal_error(
+        struct_name: &str,
+        missing: &BTreeSet<String>,
+        duplicates: &BTreeSet<String>,
+        unknown: &BTreeSet<String>,
+    ) -> TypeckError {
+        let mut parts = Vec::new();
+        if !missing.is_empty() {
+            parts.push(format!(
+                "missing fields: {}",
+                Self::format_struct_field_names(missing)
+            ));
+        }
+        if !duplicates.is_empty() {
+            parts.push(format!(
+                "duplicate fields: {}",
+                Self::format_struct_field_names(duplicates)
+            ));
+        }
+        if !unknown.is_empty() {
+            parts.push(format!(
+                "unknown fields: {}",
+                Self::format_struct_field_names(unknown)
+            ));
+        }
+
+        TypeckError::Other(format!(
+            "invalid struct literal `{}`: {}",
+            struct_name,
+            parts.join("; ")
+        ))
+    }
+
+    fn format_struct_field_names(fields: &BTreeSet<String>) -> String {
+        fields
+            .iter()
+            .map(|field| format!("`{}`", field))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// 检查字面量表达式并返回其类型。
@@ -2233,6 +2277,99 @@ impl TypeChecker {
     }
 
     fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
+        let builtin_name = match &func.kind {
+            ExprKind::Ident(ident) => Some(ident.name.as_str()),
+            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.as_str()),
+            _ => None,
+        };
+
+        if builtin_name == Some("spawn") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "spawn is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+
+            let future_ty = self.check_expr(&args[0])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "spawn requires a Future value".to_string(),
+                ));
+            }
+
+            return Ok(future_ty);
+        }
+
+        if builtin_name == Some("join") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "join is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+
+            for arg in args {
+                let future_ty = self.check_expr(arg)?;
+                if !future_ty.is_future() {
+                    return Err(TypeckError::Other(
+                        "join requires Future values".to_string(),
+                    ));
+                }
+            }
+
+            return Ok(self.env.unit_ty());
+        }
+
+        if builtin_name == Some("select") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "select is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+
+            let left_future = self.check_expr(&args[0])?;
+            let right_future = self.check_expr(&args[1])?;
+            let TyKind::Future(left_inner) = &left_future.kind else {
+                return Err(TypeckError::Other(
+                    "select requires Future values".to_string(),
+                ));
+            };
+            let TyKind::Future(right_inner) = &right_future.kind else {
+                return Err(TypeckError::Other(
+                    "select requires Future values".to_string(),
+                ));
+            };
+
+            self.infer.unify(left_inner, right_inner)?;
+            let result_ty = self.infer.apply_subst(left_inner);
+            if !matches!(
+                result_ty.kind,
+                TyKind::Int(IntKind::I64)
+            ) {
+                return Err(TypeckError::Other(
+                    "select currently only supports Future<i64> values".to_string(),
+                ));
+            }
+            return Ok(result_ty);
+        }
+
         // Special handling for `print` builtin function
         // Check both Ident and Path (single-segment) since the parser may produce either
         let is_print = match &func.kind {

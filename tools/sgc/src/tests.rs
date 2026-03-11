@@ -1513,6 +1513,332 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_executes_async_block_with_capture() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def main() -> i64 {
+    let base = 40;
+    let fut = async { base + 3 };
+    await fut
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async block source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-block-capture", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-block-capture",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async block native executable should run");
+    assert_eq!(output.status.code(), Some(43));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_executes_spawned_future() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def add_one(x: i64) -> i64 { x + 1 }
+async def slow_step() -> i64 { 0 }
+async def slow() -> i64 {
+    let first = await slow_step();
+    let second = await slow_step();
+    0
+}
+async def main() -> i64 {
+    let task = spawn(add_one(41));
+    let waited = await slow();
+    await task
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("spawn source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-spawn", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-spawn", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("spawn native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_polls_spawned_future_while_parent_waits() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-spawn-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_spawn_counter = 0;\nlong long sengoo_test_spawn_reset(void) {{ sengoo_test_spawn_counter = 0; return 0; }}\nlong long sengoo_test_spawn_mark(void) {{ sengoo_test_spawn_counter += 1; return sengoo_test_spawn_counter; }}\nlong long sengoo_test_spawn_get(void) {{ return sengoo_test_spawn_counter; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_spawn_reset() -> i64;
+    fn sengoo_test_spawn_mark() -> i64;
+    fn sengoo_test_spawn_get() -> i64;
+}
+
+async def child() -> i64 {
+    sengoo_test_spawn_mark();
+    7
+}
+
+async def slow_step() -> i64 { 0 }
+async def slow() -> i64 {
+    let first = await slow_step();
+    let second = await slow_step();
+    0
+}
+
+async def main() -> i64 {
+    sengoo_test_spawn_reset();
+    let task = spawn(child());
+    let waited = await slow();
+    if sengoo_test_spawn_get() == 1 {
+        await task
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("spawn polling source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-spawn-polling", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+
+    let exe_path = temp_artifact(
+        "async-spawn-polling",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("spawn polling executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
+fn async_native_runtime_join_waits_for_all_spawned_futures() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-join-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_join_counter = 0;\nlong long sengoo_test_join_reset(void) {{ sengoo_test_join_counter = 0; return 0; }}\nlong long sengoo_test_join_mark(long long bit) {{ sengoo_test_join_counter |= bit; return sengoo_test_join_counter; }}\nlong long sengoo_test_join_get(void) {{ return sengoo_test_join_counter; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_join_reset() -> i64;
+    fn sengoo_test_join_mark(bit: i64) -> i64;
+    fn sengoo_test_join_get() -> i64;
+}
+
+async def slow_step() -> i64 { 0 }
+
+async def child_one() -> i64 {
+    let waited = await slow_step();
+    sengoo_test_join_mark(1)
+}
+
+async def child_two() -> i64 {
+    let waited = await slow_step();
+    sengoo_test_join_mark(2)
+}
+
+async def main() -> i64 {
+    sengoo_test_join_reset();
+    let first = spawn(child_one());
+    let second = spawn(child_two());
+    join(first, second);
+    if sengoo_test_join_get() == 3 {
+        7
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("join source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-join", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+
+    let exe_path = temp_artifact("async-join", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("join native executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
+fn async_native_runtime_select_returns_first_completed_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-select-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_select_fast_mark(void) {{ return 7; }}\nlong long sengoo_test_select_slow_mark(void) {{ return 9; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_select_fast_mark() -> i64;
+    fn sengoo_test_select_slow_mark() -> i64;
+}
+
+async def slow_step() -> i64 { 0 }
+
+async def fast() -> i64 {
+    sengoo_test_select_fast_mark()
+}
+
+async def slow() -> i64 {
+    let waited = await slow_step();
+    sengoo_test_select_slow_mark()
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    select(first, second)
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+
+    let exe_path = temp_artifact("async-select", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("select native executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
 fn async_native_runtime_preserves_live_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;
@@ -1782,6 +2108,51 @@ async def main() -> i64 {
     let output = Command::new(&exe_path)
         .output()
         .expect("async ref executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_preserves_f64_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let keep: f64 = 3.14;
+    let first = await step1();
+    let value = await step2(first);
+    if keep > 3.0 { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async f64 source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-f64-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-f64-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async f64 executable should run");
     assert_eq!(output.status.code(), Some(42));
 
     let _ = fs::remove_file(&ll_path);

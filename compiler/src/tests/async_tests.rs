@@ -91,20 +91,215 @@ async def main() -> i64 {
 }
 
 #[test]
-fn async_block_is_rejected() {
+fn async_block_direct_await_compiles() {
     let source = r#"
 async def main() -> i64 {
-    let f = async { 42 };
+    let value = await async { 42 };
+    value
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "direct await on async block should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_block_captures_outer_local_and_can_be_awaited_via_binding() {
+    let source = r#"
+async def main() -> i64 {
+    let base = 41;
+    let fut = async { base + 1 };
+    let value = await fut;
+    value
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "async block with captured local should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn spawn_builtin_returns_awaitable_future() {
+    let source = r#"
+async def add_one(x: i64) -> i64 { x + 1 }
+async def slow_step() -> i64 { 0 }
+async def slow() -> i64 {
+    let first = await slow_step();
+    let second = await slow_step();
+    0
+}
+async def main() -> i64 {
+    let task = spawn(add_one(41));
+    let waited = await slow();
+    await task
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "spawn builtin should return an awaitable future, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn spawn_lowering_emits_runtime_spawn_call() {
+    let source = r#"
+async def add_one(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let task = spawn(add_one(41));
+    await task
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("spawn source should lower to MIR");
+    let has_spawn_call = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_spawn_raw",
+            _ => false,
+        })
+    });
+
+    assert!(
+        has_spawn_call,
+        "spawn lowering should emit a runtime spawn call"
+    );
+}
+
+#[test]
+fn join_builtin_waits_spawned_futures_and_returns_unit() {
+    let source = r#"
+async def add_one(x: i64) -> i64 { x + 1 }
+async def main() -> i64 {
+    let first = spawn(add_one(1));
+    let second = spawn(add_one(2));
+    join(first, second);
     0
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("async blocks should be rejected");
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "join builtin should accept spawned futures in async contexts, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn join_lowering_collects_results_from_each_future() {
+    let source = r#"
+async def first_step() -> i64 { 1 }
+async def second_step() -> i64 { 2 }
+async def main() -> i64 {
+    let first = spawn(first_step());
+    let second = spawn(second_step());
+    join(first, second);
+    0
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("join source should lower to MIR");
+    let mut result_calls = std::collections::HashSet::new();
+    for mir_fn in &mir_fns {
+        for inst in &mir_fn.instructions {
+            if let Instruction::Call { func, .. } = inst {
+                if func.ends_with("__result") {
+                    result_calls.insert(func.clone());
+                }
+            }
+        }
+    }
+
+    assert!(
+        result_calls.contains("first_step__result"),
+        "join lowering should collect the first future result, got: {:?}",
+        result_calls
+    );
+    assert!(
+        result_calls.contains("second_step__result"),
+        "join lowering should collect the second future result, got: {:?}",
+        result_calls
+    );
+}
+
+#[test]
+fn select_builtin_returns_first_completed_value() {
+    let source = r#"
+async def fast() -> i64 { 7 }
+async def slow_step() -> i64 { 0 }
+async def slow() -> i64 {
+    let waited = await slow_step();
+    9
+}
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    select(first, second)
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "select builtin should compile for matching future types, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn select_rejects_non_i64_futures() {
+    let source = r#"
+async def fast() -> f64 { 7.0 }
+async def slow() -> f64 { 9.0 }
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    if picked > 0.0 { 1 } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("select on non-i64 futures should fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("async blocks are not yet supported"),
-        "error should mention async block restriction, got: {}",
-        msg
+        msg.contains("select currently only supports Future<i64> values"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn select_lowering_emits_runtime_select_call() {
+    let source = r#"
+async def first_step() -> i64 { 1 }
+async def second_step() -> i64 { 2 }
+async def main() -> i64 {
+    let first = spawn(first_step());
+    let second = spawn(second_step());
+    select(first, second)
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("select source should lower to MIR");
+    let has_select_call = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_select_i64",
+            _ => false,
+        })
+    });
+
+    assert!(
+        has_select_call,
+        "select lowering should emit a runtime select call"
     );
 }
 
@@ -712,10 +907,8 @@ async def main() -> i64 {
     );
 }
 
-/// Test that f64 locals crossing await are currently rejected.
-/// Float types require bitcast support which is not yet implemented in MIR.
 #[test]
-fn async_f64_local_across_await_rejected() {
+fn async_f64_local_survives_await() {
     let source = r#"
 async def step1() -> i64 { 41 }
 async def main() -> f64 {
@@ -725,12 +918,52 @@ async def main() -> f64 {
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("f64 crossing await should fail");
-    let msg = err.to_string();
+    let result = compile_to_ir(source);
     assert!(
-        msg.contains("float types require bitcast support"),
-        "f64-crossing-await error should mention bitcast requirement, got: {}",
-        msg
+        result.is_ok(),
+        "f64 local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_f32_local_survives_await() {
+    let source = r#"
+extern "C" {
+    fn get_f32() -> f32;
+}
+async def step1() -> i64 { 41 }
+async def main() -> f32 {
+    let keep = get_f32();
+    let first = await step1();
+    keep
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "f32 local crossing await should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn async_helper_ir_uses_bitcast_for_float_frame_roundtrip() {
+    let source = r#"
+async def step1() -> i64 { 41 }
+async def main() -> f64 {
+    let keep: f64 = 3.14;
+    let first = await step1();
+    keep
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("should compile to IR");
+    assert!(
+        ir.contains("bitcast double") && ir.contains("bitcast i64"),
+        "async float frame round-trip should use bitcast in generated IR, got:\n{}",
+        &ir[..ir.len().min(4000)]
     );
 }
 

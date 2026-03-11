@@ -60,6 +60,10 @@ impl JITCodegen {
             .push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64)\n");
         self.extern_decls.push_str("declare i8* @malloc(i64)\n");
         self.extern_decls.push_str("declare void @free(i8*)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
     }
 
     /// 鐢熸垚瀹屾暣鐨?LLVM IR 妯″潡
@@ -470,6 +474,45 @@ impl JITCodegen {
                         dst_llvm, casted, dst_llvm, dest
                     ));
                 }
+            }
+            mir::Instruction::Bitcast {
+                destination,
+                value,
+                to,
+            } => {
+                let dest = self.local_name(*destination);
+                let src_ty = self.get_local_type(mir_fn, *value);
+                let dst_ty = to.clone();
+                let src_llvm = self.mir_type_to_llvm_str(&src_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(&dst_ty);
+                let src_reg = self.local_reg(*value);
+
+                if !common::supports_mir_bitcast(&src_ty, &dst_ty) {
+                    return Err(format!(
+                        "invalid MIR bitcast from {} to {}",
+                        src_llvm, dst_llvm
+                    ));
+                }
+
+                self.emit_indent();
+                let src_temp = format!("{}.bitcast.in", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    src_temp, src_llvm, src_llvm, src_reg
+                ));
+
+                self.emit_indent();
+                let casted = format!("{}.bitcast.out", dest);
+                self.ir.push_str(&format!(
+                    "{} = bitcast {} {} to {}\n",
+                    casted, src_llvm, src_temp, dst_llvm
+                ));
+
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {} {}, {}* {}\n",
+                    dst_llvm, casted, dst_llvm, dest
+                ));
             }
             mir::Instruction::Binary {
                 destination,

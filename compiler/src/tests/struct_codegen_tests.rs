@@ -46,13 +46,8 @@ def main() -> i64 {
 /// Requirement 4.5 states: IF a struct construction is missing required fields,
 /// THEN THE TypeChecker SHALL emit an error listing the missing fields.
 ///
-/// NOTE: The current TypeChecker does NOT validate missing struct fields —
-/// it only checks field value types and looks up the struct type. This test
-/// is marked as `#[ignore]` until Requirement 4.5 is implemented.
-///
 /// _Requirements: 4.5_
 #[test]
-#[ignore = "TypeChecker does not yet validate missing struct fields (Requirement 4.5 not implemented)"]
 fn test_struct_construction_missing_field_produces_error() {
     let source = r#"
 struct Point { x: i64, y: i64 }
@@ -61,9 +56,82 @@ def main() -> i64 {
     p.x
 }
 "#;
-    let result = compile_to_ir(source);
+    let err = compile_to_ir(source).expect_err("missing struct field should be rejected");
     assert!(
-        result.is_err(),
-        "Expected compile error for struct construction with missing field 'y', but compilation succeeded"
+        err.to_string()
+            .contains("invalid struct literal `Point`: missing fields: `y`"),
+        "Expected missing field diagnostic for `y`, got:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_struct_construction_duplicate_field_produces_error() {
+    let source = r#"
+struct Point { x: i64, y: i64 }
+def main() -> i64 {
+    let p = Point { x: 10, x: 20, y: 30 };
+    p.x
+}
+"#;
+    let err = compile_to_ir(source).expect_err("duplicate struct field should be rejected");
+    assert!(
+        err.to_string()
+            .contains("invalid struct literal `Point`: duplicate fields: `x`"),
+        "Expected duplicate field diagnostic for `x`, got:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_struct_construction_unknown_field_produces_error() {
+    let source = r#"
+struct Point { x: i64, y: i64 }
+def main() -> i64 {
+    let p = Point { x: 10, y: 20, z: 30 };
+    p.x
+}
+"#;
+    let err = compile_to_ir(source).expect_err("unknown struct field should be rejected");
+    assert!(
+        err.to_string()
+            .contains("invalid struct literal `Point`: unknown fields: `z`"),
+        "Expected unknown field diagnostic for `z`, got:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_struct_construction_reports_missing_duplicate_and_unknown_fields_together() {
+    let source = r#"
+struct Point { x: i64, y: i64, z: i64 }
+def main() -> i64 {
+    let p = Point { x: 10, x: 20, extra: 30 };
+    p.x
+}
+"#;
+    let err = compile_to_ir(source)
+        .expect_err("struct field completeness issues should be aggregated");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("invalid struct literal `Point`:"),
+        "Expected aggregated struct literal diagnostic header, got:\n{}",
+        message
+    );
+    assert!(
+        message.contains("missing fields: `y`, `z`"),
+        "Expected missing field list for `y` and `z`, got:\n{}",
+        message
+    );
+    assert!(
+        message.contains("duplicate fields: `x`"),
+        "Expected duplicate field list for `x`, got:\n{}",
+        message
+    );
+    assert!(
+        message.contains("unknown fields: `extra`"),
+        "Expected unknown field list for `extra`, got:\n{}",
+        message
     );
 }

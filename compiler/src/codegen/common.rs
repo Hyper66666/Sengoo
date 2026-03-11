@@ -51,6 +51,26 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
     }
 }
 
+pub fn mir_type_bit_width(ty: &MIRType) -> Option<u32> {
+    match ty {
+        MIRType::Bool => Some(1),
+        MIRType::Int(bits) | MIRType::Float(bits) => Some(*bits as u32),
+        _ => None,
+    }
+}
+
+pub fn supports_mir_bitcast(from: &MIRType, to: &MIRType) -> bool {
+    match (from, to) {
+        (MIRType::Float(32), MIRType::Int(32))
+        | (MIRType::Int(32), MIRType::Float(32))
+        | (MIRType::Float(64), MIRType::Int(64))
+        | (MIRType::Int(64), MIRType::Float(64)) => true,
+        _ => mir_type_bit_width(from)
+            .zip(mir_type_bit_width(to))
+            .is_some_and(|(a, b)| a == b && from == to),
+    }
+}
+
 /// Generate a local variable name from a `Local` based on its `LocalKind`.
 ///
 /// This uses the kind-based naming convention from the main codegen:
@@ -276,6 +296,24 @@ mod tests {
             variants: vec![(0, None), (1, Some(MIRType::Int(64)))],
         };
         assert_eq!(mir_type_to_llvm_str(&enum_ty), "{ i64, i64 }");
+    }
+
+    #[test]
+    fn test_supports_mir_bitcast_for_float_int_same_width() {
+        assert!(supports_mir_bitcast(&MIRType::Float(64), &MIRType::Int(64)));
+        assert!(supports_mir_bitcast(&MIRType::Int(64), &MIRType::Float(64)));
+        assert!(supports_mir_bitcast(&MIRType::Float(32), &MIRType::Int(32)));
+        assert!(supports_mir_bitcast(&MIRType::Int(32), &MIRType::Float(32)));
+    }
+
+    #[test]
+    fn test_supports_mir_bitcast_rejects_mismatched_widths() {
+        assert!(!supports_mir_bitcast(&MIRType::Float(32), &MIRType::Int(64)));
+        assert!(!supports_mir_bitcast(&MIRType::Float(64), &MIRType::Int(32)));
+        assert!(!supports_mir_bitcast(
+            &MIRType::Ref(Box::new(MIRType::Int(64))),
+            &MIRType::Int(64)
+        ));
     }
 
     // ── local_name tests ────────────────────────────────────────────────
