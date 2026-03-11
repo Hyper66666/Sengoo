@@ -435,6 +435,42 @@ impl JITCodegen {
                     self.local_reg(*destination)
                 ));
             }
+            mir::Instruction::Cast {
+                destination,
+                value,
+                to,
+            } => {
+                let dest = self.local_name(*destination);
+                let src_ty = self.get_local_type(mir_fn, *value);
+                let dst_ty = to.clone();
+                let src_llvm = self.mir_type_to_llvm_str(&src_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(&dst_ty);
+                let src_reg = self.local_reg(*value);
+
+                self.emit_indent();
+                let src_temp = format!("{}.cast.in", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    src_temp, src_llvm, src_llvm, src_reg
+                ));
+
+                if src_ty == dst_ty {
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        dst_llvm, src_temp, dst_llvm, dest
+                    ));
+                } else {
+                    self.emit_indent();
+                    let casted = format!("{}.cast.out", dest);
+                    self.emit_cast_value(&casted, &src_temp, &src_ty, &dst_ty);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        dst_llvm, casted, dst_llvm, dest
+                    ));
+                }
+            }
             mir::Instruction::Binary {
                 destination,
                 op,
@@ -812,36 +848,10 @@ impl JITCodegen {
                         let final_arg = if let Some(target_ty) = target_param_tys.get(i) {
                             let llvm_target_ty = self.mir_type_to_llvm_str(target_ty);
                             if llvm_ty != llvm_target_ty {
-                                // 闇€瑕佺被鍨嬭浆鎹?
                                 let converted = format!("%.arg.{}.{}.conv", func, i);
                                 self.emit_indent();
-                                // 瀵逛簬鏁存暟绫诲瀷锛屼娇鐢?trunc/zext/sext
-                                if (llvm_ty.starts_with("i") || llvm_ty.starts_with("u"))
-                                    && (llvm_target_ty.starts_with("i")
-                                        || llvm_target_ty.starts_with("u"))
-                                {
-                                    // 简单处理：使用 bitcast + trunc
-                                    if llvm_ty == "i64" && llvm_target_ty == "i32" {
-                                        self.ir.push_str(&format!(
-                                            "{} = trunc i64 {} to i32\n",
-                                            converted, arg_temp
-                                        ));
-                                    } else if llvm_ty == "i32" && llvm_target_ty == "i64" {
-                                        self.ir.push_str(&format!(
-                                            "{} = sext i32 {} to i64\n",
-                                            converted, arg_temp
-                                        ));
-                                    } else {
-                                        // 通用转换：使用 bitcast
-                                        self.ir.push_str(&format!(
-                                            "{} = bitcast {} {} to {}\n",
-                                            converted, llvm_ty, arg_temp, llvm_target_ty
-                                        ));
-                                    }
-                                    format!("{} {}", llvm_target_ty, converted)
-                                } else {
-                                    format!("{} {}", llvm_ty, arg_temp)
-                                }
+                                self.emit_cast_value(&converted, &arg_temp, &ty, target_ty);
+                                format!("{} {}", llvm_target_ty, converted)
                             } else {
                                 format!("{} {}", llvm_ty, arg_temp)
                             }
@@ -1126,6 +1136,86 @@ impl JITCodegen {
         let res = "%result";
         let opcode = common::binary_op_to_llvm(op, ty);
         format!("{} = {} {} {}, {}", res, opcode, llvm_ty, left, right)
+    }
+
+    fn emit_cast_value(
+        &mut self,
+        result: &str,
+        src_value: &str,
+        src_ty: &MIRType,
+        target_ty: &MIRType,
+    ) {
+        let src_llvm = self.mir_type_to_llvm_str(src_ty);
+        let dst_llvm = self.mir_type_to_llvm_str(target_ty);
+
+        match (src_ty, target_ty) {
+            (MIRType::Int(a), MIRType::Int(b)) if a < b => {
+                self.ir.push_str(&format!(
+                    "{} = sext {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Int(a), MIRType::Int(b)) if a > b => {
+                self.ir.push_str(&format!(
+                    "{} = trunc {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Float(a), MIRType::Float(b)) if a < b => {
+                self.ir.push_str(&format!(
+                    "{} = fpext {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Float(a), MIRType::Float(b)) if a > b => {
+                self.ir.push_str(&format!(
+                    "{} = fptrunc {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Int(_), MIRType::Float(_)) => {
+                self.ir.push_str(&format!(
+                    "{} = sitofp {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Float(_), MIRType::Int(_)) => {
+                self.ir.push_str(&format!(
+                    "{} = fptosi {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Bool, MIRType::Int(_)) => {
+                self.ir.push_str(&format!(
+                    "{} = zext {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Int(_), MIRType::Bool) => {
+                self.ir.push_str(&format!(
+                    "{} = trunc {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Ptr(_), MIRType::Int(_)) | (MIRType::Ref(_), MIRType::Int(_)) => {
+                self.ir.push_str(&format!(
+                    "{} = ptrtoint {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            (MIRType::Int(_), MIRType::Ptr(_)) | (MIRType::Int(_), MIRType::Ref(_)) => {
+                self.ir.push_str(&format!(
+                    "{} = inttoptr {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+            _ => {
+                self.ir.push_str(&format!(
+                    "{} = bitcast {} {} to {}\n",
+                    result, src_llvm, src_value, dst_llvm
+                ));
+            }
+        }
     }
 
     /// 发射 main 包装器
