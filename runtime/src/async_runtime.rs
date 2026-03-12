@@ -210,6 +210,32 @@ fn take_poll_wakeup_hint() -> Option<Instant> {
 }
 
 #[cfg(feature = "native-bridge")]
+fn merge_wakeup_hints(first: Option<Instant>, second: Option<Instant>) -> Option<Instant> {
+    match (first, second) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+#[cfg(feature = "native-bridge")]
+fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => {
+            let now = Instant::now();
+            let sleep_for = deadline.saturating_duration_since(now);
+            if sleep_for.is_zero() {
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(sleep_for);
+            }
+        }
+        None => std::thread::yield_now(),
+    }
+}
+
+#[cfg(feature = "native-bridge")]
 struct RootAsyncMainI64Task {
     handle: Option<i64>,
     result: Arc<Mutex<Option<i64>>>,
@@ -374,12 +400,19 @@ pub extern "C" fn sengoo_async_select_i64(
     second_handle: i64,
 ) -> i64 {
     loop {
+        clear_poll_wakeup_hint();
         if unsafe { sengoo_async_poll_dispatch(first_kind, first_handle) } != 0 {
             return unsafe { sengoo_async_result_dispatch_i64(first_kind, first_handle) };
         }
+        let first_hint = take_poll_wakeup_hint();
+
+        clear_poll_wakeup_hint();
         if unsafe { sengoo_async_poll_dispatch(second_kind, second_handle) } != 0 {
             return unsafe { sengoo_async_result_dispatch_i64(second_kind, second_handle) };
         }
+        let second_hint = take_poll_wakeup_hint();
+
+        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
     }
 }
 
@@ -419,6 +452,7 @@ mod tests {
     static MAIN_RESULT: AtomicI64 = AtomicI64::new(42);
     static MAIN_DEADLINE_OFFSET_MS: AtomicI64 = AtomicI64::new(0);
     static MAIN_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
+    static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
     static TEST_GUARD: Mutex<()> = Mutex::new(());
 
     #[no_mangle]
@@ -469,14 +503,21 @@ mod tests {
     pub extern "C" fn sengoo_async_poll_dispatch(kind: i64, handle: i64) -> i64 {
         if kind == async_spawn_kind_id_for_tests() {
             unsafe { sengoo_async_sleep__poll(handle) }
+        } else if kind == async_select_hint_kind_id_for_tests() {
+            SELECT_HINT_POLLS.fetch_add(1, Ordering::SeqCst);
+            unsafe { sengoo_async_sleep__poll(handle) }
         } else {
             1
         }
     }
 
     #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_i64(_kind: i64, _handle: i64) -> i64 {
-        42
+    pub extern "C" fn sengoo_async_result_dispatch_i64(kind: i64, _handle: i64) -> i64 {
+        if kind == async_select_hint_kind_id_for_tests() {
+            11
+        } else {
+            42
+        }
     }
 
     struct CountDownTask(u8);
@@ -548,6 +589,31 @@ mod tests {
     }
 
     #[test]
+    fn select_i64_waits_for_deadline_hints_instead_of_busy_spinning() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let fast = sengoo_async_sleep__start(12);
+        let slow = sengoo_async_sleep__start(20);
+        SELECT_HINT_POLLS.store(0, Ordering::SeqCst);
+
+        let start = Instant::now();
+        let result = sengoo_async_select_i64(
+            async_select_hint_kind_id_for_tests(),
+            fast,
+            async_select_hint_kind_id_for_tests(),
+            slow,
+        );
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, 11);
+        assert!(elapsed >= Duration::from_millis(10));
+        assert!(
+            SELECT_HINT_POLLS.load(Ordering::SeqCst) <= 4,
+            "select should not busy-spin when wakeup hints are available"
+        );
+        unsafe { sengoo_async_sleep__result(slow) };
+    }
+
+    #[test]
     fn scheduler_waits_for_deadline_hints_instead_of_busy_spinning() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         let mut scheduler = CoroutineScheduler::new();
@@ -608,8 +674,16 @@ mod tests {
     }
 
     fn async_spawn_kind_id_for_tests() -> i64 {
+        hash_kind_id_for_tests(b"sengoo_async_sleep")
+    }
+
+    fn async_select_hint_kind_id_for_tests() -> i64 {
+        hash_kind_id_for_tests(b"sengoo_async_select_hint")
+    }
+
+    fn hash_kind_id_for_tests(name: &[u8]) -> i64 {
         let mut hash = 0x811c9dc5u32;
-        for byte in b"sengoo_async_sleep" {
+        for byte in name {
             hash ^= u32::from(*byte);
             hash = hash.wrapping_mul(0x01000193);
         }
