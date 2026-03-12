@@ -2306,6 +2306,51 @@ impl TypeChecker {
             return Ok(future_ty);
         }
 
+        if builtin_name == Some("sleep") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "sleep is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+
+            let duration_ty = self.check_expr(&args[0])?;
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&duration_ty, &i64_ty)?;
+            return Ok(Ty::new(0, TyKind::Future(Box::new(self.env.unit_ty()))));
+        }
+
+        if builtin_name == Some("timeout") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "timeout is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+
+            let future_ty = self.check_expr(&args[0])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "timeout requires a Future value".to_string(),
+                ));
+            }
+
+            let duration_ty = self.check_expr(&args[1])?;
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&duration_ty, &i64_ty)?;
+            return Ok(self.env.bool_ty());
+        }
+
         if builtin_name == Some("join") {
             if self.async_context_depth == 0 {
                 return Err(TypeckError::Other(

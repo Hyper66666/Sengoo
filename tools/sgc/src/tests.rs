@@ -1554,6 +1554,145 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_executes_sleep_builtin() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def main() -> i64 {
+    await sleep(20);
+    42
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("sleep source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-sleep", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-sleep", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let run_start = SystemTime::now();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("sleep native executable should run");
+    let elapsed_ms = run_start.elapsed().unwrap().as_millis();
+
+    assert_eq!(output.status.code(), Some(42));
+    assert!(
+        elapsed_ms >= 10,
+        "sleep should delay execution measurably, only took {}ms",
+        elapsed_ms
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_waits_for_spawned_sleep_future_before_exit() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def main() -> i64 {
+    let background = spawn(sleep(20));
+    await sleep(1);
+    42
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("spawned sleep source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-spawn-sleep", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-spawn-sleep", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let run_start = SystemTime::now();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("spawned sleep native executable should run");
+    let elapsed_ms = run_start.elapsed().unwrap().as_millis();
+
+    assert_eq!(output.status.code(), Some(42));
+    assert!(
+        elapsed_ms >= 10,
+        "spawned sleep future should keep the runtime alive, only took {}ms",
+        elapsed_ms
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_timeout_reports_not_ready_then_allows_await() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def child() -> i64 {
+    await sleep(20);
+    7
+}
+
+async def main() -> i64 {
+    let fut = child();
+    let ready = timeout(fut, 1);
+    if ready {
+        0
+    } else {
+        await fut
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("timeout source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-timeout", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-timeout", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("timeout native executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_executes_spawned_future() {
     let Some(clang) = find_clang() else {
         return;

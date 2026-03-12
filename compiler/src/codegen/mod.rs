@@ -363,6 +363,64 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
     }
+
+    fn maybe_declare_sleep_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let needs_sleep = mir_fns.iter().any(|mir_fn| {
+            let has_sleep_call = mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => {
+                    matches!(
+                        func.as_str(),
+                        "sengoo_async_sleep__start"
+                            | "sengoo_async_sleep__poll"
+                            | "sengoo_async_sleep__result"
+                    )
+                }
+                _ => false,
+            });
+            let has_sleep_suspend = mir_fn.basic_blocks.iter().any(|bb| match &bb.terminator {
+                Some(mir::Terminator::Suspend { poll_func, .. }) => {
+                    poll_func == "sengoo_async_sleep__poll"
+                }
+                _ => false,
+            });
+            has_sleep_call || has_sleep_suspend
+        });
+
+        if !needs_sleep
+            || self
+                .declarations
+                .contains("declare i64 @sengoo_async_sleep__start(i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i64 @sengoo_async_sleep__start(i64)\n");
+        self.declarations
+            .push_str("declare i64 @sengoo_async_sleep__poll(i64)\n");
+        self.declarations
+            .push_str("declare void @sengoo_async_sleep__result(i64)\n");
+    }
+
+    fn maybe_declare_timeout_runtime_function(&mut self, mir_fns: &[MirFunction]) {
+        let needs_timeout = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_async_timeout_ready",
+                _ => false,
+            })
+        });
+
+        if !needs_timeout
+            || self
+                .declarations
+                .contains("declare i64 @sengoo_async_timeout_ready(i64, i64, i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i64 @sengoo_async_timeout_ready(i64, i64, i64)\n");
+    }
     fn emit_string_constants(&mut self) {
 
         if !self.strings.is_empty() {
@@ -586,6 +644,8 @@ impl Codegen {
         // collect string constants declarations
         self.maybe_declare_spawn_runtime_function(mir_fns);
         self.maybe_declare_select_runtime_function(mir_fns);
+        self.maybe_declare_sleep_runtime_functions(mir_fns);
+        self.maybe_declare_timeout_runtime_function(mir_fns);
         self.emit_string_constants();
 
 
