@@ -3056,6 +3056,77 @@ impl<'a> LoweringContext<'a> {
         future_handle
     }
 
+    fn lower_builtin_sleep(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "sleep expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let duration_local = arg_locals[0];
+        let future_local =
+            self.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_UNIT)));
+        self.push_inst(Instruction::Call {
+            destination: future_local,
+            func: "sengoo_async_sleep__start".to_string(),
+            args: vec![duration_local],
+        });
+        self.future_origins
+            .insert(future_local, "sengoo_async_sleep".to_string());
+        future_local
+    }
+
+    fn lower_builtin_timeout(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 2 {
+            self.errors.push(format!(
+                "timeout expects exactly two arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let future_handle = arg_locals[0];
+        let duration_local = arg_locals[1];
+        let base_name = self.resolve_async_base_name(future_handle);
+        if base_name == "unknown" {
+            self.errors.push(
+                "timeout requires a future produced by an async function or async block"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: kind_local,
+            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+        });
+
+        let ready_i64 = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: ready_i64,
+            func: "sengoo_async_timeout_ready".to_string(),
+            args: vec![kind_local, future_handle, duration_local],
+        });
+
+        let zero_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: zero_local,
+            value: MirConstant::Int(0),
+        });
+
+        let ready_bool = self.add_local(None, LocalKind::Temp, MIR_BOOL);
+        self.push_inst(Instruction::Binary {
+            destination: ready_bool,
+            op: MirBinOp::Ne,
+            left: ready_i64,
+            right: zero_local,
+        });
+        ready_bool
+    }
+
     fn async_await_result_type(&self, future_handle: Local) -> MIRType {
         match self.get_local_type(future_handle) {
             MIRType::Future(inner) => (**inner).clone(),
@@ -3823,6 +3894,10 @@ impl<'a> LoweringContext<'a> {
                             }
                         } else if name == "print" {
                             return self.lower_builtin_print(&arg_locals);
+                        } else if name == "sleep" {
+                            return self.lower_builtin_sleep(&arg_locals);
+                        } else if name == "timeout" {
+                            return self.lower_builtin_timeout(&arg_locals);
                         } else if name == "spawn" {
                             return self.lower_builtin_spawn(&arg_locals);
                         } else if name == "join" {

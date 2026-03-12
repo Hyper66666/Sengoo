@@ -127,6 +127,145 @@ async def main() -> i64 {
 }
 
 #[test]
+fn sleep_builtin_requires_async_context() {
+    let source = r#"
+def main() -> i64 {
+    sleep(1);
+    0
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("sleep outside async should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("sleep is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn sleep_builtin_can_be_awaited() {
+    let source = r#"
+async def main() -> i64 {
+    await sleep(1);
+    42
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "sleep builtin should compile in async contexts, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn sleep_future_binding_can_be_awaited() {
+    let source = r#"
+async def main() -> i64 {
+    let fut = sleep(1);
+    await fut;
+    42
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "sleep future bindings should remain awaitable, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn sleep_lowering_emits_runtime_sleep_start_call() {
+    let source = r#"
+async def main() -> i64 {
+    await sleep(1);
+    0
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("sleep source should lower to MIR");
+    let has_sleep_start = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_sleep__start",
+            _ => false,
+        })
+    });
+
+    assert!(
+        has_sleep_start,
+        "sleep lowering should emit a runtime sleep start call"
+    );
+}
+
+#[test]
+fn timeout_builtin_requires_async_context() {
+    let source = r#"
+async def helper() -> i64 { 1 }
+def main() -> i64 {
+    let ready = timeout(helper(), 1);
+    if ready { 1 } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("timeout outside async should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("timeout is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn timeout_builtin_returns_bool_for_future_readiness() {
+    let source = r#"
+async def helper() -> i64 { 1 }
+async def main() -> i64 {
+    let fut = helper();
+    let ready = timeout(fut, 1);
+    if ready { await fut } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "timeout builtin should compile in async contexts, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn timeout_lowering_emits_runtime_timeout_call() {
+    let source = r#"
+async def helper() -> i64 { 1 }
+async def main() -> i64 {
+    let fut = helper();
+    let ready = timeout(fut, 1);
+    if ready { await fut } else { 0 }
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("timeout source should lower to MIR");
+    let has_timeout_call = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_timeout_ready",
+            _ => false,
+        })
+    });
+
+    assert!(
+        has_timeout_call,
+        "timeout lowering should emit a runtime timeout call"
+    );
+}
+
+#[test]
 fn spawn_builtin_returns_awaitable_future() {
     let source = r#"
 async def add_one(x: i64) -> i64 { x + 1 }

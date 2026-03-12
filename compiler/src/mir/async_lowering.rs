@@ -254,6 +254,19 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
         targets.push((async_spawn_kind_id(base_name) as u32, case_block));
     }
 
+    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_I64);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_sleep__poll".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+    }
+
     f.basic_blocks[bb0].set_terminator(Terminator::Switch {
         discr: kind_local,
         targets,
