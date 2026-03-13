@@ -71,7 +71,11 @@ impl JITCodegen {
         self.extern_decls
             .push_str("declare void @sengoo_async_sleep__result(i64)\n");
         self.extern_decls
-            .push_str("declare i64 @sengoo_async_timeout_ready(i64, i64, i64)\n");
+            .push_str("declare i64 @sengoo_async_timeout_bool__start(i64, i64, i64)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_timeout_bool__poll(i64)\n");
+        self.extern_decls
+            .push_str("declare i1 @sengoo_async_timeout_bool__result(i64)\n");
         self.function_signatures.insert(
             "sengoo_async_spawn_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
@@ -101,11 +105,19 @@ impl JITCodegen {
             (vec![MIRType::Int(64)], MIRType::Unit),
         );
         self.function_signatures.insert(
-            "sengoo_async_timeout_ready".to_string(),
+            "sengoo_async_timeout_bool__start".to_string(),
             (
                 vec![MIRType::Int(64), MIRType::Int(64), MIRType::Int(64)],
                 MIRType::Int(64),
             ),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_timeout_bool__poll".to_string(),
+            (vec![MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_timeout_bool__result".to_string(),
+            (vec![MIRType::Int(64)], MIRType::Bool),
         );
     }
 

@@ -285,6 +285,14 @@ struct SleepFutureState {
 }
 
 #[cfg(feature = "native-bridge")]
+struct TimeoutBoolFutureState {
+    child_kind: i64,
+    child_handle: i64,
+    deadline: Instant,
+    result: Option<bool>,
+}
+
+#[cfg(feature = "native-bridge")]
 fn sleep_duration(duration_ms: i64) -> Duration {
     Duration::from_millis(duration_ms.max(0) as u64)
 }
@@ -324,25 +332,58 @@ pub unsafe extern "C" fn sengoo_async_sleep__result(handle: i64) {
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
-pub extern "C" fn sengoo_async_timeout_ready(kind: i64, handle: i64, duration_ms: i64) -> i64 {
-    let deadline = Instant::now() + sleep_duration(duration_ms);
-    loop {
-        clear_poll_wakeup_hint();
-        if unsafe { sengoo_async_poll_dispatch(kind, handle) } != 0 {
-            return 1;
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            return 0;
-        }
-        let wakeup = take_poll_wakeup_hint().unwrap_or(deadline);
-        let next_poll = wakeup.min(deadline);
-        let sleep_for = next_poll.saturating_duration_since(now);
-        if sleep_for.is_zero() {
-            continue;
-        }
-        std::thread::sleep(sleep_for);
+pub extern "C" fn sengoo_async_timeout_bool__start(
+    child_kind: i64,
+    child_handle: i64,
+    duration_ms: i64,
+) -> i64 {
+    let state = TimeoutBoolFutureState {
+        child_kind,
+        child_handle,
+        deadline: Instant::now() + sleep_duration(duration_ms),
+        result: None,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_timeout_bool__poll(handle: i64) -> i64 {
+    if handle == 0 {
+        return 1;
     }
+
+    let state = &mut *(handle as *mut TimeoutBoolFutureState);
+    if state.result.is_some() {
+        return 1;
+    }
+
+    clear_poll_wakeup_hint();
+    if sengoo_async_poll_dispatch(state.child_kind, state.child_handle) != 0 {
+        state.result = Some(true);
+        return 1;
+    }
+    let child_hint = take_poll_wakeup_hint();
+
+    let now = Instant::now();
+    if now >= state.deadline {
+        state.result = Some(false);
+        return 1;
+    }
+
+    record_poll_wakeup_hint(child_hint.map_or(state.deadline, |hint| hint.min(state.deadline)));
+    0
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_timeout_bool__result(handle: i64) -> bool {
+    if handle == 0 {
+        return false;
+    }
+
+    let state = Box::from_raw(handle as *mut TimeoutBoolFutureState);
+    state.result.unwrap_or(false)
 }
 
 #[cfg(feature = "native-bridge")]
@@ -578,14 +619,16 @@ mod tests {
     }
 
     #[test]
-    fn timeout_ready_reports_pending_before_deadline() {
+    fn timeout_bool_future_can_complete_with_false_after_deadline() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
-        let handle = sengoo_async_sleep__start(20);
-        assert_eq!(
-            sengoo_async_timeout_ready(async_spawn_kind_id_for_tests(), handle, 1),
-            0
-        );
-        unsafe { sengoo_async_sleep__result(handle) };
+        let child_handle = sengoo_async_sleep__start(20);
+        let timeout_handle =
+            sengoo_async_timeout_bool__start(async_spawn_kind_id_for_tests(), child_handle, 1);
+        assert_eq!(unsafe { sengoo_async_timeout_bool__poll(timeout_handle) }, 0);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(unsafe { sengoo_async_timeout_bool__poll(timeout_handle) }, 1);
+        assert!(!unsafe { sengoo_async_timeout_bool__result(timeout_handle) });
+        unsafe { sengoo_async_sleep__result(child_handle) };
     }
 
     #[test]
