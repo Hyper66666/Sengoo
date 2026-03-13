@@ -3104,27 +3104,16 @@ impl<'a> LoweringContext<'a> {
             value: MirConstant::Int(async_spawn_kind_id(&base_name)),
         });
 
-        let ready_i64 = self.add_local(None, LocalKind::Temp, MIR_I64);
+        let future_local =
+            self.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_BOOL)));
         self.push_inst(Instruction::Call {
-            destination: ready_i64,
-            func: "sengoo_async_timeout_ready".to_string(),
+            destination: future_local,
+            func: "sengoo_async_timeout_bool__start".to_string(),
             args: vec![kind_local, future_handle, duration_local],
         });
-
-        let zero_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-        self.push_inst(Instruction::Assign {
-            destination: zero_local,
-            value: MirConstant::Int(0),
-        });
-
-        let ready_bool = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-        self.push_inst(Instruction::Binary {
-            destination: ready_bool,
-            op: MirBinOp::Ne,
-            left: ready_i64,
-            right: zero_local,
-        });
-        ready_bool
+        self.future_origins
+            .insert(future_local, "sengoo_async_timeout_bool".to_string());
+        future_local
     }
 
     fn async_await_result_type(&self, future_handle: Local) -> MIRType {

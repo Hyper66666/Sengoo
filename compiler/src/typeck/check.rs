@@ -2348,7 +2348,7 @@ impl TypeChecker {
             let duration_ty = self.check_expr(&args[1])?;
             let i64_ty = self.env.int_ty(IntKind::I64);
             self.infer.unify(&duration_ty, &i64_ty)?;
-            return Ok(self.env.bool_ty());
+            return Ok(Ty::new(0, TyKind::Future(Box::new(self.env.bool_ty()))));
         }
 
         if builtin_name == Some("join") {

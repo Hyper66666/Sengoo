@@ -1667,7 +1667,7 @@ async def child() -> i64 {
 
 async def main() -> i64 {
     let fut = child();
-    let ready = timeout(fut, 1);
+    let ready = await timeout(fut, 1);
     if ready {
         0
     } else {

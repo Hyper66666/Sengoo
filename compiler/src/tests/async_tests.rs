@@ -207,8 +207,8 @@ fn timeout_builtin_requires_async_context() {
     let source = r#"
 async def helper() -> i64 { 1 }
 def main() -> i64 {
-    let ready = timeout(helper(), 1);
-    if ready { 1 } else { 0 }
+    timeout(helper(), 1);
+    0
 }
 "#;
 
@@ -227,7 +227,7 @@ fn timeout_builtin_returns_bool_for_future_readiness() {
 async def helper() -> i64 { 1 }
 async def main() -> i64 {
     let fut = helper();
-    let ready = timeout(fut, 1);
+    let ready = await timeout(fut, 1);
     if ready { await fut } else { 0 }
 }
 "#;
@@ -246,22 +246,22 @@ fn timeout_lowering_emits_runtime_timeout_call() {
 async def helper() -> i64 { 1 }
 async def main() -> i64 {
     let fut = helper();
-    let ready = timeout(fut, 1);
+    let ready = await timeout(fut, 1);
     if ready { await fut } else { 0 }
 }
 "#;
 
     let mir_fns = compile_to_mir(source).expect("timeout source should lower to MIR");
-    let has_timeout_call = mir_fns.iter().any(|mir_fn| {
+    let has_timeout_start = mir_fns.iter().any(|mir_fn| {
         mir_fn.instructions.iter().any(|inst| match inst {
-            Instruction::Call { func, .. } => func == "sengoo_async_timeout_ready",
+            Instruction::Call { func, .. } => func == "sengoo_async_timeout_bool__start",
             _ => false,
         })
     });
 
     assert!(
-        has_timeout_call,
-        "timeout lowering should emit a runtime timeout call"
+        has_timeout_start,
+        "timeout lowering should emit a timeout future start call"
     );
 }
 
