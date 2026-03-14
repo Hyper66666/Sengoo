@@ -396,23 +396,24 @@ async def main() -> i64 {
 }
 
 #[test]
-fn select_rejects_non_i64_futures() {
+fn select_builtin_returns_first_completed_bool_value() {
     let source = r#"
-async def fast() -> f64 { 7.0 }
-async def slow() -> f64 { 9.0 }
+async def fast() -> bool { true }
+async def slow_step() -> i64 { 0 }
+async def slow() -> bool {
+    let waited = await slow_step();
+    false
+}
 async def main() -> i64 {
     let first = spawn(fast());
     let second = spawn(slow());
-    let picked = select(first, second);
-    if picked > 0.0 { 1 } else { 0 }
+    if select(first, second) { 1 } else { 0 }
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("select on non-i64 futures should fail");
-    let msg = err.to_string();
     assert!(
-        msg.contains("select currently only supports Future<i64> values"),
-        "unexpected error: {msg}"
+        compile_to_ir(source).is_ok(),
+        "select builtin should compile for bool futures"
     );
 }
 
@@ -439,6 +440,74 @@ async def main() -> i64 {
     assert!(
         has_select_call,
         "select lowering should emit a runtime select call"
+    );
+}
+
+#[test]
+fn select_lowering_emits_runtime_select_bool_call() {
+    let source = r#"
+async def first_step() -> bool { true }
+async def second_step() -> bool { false }
+async def main() -> i64 {
+    let first = spawn(first_step());
+    let second = spawn(second_step());
+    if select(first, second) { 1 } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_to_ir(source).expect("bool select source should lower to LLVM IR");
+    let has_select_call = llvm_ir.contains("@sengoo_async_select_bool(");
+
+    assert!(
+        has_select_call,
+        "select lowering should emit a bool runtime select call"
+    );
+}
+
+#[test]
+fn select_accepts_timeout_bool_futures() {
+    let source = r#"
+async def worker() -> i64 {
+    42
+}
+
+async def main() -> i64 {
+    let first = timeout(worker(), 1);
+    let second = timeout(worker(), 2);
+    if select(first, second) { 1 } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "select should accept timeout-produced bool futures, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn select_rejects_mismatched_future_result_types() {
+    let source = r#"
+async def left() -> i64 { 1 }
+async def right() -> bool { true }
+
+async def main() -> i64 {
+    let first = spawn(left());
+    let second = spawn(right());
+    let picked = select(first, second);
+    if picked > 0 { picked } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("select should reject mismatched future result types");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            || msg.contains("cannot unify")
+            || msg.contains("matching")
+            || msg.contains("类型不匹配"),
+        "unexpected mismatch diagnostic: {msg}"
     );
 }
 

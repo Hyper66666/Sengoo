@@ -65,6 +65,8 @@ impl JITCodegen {
         self.extern_decls
             .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
         self.extern_decls
+            .push_str("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n");
+        self.extern_decls
             .push_str("declare i64 @sengoo_async_sleep__start(i64)\n");
         self.extern_decls
             .push_str("declare i64 @sengoo_async_sleep__poll(i64)\n");
@@ -90,6 +92,18 @@ impl JITCodegen {
                     MIRType::Int(64),
                 ],
                 MIRType::Int(64),
+            ),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_select_bool".to_string(),
+            (
+                vec![
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                ],
+                MIRType::Bool,
             ),
         );
         self.function_signatures.insert(

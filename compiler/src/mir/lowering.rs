@@ -3193,9 +3193,22 @@ impl<'a> LoweringContext<'a> {
         }
 
         let result_ty = self.async_await_result_type(first_handle);
-        if !matches!(result_ty, MIRType::Int(64)) {
+        let select_runtime = match &result_ty {
+            MIRType::Int(64) => "sengoo_async_select_i64",
+            MIRType::Bool => "sengoo_async_select_bool",
+            _ => {
+                self.errors.push(
+                    "select currently only supports Future<i64> and Future<bool> values during MIR lowering"
+                        .to_string(),
+                );
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
+        };
+
+        let second_result_ty = self.async_await_result_type(second_handle);
+        if second_result_ty != result_ty {
             self.errors.push(
-                "select currently only supports Future<i64> values during MIR lowering"
+                "select requires futures with matching result types during MIR lowering"
                     .to_string(),
             );
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
@@ -3213,10 +3226,10 @@ impl<'a> LoweringContext<'a> {
             value: MirConstant::Int(async_spawn_kind_id(&second_name)),
         });
 
-        let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        let result_local = self.add_local(None, LocalKind::Temp, result_ty);
         self.push_inst(Instruction::Call {
             destination: result_local,
-            func: "sengoo_async_select_i64".to_string(),
+            func: select_runtime.to_string(),
             args: vec![first_kind, first_handle, second_kind, second_handle],
         });
         result_local
@@ -3905,9 +3918,18 @@ impl<'a> LoweringContext<'a> {
                     _ => (String::new(), MIR_UNIT, None),
                 };
 
-                let local: Local = self.add_local(None, LocalKind::Temp, ret_type.clone());
-                if let MIRType::Struct { name, .. } = &ret_type {
-                    self.type_names.insert(local, name.clone());
+                let is_async_call = self.options.async_functions.contains(&func_name);
+                let local_ty = if is_async_call {
+                    MIRType::Future(Box::new(ret_type.clone()))
+                } else {
+                    ret_type.clone()
+                };
+
+                let local: Local = self.add_local(None, LocalKind::Temp, local_ty);
+                if !is_async_call {
+                    if let MIRType::Struct { name, .. } = &ret_type {
+                        self.type_names.insert(local, name.clone());
+                    }
                 }
 
                 // 调用lambda时将环境指针作为第一个参数传入。
@@ -3917,7 +3939,6 @@ impl<'a> LoweringContext<'a> {
                 }
                 final_args.extend(arg_locals);
 
-                let is_async_call = self.options.async_functions.contains(&func_name);
                 let actual_func = if is_async_call {
                     format!("{}__start", func_name.clone())
                 } else {

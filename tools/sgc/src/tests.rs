@@ -1693,6 +1693,52 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_timeout_ready_then_still_allows_await() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def child() -> i64 {
+    9
+}
+
+async def main() -> i64 {
+    let fut = child();
+    let ready = await timeout(fut, 50);
+    if ready {
+        await fut
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("timeout-ready source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-timeout-ready", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-timeout-ready", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("timeout-ready native executable should run");
+    assert_eq!(output.status.code(), Some(9));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_executes_spawned_future() {
     let Some(clang) = find_clang() else {
         return;
@@ -1978,6 +2024,50 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_select_returns_first_completed_bool_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def fast() -> bool { true }
+async def slow_step() -> i64 { 0 }
+async def slow() -> bool {
+    let waited = await slow_step();
+    false
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    if select(first, second) { 1 } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("bool select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-bool", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact("async-select-bool", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("bool select executable should run");
+    assert_eq!(output.status.code(), Some(1));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_preserves_live_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;
@@ -2108,6 +2198,51 @@ async def main() -> i64 {
     let output = Command::new(&exe_path)
         .output()
         .expect("loop async executable should run");
+    assert_eq!(output.status.code(), Some(3));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_executes_sleep_inside_loop_body() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def main() -> i64 {
+    let ticks = 0;
+    while ticks < 3 {
+        await sleep(1);
+        ticks = ticks + 1;
+    }
+    ticks
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("sleep-loop async source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-sleep-loop-body", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-sleep-loop-body",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("sleep-loop async executable should run");
     assert_eq!(output.status.code(), Some(3));
 
     let _ = fs::remove_file(&ll_path);
@@ -2296,6 +2431,69 @@ async def main() -> i64 {
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_preserves_f32_locals_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-f32-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nfloat sengoo_test_get_f32(void) {{ return 3.25f; }}\nfloat sengoo_test_get_f32_threshold(void) {{ return 3.0f; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_get_f32() -> f32;
+    fn sengoo_test_get_f32_threshold() -> f32;
+}
+
+async def step1() -> i64 { 41 }
+async def step2(x: i64) -> i64 { x + 1 }
+
+async def main() -> i64 {
+    let keep = sengoo_test_get_f32();
+    let first = await step1();
+    let value = await step2(first);
+    if keep > sengoo_test_get_f32_threshold() { value } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async f32 source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-f32-local", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    let exe_path = temp_artifact(
+        "async-f32-local",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async f32 executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
 }
 
 #[test]

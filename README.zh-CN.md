@@ -309,15 +309,18 @@ sgc daemon --addr 127.0.0.1:48765
 - `async { ... }` 块，包括捕获外部局部变量
 - 通过 `sgc run` 使用 runtime bridge 执行原生 async
 - 当前测试已覆盖的 frame-backed async lowering：顺序控制流，以及 `if`、`loop`、`match` 形态路径
+- 可被 `await` 的 `sleep(ms)` 定时 future
+- 可被 `await` 的 `timeout(future, ms)`，返回 `Future<bool>`
 - `spawn(future)`
 - `join(f1, f2)`
-- 针对 `Future<i64>` 的 `select(f1, f2)`
+- 针对两个同结果类型 `Future<i64>` 或 `Future<bool>` 的 `select(f1, f2)`
 
 当前限制：
 
-- `select` 目前只支持两个 `Future<i64>` 操作数
+- `select` 目前只支持结果类型为 `i64` 或 `bool` 的两个 future 操作数
 - `select` 中未胜出的 future 还不会被取消
-- 还没有 timer 或 IO wakeup
+- timer 目前覆盖 `sleep` 和 `timeout`，但还不是通用 timer queue / wheel
+- 还没有 IO wakeup
 - 还没有用户自定义 awaitable，也没有完整 trait-based Future 抽象
 
 最小示例：
@@ -332,6 +335,24 @@ async def main() -> i64 {
     let value = select(task, add1(1));
     print(value);
     value
+}
+```
+
+Timer 示例：
+
+```sg
+async def work() -> i64 {
+    42
+}
+
+async def main() -> i64 {
+    let task = work();
+    let ready = await timeout(task, 10);
+    if ready {
+        await task
+    } else {
+        0
+    }
 }
 ```
 
