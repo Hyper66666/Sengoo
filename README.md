@@ -309,15 +309,18 @@ Currently supported:
 - `async { ... }` blocks, including captured locals
 - native execution through the runtime bridge used by `sgc run`
 - frame-backed async lowering for sequential control flow, `if`, `loop`, and `match`-shaped code paths covered by the current tests
+- `sleep(ms)` as an awaitable timer future
+- `timeout(future, ms)` as an awaitable `Future<bool>`
 - `spawn(future)`
 - `join(f1, f2)`
-- `select(f1, f2)` for `Future<i64>` values
+- `select(f1, f2)` for two same-type `Future<i64>` or `Future<bool>` values
 
 Current limitations:
 
-- `select` is currently limited to two `Future<i64>` operands
+- `select` is currently limited to two operands whose future result type is `i64` or `bool`
 - loser futures in `select` are not canceled yet
-- no timer or IO wakeups yet
+- timer support currently covers `sleep` and `timeout`, but not a general timer queue / wheel
+- no IO wakeups yet
 - no user-defined awaitables or full trait-based Future abstraction
 
 Minimal example:
@@ -332,6 +335,24 @@ async def main() -> i64 {
     let value = select(task, add1(1));
     print(value);
     value
+}
+```
+
+Timer example:
+
+```sg
+async def work() -> i64 {
+    42
+}
+
+async def main() -> i64 {
+    let task = work();
+    let ready = await timeout(task, 10);
+    if ready {
+        await task
+    } else {
+        0
+    }
 }
 ```
 

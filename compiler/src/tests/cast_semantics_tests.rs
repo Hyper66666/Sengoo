@@ -218,6 +218,21 @@ fn llvm_codegen_lowers_bitcast_with_real_instructions() {
         "LLVM IR should emit bitcast for f64 -> i64 reinterpretation, got:\n{}",
         ir
     );
+
+    let mut codegen = Codegen::new();
+    let f32_ir = codegen
+        .codegen(&[build_bitcast_fixture(
+            MIRType::Float(32),
+            MIRType::Int(32),
+            MirConstant::Float(1.5),
+        )])
+        .expect("LLVM codegen should succeed");
+
+    assert!(
+        f32_ir.contains("bitcast float"),
+        "LLVM IR should emit bitcast for f32 -> i32 reinterpretation, got:\n{}",
+        f32_ir
+    );
 }
 
 #[test]
@@ -240,5 +255,20 @@ fn jit_codegen_lowers_bitcast_with_real_instructions() {
         ir.contains("bitcast double"),
         "JIT IR should emit bitcast for f64 -> i64 reinterpretation, got:\n{}",
         ir
+    );
+
+    let mut jit = JITCodegen::new();
+    let f32_ir = jit
+        .generate(&[build_bitcast_fixture(
+            MIRType::Float(32),
+            MIRType::Int(32),
+            MirConstant::Float(1.5),
+        )])
+        .expect("JIT codegen should succeed");
+
+    assert!(
+        f32_ir.contains("bitcast float"),
+        "JIT IR should emit bitcast for f32 -> i32 reinterpretation, got:\n{}",
+        f32_ir
     );
 }

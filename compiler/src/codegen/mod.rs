@@ -346,22 +346,35 @@ impl Codegen {
 
     /// Declare the async select runtime hook only when the module actually uses it.
     fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        let needs_select = mir_fns.iter().any(|mir_fn| {
+        let needs_select_i64 = mir_fns.iter().any(|mir_fn| {
             mir_fn.instructions.iter().any(|inst| match inst {
                 mir::Instruction::Call { func, .. } => func == "sengoo_async_select_i64",
                 _ => false,
             })
         });
-        if !needs_select
-            || self
+        if needs_select_i64
+            && !self
                 .declarations
                 .contains("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n")
         {
-            return;
+            self.declarations
+                .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
         }
 
-        self.declarations
-            .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
+        let needs_select_bool = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_async_select_bool",
+                _ => false,
+            })
+        });
+        if needs_select_bool
+            && !self
+                .declarations
+                .contains("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n")
+        {
+            self.declarations
+                .push_str("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n");
+        }
     }
 
     fn maybe_declare_sleep_runtime_functions(&mut self, mir_fns: &[MirFunction]) {

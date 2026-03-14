@@ -2404,12 +2404,10 @@ impl TypeChecker {
 
             self.infer.unify(left_inner, right_inner)?;
             let result_ty = self.infer.apply_subst(left_inner);
-            if !matches!(
-                result_ty.kind,
-                TyKind::Int(IntKind::I64)
-            ) {
+            if !matches!(result_ty.kind, TyKind::Int(IntKind::I64) | TyKind::Bool) {
                 return Err(TypeckError::Other(
-                    "select currently only supports Future<i64> values".to_string(),
+                    "select currently only supports Future<i64> and Future<bool> values"
+                        .to_string(),
                 ));
             }
             return Ok(result_ty);

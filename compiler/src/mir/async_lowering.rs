@@ -7,7 +7,7 @@
 
 use crate::mir::{
     CallArg, Instruction, Local, LocalKind, MIRType, MirConstant,
-    MirFunction, Terminator, MIR_I64, MIR_UNIT,
+    MirFunction, Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
 use crate::CompileError;
 use std::collections::{HashMap, HashSet};
@@ -160,6 +160,7 @@ pub fn expand_async_functions(
     let mut new_fns = Vec::new();
     let mut spawn_dispatch_entries = Vec::new();
     let mut result_dispatch_i64_entries = Vec::new();
+    let mut result_dispatch_bool_entries = Vec::new();
 
     for name in &async_fn_names {
         let mir_fn = match mir_fns.iter().find(|f| &f.name == name) {
@@ -204,6 +205,8 @@ pub fn expand_async_functions(
         spawn_dispatch_entries.push((name.clone(), poll.name.clone()));
         if matches!(mir_fn.return_type, MIRType::Int(64)) {
             result_dispatch_i64_entries.push((name.clone(), result.name.clone()));
+        } else if matches!(mir_fn.return_type, MIRType::Bool) {
+            result_dispatch_bool_entries.push((name.clone(), result.name.clone()));
         }
 
         new_fns.push(start);
@@ -216,6 +219,9 @@ pub fn expand_async_functions(
     }
     if !result_dispatch_i64_entries.is_empty() {
         new_fns.push(synthesize_result_dispatch_i64(&result_dispatch_i64_entries));
+    }
+    if !result_dispatch_bool_entries.is_empty() {
+        new_fns.push(synthesize_result_dispatch_bool(&result_dispatch_bool_entries));
     }
 
     if has_async_main {
@@ -342,6 +348,68 @@ fn synthesize_result_dispatch_i64(entries: &[(String, String)]) -> MirFunction {
     });
     f.basic_blocks[default_block].push(zero_inst);
     f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(zero_local)));
+
+    f
+}
+
+fn synthesize_result_dispatch_bool(entries: &[(String, String)]) -> MirFunction {
+    let mut f = MirFunction::new(
+        "sengoo_async_result_dispatch_bool".to_string(),
+        vec![MIR_I64, MIR_I64],
+        MIR_BOOL,
+    );
+
+    let bb0 = f.start_block;
+    let kind_local = Local::new(1, LocalKind::Param);
+    let handle_local = Local::new(2, LocalKind::Param);
+    let default_block = f.add_block();
+    let mut targets = Vec::with_capacity(entries.len() + 1);
+
+    for (base_name, result_name) in entries {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: result_name.clone(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+    }
+
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_timeout_bool")
+    {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_timeout_bool__result".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((
+            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            case_block,
+        ));
+    }
+
+    f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+        discr: kind_local,
+        targets,
+        otherwise: default_block,
+    });
+
+    let false_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+    let false_inst = f.alloc_inst(Instruction::Assign {
+        destination: false_local,
+        value: MirConstant::Bool(false),
+    });
+    f.basic_blocks[default_block].push(false_inst);
+    f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(false_local)));
 
     f
 }

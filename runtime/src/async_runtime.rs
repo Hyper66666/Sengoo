@@ -5,6 +5,8 @@ use std::time::Instant;
 #[cfg(feature = "native-bridge")]
 use std::cell::Cell;
 #[cfg(feature = "native-bridge")]
+use std::ptr::NonNull;
+#[cfg(feature = "native-bridge")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "native-bridge")]
 use std::time::Duration;
@@ -164,6 +166,7 @@ unsafe extern "C" {
     fn main__result(handle: i64) -> i64;
     fn sengoo_async_poll_dispatch(kind: i64, handle: i64) -> i64;
     fn sengoo_async_result_dispatch_i64(kind: i64, handle: i64) -> i64;
+    fn sengoo_async_result_dispatch_bool(kind: i64, handle: i64) -> bool;
 }
 
 #[cfg(feature = "native-bridge")]
@@ -233,6 +236,42 @@ fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
         }
         None => std::thread::yield_now(),
     }
+}
+
+#[cfg(feature = "native-bridge")]
+/// Async runtime FFI contract:
+/// - handle values come only from the matching `__start`/constructor function
+/// - `0` is reserved as an invalid handle and must be treated as absent
+/// - non-zero handles must point to a live allocation of the exact state type
+/// - `__result` / `*_free` consume ownership exactly once for owning handle types
+/// - callers must not alias mutable access across FFI boundaries
+unsafe fn handle_nonnull<T>(handle: i64) -> Option<NonNull<T>> {
+    NonNull::new(handle as *mut T)
+}
+
+#[cfg(feature = "native-bridge")]
+unsafe fn handle_ref<'a, T>(handle: i64) -> Option<&'a T> {
+    handle_nonnull(handle).map(|ptr| ptr.as_ref())
+}
+
+#[cfg(feature = "native-bridge")]
+unsafe fn handle_mut<'a, T>(handle: i64) -> Option<&'a mut T> {
+    handle_nonnull(handle).map(|mut ptr| ptr.as_mut())
+}
+
+#[cfg(feature = "native-bridge")]
+unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
+    handle_nonnull(handle).map(|ptr| Box::from_raw(ptr.as_ptr()))
+}
+
+#[cfg(feature = "native-bridge")]
+fn scheduler_nonnull(ptr: *mut CoroutineScheduler) -> Option<NonNull<CoroutineScheduler>> {
+    NonNull::new(ptr)
+}
+
+#[cfg(feature = "native-bridge")]
+unsafe fn scheduler_mut<'a>(ptr: *mut CoroutineScheduler) -> Option<&'a mut CoroutineScheduler> {
+    scheduler_nonnull(ptr).map(|mut ptr| ptr.as_mut())
 }
 
 #[cfg(feature = "native-bridge")]
@@ -309,10 +348,9 @@ pub extern "C" fn sengoo_async_sleep__start(duration_ms: i64) -> i64 {
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub unsafe extern "C" fn sengoo_async_sleep__poll(handle: i64) -> i64 {
-    if handle == 0 {
+    let Some(state) = handle_ref::<SleepFutureState>(handle) else {
         return 1;
-    }
-    let state = &*(handle as *const SleepFutureState);
+    };
     if Instant::now() >= state.deadline {
         1
     } else {
@@ -324,10 +362,10 @@ pub unsafe extern "C" fn sengoo_async_sleep__poll(handle: i64) -> i64 {
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub unsafe extern "C" fn sengoo_async_sleep__result(handle: i64) {
-    if handle == 0 {
+    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
         return;
-    }
-    drop(Box::from_raw(handle as *mut SleepFutureState));
+    };
+    drop(state);
 }
 
 #[cfg(feature = "native-bridge")]
@@ -349,11 +387,9 @@ pub extern "C" fn sengoo_async_timeout_bool__start(
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub unsafe extern "C" fn sengoo_async_timeout_bool__poll(handle: i64) -> i64 {
-    if handle == 0 {
+    let Some(state) = handle_mut::<TimeoutBoolFutureState>(handle) else {
         return 1;
-    }
-
-    let state = &mut *(handle as *mut TimeoutBoolFutureState);
+    };
     if state.result.is_some() {
         return 1;
     }
@@ -378,11 +414,9 @@ pub unsafe extern "C" fn sengoo_async_timeout_bool__poll(handle: i64) -> i64 {
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub unsafe extern "C" fn sengoo_async_timeout_bool__result(handle: i64) -> bool {
-    if handle == 0 {
+    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
         return false;
-    }
-
-    let state = Box::from_raw(handle as *mut TimeoutBoolFutureState);
+    };
     state.result.unwrap_or(false)
 }
 
@@ -397,10 +431,10 @@ pub extern "C" fn sengoo_async_scheduler_new() -> *mut CoroutineScheduler {
 pub unsafe extern "C" fn sengoo_async_scheduler_free(
     scheduler: *mut CoroutineScheduler,
 ) {
-    if scheduler.is_null() {
+    let Some(scheduler) = scheduler_nonnull(scheduler) else {
         return;
-    }
-    drop(Box::from_raw(scheduler));
+    };
+    drop(Box::from_raw(scheduler.as_ptr()));
 }
 
 #[cfg(feature = "native-bridge")]
@@ -409,12 +443,12 @@ pub unsafe extern "C" fn sengoo_async_scheduler_run_until_idle(
     scheduler: *mut CoroutineScheduler,
     max_ticks: usize,
 ) -> usize {
-    if scheduler.is_null() {
+    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
         return 0;
-    }
+    };
     CURRENT_SCHEDULER.with(|cell| {
         let previous = cell.replace(scheduler);
-        let finished = (&mut *scheduler).run_until_idle(max_ticks).len();
+        let finished = scheduler_ref.run_until_idle(max_ticks).len();
         cell.set(previous);
         finished
     })
@@ -425,37 +459,48 @@ pub unsafe extern "C" fn sengoo_async_scheduler_run_until_idle(
 pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
     CURRENT_SCHEDULER.with(|cell| {
         let scheduler = cell.get();
-        if scheduler.is_null() {
+        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
             return 0;
-        }
-        unsafe { (&mut *scheduler).spawn(ForeignAsyncTask { kind, handle }) as i64 }
+        };
+        scheduler.spawn(ForeignAsyncTask { kind, handle }) as i64
     })
 }
 
 #[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_select_i64(
-    first_kind: i64,
-    first_handle: i64,
-    second_kind: i64,
-    second_handle: i64,
-) -> i64 {
-    loop {
-        clear_poll_wakeup_hint();
-        if unsafe { sengoo_async_poll_dispatch(first_kind, first_handle) } != 0 {
-            return unsafe { sengoo_async_result_dispatch_i64(first_kind, first_handle) };
-        }
-        let first_hint = take_poll_wakeup_hint();
+macro_rules! define_async_select {
+    ($name:ident, $dispatch:path, $ret:ty) => {
+        #[cfg(feature = "native-bridge")]
+        #[no_mangle]
+        pub extern "C" fn $name(
+            first_kind: i64,
+            first_handle: i64,
+            second_kind: i64,
+            second_handle: i64,
+        ) -> $ret {
+            loop {
+                clear_poll_wakeup_hint();
+                if unsafe { sengoo_async_poll_dispatch(first_kind, first_handle) } != 0 {
+                    return unsafe { $dispatch(first_kind, first_handle) };
+                }
+                let first_hint = take_poll_wakeup_hint();
 
-        clear_poll_wakeup_hint();
-        if unsafe { sengoo_async_poll_dispatch(second_kind, second_handle) } != 0 {
-            return unsafe { sengoo_async_result_dispatch_i64(second_kind, second_handle) };
-        }
-        let second_hint = take_poll_wakeup_hint();
+                clear_poll_wakeup_hint();
+                if unsafe { sengoo_async_poll_dispatch(second_kind, second_handle) } != 0 {
+                    return unsafe { $dispatch(second_kind, second_handle) };
+                }
+                let second_hint = take_poll_wakeup_hint();
 
-        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
-    }
+                wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
+            }
+        }
+    };
 }
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_i64, sengoo_async_result_dispatch_i64, i64);
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_bool, sengoo_async_result_dispatch_bool, bool);
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
@@ -495,6 +540,45 @@ mod tests {
     static MAIN_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
     static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
     static TEST_GUARD: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn async_handle_helpers_reject_zero_handles() {
+        assert!(unsafe { handle_nonnull::<SleepFutureState>(0) }.is_none());
+        assert!(unsafe { handle_ref::<SleepFutureState>(0) }.is_none());
+        assert!(unsafe { handle_mut::<SleepFutureState>(0) }.is_none());
+        assert!(unsafe { handle_take_box::<SleepFutureState>(0) }.is_none());
+    }
+
+    #[test]
+    fn async_handle_helpers_round_trip_allocated_state() {
+        let initial_deadline = Instant::now() + Duration::from_millis(3);
+        let updated_deadline = initial_deadline + Duration::from_millis(2);
+        let handle = Box::into_raw(Box::new(SleepFutureState {
+            deadline: initial_deadline,
+        })) as i64;
+
+        let state = unsafe { handle_ref::<SleepFutureState>(handle) }
+            .expect("allocated handle should decode to shared ref");
+        assert_eq!(state.deadline, initial_deadline);
+
+        unsafe { handle_mut::<SleepFutureState>(handle) }
+            .expect("allocated handle should decode to mutable ref")
+            .deadline = updated_deadline;
+
+        let state = unsafe { handle_take_box::<SleepFutureState>(handle) }
+            .expect("allocated handle should decode back into box");
+        assert_eq!(state.deadline, updated_deadline);
+    }
+
+    #[test]
+    fn scheduler_ffi_helpers_reject_null_pointers() {
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_run_until_idle(std::ptr::null_mut(), 1) },
+            0
+        );
+        assert_eq!(sengoo_async_spawn_raw(123, 456), 0);
+        unsafe { sengoo_async_scheduler_free(std::ptr::null_mut()) };
+    }
 
     #[no_mangle]
     pub extern "C" fn main__start() -> i64 {
@@ -559,6 +643,11 @@ mod tests {
         } else {
             42
         }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_bool(kind: i64, _handle: i64) -> bool {
+        kind == async_select_hint_kind_id_for_tests()
     }
 
     struct CountDownTask(u8);
@@ -654,6 +743,23 @@ mod tests {
             "select should not busy-spin when wakeup hints are available"
         );
         unsafe { sengoo_async_sleep__result(slow) };
+    }
+
+    #[test]
+    fn select_bool_returns_dispatched_bool_value() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let ready = sengoo_async_sleep__start(0);
+        let pending = sengoo_async_sleep__start(10);
+
+        let result = sengoo_async_select_bool(
+            async_select_hint_kind_id_for_tests(),
+            ready,
+            async_spawn_kind_id_for_tests(),
+            pending,
+        );
+
+        assert!(result);
+        unsafe { sengoo_async_sleep__result(pending) };
     }
 
     #[test]
