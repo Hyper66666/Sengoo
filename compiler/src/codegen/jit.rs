@@ -3,6 +3,7 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
+use crate::mir::async_lowering::{select_runtime_declaration, select_runtime_function_name, select_runtime_return_type};
 use crate::mir::{self, Local, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
 
@@ -62,10 +63,19 @@ impl JITCodegen {
         self.extern_decls.push_str("declare void @free(i8*)\n");
         self.extern_decls
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
-        self.extern_decls
-            .push_str("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n");
+        for ty in [
+            MIRType::Int(8),
+            MIRType::Int(16),
+            MIRType::Int(32),
+            MIRType::Int(64),
+            MIRType::Bool,
+            MIRType::Float(32),
+            MIRType::Float(64),
+        ] {
+            if let Some(decl) = select_runtime_declaration(&ty) {
+                self.extern_decls.push_str(&decl);
+            }
+        }
         self.extern_decls
             .push_str("declare i64 @sengoo_async_sleep__start(i64)\n");
         self.extern_decls
@@ -82,30 +92,32 @@ impl JITCodegen {
             "sengoo_async_spawn_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
         );
-        self.function_signatures.insert(
-            "sengoo_async_select_i64".to_string(),
-            (
-                vec![
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                ],
-                MIRType::Int(64),
-            ),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_select_bool".to_string(),
-            (
-                vec![
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                ],
-                MIRType::Bool,
-            ),
-        );
+        for ty in [
+            MIRType::Int(8),
+            MIRType::Int(16),
+            MIRType::Int(32),
+            MIRType::Int(64),
+            MIRType::Bool,
+            MIRType::Float(32),
+            MIRType::Float(64),
+        ] {
+            if let (Some(name), Some(ret_ty)) =
+                (select_runtime_function_name(&ty), select_runtime_return_type(&ty))
+            {
+                self.function_signatures.insert(
+                    name,
+                    (
+                        vec![
+                            MIRType::Int(64),
+                            MIRType::Int(64),
+                            MIRType::Int(64),
+                            MIRType::Int(64),
+                        ],
+                        ret_ty,
+                    ),
+                );
+            }
+        }
         self.function_signatures.insert(
             "sengoo_async_sleep__start".to_string(),
             (vec![MIRType::Int(64)], MIRType::Int(64)),

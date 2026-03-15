@@ -2068,6 +2068,50 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_select_returns_first_completed_f64_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def fast() -> f64 { 3.5 }
+async def slow_step() -> i64 { 0 }
+async def slow() -> f64 {
+    let waited = await slow_step();
+    1.5
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    if select(first, second) > 3.0 { 1 } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("f64 select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-f64", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact("async-select-f64", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("f64 select executable should run");
+    assert_eq!(output.status.code(), Some(1));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_preserves_live_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;

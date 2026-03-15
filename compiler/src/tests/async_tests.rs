@@ -418,6 +418,30 @@ async def main() -> i64 {
 }
 
 #[test]
+fn select_builtin_returns_first_completed_i32_value() {
+    let source = r#"
+extern "C" {
+    fn get_i32() -> i32;
+}
+
+async def fast() -> i32 { get_i32() }
+async def slow() -> i32 { get_i32() }
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    picked + 1
+}
+"#;
+
+    assert!(
+        compile_to_ir(source).is_ok(),
+        "select builtin should compile for i32 futures"
+    );
+}
+
+#[test]
 fn select_lowering_emits_runtime_select_call() {
     let source = r#"
 async def first_step() -> i64 { 1 }
@@ -461,6 +485,27 @@ async def main() -> i64 {
     assert!(
         has_select_call,
         "select lowering should emit a bool runtime select call"
+    );
+}
+
+#[test]
+fn select_lowering_emits_runtime_select_f64_call() {
+    let source = r#"
+async def first_step() -> f64 { 3.5 }
+async def second_step() -> f64 { 1.5 }
+async def main() -> i64 {
+    let first = spawn(first_step());
+    let second = spawn(second_step());
+    if select(first, second) > 3.0 { 1 } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_to_ir(source).expect("f64 select source should lower to LLVM IR");
+    let has_select_call = llvm_ir.contains("@sengoo_async_select_f64(");
+
+    assert!(
+        has_select_call,
+        "select lowering should emit an f64 runtime select call"
     );
 }
 

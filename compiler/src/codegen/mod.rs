@@ -9,6 +9,7 @@ pub use jit::JITCodegen;
 
 
 use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64};
+use crate::mir::async_lowering::select_runtime_declaration;
 
 use std::collections::{HashMap, HashSet};
 
@@ -346,34 +347,39 @@ impl Codegen {
 
     /// Declare the async select runtime hook only when the module actually uses it.
     fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        let needs_select_i64 = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => func == "sengoo_async_select_i64",
-                _ => false,
-            })
-        });
-        if needs_select_i64
-            && !self
-                .declarations
-                .contains("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n")
-        {
-            self.declarations
-                .push_str("declare i64 @sengoo_async_select_i64(i64, i64, i64, i64)\n");
+        let mut needed = std::collections::BTreeSet::new();
+        for mir_fn in mir_fns {
+            for inst in &mir_fn.instructions {
+                if let mir::Instruction::Call { func, .. } = inst {
+                    if func
+                        .strip_prefix("sengoo_async_select_")
+                        .is_some_and(|suffix| matches!(suffix, "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64"))
+                    {
+                        needed.insert(func.clone());
+                    }
+                }
+            }
         }
 
-        let needs_select_bool = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => func == "sengoo_async_select_bool",
-                _ => false,
-            })
-        });
-        if needs_select_bool
-            && !self
-                .declarations
-                .contains("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n")
-        {
-            self.declarations
-                .push_str("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n");
+        for func in needed {
+            let suffix = func
+                .strip_prefix("sengoo_async_select_")
+                .expect("filtered select runtime function should keep prefix");
+            let ty = match suffix {
+                "bool" => MIRType::Bool,
+                "i8" => MIRType::Int(8),
+                "i16" => MIRType::Int(16),
+                "i32" => MIRType::Int(32),
+                "i64" => MIRType::Int(64),
+                "f32" => MIRType::Float(32),
+                "f64" => MIRType::Float(64),
+                _ => continue,
+            };
+            let decl = select_runtime_declaration(&ty)
+                .expect("needed select runtime declaration should exist");
+            if !self.declarations.contains(&decl) {
+                self.declarations.push_str(&decl);
+            }
         }
     }
 
