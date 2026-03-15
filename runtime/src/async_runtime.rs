@@ -228,6 +228,11 @@ fn merge_wakeup_hints(first: Option<Instant>, second: Option<Instant>) -> Option
 }
 
 #[cfg(feature = "native-bridge")]
+fn merge_wakeup_hint_with_deadline(hint: Option<Instant>, deadline: Instant) -> Instant {
+    merge_wakeup_hints(hint, Some(deadline)).expect("deadline should always produce a wakeup hint")
+}
+
+#[cfg(feature = "native-bridge")]
 fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => {
@@ -240,6 +245,31 @@ fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
             }
         }
         None => std::thread::yield_now(),
+    }
+}
+
+#[cfg(feature = "native-bridge")]
+unsafe fn wait_for_first_ready<T>(
+    first_kind: i64,
+    first_handle: i64,
+    second_kind: i64,
+    second_handle: i64,
+    dispatch: unsafe extern "C" fn(i64, i64) -> T,
+) -> T {
+    loop {
+        clear_poll_wakeup_hint();
+        if sengoo_async_poll_dispatch(first_kind, first_handle) != 0 {
+            return dispatch(first_kind, first_handle);
+        }
+        let first_hint = take_poll_wakeup_hint();
+
+        clear_poll_wakeup_hint();
+        if sengoo_async_poll_dispatch(second_kind, second_handle) != 0 {
+            return dispatch(second_kind, second_handle);
+        }
+        let second_hint = take_poll_wakeup_hint();
+
+        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
     }
 }
 
@@ -412,7 +442,7 @@ pub unsafe extern "C" fn sengoo_async_timeout_bool__poll(handle: i64) -> i64 {
         return 1;
     }
 
-    record_poll_wakeup_hint(child_hint.map_or(state.deadline, |hint| hint.min(state.deadline)));
+    record_poll_wakeup_hint(merge_wakeup_hint_with_deadline(child_hint, state.deadline));
     0
 }
 
@@ -482,20 +512,14 @@ macro_rules! define_async_select {
             second_kind: i64,
             second_handle: i64,
         ) -> $ret {
-            loop {
-                clear_poll_wakeup_hint();
-                if unsafe { sengoo_async_poll_dispatch(first_kind, first_handle) } != 0 {
-                    return unsafe { $dispatch(first_kind, first_handle) };
-                }
-                let first_hint = take_poll_wakeup_hint();
-
-                clear_poll_wakeup_hint();
-                if unsafe { sengoo_async_poll_dispatch(second_kind, second_handle) } != 0 {
-                    return unsafe { $dispatch(second_kind, second_handle) };
-                }
-                let second_hint = take_poll_wakeup_hint();
-
-                wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
+            unsafe {
+                wait_for_first_ready(
+                    first_kind,
+                    first_handle,
+                    second_kind,
+                    second_handle,
+                    $dispatch,
+                )
             }
         }
     };
@@ -591,6 +615,19 @@ mod tests {
     }
 
     #[test]
+    fn merge_wakeup_hint_with_deadline_prefers_earlier_instant() {
+        let now = Instant::now();
+        let child_hint = now + Duration::from_millis(20);
+        let deadline = now + Duration::from_millis(5);
+
+        let merged = merge_wakeup_hint_with_deadline(Some(child_hint), deadline);
+        assert_eq!(merged, deadline);
+
+        let merged_without_child = merge_wakeup_hint_with_deadline(None, deadline);
+        assert_eq!(merged_without_child, deadline);
+    }
+
+    #[test]
     fn scheduler_ffi_helpers_reject_null_pointers() {
         assert_eq!(
             unsafe { sengoo_async_scheduler_run_until_idle(std::ptr::null_mut(), 1) },
@@ -656,20 +693,18 @@ mod tests {
         }
     }
 
-    #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_i8(_kind: i64, _handle: i64) -> i8 {
-        7
+    macro_rules! define_test_result_dispatch {
+        ($name:ident, $ty:ty, $value:expr) => {
+            #[no_mangle]
+            pub extern "C" fn $name(_kind: i64, _handle: i64) -> $ty {
+                $value
+            }
+        };
     }
 
-    #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_i16(_kind: i64, _handle: i64) -> i16 {
-        7
-    }
-
-    #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_i32(_kind: i64, _handle: i64) -> i32 {
-        7
-    }
+    define_test_result_dispatch!(sengoo_async_result_dispatch_i8, i8, 7);
+    define_test_result_dispatch!(sengoo_async_result_dispatch_i16, i16, 7);
+    define_test_result_dispatch!(sengoo_async_result_dispatch_i32, i32, 7);
 
     #[no_mangle]
     pub extern "C" fn sengoo_async_result_dispatch_i64(kind: i64, _handle: i64) -> i64 {
@@ -685,15 +720,8 @@ mod tests {
         kind == async_select_hint_kind_id_for_tests()
     }
 
-    #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_f32(_kind: i64, _handle: i64) -> f32 {
-        3.5
-    }
-
-    #[no_mangle]
-    pub extern "C" fn sengoo_async_result_dispatch_f64(_kind: i64, _handle: i64) -> f64 {
-        3.5
-    }
+    define_test_result_dispatch!(sengoo_async_result_dispatch_f32, f32, 3.5);
+    define_test_result_dispatch!(sengoo_async_result_dispatch_f64, f64, 3.5);
 
     struct CountDownTask(u8);
 
