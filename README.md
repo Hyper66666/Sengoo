@@ -313,11 +313,11 @@ Currently supported:
 - `timeout(future, ms)` as an awaitable `Future<bool>`
 - `spawn(future)`
 - `join(f1, f2)`
-- `select(f1, f2)` for two same-type `Future<i64>` or `Future<bool>` values
+- `select(f1, f2)` for two same-type scalar futures (`Future<bool>`, `Future<i8/i16/i32/i64>`, `Future<f32/f64>`)
 
 Current limitations:
 
-- `select` is currently limited to two operands whose future result type is `i64` or `bool`
+- `select` is currently limited to two operands whose future result type is a matching scalar (`bool`, integer, or float)
 - loser futures in `select` are not canceled yet
 - timer support currently covers `sleep` and `timeout`, but not a general timer queue / wheel
 - no IO wakeups yet

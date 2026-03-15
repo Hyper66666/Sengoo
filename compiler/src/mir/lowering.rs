@@ -16,7 +16,7 @@ use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
 };
-use super::async_lowering::async_spawn_kind_id;
+use super::async_lowering::{async_spawn_kind_id, select_runtime_function_name};
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -3193,16 +3193,12 @@ impl<'a> LoweringContext<'a> {
         }
 
         let result_ty = self.async_await_result_type(first_handle);
-        let select_runtime = match &result_ty {
-            MIRType::Int(64) => "sengoo_async_select_i64",
-            MIRType::Bool => "sengoo_async_select_bool",
-            _ => {
-                self.errors.push(
-                    "select currently only supports Future<i64> and Future<bool> values during MIR lowering"
-                        .to_string(),
-                );
-                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-            }
+        let Some(select_runtime) = select_runtime_function_name(&result_ty) else {
+            self.errors.push(
+                "select currently only supports Future values whose results are bool, integer, or float scalars during MIR lowering"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         };
 
         let second_result_ty = self.async_await_result_type(second_handle);
@@ -3229,7 +3225,7 @@ impl<'a> LoweringContext<'a> {
         let result_local = self.add_local(None, LocalKind::Temp, result_ty);
         self.push_inst(Instruction::Call {
             destination: result_local,
-            func: select_runtime.to_string(),
+            func: select_runtime,
             args: vec![first_kind, first_handle, second_kind, second_handle],
         });
         result_local

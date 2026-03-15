@@ -165,8 +165,13 @@ unsafe extern "C" {
     fn main__poll(handle: i64) -> i64;
     fn main__result(handle: i64) -> i64;
     fn sengoo_async_poll_dispatch(kind: i64, handle: i64) -> i64;
+    fn sengoo_async_result_dispatch_i8(kind: i64, handle: i64) -> i8;
+    fn sengoo_async_result_dispatch_i16(kind: i64, handle: i64) -> i16;
+    fn sengoo_async_result_dispatch_i32(kind: i64, handle: i64) -> i32;
     fn sengoo_async_result_dispatch_i64(kind: i64, handle: i64) -> i64;
     fn sengoo_async_result_dispatch_bool(kind: i64, handle: i64) -> bool;
+    fn sengoo_async_result_dispatch_f32(kind: i64, handle: i64) -> f32;
+    fn sengoo_async_result_dispatch_f64(kind: i64, handle: i64) -> f64;
 }
 
 #[cfg(feature = "native-bridge")]
@@ -497,10 +502,25 @@ macro_rules! define_async_select {
 }
 
 #[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_i8, sengoo_async_result_dispatch_i8, i8);
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_i16, sengoo_async_result_dispatch_i16, i16);
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_i32, sengoo_async_result_dispatch_i32, i32);
+
+#[cfg(feature = "native-bridge")]
 define_async_select!(sengoo_async_select_i64, sengoo_async_result_dispatch_i64, i64);
 
 #[cfg(feature = "native-bridge")]
 define_async_select!(sengoo_async_select_bool, sengoo_async_result_dispatch_bool, bool);
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_f32, sengoo_async_result_dispatch_f32, f32);
+
+#[cfg(feature = "native-bridge")]
+define_async_select!(sengoo_async_select_f64, sengoo_async_result_dispatch_f64, f64);
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
@@ -637,6 +657,21 @@ mod tests {
     }
 
     #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_i8(_kind: i64, _handle: i64) -> i8 {
+        7
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_i16(_kind: i64, _handle: i64) -> i16 {
+        7
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_i32(_kind: i64, _handle: i64) -> i32 {
+        7
+    }
+
+    #[no_mangle]
     pub extern "C" fn sengoo_async_result_dispatch_i64(kind: i64, _handle: i64) -> i64 {
         if kind == async_select_hint_kind_id_for_tests() {
             11
@@ -648,6 +683,16 @@ mod tests {
     #[no_mangle]
     pub extern "C" fn sengoo_async_result_dispatch_bool(kind: i64, _handle: i64) -> bool {
         kind == async_select_hint_kind_id_for_tests()
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_f32(_kind: i64, _handle: i64) -> f32 {
+        3.5
+    }
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_async_result_dispatch_f64(_kind: i64, _handle: i64) -> f64 {
+        3.5
     }
 
     struct CountDownTask(u8);

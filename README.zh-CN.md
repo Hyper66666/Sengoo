@@ -313,11 +313,11 @@ sgc daemon --addr 127.0.0.1:48765
 - 可被 `await` 的 `timeout(future, ms)`，返回 `Future<bool>`
 - `spawn(future)`
 - `join(f1, f2)`
-- 针对两个同结果类型 `Future<i64>` 或 `Future<bool>` 的 `select(f1, f2)`
+- 针对两个同结果类型的标量 future 的 `select(f1, f2)`，包括 `Future<bool>`、`Future<i8/i16/i32/i64>`、`Future<f32/f64>`
 
 当前限制：
 
-- `select` 目前只支持结果类型为 `i64` 或 `bool` 的两个 future 操作数
+- `select` 目前只支持结果类型为同一种标量的两个 future 操作数，也就是 `bool`、整数或浮点
 - `select` 中未胜出的 future 还不会被取消
 - timer 目前覆盖 `sleep` 和 `timeout`，但还不是通用 timer queue / wheel
 - 还没有 IO wakeup
