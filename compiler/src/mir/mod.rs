@@ -9,6 +9,7 @@
 //! - **接近机器码**：易于映射到目标架构
 
 mod bb;
+pub(crate) mod async_origin_helpers;
 mod generic_methods;
 mod inst;
 pub(crate) mod lowering_helpers;
