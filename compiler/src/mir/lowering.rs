@@ -8,6 +8,9 @@ use crate::method_resolution::{
     ambiguous_method_error, explicit_hir_method_param_count, explicit_hir_method_params,
     select_method_candidate, MethodCandidate, MethodCandidateMatch,
 };
+use crate::mir::lowering_helpers::{
+    collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
+};
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
@@ -1943,21 +1946,15 @@ impl<'a> LoweringContext<'a> {
         params: &[String],
         body: &crate::hir::HIRExpr,
     ) -> Vec<(String, Local)> {
-        let param_names: std::collections::HashSet<String> = params.iter().cloned().collect();
-
-        let mut free_vars = Vec::new();
-        self.collect_vars_from_expr(body, &param_names, &mut free_vars);
-        free_vars
+        collect_free_vars(body, params, &self.local_names)
     }
 
     fn collect_async_block_free_vars(&self, body: &crate::hir::HIRBody) -> Vec<(String, Local)> {
-        let param_names = std::collections::HashSet::new();
-        let mut free_vars = Vec::new();
-        self.collect_vars_from_body(body, &param_names, &mut free_vars);
-        free_vars
+        collect_free_vars_in_body(body, &self.local_names)
     }
 
     /// 从表达式中收集自由变量（捕获的外部变量）。
+    #[allow(dead_code)]
     fn collect_vars_from_expr(
         &self,
         expr: &crate::hir::HIRExpr,
@@ -2092,6 +2089,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 从语句列表中收集自由变量引用。
+    #[allow(dead_code)]
     fn collect_vars_from_body(
         &self,
         body: &crate::hir::HIRBody,
@@ -2206,6 +2204,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 从语句列表中收集自由变量引用（lambda捕获分析）。
+    #[allow(dead_code)]
     fn collect_vars_from_stmt(
         &self,
         stmt: &crate::hir::HIRStmt,
@@ -2516,7 +2515,7 @@ impl<'a> LoweringContext<'a> {
             saved_name_bindings.push((result_name, previous_result_name));
 
             let mut result_symbols = Vec::new();
-            Self::collect_named_symbols(condition, "result", &mut result_symbols);
+            collect_named_symbols(condition, "result", &mut result_symbols);
             for symbol in result_symbols {
                 if symbol.is_valid() {
                     let previous_symbol = self.local_symbols.insert(symbol, result_local);
