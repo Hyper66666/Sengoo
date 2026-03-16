@@ -844,8 +844,22 @@ long long sengoo_hashmap_iter_reset_i64_status(long long iter_handle) {
 
 /* ========== Async Runtime: Frame-backed coroutine helpers ========== */
 
+static long long* sengoo_async_frame_data(long long handle) {
+    return handle == 0 ? NULL : (long long*)(intptr_t)handle;
+}
+
 long long sengoo_async_frame_alloc(long long slot_count) {
-    long long *frame = (long long *)calloc((size_t)slot_count, sizeof(long long));
+    if (slot_count < 0) {
+        return 0;
+    }
+    if ((unsigned long long)slot_count > (SIZE_MAX / sizeof(long long)) - 1) {
+        return 0;
+    }
+    long long* frame = (long long*)calloc((size_t)slot_count + 1, sizeof(long long));
+    if (frame == NULL) {
+        return 0;
+    }
+    frame[0] = slot_count;
     return (long long)(intptr_t)frame;
 }
 
@@ -854,17 +868,22 @@ void sengoo_async_frame_free(long long handle) {
 }
 
 void sengoo_async_frame_store(long long handle, long long offset, long long value) {
-    long long *frame = (long long *)(intptr_t)handle;
-    frame[offset] = value;
+    long long* frame = sengoo_async_frame_data(handle);
+    if (frame == NULL || offset < 0 || offset >= frame[0]) {
+        return;
+    }
+    frame[offset + 1] = value;
 }
 
 long long sengoo_async_frame_load(long long handle, long long offset) {
-    long long *frame = (long long *)(intptr_t)handle;
-    return frame[offset];
+    long long* frame = sengoo_async_frame_data(handle);
+    if (frame == NULL || offset < 0 || offset >= frame[0]) {
+        return 0;
+    }
+    return frame[offset + 1];
 }
 
 long long sengoo_async_run_main_i64(long long handle) {
     (void)handle;
     return handle;
 }
-

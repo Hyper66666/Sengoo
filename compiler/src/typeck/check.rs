@@ -1965,10 +1965,7 @@ impl TypeChecker {
     }
 
     fn future_escape_error() -> TypeckError {
-        TypeckError::Other(
-            "phase-1 async future values cannot escape; await the async call directly"
-                .to_string(),
-        )
+        TypeckError::Other("future values cannot escape; await the async call directly".to_string())
     }
 
     fn contains_future_escape_ty(&self, ty: &Ty) -> bool {
