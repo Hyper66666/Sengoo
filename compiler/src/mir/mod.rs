@@ -11,6 +11,7 @@
 mod bb;
 mod generic_methods;
 mod inst;
+pub(crate) mod lowering_helpers;
 mod lowering;
 mod op;
 pub mod opt;
