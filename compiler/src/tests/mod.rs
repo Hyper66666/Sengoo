@@ -30,6 +30,7 @@ pub mod print_tests;
 pub mod property_tests;
 pub mod recursive_tests;
 pub mod regression_suite_tests;
+pub mod mir_type_helpers_tests;
 pub mod snapshot_tests;
 pub mod stability_property_tests;
 pub mod string_tests;

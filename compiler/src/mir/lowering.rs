@@ -15,6 +15,7 @@ use crate::mir::pattern_helpers::{
     build_match_switch_plan, pattern_binding_plan, pattern_match_plan, PatternBindingPlan,
     PatternMatchPlan,
 };
+use crate::mir::type_helpers::is_void_like;
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
@@ -3192,12 +3193,7 @@ impl<'a> LoweringContext<'a> {
                     // 合并if-else分支到join块，插入Phi节点。
                     self.set_current_block(join_block);
                     let then_ty = self.get_local_type(then_val).clone();
-                    let is_void_like = match &then_ty {
-                        MIRType::Unit | MIRType::Never => true,
-                        MIRType::Tuple(fields) if fields.is_empty() => true,
-                        _ => false,
-                    };
-                    if is_void_like {
+                    if is_void_like(&then_ty) {
                         self.add_local(None, LocalKind::Temp, MIR_UNIT)
                     } else {
                         let result = self.add_local(None, LocalKind::Temp, then_ty);
@@ -4312,12 +4308,7 @@ impl<'a> LoweringContext<'a> {
                         self.set_current_block(join_block);
                         if let Some((first_value, _)) = incoming_values.first().copied() {
                             let result_ty = self.get_local_type(first_value).clone();
-                            let is_void_like = match &result_ty {
-                                MIRType::Unit | MIRType::Never => true,
-                                MIRType::Tuple(fields) if fields.is_empty() => true,
-                                _ => false,
-                            };
-                            if is_void_like {
+                            if is_void_like(&result_ty) {
                                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
                             } else {
                                 let result = self.add_local(None, LocalKind::Temp, result_ty);
@@ -4376,12 +4367,7 @@ impl<'a> LoweringContext<'a> {
                         self.set_current_block(join_block);
                         if let Some((first_value, _)) = incoming_values.first().copied() {
                             let result_ty = self.get_local_type(first_value).clone();
-                            let is_void_like = match &result_ty {
-                                MIRType::Unit | MIRType::Never => true,
-                                MIRType::Tuple(fields) if fields.is_empty() => true,
-                                _ => false,
-                            };
-                            if is_void_like {
+                            if is_void_like(&result_ty) {
                                 self.add_local(None, LocalKind::Temp, MIR_UNIT)
                             } else {
                                 let result = self.add_local(None, LocalKind::Temp, result_ty);
@@ -4637,5 +4623,4 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
 

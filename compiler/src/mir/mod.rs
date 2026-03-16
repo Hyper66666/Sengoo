@@ -13,6 +13,7 @@ mod generic_methods;
 mod inst;
 pub(crate) mod lowering_helpers;
 pub(crate) mod pattern_helpers;
+pub(crate) mod type_helpers;
 mod lowering;
 mod op;
 pub mod opt;
