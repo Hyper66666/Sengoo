@@ -11,6 +11,9 @@ use crate::method_resolution::{
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
+use crate::mir::async_origin_helpers::{
+    infer_async_base_name_from_instructions, infer_last_async_start_base,
+};
 use crate::mir::pattern_helpers::{
     build_match_switch_plan, pattern_binding_plan, pattern_match_plan, PatternBindingPlan,
     PatternMatchPlan,
@@ -4470,14 +4473,12 @@ impl<'a> LoweringContext<'a> {
 
     fn infer_poll_func_from_last_call(&self) -> String {
         let block = &self.mir_fn.basic_blocks[self.current_block()];
-        for inst_id in block.instructions.iter().rev() {
-            if let Instruction::Call { func, .. } = self.mir_fn.instruction(*inst_id) {
-                if func.ends_with("__start") {
-                    return func.trim_end_matches("__start").to_string();
-                }
-            }
-        }
-        "unknown".to_string()
+        let instructions = block
+            .instructions
+            .iter()
+            .map(|inst_id| self.mir_fn.instruction(*inst_id).clone())
+            .collect::<Vec<_>>();
+        infer_last_async_start_base(&instructions).unwrap_or_else(|| "unknown".to_string())
     }
 
     /// Resolve the async function base name for a given future handle local.
@@ -4488,23 +4489,15 @@ impl<'a> LoweringContext<'a> {
     ///     look up `src` in `future_origins` — covers `let f = async_fn(); await f`.
     ///  3. Fall back to backward-scan heuristic via `infer_poll_func_from_last_call`.
     fn resolve_async_base_name(&self, handle: Local) -> String {
-        // 1. Direct hit
-        if let Some(name) = self.future_origins.get(&handle) {
-            return name.clone();
-        }
-        // 2. Trace through a Load in the current block (let-binding case)
         let block = &self.mir_fn.basic_blocks[self.current_block()];
-        for inst_id in block.instructions.iter().rev() {
-            if let Instruction::Load { destination, source } = self.mir_fn.instruction(*inst_id) {
-                if *destination == handle {
-                    if let Some(name) = self.future_origins.get(source) {
-                        return name.clone();
-                    }
-                }
-            }
-        }
-        // 3. Fallback: scan for the last __start call
-        self.infer_poll_func_from_last_call()
+        let instructions = block
+            .instructions
+            .iter()
+            .map(|inst_id| self.mir_fn.instruction(*inst_id).clone())
+            .collect::<Vec<_>>();
+
+        infer_async_base_name_from_instructions(handle, &instructions, &self.future_origins)
+            .unwrap_or_else(|| self.infer_poll_func_from_last_call())
     }
 
     /// 从模式中提取可用于匹配的枚举判别值。
@@ -4623,4 +4616,3 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-

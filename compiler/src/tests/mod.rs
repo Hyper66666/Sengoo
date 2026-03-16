@@ -2,6 +2,7 @@
 
 pub mod array_assign_tests;
 pub mod async_tests;
+pub mod async_origin_helpers_tests;
 pub mod cast_semantics_tests;
 pub mod class_inheritance_tests;
 pub mod codegen_stream_tests;
