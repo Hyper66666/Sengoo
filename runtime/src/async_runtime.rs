@@ -852,7 +852,10 @@ mod tests {
                     0
                 }
             }
-            mode => panic!("unexpected main poll mode: {mode}"),
+            mode => {
+                eprintln!("unexpected main poll mode: {mode}");
+                1
+            }
         }
     }
 
@@ -1189,6 +1192,20 @@ mod tests {
         assert_eq!(result, 99);
         assert!(elapsed >= Duration::from_millis(10));
         assert!(TEST_POLLS.load(Ordering::SeqCst) <= 2);
+    }
+
+    #[test]
+    fn ffi_bridge_unknown_main_poll_mode_falls_back_to_ready() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        MAIN_MODE.store(99, Ordering::SeqCst);
+        MAIN_RESULT.store(21, Ordering::SeqCst);
+        *MAIN_DEADLINE.lock().expect("main deadline mutex poisoned") = None;
+        TEST_POLLS.store(0, Ordering::SeqCst);
+
+        let result = unsafe { sengoo_async_run_main_i64() };
+
+        assert_eq!(result, 21);
+        assert_eq!(TEST_POLLS.load(Ordering::SeqCst), 1);
     }
 
     fn main_deadline() -> Instant {

@@ -35,16 +35,84 @@ long long sengoo_panic_result_unwrap_i64(void) {
 }
 
 void* sengoo_alloc(long long size, long long align) {
-    if (align <= 0) align = 1;
-    return malloc((size_t)size);
+    if (size < 0) {
+        return NULL;
+    }
+
+    size_t alignment = (align <= 1) ? 1u : (size_t)align;
+    if (alignment > 1) {
+        size_t normalized = sizeof(void*);
+        while (normalized < alignment && normalized <= (SIZE_MAX / 2)) {
+            normalized <<= 1;
+        }
+        if (normalized < alignment) {
+            return NULL;
+        }
+        alignment = normalized;
+    }
+
+    size_t bytes = (size_t)size;
+    if (alignment <= 1) {
+        return malloc(bytes);
+    }
+
+    if (bytes > SIZE_MAX - alignment - sizeof(void*)) {
+        return NULL;
+    }
+
+    void* raw = malloc(bytes + alignment - 1 + sizeof(void*));
+    if (raw == NULL) {
+        return NULL;
+    }
+
+    uintptr_t start = (uintptr_t)raw + sizeof(void*);
+    uintptr_t aligned = (start + (alignment - 1)) & ~(uintptr_t)(alignment - 1);
+    ((void**)aligned)[-1] = raw;
+    return (void*)aligned;
 }
 
 void sengoo_free(void* ptr, long long size, long long align) {
-    free(ptr);
+    (void)size;
+    if (ptr == NULL) {
+        return;
+    }
+    if (align <= 1) {
+        free(ptr);
+        return;
+    }
+
+    void* raw = ((void**)ptr)[-1];
+    free(raw);
 }
 
 void* sengoo_realloc(void* ptr, long long old_size, long long old_align, long long new_size) {
-    return realloc(ptr, (size_t)new_size);
+    if (ptr == NULL) {
+        return sengoo_alloc(new_size, old_align);
+    }
+    if (new_size < 0) {
+        return NULL;
+    }
+    if (old_align <= 1) {
+        return realloc(ptr, (size_t)new_size);
+    }
+
+    void* new_ptr = sengoo_alloc(new_size, old_align);
+    if (new_ptr == NULL) {
+        return NULL;
+    }
+
+    size_t copy_size = 0;
+    if (old_size > 0) {
+        copy_size = (size_t)old_size;
+    }
+    if ((size_t)new_size < copy_size) {
+        copy_size = (size_t)new_size;
+    }
+    if (copy_size > 0) {
+        memcpy(new_ptr, ptr, copy_size);
+    }
+    sengoo_free(ptr, old_size, old_align);
+    return new_ptr;
 }
 
 static long long sengoo_ptr_to_handle(void* ptr) {

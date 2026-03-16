@@ -2633,6 +2633,63 @@ async def main() -> i64 {
 }
 
 #[test]
+fn native_runtime_alloc_respects_requested_alignment() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("alloc-align-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_alloc_alignment(long long size, long long align) {{\n    void* ptr = sengoo_alloc(size, align);\n    if (!ptr) {{ return 0; }}\n    unsigned long long addr = (unsigned long long)(uintptr_t)ptr;\n    long long ok = (align <= 1) ? 1 : ((addr % (unsigned long long)align) == 0 ? 1 : 0);\n    sengoo_free(ptr, size, align);\n    return ok;\n}}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_alloc_alignment(size: i64, align: i64) -> i64;
+}
+
+def main() -> i64 {
+    if sengoo_test_alloc_alignment(64, 16) == 1 {
+        if sengoo_test_alloc_alignment(96, 32) == 1 { 1 } else { 0 }
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("alignment probe should compile to LLVM IR");
+    let ll_path = temp_artifact("alloc-align", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    let exe_path = temp_artifact("alloc-align", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("alignment probe executable should run");
+    assert_eq!(output.status.code(), Some(1));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
 fn async_native_runtime_preserves_struct_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;

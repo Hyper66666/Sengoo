@@ -234,7 +234,7 @@ pub fn expand_async_functions(
         let spill_user_locals = if await_count == 0 {
             Vec::new()
         } else if let Ok(plan) = build_async_cfg_plan(mir_fn) {
-            let live_in = compute_live_in_user_locals(mir_fn, &plan);
+            let live_in = compute_live_in_user_locals(mir_fn, &plan)?;
             collect_spill_user_locals(&plan, &user_locals, &live_in)
         } else {
             Vec::new()
@@ -828,7 +828,7 @@ fn collect_user_locals(mir_fn: &MirFunction) -> Vec<(Local, MIRType)> {
 fn compute_live_in_user_locals(
     mir_fn: &MirFunction,
     plan: &AsyncCfgPlan,
-) -> HashMap<usize, HashSet<Local>> {
+) -> Result<HashMap<usize, HashSet<Local>>, CompileError> {
     let mut live_in = HashMap::<usize, HashSet<Local>>::new();
     for block in &plan.ordered_blocks {
         live_in.insert(*block, HashSet::new());
@@ -871,7 +871,12 @@ fn compute_live_in_user_locals(
                     live
                 }
                 Terminator::Return(_) => HashSet::new(),
-                other => panic!("unsupported terminator in async liveness: {:?}", other),
+                other => {
+                    return Err(CompileError::MirLower(format!(
+                        "unsupported terminator in async liveness: {:?}",
+                        other
+                    )))
+                }
             };
 
             for local in terminator_user_defs(terminator) {
@@ -895,7 +900,7 @@ fn compute_live_in_user_locals(
         }
     }
 
-    live_in
+    Ok(live_in)
 }
 
 fn collect_spill_user_locals(
@@ -1831,7 +1836,7 @@ fn synthesize_cfg_poll(
     let handle = Local::new(1, LocalKind::Param);
     let bb0 = f.start_block;
 
-    let live_in = compute_live_in_user_locals(mir_fn, plan);
+    let live_in = compute_live_in_user_locals(mir_fn, plan)?;
     let live_user_slots = collect_live_user_slots(plan, spill_user_locals, &live_in);
     let mut local_map = HashMap::new();
     for (local, ty) in mir_fn.locals.iter().skip(1) {
@@ -2540,6 +2545,27 @@ mod tests {
         assert!(
             message.contains("self-looping pending blocks"),
             "error should describe expected async cfg shape, got: {message}"
+        );
+    }
+
+    #[test]
+    fn compute_live_in_user_locals_reports_unsupported_terminator() {
+        let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
+        mir_fn.is_async = true;
+
+        let start = mir_fn.start_block;
+        mir_fn.basic_blocks[start].set_terminator(Terminator::Break { target: start });
+
+        let plan = AsyncCfgPlan {
+            ordered_blocks: vec![start],
+            suspend_points: Vec::new(),
+        };
+
+        let err = compute_live_in_user_locals(&mir_fn, &plan)
+            .expect_err("unsupported liveness terminator should return an error");
+        assert!(
+            err.to_string().contains("unsupported terminator in async liveness"),
+            "unexpected liveness diagnostic: {err}"
         );
     }
 
