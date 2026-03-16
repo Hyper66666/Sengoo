@@ -1,10 +1,16 @@
-use crate::hir::{HIRLiteral, HIRPattern};
+use crate::hir::{HIRLiteral, HIRMatchArm, HIRPattern};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PatternBindingPlan {
     Ignore,
     BindWhole(String),
     BindTupleFields(Vec<(u32, String)>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MatchSwitchPlan {
+    pub targets: Vec<(u32, usize)>,
+    pub otherwise_block: usize,
 }
 
 pub(crate) fn extract_discriminant_from_pattern(pat: &HIRPattern) -> Option<u32> {
@@ -37,5 +43,27 @@ pub(crate) fn pattern_binding_plan(pat: &HIRPattern) -> PatternBindingPlan {
             }
         }
         _ => PatternBindingPlan::Ignore,
+    }
+}
+
+pub(crate) fn build_match_switch_plan(
+    arms: &[HIRMatchArm],
+    arm_blocks: &[usize],
+    default_otherwise: usize,
+) -> MatchSwitchPlan {
+    let mut targets = Vec::new();
+    let mut otherwise_block = default_otherwise;
+
+    for (arm, arm_block) in arms.iter().zip(arm_blocks.iter().copied()) {
+        if let Some(value) = extract_discriminant_from_pattern(&arm.pat) {
+            targets.push((value, arm_block));
+        } else {
+            otherwise_block = arm_block;
+        }
+    }
+
+    MatchSwitchPlan {
+        targets,
+        otherwise_block,
     }
 }

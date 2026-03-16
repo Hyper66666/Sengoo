@@ -12,7 +12,7 @@ use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
 use crate::mir::pattern_helpers::{
-    extract_discriminant_from_pattern, pattern_binding_plan, PatternBindingPlan,
+    build_match_switch_plan, pattern_binding_plan, PatternBindingPlan,
 };
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
@@ -4283,20 +4283,12 @@ impl<'a> LoweringContext<'a> {
                             arms.iter().map(|_| self.new_block()).collect();
                         let join_block = self.new_block();
 
-                        let mut targets = Vec::new();
-                        let mut otherwise_block = join_block;
-                        for (i, arm) in arms.iter().enumerate() {
-                            if let Some(value) = extract_discriminant_from_pattern(&arm.pat) {
-                                targets.push((value, arm_blocks[i]));
-                            } else {
-                                otherwise_block = arm_blocks[i];
-                            }
-                        }
+                        let switch_plan = build_match_switch_plan(arms, &arm_blocks, join_block);
 
                         self.set_terminator(Terminator::Switch {
                             discr: discr_local,
-                            targets,
-                            otherwise: otherwise_block,
+                            targets: switch_plan.targets,
+                            otherwise: switch_plan.otherwise_block,
                         });
 
                         let mut incoming_values: Vec<(Local, usize)> = Vec::new();
@@ -4663,8 +4655,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
-
 
 
 
