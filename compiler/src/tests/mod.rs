@@ -25,6 +25,7 @@ pub mod macro_tests;
 pub mod parser_ambiguity_tests;
 pub mod perf_runtime_regression_tests;
 pub mod phi_tests;
+pub mod pattern_helpers_tests;
 pub mod print_tests;
 pub mod property_tests;
 pub mod recursive_tests;

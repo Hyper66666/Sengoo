@@ -11,6 +11,9 @@ use crate::method_resolution::{
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
+use crate::mir::pattern_helpers::{
+    extract_discriminant_from_pattern, pattern_binding_plan, PatternBindingPlan,
+};
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
@@ -4283,7 +4286,7 @@ impl<'a> LoweringContext<'a> {
                         let mut targets = Vec::new();
                         let mut otherwise_block = join_block;
                         for (i, arm) in arms.iter().enumerate() {
-                            if let Some(value) = self.extract_discriminant_from_pattern(&arm.pat) {
+                            if let Some(value) = extract_discriminant_from_pattern(&arm.pat) {
                                 targets.push((value, arm_blocks[i]));
                             } else {
                                 otherwise_block = arm_blocks[i];
@@ -4527,18 +4530,6 @@ impl<'a> LoweringContext<'a> {
 
     /// 从模式中提取可用于匹配的枚举判别值。
     /// 从枚举模式中提取判别值（discriminant）用于匹配检查。
-    fn extract_discriminant_from_pattern(&self, pat: &crate::hir::HIRPattern) -> Option<u32> {
-        use crate::hir::HIRPattern;
-        match pat {
-            HIRPattern::Lit(lit) => match lit {
-                HIRLiteral::Int(n) if *n >= 0 && *n < u32::MAX as i64 => Some(*n as u32),
-                _ => None,
-            },
-            HIRPattern::Wild => None,
-            HIRPattern::Var { .. } => None,
-            _ => None,
-        }
-    }
 
     /// 根据给定值生成与 HIR 模式匹配的判断逻辑。
     /// 判断值是否匹配给定的HIR模式，用于运行时合约检查。
@@ -4588,39 +4579,30 @@ impl<'a> LoweringContext<'a> {
     /// 将HIR模式绑定降级为MIR，生成对应的局部变量绑定指令。
     /// 将模式绑定降级到MIR，生成模式匹配的局部变量绑定指令。
     fn lower_pattern_bindings(&mut self, pat: &crate::hir::HIRPattern, enum_value: Local) {
-        use crate::hir::HIRPattern;
-        match pat {
-            HIRPattern::Var { name, .. } => {
-                // 变量绑定模式：为捕获的变量创建局部变量。
-                let _ = self.add_local(Some(name.clone()), LocalKind::User, MIR_I64);
+        match pattern_binding_plan(pat) {
+            PatternBindingPlan::Ignore => {}
+            PatternBindingPlan::BindWhole(name) => {
+                let _ = self.add_local(Some(name), LocalKind::User, MIR_I64);
             }
-            HIRPattern::Tuple(patterns) => {
-                if !patterns.is_empty() {
-                    let payload_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                    self.push_inst(Instruction::ExtractPayload {
-                        destination: payload_local,
-                        source: enum_value,
+            PatternBindingPlan::BindTupleFields(fields) => {
+                let payload_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+                self.push_inst(Instruction::ExtractPayload {
+                    destination: payload_local,
+                    source: enum_value,
+                });
+                for (index, name) in fields {
+                    let field_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+                    self.push_inst(Instruction::Extract {
+                        destination: field_local,
+                        value: payload_local,
+                        index,
                     });
-                    for (index, sub_pat) in patterns.iter().enumerate() {
-                        if let HIRPattern::Var { name, .. } = sub_pat {
-                            let field_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                            self.push_inst(Instruction::Extract {
-                                destination: field_local,
-                                value: payload_local,
-                                index: index as u32,
-                            });
-                            let bound_local =
-                                self.add_local(Some(name.clone()), LocalKind::User, MIR_I64);
-                            self.push_inst(Instruction::Store {
-                                destination: bound_local,
-                                value: field_local,
-                            });
-                        }
-                    }
+                    let bound_local = self.add_local(Some(name), LocalKind::User, MIR_I64);
+                    self.push_inst(Instruction::Store {
+                        destination: bound_local,
+                        value: field_local,
+                    });
                 }
-            }
-            _ => {
-            // 未知或不需要转换的字面量类型，返回unit。
             }
         }
     }
@@ -4681,7 +4663,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
 
 
 
