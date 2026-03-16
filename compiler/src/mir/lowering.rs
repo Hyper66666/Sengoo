@@ -12,7 +12,8 @@ use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
 use crate::mir::pattern_helpers::{
-    build_match_switch_plan, pattern_binding_plan, PatternBindingPlan,
+    build_match_switch_plan, pattern_binding_plan, pattern_match_plan, PatternBindingPlan,
+    PatternMatchPlan,
 };
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
@@ -4526,42 +4527,23 @@ impl<'a> LoweringContext<'a> {
     /// 根据给定值生成与 HIR 模式匹配的判断逻辑。
     /// 判断值是否匹配给定的HIR模式，用于运行时合约检查。
     fn matches_pattern(&mut self, pat: &crate::hir::HIRPattern, value: Local) -> Local {
-        use crate::hir::HIRPattern;
         let result = self.add_local(None, LocalKind::Temp, MIR_BOOL);
 
-        match pat {
-            HIRPattern::Wild => {
-                // 处理通配符模式（_），忽略绑定。
+        match pattern_match_plan(pat) {
+            PatternMatchPlan::AlwaysTrue => {
                 self.push_inst(Instruction::Assign {
                     destination: result,
                     value: MirConstant::Bool(true),
                 });
                 result
             }
-            HIRPattern::Lit(lit) => {
-                // 字面量模式：生成常量对比指令。
-                let lit_local = self.lower_literal(lit);
+            PatternMatchPlan::EqLiteral(lit) => {
+                let lit_local = self.lower_literal(&lit);
                 self.push_inst(Instruction::Binary {
                     destination: result,
                     op: MirBinOp::Eq,
                     left: value,
                     right: lit_local,
-                });
-                result
-            }
-            HIRPattern::Var { .. } => {
-                // 变量模式：将值赋给对应的局部变量。
-                self.push_inst(Instruction::Assign {
-                    destination: result,
-                    value: MirConstant::Bool(true),
-                });
-                result
-            }
-            _ => {
-                // 默认模式：不生成绑定指令。
-                self.push_inst(Instruction::Assign {
-                    destination: result,
-                    value: MirConstant::Bool(true),
                 });
                 result
             }
@@ -4655,6 +4637,5 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
 
 
