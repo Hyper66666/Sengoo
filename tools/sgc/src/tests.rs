@@ -1784,6 +1784,98 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_spawn_task_reports_completed_status() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def child() -> i64 {
+    await sleep(5);
+    7
+}
+
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let pending = task_status(task);
+    await sleep(15);
+    let done = task_status(task);
+    if pending == 1 {
+        if done == 2 { 42 } else { 0 }
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("spawn_task source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-spawn-task-status", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-spawn-task-status", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("spawn_task status executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_cancel_task_marks_canceled_status() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def main() -> i64 {
+    let task = spawn_task(sleep(20));
+    let canceled = cancel_task(task);
+    let status = task_status(task);
+    if canceled {
+        if status == 3 { 42 } else { 0 }
+    } else {
+        0
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("cancel_task source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-cancel-task-status", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-cancel-task-status", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("cancel_task executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_polls_spawned_future_while_parent_waits() {
     let Some(clang) = find_clang() else {
         return;

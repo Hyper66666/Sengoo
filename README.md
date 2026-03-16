@@ -312,6 +312,9 @@ Currently supported:
 - `sleep(ms)` as an awaitable timer future
 - `timeout(future, ms)` as an awaitable `Future<bool>`
 - `spawn(future)`
+- `spawn_task(future) -> i64`
+- `cancel_task(task_id) -> bool`
+- `task_status(task_id) -> i64` (`0=unknown`, `1=pending`, `2=completed`, `3=canceled`)
 - `join(f1, f2)`
 - `select(f1, f2)` for two same-type scalar futures (`Future<bool>`, `Future<i8/i16/i32/i64>`, `Future<f32/f64>`)
 
@@ -319,6 +322,7 @@ Current limitations:
 
 - `select` is currently limited to two operands whose future result type is a matching scalar (`bool`, integer, or float)
 - loser futures in `select` are not canceled yet
+- `spawn(future)` still returns an awaitable `Future<T>`; task lifecycle management is exposed separately through `spawn_task/cancel_task/task_status`
 - timer support currently covers `sleep` and `timeout`, but not a general timer queue / wheel
 - no IO wakeups yet
 - no user-defined awaitables or full trait-based Future abstraction
@@ -335,6 +339,23 @@ async def main() -> i64 {
     let value = select(task, add1(1));
     print(value);
     value
+}
+```
+
+Task lifecycle example:
+
+```sg
+async def child() -> i64 {
+    await sleep(5);
+    7
+}
+
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let before = task_status(task);
+    await sleep(10);
+    let after = task_status(task);
+    if before == 1 && after == 2 { 42 } else { 0 }
 }
 ```
 

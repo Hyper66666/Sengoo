@@ -1899,6 +1899,9 @@ impl TypeChecker {
 
             provided_known.insert(field_name);
             let value_ty = self.check_expr(&field_value.value)?;
+            if self.contains_future_escape_ty(&value_ty) {
+                return Err(Self::future_escape_error());
+            }
             self.infer.unify(&expected_ty, &value_ty)?;
         }
 
@@ -1959,6 +1962,28 @@ impl TypeChecker {
             .map(|field| format!("`{}`", field))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    fn future_escape_error() -> TypeckError {
+        TypeckError::Other(
+            "phase-1 async future values cannot escape; await the async call directly"
+                .to_string(),
+        )
+    }
+
+    fn contains_future_escape_ty(&self, ty: &Ty) -> bool {
+        let resolved = self.infer.apply_subst(ty);
+        Self::ty_contains_future_escape(&resolved)
+    }
+
+    fn ty_contains_future_escape(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Future(_) => true,
+            TyKind::Tuple(types) => types.iter().any(Self::ty_contains_future_escape),
+            TyKind::Array(elem, _) | TyKind::Slice(elem) => Self::ty_contains_future_escape(elem),
+            TyKind::Adt { args, .. } => args.iter().any(Self::ty_contains_future_escape),
+            _ => false,
+        }
     }
 
     /// 检查字面量表达式并返回其类型。
@@ -2306,6 +2331,29 @@ impl TypeChecker {
             return Ok(future_ty);
         }
 
+        if builtin_name == Some("spawn_task") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "spawn_task is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+
+            let future_ty = self.check_expr(&args[0])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "spawn_task requires a Future value".to_string(),
+                ));
+            }
+
+            return Ok(self.env.int_ty(IntKind::I64));
+        }
+
         if builtin_name == Some("sleep") {
             if self.async_context_depth == 0 {
                 return Err(TypeckError::Other(
@@ -2374,6 +2422,44 @@ impl TypeChecker {
             }
 
             return Ok(self.env.unit_ty());
+        }
+
+        if builtin_name == Some("cancel_task") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "cancel_task is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+
+            let task_ty = self.check_expr(&args[0])?;
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&task_ty, &i64_ty)?;
+            return Ok(self.env.bool_ty());
+        }
+
+        if builtin_name == Some("task_status") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "task_status is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+
+            let task_ty = self.check_expr(&args[0])?;
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&task_ty, &i64_ty)?;
+            return Ok(i64_ty);
         }
 
         if builtin_name == Some("select") {
@@ -2482,7 +2568,7 @@ impl TypeChecker {
                 let actual_ty = self.check_expr(arg_expr)?;
                 // Passing an unawaited Future as a function argument is an escape.
                 // The caller must `await` it at the call-site first.
-                if actual_ty.is_future() {
+                if self.contains_future_escape_ty(&actual_ty) {
                     return Err(TypeckError::Other(
                         "future values cannot be passed as arguments; await the async call first"
                             .to_string(),
@@ -2685,6 +2771,9 @@ impl TypeChecker {
             .iter()
             .map(|e| self.check_expr(e))
             .collect::<TyResult<Vec<_>>>()?;
+        if elem_types.iter().any(|ty| self.contains_future_escape_ty(ty)) {
+            return Err(Self::future_escape_error());
+        }
         Ok(self.env.tuple_ty(elem_types))
     }
 
@@ -2695,8 +2784,14 @@ impl TypeChecker {
         }
 
         let first_ty = self.check_expr(&elems[0])?;
+        if self.contains_future_escape_ty(&first_ty) {
+            return Err(Self::future_escape_error());
+        }
         for elem in &elems[1..] {
             let ty = self.check_expr(elem)?;
+            if self.contains_future_escape_ty(&ty) {
+                return Err(Self::future_escape_error());
+            }
             self.infer.unify(&first_ty, &ty)?;
         }
 
@@ -2895,11 +2990,8 @@ impl TypeChecker {
         match value {
             Some(v) => {
                 let ty = self.check_expr(v)?;
-                if ty.is_future() {
-                    return Err(TypeckError::Other(
-                        "phase-1 async future values cannot escape; await the async call directly"
-                            .to_string(),
-                    ));
+                if self.contains_future_escape_ty(&ty) {
+                    return Err(Self::future_escape_error());
                 }
             }
             None => {}
@@ -2911,7 +3003,10 @@ impl TypeChecker {
     fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         match value {
             Some(v) => {
-                self.check_expr(v)?;
+                let ty = self.check_expr(v)?;
+                if self.contains_future_escape_ty(&ty) {
+                    return Err(Self::future_escape_error());
+                }
             }
             None => {}
         }
@@ -2929,13 +3024,6 @@ impl Default for TypeChecker {
         Self::new()
     }
 }
-
-
-
-
-
-
-
 
 
 

@@ -2351,6 +2351,31 @@ impl<'a> LoweringContext<'a> {
         self.current_block.expect("no current block set")
     }
 
+    fn propagate_future_origin_through_phi(
+        &mut self,
+        destination: Local,
+        incoming: &[(Local, usize)],
+    ) {
+        if !matches!(self.get_local_type(destination), MIRType::Future(_)) {
+            return;
+        }
+
+        let mut resolved = Vec::with_capacity(incoming.len());
+        for (local, _) in incoming {
+            let Some(origin) = self.future_origins.get(local).cloned() else {
+                return;
+            };
+            resolved.push(origin);
+        }
+
+        let Some(first) = resolved.first().cloned() else {
+            return;
+        };
+        if resolved.iter().all(|origin| origin == &first) {
+            self.future_origins.insert(destination, first);
+        }
+    }
+
     /// Check if two types are compatible for binary operations and, if not,
     /// try to insert Cast instructions to reconcile them.  Returns the
     /// (possibly cast) left and right locals whose types now match, or pushes
@@ -3056,6 +3081,41 @@ impl<'a> LoweringContext<'a> {
         future_handle
     }
 
+    fn lower_builtin_spawn_task(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "spawn_task expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let future_handle = arg_locals[0];
+        let base_name = self.resolve_async_base_name(future_handle);
+        if base_name == "unknown" {
+            self.errors.push(
+                "spawn_task requires a future produced by an async function or async block"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: kind_local,
+            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+        });
+
+        let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: task_id,
+            func: "sengoo_async_spawn_raw".to_string(),
+            args: vec![kind_local, future_handle],
+        });
+
+        task_id
+    }
+
     fn lower_builtin_sleep(&mut self, arg_locals: &[Local]) -> Local {
         if arg_locals.len() != 1 {
             self.errors.push(format!(
@@ -3170,6 +3230,42 @@ impl<'a> LoweringContext<'a> {
         let _first_result = self.lower_async_wait(arg_locals[0]);
         let _second_result = self.lower_async_wait(arg_locals[1]);
         self.add_local(None, LocalKind::Temp, MIR_UNIT)
+    }
+
+    fn lower_builtin_cancel_task(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "cancel_task expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let result_local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
+        self.push_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_cancel_task".to_string(),
+            args: vec![arg_locals[0]],
+        });
+        result_local
+    }
+
+    fn lower_builtin_task_status(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "task_status expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_task_status".to_string(),
+            args: vec![arg_locals[0]],
+        });
+        result_local
     }
 
     fn lower_builtin_select(&mut self, arg_locals: &[Local]) -> Local {
@@ -3443,10 +3539,12 @@ impl<'a> LoweringContext<'a> {
                         self.add_local(None, LocalKind::Temp, MIR_UNIT)
                     } else {
                         let result = self.add_local(None, LocalKind::Temp, then_ty);
+                        let incoming = vec![(then_val, then_end), (else_val, else_end)];
                         self.push_inst(Instruction::Phi {
                             destination: result,
-                            incoming: vec![(then_val, then_end), (else_val, else_end)],
+                            incoming: incoming.clone(),
                         });
+                        self.propagate_future_origin_through_phi(result, &incoming);
                         result
                     }
                 } else {
@@ -3892,6 +3990,8 @@ impl<'a> LoweringContext<'a> {
                             }
                         } else if name == "print" {
                             return self.lower_builtin_print(&arg_locals);
+                        } else if name == "spawn_task" {
+                            return self.lower_builtin_spawn_task(&arg_locals);
                         } else if name == "sleep" {
                             return self.lower_builtin_sleep(&arg_locals);
                         } else if name == "timeout" {
@@ -3900,6 +4000,10 @@ impl<'a> LoweringContext<'a> {
                             return self.lower_builtin_spawn(&arg_locals);
                         } else if name == "join" {
                             return self.lower_builtin_join(&arg_locals);
+                        } else if name == "cancel_task" {
+                            return self.lower_builtin_cancel_task(&arg_locals);
+                        } else if name == "task_status" {
+                            return self.lower_builtin_task_status(&arg_locals);
                         } else if name == "select" {
                             return self.lower_builtin_select(&arg_locals);
                         } else {
@@ -4565,8 +4669,9 @@ impl<'a> LoweringContext<'a> {
                                 let result = self.add_local(None, LocalKind::Temp, result_ty);
                                 self.push_inst(Instruction::Phi {
                                     destination: result,
-                                    incoming: incoming_values,
+                                    incoming: incoming_values.clone(),
                                 });
+                                self.propagate_future_origin_through_phi(result, &incoming_values);
                                 result
                             }
                         } else {
@@ -4628,8 +4733,9 @@ impl<'a> LoweringContext<'a> {
                                 let result = self.add_local(None, LocalKind::Temp, result_ty);
                                 self.push_inst(Instruction::Phi {
                                     destination: result,
-                                    incoming: incoming_values,
+                                    incoming: incoming_values.clone(),
                                 });
+                                self.propagate_future_origin_through_phi(result, &incoming_values);
                                 result
                             }
                         } else {
@@ -4917,10 +5023,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
-
-
-
 
 
 

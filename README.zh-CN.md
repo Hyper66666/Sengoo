@@ -298,32 +298,36 @@ sgc build <file.sg> -O 2 --force-rebuild
 sgc daemon --addr 127.0.0.1:48765
 ```
 
-## Async 执行
+## Async ??
 
-当入口是 `async def main()` 时，`sgc run` 已支持原生 async 执行路径。
+???? `async def main()` ??`sgc run` ????? async ?????
 
-当前支持：
+?????
 
 - `async def`
 - `await async_fn(...)`
-- `async { ... }` 块，包括捕获外部局部变量
-- 通过 `sgc run` 使用 runtime bridge 执行原生 async
-- 当前测试已覆盖的 frame-backed async lowering：顺序控制流，以及 `if`、`loop`、`match` 形态路径
-- 可被 `await` 的 `sleep(ms)` 定时 future
-- 可被 `await` 的 `timeout(future, ms)`，返回 `Future<bool>`
+- `async { ... }` ????????????
+- ?? `sgc run` ?? runtime bridge ???? async
+- ???????? frame-backed async lowering????????? `if`?`loop`?`match` ????
+- ?? `await` ? `sleep(ms)` ?? future
+- ?? `await` ? `timeout(future, ms)`??? `Future<bool>`
 - `spawn(future)`
+- `spawn_task(future) -> i64`
+- `cancel_task(task_id) -> bool`
+- `task_status(task_id) -> i64`?`0=unknown`?`1=pending`?`2=completed`?`3=canceled`?
 - `join(f1, f2)`
-- 针对两个同结果类型的标量 future 的 `select(f1, f2)`，包括 `Future<bool>`、`Future<i8/i16/i32/i64>`、`Future<f32/f64>`
+- ???????????? future ? `select(f1, f2)`??? `Future<bool>`?`Future<i8/i16/i32/i64>`?`Future<f32/f64>`
 
-当前限制：
+?????
 
-- `select` 目前只支持结果类型为同一种标量的两个 future 操作数，也就是 `bool`、整数或浮点
-- `select` 中未胜出的 future 还不会被取消
-- timer 目前覆盖 `sleep` 和 `timeout`，但还不是通用 timer queue / wheel
-- 还没有 IO wakeup
-- 还没有用户自定义 awaitable，也没有完整 trait-based Future 抽象
+- `select` ?????????????????? future ??????? `bool`??????
+- `select` ????? future ??????
+- `spawn(future)` ????? `await` ? `Future<T>`??????????? `spawn_task/cancel_task/task_status` ????
+- timer ???? `sleep` ? `timeout`??????? timer queue / wheel
+- ??? IO wakeup
+- ???????? awaitable?????? trait-based Future ??
 
-最小示例：
+?????
 
 ```sg
 async def add1(x: i64) -> i64 {
@@ -338,7 +342,24 @@ async def main() -> i64 {
 }
 ```
 
-Timer 示例：
+?????????
+
+```sg
+async def child() -> i64 {
+    await sleep(5);
+    7
+}
+
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let before = task_status(task);
+    await sleep(10);
+    let after = task_status(task);
+    if before == 1 && after == 2 { 42 } else { 0 }
+}
+```
+
+Timer ???
 
 ```sg
 async def work() -> i64 {
@@ -354,12 +375,6 @@ async def main() -> i64 {
         0
     }
 }
-```
-
-运行方式和同步程序相同：
-
-```bash
-sgc run <file.sg> -O 1
 ```
 
 ## VS Code 扩展

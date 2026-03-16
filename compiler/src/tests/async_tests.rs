@@ -291,6 +291,79 @@ async def main() -> i64 {
 }
 
 #[test]
+fn spawn_task_builtin_returns_task_id() {
+    let source = r#"
+async def child() -> i64 { 7 }
+async def main() -> i64 {
+    let task = spawn_task(child());
+    task_status(task)
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "spawn_task should return a task id usable with task_status, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn spawn_task_builtin_requires_async_context() {
+    let source = r#"
+async def child() -> i64 { 1 }
+def main() -> i64 {
+    let task = spawn_task(child());
+    task
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("spawn_task outside async should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("spawn_task is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn cancel_task_builtin_requires_async_context() {
+    let source = r#"
+def main() -> i64 {
+    let task: i64 = 1;
+    if cancel_task(task) { 1 } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("cancel_task outside async should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("cancel_task is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn task_status_builtin_requires_async_context() {
+    let source = r#"
+def main() -> i64 {
+    let task: i64 = 1;
+    task_status(task)
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("task_status outside async should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("task_status is only allowed in async contexts"),
+        "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
 fn spawn_lowering_emits_runtime_spawn_call() {
     let source = r#"
 async def add_one(x: i64) -> i64 { x + 1 }
@@ -312,6 +385,32 @@ async def main() -> i64 {
         has_spawn_call,
         "spawn lowering should emit a runtime spawn call"
     );
+}
+
+#[test]
+fn task_lifecycle_lowering_emits_runtime_calls() {
+    let source = r#"
+async def child() -> i64 { 7 }
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let canceled = cancel_task(task);
+    if canceled { task_status(task) } else { 0 }
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("task lifecycle source should lower to MIR");
+    let mut call_names = std::collections::HashSet::new();
+    for mir_fn in &mir_fns {
+        for inst in &mir_fn.instructions {
+            if let Instruction::Call { func, .. } = inst {
+                call_names.insert(func.clone());
+            }
+        }
+    }
+
+    assert!(call_names.contains("sengoo_async_spawn_raw"));
+    assert!(call_names.contains("sengoo_async_cancel_task"));
+    assert!(call_names.contains("sengoo_async_task_status"));
 }
 
 #[test]
@@ -596,6 +695,87 @@ async def main() -> i64 {
 }
 
 #[test]
+fn breaking_with_future_is_rejected() {
+    let source = r#"
+async def helper() -> i64 { 42 }
+async def main() -> i64 {
+    loop {
+        break helper()
+    }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("breaking with a future should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("future values cannot escape"),
+        "error should mention escape restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn phi_merged_future_binding_can_be_awaited_when_origins_match() {
+    let source = r#"
+async def helper() -> i64 { 42 }
+async def main() -> i64 {
+    let flag: bool = true;
+    let fut = if flag { helper() } else { helper() };
+    await fut
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "phi-merged future binding should remain awaitable, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn array_storing_future_is_rejected() {
+    let source = r#"
+async def helper() -> i64 { 42 }
+async def main() -> i64 {
+    let items = [helper()];
+    0
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("array storing a future should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("future values cannot escape"),
+        "error should mention future escape restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn struct_storing_future_is_rejected() {
+    let source = r#"
+struct Wrap<T> {
+    value: T,
+}
+
+async def helper() -> i64 { 42 }
+async def main() -> i64 {
+    let wrapped = Wrap { value: helper() };
+    0
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("struct storing a future should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("future values cannot escape"),
+        "error should mention future escape restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
 fn async_helpers_are_synthesized_in_mir() {
     let source = r#"
 async def add_one(x: i64) -> i64 {
@@ -626,6 +806,16 @@ def main() -> i64 {
     assert!(
         names.contains(&"add_one__result"),
         "__result helper should be synthesized, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"sengoo_async_cancel_dispatch"),
+        "cancel dispatch helper should be synthesized, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"sengoo_async_drop_dispatch"),
+        "drop dispatch helper should be synthesized, got: {:?}",
         names
     );
 }
@@ -1247,5 +1437,3 @@ async def main() -> i64 {
         result.err()
     );
 }
-
-
