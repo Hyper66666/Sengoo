@@ -11,6 +11,7 @@
 mod bb;
 pub(crate) mod async_origin_helpers;
 mod generic_methods;
+pub(crate) mod hir_specialization_helpers;
 mod inst;
 pub(crate) mod lowering_helpers;
 pub(crate) mod pattern_helpers;
