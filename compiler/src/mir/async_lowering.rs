@@ -233,7 +233,7 @@ pub fn expand_async_functions(
         let await_count = count_await_points(mir_fn);
         let spill_user_locals = if await_count == 0 {
             Vec::new()
-        } else if let Some(plan) = build_async_cfg_plan(mir_fn) {
+        } else if let Ok(plan) = build_async_cfg_plan(mir_fn) {
             let live_in = compute_live_in_user_locals(mir_fn, &plan);
             collect_spill_user_locals(&plan, &user_locals, &live_in)
         } else {
@@ -272,6 +272,8 @@ pub fn expand_async_functions(
 
     if !spawn_dispatch_entries.is_empty() {
         new_fns.push(synthesize_spawn_poll_dispatch(&spawn_dispatch_entries));
+        new_fns.push(synthesize_spawn_cancel_dispatch(&spawn_dispatch_entries));
+        new_fns.push(synthesize_spawn_drop_dispatch(&spawn_dispatch_entries));
     }
     let needs_timeout_bool_dispatch = mir_fns.iter().any(|mir_fn| {
         mir_fn.instructions.iter().any(|inst| match inst {
@@ -379,6 +381,155 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
     });
     f.basic_blocks[default_block].push(ready_inst);
     f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(ready_local)));
+
+    f
+}
+
+fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction {
+    let mut f = MirFunction::new(
+        "sengoo_async_cancel_dispatch".to_string(),
+        vec![MIR_I64, MIR_I64],
+        MIR_BOOL,
+    );
+
+    let bb0 = f.start_block;
+    let kind_local = Local::new(1, LocalKind::Param);
+    let handle_local = Local::new(2, LocalKind::Param);
+    let default_block = f.add_block();
+    let mut targets = Vec::with_capacity(entries.len());
+
+    for (base_name, _) in entries {
+        let case_block = f.add_block();
+        let free_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: free_dest,
+            func: "sengoo_async_frame_free".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        let true_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let true_inst = f.alloc_inst(Instruction::Assign {
+            destination: true_local,
+            value: MirConstant::Bool(true),
+        });
+        f.basic_blocks[case_block].push(true_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(true_local)));
+        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+    }
+
+    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_sleep__cancel".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+    }
+
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_timeout_bool")
+    {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_timeout_bool__cancel".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((
+            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            case_block,
+        ));
+    }
+
+    f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+        discr: kind_local,
+        targets,
+        otherwise: default_block,
+    });
+
+    let false_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+    let false_inst = f.alloc_inst(Instruction::Assign {
+        destination: false_local,
+        value: MirConstant::Bool(false),
+    });
+    f.basic_blocks[default_block].push(false_inst);
+    f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(false_local)));
+
+    f
+}
+
+fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
+    let mut f = MirFunction::new(
+        "sengoo_async_drop_dispatch".to_string(),
+        vec![MIR_I64, MIR_I64],
+        MIR_UNIT,
+    );
+
+    let bb0 = f.start_block;
+    let kind_local = Local::new(1, LocalKind::Param);
+    let handle_local = Local::new(2, LocalKind::Param);
+    let default_block = f.add_block();
+    let mut targets = Vec::with_capacity(entries.len());
+
+    for (base_name, _) in entries {
+        let case_block = f.add_block();
+        let free_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: free_dest,
+            func: "sengoo_async_frame_free".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
+        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+    }
+
+    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+        let case_block = f.add_block();
+        let unit_local = f.add_local(LocalKind::Temp, MIR_UNIT);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: unit_local,
+            func: "sengoo_async_sleep__drop".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
+        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+    }
+
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_timeout_bool")
+    {
+        let case_block = f.add_block();
+        let unit_local = f.add_local(LocalKind::Temp, MIR_UNIT);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: unit_local,
+            func: "sengoo_async_timeout_bool__drop".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
+        targets.push((
+            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            case_block,
+        ));
+    }
+
+    f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+        discr: kind_local,
+        targets,
+        otherwise: default_block,
+    });
+    f.basic_blocks[default_block].set_terminator(Terminator::Return(None));
 
     f
 }
@@ -565,6 +716,37 @@ struct AsyncCfgPlan {
 }
 
 #[derive(Debug, Clone)]
+struct AsyncCfgPlanError {
+    message: String,
+}
+
+impl AsyncCfgPlanError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    fn describe(&self) -> &str {
+        &self.message
+    }
+}
+
+fn async_cfg_terminator_name(terminator: &Terminator) -> &'static str {
+    match terminator {
+        Terminator::Return(_) => "return",
+        Terminator::Goto(_) => "goto",
+        Terminator::If { .. } => "if",
+        Terminator::Switch { .. } => "switch",
+        Terminator::Call { .. } => "call",
+        Terminator::Break { .. } => "break",
+        Terminator::Continue { .. } => "continue",
+        Terminator::Unreachable => "unreachable",
+        Terminator::Suspend { .. } => "suspend",
+    }
+}
+
+#[derive(Debug, Clone)]
 struct LiveUserSlot {
     slot_index: usize,
     local: Local,
@@ -733,7 +915,7 @@ fn collect_spill_user_locals(
         .collect()
 }
 
-fn build_async_cfg_plan(mir_fn: &MirFunction) -> Option<AsyncCfgPlan> {
+fn build_async_cfg_plan(mir_fn: &MirFunction) -> Result<AsyncCfgPlan, AsyncCfgPlanError> {
     let mut ordered_blocks = Vec::new();
     let mut suspend_points = Vec::new();
     let mut visited = HashSet::<usize>::new();
@@ -744,12 +926,23 @@ fn build_async_cfg_plan(mir_fn: &MirFunction) -> Option<AsyncCfgPlan> {
         visited: &mut HashSet<usize>,
         ordered_blocks: &mut Vec<usize>,
         suspend_points: &mut Vec<PlannedSuspendPoint>,
-    ) -> Option<()> {
+    ) -> Result<(), AsyncCfgPlanError> {
         if !visited.insert(block) {
-            return Some(());
+            return Ok(());
         }
 
-        let terminator = mir_fn.basic_blocks.get(block)?.terminator.clone()?;
+        let basic_block = mir_fn.basic_blocks.get(block).ok_or_else(|| {
+            AsyncCfgPlanError::new(format!(
+                "block {} is missing from the async CFG",
+                block
+            ))
+        })?;
+        let terminator = basic_block.terminator.clone().ok_or_else(|| {
+            AsyncCfgPlanError::new(format!(
+                "block {} has no terminator; expected goto/if/switch/return or suspend with a self-looping pending block",
+                block
+            ))
+        })?;
         match terminator {
             Terminator::Suspend {
                 poll_func,
@@ -758,9 +951,34 @@ fn build_async_cfg_plan(mir_fn: &MirFunction) -> Option<AsyncCfgPlan> {
                 pending_block,
                 ..
             } => {
-                match mir_fn.basic_blocks.get(pending_block)?.terminator.as_ref() {
+                match mir_fn
+                    .basic_blocks
+                    .get(pending_block)
+                    .ok_or_else(|| {
+                        AsyncCfgPlanError::new(format!(
+                            "suspend block {} references missing pending block {}",
+                            block, pending_block
+                        ))
+                    })?
+                    .terminator
+                    .as_ref()
+                {
                     Some(Terminator::Goto(target)) if *target == pending_block => {}
-                    _ => return None,
+                    Some(other) => {
+                        return Err(AsyncCfgPlanError::new(format!(
+                            "suspend block {} expects pending block {} to self-loop with `goto`, but found `{}`",
+                            block,
+                            pending_block,
+                            async_cfg_terminator_name(other)
+                        )))
+                    }
+                    None => {
+                        return Err(AsyncCfgPlanError::new(format!(
+                            "suspend block {} expects pending block {} to self-loop with `goto`, but the pending block has no terminator",
+                            block,
+                            pending_block
+                        )))
+                    }
                 }
                 suspend_points.push(PlannedSuspendPoint {
                     state_index: suspend_points.len() + 1,
@@ -823,11 +1041,17 @@ fn build_async_cfg_plan(mir_fn: &MirFunction) -> Option<AsyncCfgPlan> {
                 )?;
             }
             Terminator::Return(_) => {}
-            _ => return None,
+            other => {
+                return Err(AsyncCfgPlanError::new(format!(
+                    "block {} uses unsupported `{}` terminator; async frame lowering currently expects await control flow built from suspend, goto, if, switch, and return edges",
+                    block,
+                    async_cfg_terminator_name(&other)
+                )))
+            }
         }
 
         ordered_blocks.push(block);
-        Some(())
+        Ok(())
     }
 
     visit_async_block(
@@ -839,7 +1063,7 @@ fn build_async_cfg_plan(mir_fn: &MirFunction) -> Option<AsyncCfgPlan> {
     )?;
     ordered_blocks.reverse();
 
-    Some(AsyncCfgPlan {
+    Ok(AsyncCfgPlan {
         ordered_blocks,
         suspend_points,
     })
@@ -1911,15 +2135,16 @@ fn synthesize_poll(
         return Ok(f);
     }
 
-    if let Some(plan) = build_async_cfg_plan(mir_fn) {
-        return synthesize_cfg_poll(layout, mir_fn, &plan, spill_user_locals);
+    match build_async_cfg_plan(mir_fn) {
+        Ok(plan) => return synthesize_cfg_poll(layout, mir_fn, &plan, spill_user_locals),
+        Err(reason) => {
+            let _ = (bb0, state, result_storage_ty, n_states);
+            Err(CompileError::Codegen(format!(
+                "async frame lowering requires await control flow that can be expressed with suspend points, self-looping pending blocks, and goto/if/switch/return edges; {}",
+                reason.describe()
+            )))
+        }
     }
-
-    let _ = (bb0, state, result_storage_ty, n_states);
-    Err(CompileError::Codegen(
-        "async frame lowering only supports goto/if/switch-based control flow around await points yet"
-            .to_string(),
-    ))
 }
 
 /// Generate `foo__result(handle: i64) -> T`
@@ -2269,5 +2494,103 @@ mod tests {
         assert!(call_names.contains(&"a__poll"));
         assert!(call_names.contains(&"b__poll"));
         assert!(!call_names.contains(&"main__body"));
+    }
+
+    #[test]
+    fn expand_async_functions_reports_unsupported_cfg_terminator() {
+        let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
+        mir_fn.is_async = true;
+
+        let future_handle = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let suspend_result = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let ready = mir_fn.add_block();
+        let pending = mir_fn.add_block();
+
+        mir_fn.basic_blocks[mir_fn.start_block].set_terminator(Terminator::Suspend {
+            poll_func: "child__poll".to_string(),
+            future_handle,
+            destination: suspend_result,
+            ready_block: ready,
+            pending_block: pending,
+        });
+        mir_fn.basic_blocks[pending].set_terminator(Terminator::Goto(pending));
+        mir_fn.basic_blocks[ready].set_terminator(Terminator::Break { target: ready });
+
+        let mut mir_fns = vec![mir_fn];
+        let err = expand_async_functions(&mut mir_fns)
+            .expect_err("unsupported async cfg terminators should produce a diagnostic");
+        let message = format!("{err}");
+        assert!(
+            message.contains("unsupported `break` terminator"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("self-looping pending blocks"),
+            "error should describe expected async cfg shape, got: {message}"
+        );
+    }
+
+    #[test]
+    fn expand_async_functions_synthesizes_cancel_dispatch_with_builtin_cases() {
+        let source = r#"
+async def worker() -> i64 { 1 }
+async def main() -> i64 {
+    let a = worker();
+    let b = sleep(1);
+    let c = timeout(worker(), 2);
+    0
+}
+"#;
+
+        let mut mir_fns = crate::compile_to_mir(source).expect("source should lower to MIR");
+        let helpers = expand_async_functions(&mut mir_fns).expect("async helpers should expand");
+        let cancel_dispatch = helpers
+            .iter()
+            .find(|f| f.name == "sengoo_async_cancel_dispatch")
+            .expect("cancel dispatch helper should exist");
+        let call_names = cancel_dispatch
+            .instructions
+            .iter()
+            .filter_map(|inst| match inst {
+                Instruction::Call { func, .. } => Some(func.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(call_names.contains(&"sengoo_async_frame_free"));
+        assert!(call_names.contains(&"sengoo_async_sleep__cancel"));
+        assert!(call_names.contains(&"sengoo_async_timeout_bool__cancel"));
+    }
+
+    #[test]
+    fn expand_async_functions_synthesizes_drop_dispatch_with_builtin_cases() {
+        let source = r#"
+async def worker() -> i64 { 1 }
+async def main() -> i64 {
+    let a = worker();
+    let b = sleep(1);
+    let c = timeout(worker(), 2);
+    0
+}
+"#;
+
+        let mut mir_fns = crate::compile_to_mir(source).expect("source should lower to MIR");
+        let helpers = expand_async_functions(&mut mir_fns).expect("async helpers should expand");
+        let drop_dispatch = helpers
+            .iter()
+            .find(|f| f.name == "sengoo_async_drop_dispatch")
+            .expect("drop dispatch helper should exist");
+        let call_names = drop_dispatch
+            .instructions
+            .iter()
+            .filter_map(|inst| match inst {
+                Instruction::Call { func, .. } => Some(func.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(call_names.contains(&"sengoo_async_frame_free"));
+        assert!(call_names.contains(&"sengoo_async_sleep__drop"));
+        assert!(call_names.contains(&"sengoo_async_timeout_bool__drop"));
     }
 }

@@ -392,6 +392,8 @@ impl Codegen {
                         "sengoo_async_sleep__start"
                             | "sengoo_async_sleep__poll"
                             | "sengoo_async_sleep__result"
+                            | "sengoo_async_sleep__cancel"
+                            | "sengoo_async_sleep__drop"
                     )
                 }
                 _ => false,
@@ -419,6 +421,10 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_sleep__poll(i64)\n");
         self.declarations
             .push_str("declare void @sengoo_async_sleep__result(i64)\n");
+        self.declarations
+            .push_str("declare i1 @sengoo_async_sleep__cancel(i64)\n");
+        self.declarations
+            .push_str("declare void @sengoo_async_sleep__drop(i64)\n");
     }
 
     fn maybe_declare_timeout_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
@@ -430,6 +436,8 @@ impl Codegen {
                         "sengoo_async_timeout_bool__start"
                             | "sengoo_async_timeout_bool__poll"
                             | "sengoo_async_timeout_bool__result"
+                            | "sengoo_async_timeout_bool__cancel"
+                            | "sengoo_async_timeout_bool__drop"
                     )
                 }
                 _ => false,
@@ -457,6 +465,37 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_timeout_bool__poll(i64)\n");
         self.declarations
             .push_str("declare i1 @sengoo_async_timeout_bool__result(i64)\n");
+        self.declarations
+            .push_str("declare i1 @sengoo_async_timeout_bool__cancel(i64)\n");
+        self.declarations
+            .push_str("declare void @sengoo_async_timeout_bool__drop(i64)\n");
+    }
+
+    fn maybe_declare_async_task_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let needs_task_runtime = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => {
+                    matches!(
+                        func.as_str(),
+                        "sengoo_async_cancel_task" | "sengoo_async_task_status"
+                    )
+                }
+                _ => false,
+            })
+        });
+
+        if !needs_task_runtime
+            || self
+                .declarations
+                .contains("declare i1 @sengoo_async_cancel_task(i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
+        self.declarations
+            .push_str("declare i64 @sengoo_async_task_status(i64)\n");
     }
     fn emit_string_constants(&mut self) {
 
@@ -683,6 +722,7 @@ impl Codegen {
         self.maybe_declare_select_runtime_function(mir_fns);
         self.maybe_declare_sleep_runtime_functions(mir_fns);
         self.maybe_declare_timeout_runtime_functions(mir_fns);
+        self.maybe_declare_async_task_runtime_functions(mir_fns);
         self.emit_string_constants();
 
 
@@ -2995,6 +3035,4 @@ impl Codegen {
     }
 
 }
-
-
 

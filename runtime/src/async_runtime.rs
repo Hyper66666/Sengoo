@@ -1,6 +1,6 @@
 //! Coroutine-compatible async runtime scheduling primitives.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 #[cfg(feature = "native-bridge")]
 use std::cell::Cell;
@@ -19,8 +19,23 @@ pub enum TaskState {
     Complete,
 }
 
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskLifecycleStatus {
+    Unknown = 0,
+    Pending = 1,
+    Completed = 2,
+    Canceled = 3,
+}
+
 pub trait CoroutineTask {
     fn poll(&mut self) -> TaskState;
+
+    fn cancel(&mut self) -> bool {
+        true
+    }
+
+    fn on_scheduler_drop(&mut self) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,11 +55,20 @@ pub struct CoroutineScheduler {
     next_id: TaskId,
     queue: VecDeque<TaskEntry>,
     completed: usize,
+    statuses: HashMap<TaskId, TaskLifecycleStatus>,
 }
 
 impl Default for CoroutineScheduler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for CoroutineScheduler {
+    fn drop(&mut self) {
+        for mut entry in self.queue.drain(..) {
+            entry.task.on_scheduler_drop();
+        }
     }
 }
 
@@ -54,6 +78,7 @@ impl CoroutineScheduler {
             next_id: 1,
             queue: VecDeque::new(),
             completed: 0,
+            statuses: HashMap::new(),
         }
     }
 
@@ -68,6 +93,7 @@ impl CoroutineScheduler {
             task: Box::new(task),
             next_wakeup: None,
         });
+        self.statuses.insert(id, TaskLifecycleStatus::Pending);
         id
     }
 
@@ -80,6 +106,35 @@ impl CoroutineScheduler {
             scheduled: self.queue.len(),
             completed: self.completed,
         }
+    }
+
+    pub fn task_status(&self, task_id: TaskId) -> TaskLifecycleStatus {
+        self.statuses
+            .get(&task_id)
+            .copied()
+            .unwrap_or(TaskLifecycleStatus::Unknown)
+    }
+
+    pub fn cancel(&mut self, task_id: TaskId) -> bool {
+        let Some(index) = self.queue.iter().position(|entry| entry.id == task_id) else {
+            return false;
+        };
+
+        let canceled = self
+            .queue
+            .get_mut(index)
+            .map(|entry| entry.task.cancel())
+            .unwrap_or(false);
+        if !canceled {
+            return false;
+        }
+
+        let _entry = self
+            .queue
+            .remove(index)
+            .expect("task index located in queue should remain valid");
+        self.statuses.insert(task_id, TaskLifecycleStatus::Canceled);
+        true
     }
 
     /// Poll every queued task once.
@@ -110,6 +165,8 @@ impl CoroutineScheduler {
                 }
                 TaskState::Complete => {
                     self.completed += 1;
+                    self.statuses
+                        .insert(entry.id, TaskLifecycleStatus::Completed);
                     ready.push(entry.id);
                 }
             }
@@ -165,6 +222,8 @@ unsafe extern "C" {
     fn main__poll(handle: i64) -> i64;
     fn main__result(handle: i64) -> i64;
     fn sengoo_async_poll_dispatch(kind: i64, handle: i64) -> i64;
+    fn sengoo_async_cancel_dispatch(kind: i64, handle: i64) -> bool;
+    fn sengoo_async_drop_dispatch(kind: i64, handle: i64);
     fn sengoo_async_result_dispatch_i8(kind: i64, handle: i64) -> i8;
     fn sengoo_async_result_dispatch_i16(kind: i64, handle: i64) -> i16;
     fn sengoo_async_result_dispatch_i32(kind: i64, handle: i64) -> i32;
@@ -334,6 +393,10 @@ impl CoroutineTask for RootAsyncMainI64Task {
         *self.result.lock().expect("async main result mutex poisoned") = Some(result);
         TaskState::Complete
     }
+
+    fn cancel(&mut self) -> bool {
+        false
+    }
 }
 
 #[cfg(feature = "native-bridge")]
@@ -349,6 +412,24 @@ impl CoroutineTask for ForeignAsyncTask {
             TaskState::Pending
         } else {
             TaskState::Complete
+        }
+    }
+
+    fn cancel(&mut self) -> bool {
+        if self.handle == 0 {
+            return true;
+        }
+        let canceled = unsafe { sengoo_async_cancel_dispatch(self.kind, self.handle) };
+        if canceled {
+            self.handle = 0;
+        }
+        canceled
+    }
+
+    fn on_scheduler_drop(&mut self) {
+        if self.handle != 0 {
+            unsafe { sengoo_async_drop_dispatch(self.kind, self.handle) };
+            self.handle = 0;
         }
     }
 }
@@ -397,6 +478,25 @@ pub unsafe extern "C" fn sengoo_async_sleep__poll(handle: i64) -> i64 {
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
 pub unsafe extern "C" fn sengoo_async_sleep__result(handle: i64) {
+    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
+        return;
+    };
+    drop(state);
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_sleep__cancel(handle: i64) -> bool {
+    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
+        return false;
+    };
+    drop(state);
+    true
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_sleep__drop(handle: i64) {
     let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
         return;
     };
@@ -457,6 +557,25 @@ pub unsafe extern "C" fn sengoo_async_timeout_bool__result(handle: i64) -> bool 
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
+pub unsafe extern "C" fn sengoo_async_timeout_bool__cancel(handle: i64) -> bool {
+    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
+        return false;
+    };
+    drop(state);
+    true
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_timeout_bool__drop(handle: i64) {
+    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
+        return;
+    };
+    drop(state);
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
 pub extern "C" fn sengoo_async_scheduler_new() -> *mut CoroutineScheduler {
     Box::into_raw(Box::new(CoroutineScheduler::new()))
 }
@@ -486,6 +605,66 @@ pub unsafe extern "C" fn sengoo_async_scheduler_run_until_idle(
         let finished = scheduler_ref.run_until_idle(max_ticks).len();
         cell.set(previous);
         finished
+    })
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_scheduler_cancel(
+    scheduler: *mut CoroutineScheduler,
+    task_id: i64,
+) -> bool {
+    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
+        return false;
+    };
+    if task_id <= 0 {
+        return false;
+    }
+    scheduler_ref.cancel(task_id as TaskId)
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub unsafe extern "C" fn sengoo_async_scheduler_task_status(
+    scheduler: *mut CoroutineScheduler,
+    task_id: i64,
+) -> i64 {
+    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
+        return TaskLifecycleStatus::Unknown as i64;
+    };
+    if task_id <= 0 {
+        return TaskLifecycleStatus::Unknown as i64;
+    }
+    scheduler_ref.task_status(task_id as TaskId) as i64
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub extern "C" fn sengoo_async_cancel_task(task_id: i64) -> bool {
+    CURRENT_SCHEDULER.with(|cell| {
+        let scheduler = cell.get();
+        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
+            return false;
+        };
+        if task_id <= 0 {
+            return false;
+        }
+        scheduler.cancel(task_id as TaskId)
+    })
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub extern "C" fn sengoo_async_task_status(task_id: i64) -> i64 {
+    CURRENT_SCHEDULER.with(|cell| {
+        let scheduler = cell.get();
+        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
+            return TaskLifecycleStatus::Unknown as i64;
+        };
+        if task_id <= 0 {
+            return TaskLifecycleStatus::Unknown as i64;
+        }
+        scheduler.task_status(task_id as TaskId) as i64
     })
 }
 
@@ -583,6 +762,8 @@ mod tests {
     static MAIN_DEADLINE_OFFSET_MS: AtomicI64 = AtomicI64::new(0);
     static MAIN_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
     static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
+    static CANCEL_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
+    static DROP_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
     static TEST_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -693,6 +874,25 @@ mod tests {
         }
     }
 
+    #[no_mangle]
+    pub unsafe extern "C" fn sengoo_async_cancel_dispatch(kind: i64, handle: i64) -> bool {
+        if kind == async_spawn_kind_id_for_tests() {
+            CANCEL_DISPATCH_CALLS.fetch_add(1, Ordering::SeqCst);
+            sengoo_async_sleep__result(handle);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn sengoo_async_drop_dispatch(kind: i64, handle: i64) {
+        if kind == async_spawn_kind_id_for_tests() {
+            DROP_DISPATCH_CALLS.fetch_add(1, Ordering::SeqCst);
+            sengoo_async_sleep__result(handle);
+        }
+    }
+
     macro_rules! define_test_result_dispatch {
         ($name:ident, $ty:ty, $value:expr) => {
             #[no_mangle]
@@ -768,6 +968,109 @@ mod tests {
         assert!(rest.contains(&b));
         assert!(scheduler.is_empty());
         assert_eq!(scheduler.stats().completed, 2);
+    }
+
+    #[test]
+    fn scheduler_cancel_marks_pending_task_as_canceled() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(3));
+
+        assert_eq!(scheduler.task_status(task) as i64, 1);
+        assert!(scheduler.cancel(task));
+        assert_eq!(scheduler.task_status(task) as i64, 3);
+        assert!(scheduler.is_empty());
+    }
+
+    #[test]
+    fn scheduler_task_status_tracks_completion() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(0));
+
+        assert_eq!(scheduler.task_status(task) as i64, 1);
+        let finished = scheduler.tick();
+        assert_eq!(finished, vec![task]);
+        assert_eq!(scheduler.task_status(task) as i64, 2);
+    }
+
+    #[test]
+    fn scheduler_ffi_cancel_and_status_handle_null_and_unknown_tasks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let scheduler = sengoo_async_scheduler_new();
+        let task = unsafe { scheduler_mut(scheduler).expect("scheduler should be valid") }
+            .spawn(CountDownTask(3));
+        let task = task as i64;
+
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(std::ptr::null_mut(), task) }, 0);
+        assert!(!unsafe { sengoo_async_scheduler_cancel(std::ptr::null_mut(), task) });
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task) }, 1);
+        assert!(unsafe { sengoo_async_scheduler_cancel(scheduler, task) });
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task) }, 3);
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task + 999) }, 0);
+
+        unsafe { sengoo_async_scheduler_free(scheduler) };
+    }
+
+    #[test]
+    fn current_scheduler_task_wrappers_use_thread_local_scheduler() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(3)) as i64;
+
+        CURRENT_SCHEDULER.with(|cell| {
+            let previous = cell.replace(&mut scheduler);
+            assert_eq!(sengoo_async_task_status(task), 1);
+            assert!(sengoo_async_cancel_task(task));
+            assert_eq!(sengoo_async_task_status(task), 3);
+            cell.set(previous);
+        });
+    }
+
+    #[test]
+    fn current_scheduler_task_wrappers_return_defaults_without_scheduler() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CURRENT_SCHEDULER.with(|cell| {
+            let previous = cell.replace(std::ptr::null_mut());
+            assert_eq!(sengoo_async_task_status(1), 0);
+            assert!(!sengoo_async_cancel_task(1));
+            cell.set(previous);
+        });
+    }
+
+    #[test]
+    fn scheduler_ffi_cancel_uses_dispatch_for_foreign_tasks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let scheduler = sengoo_async_scheduler_new();
+        let foreign_task = unsafe { scheduler_mut(scheduler).expect("scheduler should be valid") }
+            .spawn(ForeignAsyncTask {
+                kind: async_spawn_kind_id_for_tests(),
+                handle: sengoo_async_sleep__start(25),
+            });
+        let foreign_task = foreign_task as i64;
+
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) }, 1);
+        assert!(unsafe { sengoo_async_scheduler_cancel(scheduler, foreign_task) });
+        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) }, 3);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+
+        unsafe { sengoo_async_scheduler_free(scheduler) };
+    }
+
+    #[test]
+    fn scheduler_free_drops_pending_foreign_tasks_via_dispatch() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let scheduler = sengoo_async_scheduler_new();
+        let _foreign_task = unsafe { scheduler_mut(scheduler).expect("scheduler should be valid") }
+            .spawn(ForeignAsyncTask {
+                kind: async_spawn_kind_id_for_tests(),
+                handle: sengoo_async_sleep__start(25),
+            });
+
+        unsafe { sengoo_async_scheduler_free(scheduler) };
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
