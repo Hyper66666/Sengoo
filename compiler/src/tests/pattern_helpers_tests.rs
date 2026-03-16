@@ -1,7 +1,7 @@
 use crate::hir::{HIRLiteral, HIRMatchArm, HIRPattern};
 use crate::mir::pattern_helpers::{
     build_match_switch_plan, extract_discriminant_from_pattern, pattern_binding_plan,
-    MatchSwitchPlan, PatternBindingPlan,
+    pattern_match_plan, MatchSwitchPlan, PatternBindingPlan, PatternMatchPlan,
 };
 use crate::symbol::SymbolId;
 
@@ -104,5 +104,26 @@ fn build_match_switch_plan_routes_literal_arms_and_last_fallback() {
             targets: vec![(1, 10)],
             otherwise_block: 12,
         }
+    );
+}
+
+#[test]
+fn pattern_match_plan_distinguishes_literal_and_always_true_patterns() {
+    assert_eq!(
+        pattern_match_plan(&HIRPattern::Lit(HIRLiteral::Int(9))),
+        PatternMatchPlan::EqLiteral(HIRLiteral::Int(9))
+    );
+    assert_eq!(pattern_match_plan(&HIRPattern::Wild), PatternMatchPlan::AlwaysTrue);
+    assert_eq!(
+        pattern_match_plan(&HIRPattern::Var {
+            name: "bound".to_string(),
+            symbol: SymbolId::new(6),
+            mutability: false,
+        }),
+        PatternMatchPlan::AlwaysTrue
+    );
+    assert_eq!(
+        pattern_match_plan(&HIRPattern::Tuple(vec![HIRPattern::Wild])),
+        PatternMatchPlan::AlwaysTrue
     );
 }

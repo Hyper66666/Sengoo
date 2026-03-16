@@ -7,6 +7,12 @@ pub(crate) enum PatternBindingPlan {
     BindTupleFields(Vec<(u32, String)>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PatternMatchPlan {
+    AlwaysTrue,
+    EqLiteral(HIRLiteral),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MatchSwitchPlan {
     pub targets: Vec<(u32, usize)>,
@@ -43,6 +49,14 @@ pub(crate) fn pattern_binding_plan(pat: &HIRPattern) -> PatternBindingPlan {
             }
         }
         _ => PatternBindingPlan::Ignore,
+    }
+}
+
+pub(crate) fn pattern_match_plan(pat: &HIRPattern) -> PatternMatchPlan {
+    match pat {
+        HIRPattern::Lit(lit) => PatternMatchPlan::EqLiteral(lit.clone()),
+        HIRPattern::Wild | HIRPattern::Var { .. } => PatternMatchPlan::AlwaysTrue,
+        _ => PatternMatchPlan::AlwaysTrue,
     }
 }
 
