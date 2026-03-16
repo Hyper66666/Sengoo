@@ -11,6 +11,7 @@ pub mod compile_options_tests;
 pub mod constant_folding_tests;
 pub mod contracts_tests;
 pub mod diagnostics_tests;
+pub mod direct_call_helpers_tests;
 pub mod derive_macro_tests;
 pub mod ffi_tests;
 pub mod for_loop_tests;
