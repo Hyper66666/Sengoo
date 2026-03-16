@@ -12,6 +12,11 @@ use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
+use crate::type_naming::{
+    hir_type_instance_name as hir_type_to_instance_name,
+    hir_type_prefix as hir_type_to_prefix,
+    mir_type_instance_name as mir_type_to_instance_name,
+};
 use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
@@ -44,61 +49,6 @@ fn mir_local_name(local: Local) -> String {
         LocalKind::Temp => format!("%t_{}", local.id),
         LocalKind::User => format!("%u_{}", local.id),
         LocalKind::Return => format!("%ret_{}", local.id),
-    }
-}
-
-fn hir_type_to_prefix(ty: &HIRType) -> String {
-    match &ty.kind {
-        HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
-        HIRTypeKind::Float(fk) => format!("f{}", fk.bits()),
-        HIRTypeKind::Bool => "bool".to_string(),
-        HIRTypeKind::Unit => "unit".to_string(),
-        HIRTypeKind::Named { name, .. } => name.clone(),
-        _ => "unknown".to_string(),
-    }
-}
-
-fn hir_type_to_instance_name(ty: &HIRType) -> String {
-    match &ty.kind {
-        HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
-        HIRTypeKind::Float(fk) => format!("f{}", fk.bits()),
-        HIRTypeKind::Bool => "bool".to_string(),
-        HIRTypeKind::Unit => "unit".to_string(),
-        HIRTypeKind::Str => "str".to_string(),
-        HIRTypeKind::Ref(_, inner) => format!("ref_{}", hir_type_to_instance_name(inner)),
-        HIRTypeKind::Ptr(inner) => format!("ptr_{}", hir_type_to_instance_name(inner)),
-        HIRTypeKind::Array(elem, len) => format!("array_{}_{}", len, hir_type_to_instance_name(elem)),
-        HIRTypeKind::Tuple(items) => {
-            let parts: Vec<String> = items.iter().map(hir_type_to_instance_name).collect();
-            format!("tuple_{}", parts.join("_"))
-        }
-        HIRTypeKind::Named { name, args } => {
-            if args.is_empty() {
-                name.clone()
-            } else {
-                let parts: Vec<String> = args.iter().map(hir_type_to_instance_name).collect();
-                format!("{}_{}", name, parts.join("_"))
-            }
-        }
-        _ => hir_type_to_prefix(ty),
-    }
-}
-
-fn mir_type_to_instance_name(ty: &MIRType) -> String {
-    match ty {
-        MIRType::Int(bits) => format!("i{}", bits),
-        MIRType::Float(bits) => format!("f{}", bits),
-        MIRType::Bool => "bool".to_string(),
-        MIRType::Unit => "unit".to_string(),
-        MIRType::Ref(inner) => format!("ref_{}", mir_type_to_instance_name(inner)),
-        MIRType::Ptr(inner) => format!("ptr_{}", mir_type_to_instance_name(inner)),
-        MIRType::Array(elem, len) => format!("array_{}_{}", len, mir_type_to_instance_name(elem)),
-        MIRType::Tuple(items) => {
-            let parts: Vec<String> = items.iter().map(mir_type_to_instance_name).collect();
-            format!("tuple_{}", parts.join("_"))
-        }
-        MIRType::Struct { name, .. } => name.clone(),
-        _ => "unknown".to_string(),
     }
 }
 

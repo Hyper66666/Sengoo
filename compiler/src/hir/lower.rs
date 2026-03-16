@@ -609,15 +609,7 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
 
 /// 将 HIRType 转换为类型前缀字符串
 fn hir_type_to_prefix(ty: &HIRType) -> String {
-    use crate::hir::HIRTypeKind;
-    match &ty.kind {
-        HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
-        HIRTypeKind::Float(fk) => format!("f{}", fk.bits()),
-        HIRTypeKind::Bool => "bool".to_string(),
-        HIRTypeKind::Unit => "unit".to_string(),
-        HIRTypeKind::Named { name, .. } => name.clone(),
-        _ => "unknown".to_string(),
-    }
+    crate::type_naming::hir_type_prefix(ty)
 }
 
 /// 降低常量声明

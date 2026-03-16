@@ -36,4 +36,5 @@ pub mod stdlib_surface_tests;
 pub mod symbol_and_borrow_tests;
 pub mod trait_tests;
 pub mod type_mismatch_tests;
+pub mod type_naming_tests;
 pub mod while_loop_tests;

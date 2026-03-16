@@ -10,6 +10,7 @@ pub mod mir;
 pub mod parser;
 pub mod runtime;
 pub mod symbol;
+pub(crate) mod type_naming;
 pub mod typeck;
 
 pub use ast::*;
