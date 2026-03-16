@@ -1550,20 +1550,21 @@ fn clone_local_kind(kind: LocalKind) -> LocalKind {
     }
 }
 
-fn remap_local(local: Local, local_map: &HashMap<Local, Local>) -> Local {
-    *local_map
+fn remap_local(local: Local, local_map: &HashMap<Local, Local>) -> Result<Local, CompileError> {
+    local_map
         .get(&local)
-        .unwrap_or_else(|| panic!("missing remapped local for {:?}", local))
+        .copied()
+        .ok_or_else(|| CompileError::MirLower(format!("missing remapped local for {:?}", local)))
 }
 
 fn remap_instruction(
     inst: &Instruction,
     local_map: &HashMap<Local, Local>,
     block_map: &HashMap<usize, usize>,
-) -> Instruction {
-    match inst {
+) -> Result<Instruction, CompileError> {
+    Ok(match inst {
         Instruction::Assign { destination, value } => Instruction::Assign {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             value: value.clone(),
         },
         Instruction::Unary {
@@ -1571,9 +1572,9 @@ fn remap_instruction(
             op,
             operand,
         } => Instruction::Unary {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             op: op.clone(),
-            operand: remap_local(*operand, local_map),
+            operand: remap_local(*operand, local_map)?,
         },
         Instruction::Binary {
             destination,
@@ -1581,30 +1582,30 @@ fn remap_instruction(
             left,
             right,
         } => Instruction::Binary {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             op: op.clone(),
-            left: remap_local(*left, local_map),
-            right: remap_local(*right, local_map),
+            left: remap_local(*left, local_map)?,
+            right: remap_local(*right, local_map)?,
         },
         Instruction::Load { destination, source } => Instruction::Load {
-            destination: remap_local(*destination, local_map),
-            source: remap_local(*source, local_map),
+            destination: remap_local(*destination, local_map)?,
+            source: remap_local(*source, local_map)?,
         },
         Instruction::Store { destination, value } => Instruction::Store {
-            destination: remap_local(*destination, local_map),
-            value: remap_local(*value, local_map),
+            destination: remap_local(*destination, local_map)?,
+            value: remap_local(*value, local_map)?,
         },
         Instruction::AddrOf { destination, source } => Instruction::AddrOf {
-            destination: remap_local(*destination, local_map),
-            source: remap_local(*source, local_map),
+            destination: remap_local(*destination, local_map)?,
+            source: remap_local(*source, local_map)?,
         },
         Instruction::FieldAddr {
             destination,
             base,
             field,
         } => Instruction::FieldAddr {
-            destination: remap_local(*destination, local_map),
-            base: remap_local(*base, local_map),
+            destination: remap_local(*destination, local_map)?,
+            base: remap_local(*base, local_map)?,
             field: *field,
         },
         Instruction::IndexAddr {
@@ -1612,17 +1613,17 @@ fn remap_instruction(
             base,
             index,
         } => Instruction::IndexAddr {
-            destination: remap_local(*destination, local_map),
-            base: remap_local(*base, local_map),
-            index: remap_local(*index, local_map),
+            destination: remap_local(*destination, local_map)?,
+            base: remap_local(*base, local_map)?,
+            index: remap_local(*index, local_map)?,
         },
         Instruction::Extract {
             destination,
             value,
             index,
         } => Instruction::Extract {
-            destination: remap_local(*destination, local_map),
-            value: remap_local(*value, local_map),
+            destination: remap_local(*destination, local_map)?,
+            value: remap_local(*value, local_map)?,
             index: *index,
         },
         Instruction::Insert {
@@ -1631,18 +1632,18 @@ fn remap_instruction(
             field,
             new_value,
         } => Instruction::Insert {
-            destination: remap_local(*destination, local_map),
-            value: remap_local(*value, local_map),
+            destination: remap_local(*destination, local_map)?,
+            value: remap_local(*value, local_map)?,
             field: *field,
-            new_value: remap_local(*new_value, local_map),
+            new_value: remap_local(*new_value, local_map)?,
         },
         Instruction::Cast {
             destination,
             value,
             to,
         } => Instruction::Cast {
-            destination: remap_local(*destination, local_map),
-            value: remap_local(*value, local_map),
+            destination: remap_local(*destination, local_map)?,
+            value: remap_local(*value, local_map)?,
             to: to.clone(),
         },
         Instruction::Bitcast {
@@ -1650,8 +1651,8 @@ fn remap_instruction(
             value,
             to,
         } => Instruction::Bitcast {
-            destination: remap_local(*destination, local_map),
-            value: remap_local(*value, local_map),
+            destination: remap_local(*destination, local_map)?,
+            value: remap_local(*value, local_map)?,
             to: to.clone(),
         },
         Instruction::Aggregate {
@@ -1659,11 +1660,11 @@ fn remap_instruction(
             fields,
             ty,
         } => Instruction::Aggregate {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             fields: fields
                 .iter()
                 .map(|local| remap_local(*local, local_map))
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             ty: ty.clone(),
         },
         Instruction::Call {
@@ -1671,28 +1672,28 @@ fn remap_instruction(
             func,
             args,
         } => Instruction::Call {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             func: func.clone(),
             args: args
                 .iter()
                 .map(|local| remap_local(*local, local_map))
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         },
         Instruction::Intrinsic {
             destination,
             intrinsic,
             args,
         } => Instruction::Intrinsic {
-            destination: destination.map(|local| remap_local(local, local_map)),
+            destination: destination.map(|local| remap_local(local, local_map)).transpose()?,
             intrinsic: intrinsic.clone(),
             args: args
                 .iter()
                 .map(|local| remap_local(*local, local_map))
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         },
         Instruction::Discriminant { destination, source } => Instruction::Discriminant {
-            destination: remap_local(*destination, local_map),
-            source: remap_local(*source, local_map),
+            destination: remap_local(*destination, local_map)?,
+            source: remap_local(*source, local_map)?,
         },
         Instruction::EnumConstruct {
             destination,
@@ -1700,32 +1701,32 @@ fn remap_instruction(
             payload,
             enum_type,
         } => Instruction::EnumConstruct {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             discriminant: *discriminant,
-            payload: payload.map(|local| remap_local(local, local_map)),
+            payload: payload.map(|local| remap_local(local, local_map)).transpose()?,
             enum_type: enum_type.clone(),
         },
         Instruction::ExtractPayload { destination, source } => Instruction::ExtractPayload {
-            destination: remap_local(*destination, local_map),
-            source: remap_local(*source, local_map),
+            destination: remap_local(*destination, local_map)?,
+            source: remap_local(*source, local_map)?,
         },
         Instruction::Phi {
             destination,
             incoming,
         } => Instruction::Phi {
-            destination: remap_local(*destination, local_map),
+            destination: remap_local(*destination, local_map)?,
             incoming: incoming
                 .iter()
-                .map(|(local, block)| {
-                    let remapped_block = *block_map
-                        .get(block)
-                        .unwrap_or_else(|| panic!("missing remapped block for {}", block));
-                    (remap_local(*local, local_map), remapped_block)
+                .map(|(local, block)| -> Result<(Local, usize), CompileError> {
+                    let remapped_block = block_map.get(block).copied().ok_or_else(|| {
+                        CompileError::MirLower(format!("missing remapped block for {}", block))
+                    })?;
+                    Ok((remap_local(*local, local_map)?, remapped_block))
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         },
         Instruction::Nop => Instruction::Nop,
-    }
+    })
 }
 
 fn emit_ready_return(f: &mut MirFunction, block: usize) {
@@ -1745,7 +1746,7 @@ fn emit_pending_return(
     local_map: &HashMap<Local, Local>,
 ) -> Result<(), CompileError> {
     for slot in live_user_slots {
-        let remapped = remap_local(slot.local, local_map);
+        let remapped = remap_local(slot.local, local_map)?;
         let loaded = f.add_local(LocalKind::Temp, slot.ty.clone());
         let load_inst = f.alloc_inst(Instruction::Load {
             destination: loaded,
@@ -1855,7 +1856,7 @@ fn synthesize_cfg_poll(
 
     for i in 0..layout.param_types.len() {
         let original = Local::new(i + 1, LocalKind::Param);
-        let remapped = remap_local(original, &local_map);
+        let remapped = remap_local(original, &local_map)?;
         push_frame_load_into_typed(
             &mut f,
             bb0,
@@ -1881,7 +1882,8 @@ fn synthesize_cfg_poll(
         let translated = translated_blocks[block];
         let original_block = &mir_fn.basic_blocks[*block];
         for inst_id in &original_block.instructions {
-            let cloned = remap_instruction(mir_fn.instruction(*inst_id), &local_map, &translated_blocks);
+            let cloned =
+                remap_instruction(mir_fn.instruction(*inst_id), &local_map, &translated_blocks)?;
             let new_id = f.alloc_inst(cloned);
             f.basic_blocks[translated].push(new_id);
         }
@@ -1889,11 +1891,11 @@ fn synthesize_cfg_poll(
         match original_block
             .terminator
             .as_ref()
-            .expect("async cfg block should terminate")
+            .ok_or_else(|| CompileError::MirLower("async cfg block should terminate".to_string()))?
         {
             Terminator::Return(value) => {
                 if let Some(value) = value {
-                    let remapped = remap_local(*value, &local_map);
+                    let remapped = remap_local(*value, &local_map)?;
                     push_frame_store_typed(
                         &mut f,
                         translated,
@@ -1920,7 +1922,7 @@ fn synthesize_cfg_poll(
                 else_block,
             } => {
                 f.basic_blocks[translated].set_terminator(Terminator::If {
-                    cond: remap_local(*cond, &local_map),
+                    cond: remap_local(*cond, &local_map)?,
                     then_block: translated_blocks[then_block],
                     else_block: translated_blocks[else_block],
                 });
@@ -1931,7 +1933,7 @@ fn synthesize_cfg_poll(
                 otherwise,
             } => {
                 f.basic_blocks[translated].set_terminator(Terminator::Switch {
-                    discr: remap_local(*discr, &local_map),
+                    discr: remap_local(*discr, &local_map)?,
                     targets: targets
                         .iter()
                         .map(|(value, block)| (*value, translated_blocks[block]))
@@ -1949,8 +1951,13 @@ fn synthesize_cfg_poll(
                     .suspend_points
                     .iter()
                     .find(|point| point.block == *block)
-                    .expect("suspend point should exist for linear block");
-                let remapped_handle = remap_local(*future_handle, &local_map);
+                    .ok_or_else(|| {
+                        CompileError::MirLower(format!(
+                            "missing suspend metadata for async block {}",
+                            block
+                        ))
+                    })?;
+                let remapped_handle = remap_local(*future_handle, &local_map)?;
                 emit_suspend_transition(
                     &mut f,
                     translated,
@@ -1969,7 +1976,12 @@ fn synthesize_cfg_poll(
                     &local_map,
                 )?;
             }
-            other => panic!("unsupported terminator in async poll plan: {:?}", other),
+            other => {
+                return Err(CompileError::MirLower(format!(
+                    "unsupported terminator in async poll plan: {:?}",
+                    other
+                )));
+            }
         }
     }
 
@@ -1987,7 +1999,7 @@ fn synthesize_cfg_poll(
                 frame_user_slot(layout, slot.slot_index),
                 slot.ty.clone(),
             )?;
-            let remapped_user = remap_local(slot.local, &local_map);
+            let remapped_user = remap_local(slot.local, &local_map)?;
             let store_inst = f.alloc_inst(Instruction::Store {
                 destination: remapped_user,
                 value: restored,
@@ -1995,7 +2007,7 @@ fn synthesize_cfg_poll(
             f.basic_blocks[resume_block].push(store_inst);
         }
 
-        let remapped_handle = remap_local(point.future_handle, &local_map);
+        let remapped_handle = remap_local(point.future_handle, &local_map)?;
         push_frame_load_into_typed(
             &mut f,
             resume_block,
@@ -2177,6 +2189,7 @@ fn synthesize_result(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     #[test]
     fn select_runtime_family_maps_scalar_types_to_expected_symbols() {
@@ -2527,6 +2540,50 @@ mod tests {
         assert!(
             message.contains("self-looping pending blocks"),
             "error should describe expected async cfg shape, got: {message}"
+        );
+    }
+
+    #[test]
+    fn expand_async_functions_returns_error_instead_of_panicking_on_unmapped_local() {
+        let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
+        mir_fn.is_async = true;
+
+        let future_handle = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let suspend_result = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+
+        let ready = mir_fn.add_block();
+        let pending = mir_fn.add_block();
+
+        mir_fn.basic_blocks[mir_fn.start_block].set_terminator(Terminator::Suspend {
+            poll_func: "child__poll".to_string(),
+            future_handle,
+            destination: suspend_result,
+            ready_block: ready,
+            pending_block: pending,
+        });
+        mir_fn.basic_blocks[pending].set_terminator(Terminator::Goto(pending));
+
+        let bogus_local = Local::new(9999, LocalKind::Temp);
+        let loaded = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let load_inst = mir_fn.alloc_inst(Instruction::Load {
+            destination: loaded,
+            source: bogus_local,
+        });
+        mir_fn.basic_blocks[ready].push(load_inst);
+        mir_fn.basic_blocks[ready].set_terminator(Terminator::Return(Some(loaded)));
+
+        let mut mir_fns = vec![mir_fn];
+        let result = catch_unwind(AssertUnwindSafe(|| expand_async_functions(&mut mir_fns)));
+        assert!(
+            result.is_ok(),
+            "async lowering should report malformed remap state as an error instead of panicking"
+        );
+        let err = result
+            .unwrap()
+            .expect_err("malformed remap state should surface as a lowering error");
+        assert!(
+            err.to_string().contains("missing remapped local"),
+            "unexpected remap diagnostic: {err}"
         );
     }
 

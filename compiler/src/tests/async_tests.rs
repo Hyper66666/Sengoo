@@ -672,6 +672,11 @@ async def main() -> i64 {
         "error should mention escape restriction, got: {}",
         msg
     );
+    assert!(
+        !msg.contains("phase-1"),
+        "user-facing future escape diagnostics should not expose internal phase terminology, got: {}",
+        msg
+    );
 }
 
 #[test]
@@ -710,6 +715,11 @@ async def main() -> i64 {
     assert!(
         msg.contains("future values cannot escape"),
         "error should mention escape restriction, got: {}",
+        msg
+    );
+    assert!(
+        !msg.contains("phase-1"),
+        "user-facing future escape diagnostics should not expose internal phase terminology, got: {}",
         msg
     );
 }
@@ -976,6 +986,27 @@ async def main() -> i64 {
 }
 
 #[test]
+fn load_traced_future_binding_then_await_compiles() {
+    let source = r#"
+async def add_one(x: i64) -> i64 {
+    x + 1
+}
+async def main() -> i64 {
+    let f = add_one(41);
+    let x = f;
+    await x
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "future bindings routed through an extra local should remain awaitable, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
 fn multi_await_poll_helper_polls_child_futures_without_reinvoking_body() {
     let source = r#"
 async def step1() -> i64 { 10 }
@@ -1015,6 +1046,52 @@ async def main() -> i64 {
     assert!(
         !call_names.contains(&"main__body"),
         "main__poll should not re-enter main__body once state-machine lowering is in place, got calls: {:?}",
+        call_names
+    );
+}
+
+#[test]
+fn multi_await_poll_helper_resolves_bound_future_base_names() {
+    let source = r#"
+async def step1() -> i64 { 10 }
+async def step2() -> i64 { 20 }
+async def main() -> i64 {
+    let first = step1();
+    let second = step2();
+    let a = await first;
+    let b = await second;
+    a + b
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("should compile");
+    let poll_fn = mir_fns
+        .iter()
+        .find(|f| f.name == "main__poll")
+        .expect("main__poll helper should exist");
+
+    let call_names = poll_fn
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        call_names.contains(&"step1__poll"),
+        "main__poll should resolve the first bound future base name, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        call_names.contains(&"step2__poll"),
+        "main__poll should resolve the second bound future base name, got calls: {:?}",
+        call_names
+    );
+    assert!(
+        !call_names.contains(&"unknown__poll"),
+        "bound future resolution should not fall back to unknown__poll, got calls: {:?}",
         call_names
     );
 }
