@@ -11,6 +11,7 @@
 mod bb;
 pub(crate) mod async_origin_helpers;
 pub(crate) mod direct_call_helpers;
+pub(crate) mod concrete_type_helpers;
 mod generic_methods;
 pub(crate) mod hir_specialization_helpers;
 mod inst;
