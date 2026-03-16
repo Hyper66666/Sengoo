@@ -1,6 +1,7 @@
-use crate::hir::{HIRLiteral, HIRPattern};
+use crate::hir::{HIRLiteral, HIRMatchArm, HIRPattern};
 use crate::mir::pattern_helpers::{
-    extract_discriminant_from_pattern, pattern_binding_plan, PatternBindingPlan,
+    build_match_switch_plan, extract_discriminant_from_pattern, pattern_binding_plan,
+    MatchSwitchPlan, PatternBindingPlan,
 };
 use crate::symbol::SymbolId;
 
@@ -78,5 +79,30 @@ fn pattern_binding_plan_ignores_non_var_tuple_members_and_other_patterns() {
             fields: vec![],
         }),
         PatternBindingPlan::Ignore
+    );
+}
+
+#[test]
+fn build_match_switch_plan_routes_literal_arms_and_last_fallback() {
+    let arms = vec![
+        HIRMatchArm::new(HIRPattern::Lit(HIRLiteral::Int(1)), crate::hir::HIRExpr::Lit(HIRLiteral::Int(1))),
+        HIRMatchArm::new(HIRPattern::Wild, crate::hir::HIRExpr::Lit(HIRLiteral::Int(0))),
+        HIRMatchArm::new(
+            HIRPattern::Var {
+                name: "fallback".to_string(),
+                symbol: SymbolId::new(5),
+                mutability: false,
+            },
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(2)),
+        ),
+    ];
+
+    let plan = build_match_switch_plan(&arms, &[10, 11, 12], 99);
+    assert_eq!(
+        plan,
+        MatchSwitchPlan {
+            targets: vec![(1, 10)],
+            otherwise_block: 12,
+        }
     );
 }
