@@ -1,7 +1,7 @@
 //! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
 use crate::hir::{
-    self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType, HIRTypeKind,
+    self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType,
 };
 use crate::hir::HIRTrait;
 use crate::method_resolution::{
@@ -14,7 +14,9 @@ use crate::mir::lowering_helpers::{
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
-use crate::mir::method_specialization_helpers::bind_method_specialization_subst;
+use crate::mir::method_specialization_helpers::{
+    bind_method_specialization_subst, realize_method_specialization,
+};
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
@@ -22,7 +24,7 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::hir_specialization_helpers::{
-    substitute_hir_function, substitute_hir_type,
+    substitute_hir_function,
 };
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, instantiate_impl_method,
@@ -559,34 +561,13 @@ impl<'a> LoweringContext<'a> {
         receiver_ty: &MIRType,
         mir_subst: HashMap<String, MIRType>,
     ) -> Option<(HashMap<String, HIRType>, String)> {
-        let receiver_prefix = receiver_type_prefix(receiver_ty);
-        let mut hir_subst = HashMap::new();
-        for (name, mir_ty) in &mir_subst {
-            hir_subst.insert(name.clone(), self.concrete_type_registry.hir_type_for_mir(mir_ty)?);
-        }
-        if !method
-            .type_params
-            .iter()
-            .all(|param| hir_subst.contains_key(&param.name))
-        {
-            return None;
-        }
-
-        let concrete_target = substitute_hir_type(target_type, &hir_subst);
-        let concrete_prefix = impl_type_prefix(&concrete_target);
-        self.concrete_type_registry
-            .register_instance(concrete_prefix.clone(), concrete_target.clone());
-        for ty in hir_subst.values() {
-            if matches!(ty.kind, HIRTypeKind::Named { .. }) {
-                self.concrete_type_registry
-                    .register_instance(hir_type_to_instance_name(ty), ty.clone());
-            }
-        }
-        if concrete_prefix != receiver_prefix {
-            return None;
-        }
-
-        Some((hir_subst, concrete_prefix))
+        realize_method_specialization(
+            target_type,
+            method,
+            receiver_ty,
+            mir_subst,
+            &mut self.concrete_type_registry,
+        )
     }
 
     fn prepare_method_specialization(
