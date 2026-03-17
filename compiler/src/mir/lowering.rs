@@ -14,9 +14,7 @@ use crate::mir::lowering_helpers::{
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
-use crate::mir::method_specialization_helpers::{
-    bind_method_specialization_subst, realize_method_specialization,
-};
+use crate::mir::method_specialization_helpers::prepare_method_specialization;
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
@@ -534,42 +532,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn bind_method_specialization_subst(
-        &self,
-        target_type: &HIRType,
-        method: &hir::HIRFunction,
-        receiver_ty: &MIRType,
-        arg_locals: &[Local],
-    ) -> Option<HashMap<String, MIRType>> {
-        let actual_arg_types: Vec<MIRType> = arg_locals
-            .iter()
-            .map(|local| self.get_local_type(*local).clone())
-            .collect();
-        bind_method_specialization_subst(
-            target_type,
-            method,
-            receiver_ty,
-            &actual_arg_types,
-            self.struct_defs,
-        )
-    }
-
-    fn realize_method_specialization(
-        &mut self,
-        target_type: &HIRType,
-        method: &hir::HIRFunction,
-        receiver_ty: &MIRType,
-        mir_subst: HashMap<String, MIRType>,
-    ) -> Option<(HashMap<String, HIRType>, String)> {
-        realize_method_specialization(
-            target_type,
-            method,
-            receiver_ty,
-            mir_subst,
-            &mut self.concrete_type_registry,
-        )
-    }
-
     fn prepare_method_specialization(
         &mut self,
         target_type: &HIRType,
@@ -577,9 +539,18 @@ impl<'a> LoweringContext<'a> {
         receiver_ty: &MIRType,
         arg_locals: &[Local],
     ) -> Option<(HashMap<String, HIRType>, String)> {
-        let mir_subst =
-            self.bind_method_specialization_subst(target_type, method, receiver_ty, arg_locals)?;
-        self.realize_method_specialization(target_type, method, receiver_ty, mir_subst)
+        let actual_arg_types: Vec<MIRType> = arg_locals
+            .iter()
+            .map(|local| self.get_local_type(*local).clone())
+            .collect();
+        prepare_method_specialization(
+            target_type,
+            method,
+            receiver_ty,
+            &actual_arg_types,
+            self.struct_defs,
+            &mut self.concrete_type_registry,
+        )
     }
 
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {

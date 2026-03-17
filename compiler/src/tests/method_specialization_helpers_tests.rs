@@ -1,6 +1,7 @@
 use crate::hir::{HIRFunction, HIRParam, HIRStruct, HIRType, HIRTypeParam, IntKind};
 use crate::mir::method_specialization_helpers::{
-    bind_method_specialization_subst, realize_method_specialization,
+    bind_method_specialization_subst, prepare_method_specialization,
+    realize_method_specialization,
 };
 use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64};
 use crate::symbol::SymbolId;
@@ -128,4 +129,48 @@ fn realize_method_specialization_rejects_receiver_prefix_mismatch() {
     );
 
     assert!(realized.is_none());
+}
+
+#[test]
+fn prepare_method_specialization_combines_binding_and_realization() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let method = generic_push_method();
+    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let mut registry = ConcreteTypeRegistry::default();
+
+    let (hir_subst, concrete_prefix) = prepare_method_specialization(
+        &target_type,
+        &method,
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+    )
+    .expect("combined helper should bind and realize the method specialization");
+
+    assert_eq!(concrete_prefix, "Vec_i64");
+    assert_eq!(hir_subst.get("T"), Some(&HIRType::int(IntKind::I64)));
+}
+
+#[test]
+fn prepare_method_specialization_rejects_arity_mismatch_before_realization() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let method = generic_push_method();
+    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let mut registry = ConcreteTypeRegistry::default();
+
+    let prepared = prepare_method_specialization(
+        &target_type,
+        &method,
+        &receiver_ty,
+        &[],
+        &struct_defs,
+        &mut registry,
+    );
+
+    assert!(prepared.is_none());
 }
