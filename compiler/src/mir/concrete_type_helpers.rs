@@ -1,5 +1,6 @@
 use crate::hir::{HIRBody, HIRExpr, HIRItem, HIRStmt, HIRType, HIRTypeKind};
 use crate::mir::hir_specialization_helpers::hir_type_is_concrete;
+use crate::mir::impl_specialization_helpers::expand_impl_variants;
 use crate::type_naming::hir_type_instance_name;
 use std::collections::{HashMap, HashSet};
 
@@ -232,6 +233,34 @@ pub(crate) fn collect_concrete_named_types_from_items(
             _ => {}
         }
     }
+    out
+}
+
+pub(crate) fn collect_concrete_named_types_with_impl_variants(
+    items: &[HIRItem],
+    known_named_types: &HashSet<String>,
+) -> HashMap<String, HIRType> {
+    let mut out = collect_concrete_named_types_from_items(items, known_named_types);
+
+    loop {
+        let before_len = out.len();
+        for item in items {
+            if let HIRItem::Impl(impl_item) = item {
+                for expanded_impl in expand_impl_variants(impl_item, &out, known_named_types) {
+                    collect_concrete_named_types_from_impl(
+                        &expanded_impl,
+                        known_named_types,
+                        &mut out,
+                    );
+                }
+            }
+        }
+
+        if out.len() == before_len {
+            break;
+        }
+    }
+
     out
 }
 
