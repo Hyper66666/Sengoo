@@ -64,3 +64,27 @@ pub(crate) fn realize_method_specialization(
 
     Some((hir_subst, concrete_prefix))
 }
+
+pub(crate) fn prepare_method_specialization(
+    target_type: &HIRType,
+    method: &hir::HIRFunction,
+    receiver_ty: &MIRType,
+    actual_arg_types: &[MIRType],
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &mut ConcreteTypeRegistry,
+) -> Option<(HashMap<String, HIRType>, String)> {
+    let mir_subst = bind_method_specialization_subst(
+        target_type,
+        method,
+        receiver_ty,
+        actual_arg_types,
+        struct_defs,
+    )?;
+    realize_method_specialization(
+        target_type,
+        method,
+        receiver_ty,
+        mir_subst,
+        concrete_type_registry,
+    )
+}
