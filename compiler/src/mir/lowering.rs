@@ -11,6 +11,9 @@ use crate::method_resolution::{
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
+use crate::mir::method_dispatch_helpers::{
+    method_dispatch_name, receiver_type_display, receiver_type_prefix,
+};
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
@@ -470,71 +473,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn receiver_type_prefix(&self, receiver_ty: &MIRType) -> String {
-        match receiver_ty {
-            MIRType::Int(bits) => format!("i{}", bits),
-            MIRType::Float(bits) => format!("f{}", bits),
-            MIRType::Bool => "bool".to_string(),
-            MIRType::Array(_, _) => "array".to_string(),
-            MIRType::Tuple(_) => "tuple".to_string(),
-            MIRType::Ptr(inner) | MIRType::Ref(inner) => match inner.as_ref() {
-                MIRType::Int(bits) => format!("i{}_ptr", bits),
-                MIRType::Float(bits) => format!("f{}_ptr", bits),
-                MIRType::Bool => "bool_ptr".to_string(),
-                _ => "ptr".to_string(),
-            },
-            MIRType::Struct { name, .. } => name.clone(),
-            MIRType::Enum { .. } => "enum".to_string(),
-            _ => "i64".to_string(),
-        }
-    }
-
-    fn method_dispatch_name(
-        &self,
-        receiver_local: Local,
-        receiver_ty: &MIRType,
-        method: &str,
-    ) -> String {
-        if let Some(type_name) = self.type_names.get(&receiver_local) {
-            format!("{}_{}", type_name, method)
-        } else {
-            match receiver_ty {
-                MIRType::Int(bits) => format!("i{}_{}", bits, method),
-                MIRType::Float(bits) => format!("f{}_{}", bits, method),
-                MIRType::Bool => format!("bool_{}", method),
-                MIRType::Array(_, _) => format!("array_{}", method),
-                MIRType::Tuple(_) => format!("tuple_{}", method),
-                MIRType::Ptr(inner) | MIRType::Ref(inner) => match inner.as_ref() {
-                    MIRType::Int(bits) => format!("i{}_ptr_{}", bits, method),
-                    MIRType::Float(bits) => format!("f{}_ptr_{}", bits, method),
-                    MIRType::Bool => format!("bool_ptr_{}", method),
-                    _ => format!("ptr_{}", method),
-                },
-                MIRType::Struct { name, .. } => format!("{}_{}", name, method),
-                MIRType::Enum { .. } => format!("enum_{}", method),
-                _ => format!("i64_{}", method),
-            }
-        }
-    }
-
-    fn receiver_type_display(&self, receiver_local: Local, receiver_ty: &MIRType) -> String {
-        if let Some(type_name) = self.type_names.get(&receiver_local) {
-            type_name.clone()
-        } else {
-            match receiver_ty {
-                MIRType::Int(bits) => format!("i{}", bits),
-                MIRType::Float(bits) => format!("f{}", bits),
-                MIRType::Bool => "bool".to_string(),
-                MIRType::Array(_, _) => "array".to_string(),
-                MIRType::Tuple(_) => "tuple".to_string(),
-                MIRType::Ptr(_) | MIRType::Ref(_) => "ptr".to_string(),
-                MIRType::Struct { name, .. } => name.clone(),
-                MIRType::Enum { .. } => "enum".to_string(),
-                _ => format!("{:?}", receiver_ty),
-            }
-        }
-    }
-
     fn resolve_method_call_target(
         &mut self,
         receiver_local: Local,
@@ -542,8 +480,9 @@ impl<'a> LoweringContext<'a> {
         method: &str,
         arg_locals: &[Local],
     ) -> Result<String, String> {
-        let method_func_name = self.method_dispatch_name(receiver_local, receiver_ty, method);
-        let type_display = self.receiver_type_display(receiver_local, receiver_ty);
+        let explicit_type_name = self.type_names.get(&receiver_local).map(String::as_str);
+        let method_func_name = method_dispatch_name(explicit_type_name, receiver_ty, method);
+        let type_display = receiver_type_display(explicit_type_name, receiver_ty);
 
         if self.known_functions.contains(&method_func_name) {
             return Ok(method_func_name);
@@ -562,7 +501,7 @@ impl<'a> LoweringContext<'a> {
         let type_prefix = if let Some(type_name) = self.type_names.get(&receiver_local) {
             type_name.clone()
         } else {
-            self.receiver_type_prefix(receiver_ty)
+            receiver_type_prefix(receiver_ty)
         };
 
         match self.select_known_trait_method_candidate(
@@ -614,7 +553,7 @@ impl<'a> LoweringContext<'a> {
         receiver_ty: &MIRType,
         mir_subst: HashMap<String, MIRType>,
     ) -> Option<(HashMap<String, HIRType>, String)> {
-        let receiver_prefix = self.receiver_type_prefix(receiver_ty);
+        let receiver_prefix = receiver_type_prefix(receiver_ty);
         let mut hir_subst = HashMap::new();
         for (name, mir_ty) in &mir_subst {
             hir_subst.insert(name.clone(), self.concrete_type_registry.hir_type_for_mir(mir_ty)?);

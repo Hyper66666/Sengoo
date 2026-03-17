@@ -17,6 +17,7 @@ pub(crate) mod hir_specialization_helpers;
 pub(crate) mod impl_specialization_helpers;
 mod inst;
 pub(crate) mod lowering_helpers;
+pub(crate) mod method_dispatch_helpers;
 pub(crate) mod pattern_helpers;
 pub(crate) mod type_mapping_helpers;
 pub(crate) mod type_helpers;
