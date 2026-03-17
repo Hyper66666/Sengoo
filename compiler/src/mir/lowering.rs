@@ -14,9 +14,7 @@ use crate::mir::lowering_helpers::{
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
-use crate::mir::concrete_type_helpers::{
-    collect_concrete_named_types_from_impl, collect_concrete_named_types_from_items,
-};
+use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::hir_specialization_helpers::{
     substitute_hir_function, substitute_hir_type,
@@ -77,34 +75,6 @@ fn mir_local_name(local: Local) -> String {
     }
 }
 
-fn collect_concrete_named_types_closure(
-    items: &[HIRItem],
-    known_named_types: &HashSet<String>,
-) -> HashMap<String, HIRType> {
-    let mut out = collect_concrete_named_types_from_items(items, known_named_types);
-
-    loop {
-        let before_len = out.len();
-        for item in items {
-            if let HIRItem::Impl(impl_item) = item {
-                for expanded_impl in expand_impl_variants(impl_item, &out, known_named_types) {
-                    collect_concrete_named_types_from_impl(
-                        &expanded_impl,
-                        known_named_types,
-                        &mut out,
-                    );
-                }
-            }
-        }
-
-        if out.len() == before_len {
-            break;
-        }
-    }
-
-    out
-}
-
 pub fn lower_hir(items: &[HIRItem]) -> Result<Vec<MirFunction>, String> {
     lower_hir_with_options(items, MirLowerOptions::default())
 }
@@ -137,7 +107,8 @@ pub fn lower_hir_with_options(
             _ => {}
         }
     }
-    let concrete_named_types = collect_concrete_named_types_closure(items, &known_named_types);
+    let concrete_named_types =
+        collect_concrete_named_types_with_impl_variants(items, &known_named_types);
     let concrete_type_registry = ConcreteTypeRegistry::new(&struct_defs, &concrete_named_types);
     let inherent_method_templates = collect_inherent_method_templates(items);
     let mut trait_method_templates: Vec<TraitMethodTemplate> = Vec::new();
