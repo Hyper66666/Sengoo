@@ -18,6 +18,7 @@ pub mod ffi_tests;
 pub mod for_loop_tests;
 pub mod generic_constraints_tests;
 pub mod generic_hir_tests;
+pub mod impl_specialization_helpers_tests;
 pub mod generic_typeck_tests;
 pub mod hir_specialization_helpers_tests;
 pub mod incremental_typeck_tests;
