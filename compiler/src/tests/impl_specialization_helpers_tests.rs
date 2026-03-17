@@ -1,6 +1,7 @@
 use crate::hir::{HIRBody, HIRFunction, HIRImpl, HIRParam, HIRType, IntKind};
 use crate::mir::impl_specialization_helpers::{
-    expand_impl_variants, impl_type_prefix, match_generic_impl_target,
+    build_inherent_specialized_method, expand_impl_variants, impl_type_prefix,
+    match_generic_impl_target,
 };
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +26,22 @@ fn method(name: &str) -> HIRFunction {
         export_name: None,
         is_pub: false,
     }
+}
+
+fn generic_method(name: &str) -> HIRFunction {
+    let mut function = method(name);
+    function.type_params = vec![crate::hir::HIRTypeParam {
+        name: "T".to_string(),
+        bounds: vec![],
+        default: None,
+    }];
+    function.params.push(HIRParam::new(
+        "value".to_string(),
+        SymbolId::new(2),
+        HIRType::named("T".to_string(), vec![]),
+    ));
+    function.return_type = HIRType::named("T".to_string(), vec![]);
+    function
 }
 
 #[test]
@@ -69,4 +86,27 @@ fn expand_impl_variants_instantiates_methods_for_concrete_named_targets() {
     assert_eq!(variants.len(), 1);
     assert_eq!(variants[0].target_type, vec_i64);
     assert!(variants[0].items[0].name.starts_with(&impl_type_prefix(&variants[0].target_type)));
+}
+
+#[test]
+fn build_inherent_specialized_method_appends_generic_suffixes() {
+    let method = generic_method("Vec_push");
+    let subst = HashMap::from([("T".to_string(), HIRType::int(IntKind::I64))]);
+
+    let specialized =
+        build_inherent_specialized_method(&method, "Vec", "Vec_i64", &subst);
+
+    assert_eq!(specialized.name, "Vec_i64_push_i64");
+    assert!(specialized.type_params.is_empty());
+    assert_eq!(specialized.return_type, HIRType::int(IntKind::I64));
+}
+
+#[test]
+fn build_inherent_specialized_method_keeps_nongeneric_name_without_suffixes() {
+    let method = method("Vec_len");
+    let specialized =
+        build_inherent_specialized_method(&method, "Vec", "Vec_i64", &HashMap::new());
+
+    assert_eq!(specialized.name, "Vec_i64_len");
+    assert!(specialized.type_params.is_empty());
 }
