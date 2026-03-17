@@ -1,10 +1,12 @@
 use crate::hir::{self, HIRType};
+use crate::method_resolution::{explicit_hir_method_param_count, MethodCandidate};
 use crate::method_resolution::explicit_hir_method_params;
+use crate::mir::hir_specialization_helpers::substitute_hir_function;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::impl_specialization_helpers::impl_type_prefix;
 use crate::mir::method_dispatch_helpers::receiver_type_prefix;
 use crate::mir::type_mapping_helpers::bind_mir_subst_from_hir_type;
-use crate::mir::{ConcreteTypeRegistry, MIRType};
+use crate::mir::{ConcreteTypeRegistry, MIRType, TraitMethodTemplate};
 use crate::type_naming::hir_type_instance_name;
 use crate::hir::HIRTypeKind;
 use std::collections::HashMap;
@@ -87,4 +89,40 @@ pub(crate) fn prepare_method_specialization(
         mir_subst,
         concrete_type_registry,
     )
+}
+
+pub(crate) fn build_trait_method_candidate(
+    template: &TraitMethodTemplate,
+    hir_subst: &HashMap<String, HIRType>,
+    concrete_prefix: &str,
+) -> MethodCandidate<hir::HIRFunction> {
+    let mut specialized = substitute_hir_function(&template.method, hir_subst);
+    specialized.type_params.clear();
+    if !template.method.type_params.is_empty() {
+        let suffixes: Vec<String> = template
+            .method
+            .type_params
+            .iter()
+            .filter_map(|param| hir_subst.get(&param.name))
+            .map(hir_type_instance_name)
+            .collect();
+        specialized.name = format!(
+            "{}_{}_{}_{}",
+            concrete_prefix,
+            template.trait_name,
+            template.method.name,
+            suffixes.join("_")
+        );
+    } else {
+        specialized.name = format!(
+            "{}_{}_{}",
+            concrete_prefix, template.trait_name, template.method.name,
+        );
+    }
+
+    MethodCandidate {
+        label: format!("{} ({})", specialized.name, template.trait_name),
+        param_count: explicit_hir_method_param_count(&specialized),
+        value: specialized,
+    }
 }

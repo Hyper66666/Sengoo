@@ -15,15 +15,13 @@ use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
 use crate::mir::method_specialization_helpers::prepare_method_specialization;
+use crate::mir::method_specialization_helpers::build_trait_method_candidate;
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
-use crate::mir::hir_specialization_helpers::{
-    substitute_hir_function,
-};
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, instantiate_impl_method,
 };
@@ -651,37 +649,11 @@ impl<'a> LoweringContext<'a> {
             arg_locals,
         )?;
 
-        let mut specialized = substitute_hir_function(&template.method, &hir_subst);
-        specialized.type_params.clear();
-        if !template.method.type_params.is_empty() {
-            let suffixes: Vec<String> = template
-                .method
-                .type_params
-                .iter()
-                .filter_map(|param| hir_subst.get(&param.name))
-                .map(hir_type_to_instance_name)
-                .collect();
-            specialized.name = format!(
-                "{}_{}_{}_{}",
-                concrete_prefix,
-                template.trait_name,
-                template.method.name,
-                suffixes.join("_")
-            );
-        } else {
-            specialized.name = format!(
-                "{}_{}_{}",
-                concrete_prefix,
-                template.trait_name,
-                template.method.name,
-            );
-        }
-
-        Some(MethodCandidate {
-            label: format!("{} ({})", specialized.name, template.trait_name),
-            param_count: explicit_hir_method_param_count(&specialized),
-            value: specialized,
-        })
+        Some(build_trait_method_candidate(
+            template,
+            &hir_subst,
+            &concrete_prefix,
+        ))
     }
 
     fn try_materialize_trait_method(

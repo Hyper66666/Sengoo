@@ -1,9 +1,10 @@
 use crate::hir::{HIRFunction, HIRParam, HIRStruct, HIRType, HIRTypeParam, IntKind};
 use crate::mir::method_specialization_helpers::{
-    bind_method_specialization_subst, prepare_method_specialization,
-    realize_method_specialization,
+    bind_method_specialization_subst, build_trait_method_candidate,
+    prepare_method_specialization, realize_method_specialization,
 };
-use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64};
+use crate::method_resolution::MethodCandidate;
+use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64, TraitMethodTemplate};
 use crate::symbol::SymbolId;
 use std::collections::HashMap;
 
@@ -50,6 +51,62 @@ fn generic_push_method() -> HIRFunction {
         no_mangle: false,
         export_name: None,
         is_pub: false,
+    }
+}
+
+fn generic_trait_template() -> TraitMethodTemplate {
+    TraitMethodTemplate {
+        target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+        trait_name: "Iterable".to_string(),
+        method: HIRFunction {
+            name: "next".to_string(),
+            type_params: vec![HIRTypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+                default: None,
+            }],
+            params: vec![HIRParam::new(
+                "self".to_string(),
+                SymbolId::new(1),
+                HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+            )],
+            return_type: HIRType::named("T".to_string(), vec![]),
+            precondition: None,
+            postcondition: None,
+            body: crate::hir::HIRBody::new(),
+            is_async: false,
+            abi: None,
+            is_unsafe: false,
+            no_mangle: false,
+            export_name: None,
+            is_pub: false,
+        },
+    }
+}
+
+fn nongeneric_trait_template() -> TraitMethodTemplate {
+    TraitMethodTemplate {
+        target_type: HIRType::named("Vec".to_string(), vec![]),
+        trait_name: "Sized".to_string(),
+        method: HIRFunction {
+            name: "len".to_string(),
+            type_params: vec![],
+            params: vec![HIRParam::new(
+                "self".to_string(),
+                SymbolId::new(1),
+                HIRType::named("Vec".to_string(), vec![]),
+            )],
+            return_type: HIRType::int(IntKind::I64),
+            precondition: None,
+            postcondition: None,
+            body: crate::hir::HIRBody::new(),
+            is_async: false,
+            abi: None,
+            is_unsafe: false,
+            no_mangle: false,
+            export_name: None,
+            is_pub: false,
+        },
     }
 }
 
@@ -173,4 +230,32 @@ fn prepare_method_specialization_rejects_arity_mismatch_before_realization() {
     );
 
     assert!(prepared.is_none());
+}
+
+#[test]
+fn build_trait_method_candidate_names_generic_specialization_with_suffixes() {
+    let template = generic_trait_template();
+    let hir_subst = HashMap::from([("T".to_string(), HIRType::int(IntKind::I64))]);
+
+    let candidate: MethodCandidate<HIRFunction> =
+        build_trait_method_candidate(&template, &hir_subst, "Vec_i64");
+
+    assert_eq!(candidate.value.name, "Vec_i64_Iterable_next_i64");
+    assert_eq!(candidate.label, "Vec_i64_Iterable_next_i64 (Iterable)");
+    assert_eq!(candidate.param_count, 0);
+    assert!(candidate.value.type_params.is_empty());
+    assert_eq!(candidate.value.return_type, HIRType::int(IntKind::I64));
+}
+
+#[test]
+fn build_trait_method_candidate_names_nongeneric_specialization_without_suffixes() {
+    let template = nongeneric_trait_template();
+    let hir_subst = HashMap::new();
+
+    let candidate: MethodCandidate<HIRFunction> =
+        build_trait_method_candidate(&template, &hir_subst, "Vec");
+
+    assert_eq!(candidate.value.name, "Vec_Sized_len");
+    assert_eq!(candidate.label, "Vec_Sized_len (Sized)");
+    assert_eq!(candidate.param_count, 0);
 }
