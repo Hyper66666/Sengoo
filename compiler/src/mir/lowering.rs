@@ -14,6 +14,7 @@ use crate::mir::lowering_helpers::{
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
+use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
@@ -504,7 +505,16 @@ impl<'a> LoweringContext<'a> {
             receiver_type_prefix(receiver_ty)
         };
 
-        match self.select_known_trait_method_candidate(
+        match select_known_trait_method_candidate(
+            self.known_functions.iter().map(|name| {
+                (
+                    name.as_str(),
+                    self.function_sigs
+                        .get(name)
+                        .map(|sig| sig.param_count)
+                        .unwrap_or(0),
+                )
+            }),
             &type_prefix,
             method,
             &method_func_name,
@@ -631,40 +641,6 @@ impl<'a> LoweringContext<'a> {
                 None
             }
         }
-    }
-
-    fn select_known_trait_method_candidate(
-        &self,
-        type_prefix: &str,
-        method: &str,
-        excluded_name: &str,
-        expected_param_count: usize,
-    ) -> MethodCandidateMatch<String> {
-        let suffix = format!("_{}", method);
-        let prefix = format!("{}_", type_prefix);
-        let matches = self
-            .known_functions
-            .iter()
-            .filter(|name| {
-                name.starts_with(&prefix)
-                    && name.ends_with(&suffix)
-                    && *name != excluded_name
-                    && {
-                        let middle = &name[prefix.len()..name.len() - suffix.len()];
-                        !middle.is_empty()
-                    }
-            })
-            .map(|name| MethodCandidate {
-                label: name.clone(),
-                param_count: self
-                    .function_sigs
-                    .get(name)
-                    .map(|sig| sig.param_count)
-                    .unwrap_or(0),
-                value: name.clone(),
-            })
-            .collect();
-        select_method_candidate(matches, expected_param_count)
     }
 
     fn try_materialize_inherent_method(

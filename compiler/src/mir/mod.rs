@@ -19,6 +19,7 @@ mod inst;
 pub(crate) mod lowering_helpers;
 pub(crate) mod method_dispatch_helpers;
 pub(crate) mod pattern_helpers;
+pub(crate) mod trait_dispatch_helpers;
 pub(crate) mod type_mapping_helpers;
 pub(crate) mod type_helpers;
 mod lowering;

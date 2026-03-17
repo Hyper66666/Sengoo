@@ -26,6 +26,7 @@ pub mod incremental_typeck_tests;
 pub mod lowering_helpers_tests;
 pub mod match_phi_tests;
 pub mod method_call_tests;
+pub mod trait_dispatch_helpers_tests;
 pub mod mir_generic_methods_tests;
 pub mod macro_tests;
 pub mod method_dispatch_helpers_tests;
