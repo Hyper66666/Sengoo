@@ -14,6 +14,7 @@ pub(crate) mod direct_call_helpers;
 pub(crate) mod concrete_type_helpers;
 mod generic_methods;
 pub(crate) mod hir_specialization_helpers;
+pub(crate) mod impl_specialization_helpers;
 mod inst;
 pub(crate) mod lowering_helpers;
 pub(crate) mod pattern_helpers;
