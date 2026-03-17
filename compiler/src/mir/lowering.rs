@@ -5,8 +5,8 @@ use crate::hir::{
 };
 use crate::hir::HIRTrait;
 use crate::method_resolution::{
-    ambiguous_method_error, explicit_hir_method_param_count, explicit_hir_method_params,
-    select_method_candidate, MethodCandidate, MethodCandidateMatch,
+    ambiguous_method_error, explicit_hir_method_param_count, select_method_candidate,
+    MethodCandidate, MethodCandidateMatch,
 };
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
@@ -14,6 +14,7 @@ use crate::mir::lowering_helpers::{
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
+use crate::mir::method_specialization_helpers::bind_method_specialization_subst;
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
@@ -538,22 +539,17 @@ impl<'a> LoweringContext<'a> {
         receiver_ty: &MIRType,
         arg_locals: &[Local],
     ) -> Option<HashMap<String, MIRType>> {
-        let mut mir_subst = HashMap::new();
-        bind_mir_subst_from_hir_type(target_type, receiver_ty, self.struct_defs, &mut mir_subst);
-
         let actual_arg_types: Vec<MIRType> = arg_locals
             .iter()
             .map(|local| self.get_local_type(*local).clone())
             .collect();
-        let explicit_params = explicit_hir_method_params(&method.params);
-        if explicit_params.len() != actual_arg_types.len() {
-            return None;
-        }
-        for (param, actual_ty) in explicit_params.iter().zip(actual_arg_types.iter()) {
-            bind_mir_subst_from_hir_type(&param.ty, actual_ty, self.struct_defs, &mut mir_subst);
-        }
-
-        Some(mir_subst)
+        bind_method_specialization_subst(
+            target_type,
+            method,
+            receiver_ty,
+            &actual_arg_types,
+            self.struct_defs,
+        )
     }
 
     fn realize_method_specialization(
