@@ -28,6 +28,7 @@ pub mod match_phi_tests;
 pub mod method_call_tests;
 pub mod mir_generic_methods_tests;
 pub mod macro_tests;
+pub mod method_dispatch_helpers_tests;
 pub mod parser_ambiguity_tests;
 pub mod perf_runtime_regression_tests;
 pub mod phi_tests;
