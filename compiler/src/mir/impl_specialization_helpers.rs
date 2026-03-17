@@ -109,6 +109,26 @@ pub(crate) fn instantiate_impl_method(
     method
 }
 
+pub(crate) fn build_inherent_specialized_method(
+    method: &hir::HIRFunction,
+    legacy_prefix: &str,
+    concrete_prefix: &str,
+    subst: &HashMap<String, HIRType>,
+) -> hir::HIRFunction {
+    let mut specialized = instantiate_impl_method(method, legacy_prefix, concrete_prefix, subst);
+    specialized.type_params.clear();
+    if !method.type_params.is_empty() {
+        let suffixes: Vec<String> = method
+            .type_params
+            .iter()
+            .filter_map(|param| subst.get(&param.name))
+            .map(hir_type_instance_name)
+            .collect();
+        specialized.name = format!("{}_{}", specialized.name, suffixes.join("_"));
+    }
+    specialized
+}
+
 pub(crate) fn expand_impl_variants(
     impl_item: &hir::HIRImpl,
     concrete_named_types: &HashMap<String, HIRType>,

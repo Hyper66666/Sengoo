@@ -23,7 +23,7 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::impl_specialization_helpers::{
-    expand_impl_variants, impl_type_prefix, instantiate_impl_method,
+    build_inherent_specialized_method, expand_impl_variants, impl_type_prefix,
 };
 use crate::mir::type_mapping_helpers::{
     bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
@@ -39,7 +39,6 @@ use crate::mir::{
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
 use crate::type_naming::{
-    hir_type_instance_name as hir_type_to_instance_name,
     hir_type_prefix as hir_type_to_prefix,
     mir_type_instance_name as mir_type_to_instance_name,
 };
@@ -613,23 +612,12 @@ impl<'a> LoweringContext<'a> {
                 arg_locals,
             )?;
 
-            let mut specialized = instantiate_impl_method(
+            let specialized = build_inherent_specialized_method(
                 &template.method,
                 &legacy_prefix,
                 &concrete_prefix,
                 &hir_subst,
             );
-            specialized.type_params.clear();
-            if !template.method.type_params.is_empty() {
-                let suffixes: Vec<String> = template
-                    .method
-                    .type_params
-                    .iter()
-                    .filter_map(|param| hir_subst.get(&param.name))
-                    .map(hir_type_to_instance_name)
-                    .collect();
-                specialized.name = format!("{}_{}", specialized.name, suffixes.join("_"));
-            }
 
             return self.lower_materialized_method(specialized);
         }
