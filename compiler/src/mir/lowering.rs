@@ -10,6 +10,7 @@ use crate::method_resolution::{
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
+use crate::mir::local_type_helpers::collect_local_types;
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
@@ -571,10 +572,8 @@ impl<'a> LoweringContext<'a> {
         method: &str,
         arg_locals: &[Local],
     ) -> Option<String> {
-        let actual_arg_types: Vec<MIRType> = arg_locals
-            .iter()
-            .map(|local| self.get_local_type(*local).clone())
-            .collect();
+        let actual_arg_types =
+            collect_local_types(arg_locals, |local| self.get_local_type(local).clone());
         let specialized = resolve_inherent_method_specialization(
             self.inherent_method_templates,
             method,
@@ -594,10 +593,8 @@ impl<'a> LoweringContext<'a> {
         arg_locals: &[Local],
         type_display: &str,
     ) -> Result<Option<String>, String> {
-        let actual_arg_types: Vec<MIRType> = arg_locals
-            .iter()
-            .map(|local| self.get_local_type(*local).clone())
-            .collect();
+        let actual_arg_types =
+            collect_local_types(arg_locals, |local| self.get_local_type(local).clone());
         let specialized = resolve_trait_method_specialization(
             self.trait_method_templates,
             method,

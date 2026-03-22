@@ -16,6 +16,7 @@ mod generic_methods;
 pub(crate) mod hir_specialization_helpers;
 pub(crate) mod impl_specialization_helpers;
 mod inst;
+pub(crate) mod local_type_helpers;
 pub(crate) mod lowering_helpers;
 pub(crate) mod method_dispatch_helpers;
 pub(crate) mod method_specialization_helpers;
