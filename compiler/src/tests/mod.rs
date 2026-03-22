@@ -15,6 +15,7 @@ pub mod diagnostics_tests;
 pub mod direct_call_helpers_tests;
 pub mod derive_macro_tests;
 pub mod ffi_tests;
+pub mod function_sig_helpers_tests;
 pub mod for_loop_tests;
 pub mod generic_constraints_tests;
 pub mod generic_hir_tests;
