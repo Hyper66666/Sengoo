@@ -9,6 +9,7 @@ use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
 use crate::mir::local_type_helpers::collect_local_types;
+use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
 use crate::mir::method_dispatch_helpers::{
     build_method_dispatch_plan,
 };
@@ -121,11 +122,7 @@ pub fn lower_hir_with_options(
                 known_functions.insert(fn_item.name.clone());
                 known_function_sigs.insert(
                     fn_item.name.clone(),
-                    FunctionSig {
-                        ret_type: hir_type_to_mir_with_structs(&fn_item.return_type, &struct_defs),
-                        param_count: fn_item.params.len(),
-                        env: vec![],
-                    },
+                    build_hir_function_sig(&fn_item.return_type, fn_item.params.len(), &struct_defs),
                 );
             }
             HIRItem::ExternBlock(extern_block) => {
@@ -134,11 +131,11 @@ pub fn lower_hir_with_options(
                         known_functions.insert(extern_fn.name.clone());
                         known_function_sigs.insert(
                             extern_fn.name.clone(),
-                            FunctionSig {
-                                ret_type: hir_type_to_mir_with_structs(&extern_fn.return_type, &struct_defs),
-                                param_count: extern_fn.params.len(),
-                                env: vec![],
-                            },
+                            build_hir_function_sig(
+                                &extern_fn.return_type,
+                                extern_fn.params.len(),
+                                &struct_defs,
+                            ),
                         );
                     }
                 }
@@ -159,14 +156,11 @@ pub fn lower_hir_with_options(
                         for registration in collected.eager_registrations() {
                             known_function_sigs.insert(
                                 registration.name.clone(),
-                                FunctionSig {
-                                    ret_type: hir_type_to_mir_with_structs(
-                                        &registration.return_type,
-                                        &struct_defs,
-                                    ),
-                                    param_count: registration.explicit_param_count,
-                                    env: vec![],
-                                },
+                                build_hir_function_sig(
+                                    &registration.return_type,
+                                    registration.explicit_param_count,
+                                    &struct_defs,
+                                ),
                             );
                             known_functions.insert(registration.name);
                         }
@@ -181,14 +175,11 @@ pub fn lower_hir_with_options(
                             known_functions.insert(method.name.clone());
                             known_function_sigs.insert(
                                 method.name.clone(),
-                                FunctionSig {
-                                    ret_type: hir_type_to_mir_with_structs(
-                                        &method.return_type,
-                                        &struct_defs,
-                                    ),
-                                    param_count: explicit_hir_method_param_count(method),
-                                    env: vec![],
-                                },
+                                build_hir_function_sig(
+                                    &method.return_type,
+                                    explicit_hir_method_param_count(method),
+                                    &struct_defs,
+                                ),
                             );
                         }
                     }
@@ -375,13 +366,13 @@ struct LoopContext {
 }
 
 /// 函数签名信息，存储函数名、参数数量和参数类型。
-#[derive(Clone)]
-struct FunctionSig {
-    ret_type: MIRType,
-    param_count: usize,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FunctionSig {
+    pub(crate) ret_type: MIRType,
+    pub(crate) param_count: usize,
     /// 函数参数数量（不含环境指针参数）。
     #[allow(dead_code)]
-    env: Vec<(String, MIRType)>,
+    pub(crate) env: Vec<(String, MIRType)>,
 }
 
 /// Lambda 捕获环境。
@@ -521,11 +512,11 @@ impl<'a> LoweringContext<'a> {
 
         self.function_sigs.insert(
             specialized.name.clone(),
-            FunctionSig {
-                ret_type: hir_type_to_mir_with_structs(&specialized.return_type, self.struct_defs),
-                param_count: explicit_hir_method_param_count(&specialized),
-                env: vec![],
-            },
+            build_hir_function_sig(
+                &specialized.return_type,
+                explicit_hir_method_param_count(&specialized),
+                self.struct_defs,
+            ),
         );
         self.known_functions.insert(specialized.name.clone());
 
@@ -778,11 +769,7 @@ impl<'a> LoweringContext<'a> {
         self.options.async_functions.insert(async_block_name.clone());
         self.function_sigs.insert(
             async_block_name.clone(),
-            FunctionSig {
-                ret_type: result_ty.clone(),
-                param_count: capture_types.len(),
-                env: vec![],
-            },
+            build_function_sig(result_ty.clone(), capture_types.len(), vec![]),
         );
 
         self.lambda_functions.push(async_fn);
@@ -2969,21 +2956,13 @@ impl<'a> LoweringContext<'a> {
                     // 带捕获环境的lambda函数签名注册。
                     self.function_sigs.insert(
                         lambda_name.clone(),
-                        FunctionSig {
-                            ret_type: ret_type.clone(),
-                            param_count: param_types.len(),
-                            env: env_var_types,
-                        },
+                        build_function_sig(ret_type.clone(), param_types.len(), env_var_types),
                     );
                 } else {
                     // 不带捕获环境的lambda函数签名注册。
                     self.function_sigs.insert(
                         lambda_name.clone(),
-                        FunctionSig {
-                            ret_type: ret_type.clone(),
-                            param_count: param_types.len(),
-                            env: vec![],
-                        },
+                        build_function_sig(ret_type.clone(), param_types.len(), vec![]),
                     );
                 }
 
