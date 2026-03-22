@@ -10,7 +10,7 @@ use crate::mir::lowering_helpers::{
 };
 use crate::mir::local_type_helpers::collect_local_types;
 use crate::mir::method_dispatch_helpers::{
-    method_dispatch_name, receiver_type_display, receiver_type_prefix,
+    build_method_dispatch_plan,
 };
 use crate::mir::method_specialization_helpers::{
     resolve_trait_method_specialization,
@@ -477,28 +477,24 @@ impl<'a> LoweringContext<'a> {
         arg_locals: &[Local],
     ) -> Result<String, String> {
         let explicit_type_name = self.type_names.get(&receiver_local).map(String::as_str);
-        let method_func_name = method_dispatch_name(explicit_type_name, receiver_ty, method);
-        let type_display = receiver_type_display(explicit_type_name, receiver_ty);
+        let dispatch_plan = build_method_dispatch_plan(explicit_type_name, receiver_ty, method);
 
-        if self.known_functions.contains(&method_func_name) {
-            return Ok(method_func_name);
+        if self.known_functions.contains(&dispatch_plan.func_name) {
+            return Ok(dispatch_plan.func_name);
         }
         if let Some(generated_name) =
             self.try_materialize_inherent_method(receiver_ty, method, arg_locals)
         {
             return Ok(generated_name);
         }
-        if let Some(generated_name) =
-            self.try_materialize_trait_method(receiver_ty, method, arg_locals, &type_display)?
-        {
+        if let Some(generated_name) = self.try_materialize_trait_method(
+            receiver_ty,
+            method,
+            arg_locals,
+            &dispatch_plan.type_display,
+        )? {
             return Ok(generated_name);
         }
-
-        let type_prefix = if let Some(type_name) = self.type_names.get(&receiver_local) {
-            type_name.clone()
-        } else {
-            receiver_type_prefix(receiver_ty)
-        };
 
         resolve_known_trait_method_name(
             self.known_functions.iter().map(|name| {
@@ -510,11 +506,11 @@ impl<'a> LoweringContext<'a> {
                         .unwrap_or(0),
                 )
             }),
-            &type_prefix,
+            &dispatch_plan.type_prefix,
             method,
-            &method_func_name,
+            &dispatch_plan.func_name,
             arg_locals.len(),
-            &type_display,
+            &dispatch_plan.type_display,
         )
     }
 

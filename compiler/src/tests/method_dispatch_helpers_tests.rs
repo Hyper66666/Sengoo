@@ -1,5 +1,5 @@
 use crate::mir::method_dispatch_helpers::{
-    method_dispatch_name, receiver_type_display, receiver_type_prefix,
+    build_method_dispatch_plan, method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
 use crate::mir::MIRType;
 
@@ -43,4 +43,26 @@ fn receiver_type_display_prefers_explicit_name_and_has_pointer_fallback() {
         receiver_type_display(None, &MIRType::Ref(Box::new(MIRType::Int(64)))),
         "ptr"
     );
+}
+
+#[test]
+fn build_method_dispatch_plan_keeps_name_display_and_prefix_in_sync() {
+    let plan = build_method_dispatch_plan(
+        Some("Vec_i64"),
+        &MIRType::Array(Box::new(MIRType::Int(64)), 3),
+        "len",
+    );
+
+    assert_eq!(plan.func_name, "Vec_i64_len");
+    assert_eq!(plan.type_display, "Vec_i64");
+    assert_eq!(plan.type_prefix, "Vec_i64");
+}
+
+#[test]
+fn build_method_dispatch_plan_uses_shape_based_fallbacks_without_explicit_name() {
+    let plan = build_method_dispatch_plan(None, &MIRType::Ptr(Box::new(MIRType::Bool)), "flip");
+
+    assert_eq!(plan.func_name, "bool_ptr_flip");
+    assert_eq!(plan.type_display, "ptr");
+    assert_eq!(plan.type_prefix, "bool_ptr");
 }
