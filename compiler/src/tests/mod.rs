@@ -23,6 +23,7 @@ pub mod mir_type_mapping_helpers_tests;
 pub mod generic_typeck_tests;
 pub mod hir_specialization_helpers_tests;
 pub mod incremental_typeck_tests;
+pub mod local_type_helpers_tests;
 pub mod lowering_helpers_tests;
 pub mod match_phi_tests;
 pub mod method_call_tests;
