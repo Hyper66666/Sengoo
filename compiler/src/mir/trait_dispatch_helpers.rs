@@ -1,5 +1,5 @@
 use crate::method_resolution::{
-    select_method_candidate, MethodCandidate, MethodCandidateMatch,
+    ambiguous_method_error, select_method_candidate, MethodCandidate, MethodCandidateMatch,
 };
 
 pub(crate) fn select_known_trait_method_candidate<'a, I>(
@@ -29,4 +29,32 @@ where
         })
         .collect();
     select_method_candidate(matches, expected_param_count)
+}
+
+pub(crate) fn resolve_known_trait_method_name<'a, I>(
+    functions: I,
+    type_prefix: &str,
+    method: &str,
+    excluded_name: &str,
+    expected_param_count: usize,
+    type_display: &str,
+) -> Result<String, String>
+where
+    I: IntoIterator<Item = (&'a str, usize)>,
+{
+    match select_known_trait_method_candidate(
+        functions,
+        type_prefix,
+        method,
+        excluded_name,
+        expected_param_count,
+    ) {
+        MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => {
+            Err(format!("method '{}' not found for type '{}'", method, type_display))
+        }
+        MethodCandidateMatch::One(name) => Ok(name),
+        MethodCandidateMatch::Ambiguous { labels } => {
+            Err(ambiguous_method_error(method, type_display, &labels))
+        }
+    }
 }

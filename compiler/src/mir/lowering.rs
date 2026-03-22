@@ -4,9 +4,7 @@ use crate::hir::{
     self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType,
 };
 use crate::hir::HIRTrait;
-use crate::method_resolution::{
-    ambiguous_method_error, explicit_hir_method_param_count, MethodCandidateMatch,
-};
+use crate::method_resolution::explicit_hir_method_param_count;
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
@@ -17,7 +15,7 @@ use crate::mir::method_dispatch_helpers::{
 use crate::mir::method_specialization_helpers::{
     resolve_trait_method_specialization,
 };
-use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
+use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
@@ -502,7 +500,7 @@ impl<'a> LoweringContext<'a> {
             receiver_type_prefix(receiver_ty)
         };
 
-        match select_known_trait_method_candidate(
+        resolve_known_trait_method_name(
             self.known_functions.iter().map(|name| {
                 (
                     name.as_str(),
@@ -516,16 +514,8 @@ impl<'a> LoweringContext<'a> {
             method,
             &method_func_name,
             arg_locals.len(),
-        ) {
-            MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => Err(format!(
-                "method '{}' not found for type '{}'",
-                method, type_display
-            )),
-            MethodCandidateMatch::One(name) => Ok(name),
-            MethodCandidateMatch::Ambiguous { labels } => {
-                Err(ambiguous_method_error(method, &type_display, &labels))
-            }
-        }
+            &type_display,
+        )
     }
 
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
