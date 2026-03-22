@@ -1,5 +1,12 @@
 use crate::mir::MIRType;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MethodDispatchPlan {
+    pub func_name: String,
+    pub type_display: String,
+    pub type_prefix: String,
+}
+
 pub(crate) fn receiver_type_prefix(receiver_ty: &MIRType) -> String {
     match receiver_ty {
         MIRType::Int(bits) => format!("i{}", bits),
@@ -64,5 +71,23 @@ pub(crate) fn receiver_type_display(
             MIRType::Enum { .. } => "enum".to_string(),
             _ => format!("{:?}", receiver_ty),
         }
+    }
+}
+
+pub(crate) fn build_method_dispatch_plan(
+    explicit_type_name: Option<&str>,
+    receiver_ty: &MIRType,
+    method: &str,
+) -> MethodDispatchPlan {
+    let func_name = method_dispatch_name(explicit_type_name, receiver_ty, method);
+    let type_display = receiver_type_display(explicit_type_name, receiver_ty);
+    let type_prefix = explicit_type_name
+        .map(str::to_string)
+        .unwrap_or_else(|| receiver_type_prefix(receiver_ty));
+
+    MethodDispatchPlan {
+        func_name,
+        type_display,
+        type_prefix,
     }
 }
