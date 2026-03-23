@@ -6,7 +6,7 @@ use crate::hir::{
 use crate::hir::HIRTrait;
 use crate::method_resolution::{
     ambiguous_method_error, explicit_hir_method_param_count, select_method_candidate,
-    MethodCandidate, MethodCandidateMatch,
+    MethodCandidateMatch,
 };
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
@@ -14,8 +14,9 @@ use crate::mir::lowering_helpers::{
 use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
-use crate::mir::method_specialization_helpers::prepare_method_specialization;
-use crate::mir::method_specialization_helpers::build_trait_method_candidate;
+use crate::mir::method_specialization_helpers::{
+    collect_trait_method_candidates, prepare_method_specialization,
+};
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
@@ -624,26 +625,6 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
-    fn specialize_trait_method_candidate(
-        &mut self,
-        template: &TraitMethodTemplate,
-        receiver_ty: &MIRType,
-        arg_locals: &[Local],
-    ) -> Option<MethodCandidate<hir::HIRFunction>> {
-        let (hir_subst, concrete_prefix) = self.prepare_method_specialization(
-            &template.target_type,
-            &template.method,
-            receiver_ty,
-            arg_locals,
-        )?;
-
-        Some(build_trait_method_candidate(
-            template,
-            &hir_subst,
-            &concrete_prefix,
-        ))
-    }
-
     fn try_materialize_trait_method(
         &mut self,
         receiver_ty: &MIRType,
@@ -651,18 +632,18 @@ impl<'a> LoweringContext<'a> {
         arg_locals: &[Local],
         type_display: &str,
     ) -> Result<Option<String>, String> {
-        let mut candidates = Vec::new();
-        for template in self.trait_method_templates {
-            if template.method.name != method {
-                continue;
-            }
-
-            if let Some(candidate) =
-                self.specialize_trait_method_candidate(template, receiver_ty, arg_locals)
-            {
-                candidates.push(candidate);
-            }
-        }
+        let actual_arg_types: Vec<MIRType> = arg_locals
+            .iter()
+            .map(|local| self.get_local_type(*local).clone())
+            .collect();
+        let candidates = collect_trait_method_candidates(
+            self.trait_method_templates,
+            method,
+            receiver_ty,
+            &actual_arg_types,
+            self.struct_defs,
+            &mut self.concrete_type_registry,
+        );
 
         match select_method_candidate(candidates, arg_locals.len()) {
             MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => Ok(None),

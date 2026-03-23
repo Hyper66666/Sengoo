@@ -1,7 +1,8 @@
 use crate::hir::{HIRFunction, HIRParam, HIRStruct, HIRType, HIRTypeParam, IntKind};
 use crate::mir::method_specialization_helpers::{
     bind_method_specialization_subst, build_trait_method_candidate,
-    prepare_method_specialization, realize_method_specialization,
+    collect_trait_method_candidates, prepare_method_specialization,
+    realize_method_specialization,
 };
 use crate::method_resolution::MethodCandidate;
 use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64, TraitMethodTemplate};
@@ -258,4 +259,57 @@ fn build_trait_method_candidate_names_nongeneric_specialization_without_suffixes
     assert_eq!(candidate.value.name, "Vec_Sized_len");
     assert_eq!(candidate.label, "Vec_Sized_len (Sized)");
     assert_eq!(candidate.param_count, 0);
+}
+
+#[test]
+fn collect_trait_method_candidates_filters_by_method_name() {
+    let struct_defs = HashMap::new();
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let mut matching = generic_trait_template();
+    matching.method.params.push(HIRParam::new(
+        "value".to_string(),
+        SymbolId::new(2),
+        HIRType::named("T".to_string(), vec![]),
+    ));
+    let mut other = matching.clone();
+    other.method.name = "peek".to_string();
+
+    let candidates = collect_trait_method_candidates(
+        &[matching, other],
+        "next",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+    );
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].value.name, "Vec_i64_Iterable_next_i64");
+    assert_eq!(candidates[0].param_count, 1);
+}
+
+#[test]
+fn collect_trait_method_candidates_skips_unrealizable_templates() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_bool".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+
+    let candidates = collect_trait_method_candidates(
+        &[generic_trait_template()],
+        "next",
+        &receiver_ty,
+        &[],
+        &struct_defs,
+        &mut registry,
+    );
+
+    assert!(candidates.is_empty());
 }
