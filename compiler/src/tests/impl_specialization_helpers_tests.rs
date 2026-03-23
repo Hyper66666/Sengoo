@@ -1,7 +1,8 @@
 use crate::hir::{HIRBody, HIRFunction, HIRImpl, HIRParam, HIRType, IntKind};
 use crate::mir::impl_specialization_helpers::{
     build_inherent_specialized_method, collect_matching_inherent_method_templates,
-    expand_impl_variants, impl_type_prefix, specialize_matching_inherent_method,
+    expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
+    specialize_matching_inherent_method,
     match_generic_impl_target,
 };
 use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType, MIR_I64};
@@ -190,4 +191,74 @@ fn specialize_matching_inherent_method_builds_generic_specialization() {
     assert_eq!(specialized.name, "Vec_i64_push_i64");
     assert!(specialized.type_params.is_empty());
     assert_eq!(specialized.return_type, HIRType::int(IntKind::I64));
+}
+
+#[test]
+fn resolve_inherent_method_specialization_skips_unrealizable_match_and_uses_next() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let templates = vec![
+        InherentMethodTemplate {
+            target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+            method: generic_method("Vec_push"),
+        },
+        InherentMethodTemplate {
+            target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+            method: {
+                let mut method = generic_method("Vec_push");
+                method.params[1].ty = HIRType::bool();
+                method.return_type = HIRType::bool();
+                method
+            },
+        },
+    ];
+
+    let specialized = resolve_inherent_method_specialization(
+        &templates,
+        "push",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+    )
+    .expect("one matching template should specialize");
+
+    assert_eq!(specialized.name, "Vec_i64_push_i64");
+    assert_eq!(specialized.return_type, HIRType::int(IntKind::I64));
+}
+
+#[test]
+fn resolve_inherent_method_specialization_returns_none_when_no_match_specializes() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let templates = vec![InherentMethodTemplate {
+        target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+        method: {
+            let mut method = generic_method("Vec_push");
+            method.params[1].ty = HIRType::bool();
+            method.return_type = HIRType::bool();
+            method
+        },
+    }];
+
+    let specialized = resolve_inherent_method_specialization(
+        &templates,
+        "push",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+    );
+
+    assert!(specialized.is_none());
 }

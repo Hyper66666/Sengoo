@@ -176,6 +176,31 @@ pub(crate) fn specialize_matching_inherent_method(
     ))
 }
 
+pub(crate) fn resolve_inherent_method_specialization(
+    templates: &[InherentMethodTemplate],
+    method_name: &str,
+    receiver_ty: &MIRType,
+    actual_arg_types: &[MIRType],
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &mut ConcreteTypeRegistry,
+) -> Option<hir::HIRFunction> {
+    for (template, legacy_prefix) in collect_matching_inherent_method_templates(templates, method_name)
+    {
+        if let Some(specialized) = specialize_matching_inherent_method(
+            template,
+            &legacy_prefix,
+            receiver_ty,
+            actual_arg_types,
+            struct_defs,
+            concrete_type_registry,
+        ) {
+            return Some(specialized);
+        }
+    }
+
+    None
+}
+
 pub(crate) fn expand_impl_variants(
     impl_item: &hir::HIRImpl,
     concrete_named_types: &HashMap<String, HIRType>,
