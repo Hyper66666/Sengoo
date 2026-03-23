@@ -570,10 +570,18 @@ fn synthesize_result_dispatch(
     return_ty: &MIRType,
     entries: &[(String, String)],
 ) -> Result<MirFunction, CompileError> {
-    let dispatch_name = select_result_dispatch_name(return_ty)
-        .expect("result dispatch should only be synthesized for supported scalar select types");
-    let default_value = select_result_default_constant(return_ty)
-        .expect("result dispatch should have a scalar default value");
+    let dispatch_name = select_result_dispatch_name(return_ty).ok_or_else(|| {
+        CompileError::MirLower(format!(
+            "async result dispatch only supports scalar select result types, got `{:?}`",
+            return_ty
+        ))
+    })?;
+    let default_value = select_result_default_constant(return_ty).ok_or_else(|| {
+        CompileError::MirLower(format!(
+            "async result dispatch has no default value for unsupported type `{:?}`",
+            return_ty
+        ))
+    })?;
 
     let mut f = MirFunction::new(dispatch_name, vec![MIR_I64, MIR_I64], return_ty.clone());
 
@@ -875,10 +883,12 @@ fn compute_live_in_user_locals(
 
         for block in plan.ordered_blocks.iter().rev() {
             let basic_block = &mir_fn.basic_blocks[*block];
-            let terminator = basic_block
-                .terminator
-                .as_ref()
-                .expect("async cfg block should terminate");
+            let terminator = basic_block.terminator.as_ref().ok_or_else(|| {
+                CompileError::MirLower(format!(
+                    "async cfg liveness requires every planned block to terminate; block {} is missing a terminator",
+                    block
+                ))
+            })?;
 
             let mut live = match terminator {
                 Terminator::Suspend { ready_block, .. } => {
@@ -2266,6 +2276,50 @@ mod tests {
         assert!(seen.contains(&1), "sleep builtin ordinal should be reserved");
         assert!(seen.contains(&2), "timeout builtin ordinal should be reserved");
         assert!(seen.contains(&4), "worker_b should receive stable sorted ordinal");
+    }
+
+    #[test]
+    fn synthesize_result_dispatch_reports_unsupported_result_type_instead_of_panicking() {
+        let registry = build_async_dispatch_registry(["worker".to_string()]);
+        let err = synthesize_result_dispatch(
+            &registry,
+            &MIRType::Struct {
+                name: "Point".to_string(),
+                fields: vec![("x".to_string(), MIR_I64)],
+            },
+            &[("worker".to_string(), "worker__result".to_string())],
+        )
+        .expect_err("unsupported result dispatch types should return a compile error");
+
+        assert!(matches!(err, CompileError::MirLower(_)));
+    }
+
+    #[test]
+    fn build_async_cfg_plan_reports_missing_terminator_instead_of_panicking() {
+        let mut mir_fn = MirFunction::new("main".to_string(), vec![], MIR_I64);
+        mir_fn.is_async = true;
+
+        let ready = mir_fn.add_block();
+        let pending = mir_fn.add_block();
+        let future_handle = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        let suspend_result = mir_fn.add_local(LocalKind::Temp, MIR_I64);
+
+        mir_fn.basic_blocks[mir_fn.start_block].set_terminator(Terminator::Suspend {
+            poll_func: "child__poll".to_string(),
+            future_handle,
+            destination: suspend_result,
+            ready_block: ready,
+            pending_block: pending,
+        });
+        mir_fn.basic_blocks[pending].set_terminator(Terminator::Goto(pending));
+
+        let err = build_async_cfg_plan(&mir_fn)
+            .expect_err("missing terminator should return a planning error");
+
+        assert!(
+            err.describe().contains("has no terminator"),
+            "missing terminator error should remain explicit"
+        );
     }
 
     #[test]
