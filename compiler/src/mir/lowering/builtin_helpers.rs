@@ -1,6 +1,25 @@
 use super::*;
 
 impl<'a> LoweringContext<'a> {
+    pub(super) fn try_lower_builtin_call(
+        &mut self,
+        name: &str,
+        arg_locals: &[Local],
+    ) -> Option<Local> {
+        match name {
+            "print" => Some(self.lower_builtin_print(arg_locals)),
+            "spawn" => Some(self.lower_builtin_spawn(arg_locals)),
+            "spawn_task" => Some(self.lower_builtin_spawn_task(arg_locals)),
+            "sleep" => Some(self.lower_builtin_sleep(arg_locals)),
+            "timeout" => Some(self.lower_builtin_timeout(arg_locals)),
+            "join" => Some(self.lower_builtin_join(arg_locals)),
+            "cancel_task" => Some(self.lower_builtin_cancel_task(arg_locals)),
+            "task_status" => Some(self.lower_builtin_task_status(arg_locals)),
+            "select" => Some(self.lower_builtin_select(arg_locals)),
+            _ => None,
+        }
+    }
+
     pub(super) fn lower_builtin_print(&mut self, arg_locals: &[Local]) -> Local {
         if arg_locals.len() != 1 {
             self.errors.push(format!(
@@ -315,6 +334,73 @@ impl<'a> LoweringContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn try_lower_builtin_call_dispatches_known_builtin_name() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::new();
+        let function_sigs = HashMap::new();
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+
+        let start_block = mir_fn.start_block;
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let task = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        let result = ctx.try_lower_builtin_call("task_status", &[task]);
+
+        assert!(result.is_some(), "expected builtin dispatch to return Some");
+        let has_task_status_call = ctx.mir_fn.instructions.iter().any(|inst| matches!(
+            inst,
+            Instruction::Call { func, .. } if func == "sengoo_async_task_status"
+        ));
+        assert!(
+            has_task_status_call,
+            "expected builtin dispatch to emit task_status runtime call"
+        );
+    }
+
+    #[test]
+    fn try_lower_builtin_call_ignores_non_builtin_name() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::new();
+        let function_sigs = HashMap::new();
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+
+        assert!(
+            ctx.try_lower_builtin_call("user_function", &[]).is_none(),
+            "non-builtin names should bypass builtin dispatch"
+        );
+        assert!(ctx.errors.is_empty(), "non-builtin dispatch should stay silent");
+    }
 
     #[test]
     fn lower_builtin_select_records_mismatched_future_result_types() {
