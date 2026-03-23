@@ -9,7 +9,7 @@ pub use jit::JITCodegen;
 
 
 use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64};
-use crate::mir::async_lowering::select_runtime_declaration;
+use crate::mir::async_dispatch_synthesis_helpers::select_runtime_declaration;
 
 use std::collections::{HashMap, HashSet};
 

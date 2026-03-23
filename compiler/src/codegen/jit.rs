@@ -3,7 +3,9 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
-use crate::mir::async_lowering::{select_runtime_declaration, select_runtime_function_name, select_runtime_return_type};
+use crate::mir::async_dispatch_synthesis_helpers::{
+    select_runtime_declaration, select_runtime_function_name, select_runtime_return_type,
+};
 use crate::mir::{self, Local, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
 
