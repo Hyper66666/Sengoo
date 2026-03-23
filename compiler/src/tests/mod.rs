@@ -3,6 +3,7 @@
 pub mod array_assign_tests;
 pub mod async_tests;
 pub mod async_cfg_helpers_tests;
+pub mod async_frame_helpers_tests;
 pub mod async_origin_helpers_tests;
 pub mod cast_semantics_tests;
 pub mod class_inheritance_tests;
