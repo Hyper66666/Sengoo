@@ -11,6 +11,7 @@
 mod bb;
 pub(crate) mod async_dispatch_helpers;
 pub(crate) mod async_cfg_helpers;
+pub(crate) mod async_frame_helpers;
 pub(crate) mod async_origin_helpers;
 pub(crate) mod direct_call_helpers;
 pub(crate) mod function_sig_helpers;
