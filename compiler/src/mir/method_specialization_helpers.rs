@@ -126,3 +126,38 @@ pub(crate) fn build_trait_method_candidate(
         value: specialized,
     }
 }
+
+pub(crate) fn collect_trait_method_candidates(
+    templates: &[TraitMethodTemplate],
+    method_name: &str,
+    receiver_ty: &MIRType,
+    actual_arg_types: &[MIRType],
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &mut ConcreteTypeRegistry,
+) -> Vec<MethodCandidate<hir::HIRFunction>> {
+    let mut candidates = Vec::new();
+    for template in templates {
+        if template.method.name != method_name {
+            continue;
+        }
+
+        let Some((hir_subst, concrete_prefix)) = prepare_method_specialization(
+            &template.target_type,
+            &template.method,
+            receiver_ty,
+            actual_arg_types,
+            struct_defs,
+            concrete_type_registry,
+        ) else {
+            continue;
+        };
+
+        candidates.push(build_trait_method_candidate(
+            template,
+            &hir_subst,
+            &concrete_prefix,
+        ));
+    }
+
+    candidates
+}
