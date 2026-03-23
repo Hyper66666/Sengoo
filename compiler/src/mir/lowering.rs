@@ -5,8 +5,7 @@ use crate::hir::{
 };
 use crate::hir::HIRTrait;
 use crate::method_resolution::{
-    ambiguous_method_error, explicit_hir_method_param_count, select_method_candidate,
-    MethodCandidateMatch,
+    ambiguous_method_error, explicit_hir_method_param_count, MethodCandidateMatch,
 };
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
@@ -16,6 +15,7 @@ use crate::mir::method_dispatch_helpers::{
 };
 use crate::mir::method_specialization_helpers::{
     collect_trait_method_candidates, prepare_method_specialization,
+    resolve_trait_method_candidate,
 };
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
@@ -645,12 +645,9 @@ impl<'a> LoweringContext<'a> {
             &mut self.concrete_type_registry,
         );
 
-        match select_method_candidate(candidates, arg_locals.len()) {
-            MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => Ok(None),
-            MethodCandidateMatch::One(specialized) => Ok(self.lower_materialized_method(specialized)),
-            MethodCandidateMatch::Ambiguous { labels } => {
-                Err(ambiguous_method_error(method, type_display, &labels))
-            }
+        match resolve_trait_method_candidate(candidates, arg_locals.len(), method, type_display)? {
+            Some(specialized) => Ok(self.lower_materialized_method(specialized)),
+            None => Ok(None),
         }
     }
 
