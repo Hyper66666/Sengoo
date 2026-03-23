@@ -10,6 +10,7 @@
 
 mod bb;
 pub(crate) mod async_dispatch_helpers;
+pub(crate) mod async_dispatch_synthesis_helpers;
 pub(crate) mod async_cfg_helpers;
 pub(crate) mod async_frame_helpers;
 pub(crate) mod async_origin_helpers;

@@ -6,6 +6,7 @@ use crate::hir::{
 use crate::hir::HIRTrait;
 use crate::method_resolution::explicit_hir_method_param_count;
 use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
+use crate::mir::async_dispatch_synthesis_helpers::select_runtime_function_name;
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
@@ -45,7 +46,6 @@ use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
 };
-use super::async_lowering::select_runtime_function_name;
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
