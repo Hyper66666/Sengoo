@@ -50,6 +50,8 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
+mod call_target_helpers;
+use self::call_target_helpers::CallTargetResolution;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2083,48 +2085,12 @@ fn set_terminator(&mut self, term: Terminator) {
 
                 // 解析函数表达式、函数名、返回类型和环境指针。
                 let (func_name, ret_type, env_ptr_local) = match func.as_ref() {
-                    HIRExpr::Var { name, .. } => {
-                        // Prefer local function-valued variables (e.g. lambdas) over builtins.
-                        if let Some(&var_local) = self.local_names.get(name) {
-                            if let Some(lambda_name) = self.lambda_names.get(&var_local) {
-                                let ret = self
-                                    .function_sigs
-                                    .get(lambda_name)
-                                    .map(|sig| sig.ret_type.clone())
-                                    .unwrap_or(MIR_I64);
-
-                                let env_ptr = self
-                                    .lambda_environments
-                                    .get(lambda_name)
-                                    .and_then(|env| env.env_ptr_local);
-
-                                (lambda_name.clone(), ret, env_ptr)
-                            } else {
-                                let local_ty = self.get_local_type(var_local).clone();
-                                if let MIRType::Fn { ret, .. } = &local_ty {
-                                    (mir_local_name(var_local), (**ret).clone(), None)
-                                } else {
-                                    let ret = self
-                                        .function_sigs
-                                        .get(name)
-                                        .map(|sig| sig.ret_type.clone())
-                                        .unwrap_or(MIR_I64);
-                                    (name.clone(), ret, None)
-                                }
-                            }
-                        } else if let Some(builtin_local) =
-                            self.try_lower_builtin_call(name, &arg_locals)
-                        {
-                            return builtin_local;
-                        } else {
-                            let ret = self
-                                .function_sigs
-                                .get(name)
-                                .map(|sig| sig.ret_type.clone())
-                                .unwrap_or(MIR_I64);
-                            (name.clone(), ret, None)
+                    HIRExpr::Var { name, .. } => match self.resolve_named_call_target(name, &arg_locals) {
+                        CallTargetResolution::Builtin(local) => return local,
+                        CallTargetResolution::Planned(plan) => {
+                            (plan.func_name, plan.ret_type, plan.env_ptr_local)
                         }
-                    }
+                    },
                     _ => (String::new(), MIR_UNIT, None),
                 };
 
