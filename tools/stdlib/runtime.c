@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -916,6 +917,19 @@ static long long* sengoo_async_frame_data(long long handle) {
     return handle == 0 ? NULL : (long long*)(intptr_t)handle;
 }
 
+static int sengoo_async_frame_access_is_valid(long long* frame, long long offset) {
+    return frame != NULL && offset >= 0 && offset < frame[0];
+}
+
+static int sengoo_async_frame_guard_access(long long* frame, long long offset) {
+#ifndef NDEBUG
+    assert(frame != NULL && "async frame access requires a non-null compiler-managed handle");
+    assert(offset >= 0 && "async frame access requires a non-negative slot offset");
+    assert(offset < frame[0] && "async frame access offset is out of bounds");
+#endif
+    return sengoo_async_frame_access_is_valid(frame, offset);
+}
+
 long long sengoo_async_frame_alloc(long long slot_count) {
     if (slot_count < 0) {
         return 0;
@@ -935,9 +949,16 @@ void sengoo_async_frame_free(long long handle) {
     free((void *)(intptr_t)handle);
 }
 
+/*
+ * Async frame helpers are a compiler/runtime ABI and are not intended for
+ * user-authored source calls. In debug builds, invalid handle/offset access
+ * traps via assert(). In release-compatible builds, store becomes a no-op and
+ * load returns 0 as a fallback; that 0 is ambiguous and must not be treated as
+ * a reliable semantic value.
+ */
 void sengoo_async_frame_store(long long handle, long long offset, long long value) {
     long long* frame = sengoo_async_frame_data(handle);
-    if (frame == NULL || offset < 0 || offset >= frame[0]) {
+    if (!sengoo_async_frame_guard_access(frame, offset)) {
         return;
     }
     frame[offset + 1] = value;
@@ -945,7 +966,7 @@ void sengoo_async_frame_store(long long handle, long long offset, long long valu
 
 long long sengoo_async_frame_load(long long handle, long long offset) {
     long long* frame = sengoo_async_frame_data(handle);
-    if (frame == NULL || offset < 0 || offset >= frame[0]) {
+    if (!sengoo_async_frame_guard_access(frame, offset)) {
         return 0;
     }
     return frame[offset + 1];
