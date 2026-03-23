@@ -2690,6 +2690,66 @@ def main() -> i64 {
 }
 
 #[test]
+fn native_runtime_invalid_async_frame_access_aborts_in_debug_builds() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-frame-guard-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_invalid_async_frame_load_reaches_end(void) {{\n    long long frame = sengoo_async_frame_alloc(1);\n    if (frame == 0) {{ return 0; }}\n    (void)sengoo_async_frame_load(frame, 1);\n    sengoo_async_frame_free(frame);\n    return 1;\n}}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_invalid_async_frame_load_reaches_end() -> i64;
+}
+
+def main() -> i64 {
+    sengoo_test_invalid_async_frame_load_reaches_end()
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("frame guard probe should compile to LLVM IR");
+    let ll_path = temp_artifact("async-frame-guard", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    let exe_path = temp_artifact(
+        "async-frame-guard",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("frame guard probe executable should run");
+    assert_ne!(
+        output.status.code(),
+        Some(1),
+        "invalid async frame access should not reach the end of the probe function"
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
 fn async_native_runtime_preserves_struct_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;
