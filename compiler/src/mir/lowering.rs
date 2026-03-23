@@ -14,8 +14,7 @@ use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
 use crate::mir::method_specialization_helpers::{
-    collect_trait_method_candidates, prepare_method_specialization,
-    resolve_trait_method_candidate,
+    collect_trait_method_candidates, resolve_trait_method_candidate,
 };
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
@@ -24,8 +23,9 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::impl_specialization_helpers::{
-    build_inherent_specialized_method, collect_matching_inherent_method_templates,
+    collect_matching_inherent_method_templates,
     expand_impl_variants, impl_type_prefix,
+    specialize_matching_inherent_method,
 };
 use crate::mir::type_mapping_helpers::{
     bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
@@ -528,27 +528,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn prepare_method_specialization(
-        &mut self,
-        target_type: &HIRType,
-        method: &hir::HIRFunction,
-        receiver_ty: &MIRType,
-        arg_locals: &[Local],
-    ) -> Option<(HashMap<String, HIRType>, String)> {
-        let actual_arg_types: Vec<MIRType> = arg_locals
-            .iter()
-            .map(|local| self.get_local_type(*local).clone())
-            .collect();
-        prepare_method_specialization(
-            target_type,
-            method,
-            receiver_ty,
-            &actual_arg_types,
-            self.struct_defs,
-            &mut self.concrete_type_registry,
-        )
-    }
-
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
         if self.known_functions.contains(&specialized.name) {
             return Some(specialized.name);
@@ -593,22 +572,21 @@ impl<'a> LoweringContext<'a> {
         method: &str,
         arg_locals: &[Local],
     ) -> Option<String> {
+        let actual_arg_types: Vec<MIRType> = arg_locals
+            .iter()
+            .map(|local| self.get_local_type(*local).clone())
+            .collect();
         for (template, legacy_prefix) in
             collect_matching_inherent_method_templates(self.inherent_method_templates, method)
         {
-            let (hir_subst, concrete_prefix) = self.prepare_method_specialization(
-                &template.target_type,
-                &template.method,
-                receiver_ty,
-                arg_locals,
-            )?;
-
-            let specialized = build_inherent_specialized_method(
-                &template.method,
+            let specialized = specialize_matching_inherent_method(
+                template,
                 &legacy_prefix,
-                &concrete_prefix,
-                &hir_subst,
-            );
+                receiver_ty,
+                &actual_arg_types,
+                self.struct_defs,
+                &mut self.concrete_type_registry,
+            )?;
 
             return self.lower_materialized_method(specialized);
         }
