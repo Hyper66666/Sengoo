@@ -1,5 +1,8 @@
 use crate::hir::{self, HIRType};
-use crate::method_resolution::{explicit_hir_method_param_count, MethodCandidate};
+use crate::method_resolution::{
+    ambiguous_method_error, explicit_hir_method_param_count, select_method_candidate,
+    MethodCandidate, MethodCandidateMatch,
+};
 use crate::method_resolution::explicit_hir_method_params;
 use crate::mir::hir_specialization_helpers::substitute_hir_function;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
@@ -160,4 +163,19 @@ pub(crate) fn collect_trait_method_candidates(
     }
 
     candidates
+}
+
+pub(crate) fn resolve_trait_method_candidate(
+    candidates: Vec<MethodCandidate<hir::HIRFunction>>,
+    arg_count: usize,
+    method_name: &str,
+    type_display: &str,
+) -> Result<Option<hir::HIRFunction>, String> {
+    match select_method_candidate(candidates, arg_count) {
+        MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => Ok(None),
+        MethodCandidateMatch::One(specialized) => Ok(Some(specialized)),
+        MethodCandidateMatch::Ambiguous { labels } => {
+            Err(ambiguous_method_error(method_name, type_display, &labels))
+        }
+    }
 }

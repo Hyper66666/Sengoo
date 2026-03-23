@@ -2,7 +2,7 @@ use crate::hir::{HIRFunction, HIRParam, HIRStruct, HIRType, HIRTypeParam, IntKin
 use crate::mir::method_specialization_helpers::{
     bind_method_specialization_subst, build_trait_method_candidate,
     collect_trait_method_candidates, prepare_method_specialization,
-    realize_method_specialization,
+    realize_method_specialization, resolve_trait_method_candidate,
 };
 use crate::method_resolution::MethodCandidate;
 use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64, TraitMethodTemplate};
@@ -312,4 +312,41 @@ fn collect_trait_method_candidates_skips_unrealizable_templates() {
     );
 
     assert!(candidates.is_empty());
+}
+
+#[test]
+fn resolve_trait_method_candidate_returns_single_matching_candidate() {
+    let template = nongeneric_trait_template();
+    let candidate: MethodCandidate<HIRFunction> =
+        build_trait_method_candidate(&template, &HashMap::new(), "Vec");
+
+    let resolved =
+        resolve_trait_method_candidate(vec![candidate], 0, "len", "Vec").expect("should resolve");
+
+    assert_eq!(
+        resolved.expect("candidate should exist").name,
+        "Vec_Sized_len"
+    );
+}
+
+#[test]
+fn resolve_trait_method_candidate_builds_ambiguous_error() {
+    let first = MethodCandidate {
+        label: "Vec_A_len (A)".to_string(),
+        param_count: 0,
+        value: nongeneric_trait_template().method.clone(),
+    };
+    let second = MethodCandidate {
+        label: "Vec_B_len (B)".to_string(),
+        param_count: 0,
+        value: nongeneric_trait_template().method,
+    };
+
+    let err = resolve_trait_method_candidate(vec![first, second], 0, "len", "Vec")
+        .expect_err("matching candidates should be ambiguous");
+
+    assert_eq!(
+        err,
+        "ambiguous method 'len' for type 'Vec': candidates Vec_A_len (A), Vec_B_len (B)"
+    );
 }
