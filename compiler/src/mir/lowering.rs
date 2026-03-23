@@ -2112,24 +2112,10 @@ fn set_terminator(&mut self, term: Terminator) {
                                     (name.clone(), ret, None)
                                 }
                             }
-                        } else if name == "print" {
-                            return self.lower_builtin_print(&arg_locals);
-                        } else if name == "spawn_task" {
-                            return self.lower_builtin_spawn_task(&arg_locals);
-                        } else if name == "sleep" {
-                            return self.lower_builtin_sleep(&arg_locals);
-                        } else if name == "timeout" {
-                            return self.lower_builtin_timeout(&arg_locals);
-                        } else if name == "spawn" {
-                            return self.lower_builtin_spawn(&arg_locals);
-                        } else if name == "join" {
-                            return self.lower_builtin_join(&arg_locals);
-                        } else if name == "cancel_task" {
-                            return self.lower_builtin_cancel_task(&arg_locals);
-                        } else if name == "task_status" {
-                            return self.lower_builtin_task_status(&arg_locals);
-                        } else if name == "select" {
-                            return self.lower_builtin_select(&arg_locals);
+                        } else if let Some(builtin_local) =
+                            self.try_lower_builtin_call(name, &arg_locals)
+                        {
+                            return builtin_local;
                         } else {
                             let ret = self
                                 .function_sigs
