@@ -1,4 +1,4 @@
-//! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
+﻿//! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
 use crate::hir::{
     self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType,
@@ -50,7 +50,9 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
+mod call_invocation_helpers;
 mod call_target_helpers;
+use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
@@ -2094,40 +2096,24 @@ fn set_terminator(&mut self, term: Terminator) {
                     _ => (String::new(), MIR_UNIT, None),
                 };
 
-                let is_async_call = self.options.async_functions.contains(&func_name);
-                let local_ty = if is_async_call {
-                    MIRType::Future(Box::new(ret_type.clone()))
-                } else {
-                    ret_type.clone()
-                };
-
-                let local: Local = self.add_local(None, LocalKind::Temp, local_ty);
-                if !is_async_call {
-                    if let MIRType::Struct { name, .. } = &ret_type {
-                        self.type_names.insert(local, name.clone());
-                    }
+                let plan = build_call_invocation_plan(
+                    &func_name,
+                    &ret_type,
+                    env_ptr_local,
+                    &arg_locals,
+                    &self.options.async_functions,
+                );
+                let local: Local = self.add_local(None, LocalKind::Temp, plan.local_ty.clone());
+                if let Some(type_name) = plan.struct_type_name.clone() {
+                    self.type_names.insert(local, type_name);
                 }
-
-                // 调用lambda时将环境指针作为第一个参数传入。
-                let mut final_args = Vec::new();
-                if let Some(env_ptr) = env_ptr_local {
-                    final_args.push(env_ptr);
-                }
-                final_args.extend(arg_locals);
-
-                let actual_func = if is_async_call {
-                    format!("{}__start", func_name.clone())
-                } else {
-                    func_name.clone()
-                };
                 self.push_inst(Instruction::Call {
                     destination: local,
-                    func: actual_func,
-                    args: final_args,
+                    func: plan.actual_func,
+                    args: plan.final_args,
                 });
-                // Track which async function produced this future handle.
-                if is_async_call {
-                    self.future_origins.insert(local, func_name);
+                if let Some(origin) = plan.future_origin {
+                    self.future_origins.insert(local, origin);
                 }
                 local
             }
