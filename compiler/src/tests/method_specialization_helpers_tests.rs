@@ -3,6 +3,7 @@ use crate::mir::method_specialization_helpers::{
     bind_method_specialization_subst, build_trait_method_candidate,
     collect_trait_method_candidates, prepare_method_specialization,
     realize_method_specialization, resolve_trait_method_candidate,
+    resolve_trait_method_specialization,
 };
 use crate::method_resolution::MethodCandidate;
 use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64, TraitMethodTemplate};
@@ -349,4 +350,67 @@ fn resolve_trait_method_candidate_builds_ambiguous_error() {
         err,
         "ambiguous method 'len' for type 'Vec': candidates Vec_A_len (A), Vec_B_len (B)"
     );
+}
+
+#[test]
+fn resolve_trait_method_specialization_returns_single_matching_candidate() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let mut matching = generic_trait_template();
+    matching.method.params.push(HIRParam::new(
+        "value".to_string(),
+        SymbolId::new(2),
+        HIRType::named("T".to_string(), vec![]),
+    ));
+
+    let specialized = resolve_trait_method_specialization(
+        &[matching],
+        "next",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+        "Vec<i64>",
+    )
+    .expect("should resolve")
+    .expect("one candidate should match");
+
+    assert_eq!(specialized.name, "Vec_i64_Iterable_next_i64");
+    assert_eq!(specialized.return_type, HIRType::int(IntKind::I64));
+}
+
+#[test]
+fn resolve_trait_method_specialization_builds_ambiguous_error() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let mut matching = generic_trait_template();
+    matching.method.params.push(HIRParam::new(
+        "value".to_string(),
+        SymbolId::new(2),
+        HIRType::named("T".to_string(), vec![]),
+    ));
+
+    let err = resolve_trait_method_specialization(
+        &[matching.clone(), matching],
+        "next",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+        "Vec<i64>",
+    )
+    .expect_err("duplicate matching trait templates should be ambiguous");
+
+    assert!(err.contains("next"));
+    assert!(err.contains("Vec<i64>"));
 }

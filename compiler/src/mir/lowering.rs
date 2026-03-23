@@ -14,7 +14,7 @@ use crate::mir::method_dispatch_helpers::{
     method_dispatch_name, receiver_type_display, receiver_type_prefix,
 };
 use crate::mir::method_specialization_helpers::{
-    collect_trait_method_candidates, resolve_trait_method_candidate,
+    resolve_trait_method_specialization,
 };
 use crate::mir::trait_dispatch_helpers::select_known_trait_method_candidate;
 use crate::mir::async_origin_helpers::{
@@ -598,16 +598,17 @@ impl<'a> LoweringContext<'a> {
             .iter()
             .map(|local| self.get_local_type(*local).clone())
             .collect();
-        let candidates = collect_trait_method_candidates(
+        let specialized = resolve_trait_method_specialization(
             self.trait_method_templates,
             method,
             receiver_ty,
             &actual_arg_types,
             self.struct_defs,
             &mut self.concrete_type_registry,
-        );
+            type_display,
+        )?;
 
-        match resolve_trait_method_candidate(candidates, arg_locals.len(), method, type_display)? {
+        match specialized {
             Some(specialized) => Ok(self.lower_materialized_method(specialized)),
             None => Ok(None),
         }
