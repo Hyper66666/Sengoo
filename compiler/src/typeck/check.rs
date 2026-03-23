@@ -1978,6 +1978,11 @@ impl TypeChecker {
             TyKind::Future(_) => true,
             TyKind::Tuple(types) => types.iter().any(Self::ty_contains_future_escape),
             TyKind::Array(elem, _) | TyKind::Slice(elem) => Self::ty_contains_future_escape(elem),
+            TyKind::Ref(_, inner) | TyKind::Ptr(inner) => Self::ty_contains_future_escape(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::ty_contains_future_escape)
+                    || Self::ty_contains_future_escape(ret)
+            }
             TyKind::Adt { args, .. } => args.iter().any(Self::ty_contains_future_escape),
             _ => false,
         }
@@ -3019,6 +3024,44 @@ impl TypeChecker {
 impl Default for TypeChecker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TypeChecker;
+    use crate::typeck::ty::{IntKind, Ty, TyKind};
+
+    fn mk(id: usize, kind: TyKind) -> Ty {
+        Ty::new(id, kind)
+    }
+
+    #[test]
+    fn ty_contains_future_escape_rejects_ref_wrapped_future() {
+        let future = mk(1, TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))));
+        let wrapped = mk(3, TyKind::Ref(false, Box::new(future)));
+        assert!(TypeChecker::ty_contains_future_escape(&wrapped));
+    }
+
+    #[test]
+    fn ty_contains_future_escape_rejects_ptr_wrapped_future() {
+        let future = mk(1, TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))));
+        let wrapped = mk(3, TyKind::Ptr(Box::new(future)));
+        assert!(TypeChecker::ty_contains_future_escape(&wrapped));
+    }
+
+    #[test]
+    fn ty_contains_future_escape_rejects_fn_returning_future() {
+        let future = mk(3, TyKind::Future(Box::new(mk(4, TyKind::Int(IntKind::I64)))));
+        let fn_ty = mk(
+            1,
+            TyKind::Fn {
+                params: vec![mk(2, TyKind::Int(IntKind::I32))],
+                ret: Box::new(future),
+                is_variadic: false,
+            },
+        );
+        assert!(TypeChecker::ty_contains_future_escape(&fn_ty));
     }
 }
 

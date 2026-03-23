@@ -1,6 +1,6 @@
 use crate::hir::{HIRType, IntKind};
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
-use crate::mir::{MIRType, MIR_BOOL, MIR_I64};
+use crate::mir::{MIR_BOOL, MIR_I64};
 use std::collections::HashMap;
 
 #[test]
