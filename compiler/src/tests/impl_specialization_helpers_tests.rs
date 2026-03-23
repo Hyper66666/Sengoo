@@ -1,8 +1,10 @@
 use crate::hir::{HIRBody, HIRFunction, HIRImpl, HIRParam, HIRType, IntKind};
 use crate::mir::impl_specialization_helpers::{
-    build_inherent_specialized_method, expand_impl_variants, impl_type_prefix,
+    build_inherent_specialized_method, collect_matching_inherent_method_templates,
+    expand_impl_variants, impl_type_prefix,
     match_generic_impl_target,
 };
+use crate::mir::InherentMethodTemplate;
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -109,4 +111,38 @@ fn build_inherent_specialized_method_keeps_nongeneric_name_without_suffixes() {
 
     assert_eq!(specialized.name, "Vec_i64_len");
     assert!(specialized.type_params.is_empty());
+}
+
+#[test]
+fn collect_matching_inherent_method_templates_strips_legacy_prefix() {
+    let templates = vec![
+        InherentMethodTemplate {
+            target_type: HIRType::named("Vec".to_string(), vec![]),
+            method: method("Vec_len"),
+        },
+        InherentMethodTemplate {
+            target_type: HIRType::named("Vec".to_string(), vec![]),
+            method: method("Vec_push"),
+        },
+    ];
+
+    let matches = collect_matching_inherent_method_templates(&templates, "len");
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].1, "Vec");
+    assert_eq!(matches[0].0.method.name, "Vec_len");
+}
+
+#[test]
+fn collect_matching_inherent_method_templates_keeps_unprefixed_name() {
+    let templates = vec![InherentMethodTemplate {
+        target_type: HIRType::named("Point".to_string(), vec![]),
+        method: method("sum"),
+    }];
+
+    let matches = collect_matching_inherent_method_templates(&templates, "sum");
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].1, "Point");
+    assert_eq!(matches[0].0.method.name, "sum");
 }

@@ -1,4 +1,5 @@
 use crate::hir::{self, HIRType, HIRTypeKind};
+use crate::mir::InherentMethodTemplate;
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
 };
@@ -127,6 +128,26 @@ pub(crate) fn build_inherent_specialized_method(
         specialized.name = format!("{}_{}", specialized.name, suffixes.join("_"));
     }
     specialized
+}
+
+pub(crate) fn collect_matching_inherent_method_templates<'a>(
+    templates: &'a [InherentMethodTemplate],
+    method_name: &str,
+) -> Vec<(&'a InherentMethodTemplate, String)> {
+    let mut matches = Vec::new();
+    for template in templates {
+        let legacy_prefix = hir_type_prefix(&template.target_type);
+        let original_method_name = template
+            .method
+            .name
+            .strip_prefix(&format!("{}_", legacy_prefix))
+            .unwrap_or(&template.method.name);
+        if original_method_name == method_name {
+            matches.push((template, legacy_prefix));
+        }
+    }
+
+    matches
 }
 
 pub(crate) fn expand_impl_variants(
