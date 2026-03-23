@@ -54,3 +54,5 @@ pub mod trait_tests;
 pub mod type_mismatch_tests;
 pub mod type_naming_tests;
 pub mod while_loop_tests;
+
+pub mod async_poll_helpers_tests;
