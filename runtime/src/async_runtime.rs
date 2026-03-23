@@ -1216,19 +1216,10 @@ mod tests {
     }
 
     fn async_spawn_kind_id_for_tests() -> i64 {
-        hash_kind_id_for_tests(b"sengoo_async_sleep")
+        1
     }
 
     fn async_select_hint_kind_id_for_tests() -> i64 {
-        hash_kind_id_for_tests(b"sengoo_async_select_hint")
-    }
-
-    fn hash_kind_id_for_tests(name: &[u8]) -> i64 {
-        let mut hash = 0x811c9dc5u32;
-        for byte in name {
-            hash ^= u32::from(*byte);
-            hash = hash.wrapping_mul(0x01000193);
-        }
-        i64::from(hash)
+        99
     }
 }

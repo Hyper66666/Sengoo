@@ -5,6 +5,7 @@
 //!   - `foo__poll(handle: i64) -> i64`  — runs until next suspend or completion, returns 0=pending, 1=ready
 //!   - `foo__result(handle: i64) -> T`  — reads the result from the frame, frees it, returns T
 
+use super::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
 use crate::mir::{
     CallArg, Instruction, Local, LocalKind, MIRType, MirConstant,
     MirFunction, Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
@@ -132,15 +133,6 @@ pub fn count_await_points(mir_fn: &MirFunction) -> usize {
         .count()
 }
 
-pub fn async_spawn_kind_id(name: &str) -> i64 {
-    let mut hash = 0x811c9dc5u32;
-    for byte in name.as_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(0x01000193);
-    }
-    i64::from(hash)
-}
-
 pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {
     match ty {
         MIRType::Bool => Some("bool"),
@@ -209,6 +201,7 @@ pub fn expand_async_functions(
         .filter(|f| f.is_async)
         .map(|f| f.name.clone())
         .collect();
+    let dispatch_registry = build_async_dispatch_registry(async_fn_names.iter().cloned());
 
     let has_async_main = async_fn_names.iter().any(|n| n == "main");
 
@@ -271,9 +264,18 @@ pub fn expand_async_functions(
     }
 
     if !spawn_dispatch_entries.is_empty() {
-        new_fns.push(synthesize_spawn_poll_dispatch(&spawn_dispatch_entries));
-        new_fns.push(synthesize_spawn_cancel_dispatch(&spawn_dispatch_entries));
-        new_fns.push(synthesize_spawn_drop_dispatch(&spawn_dispatch_entries));
+        new_fns.push(synthesize_spawn_poll_dispatch(
+            &dispatch_registry,
+            &spawn_dispatch_entries,
+        )?);
+        new_fns.push(synthesize_spawn_cancel_dispatch(
+            &dispatch_registry,
+            &spawn_dispatch_entries,
+        )?);
+        new_fns.push(synthesize_spawn_drop_dispatch(
+            &dispatch_registry,
+            &spawn_dispatch_entries,
+        )?);
     }
     let needs_timeout_bool_dispatch = mir_fns.iter().any(|mir_fn| {
         mir_fn.instructions.iter().any(|inst| match inst {
@@ -297,7 +299,11 @@ pub fn expand_async_functions(
     }
 
     for (_suffix, (return_ty, entries)) in result_dispatch_entries {
-        new_fns.push(synthesize_result_dispatch(&return_ty, &entries));
+        new_fns.push(synthesize_result_dispatch(
+            &dispatch_registry,
+            &return_ty,
+            &entries,
+        )?);
     }
 
     if has_async_main {
@@ -310,7 +316,26 @@ pub fn expand_async_functions(
     Ok(new_fns)
 }
 
-fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
+fn dispatch_switch_key(
+    registry: &AsyncDispatchRegistry,
+    base_name: &str,
+) -> Result<u32, CompileError> {
+    let kind = registry.kind_id(base_name).ok_or_else(|| {
+        CompileError::MirLower(format!(
+            "missing async dispatch id for future origin `{base_name}`"
+        ))
+    })?;
+    u32::try_from(kind).map_err(|_| {
+        CompileError::MirLower(format!(
+            "async dispatch id for future origin `{base_name}` does not fit switch key width"
+        ))
+    })
+}
+
+fn synthesize_spawn_poll_dispatch(
+    registry: &AsyncDispatchRegistry,
+    entries: &[(String, String)],
+) -> Result<MirFunction, CompileError> {
     let mut f = MirFunction::new(
         "sengoo_async_poll_dispatch".to_string(),
         vec![MIR_I64, MIR_I64],
@@ -333,7 +358,7 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+        targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
     if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
@@ -346,7 +371,7 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
     }
 
     if !entries
@@ -363,7 +388,7 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
         targets.push((
-            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            dispatch_switch_key(registry, "sengoo_async_timeout_bool")?,
             case_block,
         ));
     }
@@ -382,10 +407,13 @@ fn synthesize_spawn_poll_dispatch(entries: &[(String, String)]) -> MirFunction {
     f.basic_blocks[default_block].push(ready_inst);
     f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(ready_local)));
 
-    f
+    Ok(f)
 }
 
-fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction {
+fn synthesize_spawn_cancel_dispatch(
+    registry: &AsyncDispatchRegistry,
+    entries: &[(String, String)],
+) -> Result<MirFunction, CompileError> {
     let mut f = MirFunction::new(
         "sengoo_async_cancel_dispatch".to_string(),
         vec![MIR_I64, MIR_I64],
@@ -414,7 +442,7 @@ fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction
         });
         f.basic_blocks[case_block].push(true_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(true_local)));
-        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+        targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
     if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
@@ -427,7 +455,7 @@ fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
     }
 
     if !entries
@@ -444,7 +472,7 @@ fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
         targets.push((
-            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            dispatch_switch_key(registry, "sengoo_async_timeout_bool")?,
             case_block,
         ));
     }
@@ -463,10 +491,13 @@ fn synthesize_spawn_cancel_dispatch(entries: &[(String, String)]) -> MirFunction
     f.basic_blocks[default_block].push(false_inst);
     f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(false_local)));
 
-    f
+    Ok(f)
 }
 
-fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
+fn synthesize_spawn_drop_dispatch(
+    registry: &AsyncDispatchRegistry,
+    entries: &[(String, String)],
+) -> Result<MirFunction, CompileError> {
     let mut f = MirFunction::new(
         "sengoo_async_drop_dispatch".to_string(),
         vec![MIR_I64, MIR_I64],
@@ -489,7 +520,7 @@ fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
-        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+        targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
     if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
@@ -502,7 +533,7 @@ fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
-        targets.push((async_spawn_kind_id("sengoo_async_sleep") as u32, case_block));
+        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
     }
 
     if !entries
@@ -519,7 +550,7 @@ fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
         targets.push((
-            async_spawn_kind_id("sengoo_async_timeout_bool") as u32,
+            dispatch_switch_key(registry, "sengoo_async_timeout_bool")?,
             case_block,
         ));
     }
@@ -531,10 +562,14 @@ fn synthesize_spawn_drop_dispatch(entries: &[(String, String)]) -> MirFunction {
     });
     f.basic_blocks[default_block].set_terminator(Terminator::Return(None));
 
-    f
+    Ok(f)
 }
 
-fn synthesize_result_dispatch(return_ty: &MIRType, entries: &[(String, String)]) -> MirFunction {
+fn synthesize_result_dispatch(
+    registry: &AsyncDispatchRegistry,
+    return_ty: &MIRType,
+    entries: &[(String, String)],
+) -> Result<MirFunction, CompileError> {
     let dispatch_name = select_result_dispatch_name(return_ty)
         .expect("result dispatch should only be synthesized for supported scalar select types");
     let default_value = select_result_default_constant(return_ty)
@@ -558,7 +593,7 @@ fn synthesize_result_dispatch(return_ty: &MIRType, entries: &[(String, String)])
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((async_spawn_kind_id(base_name) as u32, case_block));
+        targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
     f.basic_blocks[bb0].set_terminator(Terminator::Switch {
@@ -575,7 +610,7 @@ fn synthesize_result_dispatch(return_ty: &MIRType, entries: &[(String, String)])
     f.basic_blocks[default_block].push(default_inst);
     f.basic_blocks[default_block].set_terminator(Terminator::Return(Some(default_local)));
 
-    f
+    Ok(f)
 }
 
 /// Generate a `main` wrapper that drives async main through the helper ABI:
@@ -2195,6 +2230,43 @@ fn synthesize_result(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileEr
 mod tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn async_dispatch_registry_assigns_reserved_builtin_ordinals_then_sorted_async_functions() {
+        let registry = build_async_dispatch_registry([
+            "worker_b".to_string(),
+            "worker_a".to_string(),
+        ]);
+
+        assert_eq!(registry.kind_id("sengoo_async_sleep"), Some(1));
+        assert_eq!(registry.kind_id("sengoo_async_timeout_bool"), Some(2));
+        assert_eq!(registry.kind_id("worker_a"), Some(3));
+        assert_eq!(registry.kind_id("worker_b"), Some(4));
+    }
+
+    #[test]
+    fn spawn_poll_dispatch_switch_targets_use_registry_ordinals() {
+        let registry = build_async_dispatch_registry([
+            "worker_b".to_string(),
+            "worker_a".to_string(),
+        ]);
+        let dispatch = synthesize_spawn_poll_dispatch(
+            &registry,
+            &[("worker_b".to_string(), "worker_b__poll".to_string())],
+        )
+        .expect("spawn dispatch should synthesize with stable ordinals");
+
+        let Some(Terminator::Switch { targets, .. }) =
+            dispatch.basic_blocks[dispatch.start_block].terminator.as_ref()
+        else {
+            panic!("spawn poll dispatch should start with a switch terminator");
+        };
+
+        let seen: HashSet<u32> = targets.iter().map(|(kind, _)| *kind).collect();
+        assert!(seen.contains(&1), "sleep builtin ordinal should be reserved");
+        assert!(seen.contains(&2), "timeout builtin ordinal should be reserved");
+        assert!(seen.contains(&4), "worker_b should receive stable sorted ordinal");
+    }
 
     #[test]
     fn select_runtime_family_maps_scalar_types_to_expected_symbols() {
