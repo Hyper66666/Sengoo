@@ -23,9 +23,8 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::impl_specialization_helpers::{
-    collect_matching_inherent_method_templates,
+    resolve_inherent_method_specialization,
     expand_impl_variants, impl_type_prefix,
-    specialize_matching_inherent_method,
 };
 use crate::mir::type_mapping_helpers::{
     bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
@@ -576,21 +575,16 @@ impl<'a> LoweringContext<'a> {
             .iter()
             .map(|local| self.get_local_type(*local).clone())
             .collect();
-        for (template, legacy_prefix) in
-            collect_matching_inherent_method_templates(self.inherent_method_templates, method)
-        {
-            let specialized = specialize_matching_inherent_method(
-                template,
-                &legacy_prefix,
-                receiver_ty,
-                &actual_arg_types,
-                self.struct_defs,
-                &mut self.concrete_type_registry,
-            )?;
+        let specialized = resolve_inherent_method_specialization(
+            self.inherent_method_templates,
+            method,
+            receiver_ty,
+            &actual_arg_types,
+            self.struct_defs,
+            &mut self.concrete_type_registry,
+        )?;
 
-            return self.lower_materialized_method(specialized);
-        }
-        None
+        self.lower_materialized_method(specialized)
     }
 
     fn try_materialize_trait_method(
