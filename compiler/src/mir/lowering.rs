@@ -865,14 +865,27 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 设置当前基本块为指定块。
-    fn set_current_block(&mut self, block: usize) {
-        self.current_block = Some(block);
+fn set_current_block(&mut self, block: usize) {
+    self.current_block = Some(block);
+}
+
+fn current_block_or_error(&mut self, context: &str) -> usize {
+    match self.current_block {
+        Some(block) => block,
+        None => {
+            self.errors.push(format!(
+                "internal MIR lowering error: no current block set while {context}"
+            ));
+            self.mir_fn.start_block
+        }
     }
+}
 
     /// 返回当前正在生成的基本块索引。
-    fn current_block(&self) -> usize {
-        self.current_block.expect("no current block set")
-    }
+fn current_block(&self) -> usize {
+    debug_assert!(self.current_block.is_some(), "no current block set");
+    self.current_block.unwrap_or(self.mir_fn.start_block)
+}
 
     fn propagate_future_origin_through_phi(
         &mut self,
@@ -997,18 +1010,18 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 向当前基本块追加一条MIR指令。
-    fn push_inst(&mut self, inst: Instruction) {
-        let block_id = self.current_block();
-        self.mir_fn.push_inst_to_block(block_id, inst);
-    }
+fn push_inst(&mut self, inst: Instruction) {
+    let block_id = self.current_block_or_error("emitting MIR instruction");
+    self.mir_fn.push_inst_to_block(block_id, inst);
+}
 
     /// 向当前基本块追加terminator终止指令。
-    fn set_terminator(&mut self, term: Terminator) {
-        let block_id = self.current_block();
-        if let Some(block) = self.mir_fn.block_mut(block_id) {
-            block.set_terminator(term);
-        }
+fn set_terminator(&mut self, term: Terminator) {
+    let block_id = self.current_block_or_error("emitting MIR terminator");
+    if let Some(block) = self.mir_fn.block_mut(block_id) {
+        block.set_terminator(term);
     }
+}
 
     fn inject_precondition_check(&mut self, precondition: &HIRExpr, entry_block: usize) -> usize {
         self.set_current_block(entry_block);
@@ -3342,7 +3355,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 将HIR二元运算符转换为MIR二元运算符。
-    fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
+fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
         match op {
             hir::HIRBinaryOp::Add => MirBinOp::Add,
             hir::HIRBinaryOp::Sub => MirBinOp::Sub,
@@ -3364,5 +3377,50 @@ impl<'a> LoweringContext<'a> {
             hir::HIRBinaryOp::Ge => MirBinOp::Ge,
             hir::HIRBinaryOp::Assign => MirBinOp::Add,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn set_terminator_without_current_block_records_error_instead_of_panicking() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::new();
+        let function_sigs = HashMap::new();
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            ctx.set_terminator(Terminator::Return(None));
+        }));
+
+        assert!(
+            result.is_ok(),
+            "set_terminator should not panic without a current block"
+        );
+        assert!(
+            ctx.errors
+                .iter()
+                .any(|err| err.contains("no current block set while emitting MIR terminator")),
+            "expected lowering error to be recorded, got {:?}",
+            ctx.errors
+        );
     }
 }

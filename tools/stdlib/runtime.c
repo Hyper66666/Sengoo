@@ -946,15 +946,34 @@ long long sengoo_async_frame_alloc(long long slot_count) {
 }
 
 void sengoo_async_frame_free(long long handle) {
-    free((void *)(intptr_t)handle);
+    long long* frame = sengoo_async_frame_data(handle);
+#ifndef NDEBUG
+    assert(frame != NULL && "async frame free requires a non-null compiler-managed handle");
+#endif
+    if (frame == NULL) {
+        return;
+    }
+    free((void *)(intptr_t)frame);
 }
 
 /*
  * Async frame helpers are a compiler/runtime ABI and are not intended for
- * user-authored source calls. In debug builds, invalid handle/offset access
- * traps via assert(). In release-compatible builds, store becomes a no-op and
- * load returns 0 as a fallback; that 0 is ambiguous and must not be treated as
- * a reliable semantic value.
+ * user-authored source calls.
+ *
+ * Contract summary:
+ *   - alloc(slot_count): returns 0 on allocation/size failure
+ *   - free(handle):
+ *       debug   -> assert on null / invalid compiler-managed handle
+ *       release -> null is ignored to preserve ABI-compatible behavior
+ *   - store(handle, offset, value):
+ *       debug   -> assert on invalid handle or offset
+ *       release -> no-op on invalid access
+ *   - load(handle, offset):
+ *       debug   -> assert on invalid handle or offset
+ *       release -> returns 0 on invalid access
+ *
+ * The release-path 0 fallback is ambiguous and must not be treated as a
+ * reliable semantic value.
  */
 void sengoo_async_frame_store(long long handle, long long offset, long long value) {
     long long* frame = sengoo_async_frame_data(handle);
