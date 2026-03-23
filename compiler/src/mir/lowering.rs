@@ -5,6 +5,7 @@ use crate::hir::{
 };
 use crate::hir::HIRTrait;
 use crate::method_resolution::explicit_hir_method_param_count;
+use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
@@ -44,7 +45,7 @@ use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
 };
-use super::async_lowering::{async_spawn_kind_id, select_runtime_function_name};
+use super::async_lowering::select_runtime_function_name;
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -418,6 +419,7 @@ struct LoweringContext<'a> {
     options: MirLowerOptions,
     inherent_method_templates: &'a [InherentMethodTemplate],
     trait_method_templates: &'a [TraitMethodTemplate],
+    async_dispatch_registry: AsyncDispatchRegistry,
     /// Maps a Local → async function base name when that local holds a future
     /// handle produced by a `foo__start(...)` call. Propagated through let
     /// bindings so that `let f = async_fn(); await f` resolves correctly.
@@ -436,6 +438,8 @@ impl<'a> LoweringContext<'a> {
         inherent_method_templates: &'a [InherentMethodTemplate],
         trait_method_templates: &'a [TraitMethodTemplate],
     ) -> Self {
+        let async_dispatch_registry =
+            build_async_dispatch_registry(options.async_functions.iter().cloned());
         Self {
             mir_fn,
             local_names: HashMap::new(),
@@ -456,8 +460,18 @@ impl<'a> LoweringContext<'a> {
             options,
             inherent_method_templates,
             trait_method_templates,
+            async_dispatch_registry,
             future_origins: HashMap::new(),
         }
+    }
+
+    fn async_dispatch_kind_id(&mut self, base_name: &str) -> Option<i64> {
+        self.async_dispatch_registry.kind_id(base_name).or_else(|| {
+            self.errors.push(format!(
+                "unable to assign a stable async dispatch id for future origin `{base_name}` during MIR lowering"
+            ));
+            None
+        })
     }
 
     fn resolve_method_call_target(
@@ -1460,10 +1474,13 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
+        let Some(kind_id) = self.async_dispatch_kind_id(&base_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
         let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Assign {
             destination: kind_local,
-            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+            value: MirConstant::Int(kind_id),
         });
 
         let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
@@ -1495,10 +1512,13 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
+        let Some(kind_id) = self.async_dispatch_kind_id(&base_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
         let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Assign {
             destination: kind_local,
-            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+            value: MirConstant::Int(kind_id),
         });
 
         let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
@@ -1553,10 +1573,13 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
+        let Some(kind_id) = self.async_dispatch_kind_id(&base_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
         let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Assign {
             destination: kind_local,
-            value: MirConstant::Int(async_spawn_kind_id(&base_name)),
+            value: MirConstant::Int(kind_id),
         });
 
         let future_local =
@@ -1701,16 +1724,22 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
+        let Some(first_kind_id) = self.async_dispatch_kind_id(&first_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
         let first_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Assign {
             destination: first_kind,
-            value: MirConstant::Int(async_spawn_kind_id(&first_name)),
+            value: MirConstant::Int(first_kind_id),
         });
 
+        let Some(second_kind_id) = self.async_dispatch_kind_id(&second_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
         let second_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Assign {
             destination: second_kind,
-            value: MirConstant::Int(async_spawn_kind_id(&second_name)),
+            value: MirConstant::Int(second_kind_id),
         });
 
         let result_local = self.add_local(None, LocalKind::Temp, result_ty);

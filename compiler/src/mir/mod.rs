@@ -9,6 +9,7 @@
 //! - **接近机器码**：易于映射到目标架构
 
 mod bb;
+pub(crate) mod async_dispatch_helpers;
 pub(crate) mod async_origin_helpers;
 pub(crate) mod direct_call_helpers;
 pub(crate) mod function_sig_helpers;
