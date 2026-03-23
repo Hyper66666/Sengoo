@@ -1,0 +1,290 @@
+id: async-runtime-hardening-and-lowering-split
+title: Harden Async Semantics and Split Lowering Hotspots
+status: proposed
+priority: high
+created: 2026-03-23
+updated: 2026-03-23
+
+summary: |
+  Close remaining async correctness and maintainability gaps by tightening
+  future escape checks, replacing fragile spawn dispatch IDs, converting async
+  lowering ICE paths into structured compiler errors, hardening runtime frame
+  contracts, and splitting the largest lowering files into smaller submodules.
+
+motivation: |
+  The current async implementation is functionally broad and heavily tested, but
+  several long-tail risks remain:
+
+  1. Future escape detection is still incomplete for nested type shapes.
+  2. Spawn dispatch currently relies on a 32-bit hash-based identifier, which is
+     hard to reason about and can fail silently on collision.
+  3. Some async lowering paths still panic or rely on expect() in places that
+     should report CompileError diagnostics.
+  4. The C runtime frame ABI can still fail ambiguously on invalid handle/offset
+     inputs.
+  5. compiler/src/mir/lowering.rs and compiler/src/mir/async_lowering.rs remain
+     structurally dense enough that new work can easily reintroduce "god file"
+     coupling.
+
+  None of these issues mean the current branch is unusable. They do mean the
+  next wave of async work will get more expensive unless these seams are
+  tightened now.
+
+problem: |
+  The remaining gaps are concentrated in five areas:
+
+  1. **Type escape blind spots**
+     - Future escape checks do not recursively cover all type constructors that
+       can preserve an embedded future value.
+     - This risks programs that type-check while still violating the intended
+       "future values cannot escape" rule.
+
+  2. **Hash-based spawn dispatch IDs**
+     - Runtime spawn dispatch currently depends on a 32-bit hash-derived mode.
+     - This makes correctness depend on collision freedom that is not encoded in
+       the type system or the ABI.
+
+  3. **Compiler ICE paths**
+     - async lowering still contains panic!/expect paths in code that handles
+       user programs.
+     - These should become explicit CompileError diagnostics, especially around
+       CFG remapping, terminator handling, and liveness planning.
+
+  4. **Ambiguous runtime frame failures**
+     - The C runtime frame API can return behavior that is hard to distinguish
+       from valid execution (for example, load returning 0).
+     - The contract for invalid handle/offset access is not explicit enough.
+
+  5. **Structural drift toward monolithic lowering files**
+     - lowering.rs and async_lowering.rs continue to accumulate orchestration,
+       planning, and execution logic in the same modules.
+     - This raises the cost of review, makes regressions harder to localize, and
+       increases the odds of large accidental diffs.
+
+goals:
+  - Extend future escape detection to recursively cover nested type shapes,
+    including Ref/Ptr/Fn-style wrappers where applicable.
+  - Replace hash-based spawn dispatch IDs with a stable, collision-free scheme.
+  - Convert async lowering panic!/expect paths on user-program input into
+    structured CompileError diagnostics.
+  - Clarify and harden runtime frame error behavior for invalid handle/offset
+    usage.
+  - Split lowering.rs and async_lowering.rs by responsibility before further
+    feature growth.
+  - Add regression coverage for the newly hardened async edges.
+
+non_goals:
+  - Replacing the full async ABI design.
+  - Changing the public syntax of async features in this batch.
+  - Reworking the Rust and C runtimes into a single runtime implementation.
+  - Full TaskHandle/TaskStatus type-system redesign in this change.
+  - Refactoring every non-async expect()/panic! in general MIR lowering.
+
+design:
+  approach: |
+    The work is intentionally staged from correctness to structure:
+
+    **Stage 1: Type and lowering correctness**
+    - Extend future escape detection helpers and their callers.
+    - Replace panic!/expect in async lowering hot paths with Result-based error
+      propagation and explicit CompileError variants/messages.
+
+    **Stage 2: Runtime and dispatch hardening**
+    - Replace 32-bit spawn hash IDs with a stable dispatch identity scheme.
+    - Harden frame handle/offset behavior in runtime.c, at minimum with debug
+      traps or explicit failure signaling and documented semantics.
+
+    **Stage 3: File structure control**
+    - Split async_lowering.rs into submodules for frame layout, CFG planning,
+      and poll synthesis.
+    - Split lowering.rs along responsibility lines, starting with expression,
+      statement, and builtin/lowering-planner subdomains.
+
+    **Stage 4: Regression coverage**
+    - Add focused tests for future escapes through wrappers, multiple __start
+      sites in one block, spawn dispatch uniqueness, and ambiguous runtime-frame
+      behavior.
+
+  components:
+    - compiler/src/typeck/check.rs
+    - compiler/src/typeck/ty.rs
+    - compiler/src/mir/lowering.rs
+    - compiler/src/mir/async_lowering.rs
+    - compiler/src/mir/*
+    - runtime/src/async_runtime.rs
+    - tools/stdlib/runtime.c
+    - compiler/src/tests/async_tests.rs
+    - tools/sgc/src/tests.rs
+
+  future_escape_design: |
+    Future escape detection should be phrased in terms of recursively walking
+    the type shape, not ad hoc checks at only return/arg sites. The helper
+    should explicitly decide how these constructors behave.
+
+    Sengoo language rule for this change:
+    **future-bearing wrapper types are not allowed to escape**. If a type shape
+    containing Future<T> is constructible in the current type system, it is
+    rejected by recursive escape detection; this change does not introduce any
+    new source-level wrapper forms.
+
+    The helper should explicitly treat these constructors as follows:
+    - Future<T>: escape root
+    - Ref<T>/Ptr<T>: recurse into T
+    - Fn(args...) -> T: recurse through parameter and return types
+    - Tuple/Array/Struct fields: recurse
+
+    The diagnostic text should remain user-facing and avoid internal phase names.
+
+  spawn_dispatch_design: |
+    Replace hash-based IDs with a stable mapping that is collision-free by
+    construction.
+
+    Chosen approach:
+    - compile-time monotonically assigned integer IDs
+    - generated dispatch tables keyed by that ordinal
+
+    This ID only needs to be unique within one compiled artifact. It does not
+    need to be stable across different builds.
+
+    The implementation scope must cover the compiler-side emitter, the Rust
+    async runtime dispatch path, and any C-side symbol plumbing that consumes
+    the same ID contract.
+
+  error_propagation_design: |
+    async lowering should treat unsupported or malformed internal states as
+    structured compiler errors where they can be triggered by user programs.
+    panic! or expect() may remain only behind debug_assert! or in truly
+    unreachable invariants that cannot be driven from source input.
+
+    This change targets async-lowering and await/suspend paths first, especially:
+    - unsupported async CFG terminator
+    - missing remapped local
+    - missing remapped block
+    - missing suspend metadata
+    - liveness/planning states that can be reached from source programs
+
+    Non-async lowering expect()/panic! cleanup is explicitly out of scope for
+    this batch.
+
+  runtime_frame_design: |
+    runtime.c should stop silently treating invalid frame accesses as valid zero
+    values in debug paths. Two acceptable minimums:
+    - debug trap/assert on invalid handle or offset
+    - explicit failure status with documented caller contract
+
+    Chosen minimum contract for this change:
+    - debug builds trap/assert on invalid handle or offset
+    - release builds may preserve current ABI-compatible behavior, but the docs
+      must explicitly state that frame load/store are compiler-generated only
+      and that a 0 result on invalid access is ambiguous rather than a valid
+      semantic guarantee
+
+  structure_design: |
+    Prioritize low-risk module boundaries:
+    - async_lowering/frame_layout.rs
+    - async_lowering/cfg_plan.rs
+    - async_lowering/poll_synthesis.rs
+    - lowering/expr.rs
+    - lowering/stmt.rs
+    - lowering/builtins.rs
+
+    The goal is not arbitrary file-count growth. The goal is to isolate hot
+    domains that currently mix planning, bookkeeping, and code emission.
+
+tasks:
+  - id: recursive-future-escape-checks
+    title: Extend future escape detection through nested type shapes
+    description: |
+      Audit ty_contains_future_escape and its callers.
+      Ensure recursive coverage for wrapper/container types that can retain
+      future values, and add focused typeck regressions.
+    estimate: 3 hours
+
+  - id: stable-spawn-dispatch-id
+    title: Replace hash-based spawn dispatch IDs with a collision-free scheme
+    description: |
+      Remove 32-bit hash-derived runtime dispatch IDs and replace them with a
+      compile-time assigned ordinal plus generated dispatch tables.
+      Update compiler-side emission, Rust runtime dispatch, and any linked C-side
+      consumers of the same contract. Add tests proving no aliasing across
+      multiple spawnable futures in one artifact.
+    estimate: 4 hours
+
+  - id: async-lowering-error-propagation
+    title: Convert async lowering ICE paths into structured CompileError results
+    description: |
+      Replace panic!/expect() in async lowering hot paths, especially terminator,
+      CFG remap, and liveness logic, with Result-based error propagation.
+    estimate: 5 hours
+
+  - id: runtime-frame-contract-hardening
+    title: Harden runtime frame handle and offset semantics
+    description: |
+      Add debug-time trapping or explicit failure signaling for invalid frame
+      handle/offset usage in runtime.c. Document remaining ambiguity if release
+      behavior must preserve compatibility.
+    estimate: 4 hours
+
+  - id: split-async-lowering
+    title: Split async_lowering.rs into frame, cfg, and poll synthesis modules
+    description: |
+      Move the highest-cohesion async lowering responsibilities into submodules
+      without changing public behavior.
+    estimate: 8 hours
+
+  - id: split-general-lowering
+    title: Split lowering.rs first-cut into builtin and planning-focused submodules
+    description: |
+      Continue reducing god-file pressure by moving the highest-value lowering
+      responsibilities out of lowering.rs once async submodules are stable.
+      This first cut is intentionally scoped to builtin lowering and planning/
+      analysis glue rather than a full lower_expr decomposition.
+    estimate: 12-16 hours
+
+  - id: async-hardening-regressions
+    title: Add regression coverage for escape, dispatch, and frame edge cases
+    description: |
+      Add tests for:
+      - wrapper-based future escape paths
+      - let x = f; await x
+      - multiple __start calls in one block
+      - spawn dispatch uniqueness
+      - runtime frame invalid-access behavior
+      - break future_value rejection
+    estimate: 4 hours
+
+acceptance_criteria:
+  - Future escape detection rejects nested escape paths consistently with the
+    project's async ownership rules.
+  - Spawn dispatch no longer depends on a collision-prone hash.
+  - User-triggerable async lowering failures report CompileError diagnostics
+    instead of panicking.
+  - runtime.c documents and enforces a clear contract for invalid frame access.
+  - async_lowering.rs and lowering.rs are reduced by responsibility through
+    submodules, not just helper scattering.
+  - Regression tests cover the newly hardened async edges.
+  - Existing compiler and sgc test suites remain green.
+  - Relevant property/regression tests covering async lowering error paths
+    continue to pass.
+
+risks:
+  - Tightening future escape recursion may reject programs that previously
+    compiled, requiring careful diagnostic wording.
+  - Replacing spawn dispatch IDs changes an internal ABI edge and may require
+    coordinated compiler/runtime changes.
+  - Over-eager file splitting can increase indirection without reducing actual
+    complexity if boundaries are chosen poorly.
+
+dependencies:
+  - Aligns with: async-phase-2-features
+  - Aligns with: mir-bitcast-instruction
+  - Informs: toolchain-language-runtime-roadmap
+
+references:
+  - compiler/src/typeck/check.rs
+  - compiler/src/mir/lowering.rs
+  - compiler/src/mir/async_lowering.rs
+  - runtime/src/async_runtime.rs
+  - tools/stdlib/runtime.c
+  - docs/plans/2026-03-11-next-priority-roadmap.md
+  - docs/plans/2026-03-12-3-month-development-roadmap.md
