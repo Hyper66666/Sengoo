@@ -24,7 +24,8 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::impl_specialization_helpers::{
-    build_inherent_specialized_method, expand_impl_variants, impl_type_prefix,
+    build_inherent_specialized_method, collect_matching_inherent_method_templates,
+    expand_impl_variants, impl_type_prefix,
 };
 use crate::mir::type_mapping_helpers::{
     bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
@@ -39,10 +40,7 @@ use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
-use crate::type_naming::{
-    hir_type_prefix as hir_type_to_prefix,
-    mir_type_instance_name as mir_type_to_instance_name,
-};
+use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
 use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
@@ -595,17 +593,9 @@ impl<'a> LoweringContext<'a> {
         method: &str,
         arg_locals: &[Local],
     ) -> Option<String> {
-        for template in self.inherent_method_templates {
-            let legacy_prefix = hir_type_to_prefix(&template.target_type);
-            let original_method_name = template
-                .method
-                .name
-                .strip_prefix(&format!("{}_", legacy_prefix))
-                .unwrap_or(&template.method.name);
-            if original_method_name != method {
-                continue;
-            }
-
+        for (template, legacy_prefix) in
+            collect_matching_inherent_method_templates(self.inherent_method_templates, method)
+        {
             let (hir_subst, concrete_prefix) = self.prepare_method_specialization(
                 &template.target_type,
                 &template.method,
