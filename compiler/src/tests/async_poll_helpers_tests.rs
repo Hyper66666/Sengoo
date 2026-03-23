@@ -29,7 +29,7 @@ async def main() -> i64 {
         mir_fn.name.clone(),
         mir_fn.params.clone(),
         mir_fn.return_type.clone(),
-        crate::mir::async_lowering::count_await_points(mir_fn),
+        crate::mir::async_entry_helpers::count_await_points(mir_fn),
         &spill_user_locals,
     )
     .expect("frame layout should build");

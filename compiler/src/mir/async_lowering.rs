@@ -6,6 +6,9 @@
 //!   - `foo__result(handle: i64) -> T`  鈥?reads the result from the frame, frees it, returns T
 
 use super::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
+use super::async_entry_helpers::{
+    count_await_points, synthesize_async_main_wrapper, synthesize_result, synthesize_start,
+};
 use super::async_cfg_helpers::{
     build_async_cfg_plan, collect_spill_user_locals, collect_user_locals,
     compute_live_in_user_locals,
@@ -25,16 +28,6 @@ use std::collections::BTreeMap;
 use super::async_cfg_helpers::AsyncCfgPlan;
 #[cfg(test)]
 use std::collections::HashSet;
-
-
-/// Count the number of await points in a MIR function by scanning for Suspend terminators
-pub fn count_await_points(mir_fn: &MirFunction) -> usize {
-    mir_fn
-        .basic_blocks
-        .iter()
-        .filter(|bb| matches!(bb.terminator, Some(Terminator::Suspend { .. })))
-        .count()
-}
 
 pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {
     match ty {
@@ -524,130 +517,6 @@ fn synthesize_result_dispatch(
     Ok(f)
 }
 
-/// Generate a `main` wrapper that drives async main through the helper ABI:
-///   handle = main__start()
-///   while main__poll(handle) == 0 { }
-///   return main__result(handle)
-fn synthesize_async_main_wrapper() -> MirFunction {
-    let mut f = MirFunction::new("main".to_string(), vec![], MIR_I64);
-    let bb0 = f.start_block;
-
-    // handle = main__start()
-    let handle = f.add_local(LocalKind::Temp, MIR_I64);
-    let start_call = f.alloc_inst(Instruction::Call {
-        destination: handle,
-        func: "main__start".to_string(),
-        args: vec![],
-    });
-    f.basic_blocks[bb0].push(start_call);
-
-    // poll loop
-    let poll_block = f.add_block();
-    let ready_block = f.add_block();
-
-    f.basic_blocks[bb0].set_terminator(Terminator::Goto(poll_block));
-
-    // poll_block: status = main__poll(handle)
-    let status = f.add_local(LocalKind::Temp, MIR_I64);
-    let poll_call = f.alloc_inst(Instruction::Call {
-        destination: status,
-        func: "main__poll".to_string(),
-        args: vec![handle],
-    });
-    f.basic_blocks[poll_block].push(poll_call);
-
-    // branch: status == 1 -> ready_block, else -> poll_block
-    let one = f.add_local(LocalKind::Temp, MIR_I64);
-    let one_inst = f.alloc_inst(Instruction::Assign {
-        destination: one,
-        value: MirConstant::Int(1),
-    });
-    f.basic_blocks[poll_block].push(one_inst);
-
-    f.basic_blocks[poll_block].set_terminator(Terminator::Switch {
-        discr: status,
-        targets: vec![(1, ready_block)],
-        otherwise: poll_block,
-    });
-
-    // ready_block: result = main__result(handle); return result
-    let result = f.add_local(LocalKind::Temp, MIR_I64);
-    let result_call = f.alloc_inst(Instruction::Call {
-        destination: result,
-        func: "main__result".to_string(),
-        args: vec![handle],
-    });
-    f.basic_blocks[ready_block].push(result_call);
-    f.basic_blocks[ready_block].set_terminator(Terminator::Return(Some(result)));
-
-    f
-}
-
-/// Generate `foo__start(params...) -> i64`
-fn synthesize_start(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileError> {
-    let name = format!("{}__start", layout.func_name);
-    let mut f = MirFunction::new(name, layout.param_types.clone(), MIR_I64);
-
-    let total_slots = layout.total_slots();
-
-    // _0 = return local (handle)
-    // _1.._N = param locals (already created by MirFunction::new)
-    let bb0 = f.start_block;
-
-    // Allocate frame: handle = sengoo_async_frame_alloc(total_slots)
-    let slots_local = f.add_local(LocalKind::Temp, MIR_I64);
-    let handle_local = f.add_local(LocalKind::Temp, MIR_I64);
-
-    let alloc_inst = f.alloc_inst(Instruction::Assign {
-        destination: slots_local,
-        value: MirConstant::Int(total_slots as i64),
-    });
-    f.basic_blocks[bb0].push(alloc_inst);
-
-    let call_inst = f.alloc_inst(Instruction::Call {
-        destination: handle_local,
-        func: "sengoo_async_frame_alloc".to_string(),
-        args: vec![slots_local],
-    });
-    f.basic_blocks[bb0].push(call_inst);
-
-    // Store state = 0 at offset 0
-    let zero = f.add_local(LocalKind::Temp, MIR_I64);
-    let zero_inst = f.alloc_inst(Instruction::Assign {
-        destination: zero,
-        value: MirConstant::Int(0),
-    });
-    f.basic_blocks[bb0].push(zero_inst);
-
-    let store_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
-    let store_state = f.alloc_inst(Instruction::Call {
-        destination: store_dest,
-        func: "sengoo_async_frame_store".to_string(),
-        args: vec![handle_local, zero, zero],
-    });
-    f.basic_blocks[bb0].push(store_state);
-
-    // Store each parameter at its assigned frame offset.
-    for i in 0..layout.param_types.len() {
-        let param_local = Local::new(i + 1, LocalKind::Param);
-        push_frame_store_typed(
-            &mut f,
-            bb0,
-            handle_local,
-            layout.param_offsets[i],
-            param_local,
-            &layout.param_types[i],
-        )?;
-    }
-
-    // Return the handle
-    f.basic_blocks[bb0].set_terminator(Terminator::Return(Some(handle_local)));
-
-    Ok(f)
-}
-
-
-
 /// Generate `foo__poll(handle: i64) -> i64`
 /// Returns 0 = pending, 1 = ready
 fn synthesize_poll(
@@ -767,33 +636,6 @@ fn synthesize_poll(
             )))
         }
     }
-}
-
-/// Generate `foo__result(handle: i64) -> T`
-fn synthesize_result(layout: &AsyncFrameLayout) -> Result<MirFunction, CompileError> {
-    let name = format!("{}__result", layout.func_name);
-    let ret = layout.result_storage_ty.clone();
-    let mut f = MirFunction::new(name, vec![MIR_I64], ret.clone());
-
-    let handle = Local::new(1, LocalKind::Param);
-    let bb0 = f.start_block;
-
-    let result = f.add_local(LocalKind::Temp, ret.clone());
-    push_frame_load_into_typed(&mut f, bb0, handle, 1, result, &ret)?;
-
-    // Free the frame
-    let free_dest = f.add_local(LocalKind::Temp, MIR_UNIT);
-    let free_inst = f.alloc_inst(Instruction::Call {
-        destination: free_dest,
-        func: "sengoo_async_frame_free".to_string(),
-        args: vec![handle],
-    });
-    f.basic_blocks[bb0].push(free_inst);
-
-    // Return result
-    f.basic_blocks[bb0].set_terminator(Terminator::Return(Some(result)));
-
-    Ok(f)
 }
 
 #[cfg(test)]
