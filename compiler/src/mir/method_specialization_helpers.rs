@@ -179,3 +179,24 @@ pub(crate) fn resolve_trait_method_candidate(
         }
     }
 }
+
+pub(crate) fn resolve_trait_method_specialization(
+    templates: &[TraitMethodTemplate],
+    method_name: &str,
+    receiver_ty: &MIRType,
+    actual_arg_types: &[MIRType],
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &mut ConcreteTypeRegistry,
+    type_display: &str,
+) -> Result<Option<hir::HIRFunction>, String> {
+    let candidates = collect_trait_method_candidates(
+        templates,
+        method_name,
+        receiver_ty,
+        actual_arg_types,
+        struct_defs,
+        concrete_type_registry,
+    );
+
+    resolve_trait_method_candidate(candidates, actual_arg_types.len(), method_name, type_display)
+}
