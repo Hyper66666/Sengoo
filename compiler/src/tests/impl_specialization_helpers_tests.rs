@@ -1,10 +1,10 @@
 use crate::hir::{HIRBody, HIRFunction, HIRImpl, HIRParam, HIRType, IntKind};
 use crate::mir::impl_specialization_helpers::{
     build_inherent_specialized_method, collect_matching_inherent_method_templates,
-    expand_impl_variants, impl_type_prefix,
+    expand_impl_variants, impl_type_prefix, specialize_matching_inherent_method,
     match_generic_impl_target,
 };
-use crate::mir::InherentMethodTemplate;
+use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType, MIR_I64};
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
@@ -44,6 +44,19 @@ fn generic_method(name: &str) -> HIRFunction {
     ));
     function.return_type = HIRType::named("T".to_string(), vec![]);
     function
+}
+
+fn generic_vec_struct() -> crate::hir::HIRStruct {
+    crate::hir::HIRStruct {
+        name: "Vec".to_string(),
+        type_params: vec![crate::hir::HIRTypeParam {
+            name: "T".to_string(),
+            bounds: vec![],
+            default: None,
+        }],
+        fields: vec![],
+        is_pub: false,
+    }
 }
 
 #[test]
@@ -145,4 +158,36 @@ fn collect_matching_inherent_method_templates_keeps_unprefixed_name() {
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].1, "Point");
     assert_eq!(matches[0].0.method.name, "sum");
+}
+
+#[test]
+fn specialize_matching_inherent_method_builds_generic_specialization() {
+    let vec_def = generic_vec_struct();
+    let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
+    let template = InherentMethodTemplate {
+        target_type: HIRType::named(
+            "Vec".to_string(),
+            vec![HIRType::named("T".to_string(), vec![])],
+        ),
+        method: generic_method("Vec_push"),
+    };
+    let mut registry = ConcreteTypeRegistry::default();
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
+
+    let specialized = specialize_matching_inherent_method(
+        &template,
+        "Vec",
+        &receiver_ty,
+        &[MIR_I64],
+        &struct_defs,
+        &mut registry,
+    )
+    .expect("matching inherent template should specialize");
+
+    assert_eq!(specialized.name, "Vec_i64_push_i64");
+    assert!(specialized.type_params.is_empty());
+    assert_eq!(specialized.return_type, HIRType::int(IntKind::I64));
 }

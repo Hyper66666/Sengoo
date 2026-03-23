@@ -1,5 +1,6 @@
 use crate::hir::{self, HIRType, HIRTypeKind};
-use crate::mir::InherentMethodTemplate;
+use crate::mir::method_specialization_helpers::prepare_method_specialization;
+use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType};
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
 };
@@ -148,6 +149,31 @@ pub(crate) fn collect_matching_inherent_method_templates<'a>(
     }
 
     matches
+}
+
+pub(crate) fn specialize_matching_inherent_method(
+    template: &InherentMethodTemplate,
+    legacy_prefix: &str,
+    receiver_ty: &MIRType,
+    actual_arg_types: &[MIRType],
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &mut ConcreteTypeRegistry,
+) -> Option<hir::HIRFunction> {
+    let (hir_subst, concrete_prefix) = prepare_method_specialization(
+        &template.target_type,
+        &template.method,
+        receiver_ty,
+        actual_arg_types,
+        struct_defs,
+        concrete_type_registry,
+    )?;
+
+    Some(build_inherent_specialized_method(
+        &template.method,
+        legacy_prefix,
+        &concrete_prefix,
+        &hir_subst,
+    ))
 }
 
 pub(crate) fn expand_impl_variants(
