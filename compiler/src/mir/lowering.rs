@@ -50,8 +50,10 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
+mod call_emission_helpers;
 mod call_invocation_helpers;
 mod call_target_helpers;
+use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 
@@ -2103,19 +2105,7 @@ fn set_terminator(&mut self, term: Terminator) {
                     &arg_locals,
                     &self.options.async_functions,
                 );
-                let local: Local = self.add_local(None, LocalKind::Temp, plan.local_ty.clone());
-                if let Some(type_name) = plan.struct_type_name.clone() {
-                    self.type_names.insert(local, type_name);
-                }
-                self.push_inst(Instruction::Call {
-                    destination: local,
-                    func: plan.actual_func,
-                    args: plan.final_args,
-                });
-                if let Some(origin) = plan.future_origin {
-                    self.future_origins.insert(local, origin);
-                }
-                local
+                emit_call_from_plan(self, plan)
             }
             HIRExpr::And(left, right) => {
                 // 短路逻辑AND：左侧为false时直接跳过右侧。
