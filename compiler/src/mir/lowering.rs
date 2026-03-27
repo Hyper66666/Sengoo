@@ -52,9 +52,11 @@ use std::collections::{HashMap, HashSet};
 mod builtin_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
+mod named_call_helpers;
 mod call_target_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
+use self::named_call_helpers::lower_named_call;
 use self::call_target_helpers::CallTargetResolution;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
@@ -2087,25 +2089,19 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Call { func, args } => {
                 let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
 
-                // 解析函数表达式、函数名、返回类型和环境指针。
-                let (func_name, ret_type, env_ptr_local) = match func.as_ref() {
-                    HIRExpr::Var { name, .. } => match self.resolve_named_call_target(name, &arg_locals) {
-                        CallTargetResolution::Builtin(local) => return local,
-                        CallTargetResolution::Planned(plan) => {
-                            (plan.func_name, plan.ret_type, plan.env_ptr_local)
-                        }
-                    },
-                    _ => (String::new(), MIR_UNIT, None),
-                };
-
-                let plan = build_call_invocation_plan(
-                    &func_name,
-                    &ret_type,
-                    env_ptr_local,
-                    &arg_locals,
-                    &self.options.async_functions,
-                );
-                emit_call_from_plan(self, plan)
+                match func.as_ref() {
+                    HIRExpr::Var { name, .. } => lower_named_call(self, name, &arg_locals),
+                    _ => {
+                        let plan = build_call_invocation_plan(
+                            "",
+                            &MIR_UNIT,
+                            None,
+                            &arg_locals,
+                            &self.options.async_functions,
+                        );
+                        emit_call_from_plan(self, plan)
+                    }
+                }
             }
             HIRExpr::And(left, right) => {
                 // 短路逻辑AND：左侧为false时直接跳过右侧。
