@@ -54,10 +54,12 @@ mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
 mod call_target_helpers;
+mod method_call_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::named_call_helpers::lower_named_call;
 use self::call_target_helpers::CallTargetResolution;
+use self::method_call_helpers::lower_method_call_from_locals;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2771,76 +2773,10 @@ fn set_terminator(&mut self, term: Terminator) {
                 method,
                 args,
             } => {
-                // 方法调用表达式降级（receiver.method(args)形式）。
-                // 进行receiver方法调用的分派解析。
-
-                // 获取方法名，支持路径和标识符形式。
                 let receiver_local = self.lower_expr(receiver);
-                let receiver_ty = self.get_local_type(receiver_local).clone();
-
-                // 降级所有参数表达式为局部变量列表。
                 let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
-
-                // String built-in method handling: when receiver is a string
-                // (Ptr to i8), intercept known methods and generate runtime calls.
-                if let MIRType::Ptr(inner) = &receiver_ty {
-                    if let MIRType::Int(8) = inner.as_ref() {
-                        if method == "len" {
-                            // Generate call to sengoo_str_len(receiver) -> i64
-                            let result_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                            self.push_inst(Instruction::Call {
-                                destination: result_local,
-                                func: "sengoo_str_len".to_string(),
-                                args: vec![receiver_local],
-                            });
-                            return result_local;
-                        }
-                    }
-                }
-
-                // 解析方法调用目标并获取函数签名。
-                // 使用Sengoo的方法解析逻辑确定最终调用目标。
-                // 解析方法调用的目标函数名称（含trait分派逻辑）。
-                let resolved_func_name = match self.resolve_method_call_target(
-                    receiver_local,
-                    &receiver_ty,
-                    method,
-                    &arg_locals,
-                ) {
-                    Ok(name) => name,
-                    Err(error) => {
-                        self.errors.push(error);
-                        return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-                    }
-                };
-
-
-
-                // 获取方法调用的返回类型信息。
-                let ret_type = self
-                    .function_sigs
-                    .get(&resolved_func_name)
-                    .map(|sig| sig.ret_type.clone())
-                    .unwrap_or(MIR_I64);
-                let result_local = self.add_local(None, LocalKind::Temp, ret_type.clone());
-                if let MIRType::Struct { name, .. } = &ret_type {
-                    self.type_names.insert(result_local, name.clone());
-                }
-
-                // 构造调用参数列表，包含receiver和其他参数。
-                let mut call_args = vec![receiver_local];
-                call_args.extend(arg_locals);
-
-                // 生成Call指令并返回结果local。
-                self.push_inst(Instruction::Call {
-                    destination: result_local,
-                    func: resolved_func_name,
-                    args: call_args,
-                });
-
-                result_local
+                lower_method_call_from_locals(self, receiver_local, method, &arg_locals)
             }
-                // 处理await表达式（仅用于类型系统，无实际异步支持）。
             HIRExpr::Await(inner) => {
                 let future_handle = self.lower_expr(inner);
                 self.lower_async_wait(future_handle)
