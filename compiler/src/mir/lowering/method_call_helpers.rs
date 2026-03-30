@@ -1,4 +1,84 @@
 use super::*;
+use crate::mir::method_dispatch_helpers::MethodDispatchPlan;
+use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
+
+#[cfg(test)]
+pub(super) fn resolve_method_call_name<'a, I, FInherent, FTrait>(
+    dispatch_plan: &MethodDispatchPlan,
+    method: &str,
+    arg_count: usize,
+    known_functions: I,
+    try_materialize_inherent: FInherent,
+    try_materialize_trait: FTrait,
+) -> Result<String, String>
+where
+    I: IntoIterator<Item = (&'a str, usize)>,
+    FInherent: FnOnce() -> Option<String>,
+    FTrait: FnOnce(&str) -> Result<Option<String>, String>,
+{
+    let known_functions: Vec<(&str, usize)> = known_functions.into_iter().collect();
+
+    if known_functions
+        .iter()
+        .any(|(name, _)| *name == dispatch_plan.func_name.as_str())
+    {
+        return Ok(dispatch_plan.func_name.clone());
+    }
+    if let Some(generated_name) = try_materialize_inherent() {
+        return Ok(generated_name);
+    }
+    if let Some(generated_name) = try_materialize_trait(&dispatch_plan.type_display)? {
+        return Ok(generated_name);
+    }
+
+    resolve_known_trait_method_name(
+        known_functions.iter().copied(),
+        &dispatch_plan.type_prefix,
+        method,
+        &dispatch_plan.func_name,
+        arg_count,
+        &dispatch_plan.type_display,
+    )
+}
+
+pub(super) fn resolve_method_call_name_with_ctx<'a, I>(
+    ctx: &mut LoweringContext<'_>,
+    dispatch_plan: &MethodDispatchPlan,
+    receiver_ty: &MIRType,
+    method: &str,
+    arg_locals: &[Local],
+    known_functions: I,
+) -> Result<String, String>
+where
+    I: IntoIterator<Item = (&'a str, usize)>,
+{
+    let known_functions: Vec<(&str, usize)> = known_functions.into_iter().collect();
+
+    if known_functions
+        .iter()
+        .any(|(name, _)| *name == dispatch_plan.func_name.as_str())
+    {
+        return Ok(dispatch_plan.func_name.clone());
+    }
+    if let Some(generated_name) = ctx.try_materialize_inherent_method(receiver_ty, method, arg_locals)
+    {
+        return Ok(generated_name);
+    }
+    if let Some(generated_name) =
+        ctx.try_materialize_trait_method(receiver_ty, method, arg_locals, &dispatch_plan.type_display)?
+    {
+        return Ok(generated_name);
+    }
+
+    resolve_known_trait_method_name(
+        known_functions.iter().copied(),
+        &dispatch_plan.type_prefix,
+        method,
+        &dispatch_plan.func_name,
+        arg_locals.len(),
+        &dispatch_plan.type_display,
+    )
+}
 
 pub(super) fn lower_method_call_from_locals(
     ctx: &mut LoweringContext<'_>,
@@ -84,7 +164,11 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let receiver = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(MIRType::Int(8))));
+        let receiver = ctx.add_local(
+            None,
+            LocalKind::Temp,
+            MIRType::Ptr(Box::new(MIRType::Int(8))),
+        );
         let result = lower_method_call_from_locals(&mut ctx, receiver, "len", &[]);
 
         assert_eq!(ctx.get_local_type(result), &MIR_I64);
@@ -92,6 +176,46 @@ mod tests {
             inst,
             Instruction::Call { func, args, .. } if func == "sengoo_str_len" && args == &vec![receiver]
         )));
+    }
+
+    #[test]
+    fn resolve_method_call_name_prefers_known_function_before_materializers() {
+        let plan = MethodDispatchPlan {
+            func_name: "i64_abs".to_string(),
+            type_display: "i64".to_string(),
+            type_prefix: "i64".to_string(),
+        };
+
+        let result = resolve_method_call_name(
+            &plan,
+            "abs",
+            0,
+            [("i64_abs", 0usize)],
+            || panic!("inherent materialization should not run"),
+            |_| panic!("trait materialization should not run"),
+        );
+
+        assert_eq!(result.unwrap(), "i64_abs");
+    }
+
+    #[test]
+    fn resolve_method_call_name_falls_back_to_known_trait_candidates() {
+        let plan = MethodDispatchPlan {
+            func_name: "i64_abs".to_string(),
+            type_display: "i64".to_string(),
+            type_prefix: "i64".to_string(),
+        };
+
+        let result = resolve_method_call_name(
+            &plan,
+            "abs",
+            0,
+            [("i64_Number_abs", 0usize)],
+            || None,
+            |_| Ok(None),
+        );
+
+        assert_eq!(result.unwrap(), "i64_Number_abs");
     }
 
     #[test]
@@ -122,6 +246,9 @@ mod tests {
         let result = lower_method_call_from_locals(&mut ctx, receiver, "missing", &[]);
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
-        assert!(ctx.errors.iter().any(|e| e.contains("method 'missing' not found for type 'i64'")));
+        assert!(ctx
+            .errors
+            .iter()
+            .any(|e| e.contains("method 'missing' not found for type 'i64'")));
     }
 }
