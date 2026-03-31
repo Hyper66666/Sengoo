@@ -12,9 +12,6 @@ use crate::mir::lowering_helpers::{
 };
 use crate::mir::local_type_helpers::collect_local_types;
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
-use crate::mir::method_dispatch_helpers::{
-    build_method_dispatch_plan,
-};
 use crate::mir::method_specialization_helpers::{
     resolve_trait_method_specialization,
 };
@@ -58,7 +55,7 @@ use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::named_call_helpers::lower_named_call;
 use self::call_target_helpers::CallTargetResolution;
-use self::method_call_helpers::{lower_method_call_from_locals, resolve_method_call_name_with_ctx};
+use self::method_call_helpers::lower_method_call_from_locals;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -485,39 +482,6 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    fn resolve_method_call_target(
-        &mut self,
-        receiver_local: Local,
-        receiver_ty: &MIRType,
-        method: &str,
-        arg_locals: &[Local],
-    ) -> Result<String, String> {
-        let explicit_type_name = self.type_names.get(&receiver_local).map(String::as_str);
-        let dispatch_plan = build_method_dispatch_plan(explicit_type_name, receiver_ty, method);
-
-        let known_function_entries: Vec<(String, usize)> = self
-            .known_functions
-            .iter()
-            .map(|name| {
-                (
-                    name.clone(),
-                    self.function_sigs
-                        .get(name)
-                        .map(|sig| sig.param_count)
-                        .unwrap_or(0),
-                )
-            })
-            .collect();
-
-        resolve_method_call_name_with_ctx(
-            self,
-            &dispatch_plan,
-            receiver_ty,
-            method,
-            arg_locals,
-            known_function_entries.iter().map(|(name, arity)| (name.as_str(), *arity)),
-        )
-    }
 
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
         if self.known_functions.contains(&specialized.name) {

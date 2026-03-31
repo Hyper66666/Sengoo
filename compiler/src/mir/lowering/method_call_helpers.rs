@@ -1,5 +1,5 @@
 use super::*;
-use crate::mir::method_dispatch_helpers::MethodDispatchPlan;
+use crate::mir::method_dispatch_helpers::{build_method_dispatch_plan, MethodDispatchPlan};
 use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
 
 #[cfg(test)]
@@ -80,6 +80,42 @@ where
     )
 }
 
+pub(super) fn resolve_method_call_target_with_ctx(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    method: &str,
+    arg_locals: &[Local],
+) -> Result<String, String> {
+    let receiver_ty = ctx.get_local_type(receiver_local).clone();
+    let explicit_type_name = ctx.type_names.get(&receiver_local).map(String::as_str);
+    let dispatch_plan = build_method_dispatch_plan(explicit_type_name, &receiver_ty, method);
+
+    let known_function_entries: Vec<(String, usize)> = ctx
+        .known_functions
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                ctx.function_sigs
+                    .get(name)
+                    .map(|sig| sig.param_count)
+                    .unwrap_or(0),
+            )
+        })
+        .collect();
+
+    resolve_method_call_name_with_ctx(
+        ctx,
+        &dispatch_plan,
+        &receiver_ty,
+        method,
+        arg_locals,
+        known_function_entries
+            .iter()
+            .map(|(name, arity)| (name.as_str(), *arity)),
+    )
+}
+
 pub(super) fn lower_method_call_from_locals(
     ctx: &mut LoweringContext<'_>,
     receiver_local: Local,
@@ -102,9 +138,9 @@ pub(super) fn lower_method_call_from_locals(
         }
     }
 
-    let resolved_func_name = match ctx.resolve_method_call_target(
+    let resolved_func_name = match resolve_method_call_target_with_ctx(
+        ctx,
         receiver_local,
-        &receiver_ty,
         method,
         arg_locals,
     ) {
@@ -218,6 +254,52 @@ mod tests {
         assert_eq!(result.unwrap(), "i64_Number_abs");
     }
 
+    #[test]
+    fn resolve_method_call_target_with_ctx_uses_explicit_type_name_for_known_function() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::from(["Point_sum".to_string()]);
+        let mut function_sigs = HashMap::new();
+        function_sigs.insert(
+            "Point_sum".to_string(),
+            FunctionSig {
+                env: Vec::new(),
+                param_count: 1,
+                ret_type: MIR_I64,
+            },
+        );
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+        let start_block = mir_fn.start_block;
+
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let receiver = ctx.add_local(
+            None,
+            LocalKind::Temp,
+            MIRType::Struct {
+                name: "Point".to_string(),
+                fields: vec![],
+            },
+        );
+        ctx.type_names.insert(receiver, "Point".to_string());
+
+        let result = resolve_method_call_target_with_ctx(&mut ctx, receiver, "sum", &[]);
+
+        assert_eq!(result.unwrap(), "Point_sum");
+    }
     #[test]
     fn lower_method_call_from_locals_records_resolution_error_as_unit_temp() {
         let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
