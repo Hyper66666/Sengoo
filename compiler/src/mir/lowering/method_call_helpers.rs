@@ -116,6 +116,33 @@ pub(super) fn resolve_method_call_target_with_ctx(
     )
 }
 
+pub(super) fn emit_resolved_method_call(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    arg_locals: &[Local],
+    resolved_func_name: &str,
+) -> Local {
+    let ret_type = ctx
+        .function_sigs
+        .get(resolved_func_name)
+        .map(|sig| sig.ret_type.clone())
+        .unwrap_or(MIR_I64);
+    let result_local = ctx.add_local(None, LocalKind::Temp, ret_type.clone());
+    if let MIRType::Struct { name, .. } = &ret_type {
+        ctx.type_names.insert(result_local, name.clone());
+    }
+
+    let mut call_args = vec![receiver_local];
+    call_args.extend(arg_locals.iter().copied());
+    ctx.push_inst(Instruction::Call {
+        destination: result_local,
+        func: resolved_func_name.to_string(),
+        args: call_args,
+    });
+
+    result_local
+}
+
 pub(super) fn lower_method_call_from_locals(
     ctx: &mut LoweringContext<'_>,
     receiver_local: Local,
@@ -150,26 +177,7 @@ pub(super) fn lower_method_call_from_locals(
             return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
     };
-
-    let ret_type = ctx
-        .function_sigs
-        .get(&resolved_func_name)
-        .map(|sig| sig.ret_type.clone())
-        .unwrap_or(MIR_I64);
-    let result_local = ctx.add_local(None, LocalKind::Temp, ret_type.clone());
-    if let MIRType::Struct { name, .. } = &ret_type {
-        ctx.type_names.insert(result_local, name.clone());
-    }
-
-    let mut call_args = vec![receiver_local];
-    call_args.extend(arg_locals.iter().copied());
-    ctx.push_inst(Instruction::Call {
-        destination: result_local,
-        func: resolved_func_name,
-        args: call_args,
-    });
-
-    result_local
+    emit_resolved_method_call(ctx, receiver_local, arg_locals, &resolved_func_name)
 }
 
 #[cfg(test)]
@@ -299,6 +307,58 @@ mod tests {
         let result = resolve_method_call_target_with_ctx(&mut ctx, receiver, "sum", &[]);
 
         assert_eq!(result.unwrap(), "Point_sum");
+    }
+    #[test]
+    fn emit_resolved_method_call_tracks_struct_return_type_name() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::new();
+        let mut function_sigs = HashMap::new();
+        function_sigs.insert(
+            "Point_sum".to_string(),
+            FunctionSig {
+                env: Vec::new(),
+                param_count: 1,
+                ret_type: MIRType::Struct {
+                    name: "Point".to_string(),
+                    fields: vec![],
+                },
+            },
+        );
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+        let start_block = mir_fn.start_block;
+
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let receiver = ctx.add_local(
+            None,
+            LocalKind::Temp,
+            MIRType::Struct {
+                name: "Point".to_string(),
+                fields: vec![],
+            },
+        );
+
+        let result = emit_resolved_method_call(&mut ctx, receiver, &[], "Point_sum");
+
+        assert_eq!(ctx.get_local_type(result), &MIRType::Struct {
+            name: "Point".to_string(),
+            fields: vec![],
+        });
+        assert_eq!(ctx.type_names.get(&result).map(String::as_str), Some("Point"));
     }
     #[test]
     fn lower_method_call_from_locals_records_resolution_error_as_unit_temp() {
