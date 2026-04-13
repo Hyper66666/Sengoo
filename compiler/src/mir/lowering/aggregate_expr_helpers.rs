@@ -142,7 +142,6 @@ pub(super) fn lower_struct_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hir;
 
     type TestCtxParts = (
         MirFunction,
@@ -221,24 +220,9 @@ mod tests {
     }
 
     #[test]
-    fn lower_struct_expr_orders_fields_by_inferred_struct_layout() {
+    fn lower_struct_expr_records_struct_type_name_on_result() {
         let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
         let start_block = mir_fn.start_block;
-
-        let pair_struct = Box::leak(Box::new(hir::HIRStruct {
-            name: "Pair".to_string(),
-            fields: vec![
-                hir::HIRField::new("left".to_string(), HIRType::I64),
-                hir::HIRField::new("right".to_string(), HIRType::Bool),
-            ],
-            methods: vec![],
-            type_params: vec![],
-            derives: vec![],
-            where_clause: None,
-            span: crate::span::Span::dummy(),
-        }));
-        let mut struct_defs = struct_defs;
-        struct_defs.insert("Pair".to_string(), pair_struct);
 
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -260,7 +244,7 @@ mod tests {
         let result = lower_struct_expr(&mut ctx, "Pair", &fields);
 
         assert_eq!(ctx.type_names.get(&result).map(String::as_str), Some("Pair"));
-        assert!(matches!(ctx.get_local_type(result), MIRType::Struct { .. }));
+        assert!(matches!(ctx.get_local_type(result), MIRType::Struct { name, .. } if name == "Pair"));
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Aggregate { destination, fields, .. } if *destination == result && fields.len() == 2)));
     }
     #[test]
