@@ -52,13 +52,14 @@ mod named_call_helpers;
 mod non_named_call_helpers;
 mod call_target_helpers;
 mod method_call_helpers;
+mod method_expr_helpers;
 mod method_builtin_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::named_call_helpers::lower_named_call;
 use self::non_named_call_helpers::lower_non_named_call;
 use self::call_target_helpers::CallTargetResolution;
-use self::method_call_helpers::lower_method_call_from_locals;
+use self::method_expr_helpers::lower_method_call_expr;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2718,11 +2719,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 receiver,
                 method,
                 args,
-            } => {
-                let receiver_local = self.lower_expr(receiver);
-                let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
-                lower_method_call_from_locals(self, receiver_local, method, &arg_locals)
-            }
+            } => lower_method_call_expr(self, receiver, method, args),
             HIRExpr::Await(inner) => {
                 let future_handle = self.lower_expr(inner);
                 self.lower_async_wait(future_handle)
