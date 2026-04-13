@@ -46,6 +46,7 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
+mod call_expr_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
@@ -55,9 +56,8 @@ mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
+use self::call_expr_helpers::lower_call_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
-use self::named_call_helpers::lower_named_call;
-use self::non_named_call_helpers::lower_non_named_call;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_expr_helpers::lower_method_call_expr;
 
@@ -2044,14 +2044,7 @@ fn set_terminator(&mut self, term: Terminator) {
                     }
                 }
             }
-            HIRExpr::Call { func, args } => {
-                let arg_locals: Vec<Local> = args.iter().map(|a| self.lower_expr(a)).collect();
-
-                match func.as_ref() {
-                    HIRExpr::Var { name, .. } => lower_named_call(self, name, &arg_locals),
-                    _ => lower_non_named_call(self, &arg_locals)
-                }
-            }
+            HIRExpr::Call { func, args } => lower_call_expr(self, func, args),
             HIRExpr::And(left, right) => {
                 // 短路逻辑AND：左侧为false时直接跳过右侧。
                 let left_local = self.lower_expr(left);
