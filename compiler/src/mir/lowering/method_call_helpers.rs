@@ -1,4 +1,5 @@
 use super::*;
+use super::method_builtin_helpers::try_lower_string_len_method_call;
 use crate::mir::method_dispatch_helpers::{build_method_dispatch_plan, MethodDispatchPlan};
 use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
 
@@ -150,19 +151,10 @@ pub(super) fn lower_method_call_from_locals(
     arg_locals: &[Local],
 ) -> Local {
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
-
-    if let MIRType::Ptr(inner) = &receiver_ty {
-        if let MIRType::Int(8) = inner.as_ref() {
-            if method == "len" {
-                let result_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
-                ctx.push_inst(Instruction::Call {
-                    destination: result_local,
-                    func: "sengoo_str_len".to_string(),
-                    args: vec![receiver_local],
-                });
-                return result_local;
-            }
-        }
+    if let Some(result_local) =
+        try_lower_string_len_method_call(ctx, receiver_local, &receiver_ty, method)
+    {
+        return result_local;
     }
 
     let resolved_func_name = match resolve_method_call_target_with_ctx(
