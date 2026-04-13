@@ -51,6 +51,7 @@ mod aggregate_expr_helpers;
 mod pointer_expr_helpers;
 mod call_expr_helpers;
 mod loop_control_helpers;
+mod lambda_expr_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
@@ -65,6 +66,7 @@ use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
+use self::lambda_expr_helpers::lower_lambda_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_expr_helpers::lower_method_call_expr;
@@ -2093,171 +2095,7 @@ fn set_terminator(&mut self, term: Terminator) {
             }
             HIRExpr::Ref(_is_mut, expr) => lower_ref_expr(self, expr),
             HIRExpr::Deref(expr) => lower_deref_expr(self, expr),
-            HIRExpr::Lambda { params, body } => {
-                // Lambda表达式降级，形如|args| body。
-                // 收集lambda自由变量（闭包捕获分析）。
-
-                // 获取并递增lambda计数器生成唯一名称。
-                let lambda_name = self.lambda_name();
-
-                // 收集 lambda 自由变量，决定是否需要闭包环境。
-                let free_vars = self.collect_free_vars(params, body);
-
-                // Lambda 当前统一推断为 `fn(i64, ...) -> i64` 风格的内部表示。
-                let mut param_types: Vec<MIRType> = (0..params.len()).map(|_| MIR_I64).collect();
-                let ret_type = MIR_I64;
-
-                // 构建lambda的参数类型列表和返回类型。
-                let env_param_offset = if free_vars.is_empty() {
-                    0
-                } else {
-                    // 有捕获变量时在参数列表头部插入环境指针（i64指针）。
-                    // 若有捕获环境，在lambda参数列表前插入env指针。
-                    param_types.insert(0, MIRType::Ptr(Box::new(MIR_I64)));
-                    1
-                };
-
-                // 构建lambda的MIR函数对象。
-                let mut lambda_fn =
-                    MirFunction::new(lambda_name.clone(), param_types.clone(), ret_type.clone());
-                let lambda_start = lambda_fn.start_block;
-                let mut lambda_ctx =
-                    LoweringContext::new(
-                        &mut lambda_fn,
-                        self.lambda_counter,
-                        &self.known_functions,
-                        &self.function_sigs,
-                        self.struct_defs,
-                        self.concrete_type_registry.clone(),
-                        self.options.clone(),
-                        self.inherent_method_templates,
-                        self.trait_method_templates,
-                    );
-                // Set current block for Lambda function entry
-                lambda_ctx.current_block = Some(lambda_start);
-
-                // 在子上下文中执行lambda体的降级。
-                if !free_vars.is_empty() {
-                // 构建lambda子上下文并降级函数体。
-                    let env_local = Local::new(1, LocalKind::Param);
-                    let env_ptr_name = "__env".to_string();
-                    lambda_ctx
-                        .local_names
-                        .insert(env_ptr_name.clone(), env_local);
-
-                // 将lambda的返回值传出，处理捕获环境。
-                    // 将所有捕获变量的值存入环境数组中。
-                    for (i, (var_name, _)) in free_vars.iter().enumerate() {
-                        // 为每个捕获变量在 lambda 上下文中创建对应的局部变量。
-                        let captured_local =
-                            lambda_ctx.add_local(Some(var_name.clone()), LocalKind::Temp, MIR_I64);
-
-                        // 使用getelementptr和load读取捕获变量。
-                        // 从lambda环境数组按索引加载捕获变量。
-                        let index_local = lambda_ctx.add_local(None, LocalKind::Temp, MIR_I64);
-                        lambda_ctx.push_inst(Instruction::Assign {
-                            destination: index_local,
-                            value: MirConstant::Int(i as i64),
-                        });
-
-                        let ptr_local = lambda_ctx.add_local(
-                            None,
-                            LocalKind::Temp,
-                            MIRType::Ptr(Box::new(MIR_I64)),
-                        );
-                        lambda_ctx.push_inst(Instruction::IndexAddr {
-                            destination: ptr_local,
-                            base: env_local,
-                            index: index_local,
-                        });
-
-                        // 加载捕获变量的值到lambda上下文。
-                        lambda_ctx.push_inst(Instruction::Load {
-                            destination: captured_local,
-                            source: ptr_local,
-                        });
-
-                    // 将捕获变量绑定到lambda上下文的局部变量中。
-                        lambda_ctx
-                            .local_names
-                            .insert(var_name.clone(), captured_local);
-                    }
-
-                    // 将函数参数绑定到lambda上下文的局部变量中。
-                    for (i, param_name) in params.iter().enumerate() {
-                        let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
-                        lambda_ctx.local_names.insert(param_name.clone(), local);
-                    }
-                } else {
-                    // 不带捕获变量时，直接绑定函数参数。
-                    for (i, param_name) in params.iter().enumerate() {
-                        let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
-                        lambda_ctx.local_names.insert(param_name.clone(), local);
-                    }
-                }
-
-                // 降级lambda体，在lambda上下文中执行。
-                    // 在lambda上下文中降级函数体（HIRBody）。
-                use crate::hir::HIRBody;
-                let lambda_body = HIRBody {
-                    stmts: vec![],
-                    expr: Some(body.clone()),
-                };
-                lambda_ctx.lower_body_to_block(&lambda_body, lambda_start);
-
-                // 将生成的lambda函数加入函数列表。
-                self.lambda_functions.push(lambda_fn);
-
-                // 注册lambda函数签名（带环境参数或不带）。
-                if !free_vars.is_empty() {
-                    let env_var_types: Vec<(String, MIRType)> = free_vars
-                        .iter()
-                        .map(|(name, local)| (name.clone(), self.get_local_type(*local).clone()))
-                        .collect();
-                    self.lambda_environments.insert(
-                        lambda_name.clone(),
-                        LambdaEnv {
-                            vars: free_vars.clone(),
-                            env_type: MIRType::Ptr(Box::new(MIR_I64)),
-                            env_ptr_local: None, // 由 Let lowering 阶段补回实际 `env_ptr_local`。
-                        },
-                    );
-
-                    // 带捕获环境的lambda函数签名注册。
-                    self.function_sigs.insert(
-                        lambda_name.clone(),
-                        build_function_sig(ret_type.clone(), param_types.len(), env_var_types),
-                    );
-                } else {
-                    // 不带捕获环境的lambda函数签名注册。
-                    self.function_sigs.insert(
-                        lambda_name.clone(),
-                        build_function_sig(ret_type.clone(), param_types.len(), vec![]),
-                    );
-                }
-
-                // 若无捕获变量，直接返回lambda函数引用。
-                // 检查捕获变量列表并获取环境指针。
-                let lambda_local = if free_vars.is_empty() {
-                    let fn_ty = MIRType::Fn {
-                        params: param_types.clone(),
-                        ret: Box::new(ret_type.clone()),
-                    };
-                    let local = self.add_local(None, LocalKind::Temp, fn_ty);
-                    self.push_inst(Instruction::Assign {
-                        destination: local,
-                        value: MirConstant::GlobalRef(lambda_name.clone()),
-                    });
-                    local
-                } else {
-                    self.add_local(None, LocalKind::Temp, MIR_I64)
-                };
-
-                // 记录 `Local -> Lambda 名称` 的映射，便于后续引用解析。
-                self.lambda_names.insert(lambda_local, lambda_name.clone());
-
-                lambda_local
-            }
+            HIRExpr::Lambda { params, body } => lower_lambda_expr(self, params, body),
             HIRExpr::Match { scrutinee, arms } => {
                 let scrutinee_local = self.lower_expr(scrutinee);
                 let scrutinee_ty = self.get_local_type(scrutinee_local).clone();
