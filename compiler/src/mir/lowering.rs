@@ -51,6 +51,7 @@ mod aggregate_expr_helpers;
 mod pointer_expr_helpers;
 mod call_expr_helpers;
 mod if_expr_helpers;
+mod match_expr_helpers;
 mod loop_expr_helpers;
 mod while_expr_helpers;
 mod for_expr_helpers;
@@ -70,6 +71,7 @@ use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
+use self::match_expr_helpers::lower_enum_match_expr;
 use self::loop_expr_helpers::lower_loop_expr;
 use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::{lower_array_for_expr, lower_range_for_expr};
@@ -1690,60 +1692,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 let scrutinee_ty = self.get_local_type(scrutinee_local).clone();
 
                 match scrutinee_ty {
-                    MIRType::Enum { .. } => {
-                        let discr_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Discriminant {
-                            destination: discr_local,
-                            source: scrutinee_local,
-                        });
-
-                        let arm_blocks: Vec<usize> =
-                            arms.iter().map(|_| self.new_block()).collect();
-                        let join_block = self.new_block();
-
-                        let switch_plan = build_match_switch_plan(arms, &arm_blocks, join_block);
-
-                        self.set_terminator(Terminator::Switch {
-                            discr: discr_local,
-                            targets: switch_plan.targets,
-                            otherwise: switch_plan.otherwise_block,
-                        });
-
-                        let mut incoming_values: Vec<(Local, usize)> = Vec::new();
-                        for (i, arm) in arms.iter().enumerate() {
-                            let arm_block = arm_blocks[i];
-                            self.set_current_block(arm_block);
-
-                            self.lower_pattern_bindings(&arm.pat, scrutinee_local);
-                            let arm_result = self.lower_expr(&arm.body);
-                            let arm_end = self.current_block();
-
-                            if let Some(block) = self.mir_fn.block_mut(arm_end) {
-                                if block.terminator.is_none() {
-                                    block.set_terminator(Terminator::Goto(join_block));
-                                    incoming_values.push((arm_result, arm_end));
-                                }
-                            }
-                        }
-
-                        self.set_current_block(join_block);
-                        if let Some((first_value, _)) = incoming_values.first().copied() {
-                            let result_ty = self.get_local_type(first_value).clone();
-                            if is_void_like(&result_ty) {
-                                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                            } else {
-                                let result = self.add_local(None, LocalKind::Temp, result_ty);
-                                self.push_inst(Instruction::Phi {
-                                    destination: result,
-                                    incoming: incoming_values.clone(),
-                                });
-                                self.propagate_future_origin_through_phi(result, &incoming_values);
-                                result
-                            }
-                        } else {
-                            self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                        }
-                    }
+                    MIRType::Enum { .. } => lower_enum_match_expr(self, scrutinee_local, arms),
                     _ => {
                         let join_block = self.new_block();
                         let mut incoming_values: Vec<(Local, usize)> = Vec::new();
