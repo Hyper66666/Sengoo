@@ -53,6 +53,7 @@ mod call_expr_helpers;
 mod if_expr_helpers;
 mod loop_expr_helpers;
 mod while_expr_helpers;
+mod for_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
 mod call_emission_helpers;
@@ -71,6 +72,7 @@ use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
 use self::loop_expr_helpers::lower_loop_expr;
 use self::while_expr_helpers::lower_while_expr;
+use self::for_expr_helpers::lower_range_for_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
@@ -1621,133 +1623,7 @@ fn set_terminator(&mut self, term: Terminator) {
                         start,
                         end,
                         inclusive,
-                    } => {
-                    // for x in start..end语句，生成对应的范围循环MIR。
-                        let cond_block = self.new_block();
-                        let body_block = self.new_block();
-                        let inc_block = self.new_block();
-                        // 生成for x in 0..N形式的范围循环。
-                        let exit_block = self.new_block();
-
-                        // 降级start和end表达式并存入局部变量。
-                        let start_local = if let Some(s) = start {
-                            self.lower_expr(s)
-                        } else {
-                            // 缺省起点时使用 `0` 作为范围起始。
-                            let zero = self.add_local(None, LocalKind::Temp, MIR_I64);
-                            self.push_inst(Instruction::Assign {
-                                destination: zero,
-                                value: MirConstant::Int(0),
-                            });
-                            zero
-                        };
-
-                        let end_local = if let Some(e) = end {
-                            self.lower_expr(e)
-                        } else {
-                            // 计算范围上界（未指定时使用数组长度）。
-                            let max = self.add_local(None, LocalKind::Temp, MIR_I64);
-                            self.push_inst(Instruction::Assign {
-                                destination: max,
-                                value: MirConstant::Int(i64::MAX),
-                            });
-                            max
-                        };
-
-                        // 为范围循环生成循环变量和步进逻辑。
-                        let loop_var =
-                            self.add_local(Some(var_name.clone()), LocalKind::User, MIR_I64);
-                        self.push_inst(Instruction::Store {
-                            destination: loop_var,
-                            value: start_local,
-                        });
-
-                        // 条件块循环回while条件判断。
-                        self.set_terminator(Terminator::Goto(cond_block));
-
-                        // 生成范围循环的步进增量指令。
-                        self.set_current_block(cond_block);
-                        let loop_var_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Load {
-                            destination: loop_var_loaded,
-                            source: loop_var,
-                        });
-
-                        let end_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Load {
-                            destination: end_loaded,
-                            source: end_local,
-                        });
-
-                        // 生成范围比较条件。
-                        let cond_local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-                        let compare_op = if *inclusive {
-                            MirBinOp::Le
-                        } else {
-                            MirBinOp::Lt
-                        };
-                        self.push_inst(Instruction::Binary {
-                            destination: cond_local,
-                            op: compare_op,
-                            left: loop_var_loaded,
-                            right: end_loaded,
-                        });
-
-                        self.set_terminator(Terminator::If {
-                            cond: cond_local,
-                            then_block: body_block,
-                            else_block: exit_block,
-                        });
-
-                        // 压入循环上下文，约定 `break -> exit_block`，`continue -> inc_block`。
-                        self.push_loop(exit_block, inc_block);
-
-                        // 降级for-in（迭代器）循环体到body_block。
-                        self.lower_body_to_block_with_return(body, body_block, false);
-
-                        // 弹出循环栈，更新break目标信息。
-                        self.pop_loop();
-
-                        // 若 body_block 尚未终止，则跳到 `inc_block`。
-                        if let Some(block) = self.mir_fn.block_mut(body_block) {
-                            if block.terminator.is_none() {
-                                block.set_terminator(Terminator::Goto(inc_block));
-                            }
-                        }
-
-                        // 设置步进块并增加索引变量。
-                        self.set_current_block(inc_block);
-                        let inc_loaded = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Load {
-                            destination: inc_loaded,
-                            source: loop_var,
-                        });
-
-                        let one = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Assign {
-                            destination: one,
-                            value: MirConstant::Int(1),
-                        });
-
-                        let inc_result = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Binary {
-                            destination: inc_result,
-                            op: MirBinOp::Add,
-                            left: inc_loaded,
-                            right: one,
-                        });
-
-                        self.push_inst(Instruction::Store {
-                            destination: loop_var,
-                            value: inc_result,
-                        });
-
-                        // 设置条件块跳转回for条件判断块。
-                        self.set_terminator(Terminator::Goto(cond_block));
-
-                        self.set_current_block(exit_block);
-                        self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                    }
+                    } => lower_range_for_expr(self, var_name, start.as_deref(), end.as_deref(), *inclusive, body),
                     _ => {
                     // 处理非范围类型的for-in循环（迭代器模式）。
                         let iter_local = self.lower_expr(iter);
