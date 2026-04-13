@@ -52,6 +52,7 @@ mod named_call_helpers;
 mod non_named_call_helpers;
 mod call_target_helpers;
 mod method_call_helpers;
+mod method_builtin_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::named_call_helpers::lower_named_call;
