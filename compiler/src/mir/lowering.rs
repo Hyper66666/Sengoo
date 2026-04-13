@@ -48,6 +48,7 @@ use std::collections::{HashMap, HashSet};
 mod builtin_helpers;
 mod assignment_helpers;
 mod aggregate_expr_helpers;
+mod pointer_expr_helpers;
 mod call_expr_helpers;
 mod loop_control_helpers;
 mod call_emission_helpers;
@@ -59,6 +60,7 @@ mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
 use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr};
+use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
@@ -2089,48 +2091,8 @@ fn set_terminator(&mut self, term: Terminator) {
                 let base_local = self.lower_expr(base);
                 lower_field_expr(self, base_local, field)
             }
-            HIRExpr::Ref(_is_mut, expr) => {
-                // 取引用（Ref）：获取表达式的地址。
-                let expr_local = self.lower_expr(expr);
-                let expr_ty = self.get_local_type(expr_local).clone();
-
-                // 创建指针类型的局部变量存储地址。
-                let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
-                let ptr_local = self.add_local(None, LocalKind::Temp, ptr_ty);
-
-                // 获取表达式地址：创建指针局部变量并赋值。
-                let zero_index = self.add_local(None, LocalKind::Temp, MIR_I64);
-                self.push_inst(Instruction::Assign {
-                    destination: zero_index,
-                    value: MirConstant::Int(0),
-                });
-
-                self.push_inst(Instruction::IndexAddr {
-                    destination: ptr_local,
-                    base: expr_local,
-                    index: zero_index,
-                });
-
-                ptr_local
-            }
-            HIRExpr::Deref(expr) => {
-                // 解引用（Deref）：通过Load读取指针值。
-                let ptr_local = self.lower_expr(expr);
-                let ptr_ty = self.get_local_type(ptr_local).clone();
-
-                let elem_ty = match ptr_ty {
-                    MIRType::Ptr(inner) | MIRType::Ref(inner) => *inner,
-                    _ => MIR_UNIT,
-                };
-
-                let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
-                self.push_inst(Instruction::Load {
-                    destination: result_local,
-                    source: ptr_local,
-                });
-
-                result_local
-            }
+            HIRExpr::Ref(_is_mut, expr) => lower_ref_expr(self, expr),
+            HIRExpr::Deref(expr) => lower_deref_expr(self, expr),
             HIRExpr::Lambda { params, body } => {
                 // Lambda表达式降级，形如|args| body。
                 // 收集lambda自由变量（闭包捕获分析）。
