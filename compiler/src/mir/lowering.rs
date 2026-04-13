@@ -51,6 +51,7 @@ mod aggregate_expr_helpers;
 mod pointer_expr_helpers;
 mod call_expr_helpers;
 mod if_expr_helpers;
+mod loop_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
 mod call_emission_helpers;
@@ -67,6 +68,7 @@ use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
+use self::loop_expr_helpers::lower_loop_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
@@ -1603,48 +1605,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 then_branch,
                 else_branch,
             } => lower_if_expr(self, cond, then_branch, else_branch.as_deref()),
-            HIRExpr::Loop(body) => {
-                let loop_block = self.new_block();
-                let exit_block = self.new_block();
-
-                self.set_terminator(Terminator::Goto(loop_block));
-
-                // 压入循环上下文，约定 `break -> exit_block`，`continue -> loop_block`。
-                self.push_loop(exit_block, loop_block);
-
-                // 将loop循环体降级为基本块，设置到loop_block。
-                self.lower_body_to_block_with_return(body, loop_block, false);
-
-                // 弹出循环栈，更新break目标信息。
-                self.pop_loop();
-
-                // After lowering the body, the current block may differ from
-                // loop_block (e.g. when the body contains `if` or other control
-                // flow that creates new blocks).  We need to ensure that every
-                // block reachable at the end of the body that lacks a terminator
-                // unconditionally branches back to loop_block.
-                let end_block = self.current_block();
-                if end_block != loop_block {
-                    // The body introduced extra blocks; make sure the final
-                    // block loops back.
-                    if let Some(block) = self.mir_fn.block_mut(end_block) {
-                        if block.terminator.is_none() {
-                            block.set_terminator(Terminator::Goto(loop_block));
-                        }
-                    }
-                }
-
-                // Also ensure loop_block itself loops back when it has no
-                // terminator (simple body with no control flow).
-                if let Some(block) = self.mir_fn.block_mut(loop_block) {
-                    if block.terminator.is_none() {
-                        block.set_terminator(Terminator::Goto(loop_block));
-                    }
-                }
-
-                self.set_current_block(exit_block);
-                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-            }
+            HIRExpr::Loop(body) => lower_loop_expr(self, body),
             HIRExpr::While { cond, body } => {
                 let cond_block = self.new_block();
                 let body_block = self.new_block();
