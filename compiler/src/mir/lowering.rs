@@ -47,6 +47,7 @@ use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
 mod assignment_helpers;
+mod aggregate_expr_helpers;
 mod call_expr_helpers;
 mod loop_control_helpers;
 mod call_emission_helpers;
@@ -57,6 +58,7 @@ mod call_target_helpers;
 mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
+use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
@@ -2079,62 +2081,8 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Continue => lower_continue_expr(self),
             HIRExpr::Assign { target, value } => lower_assign_expr(self, target, value),
             HIRExpr::AssignOp { target, op, value } => lower_assign_op_expr(self, target, op, value),
-            HIRExpr::Array(elems) => {
-                // 处理数组字面量 `[a, b, c]`。
-                // 降级数组字面量，为每个元素生成局部变量。
-                let elem_locals: Vec<Local> = elems.iter().map(|e| self.lower_expr(e)).collect();
-
-                // 确定数组元素类型（从第一个元素推断）。
-                let elem_ty = if let Some(first_local) = elem_locals.first() {
-                    self.get_local_type(*first_local).clone()
-                } else {
-                    MIR_UNIT
-                };
-                let array_ty = MIRType::Array(Box::new(elem_ty), elems.len() as u64);
-
-                // 将数组元素local列表打包成MIR Array指令。
-                let array_local = self.add_local(None, LocalKind::User, array_ty.clone());
-                self.push_inst(Instruction::Aggregate {
-                    destination: array_local,
-                    fields: elem_locals,
-                    ty: array_ty,
-                });
-
-                array_local
-            }
-            HIRExpr::Index { base, index } => {
-                // 处理索引表达式 `arr[i]`。
-                let base_local = self.lower_expr(base);
-                let index_local = self.lower_expr(index);
-
-                // 处理索引表达式：获取数组元素地址并加载。
-                let base_ty = self.get_local_type(base_local).clone();
-                let elem_ty = match base_ty {
-                    MIRType::Array(elem, _) => *elem,
-                    _ => MIR_UNIT,
-                };
-
-                // 计算元素地址，用GEP（地址偏移）方式索引。
-                let addr_local = self.add_local(
-                    None,
-                    LocalKind::Temp,
-                    MIRType::Ptr(Box::new(elem_ty.clone())),
-                );
-                self.push_inst(Instruction::IndexAddr {
-                    destination: addr_local,
-                    base: base_local,
-                    index: index_local,
-                });
-
-                // 生成加法运算用于指针偏移计算。
-                let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
-                self.push_inst(Instruction::Load {
-                    destination: result_local,
-                    source: addr_local,
-                });
-
-                result_local
-            }
+            HIRExpr::Array(elems) => lower_array_expr(self, elems),
+            HIRExpr::Index { base, index } => lower_index_expr(self, base, index),
             HIRExpr::Struct { name, fields } => {
                 let lowered_fields: Vec<(String, Local)> = fields
                     .iter()
@@ -2179,43 +2127,8 @@ fn set_terminator(&mut self, term: Terminator) {
                 struct_local
             }
             HIRExpr::Field { base, field } => {
-                // 字段访问：获取基础表达式local后查字段偏移。
                 let base_local = self.lower_expr(base);
-
-                // 计算字段偏移并通过Load指令读取字段值。
-                // 处理结构体或Tuple字段访问，计算字段偏移。
-                let base_ty = self.get_local_type(base_local).clone();
-                let field_index = match &base_ty {
-                    MIRType::Struct { fields, .. } => fields
-                        .iter()
-                        .position(|(name, _)| name == field)
-                        .unwrap_or(0),
-                    // Tuple fallback for legacy method/struct lowering paths.
-                    _ => match field.as_str() {
-                        "x" | "left" | "r" => 0,
-                        "y" | "right" | "g" => 1,
-                        "z" | "b" => 2,
-                        "w" | "a" => 3,
-                        _ => 0,
-                    },
-                };
-                let elem_ty = match &base_ty {
-                    MIRType::Tuple(ref tys) if field_index < tys.len() => tys[field_index].clone(),
-                    MIRType::Struct { fields, .. } if field_index < fields.len() => {
-                        fields[field_index].1.clone()
-                    }
-                    _ => MIR_I64,
-                };
-
-                // 生成二元运算结果的local并添加指令。
-                let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
-                self.push_inst(Instruction::Extract {
-                    destination: result_local,
-                    value: base_local,
-                    index: field_index as u32,
-                });
-
-                result_local
+                lower_field_expr(self, base_local, field)
             }
             HIRExpr::Ref(_is_mut, expr) => {
                 // 取引用（Ref）：获取表达式的地址。
