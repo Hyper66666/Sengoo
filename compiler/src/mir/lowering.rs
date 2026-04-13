@@ -50,6 +50,7 @@ mod assignment_helpers;
 mod aggregate_expr_helpers;
 mod pointer_expr_helpers;
 mod call_expr_helpers;
+mod if_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
 mod call_emission_helpers;
@@ -65,6 +66,7 @@ use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
+use self::if_expr_helpers::lower_if_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
@@ -1600,64 +1602,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 cond,
                 then_branch,
                 else_branch,
-            } => {
-                let then_block = self.new_block();
-                let else_block = self.new_block();
-                let join_block = self.new_block();
-
-                let cond_local = self.lower_expr(cond);
-                self.set_terminator(Terminator::If {
-                    cond: cond_local,
-                    then_block,
-                    else_block,
-                });
-
-                // 降级then分支到新基本块，并获取其值。
-                let then_val = self.lower_body_to_block_val(then_branch, then_block);
-                let then_end = self.current_block();
-                if let Some(block) = self.mir_fn.block_mut(then_end) {
-                    if block.terminator.is_none() {
-                        block.set_terminator(Terminator::Goto(join_block));
-                    }
-                }
-
-                // 降级else分支（如存在）到新基本块。
-                if let Some(e) = else_branch {
-                    let else_val = self.lower_body_to_block_val(e, else_block);
-                    let else_end = self.current_block();
-                    if let Some(block) = self.mir_fn.block_mut(else_end) {
-                        if block.terminator.is_none() {
-                            block.set_terminator(Terminator::Goto(join_block));
-                        }
-                    }
-
-                    // if表达式结果合并：插入Phi或直接赋值。
-                    // 合并if-else分支到join块，插入Phi节点。
-                    self.set_current_block(join_block);
-                    let then_ty = self.get_local_type(then_val).clone();
-                    if is_void_like(&then_ty) {
-                        self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                    } else {
-                        let result = self.add_local(None, LocalKind::Temp, then_ty);
-                        let incoming = vec![(then_val, then_end), (else_val, else_end)];
-                        self.push_inst(Instruction::Phi {
-                            destination: result,
-                            incoming: incoming.clone(),
-                        });
-                        self.propagate_future_origin_through_phi(result, &incoming);
-                        result
-                    }
-                } else {
-                    // 更新else分支的末尾块并插入跳转指令。
-                    if let Some(block) = self.mir_fn.block_mut(else_block) {
-                        if block.terminator.is_none() {
-                            block.set_terminator(Terminator::Goto(join_block));
-                        }
-                    }
-                    self.set_current_block(join_block);
-                    self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                }
-            }
+            } => lower_if_expr(self, cond, then_branch, else_branch.as_deref()),
             HIRExpr::Loop(body) => {
                 let loop_block = self.new_block();
                 let exit_block = self.new_block();
