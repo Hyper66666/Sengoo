@@ -46,6 +46,7 @@ use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
+mod assignment_helpers;
 mod call_expr_helpers;
 mod loop_control_helpers;
 mod call_emission_helpers;
@@ -56,6 +57,7 @@ mod call_target_helpers;
 mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
+use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
@@ -2075,152 +2077,8 @@ fn set_terminator(&mut self, term: Terminator) {
             }
             HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),
             HIRExpr::Continue => lower_continue_expr(self),
-            HIRExpr::Assign { target, value } => {
-                // 普通赋值：降级目标和值，生成Store或Assign指令。
-                // 降级赋值语句，获取目标局部变量。
-                let value_local = self.lower_expr(value);
-
-                // 根据赋值目标类型分别生成Store或Assign指令。
-                match target.as_ref() {
-                    HIRExpr::Var { name, symbol } => {
-                        let target_local = self.resolve_local(name, *symbol);
-                        if value_local == target_local {
-                            // Skip no-op self-assignment (`x = x`) to reduce temp churn.
-                            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-                        }
-                        // 复制类型名到目标局部变量的映射中。
-                        if let Some(type_name) = self.type_names.get(&value_local).cloned() {
-                            self.type_names.insert(target_local, type_name);
-                        }
-                        self.push_inst(Instruction::Store {
-                            destination: target_local,
-                            value: value_local,
-                        });
-                    }
-                    HIRExpr::Index { base, index } => {
-                        // 处理索引赋值：`arr[i] = value`。
-                        let base_local = self.lower_expr(base);
-                        let index_local = self.lower_expr(index);
-
-                        // 结构体字段赋值：计算字段偏移并Store。
-                        let base_ty = self.get_local_type(base_local).clone();
-                        let elem_ty = match &base_ty {
-                            MIRType::Array(elem, _) => (**elem).clone(),
-                            _ => {
-                                self.errors
-                                    .push("index assignment on non-array type".to_string());
-                                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-                            }
-                        };
-
-                        let addr_local =
-                            self.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(elem_ty)));
-                        self.push_inst(Instruction::IndexAddr {
-                            destination: addr_local,
-                            base: base_local,
-                            index: index_local,
-                        });
-
-                        // 数组索引赋值：计算元素地址并Store。
-                        self.push_inst(Instruction::Store {
-                            destination: addr_local,
-                            value: value_local,
-                        });
-                    }
-                    _ => {
-                        self.errors.push(format!("unsupported assignment target"));
-                    }
-                }
-                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-            }
-            HIRExpr::AssignOp { target, op, value } => {
-                // 处理复合赋值：`target op= value`，例如 `x += 1`。
-                // 降级赋值语句，获取目标局部变量。
-                let value_local = self.lower_expr(value);
-
-                match target.as_ref() {
-                    HIRExpr::Var { name, symbol } => {
-                        let target_local = self.resolve_local(name, *symbol);
-                        // 解析赋值目标并获取目标local类型。
-                        let target_ty = self.get_local_type(target_local).clone();
-                        let current_val = self.add_local(None, LocalKind::Temp, target_ty.clone());
-                        self.push_inst(Instruction::Load {
-                            destination: current_val,
-                            source: target_local,
-                        });
-                        // 生成复合赋值的二元运算并Store。
-                        let mir_op = self.lower_bin_op(op);
-                        let result = self.add_local(None, LocalKind::Temp, target_ty);
-                        self.push_inst(Instruction::Binary {
-                            destination: result,
-                            op: mir_op,
-                            left: current_val,
-                            right: value_local,
-                        });
-                        // 将数组元素类型名传播到被赋值的局部变量。
-                        self.push_inst(Instruction::Store {
-                            destination: target_local,
-                            value: result,
-                        });
-                    }
-                    HIRExpr::Index { base, index } => {
-                        // 处理索引复合赋值：`arr[i] += value`。
-                        let base_local = self.lower_expr(base);
-                        let index_local = self.lower_expr(index);
-
-                        // 元组字段赋值：计算字段偏移并Store。
-                        let base_ty = self.get_local_type(base_local).clone();
-                        let elem_ty = match &base_ty {
-                            MIRType::Array(elem, _) => (**elem).clone(),
-                            _ => {
-                                self.errors.push(
-                                    "index compound assignment on non-array type".to_string(),
-                                );
-                                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-                            }
-                        };
-
-                        let addr_local = self.add_local(
-                            None,
-                            LocalKind::Temp,
-                            MIRType::Ptr(Box::new(elem_ty.clone())),
-                        );
-                        self.push_inst(Instruction::IndexAddr {
-                            destination: addr_local,
-                            base: base_local,
-                            index: index_local,
-                        });
-
-                        // 复合赋值操作：先加载当前值再计算新值。
-                        let current_val = self.add_local(None, LocalKind::Temp, elem_ty.clone());
-                        self.push_inst(Instruction::Load {
-                            destination: current_val,
-                            source: addr_local,
-                        });
-
-                        // 生成索引赋值的二元运算并Store到元素地址。
-                        let mir_op = self.lower_bin_op(op);
-                        let result = self.add_local(None, LocalKind::Temp, elem_ty);
-                        self.push_inst(Instruction::Binary {
-                            destination: result,
-                            op: mir_op,
-                            left: current_val,
-                            right: value_local,
-                        });
-
-                        // 将值存入元组字段对应的内存地址。
-                        self.push_inst(Instruction::Store {
-                            destination: addr_local,
-                            value: result,
-                        });
-                    }
-                    _ => {
-                        self.errors
-                            .push(format!("unsupported compound assignment target"));
-                    }
-                }
-                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-            }
+            HIRExpr::Assign { target, value } => lower_assign_expr(self, target, value),
+            HIRExpr::AssignOp { target, op, value } => lower_assign_op_expr(self, target, op, value),
             HIRExpr::Array(elems) => {
                 // 处理数组字面量 `[a, b, c]`。
                 // 降级数组字面量，为每个元素生成局部变量。
