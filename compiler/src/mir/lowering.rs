@@ -58,7 +58,7 @@ mod call_target_helpers;
 mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
-use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr};
+use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
@@ -2083,49 +2083,8 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::AssignOp { target, op, value } => lower_assign_op_expr(self, target, op, value),
             HIRExpr::Array(elems) => lower_array_expr(self, elems),
             HIRExpr::Index { base, index } => lower_index_expr(self, base, index),
-            HIRExpr::Struct { name, fields } => {
-                let lowered_fields: Vec<(String, Local)> = fields
-                    .iter()
-                    .map(|(field_name, expr)| (field_name.clone(), self.lower_expr(expr)))
-                    .collect();
-                let field_locals_by_name: HashMap<String, Local> = lowered_fields
-                    .iter()
-                    .map(|(field_name, local)| (field_name.clone(), *local))
-                    .collect();
+            HIRExpr::Struct { name, fields } => lower_struct_expr(self, name, fields),
 
-                let struct_ty = self
-                    .infer_struct_literal_type(name, &field_locals_by_name)
-                    .unwrap_or_else(|| MIRType::Struct {
-                        name: name.clone(),
-                        fields: lowered_fields
-                            .iter()
-                            .map(|(field_name, local)| {
-                                (field_name.clone(), self.get_local_type(*local).clone())
-                            })
-                            .collect(),
-                    });
-
-                let ordered_field_locals: Vec<Local> = match &struct_ty {
-                    MIRType::Struct { fields, .. } => fields
-                        .iter()
-                        .filter_map(|(field_name, _)| field_locals_by_name.get(field_name).copied())
-                        .collect(),
-                    _ => lowered_fields.iter().map(|(_, local)| *local).collect(),
-                };
-
-                let struct_local = self.add_local(None, LocalKind::Temp, struct_ty.clone());
-                self.push_inst(Instruction::Aggregate {
-                    destination: struct_local,
-                    fields: ordered_field_locals,
-                    ty: struct_ty.clone(),
-                });
-
-                if let MIRType::Struct { name, .. } = &struct_ty {
-                    self.type_names.insert(struct_local, name.clone());
-                }
-
-                struct_local
-            }
             HIRExpr::Field { base, field } => {
                 let base_local = self.lower_expr(base);
                 lower_field_expr(self, base_local, field)
