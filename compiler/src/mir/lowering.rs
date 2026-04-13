@@ -49,11 +49,13 @@ mod builtin_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
+mod non_named_call_helpers;
 mod call_target_helpers;
 mod method_call_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::named_call_helpers::lower_named_call;
+use self::non_named_call_helpers::lower_non_named_call;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_call_helpers::lower_method_call_from_locals;
 
@@ -2045,16 +2047,7 @@ fn set_terminator(&mut self, term: Terminator) {
 
                 match func.as_ref() {
                     HIRExpr::Var { name, .. } => lower_named_call(self, name, &arg_locals),
-                    _ => {
-                        let plan = build_call_invocation_plan(
-                            "",
-                            &MIR_UNIT,
-                            None,
-                            &arg_locals,
-                            &self.options.async_functions,
-                        );
-                        emit_call_from_plan(self, plan)
-                    }
+                    _ => lower_non_named_call(self, &arg_locals)
                 }
             }
             HIRExpr::And(left, right) => {
