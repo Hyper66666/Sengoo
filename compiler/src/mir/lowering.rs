@@ -47,6 +47,7 @@ use std::collections::{HashMap, HashSet};
 
 mod builtin_helpers;
 mod call_expr_helpers;
+mod loop_control_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
@@ -57,6 +58,7 @@ mod method_expr_helpers;
 mod method_builtin_helpers;
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
+use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_expr_helpers::lower_method_call_expr;
@@ -2071,32 +2073,8 @@ fn set_terminator(&mut self, term: Terminator) {
                 });
                 local
             }
-            HIRExpr::Break(value) => {
-                // 处理 `break` 表达式。
-                if let Some(target) = self.get_break_target() {
-                    // 若有break目标，生成到目标块的跳转指令。
-                    if let Some(v) = value {
-                        self.lower_expr(v);
-                    }
-                    self.set_terminator(Terminator::Break { target });
-                    // break语句：设置跳转目标并返回unit。
-                    self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                } else {
-                    self.errors.push("break outside of loop".to_string());
-                    self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                }
-            }
-            HIRExpr::Continue => {
-                // 处理 `continue` 表达式。
-                if let Some(target) = self.get_continue_target() {
-                    self.set_terminator(Terminator::Continue { target });
-                    // continue语句：设置跳转目标并返回unit。
-                    self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                } else {
-                    self.errors.push("continue outside of loop".to_string());
-                    self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                }
-            }
+            HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),
+            HIRExpr::Continue => lower_continue_expr(self),
             HIRExpr::Assign { target, value } => {
                 // 普通赋值：降级目标和值，生成Store或Assign指令。
                 // 降级赋值语句，获取目标局部变量。
