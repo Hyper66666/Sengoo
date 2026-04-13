@@ -52,6 +52,7 @@ mod pointer_expr_helpers;
 mod call_expr_helpers;
 mod if_expr_helpers;
 mod loop_expr_helpers;
+mod while_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
 mod call_emission_helpers;
@@ -69,6 +70,7 @@ use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
 use self::loop_expr_helpers::lower_loop_expr;
+use self::while_expr_helpers::lower_while_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
@@ -1606,53 +1608,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 else_branch,
             } => lower_if_expr(self, cond, then_branch, else_branch.as_deref()),
             HIRExpr::Loop(body) => lower_loop_expr(self, body),
-            HIRExpr::While { cond, body } => {
-                let cond_block = self.new_block();
-                let body_block = self.new_block();
-                let exit_block = self.new_block();
-
-                self.set_terminator(Terminator::Goto(cond_block));
-
-                // 设置当前基本块为while的条件判断块。
-                self.set_current_block(cond_block);
-                let cond_local = self.lower_expr(cond);
-                self.set_terminator(Terminator::If {
-                    cond: cond_local,
-                    then_block: body_block,
-                    else_block: exit_block,
-                });
-
-                // 压入循环上下文，约定 `break -> exit_block`，`continue -> cond_block`。
-                self.push_loop(exit_block, cond_block);
-
-                // 将while循环体降级，设置到body_block。
-                self.lower_body_to_block_with_return(body, body_block, false);
-
-                // 弹出循环栈，更新break目标信息。
-                self.pop_loop();
-
-                // 若 body 末尾块尚未终止，则回跳到 `cond_block`。
-                // 当前循环体结束，收集body末尾块的信息。
-                // 降级结束后将body末尾块跳转回循环条件块。
-                let body_end_block = self.current_block();
-                if body_end_block != body_block {
-                // 循环体结束后若未终止，添加跳回条件块的跳转。
-                    if let Some(block) = self.mir_fn.block_mut(body_end_block) {
-                        if block.terminator.is_none() {
-                            block.set_terminator(Terminator::Goto(cond_block));
-                        }
-                    }
-                }
-                // 若循环体块未被终止，添加到back-edge跳转。
-                if let Some(block) = self.mir_fn.block_mut(body_block) {
-                    if block.terminator.is_none() {
-                        block.set_terminator(Terminator::Goto(cond_block));
-                    }
-                }
-
-                self.set_current_block(exit_block);
-                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-            }
+            HIRExpr::While { cond, body } => lower_while_expr(self, cond, body),
             HIRExpr::For {
                 var_name,
                 iter,
