@@ -618,38 +618,40 @@ impl<'a> LoweringContext<'a> {
             return None;
         }
 
-        let instance_name = if def.type_params.is_empty() {
-            name.to_string()
+        let (instance_name, concrete_hir_ty) = if def.type_params.is_empty() {
+            (
+                name.to_string(),
+                HIRType::named(name.to_string(), Vec::new()),
+            )
         } else {
-            let parts: Vec<String> = def
-                .type_params
-                .iter()
-                .map(|type_param| {
-                    mir_type_to_instance_name(
-                        subst
-                            .get(&type_param.name)
-                            .expect("generic struct literal type param should be inferred"),
-                    )
-                })
-                .collect();
-            format!("{}_{}", name, parts.join("_"))
-        };
+            let mut parts: Vec<String> = Vec::with_capacity(def.type_params.len());
+            let mut concrete_args: Vec<HIRType> = Vec::with_capacity(def.type_params.len());
 
-        let concrete_hir_ty = HIRType::named(
-            name.to_string(),
-            def.type_params
-                .iter()
-                .map(|type_param| {
-                    self.concrete_type_registry
-                        .hir_type_for_mir(
-                            subst
-                                .get(&type_param.name)
-                                .expect("generic struct literal type param should be inferred"),
-                        )
-                        .expect("concrete struct literal arg should resolve to HIR type")
-                })
-                .collect(),
-        );
+            for type_param in &def.type_params {
+                let Some(mir_arg) = subst.get(&type_param.name) else {
+                    self.errors.push(format!(
+                        "struct literal {}: generic type parameter {} could not be inferred during MIR lowering",
+                        name, type_param.name
+                    ));
+                    return None;
+                };
+                parts.push(mir_type_to_instance_name(mir_arg));
+
+                let Some(hir_arg) = self.concrete_type_registry.hir_type_for_mir(mir_arg) else {
+                    self.errors.push(format!(
+                        "struct literal {}: concrete type argument for {} could not be resolved during MIR lowering",
+                        name, type_param.name
+                    ));
+                    return None;
+                };
+                concrete_args.push(hir_arg);
+            }
+
+            (
+                format!("{}_{}", name, parts.join("_")),
+                HIRType::named(name.to_string(), concrete_args),
+            )
+        };
         self.concrete_type_registry
             .register_instance(instance_name.clone(), concrete_hir_ty);
 

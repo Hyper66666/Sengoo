@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 pub(super) fn lower_array_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr]) -> Local {
     let elem_locals: Vec<Local> = elems.iter().map(|e| ctx.lower_expr(e)).collect();
