@@ -58,6 +58,7 @@ mod for_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
 mod let_stmt_helpers;
+mod op_expr_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
@@ -78,6 +79,7 @@ use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::{lower_array_for_expr, lower_range_for_expr};
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
+use self::op_expr_helpers::lower_unary_expr;
 use self::let_stmt_helpers::lower_let_stmt;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
@@ -1279,58 +1281,7 @@ fn set_terminator(&mut self, term: Terminator) {
         match expr {
             HIRExpr::Lit(lit) => self.lower_literal(lit),
             HIRExpr::Var { name, symbol } => self.resolve_local(name, *symbol),
-            HIRExpr::Unary(op, operand) => {
-                // 一元表达式先区分取引用这类需要地址语义的特殊分支。
-                match op {
-                    hir::HIRUnaryOp::Ref | hir::HIRUnaryOp::RefMut => {
-                    // 取引用操作：获取操作数的地址。
-                        let expr_local = self.lower_expr(operand);
-                        let expr_ty = self.get_local_type(expr_local).clone();
-
-                        // 取引用操作：生成指针类型的局部变量。
-                        let ptr_ty = MIRType::Ptr(Box::new(expr_ty));
-                        let ptr_local = self.add_local(None, LocalKind::Temp, ptr_ty);
-
-                        // 生成AddrOf指令，创建指针类型local。
-                        self.push_inst(Instruction::AddrOf {
-                            destination: ptr_local,
-                            source: expr_local,
-                        });
-
-                        ptr_local
-                    }
-                    hir::HIRUnaryOp::Deref => {
-                    // 解引用操作：通过Load指令读取指针指向的值。
-                        let ptr_local = self.lower_expr(operand);
-                        let ptr_ty = self.get_local_type(ptr_local).clone();
-
-                        let elem_ty = match ptr_ty {
-                            MIRType::Ptr(inner) | MIRType::Ref(inner) => (*inner).clone(),
-                            _ => MIR_I64,
-                        };
-
-                        let result_local = self.add_local(None, LocalKind::Temp, elem_ty);
-                        self.push_inst(Instruction::Load {
-                            destination: result_local,
-                            source: ptr_local,
-                        });
-
-                        result_local
-                    }
-                    _ => {
-                        // 其余一元运算按普通值语义降级。
-                        let operand_local = self.lower_expr(operand);
-                        let mir_op = self.lower_un_op(op);
-                        let local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Unary {
-                            destination: local,
-                            op: mir_op,
-                            operand: operand_local,
-                        });
-                        local
-                    }
-                }
-            }
+            HIRExpr::Unary(op, operand) => lower_unary_expr(self, op, operand),
             HIRExpr::Binary(op, left, right) => {
                 let left_local = self.lower_expr(left);
                 let right_local = self.lower_expr(right);
