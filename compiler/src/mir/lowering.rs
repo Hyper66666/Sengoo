@@ -57,6 +57,7 @@ mod while_expr_helpers;
 mod for_expr_helpers;
 mod loop_control_helpers;
 mod lambda_expr_helpers;
+mod let_stmt_helpers;
 mod call_emission_helpers;
 mod call_invocation_helpers;
 mod named_call_helpers;
@@ -77,6 +78,7 @@ use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::{lower_array_for_expr, lower_range_for_expr};
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
+use self::let_stmt_helpers::lower_let_stmt;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_expr_helpers::lower_method_call_expr;
@@ -1211,176 +1213,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 ty,
                 value,
                 is_mut,
-            } => {
-                let kind = if *is_mut {
-                    LocalKind::User
-                } else {
-                    LocalKind::User
-                };
-                let mir_ty = ty.clone().into();
-
-                if let Some(value_expr) = value {
-                    // 先降级 `let` 初始化表达式，再决定绑定策略。
-                    let value_local = self.lower_expr(value_expr);
-
-                // 处理let绑定，确定变量种类并降级初始值。
-                    let lambda_name = self.lambda_names.get(&value_local).cloned();
-
-                    if let Some(ln) = lambda_name {
-                        let env_vars = self
-                            .lambda_environments
-                            .get(&ln)
-                            .map(|env| env.vars.clone())
-                            .unwrap_or_default();
-
-                        if env_vars.is_empty() {
-                            self.local_names.insert(name.clone(), value_local);
-                            self.bind_local_symbol(*symbol, value_local);
-                        } else {
-                            let local = self.add_local(Some(name.clone()), kind, mir_ty);
-                            self.bind_local_symbol(*symbol, local);
-                            self.lambda_names.insert(local, ln.clone());
-
-                // 若初始值为lambda，需要为其生成捕获环境。
-                            // 为lambda捕获环境分配数组局部变量。
-                            let env_elem_ty = MIR_I64;
-                            let env_ty = MIRType::Array(
-                                Box::new(env_elem_ty.clone()),
-                                env_vars.len() as u64,
-                            );
-
-                            // 创建lambda捕获环境数组local。
-                            let env_local = self.mir_fn.add_local(LocalKind::User, env_ty);
-
-                            // 遍历lambda环境变量，存入捕获数组。
-                            for (i, (var_name, _var_local)) in env_vars.iter().enumerate() {
-                                // 若变量已在当前上下文中绑定，则把它加入 lambda 捕获环境。
-                                if let Some(&captured_local) = self.local_names.get(var_name) {
-                                // 计算被捕获变量的元素地址并存入环境。
-                                    let elem_addr_local = self.add_local(
-                                        None,
-                                        LocalKind::Temp,
-                                        MIRType::Ptr(Box::new(env_elem_ty.clone())),
-                                    );
-                                    let index_local =
-                                        self.add_local(None, LocalKind::Temp, MIR_I64);
-                                    self.push_inst(Instruction::Assign {
-                                        destination: index_local,
-                                        value: MirConstant::Int(i as i64),
-                                    });
-                                    self.push_inst(Instruction::IndexAddr {
-                                        destination: elem_addr_local,
-                                        base: env_local,
-                                        index: index_local,
-                                    });
-
-                                // 从外层上下文加载被捕获的变量值。
-                                    let captured_value_local =
-                                        self.add_local(None, LocalKind::Temp, env_elem_ty.clone());
-                                    self.push_inst(Instruction::Load {
-                                        destination: captured_value_local,
-                                        source: captured_local,
-                                    });
-
-                // 将捕获变量的值逐一存入环境数组中。
-                                    self.push_inst(Instruction::Store {
-                                        destination: elem_addr_local,
-                                        value: captured_value_local,
-                                    });
-                                }
-                            }
-
-                            // 分配指向lambda捕获环境的指针。
-                            // 分配指向lambda捕获环境的指针局部变量。
-                            let env_ptr_local = self
-                                .mir_fn
-                                .add_local(LocalKind::Temp, MIRType::Ptr(Box::new(env_elem_ty)));
-                            self.push_inst(Instruction::AddrOf {
-                                destination: env_ptr_local,
-                                source: env_local,
-                            });
-
-                            // 更新lambda环境中的env_ptr_local字段。
-                            if let Some(env_mut) = self.lambda_environments.get_mut(&ln) {
-                                env_mut.env_ptr_local = Some(env_ptr_local);
-                            } else {
-                                self.errors.push(format!(
-                                    "MIR lowering: lambda environment not found for '{}' in Let binding",
-                                    ln
-                                ));
-                            }
-                        }
-                    } else {
-                    // 若为lambda引用，处理捕获环境传递。
-                        // 若捕获变量为数组类型，直接存储引用。
-                        let value_ty = self.get_local_type(value_local).clone();
-                        let value_info_opt = self
-                            .mir_fn
-                            .locals
-                            .iter()
-                            .find(|(l, _)| l == &value_local)
-                            .map(|(l, _t)| l.clone());
-
-                        let value_info = match value_info_opt {
-                            Some(info) => info,
-                            None => {
-                                self.errors.push(format!(
-                                    "MIR lowering: local info not found for local {:?} in Let binding for '{}'",
-                                    value_local, name
-                                ));
-                                // Fall through to the normal path with a new local
-                                let local = self.add_local(Some(name.clone()), kind, mir_ty);
-                                self.bind_local_symbol(*symbol, local);
-                                if let Some(type_name) = self.type_names.get(&value_local).cloned()
-                                {
-                                    self.type_names.insert(local, type_name);
-                                }
-                                self.push_inst(Instruction::Store {
-                                    destination: local,
-                                    value: value_local,
-                                });
-                                // Propagate future origin through the let binding.
-                                if let Some(origin) = self.future_origins.get(&value_local).cloned() {
-                                    self.future_origins.insert(local, origin);
-                                }
-                                return;
-                            }
-                        };
-
-                        if matches!(value_ty, MIRType::Array(_, _))
-                            && value_info.kind == LocalKind::User
-                        {
-                            // 将数组类型变量直接加入local_names映射。
-                            // 数组类型直接复用local，加入名称映射。
-                            self.local_names.insert(name.clone(), value_local);
-                            self.bind_local_symbol(*symbol, value_local);
-                            // 绑定符号到local并传播类型名。
-                        } else {
-                            // 普通类型：创建新local并生成Store指令。
-                            // 否则创建新局部变量并生成Store指令。
-                            let actual_ty = value_ty.clone();
-                            let local = self.add_local(Some(name.clone()), kind, actual_ty);
-                            self.bind_local_symbol(*symbol, local);
-                            // 将类型名传播给新创建的局部变量。
-                            if let Some(type_name) = self.type_names.get(&value_local).cloned() {
-                                self.type_names.insert(local, type_name);
-                            }
-                            self.push_inst(Instruction::Store {
-                                destination: local,
-                                value: value_local,
-                            });
-                            // Propagate future origin through the let binding.
-                            if let Some(origin) = self.future_origins.get(&value_local).cloned() {
-                                self.future_origins.insert(local, origin);
-                            }
-                        }
-                    }
-                } else {
-                    // 普通（非异步）let 绑定，直接添加局部变量。
-                    let local = self.add_local(Some(name.clone()), kind, mir_ty);
-                    self.bind_local_symbol(*symbol, local);
-                }
-            }
+            } => lower_let_stmt(self, name, *symbol, ty, value.as_ref(), *is_mut),
             HIRStmt::Expr(expr) => {
                 self.lower_expr(expr);
             }

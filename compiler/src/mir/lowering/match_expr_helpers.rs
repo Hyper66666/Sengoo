@@ -59,6 +59,7 @@ pub(super) fn lower_enum_match_expr(
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn lower_non_enum_match_expr(
     ctx: &mut LoweringContext<'_>,
     scrutinee_local: Local,
