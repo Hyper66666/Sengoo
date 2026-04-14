@@ -74,7 +74,7 @@ use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
-use self::match_expr_helpers::lower_enum_match_expr;
+use self::match_expr_helpers::{lower_enum_match_expr, lower_non_enum_match_expr};
 use self::loop_expr_helpers::lower_loop_expr;
 use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::lower_for_expr;
@@ -1325,65 +1325,7 @@ fn set_terminator(&mut self, term: Terminator) {
 
                 match scrutinee_ty {
                     MIRType::Enum { .. } => lower_enum_match_expr(self, scrutinee_local, arms),
-                    _ => {
-                        let join_block = self.new_block();
-                        let mut incoming_values: Vec<(Local, usize)> = Vec::new();
-
-                        for (i, arm) in arms.iter().enumerate() {
-                            let is_last = i == arms.len() - 1;
-
-                            if is_last {
-                                let arm_result = self.lower_expr(&arm.body);
-                                let arm_end = self.current_block();
-                                if let Some(block) = self.mir_fn.block_mut(arm_end) {
-                                    if block.terminator.is_none() {
-                                        block.set_terminator(Terminator::Goto(join_block));
-                                        incoming_values.push((arm_result, arm_end));
-                                    }
-                                }
-                            } else {
-                                let then_block = self.new_block();
-                                let next_arm_block = self.new_block();
-
-                                let should_take = self.matches_pattern(&arm.pat, scrutinee_local);
-                                self.set_terminator(Terminator::If {
-                                    cond: should_take,
-                                    then_block,
-                                    else_block: next_arm_block,
-                                });
-
-                                self.set_current_block(then_block);
-                                let arm_result = self.lower_expr(&arm.body);
-                                let arm_end = self.current_block();
-                                if let Some(block) = self.mir_fn.block_mut(arm_end) {
-                                    if block.terminator.is_none() {
-                                        block.set_terminator(Terminator::Goto(join_block));
-                                        incoming_values.push((arm_result, arm_end));
-                                    }
-                                }
-
-                                self.set_current_block(next_arm_block);
-                            }
-                        }
-
-                        self.set_current_block(join_block);
-                        if let Some((first_value, _)) = incoming_values.first().copied() {
-                            let result_ty = self.get_local_type(first_value).clone();
-                            if is_void_like(&result_ty) {
-                                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                            } else {
-                                let result = self.add_local(None, LocalKind::Temp, result_ty);
-                                self.push_inst(Instruction::Phi {
-                                    destination: result,
-                                    incoming: incoming_values.clone(),
-                                });
-                                self.propagate_future_origin_through_phi(result, &incoming_values);
-                                result
-                            }
-                        } else {
-                            self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                        }
-                    }
+                    _ => lower_non_enum_match_expr(self, scrutinee_local, arms),
                 }
             }
             HIRExpr::MethodCall {
