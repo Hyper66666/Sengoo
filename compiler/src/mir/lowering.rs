@@ -67,6 +67,7 @@ mod call_target_helpers;
 mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
+mod block_async_expr_helpers;
 use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr};
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
@@ -84,6 +85,7 @@ use self::let_stmt_helpers::lower_let_stmt;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
 use self::method_expr_helpers::lower_method_call_expr;
+use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1283,10 +1285,7 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Var { name, symbol } => self.resolve_local(name, *symbol),
             HIRExpr::Unary(op, operand) => lower_unary_expr(self, op, operand),
             HIRExpr::Binary(op, left, right) => lower_binary_expr(self, op, left, right),
-            HIRExpr::Block(body) => {
-                self.lower_body(body);
-                Local::new(0, LocalKind::Return)
-            }
+            HIRExpr::Block(body) => lower_block_expr(self, body),
             HIRExpr::If {
                 cond,
                 then_branch,
@@ -1416,11 +1415,8 @@ fn set_terminator(&mut self, term: Terminator) {
                 method,
                 args,
             } => lower_method_call_expr(self, receiver, method, args),
-            HIRExpr::Await(inner) => {
-                let future_handle = self.lower_expr(inner);
-                self.lower_async_wait(future_handle)
-            }
-            HIRExpr::AsyncBlock(body) => self.lower_async_block(body),
+            HIRExpr::Await(inner) => lower_await_expr(self, inner),
+            HIRExpr::AsyncBlock(body) => lower_async_block_expr(self, body),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }
