@@ -77,7 +77,7 @@ use self::if_expr_helpers::lower_if_expr;
 use self::match_expr_helpers::lower_enum_match_expr;
 use self::loop_expr_helpers::lower_loop_expr;
 use self::while_expr_helpers::lower_while_expr;
-use self::for_expr_helpers::{lower_array_for_expr, lower_range_for_expr};
+use self::for_expr_helpers::lower_for_expr;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
 use self::op_expr_helpers::{lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr};
@@ -1298,33 +1298,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 iter,
                 body,
                 ..
-            } => {
-                // 根据迭代对象形态分别处理 `for` lowering。
-                match iter.as_ref() {
-                    HIRExpr::Range {
-                        start,
-                        end,
-                        inclusive,
-                    } => lower_range_for_expr(self, var_name, start.as_deref(), end.as_deref(), *inclusive, body),
-                    _ => {
-                    // 处理非范围类型的for-in循环（迭代器模式）。
-                        let iter_local = self.lower_expr(iter);
-                        let iter_ty = self.get_local_type(iter_local).clone();
-
-                        match iter_ty {
-                            MIRType::Array(elem_ty, len) => lower_array_for_expr(self, var_name, iter_local, &elem_ty, len, body),
-                            _ => {
-                            // 捕获变量解析失败，生成错误信息。
-                                self.errors.push(format!(
-                                    "for loop: unsupported iterator type: {:?}",
-                                    iter_ty
-                                ));
-                                self.add_local(None, LocalKind::Temp, MIR_UNIT)
-                            }
-                        }
-                    }
-                }
-            }
+            } => lower_for_expr(self, var_name, iter, body),
             HIRExpr::Call { func, args } => lower_call_expr(self, func, args),
             HIRExpr::And(left, right) => lower_logical_and_expr(self, left, right),
             HIRExpr::Or(left, right) => lower_logical_or_expr(self, left, right),
