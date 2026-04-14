@@ -79,7 +79,7 @@ use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::{lower_array_for_expr, lower_range_for_expr};
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::lambda_expr_helpers::lower_lambda_expr;
-use self::op_expr_helpers::lower_unary_expr;
+use self::op_expr_helpers::{lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr};
 use self::let_stmt_helpers::lower_let_stmt;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
@@ -1282,110 +1282,7 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Lit(lit) => self.lower_literal(lit),
             HIRExpr::Var { name, symbol } => self.resolve_local(name, *symbol),
             HIRExpr::Unary(op, operand) => lower_unary_expr(self, op, operand),
-            HIRExpr::Binary(op, left, right) => {
-                let left_local = self.lower_expr(left);
-                let right_local = self.lower_expr(right);
-                let mir_op = self.lower_bin_op(op);
-
-                // String concatenation: when both operands are string type
-                // (Ptr(Int(8))) and the operation is Add, generate a call to
-                // sengoo_str_concat instead of a binary add instruction.
-                if mir_op == MirBinOp::Add {
-                    let is_string_concat = {
-                        let left_ty = self.get_local_type(left_local);
-                        let right_ty = self.get_local_type(right_local);
-                        let is_string = |ty: &MIRType| matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)));
-                        is_string(left_ty) && is_string(right_ty)
-                    };
-                    if is_string_concat {
-                        let result_ty = MIRType::Ptr(Box::new(MIRType::Int(8)));
-                        let result_local = self.add_local(None, LocalKind::Temp, result_ty);
-                        self.push_inst(Instruction::Call {
-                            destination: result_local,
-                            func: "sengoo_str_concat".to_string(),
-                            args: vec![left_local, right_local],
-                        });
-                        return result_local;
-                    }
-                }
-
-                // String comparison: when both operands are string type
-                // (Ptr(Int(8))) and the operation is Eq or Ne, generate a call
-                // to sengoo_str_eq instead of a binary comparison instruction.
-                // sengoo_str_eq returns i64 (1=equal, 0=not equal), so we
-                // convert to bool by comparing the result with 0.
-                if mir_op == MirBinOp::Eq || mir_op == MirBinOp::Ne {
-                    let is_string_cmp = {
-                        let left_ty = self.get_local_type(left_local);
-                        let right_ty = self.get_local_type(right_local);
-                        let is_string = |ty: &MIRType| matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)));
-                        is_string(left_ty) && is_string(right_ty)
-                    };
-                    if is_string_cmp {
-                        // Call sengoo_str_eq(left, right) -> i64
-                        let call_result = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Call {
-                            destination: call_result,
-                            func: "sengoo_str_eq".to_string(),
-                            args: vec![left_local, right_local],
-                        });
-
-                        // Create constant 0 for comparison
-                        let zero = self.add_local(None, LocalKind::Temp, MIR_I64);
-                        self.push_inst(Instruction::Assign {
-                            destination: zero,
-                            value: MirConstant::Int(0),
-                        });
-
-                        // Convert i64 result to bool:
-                        // 字符串比较：将比较结果转换为bool。
-                        // Eq时非零表示相等，Ne时零表示不等。
-                        let cmp_op = if mir_op == MirBinOp::Eq {
-                            MirBinOp::Ne
-                        } else {
-                            MirBinOp::Eq
-                        };
-                        let bool_result = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-                        self.push_inst(Instruction::Binary {
-                            destination: bool_result,
-                            op: cmp_op,
-                            left: call_result,
-                            right: zero,
-                        });
-
-                        return bool_result;
-                    }
-                }
-
-                // 在生成二元指令前，调和两个操作数的类型。
-                // Before generating the binary instruction, reconcile operand
-                // types: insert Cast instructions for compatible mismatches or
-                // record an error for incompatible types (Requirement 7.4).
-                let (left_local, right_local) =
-                    self.reconcile_binary_operand_types(left_local, right_local);
-
-                // Determine the result type based on the (possibly cast) operand type.
-                let operand_ty = self.get_local_type(left_local).clone();
-                let result_ty = match mir_op {
-                    MirBinOp::Eq
-                    | MirBinOp::Ne
-                    | MirBinOp::Lt
-                    | MirBinOp::Le
-                    | MirBinOp::Gt
-                    | MirBinOp::Ge
-                    | MirBinOp::LogAnd
-                    | MirBinOp::LogOr => MIR_BOOL,
-                    _ => operand_ty,
-                };
-                let local = self.add_local(None, LocalKind::Temp, result_ty);
-                self.push_inst(Instruction::Binary {
-                    destination: local,
-                    op: mir_op,
-                    left: left_local,
-                    right: right_local,
-                });
-                local
-            }
+            HIRExpr::Binary(op, left, right) => lower_binary_expr(self, op, left, right),
             HIRExpr::Block(body) => {
                 self.lower_body(body);
                 Local::new(0, LocalKind::Return)
@@ -1430,32 +1327,8 @@ fn set_terminator(&mut self, term: Terminator) {
                 }
             }
             HIRExpr::Call { func, args } => lower_call_expr(self, func, args),
-            HIRExpr::And(left, right) => {
-                // 短路逻辑AND：左侧为false时直接跳过右侧。
-                let left_local = self.lower_expr(left);
-                let right_local = self.lower_expr(right);
-                let local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-                self.push_inst(Instruction::Binary {
-                    destination: local,
-                    op: MirBinOp::LogAnd,
-                    left: left_local,
-                    right: right_local,
-                });
-                local
-            }
-            HIRExpr::Or(left, right) => {
-                // 短路逻辑OR：左侧为true时直接跳过右侧。
-                let left_local = self.lower_expr(left);
-                let right_local = self.lower_expr(right);
-                let local = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-                self.push_inst(Instruction::Binary {
-                    destination: local,
-                    op: MirBinOp::LogOr,
-                    left: left_local,
-                    right: right_local,
-                });
-                local
-            }
+            HIRExpr::And(left, right) => lower_logical_and_expr(self, left, right),
+            HIRExpr::Or(left, right) => lower_logical_or_expr(self, left, right),
             HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),
             HIRExpr::Continue => lower_continue_expr(self),
             HIRExpr::Assign { target, value } => lower_assign_expr(self, target, value),
