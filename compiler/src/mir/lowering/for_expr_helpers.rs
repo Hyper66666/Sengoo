@@ -1,5 +1,36 @@
-use super::*;
+﻿use super::*;
 
+pub(super) fn lower_for_expr(
+    ctx: &mut LoweringContext<'_>,
+    var_name: &str,
+    iter: &HIRExpr,
+    body: &HIRBody,
+) -> Local {
+    match iter {
+        HIRExpr::Range {
+            start,
+            end,
+            inclusive,
+        } => lower_range_for_expr(ctx, var_name, start.as_deref(), end.as_deref(), *inclusive, body),
+        _ => {
+            let iter_local = ctx.lower_expr(iter);
+            let iter_ty = ctx.get_local_type(iter_local).clone();
+
+            match iter_ty {
+                MIRType::Array(elem_ty, len) => {
+                    lower_array_for_expr(ctx, var_name, iter_local, &elem_ty, len, body)
+                }
+                _ => {
+                    ctx.errors.push(format!(
+                        "for loop: unsupported iterator type: {:?}",
+                        iter_ty
+                    ));
+                    ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
+                }
+            }
+        }
+    }
+}
 pub(super) fn lower_range_for_expr(
     ctx: &mut LoweringContext<'_>,
     var_name: &str,
