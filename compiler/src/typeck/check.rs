@@ -1,5 +1,5 @@
-//! 绫诲瀷妫€鏌ュ櫒瀹炵幇锛岃礋璐ｅAST杩涜绫诲瀷楠岃瘉銆佹帹鏂拰绾︽潫妫€鏌ャ€?
-//! 瀹炵幇浜哠engoo璇█鐨勭被鍨嬬郴缁燂紝鍖呮嫭娉涘瀷銆乼rait绾︽潫銆佺被鍨嬭浆鎹㈢瓑鏍稿績鍔熻兘銆?
+//! 缂侇偉顕ч悗宄拔涢埀顒勫蓟閵夈儲鐝ら悗鍦仧楠炲洭鏁嶅畝鍐槹閻犳劧绲介鐡礢T閺夆晜绋栭、鎴犵尵鐠囪尙鈧攱顨ュ畝鍐闁靛棔鐒︾敮褰掑棘椤撶偞瀚茬紒鎾呴檮濞碱偄螞閳ь剟寮婚妷锝傚亾?
+//! 閻庡湱鍋熼獮鍥ㄧ閸濈垁ngoo閻犲浂鍙€閳诲牓鎯冮崟顓☆潶闁搞劌顑囬柈瀵哥磼閻曞倻绀夐柛鏍ф噺鐎氼厼鈻斿☉妯尖偓鐑藉Υ娑旂磧ait缂佹拝闄勫顐﹀Υ娴ｉ缚顫﹂柛銊ヮ儓濞村棝骞戦姀銏㈡惣闁哄秶顭堢缓楣冨礉閻旇鍘撮柕?
 use crate::ast::pattern::Pattern;
 use crate::ast::Visibility;
 use crate::ast::*;
@@ -18,6 +18,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 type TyResult<T> = std::result::Result<T, TypeckError>;
 
 mod stmt_helpers;
+mod expr_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -44,15 +45,15 @@ struct GenericTypeMeta {
     params: Vec<GenericTypeParamMeta>,
 }
 
-/// 绫诲瀷妫€鏌ュ櫒锛岃礋璐ｅAST杩涜绫诲瀷楠岃瘉銆佹帹鏂拰绾︽潫妫€鏌ャ€?
+/// 缂侇偉顕ч悗宄拔涢埀顒勫蓟閵夈儲鐝ら柨娑樼焷缁€瀣嫻閿濆拋鍤燗ST閺夆晜绋栭、鎴犵尵鐠囪尙鈧攱顨ュ畝鍐闁靛棔鐒︾敮褰掑棘椤撶偞瀚茬紒鎾呴檮濞碱偄螞閳ь剟寮婚妷锝傚亾?
 pub struct TypeChecker {
-    /// 绫诲瀷鐜锛屽瓨鍌ㄥ彉閲忓拰绫诲瀷鐨勭粦瀹氬叧绯汇€?
+    /// 缂侇偉顕ч悗鐑芥偝椤栨凹鏆旈柨娑樿嫰閻°劑宕掗妸銉ョ秮闂佹彃绻愰幏鎵尵鐠囪尙鈧兘鎯冮崟顓犳嫧閻庤鑹鹃崣褏鍖栧Ч鍥ｅ亾?
     env: TypeEnv,
-    /// 绫诲瀷鎺ㄦ柇鍣紝鐢ㄤ簬绫诲瀷鍙橀噺鐨勬帹鏂拰缁熶竴銆?
+    /// 缂侇偉顕ч悗鐑藉箳閵婏附鐒介柛锝庣厜缁辨繈鎮介妸銈囪壘缂侇偉顕ч悗鐑藉矗濮椻偓閸ｆ椽鎯冮崟顒€鑵归柡鍌ゅ幖閹锋壆绱掗悢鍓侇伇闁?
     infer: TypeInfer,
-    /// Trait娉ㄥ唽琛紝瀛樺偍鎵€鏈夊凡澹版槑鐨則rait淇℃伅銆?
+    /// Trait婵炲鍔岄崬鐣屾偘椤帞绀夐悗娑櫭崑宥夊箥閳ь剟寮垫径濠傚殥濠㈠湱澧楀Σ鎴︽儍閸撳檺ait濞ｅ洠鍓濇导鍛村Υ?
     trait_registry: TraitRegistry,
-    /// Impl娉ㄥ唽琛紝瀛樺偍鎵€鏈塼rait瀹炵幇鐨勪俊鎭€?
+    /// Impl婵炲鍔岄崬鐣屾偘椤帞绀夐悗娑櫭崑宥夊箥閳ь剟寮垫繅绱僡it閻庡湱鍋熼獮鍥儍閸曨亙绻嗛柟顓у灛閳?
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     struct_type_params: HashMap<String, Vec<TypeParam>>,
@@ -86,7 +87,7 @@ impl TypeChecker {
         &self.async_functions
     }
 
-    /// 杩斿洖绫诲瀷鐜鐨勪笉鍙彉寮曠敤銆?
+    /// 閺夆晜鏌ㄥú鏍尵鐠囪尙鈧兘鎮抽姘兼殧闁汇劌瀚粭澶愬矗椤栨艾缍佺€殿喗娲滈弫銈夊Υ?
     pub fn env(&self) -> &TypeEnv {
         &self.env
     }
@@ -96,32 +97,32 @@ impl TypeChecker {
         self.env
     }
 
-    /// 杩斿洖绫诲瀷鎺ㄦ柇鍣ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
+    /// 閺夆晜鏌ㄥú鏍尵鐠囪尙鈧兘骞掗妸锔界劷闁革絻鍔庡▓鎴炵▔瀹ュ懎璁查柛娆惷槐鈺呮偨閵婏絺鍋?
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
     }
 
-    /// 杩斿洖trait娉ㄥ唽琛ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
+    /// 閺夆晜鏌ㄥú鏉ait婵炲鍔岄崬鐣屾偘閵娧勭暠濞戞挸绉磋ぐ鏌ュ矗濡櫣绌块柣顫妸閳?
     pub fn trait_registry(&self) -> &TraitRegistry {
         &self.trait_registry
     }
 
-    /// 杩斿洖impl娉ㄥ唽琛ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
+    /// 閺夆晜鏌ㄥú鏉媘pl婵炲鍔岄崬鐣屾偘閵娧勭暠濞戞挸绉磋ぐ鏌ュ矗濡櫣绌块柣顫妸閳?
     pub fn impl_registry(&self) -> &ImplRegistry {
         &self.impl_registry
     }
 
-    /// 杩斿洖trait娉ㄥ唽琛ㄧ殑鍙彉寮曠敤銆?
+    /// 閺夆晜鏌ㄥú鏉ait婵炲鍔岄崬鐣屾偘閵娧勭暠闁告瑯鍨拌ぐ澶婎嚕閺囩姵鏆忛柕?
     pub fn trait_registry_mut(&mut self) -> &mut TraitRegistry {
         &mut self.trait_registry
     }
 
-    /// 杩斿洖impl娉ㄥ唽琛ㄧ殑鍙彉寮曠敤銆?
+    /// 閺夆晜鏌ㄥú鏉媘pl婵炲鍔岄崬鐣屾偘閵娧勭暠闁告瑯鍨拌ぐ澶婎嚕閺囩姵鏆忛柕?
     pub fn impl_registry_mut(&mut self) -> &mut ImplRegistry {
         &mut self.impl_registry
     }
 
-    /// 瀵规暣涓▼搴忚繘琛岀被鍨嬫鏌ワ紝鍖呮嫭澹版槑棰勫鐞嗗拰鍏ㄩ噺妫€鏌ャ€?
+    /// 閻庝絻顫夐弳锝嗙▔椤忓棌鏌ら幖鏉戠箺缁绘鎮板畝鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劵缁辨繈宕犻崨顔碱仾濠㈠湱澧楀Σ鎴烇紣閸曨偒妲遍柣鐐叉閹蜂即宕楅妸鈺佹婵☆偀鍋撻柡灞诲劘閳?
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
@@ -158,7 +159,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 棰勫０鏄庨《灞傚０鏄庯紙鍑芥暟銆佺粨鏋勪綋銆佹灇涓剧瓑锛夛紝灏嗗叾绫诲瀷淇℃伅娉ㄥ唽鍒扮幆澧冧腑銆?
+    /// 濡澘瀚敍鎰板及鎼淬劊鈧﹦浠﹂崒姘剧矗闁哄嫬鍑界槐娆撳礄閼恒儲娈堕柕鍡曡兌缁劑寮搁崟顏嗙Ъ闁靛棔鐒﹂悘鍥ㄧ▔閸撗呮惣闁挎稑顧€缁辨繄浜搁崱妤€寰撶紒顐ヮ嚙閻庨攱绌遍埄鍐х礀婵炲鍔岄崬浠嬪礆閹殿喖绠氬褍鍟╅懙鎴﹀Υ?
     fn declare_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -183,7 +184,7 @@ impl TypeChecker {
                     return Ok(());
                 }
 
-                // 澶勭悊娉涘瀷鍑芥暟鍙傛暟绫诲瀷缁戝畾锛岃繘琛岀被鍨嬫鏌ャ€?
+                // 濠㈣泛瀚幃濠傗枖濞戞鈧兘宕欓懞銉︽闁告瑥鍊归弳鐔虹尵鐠囪尙鈧绱掗幋婵堟毎闁挎稑鐭佺换妯兼偘瀹€鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劘閳?
                 let mut param_types = Vec::new();
                 let mut fallback = false;
                 let mut generic_meta = Vec::new();
@@ -210,7 +211,7 @@ impl TypeChecker {
 
                 if fallback {
                     self.env.pop_scope();
-                    // 娉涘瀷鍙傛暟缁戝畾澶辫触鏃跺洖閫€澶勭悊銆?
+                    // 婵炲绋戦悗鐑藉矗閸屾稒娈剁紓浣瑰灥閻ｇ偓寰勬潏顐バ曢柡鍐硾濞叉牠鏌呴埀顒佸緞閸曨厽鍊為柕?
                     let unit = self.env.unit_ty();
                     let ty = self.env.fn_ty(vec![], unit.clone());
                     self.env.insert_fn(name.clone(), ty, vec![], unit);
@@ -383,7 +384,7 @@ impl TypeChecker {
         result.unwrap_or_default()
     }
 
-    /// 瀵瑰崟涓《灞傚０鏄庤繘琛岀被鍨嬫鏌ャ€?
+    /// 閻庣數鎳撳畷鐔哥▔椤忓牄鈧﹦浠﹂崒姘剧矗闁哄嫬姘︾换妯兼偘瀹€鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劘閳?
     fn check_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -861,7 +862,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵瑰嚱鏁板０鏄庤繘琛屽畬鏁寸殑绫诲瀷妫€鏌ワ紝鍖呮嫭鍙傛暟銆佽繑鍥炲€煎拰鍑芥暟浣撱€?
+    /// 閻庣數鎳撻崵閬嶅极閺夊尅绱ｉ柡鍕唉缁绘鎮扮仦鐣屾殮闁轰礁顕▓鎴犵尵鐠囪尙鈧嘲螞閳ь剟寮婚妷顖滅闁告牕鎳忕€氼參宕ｉ崒娑欐闁靛棔娴囩换鎴﹀炊閻愭祴鍋撻悡搴㈠闁告垼濮ら弳鐔告媴閹炬墎鍋?
     fn check_function_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
         let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
@@ -881,7 +882,7 @@ impl TypeChecker {
         self.validate_contracts_for_function(fn_decl, &ret_ty)?;
         self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
-        // 鍑芥暟绛惧悕涓殑鍙傛暟鍜岃繑鍥炲€肩被鍨嬫鏌ュ畬姣曪紝杩涜娉ㄥ唽銆?
+        // 闁告垼濮ら弳鐔虹驳閹勫€冲☉鎿冨幘濞堟垿宕ｉ崒娑欐闁告粌鐭佺换鎴﹀炊閻愭祴鍋撻懖鈺勵潶闁搞劌顑嗛ˉ鍛村蓟閵夈儳鏆氭慨锝嗘穿缁辨繃娼诲☉婊庢斀婵炲鍔岄崬浠嬪Υ?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env.insert_fn(
             fn_decl.name.name.clone(),
@@ -904,7 +905,7 @@ impl TypeChecker {
             self.check_block(&fn_decl.body)?
         };
 
-        // 妫€鏌ュ嚱鏁颁綋锛屽鐞嗛殣寮忚繑鍥炲€笺€?
+        // 婵☆偀鍋撻柡灞诲劚閸ら亶寮０浣虹Ъ闁挎稑鑻ˇ鈺呮偠閸℃稒顓虹€殿喖绻楃换鎴﹀炊閻愭祴鍋撶粭琛″亾?
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
             && matches!(ret_ty.kind, TyKind::Int(_));
@@ -917,7 +918,7 @@ impl TypeChecker {
 
         self.env.pop_scope();
 
-        // 娉涘瀷鍑芥暟娉ㄥ唽锛屽皢娉涘瀷鍏冧俊鎭瓨鍏ユ槧灏勮〃銆?
+        // 婵炲绋戦悗鐑藉礄閼恒儲娈舵繛澶堝妼閸炰粙鏁嶇仦鐣屾婵炲绋戦悗鐑藉礂閸愌傜箚闁诡収鍨伴悺銊╁礂閵夛附衼閻忓繐瀚妴鍐Υ?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
             .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
@@ -1047,7 +1048,7 @@ impl TypeChecker {
         Ok(metas)
     }
 
-    /// 瀵圭粨鏋勪綋澹版槑杩涜绫诲瀷妫€鏌ワ紝楠岃瘉瀛楁绫诲瀷鍜屾硾鍨嬬害鏉熴€?
+    /// 閻庨潧婀辩划銊╁几閸曨亞绉煎鍦濡叉垶娼诲☉婊庢斀缂侇偉顕ч悗宄拔涢埀顒勫蓟閵夘垳绀夊Δ鐘茬焷閻﹀鈧稒顨嗛宀€鐚剧拠鑼偓鐑藉椽鐏炲墽銆愰柛銊ヮ儑鐎规娊寮堕悢绮瑰亾?
     fn check_struct_decl(&mut self, struct_decl: &Struct) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&struct_decl.type_params)?;
@@ -1060,7 +1061,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵规灇涓惧０鏄庤繘琛岀被鍨嬫鏌ワ紝楠岃瘉鍚勬灇涓惧彉浣撶殑绫诲瀷銆?
+    /// 閻庝絻顫夐悘鍥ㄧ▔閹嶇矗闁哄嫬姘︾换妯兼偘瀹€鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劵缁辨繃顨ュ畝鍐闁告艾瀚悘鍥ㄧ▔閹冪秮濞达絾鎸惧▓鎴犵尵鐠囪尙鈧兘濡?
     fn check_enum_decl(&mut self, enum_decl: &Enum) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&enum_decl.type_params)?;
@@ -1080,7 +1081,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵圭被澹版槑杩涜绫诲瀷妫€鏌ワ紝鍖呮嫭缁ф壙鍏崇郴鍜屾柟娉曢獙璇併€?
+    /// 閻庨潧婀辩悮顐ｇ珶閻楀牊顫栭弶鈺傜椤㈡垹鐚剧拠鑼偓宄拔涢埀顒勫蓟閵夘垳绀夐柛鏍ф噺鐎氼厾绱掕婢规瑩宕楀畷鍥厙闁告粌鏈弻鐔封枖閺囥垻宕ｉ悹鍥﹂檷閳?
     fn check_class_decl(&mut self, class_decl: &Class) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&class_decl.type_params)?;
@@ -1147,7 +1148,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵瑰父閲忓０鏄庤繘琛岀被鍨嬫鏌ワ紝纭繚鍒濆鍊肩被鍨嬪尮閰嶃€?
+    /// 閻庣數鎳撻悥鍫曟煂韫囨搫绱ｉ柡鍕唉缁绘鎮板畝鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劵缁辨繄娑甸鑽ょ闁告帗绻傞～鎰板磹閼测晞顫﹂柛銊ヮ儏鐏忣噣鏌婂鍐ｅ亾?
     fn check_const_decl(&mut self, const_decl: &Const) -> Result<()> {
         let ty = self.check_type(&const_decl.ty)?;
         let value_ty = self.check_expr(&const_decl.value)?;
@@ -1157,7 +1158,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵归潤鎬佸彉閲忓０鏄庤繘琛岀被鍨嬫鏌ワ紝纭繚鍒濆鍊肩被鍨嬪尮閰嶃€?
+    /// 閻庨潧缍婂銈夊箑娴ｇ缍侀梺鎻掔箰閿涙劙寮版惔銈囩閻炴稑鐬肩悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劵缁辨繄娑甸鑽ょ闁告帗绻傞～鎰板磹閼测晞顫﹂柛銊ヮ儏鐏忣噣鏌婂鍐ｅ亾?
     fn check_static_decl(&mut self, static_decl: &Static) -> Result<()> {
         let ty = self.check_type(&static_decl.ty)?;
         // Static.value is always present
@@ -1168,7 +1169,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵箃rait澹版槑杩涜绫诲瀷妫€鏌ワ紝楠岃瘉鏂规硶绛惧悕鍜屽叧鑱旂被鍨嬨€?
+    /// 閻庣數鐣爎ait濠㈠湱澧楀Σ鎴炴交濞戞粠鏀界紒顐ヮ嚙閻庡嘲螞閳ь剟寮婚妷顖滅濡ょ姴鐭侀惁澶愬棘鐟欏嫮銆婄紒娑欏劤閹洟宕仦钘夊綘闁艰鲸姊荤悮顐﹀垂鐎ｃ劉鍋?
     fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         use crate::typeck::r#trait::{MethodSig, TraitInfo};
 
@@ -1185,13 +1186,13 @@ impl TypeChecker {
             matches!(trait_decl.vis, Visibility::Public),
         );
 
-        // 妫€鏌rait涓悇涓柟娉曠殑绛惧悕鍜屽疄鐜般€?
+        // 婵☆偀鍋撻柡宀婃rait濞戞搩鍘奸幃鍥ㄧ▔椤忓懏鐓欐繛澶嬫礈濞堟垹绮甸幆褎鍊抽柛婊冭嫰閻ゅ嫰鎮抽懜顑藉亾?
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
                     self.env.push_scope();
                     let method_generic_meta = self.bind_type_params_with_meta(&method.type_params)?;
-                    // 缁戝畾鏂规硶绾у埆鐨勬硾鍨嬬被鍨嬪弬鏁般€?
+                    // 缂備焦鍨甸悾楣冨棘鐟欏嫮銆婄紒鐙欏啫鐒奸柣銊ュ绾箖宕圭€ｎ剝顫﹂柛銊ヮ儏瀵剟寮懜顑藉亾?
                     let mut param_types = Vec::new();
                     let mut has_self = false;
 
@@ -1204,7 +1205,7 @@ impl TypeChecker {
                         }
                     }
 
-                    // 妫€鏌ユ柟娉曠殑杩斿洖绫诲瀷銆?
+                    // 婵☆偀鍋撻柡灞诲劜閺岀喎鈻旈弴鐘崇暠閺夆晜鏌ㄥú鏍尵鐠囪尙鈧兘濡?
                     let ret_ty = if let Some(ret) = &method.return_type {
                         self.check_type(ret)?
                     } else {
@@ -1247,7 +1248,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 瀵筰mpl鍧楄繘琛岀被鍨嬫鏌ワ紝楠岃瘉瀹炵幇鏄惁绗﹀悎trait绾︽潫銆?
+    /// 閻庣數顒﹎pl闁秆勵殙缁绘鎮板畝鈧悮顐﹀垂鐎ｎ偒姊鹃柡灞诲劵缁辨繃顨ュ畝鍐閻庡湱鍋熼獮鍥及椤栨碍鍎婄紒妤嬬畱閹窐rait缂佹拝闄勫顐﹀Υ?
     fn check_impl_decl(&mut self, impl_decl: &Impl) -> Result<()> {
         use crate::typeck::r#trait::type_key;
         use crate::typeck::r#trait::{FunctionTy, ImplInfo};
@@ -1266,7 +1267,7 @@ impl TypeChecker {
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name);
 
-        // 妫€鏌mpl鍧椾腑鍚勪釜鏂规硶鐨勫疄鐜般€?
+        // 婵☆偀鍋撻柡宀婃珯mpl闁秆勩仦閼垫垿宕ラ崟顏堝殝闁哄倽顫夌涵鍫曟儍閸曨偆鏉介柣婊嗗焽閳?
         for item in &impl_decl.items {
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
@@ -1297,7 +1298,7 @@ impl TypeChecker {
             self.env.pop_scope();
         }
 
-        // 楠岃瘉impl鏄惁婊¤冻trait鐨勭害鏉熻姹傘€?
+        // 濡ょ姴鐭侀惁濉眒pl闁哄嫷鍨伴幆浣割煥闄囬崘绫簉ait闁汇劌瀚€规娊寮堕悢娲绘矗婵懓鍊堕埀?
         if let Some(trait_name) = impl_info.trait_name.clone() {
             // For trait impls, also register default methods from the trait
             // definition that are not overridden by the impl.
@@ -1309,7 +1310,7 @@ impl TypeChecker {
                     if !impl_info.has_method(method_name) {
                         if method_sig.has_default {
                             // This method has a default implementation in the trait
-                            // 璇ユ柟娉曟湁榛樿瀹炵幇锛屾坊鍔犲埌impl淇℃伅涓€?
+                            // 閻犲洢鍎查弻鐔封枖閺囩喐绠掑娑欘焾椤撹崵鈧湱鍋熼獮鍥晬鐏炴儳娼戦柛鏃傚Т閸╁mpl濞ｅ洠鍓濇导鍛▔椤撴壕鍋?
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
@@ -1349,7 +1350,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 灏嗚矾寰勶紙Path锛夎В鏋愪负瀛楃涓插悕绉般€?
+    /// 閻忓繐妫滈惌鎯ь嚗閸曞墎绀凱ath闁挎稑顦宠闁哄鍔掔拹鐔衡偓娑欘殘椤戜焦绋夐幓鎺撳€崇紒澶庡焽閳?
     fn path_name(&self, path: &Path) -> TyResult<String> {
         path.as_simple()
             .map(|ident| ident.name.clone())
@@ -1662,7 +1663,7 @@ impl TypeChecker {
         Err(TypeckError::UndefinedType { name })
     }
 
-    /// 灏咥ST绫诲瀷鑺傜偣杞崲涓哄唴閮ㄧ被鍨嬭〃绀猴紙Ty锛夈€?
+    /// 閻忓繐鎸淪T缂侇偉顕ч悗鐑芥嚍閸屾粌浠弶鐑嗗墯瀹曞弶绋夐崫鍕暥闂侇喓鍔庣悮顐﹀垂鐎ｎ厹鈧啰绮堥悮瀵哥Ty闁挎稑顦埀?
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
             TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
@@ -1987,264 +1988,6 @@ impl TypeChecker {
             }
             TyKind::Adt { args, .. } => args.iter().any(Self::ty_contains_future_escape),
             _ => false,
-        }
-    }
-
-    /// 妫€鏌ュ瓧闈㈤噺琛ㄨ揪寮忓苟杩斿洖鍏剁被鍨嬨€?
-    fn check_literal(&mut self, lit: &Literal) -> TyResult<Ty> {
-        Ok(match lit {
-            // 妫€鏌ユ暣鏁板瓧闈㈤噺锛岃繑鍥炲搴旂殑鏁存暟绫诲瀷銆?
-            Literal::Int(_) => self.env.int_ty(IntKind::I64),
-            Literal::Float(_) => self.env.float_ty(FloatKind::F64),
-            Literal::String(_) => {
-                let str_ty = self.env.str_ty();
-                self.env.ref_ty(false, str_ty)
-            }
-            Literal::Char(_) => self.env.new_ty(TyKind::Char),
-            Literal::Bytes(_) => self.env.new_ty(TyKind::Bytes),
-            Literal::Bool(_) => self.env.bool_ty(),
-            Literal::Null => self.env.new_ty(TyKind::Adt {
-                name: "Option".to_string(),
-                args: vec![],
-            }),
-            Literal::Unit => self.env.unit_ty(),
-        })
-    }
-
-    /// 妫€鏌ユ爣璇嗙琛ㄨ揪寮忥紝鏌ユ壘鍙橀噺鎴栧嚱鏁扮殑绫诲瀷銆?
-    fn check_ident(&mut self, ident: &Ident) -> TyResult<Ty> {
-        let symbol = if let Some(symbol) = self.env.lookup(&ident.name) {
-            symbol.clone()
-        } else {
-            return Err(TypeckError::UndefinedVariable {
-                name: ident.name.clone(),
-            });
-        };
-
-        match &symbol.kind {
-            SymbolKind::Function { ty, .. } => {
-                Ok(self.infer.instantiate_with_fresh_vars(ty.clone()))
-            }
-            _ => {
-                if let Some(ty) = symbol.get_ty() {
-                    Ok(self.infer.instantiate(ty.clone()))
-                } else {
-                    Err(TypeckError::UndefinedVariable {
-                        name: ident.name.clone(),
-                    })
-                }
-            }
-        }
-    }
-
-    /// 妫€鏌ヨ矾寰勮〃杈惧紡锛岃В鏋愬懡鍚嶇┖闂磋矾寰勭殑绫诲瀷銆?
-    fn check_path(&mut self, path: &Path) -> TyResult<Ty> {
-        if let Some(ident) = path.as_simple() {
-            self.check_ident(ident)
-        } else {
-            Err(TypeckError::UndefinedVariable {
-                name: path
-                    .segments
-                    .iter()
-                    .map(|seg| seg.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join("::"),
-            })
-        }
-    }
-
-    /// 妫€鏌ヤ簩鍏冭繍绠楄〃杈惧紡锛岄獙璇佹搷浣滄暟绫诲瀷鍏煎鎬у苟杩斿洖缁撴灉绫诲瀷銆?
-    fn check_binary(&mut self, op: &BinOp, left: &Expr, right: &Expr) -> TyResult<Ty> {
-        let left_ty = self.check_expr(left)?;
-        let right_ty = self.check_expr(right)?;
-
-        // Mixed-width arithmetic is currently only guaranteed for signed integers.
-        // MIR erases integer signedness, so keep the accepted surface aligned with
-        // what lowering/codegen can preserve correctly today.
-        let types_compatible = match (&left_ty.kind, &right_ty.kind) {
-            // Same types are always compatible
-            _ if left_ty.kind == right_ty.kind => true,
-            // Different signed integer widths are compatible for arithmetic/bitwise ops.
-            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
-                matches!(
-                    op,
-                    BinOp::Add
-                        | BinOp::Sub
-                        | BinOp::Mul
-                        | BinOp::Div
-                        | BinOp::Mod
-                        | BinOp::BitAnd
-                        | BinOp::BitOr
-                        | BinOp::BitXor
-                        | BinOp::Shl
-                        | BinOp::Shr
-                        | BinOp::Eq
-                        | BinOp::NotEq
-                        | BinOp::Lt
-                        | BinOp::Le
-                        | BinOp::Gt
-                        | BinOp::Ge
-                )
-            }
-            // Different float widths are compatible for arithmetic ops
-            (TyKind::Float(_), TyKind::Float(_)) => matches!(
-                op,
-                BinOp::Add
-                    | BinOp::Sub
-                    | BinOp::Mul
-                    | BinOp::Div
-                    | BinOp::Mod
-                    | BinOp::Eq
-                    | BinOp::NotEq
-                    | BinOp::Lt
-                    | BinOp::Le
-                    | BinOp::Gt
-                    | BinOp::Ge
-            ),
-            _ => false,
-        };
-
-        if !types_compatible {
-            self.infer
-                .unify(&left_ty, &right_ty)
-                .map_err(|_| TypeckError::TypeMismatch {
-                    expected: right_ty.kind.clone(),
-                    found: left_ty.kind.clone(),
-                })?;
-        }
-
-        // For mixed-width operations, return the wider type within the supported surface.
-        let result_ty = match (&left_ty.kind, &right_ty.kind) {
-            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
-                let wider = if a.bits() >= b.bits() { *a } else { *b };
-                self.env.int_ty(wider)
-            }
-            (TyKind::Float(a), TyKind::Float(b)) if a != b => {
-                // F64 is wider than F32
-                use crate::typeck::ty::FloatKind;
-                let wider = match (a, b) {
-                    (FloatKind::F64, _) | (_, FloatKind::F64) => FloatKind::F64,
-                    _ => FloatKind::F32,
-                };
-                self.env.float_ty(wider)
-            }
-            _ => left_ty.clone(),
-        };
-
-        Ok(match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => result_ty,
-            BinOp::And | BinOp::Or => self.env.bool_ty(),
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => result_ty,
-            BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                self.env.bool_ty()
-            }
-            BinOp::Pipe | BinOp::Compose | BinOp::Range | BinOp::RangeInclusive => result_ty,
-        })
-    }
-
-    /// 妫€鏌ヤ竴鍏冭繍绠楄〃杈惧紡锛岄獙璇佹搷浣滄暟绫诲瀷骞惰繑鍥炵粨鏋滅被鍨嬨€?
-    fn check_unary(&mut self, op: &UnOp, operand: &Expr) -> TyResult<Ty> {
-        let ty = self.check_expr(operand)?;
-        Ok(match op {
-            UnOp::Neg | UnOp::Not | UnOp::Plus | UnOp::BitNot => ty.clone(),
-            UnOp::Deref => {
-                if let Some(inner) = ty.ref_inner() {
-                    inner.clone()
-                } else {
-                    return Err(TypeckError::TypeMismatch {
-                        expected: TyKind::Ref(false, Box::new(self.env.error_ty())),
-                        found: ty.kind.clone(),
-                    });
-                }
-            }
-            UnOp::Ref => self.env.ref_ty(false, ty),
-            UnOp::RefMut | UnOp::DerefMut => self.env.ref_ty(true, ty),
-        })
-    }
-
-    /// 妫€鏌ヨ祴鍊艰〃杈惧紡锛岄獙璇佺洰鏍囧拰鍊肩殑绫诲瀷鍏煎鎬с€?
-    fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
-        let target_ty = self.check_expr(target)?;
-        let value_ty = self.check_expr(value)?;
-        self.infer.unify(&target_ty, &value_ty)?;
-        Ok(self.env.unit_ty())
-    }
-
-    /// 妫€鏌ュ鍚堣祴鍊艰〃杈惧紡锛堝 +=銆?= 绛夛級锛岄獙璇佺被鍨嬪吋瀹规€с€?
-    fn check_assign_op(&mut self, _op: &AssignOp, target: &Expr, value: &Expr) -> TyResult<Ty> {
-        let target_ty = self.check_expr(target)?;
-        let value_ty = self.check_expr(value)?;
-        self.infer.unify(&target_ty, &value_ty)?;
-        Ok(self.env.unit_ty())
-    }
-
-    /// 妫€鏌ョ储寮曡〃杈惧紡锛岄獙璇佸熀纭€瀵硅薄鍙绱㈠紩涓旂储寮曠被鍨嬫纭€?
-    fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
-        let base_ty = self.check_expr(base)?;
-        let index_ty = self.check_expr(index)?;
-
-        if !index_ty.is_int() {
-            return Err(TypeckError::TypeMismatch {
-                expected: TyKind::Int(IntKind::ISize),
-                found: index_ty.kind.clone(),
-            });
-        }
-
-        Ok(match &base_ty.kind {
-            TyKind::Array(elem, _) => (**elem).clone(),
-            TyKind::Slice(elem) => (**elem).clone(),
-            TyKind::Tuple(types) if !types.is_empty() => types[0].clone(),
-            _ => self.env.error_ty(),
-        })
-    }
-
-    /// 妫€鏌ュ瓧娈佃闂〃杈惧紡锛岄獙璇佸瓧娈靛瓨鍦ㄦ€у拰绫诲瀷銆?
-    fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
-        let base_ty = self.check_expr(base)?;
-
-        match &base_ty.kind {
-            TyKind::Adt {
-                name: type_name, args
-            } => {
-                let field_defs =
-                    self.struct_field_defs
-                        .get(type_name)
-                        .cloned()
-                        .ok_or_else(|| TypeckError::FieldNotFound {
-                            type_name: type_name.clone(),
-                            field_name: name.name.clone(),
-                        })?;
-
-                let field_ty = field_defs
-                    .into_iter()
-                    .find(|(field_name, _)| field_name == &name.name)
-                    .map(|(_, field_ty)| field_ty)
-                    .ok_or_else(|| TypeckError::FieldNotFound {
-                        type_name: type_name.clone(),
-                        field_name: name.name.clone(),
-                    })?;
-
-                if let Some(type_params) = self.struct_type_params.get(type_name).cloned() {
-                    if !type_params.is_empty() && type_params.len() == args.len() {
-                        self.env.push_scope();
-                        for (type_param, concrete_ty) in type_params.iter().zip(args.iter()) {
-                            self.env
-                                .insert_type(type_param.name.name.clone(), concrete_ty.clone());
-                        }
-                        let resolved = self.check_type(&field_ty);
-                        self.env.pop_scope();
-                        resolved
-                    } else {
-                        self.check_type(&field_ty)
-                    }
-                } else {
-                    self.check_type(&field_ty)
-                }
-            }
-            _ => Err(TypeckError::FieldNotFound {
-                type_name: base_ty.kind.to_string(),
-                field_name: name.name.clone(),
-            }),
         }
     }
 
@@ -2662,7 +2405,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 妫€鏌ユ柟娉曡皟鐢ㄨ〃杈惧紡锛岃繘琛屾柟娉曡В鏋愬拰鍙傛暟绫诲瀷妫€鏌ャ€?
+    /// 婵☆偀鍋撻柡灞诲劜閺岀喎鈻旈弴锛勬闁活潿鍔忛妴鍐╂綇閹呯闁挎稑鐭佺换妯兼偘鐏炵偓鐓欐繛澶嬫礉琚欓柡瀣姇閹蜂即宕ｉ崒娑欐缂侇偉顕ч悗宄拔涢埀顒勫蓟閵夛絺鍋?
     fn check_method_call(
         &mut self,
         receiver: &Expr,
@@ -2768,62 +2511,6 @@ impl TypeChecker {
                 ambiguous_method_error(method_name, receiver_key, &labels),
             )),
         }
-    }
-
-    fn check_tuple(&mut self, elems: &[Expr]) -> TyResult<Ty> {
-        let elem_types = elems
-            .iter()
-            .map(|e| self.check_expr(e))
-            .collect::<TyResult<Vec<_>>>()?;
-        if elem_types.iter().any(|ty| self.contains_future_escape_ty(ty)) {
-            return Err(Self::future_escape_error());
-        }
-        Ok(self.env.tuple_ty(elem_types))
-    }
-
-    /// 妫€鏌ユ暟缁勮〃杈惧紡锛岄獙璇佹墍鏈夊厓绱犵被鍨嬩竴鑷淬€?
-    fn check_array(&mut self, elems: &[Expr]) -> TyResult<Ty> {
-        if elems.is_empty() {
-            return Ok(self.env.array_ty(self.infer.fresh_ty_var(), 0));
-        }
-
-        let first_ty = self.check_expr(&elems[0])?;
-        if self.contains_future_escape_ty(&first_ty) {
-            return Err(Self::future_escape_error());
-        }
-        for elem in &elems[1..] {
-            let ty = self.check_expr(elem)?;
-            if self.contains_future_escape_ty(&ty) {
-                return Err(Self::future_escape_error());
-            }
-            self.infer.unify(&first_ty, &ty)?;
-        }
-
-        Ok(self.env.array_ty(first_ty, elems.len()))
-    }
-
-    /// Lambda琛ㄨ揪寮忕被鍨嬫鏌ワ紝鎺ㄦ柇鍙傛暟绫诲瀷鍜岃繑鍥炵被鍨嬨€?
-    /// Lambda琛ㄨ揪寮忕被鍨嬫鏌ワ紝鎺ㄦ柇鍙傛暟绫诲瀷鍜岃繑鍥炵被鍨嬨€?
-    fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
-        // 涓烘瘡涓猯ambda鍙傛暟鍒涘缓鏂扮殑绫诲瀷鍙橀噺銆?
-        let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
-
-        // 鎺ㄦ柇鍙傛暟绫诲瀷绾︽潫銆?
-        self.env.push_scope();
-
-        // 灏嗗弬鏁扮粦瀹氬埌浣滅敤鍩熶腑銆?
-        for (param, ty) in params.iter().zip(param_tys.iter()) {
-            self.env.insert_var(param.name.clone(), ty.clone());
-        }
-
-        // 妫€鏌ambda浣撶殑绫诲瀷銆?
-        let body_ty = self.check_expr(body)?;
-
-        // 娓呯悊浣滅敤鍩熴€?
-        self.env.pop_scope();
-
-        // 杩斿洖鍑芥暟绫诲瀷銆?
-        Ok(self.env.fn_ty(param_tys, body_ty))
     }
 
 }
