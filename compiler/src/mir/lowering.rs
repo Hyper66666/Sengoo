@@ -68,6 +68,7 @@ mod method_call_helpers;
 mod method_expr_helpers;
 mod method_builtin_helpers;
 mod block_async_expr_helpers;
+mod body_lowering_helpers;
 use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr};
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
@@ -1201,13 +1202,6 @@ fn set_terminator(&mut self, term: Terminator) {
                 self.set_terminator(Terminator::Return(None));
             }
         }
-    }
-
-    /// 将HIR函数体降级为新基本块并返回块索引。
-    fn lower_body(&mut self, body: &HIRBody) -> usize {
-        let entry_block = self.new_block();
-        self.lower_body_to_block(body, entry_block);
-        entry_block
     }
 
     /// 将单条HIR语句降级为MIR指令序列。
