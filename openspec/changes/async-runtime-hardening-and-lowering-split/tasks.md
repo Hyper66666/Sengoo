@@ -7,4 +7,4 @@
 - [x] Add regression coverage for wrapper escapes, dispatch IDs, and frame access
 - [x] Remove `lowering.rs current_block.expect(...)` from user-triggerable path
 - [x] Align `runtime.c sengoo_async_frame_free(...)` with the async frame debug/release contract
-- [ ] First-cut split of `lowering.rs` for builtin/planning-heavy logic
+- [x] First-cut split of `lowering.rs` for builtin/planning-heavy logic
