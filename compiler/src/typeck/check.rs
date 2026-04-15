@@ -1,5 +1,5 @@
-//! 缂傚倸鍊搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倐鍋撻柣锝忕節楠炲繘寮埀顒勬儎椤栫偛鏄ラ柍褜鍓氶妵鍕箳閹存繍浠奸梺钘夊暟閸犳牠寮婚弴鐔风窞闁割偅绻傛慨鏇㈡⒑缂佹缂氶柛濠冪箞楠炲啫螖閸涱厽宓嶅銈嗘尵閸嬫﹢骞嬪畡鎷旀棃鎮╅棃娑楃捕濠电偛妯婇崣鍐嚕椤愩埄鍚嬮柛娑卞灡濞堟洟姊洪崨濠傚Е濞存粏娉涘嵄鐟滅増甯楅悡鐔兼煟濡搫鏆卞┑顔ㄥ懐纾奸棅顐幘閻瑦銇勯姀鈥冲摵闁诡喛娅ｇ划鍫ャ€佸ú顏呪拺闁告繂瀚峰Σ鎾煛閸涱喚鐭岀紒顔界懇瀵粙顢樺┃鎯т壕濞撴埃鍋撴鐐差儔閹晠妫冨☉娆愵唫闂備浇宕垫慨鏉懨洪埡鍐х剨婵炲棙鎸搁悞鍨亜閹烘垵顏柡浣介哺閵囧嫰濡搁敐鍛闂佷紮绲剧换鍫濈暦濮椻偓椤㈡棃宕担鍦Ь闂傚倸鍊风欢姘焽瑜嶈灋闁哄啫鐗婇崐鍧楁煥閺冨倸浜鹃柡鍡樼矌閹叉悂鎮ч崼婵堢懆濠碘槅鍋呰摫闁靛洤瀚伴獮妯兼崉鏉炵増鍕冮梺璇插娣囪櫣浜稿▎鎴烆潟闁圭儤顨呯粻濠氭煕濞戞鎽犳い搴＄Т閳规垿鎮欑喊妯诲珱闂佺顑呯€氼垶鎮樼€ｎ喗鈷戦梺顐ゅ仜閼活垱鏅剁€电硶鍋撳▓鍨灈妞ゎ參鏀辨穱濠囨倻閼恒儲娅滈梺绋挎湰閻喗绔?
-//! 闂傚倷娴囬褎顨ョ粙鍖¤€块梺顒€绉寸壕濠氭煟閺冨洤浜圭€规挷绶氶弻娑㈠Ψ閿濆懎顬嬪銈傛櫆閻擄繝寮诲☉妯锋斀闁割偅绻勯埀顒傛儮goo闂傚倷娴囧畷鍨叏閺夋嚚褰掑磼閻愯尙鐓戦梺閫炲苯澧撮柡灞界Ф閹风娀鎳犻鈧埅鐢告⒑鐠団€崇仩闁哥喐娼欓悾鐑芥偄绾拌鲸鏅ｉ梺瀹犳濡瑩鎷烘径鎰拻濞达綀顫夐崑鐘绘煕閺傝法鐒告い銏＄墵瀹曞爼顢楁担鍝勫Ъ闂佽閰ｅ褔骞楀鍛棜濠靛倸鎲￠悡鐔兼煛閸モ晛浠滈柍褜鍓濆畷鐢靛垝閸喎绶為柟閭﹀幘閸橀亶姊洪崫鍕檨闁告洦鍋呴锟犳⒑鐠囨彃顒㈤柛鎴濈秺瀹曘垺绺界粙璺ㄥ幒闂佸搫鍊哥花鍗炍ｉ崼鐔剁箚妞ゆ牗姘ㄥВ鐐烘煕鐎ｎ偅宕岄柟顔界矒閹稿﹥绔熼埞鍨姎闁宠棄顦靛顕€宕掑鎰ait缂傚倸鍊搁崐鐑芥倿閿曞倸绠繝闈涱儐閳锋棃鏌涢弴銊ヤ航闁绘帟濮ら妵鍕箛閸撲胶鏆犻弶鈺傜箖缁绘稒娼忛崜褏袦缂傚倸鍊瑰畝鎼佹晲閻愮儤鏅濋柛灞剧〒閸橀亶姊洪棃娑辩劸闁稿孩妞藉畷鏇㈠箻鐎靛摜顔曢梺鍝勵槹閸ㄥ爼藟閵忊槅娈介柣鎰綑閻忔潙鈹戦鐟颁壕闂備線娼х换鍫ュ垂濞差亜绠氶柨婵嗩槹閳锋垿鏌涘┑鍡楊伀閼叉牕顪冮妶搴″箹闁绘绻掔槐鎾诲箻濞ｎ剙浜濋梺鍛婂姂閸斿酣藝椤曗偓濮婅櫣绱掑Ο娲绘⒖濡炪倖娉﹂崶褍鍋嶉梺鍦檸閸犳鎮?
+//! 缂傚倸鍊搁崐鎼佸磹妞嬪孩顐介柨鐔哄Т绾捐顭块懜闈涘Е闁轰礁顑囬幉鎼佸籍閸繄鐣哄┑掳鍊愰崑鎾绘煟閿濆繒绡€妤犵偛绻樺顕€鍩€椤掑嫭鍎庢い鏍仜閺勩儵鏌嶈閸撴岸濡甸崟顖氱闁瑰瓨绻嶆禒濂告⒑閽樺鏆熼柛鐘崇墵瀵寮撮悢椋庣獮闂佸壊鍋呯换鍌涙叏閺囥垺鈷戠紓浣诡焽缂傛岸鏌涙繝鍐疄妤犵偛鍟灃闁告侗鍘藉畵宥咁渻閵堝棙灏甸柛瀣耿楠炲鐣￠幏鏃€妫冮幃鈺呮濞戞鎹曟繝鐢靛仜濡﹪宕ｉ崘顭戝殨妞ゆ劑鍩勯崥瀣煕濞戝崬鐏℃繛鍫熸礋濮婃椽宕ㄦ繝鍌毿曟繛瀛樼矎濞夋稑宓勯悷婊呭鐢鎮￠悢鍏肩厽婵☆垰鎼弳鍗炩攽椤斻劌鎳愮壕濂告椤愵偄骞橀柣顓熺懄閵囧嫰濮€閳ュ啿鎽甸梺璇″枦濞咃絿鍒掗崼銉ｂ偓浣该洪鍛嫼闂佸憡绻傜€氬嘲危閹绢喗鐓涢柛娑卞枤閻瞼绱掗鐣屾噰鐎殿喕绮欓、妯衡攦閹傚婵炴挻鍩冮崑鎾搭殽閻愬樊鍎旈柟顔规櫊濡啫鈽夊▎鎰靛敨闂傚倷娴囧畷鍨叏閺夋嚚娲煛閸愌呭墾濠电偛妫欓幐鎼佹倿閸偁浜滈柟鐑樺灥椤忣亪鏌℃担浠嬪摵闁靛洤瀚版俊鎼佹晲閸涱厼顫撻梻浣风串缁插墽鎹㈤崼婵堟殾婵せ鍋撴い銏℃瀹曨亝鎷呴崷顓犘梻鍌氬€搁崐椋庢濮橆剦鐒界憸宥堢亱闂佸搫鍟悧濠囧磹閸ф鐓ラ柡鍐ㄥ€告禍楣冩煛閸℃鐭岄柟鍙夋倐閹囧醇濠靛牏鎳嗘繝纰樻閸嬪懓鎽梺闈涙搐鐎氫即鐛Ο鍏煎磯閺夌偟澧楅崟鍐⒑鐠囨彃顒㈠ǎ鍥娴滅鈻庨幋鐑嗘綗闂佸湱鍎ら〃鍛不婵犳碍鐓曟繛鎴烆焽閹界姵銇勬惔锛勑㈤柍瑙勫灴閹瑧鍠婂Ο璇茬彵闂備胶顭堥鍛偓姘煎灦閹鈧綆鍠楅埛鎴︽⒑椤愩倕浠滈柤娲诲灡閺呭墎鈧數纭堕崑鎾斥枔閸喗鐏堝銈庡弮閺€杈ㄧ┍婵犲洦鍊婚柤鎭掑劜濞呮粓姊虹粙鎸庢拱闁活収鍠楃粩?
+//! 闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曟繝姘厽闁哄啫娲ゆ禍鍦偓瑙勬尫缁舵岸寮诲☉銏犖ㄩ柨婵嗘噹椤顪冮妶鍌涙珕闁绘搫绻濆璇测槈濡攱鏂€闂佸壊鍋呯换鍕焵椤掑倹鍎甮oo闂傚倸鍊峰ù鍥х暦閸偅鍙忛柡澶嬪殮瑜版帒纾奸柣鎰皺閻撴垿姊洪柅鐐茶嫰婢ф挳鏌＄仦鐣屝ら柟椋庡█閹崇娀顢楅埀顒勫焻閻㈠憡鈷戦悹鍥ｂ偓宕囦哗闂佸摜鍠愬娆撴偩閻戣姤鍋勭痪鎷岄哺閺咃綁姊虹€圭姵顥夋俊顐ｇ懇閹风儤寰勯幇顓涙嫽婵炶揪缍€椤宕戦悩缁樼厱闁哄倽娉曢悞鍛娿亜閵忥紕澧电€规洖鐖奸、妤佹媴閸濆嫬歇闂備浇顕ч柊锝咁焽瑜旈獮妤€顭ㄩ崨顓ф婵犻潧鍊搁幉锟犳偂閻斿吋鐓涢柛銉㈡櫅娴犳粓鏌嶈閸撴繂鐣烽悽闈涘灊闁割偆鍠庣欢鐐烘煙闁箑骞橀柛姗€浜跺娲传閸曨喚妾ㄩ梺鍛婃处閸嬪懘顢旈敓鐘斥拺閻犲洦褰冮銏ゆ煕閹存繄绉虹€规洏鍨虹缓鐣岀矙鐠恒劌骞掗梻浣告惈閸婂摜鑺遍崡鐐嶏綁宕奸悢鍓佺畾濡炪倖鐗楀銊バ掗悙鐑樼厱閻庯綆鍋呭畷宀勬煙椤旂晫鐭掗柟绋匡攻缁旂喖鍩為崹顔煎闂佸疇妫勯ˇ闈涱嚕椤曗偓瀹曟帒顭ㄩ幇顔绢槰ait缂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇炲€哥粻顖涚節闂堟侗鍎愰柍閿嬫閺屾盯寮撮妸銉よ埅闂佺粯甯熸慨銈夊Φ閸曨垰绠涢柛鎾茶兌閺嗙娀寮堕埡鍌滅畺缂佺粯绋掑蹇涘礈瑜忚ⅵ缂傚倸鍊搁崐鐟扮暆閹间焦鏅查柣鎰劋閺呮繈鏌涚仦鍓с€掗柛姗€浜跺娲濞戣京鍔搁梺绋垮濡炶棄鐣烽弴銏犵閻庨潧鎽滈鏇㈡⒑閸濆嫷妲归柛銊ョ埣钘熼柕蹇婃濞堜粙鏌ｉ幇顓熺稇闁诲繑娼欓埞鎴︻敊閻熼澹曢梻鍌欑窔濞佳呮崲閸儱鍨傛繛宸簻缁犳岸鏌ㄥ┑鍡╂Ч闁抽攱鍨块弻娑樷攽閸℃浼€闁煎弶鐗曢—鍐Χ鎼粹€崇闂佺粯顨呯换鎺旀閹捐绠绘繛锝庡墮娴滄繈姊洪崨濠傚闁告柨閰ｈ棟妞ゆ洍鍋撴慨濠呮缁辨帒螣濞茬粯鈷栨俊鐐€栧▔锕傚炊瑜嶉崑宥夋⒑閸︻叀妾搁柛鐘愁殜閹?
 use crate::ast::pattern::Pattern;
 use crate::ast::Visibility;
 use crate::ast::*;
@@ -21,6 +21,7 @@ mod stmt_helpers;
 mod expr_helpers;
 mod decl_helpers;
 mod trait_impl_helpers;
+mod call_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -47,15 +48,15 @@ struct GenericTypeMeta {
     params: Vec<GenericTypeParamMeta>,
 }
 
-/// 缂傚倸鍊搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倐鍋撻柣锝忕節楠炲繘寮埀顒勬儎椤栫偛鏄ラ柍褜鍓氶妵鍕箳閹存繍浠奸梺钘夊暟閸犳牠寮婚弴鐔风窞闁割偅绻傛慨鏇㈡⒑缂佹缂氶柛濠冪箞瀵濡搁妷銏☆潔濠碘槅鍨甸崑鎰板礉椤斿墽纾藉ù锝嗗絻娴滈箖鏌ｆ惔顖滅У闁告挻姘ㄩ埀顒佽壘椤兘寮婚妸銉㈡斀闁糕剝锚椤庢盯姊洪幖鐐测偓妤呭吹閸戠ǖ闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傛噽閻瑩鏌″搴″箲闁逞屽厸缁舵岸鐛€ｎ喗鍋愰梻鍫熺⊕濞堫偊姊洪懡銈呅㈡繛娴嬫櫇娴滅鈻庨幘宕囧姦濡炪倖甯掔€氼參寮潏銊ｄ簻闁靛绲介崝姘舵煟閿濆棛绠炵€规洘锕㈤、鏃堝椽娴ｅ湱绉鹃梻鍌氬€风欢姘焽瑜嶈灋闁哄啫鐗婇崐鍧楁煥閺冨倸浜鹃柡鍡樼矌閹叉悂鎮ч崼婵堢懆濠碘槅鍋呰摫闁靛洤瀚伴獮妯兼崉鏉炵増鍕冮梺璇插娣囪櫣浜稿▎鎴烆潟闁圭儤顨呯粻濠氭煕濞戞鎽犳い搴＄Т閳规垿鎮欑喊妯诲珱闂佺顑呯€氼垶鎮樼€ｎ喗鈷戦梺顐ゅ仜閼活垱鏅剁€电硶鍋撳▓鍨灈妞ゎ參鏀辨穱濠囨倻閼恒儲娅滈梺绋挎湰閻喗绔?
+/// 缂傚倸鍊搁崐鎼佸磹妞嬪孩顐介柨鐔哄Т绾捐顭块懜闈涘Е闁轰礁顑囬幉鎼佸籍閸繄鐣哄┑掳鍊愰崑鎾绘煟閿濆繒绡€妤犵偛绻樺顕€鍩€椤掑嫭鍎庢い鏍仜閺勩儵鏌嶈閸撴岸濡甸崟顖氱闁瑰瓨绻嶆禒濂告⒑閽樺鏆熼柛鐘崇墵瀵寮撮悢椋庣獮闂佸壊鍋呯换鍌涙叏閺囥垺鈷戠紓浣诡焽缂傛岸鏌涙繝鍐疄鐎殿喖顭锋俊鎼佸Ψ閵忊槅娼旀繝纰樻閸ㄧ敻宕戦幇鏉跨妞ゆ柨澧界壕钘壝归敐鍡楃祷濞存粓绠栭弻锝嗘償椤栨粎校闂佸憡鎸诲銊╁焵椤掍浇澹樻い顓犲厴瀵濡搁妷銏℃杸闂佺硶鍓濋敋妞ゅ孩鐩娲箹閻愭祴鍋撳Δ鍛惞闁告垹菛闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌涘櫧闁活厽鐟╅弻鈥愁吋鎼粹€崇闂侀€炲苯鍘哥紒鑸靛哺閻涱喚鈧綆鍠楅崑鎰版⒒閸喓鈯曟繛鍫亰濮婃椽鎳￠妶鍛呫垺绻涘ù瀣珖濞存粎顭堥埢搴ㄥ箻瀹曞洤濮︽俊鐐€栫敮鎺斺偓姘煎弮瀵偅娼忛妸锝勭盎闂侀潧顭徊浠嬪礉濮樿埖鐓熼柨婵嗘缁犵偟鈧娲橀敃銏ゃ€侀弮鍫濇そ濞达絽婀辩粔楣冩⒒閸屾艾鈧娆㈠顒夌劷鐟滃秷鐏嬮梺鍝勫暙閻楀﹪宕愰崸妤佺叆闁哄啫鍊告禍楣冩煛閸℃鐭岄柟鍙夋倐閹囧醇濠靛牏鎳嗘繝纰樻閸嬪懓鎽梺闈涙搐鐎氫即鐛Ο鍏煎磯閺夌偟澧楅崟鍐⒑鐠囨彃顒㈠ǎ鍥娴滅鈻庨幋鐑嗘綗闂佸湱鍎ら〃鍛不婵犳碍鐓曟繛鎴烆焽閹界姵銇勬惔锛勑㈤柍瑙勫灴閹瑧鍠婂Ο璇茬彵闂備胶顭堥鍛偓姘煎灦閹鈧綆鍠楅埛鎴︽⒑椤愩倕浠滈柤娲诲灡閺呭墎鈧數纭堕崑鎾斥枔閸喗鐏堝銈庡弮閺€杈ㄧ┍婵犲洦鍊婚柤鎭掑劜濞呮粓姊虹粙鎸庢拱闁活収鍠楃粩?
 pub struct TypeChecker {
-    /// 缂傚倸鍊搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倕鎳忛崐濠氭煠閹帒鍔氬ù鐘灩椤啴濡堕崱娆忣潷闂佸憡鍨电紞濠傤嚕閹惰棄绫嶉柛顐ゅ枔閸欏棗鈹戦悙鏉戠仸妞ゎ厼鐗忛埀顒佺煯閸楁娊寮婚敐鍡楃疇闂佸憡姊归崹鐢告偩閻戣棄绠虫俊銈傚亾閹喖姊洪棃娑辨Ф闁稿骸纾划鏃堫敋閳ь剙顫忕紒妯诲闁荤喐澹嗙粊椋庣磽娴ｈ櫣甯涢柛鏃€鐟╅悰顔跨疀濞戞顓煎銈嗘⒐閸庢娊寮冲Δ鍛厽闁绘ê寮剁粚鍧楁倶韫囨梻鎳囬柛鈹惧亾濡炪倖甯掗崐鎼佸储閹绢喗鐓欐い鏍ㄨ壘閺嗭絿鈧娲滈崰鏍€佸鈧幃鈺呭礃瀹割喕妲愰梻鍌欐祰椤曆冾潩閿曞偊缍栧鑸靛姈閸ゅ苯螖閿濆懎鏆欓柣顓燁殘閹叉瓕绠涘☉妯碱槺闂佸搫绋侀悘婵婎樄鐎规洖鐖奸弫鎰板川椤掆偓椤?
+    /// 缂傚倸鍊搁崐鎼佸磹妞嬪孩顐介柨鐔哄Т绾捐顭块懜闈涘Е闁轰礁顑囬幉鎼佸籍閸繄鐣哄┑掳鍊曢幊蹇涘磹婵犳碍鐓犻柟顓熷笒閸旀艾霉閻橆喖鐏╂い顏勫暣婵″爼宕卞▎蹇ｆ椒闂備礁鎲￠崹鐢电礊婵犲偆鍤曢柟鎯版缁秹鏌涢銈呮灁闁告瑥妫楅埞鎴︽倷閺夋垹浠稿銈庡幖閻楀繘鍩€椤掍胶鐓柛妤佸▕瀵鏁愰崱妤冪枃闂備礁鎲″褰掑垂閻㈠憡鍋╅柣鎴ｆ缁犺櫕淇婇妶鍌氫壕闁诡垳鍠栧娲濞戣鲸肖闂佺楠哥壕顓犲垝閺冨牜鏁嬮柍褜鍓欓～蹇曠磼濡顎撻梺鑽ゅ枑婢瑰棛绮婃搴ｇ＝濞达綀娅ｇ敮娑㈡煕閺冣偓閻熲晠鎮伴璺ㄧ杸婵炴垶顭囬鐓庮渻閵堝棙鈷愰柛搴㈠▕瀵啿螖閸涱喚鍘介梺缁樏鍓佺矚閸ф鍊堕煫鍥ㄦ⒒閹冲洭鏌涢埞鎯т壕婵＄偑鍊栫敮鎺楀磹閹间礁鍌ㄩ柟缁㈠枟閻撴瑦銇勯弽銊ㄥ闁哄棴绲块埀顒冾潐濞叉粓宕伴弽顓溾偓浣割潨閳ь剟骞冮埡鍛鐎瑰壊鍠曞Σ鎰版⒒閸屾瑦绁版い鏇嗗喚娼╅柨鏇炲亰缂嶆牕顭块懜闈涘闁搞倕鑻灃闁挎繂鎳庨弳娆撴煟椤撶噥娈橀柟鍙夌摃缁犳稑鈽夊Ο纰辨Ш闂備礁鎼粙渚€鎮樺┑濠庢▌閻庤娲栭悥濂稿极閹版澘宸濇い鎺嗗亾妞?
     env: TypeEnv,
-    /// 缂傚倸鍊搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倕鎳忛崐濠氭煢濡警妲烘い鏂匡躬濮婃椽妫冨☉杈╁彋闂傚倸瀚€氫即骞冮悙瀵割浄閻庯綆鍋嗛崢閬嶆⒑閹稿海绠撴繛瀵稿厴瀹曘垹顭ㄩ崨顖滐紲闁哄鐗勯崝搴ｇ不閻愮儤鐓欐い鏃囧吹閻瑥鈹戦埄鍐╁€愬┑鈥崇埣瀹曞爼顢旈崟鍨棨缂傚倸鍊搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倕鎳忛崐濠氭煢濡警妲洪柣鎾村灥閳规垿顢欐慨鎰捕闂佺顑嗛幑鍥蓟濞戙垺鏅查柛鈩兦滄禒銏ゆ⒑鐠団€崇仩闁哥喐娼欓悾鐑芥偄绾拌鲸鏅㈤梺閫炲苯澧撮柟铏懆閵囨劙骞掗幘璺哄箰闂備胶顭堢悮顐﹀磹閺囥垻宓侀柡宥庡幗閻撴瑩姊洪崹顕呭剰妞ゃ儱顑囩槐鎺撴綇閵娿儲璇為梺璇″枔閸ㄨ棄鐣峰鍕懝闁搞儻濡囩粈鍐⒒?
+    /// 缂傚倸鍊搁崐鎼佸磹妞嬪孩顐介柨鐔哄Т绾捐顭块懜闈涘Е闁轰礁顑囬幉鎼佸籍閸繄鐣哄┑掳鍊曢幊蹇涘磹婵犳碍鐓㈡俊顖欒濡茬儤銇勯弬鍖¤含婵﹥妞藉Λ鍐ㄢ槈鏉堚晛褰嬮梻鍌氬€哥€氼剛鈧矮鍗抽獮鍐倷鐎靛壊娴勯柣搴秵閸嬪棝宕㈤柆宥嗏拺闁圭娴风粻鎾寸箾鐎电鍘寸€规洏鍨归…銊╁川椤栨粣绱查梺鍝勵槸閻楀嫰宕濇惔锝囦笉闁绘劗鍎ら悡娆愩亜閺冨洤鍚归柣顓熺懃閳规垿鍩勯崘鈺佲偓鎰攽閳ュ磭鍩ｇ€规洖鐖奸、鏃堝礋閸偒妫ㄧ紓鍌氬€搁崐鎼佸磹妞嬪孩顐介柨鐔哄Т绾捐顭块懜闈涘Е闁轰礁顑囬幉鎼佸籍閸繄鐣哄┑掳鍊曢幊蹇涘磹婵犳碍鐓㈡俊顖欒濡叉椽鏌ｉ幘鏉戠仴闁宠鍨块、娆愭叏閹邦亞鎹曢梻浣侯焾椤戝棝骞戦崶顒€钃熸繛鎴欏灪閺呮煡鏌涢埄鍏︽粍绂掗姀銈嗏拺閻犲洠鈧磭浠╅梺鍝ュ枑濞兼瑩鎮鹃悜鑺ュ亜缁炬媽椴搁弲銏ゆ⒑闁偛鑻晶鎾煙閾忣偆鎳嗛柕鍥ㄥ姍楠炴帡骞樼捄鍝勭闂傚倷鑳堕…鍫㈡偖椤愶箑纾归柡鍥ュ灮瀹撲線鏌″搴″箺闁绘挻鐟╁娲垂椤曞懎鍓板銈冨劚椤戝洨妲愰幒鎾寸秶闁靛鍎茬拠鐐烘⒑鐠団€虫灁闁搞劏妫勯悾宄邦煥閸曨厾鎳濋梺鎼炲劵婵″洨绮堥崘顔解拻?
     infer: TypeInfer,
-    /// Trait婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵螣濮瑰洣绨诲銈嗘尵閸犲海绮缁辨帡鍩€椤掍礁绶為柟閭﹀幖閳ь剙鐏氱换娑㈠箣閻戝棔鐥銈呯箰閻楀棛澹曢懡銈傚亾楠炲灝鍔氭い锔诲灣缁濡烽埡鍌滃帗閻熸粍绮撳畷婊堟偄婵傚娈ㄩ梺鍓茬厛閸嬪嫮娆㈤悙娴嬫斀闁绘ɑ褰冮埀顒傤焾閳绘捇濡烽敂鍓х槇闂侀潧绻掓慨鐢垫嫻閳ユ剚鐔嗙憸搴ㄣ€冮崨顓炵カ闂備胶顢婇幓顏堟⒔閸曨垰纾跨€广儱顦伴悡鏇㈡煙閹规劖鐝い搴㈢崒it濠电姷鏁搁崕鎴犲緤閽樺娲偐鐠囪尙顦┑鐘绘涧濞层倝顢氶柆宥嗙厱婵炴垶鐟︾紞鎴炴交?
+    /// Trait濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨佃灒婵懓娲ｇ花璇差渻閵堝棙灏甸柛鐘叉捣缁叀顦寸紒杈ㄥ浮閸┾偓妞ゆ帊绀佺欢鐐烘煙闁箑骞栭柍褜鍓欓悘姘辨崲濞戙垹绠ｉ柣鎴濇閻ヮ亜顪冮妶鍛闁绘妫涙竟鏇㈡嚒閵堝倸浜炬鐐茬仢閸旀碍銇勯敂璇茬仯缂侇喖顭锋俊鐑藉煛閸屾粌甯楅柣鐔哥矋缁挸鐣峰鍫熷亜濠靛倸顦▓銊╂⒑閸撹尙鍘涢柛瀣濞嗐垽鎮欏ù瀣杸闂佺粯蓱瑜板啴鍩€椤掑偆鐒鹃柍缁樻崌婵＄兘鏁傞崜褏妲囬梻渚€娼х换鎺撴叏閻㈠灚瀚婚柍銉﹀墯閻斿棛鎲告惔銊ｂ偓鍐川椤撶偟銈梻鍌欒兌椤㈠﹪骞撻鍫熲挃闁告洦鍨扮壕璺ㄢ偓骞垮劚椤︿即鎮￠弴銏＄厵闁硅鍔栭悵顏呫亜鎼淬垻宕抜t婵犵數濮烽弫鎼佸磿閹寸姴绶ら柦妯侯棦濞差亝鍋愰悹鍥皺椤︻厼鈹戦悩缁樻锭婵炲眰鍊濋、姘舵焼瀹ュ棛鍘卞┑鐐村灦閻燂妇绱為幋鐐翠氦?
     trait_registry: TraitRegistry,
-    /// Impl婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵螣濮瑰洣绨诲銈嗘尵閸犲海绮缁辨帡鍩€椤掍礁绶為柟閭﹀幖閳ь剙鐏氱换娑㈠箣閻戝棔鐥銈呯箰閻楀棛澹曢懡銈傚亾楠炲灝鍔氭い锔诲灣缁濡烽埡鍌滃帗閻熸粍绮撳畷婊堟偄婵傚娈ㄩ梺鍓茬厛閸嬪棛绮诲▎鎴犵＜闁告鍋涢崝鏉媡闂傚倷娴囬褎顨ョ粙鍖¤€块梺顒€绉寸壕濠氭煟閺冨洤浜圭€规挷绶氶弻娑㈠Ψ椤旂厧顫梺绋块缁夊綊寮诲☉銏犲嵆闁靛鍊楅懗铏圭磽娴ｇ瓔鍤欐俊顐ｇ箞瀵鎮㈢喊杈ㄦ櫍閻熸粌绉归幃妯衡槈閵忥紕鍘?
+    /// Impl濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨佃灒婵懓娲ｇ花璇差渻閵堝棙灏甸柛鐘叉捣缁叀顦寸紒杈ㄥ浮閸┾偓妞ゆ帊绀佺欢鐐烘煙闁箑骞栭柍褜鍓欓悘姘辨崲濞戙垹绠ｉ柣鎴濇閻ヮ亜顪冮妶鍛闁绘妫涙竟鏇㈡嚒閵堝倸浜炬鐐茬仢閸旀碍銇勯敂璇茬仯缂侇喖顭锋俊鐑藉煛閸屾粌甯楅柣鐔哥矋缁挸鐣峰鍫熷亜濠靛倸顦▓銊╂⒑閸撹尙鍘涢柛瀣缁鈻庨幋鐘碉紲闂佸憡顨堥崑娑㈠礉閺夊闂傚倸鍊峰ù鍥敋瑜庨〃銉х矙閸柭も偓鍧楁⒑椤掆偓缁夊澹曟繝姘厽闁哄啫娲ゆ禍鍦偓瑙勬尫缁舵岸寮诲☉銏犖ㄦい鏃傚帶椤亪姊虹粙鍧楊€楃紒澶婄秺瀵鈽夐姀鐘插祮闂侀潧顭堥崐妤呮嚄閾忓湱纾藉ù锝囩摂閸ゆ瑦淇婇锝囩疄鐎殿喖顭烽幃銏㈠枈鏉堛劍娅嶉柣鐔哥矊缁夊綊骞冨Ο琛℃闁靛骏绱曢崢?
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     struct_type_params: HashMap<String, Vec<TypeParam>>,
@@ -89,7 +90,7 @@ impl TypeChecker {
         &self.async_functions
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滈崘鈧銈嗗姂閸婃洟寮冲Δ鍛厽闁绘ê寮剁粚鍧楁倶韫囨梻鎳囬柛鈹惧亾濡炪倖甯掗崐鎼佸储閹绢喗鐓欐い鏃囨閳绘洘銇勯姀锛勨槈妞ゎ偅绻堝畷妤呭礂绾板崬鎮╅梻鍌氬€烽悞锕傛儑瑜版帒绀夌€光偓閳ь剟鍩€椤掍礁鍤ù婊呭仧閸掓帡顢橀悢椋庣獮闂佸綊鍋婇崜娑㈡偂閹存繍娓婚柕鍫濇婢ь剟鏌ら悷鏉库挃缂佽京鍋為幏鍛偘閳ュ厖澹曞┑鐐茬墕閻忔繈寮搁悢鍝ョ闁告瑥顦遍惌鎺斺偓娈垮櫘閸嬪﹥淇婇懜闈涚窞濠?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粓宕橀埀顒€顪冮妶鍡楀闁稿﹥娲熷鍐参旈崨顔惧幗闂佺粯锚瀵墎绮氶崸妤佸€堕煫鍥ㄦ⒒閹冲洭鏌涢埞鎯т壕婵＄偑鍊栫敮鎺楀磹閹间礁鍌ㄩ柟缁㈠枟閻撴瑦銇勯弮鍥棄闁崇粯娲橀妵鍕閿涘嫧妲堝銈庡亝缁诲牆鐣峰Δ鍛缁炬澘宕幃鈺呮⒒閸屾艾鈧兘鎮為敃鍌涘剳鐟滅増甯掔粈澶屸偓鍏夊亾闁逞屽墴閸┾偓妞ゆ帊绀侀崵顒€霉濠婂懎浠ч柛鎺撳浮椤㈡﹢鎮㈡搴ｇ嵁闂備礁缍婇崑濠囧礈濞戙垺鍋傞柟瀛樼箥濞撳鏌曢崼婵囶棤濠⒀屽墴閺屻倝鎮烽弶搴撴寖缂備浇浜崑鐐哄箯閸涱垱鍋橀柍銉ュ帠婢规洖鈹戦悙鑼闁诲繑绻堝鎼佹偄閸濄儳顔曢梺鍛婄懃椤﹂亶鎯岄幒鏂哄亾濞堝灝娅橀柛瀣攻娣囧﹪鎳滈棃娑氱獮婵?
     pub fn env(&self) -> &TypeEnv {
         &self.env
     }
@@ -99,32 +100,32 @@ impl TypeChecker {
         self.env
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滈崘鈧銈嗗姂閸婃洟寮冲Δ鍛厽闁绘ê寮剁粚鍧楁倶韫囨梻鎳囬柛鈹惧亾濡炪倖甯掗崐鎼佸储鐎涙﹩娈介柣鎰綑濞搭喖鈹戦埄鍐╁€愰柡浣稿€块幃鍓т沪閽樺－銊╂⒒閸屾瑧绐旀繛鑹板吹瀵板﹥绻濆顒傤槷闁硅偐琛ュ褔寮搁弮鍫熺厵閻庣數顭堟禒褔鏌嶇紒妯烩拻闁逞屽墮缁犲秹宕曢柆宥呯疇閹艰揪绲炬刊濂告煛鐏炶鍔滈柣鎾存礃缁绘盯宕卞Ο鍝勫付濡炪倕绻愬Λ娆擄綖閺囥垺鐓冮柛婵嗗閸ｆ椽鏌涚€ｃ劌濮傞柡灞炬礃缁绘繆绠涢弴鐐电厳闂?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粓宕橀埀顒€顪冮妶鍡楀闁稿﹥娲熷鍐参旈崨顔惧幗闂佺粯锚瀵墎绮氶崸妤佸€堕煫鍥ㄦ⒒閹冲洭鏌涢埞鎯т壕婵＄偑鍊栫敮鎺楀磹閹间礁鍌ㄩ悗娑欙供濞堜粙鏌ｉ幇顓熺稇婵炴惌鍠栭埞鎴﹀焺閸愨晛鈧劙鏌℃担绋库偓鍧楀箖閸撗傛勃闁芥ê锛嶉妸鈺傗拻闁稿本鐟х粣鏃€绻涢懝鏉垮惞鐎垫澘锕ョ换婵嗩潩椤掑偆妲烽梺纭呭亹鐞涖儱顬婅瀵悂寮崼鐔哄幍闁诲海鏁搁…鍫熺瑜旈弻宥囩磼濡儵鎷婚梺閫炲苯澧紒鐘茬Ч瀹曟洟鏌嗗鍛枃闁硅壈鎻徊鐐垔婵傚憡鐓涢悘鐐额嚙閸旀粓鏌ｉ幘瀛樼缂佺粯鐩畷鍗炍熼崫鍕粯婵＄偑鍊曠换鎰涘▎鎿勭稏闁哄洢鍨洪悡鍐煕濠靛棗顏柛锝嗘そ閺屾稓鈧絻鍔屾慨鍌炴煛鐏炵偓绀冪紒缁樼箚缁犳盯寮撮悙鐢靛幊闂?
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滅痪褎銇勯敐鍡╂祲it婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵顫滈埀顒勫蓟閺囩喓绠剧憸宥団偓姘煎櫍瀵娊鎮╁畷鍥╊啎闂佺懓顕崑鐐典焊椤撶姷纾煎璺虹焾濡酣鏌曢崶銊ュ鐎殿喖顭锋俊鐑藉Ψ瑜忛崢顒佺節绾版ɑ顫婇柛銊╂涧閳诲秹鏁愰崶鈺冪厰闂佺鍕垫畷闁绘挾鍠愰妵鍕敃椤愩垹顫╂繝纰樺墲閹倿寮?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粎鐥閵囧嫰鏁愰崱鈺傜ゲit濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨甸～婊堝焵椤掑嫬钃熼柡鍥╁枔缁犲墽鎲稿鍥ｅ亾濮樼厧娅嶇€殿喗濞婇幃鈺佺暦閸モ晩鍟庨梻浣烘嚀椤曨參宕戦悙鍏哥剨妞ゆ挾濮风壕鐓庮熆鐠鸿櫣鐒炬俊顐㈤叄閺屾洟宕堕妸銉ヮ潚閻庢鍠栭…閿嬩繆閻戣棄唯鐟滃繘宕㈤浣虹瘈缁剧増蓱椤﹪鏌涢妸鈺傛锭闁宠绉归弫鎰板炊閳哄啰鍘伴梻浣侯潒閸曞灚鐣烽梺缁樻尵閸犳劙濡甸崟顖ｆ晝妞ゆ劑鍨归～鈺傜節绾版ê澧查柟顔煎€垮?
     pub fn trait_registry(&self) -> &TraitRegistry {
         &self.trait_registry
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滅痪褍鈹戦娴虫獟婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵顫滈埀顒勫蓟閺囩喓绠剧憸宥団偓姘煎櫍瀵娊鎮╁畷鍥╊啎闂佺懓顕崑鐐典焊椤撶姷纾煎璺虹焾濡酣鏌曢崶銊ュ鐎殿喖顭锋俊鐑藉Ψ瑜忛崢顒佺節绾版ɑ顫婇柛銊╂涧閳诲秹鏁愰崶鈺冪厰闂佺鍕垫畷闁绘挾鍠愰妵鍕敃椤愩垹顫╂繝纰樺墲閹倿寮?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粎鐥閳规垿顢涘ù铏崯濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨甸～婊堝焵椤掑嫬钃熼柡鍥╁枔缁犲墽鎲稿鍥ｅ亾濮樼厧娅嶇€殿喗濞婇幃鈺佺暦閸モ晩鍟庨梻浣烘嚀椤曨參宕戦悙鍏哥剨妞ゆ挾濮风壕鐓庮熆鐠鸿櫣鐒炬俊顐㈤叄閺屾洟宕堕妸銉ヮ潚閻庢鍠栭…閿嬩繆閻戣棄唯鐟滃繘宕㈤浣虹瘈缁剧増蓱椤﹪鏌涢妸鈺傛锭闁宠绉归弫鎰板炊閳哄啰鍘伴梻浣侯潒閸曞灚鐣烽梺缁樻尵閸犳劙濡甸崟顖ｆ晝妞ゆ劑鍨归～鈺傜節绾版ê澧查柟顔煎€垮?
     pub fn impl_registry(&self) -> &ImplRegistry {
         &self.impl_registry
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滅痪褎銇勯敐鍡╂祲it婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵顫滈埀顒勫蓟閺囩喓绠剧憸宥団偓姘煎櫍瀵娊鎮╃紒妯锋嫼闂佸憡绋戦敃锕傚箠閹扮増鐓曢柕濠忕畱椤庢粓鏌曢崶銊ュ鐎垫澘瀚换婵囨償閳╁喚鍚欓梻鍌欑閹碱偄煤閵婏附鍙忛柣銏㈩焾濮规煡鐓崶銊р姇闁?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粎鐥閵囧嫰鏁愰崱鈺傜ゲit濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨甸～婊堝焵椤掑嫬钃熼柡鍥╁枔缁犲墽鎲稿鍥ｅ亾濮樼厧娅嶇€殿喗濞婇幃鈺冪磼濡攱瀚奸梻浣告啞缁嬫垿鏁冮敃鍌氱疇闁规壆澧楅悡鏇㈡煏婵犲繒鐣辨い搴㈢矒閺屾洟宕堕妸銉ヮ潔閻庡灚婢樼€氼厾鎹㈠┑鍥ㄥ劅闁斥晛鍠氶崥娆撴⒒閸屾瑧顦﹂柟纰卞亜鐓ら柕濠忛檮閸欏繘鏌ｉ姀銏╃劸婵鐓￠悡顐﹀炊閵娧€濮囬梺?
     pub fn trait_registry_mut(&mut self) -> &mut TraitRegistry {
         &mut self.trait_registry
     }
 
-    /// 闂傚倷绀侀幖顐λ囬锕€鐤炬繝濠傜墕閽冪喖鏌曟繛鍨壄婵炲樊浜滅痪褍鈹戦娴虫獟婵犵數濮烽弫鎼佸磻濞戔懞鍥敇閵忕姷顦悗鍏夊亾闁告洦鍋夐崺鐐烘⒑娴兼瑧鍒伴柡鍫墴瀹曟垵顫滈埀顒勫蓟閺囩喓绠剧憸宥団偓姘煎櫍瀵娊鎮╃紒妯锋嫼闂佸憡绋戦敃锕傚箠閹扮増鐓曢柕濠忕畱椤庢粓鏌曢崶銊ュ鐎垫澘瀚换婵囨償閳╁喚鍚欓梻鍌欑閹碱偄煤閵婏附鍙忛柣銏㈩焾濮规煡鐓崶銊р姇闁?
+    /// 闂傚倸鍊风粈渚€骞栭位鍥敃閿曗偓閻ょ偓绻濇繝鍌滃闁藉啰鍠栭弻鏇熺箾閸喖澹勫┑鐐叉▕娴滄粎鐥閳规垿顢涘ù铏崯濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剦鏁囬柕蹇曞Х椤︻噣鎮楅崗澶婁壕闂佸憡娲﹂崑澶愬春閻愮儤鈷戝ù鍏肩懅閸掍即鏌￠崼顐㈠⒋鐎规洘鍨甸～婊堝焵椤掑嫬钃熼柡鍥╁枔缁犲墽鎲稿鍥ｅ亾濮樼厧娅嶇€殿喗濞婇幃鈺冪磼濡攱瀚奸梻浣告啞缁嬫垿鏁冮敃鍌氱疇闁规壆澧楅悡鏇㈡煏婵犲繒鐣辨い搴㈢矒閺屾洟宕堕妸銉ヮ潔閻庡灚婢樼€氼厾鎹㈠┑鍥ㄥ劅闁斥晛鍠氶崥娆撴⒒閸屾瑧顦﹂柟纰卞亜鐓ら柕濠忛檮閸欏繘鏌ｉ姀銏╃劸婵鐓￠悡顐﹀炊閵娧€濮囬梺?
     pub fn impl_registry_mut(&mut self) -> &mut ImplRegistry {
         &mut self.impl_registry
     }
 
-    /// 闂傚倷娴囬褏鑺遍懖鈺佺筏濠电姵鐔紞鏍ь熆閼搁潧濮囨慨瑙勭叀閺屻劌鈹戦崱姗嗘￥闂佸磭绮褰掑Φ閸曨喚鐤€闁圭偓鎯屽Λ蹇涙⒑閸濆嫯顫﹂柛濠冪箞閻涱噣寮介鐐甸獓闂佺懓顕慨鐑筋敊閹寸姷纾藉ù锝堟鐢稒銇勯鐐村枠妤犵偛鍟村鍓佹崉閵婏附鐣烽梻渚€鈧偛鑻晶浼存煙椤曞懎娅嶆い銏℃礋閺佸啴鍩€椤掑嫬鍨傞柛宀€鍋為崐鐢告煥濠靛棝顎楀ù婊嗗Г閹便劍绻濋崶鈺冩毇闂佸搫鐭夌槐鏇熺閿旂偓瀚氶柟缁樺笒鍟哥紓鍌氬€峰ù鍥ㄣ仈閸濄儲宕查柛顐ｇ箘閺嗭箓鏌ｅΟ娆惧殭鐎瑰憡绻冮妵鍕籍閸屾瀚涙繛瀵稿Х閸嬫挾鎹㈠┑瀣潊闁绘ê鐤囩涵鈧┑鐘媰閸曞灚鐣堕柛妤呬憾閺岀喓鈧數顭堥崜宕囩磼閹插绉柡灞剧洴瀵挳濡搁妷銈堝焻婵犵鍓濋悡鈩冪閸洖钃熼柨婵嗩槹閸婄兘鏌涘▎蹇ｆ▓婵☆偆鍋ゅ铏规兜閸涱喛鍚傞梺鍛婎殔閸熷潡鎮惧畡鎷旀棃宕ㄩ鍥ｆ櫊閺屽秵娼幍顔煎濡炪倕绻嗛埀顒佹灱閺€浠嬫煃閽樺顥滃ù婊勫姍閺屾稓鈧綆鍋呭畷宀勬煛瀹€瀣？濞寸媴濡囬幏鐘诲箵閹烘埈娼欓梻?
+    /// 闂傚倸鍊峰ù鍥敋瑜忛懞閬嶆嚃閳轰胶绛忔繝鐢靛У閻旑剛绱為弽褜鐔嗛柤鎼佹涧婵洦鎱ㄧ憴鍕弨闁哄被鍔岄埞鎴﹀幢濮楀棙锟ラ梻浣哥－缁垰顫忚ぐ鎺懳﹂柛鏇ㄥ枤閻も偓闂佸湱鍋撻幆灞轿涜箛娑欌拺闁告繂瀚～锕傛煕婵犲啰绠為柣娑卞櫍瀵粙顢橀悙鐢哥崜闂備胶鎳撻顓熸叏閻戠瓔鏁婇柟瀵稿Х绾捐棄霉閿濆牊顏犻悽顖涚⊕閵囧嫰顢橀悙鏉戞灎濡ょ姷鍋涢崯鏉戭嚕閸撲焦宕夐柕濠忛檮閻ｇ兘姊绘笟鈧埀顒傚仜閼活垱鏅舵导瀛樼厵妞ゆ洖鎳庡▍宥嗐亜閵忊剝绀嬮柡浣稿暣閸┾偓妞ゆ帒瀚崹鍌炴煕瀹€鈧崑鐐哄磹閻㈠憡鐓ユ繝闈涙椤庢霉濠婂棗袚闁逛究鍔嶇换婵嬪炊閳哄啯姣囬梻浣告惈閻妲愰弴鐔侯浄闁挎梻鍋撶€氭岸鏌熺紒妯虹瑨閸熷摜绱撻崒姘偓宄懊归崶銊ｄ粓闁告縿鍎插畷鏌ユ煕椤愶絿绠橀柡鍡畵閺岋絽螣濞嗘儳娈悗鐟版啞缁诲啴濡甸崟顖氱睄闁稿本顨嗙€氭稒绻涚€电啸闁稿鎸鹃幑銏犫攽鐎ｎ亶娼婇梺缁樏悿鍥╂兜閳ь剙鈹戦悩顐ｅ闁告洖鐏氶悾鍫曟煕濡ゅ懍鎲鹃柡宀€鍠撻埀顒傛暩椤牓宕滃畷鍥╃＜闁规彃顑囩粔顕€鏌＄仦鍓ф创鐎殿喗鎸虫俊鎼佸Ψ閵堝牆鐒诲┑鐘殿暯閸撴繈鎮￠埄鍐洸闁割偅娲栭拑鐔兼煥濠靛棭妲归柛濠勫厴閺屾稑鈻庤箛锝嗏枔濠碘槅鍋嗛崑銈咁潖閾忚鍏滈柛娑卞枦閸氬倿姊洪崨濠庢當闁哥喎娼￠幃鎯х暋閹锋梹妫冨畷銊╊敇閸ワ絾娅婇柡灞界У濞碱亪骞嶉鐓庮瀴婵＄偑鍊曠换鍡涘焵椤掍焦鐏遍柡鈧禒瀣厓闁芥ê顦伴ˉ婊兠瑰鍕闁哄本绋撻埀顒婄秵閸嬪懎鐣峰畝鍕厸鐎光偓鐎ｎ剛锛熸繛瀵稿婵″洭骞忛悩璇茬闁圭儤鍩堝娆撴⒒?
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
@@ -161,7 +162,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷顣藉Σ鍛村磻閸涱収鐔嗘俊顖氱毞閸嬫挸顫濋悡搴♀拫闂佽桨绀佺粔褰掔嵁閸ヮ剙绾ч柛顭戝枛閹搞倝姊洪悷鏉挎倯闁伙綆浜畷婵囩節閸パ呭姦濡炪倖宸婚崑鎾绘煥閺囶亪妾紒鍌涘浮閺佸啴宕掑鎲嬬床婵犳鍠楅敋濠⒀傜矙閹苯螖閸涱喒鎷洪梺鍛婄箓鐎氼剟顢旈埡鍛厱闁瑰濮靛▍鏇熶繆閸欏濮囬柍璇查叄楠炴ê鐣烽崶鑸敌熼梻鍌欑閸氬绂嶆禒瀣？闁圭粯宸婚弸鏃堟煕椤愶絾绀冮柣鎾崇箻閺屾盯鍩勯崘鈺冾槷闂佺绻愰惉鑲╂閹烘鏁婇柛婵嗗椤洭鎮楀▓鍨灍闁诡喖鍊搁悾鐑芥偄绾拌鲸鏅滈梺绯曞墲椤忕兘顢旈崼鐔叉嫼闂傚倸鐗婄粙鎺椝夊▎鎾寸厽闁硅櫣鍋熼悾鐢告煙椤旀枻鑰跨€规洖鐖兼俊姝岊槷闁哄鐗犲娲川婵犲啫鐦烽梺鍛婁緱閸犳宕曢鐐粹拻濞达絿鎳撻婊呯磼鐎ｎ偄鐏寸弧鎾绘煃瑜滈崜娑氭閹烘挻缍囬柕濞у懐鏆┑鐐茬摠缁秹骞冮崒姘辨殾闁告鍊ｉ弮鍫濈劦妞ゆ巻鍋撴い鏇樺劦楠炴﹢宕滄担鐚寸床婵＄偑鍊栭崝鎴﹀磿濞差亜鍚规繛鍡樻尰閻撶喖骞栧ǎ顒€濡介柡浣戒含缁辨帒鐣濋崟顏呭枤闂佺硶鏅涚€氭澘鐣峰Ο娆炬Ь缂備讲鍋撻柍褜鍓氱换婵嬫偨闂堟稐绮跺銈忓瘜閸欏啫鐣峰┑鍡欐殕闁告洦鍋夐崺鐐寸箾鐎电孝妞ゆ垵鎳愮划鍫ュ幢濞戞瑧鍘靛┑鐐茬墕閻忔繈寮稿☉姘辩＜闁绘ê鐤囨竟妯汇亜椤撯€冲姷妞わ附鐓￠弻娑㈡偄閸欏鐝氶梺纭呮珪閻熲晠鐛€ｎ喗鏅濋柍褜鍓濈换?
+    /// 婵犵數濮烽。钘壩ｉ崨鏉戠；闁告侗鍙庨悢鍡樹繆椤栨氨姣為柛瀣尭椤繈鎮℃惔鈾€鎷梻浣芥〃缁€浣虹矓瑜版帞宓侀柛銉墮缁狙囨煕椤垵鏋涢柟鎼炲€濆娲偡閺夋寧鍊梺浼欑秵娴滎亜鐣峰┑鍥╃瘈闁搞儜鍛Е婵＄偑鍊栧濠氬磻閹剧粯鐓ラ柡鍥朵邯濡绢喚绱掗崒娑樻诞闁轰礁鍟村畷鎺戭潩閹插搴婂┑鐘愁問閸犳鏁嬫繝鈷€鍌滅煓闁诡垰鑻灃闁告侗鍠掗幏娲⒑閸涘﹦绠撻悗姘煎墴椤㈡棃鍩￠崨顔惧幈闂佺懓顕慨闈涒枍閺囩喍绻嗛柛娆忣槸婵洭鏌嶇拠鏌ュ弰妤犵偞锚閻ｇ兘宕堕懜鏁岀喖姊婚崒娆戭槮闁告艾顑嗙粋宥嗙鐎ｎ亞锛熼梺鍦帛瀹稿寮搁弮鍫熺厱妞ゆ劧绲剧粈鍐煟閹惧磭绠婚柡灞剧洴閸╁嫰宕橀埡鍐炬Х闂備胶顭堢换鎰版儔閼测晜顫曢柟鐑橆殢閺佸﹪鏌涘┑鍡楊仼妞ゎ偄娲幃妤€鈻撻崹顔界亶闂佽鍠栭崐鎼佹偩閻戣姤鍋勭痪鎷岄哺閺呮粓姊虹化鏇炲⒉妞ゅ繒鍏橀、鏃堝醇閻斿弶瀚奸梻鍌氬€搁悧濠勭矙閹烘澶娾枎閹惧鍘介梺纭呮閸嬬喖鎮鹃悽鍛婄厵妞ゆ梹鏋婚懓璺ㄢ偓瑙勬礀閻栧吋淇婂宀婃Х闂佸搫顑嗛悧鐘差潖濞差亜宸濆┑鐘插暙閻︾兘姊洪崨濠佺繁闁哥姵顨婂畷鏇㈩敍閻愮补鎷绘繛杈剧悼閹虫捇顢氬鍛＜閻庯綆鍋勯悘瀵稿姬閹剧粯鐓冪憸婊堝礈濞戞碍顫曢柟鐑樻尰缂嶅洭鏌曟繛褍鎳愰弳顓炩攽閻愯尙鎽犵紒顔肩Ч楠炲啴宕掑杈ㄦ闂佸憡顨堥崐锝夊籍閸繄鍔﹀銈嗗坊閸嬫挻銇勯弴妯哄姦妤犵偞锕㈠畷婊勬媴閻氬搴婂┑锛勫亼閸婃牠宕濋幋锕€纾挎繛宸簻閸氳绻涢崱妯诲鞍闁绘挾鍠栭獮鏍庨鈧俊浠嬫煛娴ｆ垝鍚紒杈ㄥ笒閻ｆ繈宕熼鍛灓闂備胶纭堕弲娑氣偓姘緲閻ｅ嘲螣濞嗙偓鞋缂傚倷璁查崑鎾绘煃瑜滈崜姘辨崲濠靛鍋ㄩ梻鍫熺◥缁泛顪冮妶蹇撶槣闁告瑥鍟悾宄扳攽閸℃瑦娈曢梺鍛婃处閸嬪宕洪悙瀵哥閻庣數顭堝瓭濡炪倖鍨甸幊鎰垝閸儱骞㈡繛鎴炵懅閸橀潧鈹戦悙鑼闁诲繑绻堝绋库槈濮樿京锛滈梺缁樏悿鍥ㄧ珶濡眹浜滄い鎾偓鍐插Х濡炪倧闄勯悡锟犲蓟濞戙垺鍋勯柛娆忣槹閻濇岸姊虹涵鍛彧闁荤啿鏅犻悰顔锯偓锝庡枟閺呮繈鏌嶈閸撴繄鎹?
     fn declare_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -186,7 +187,7 @@ impl TypeChecker {
                     return Ok(());
                 }
 
-                // 濠电姷鏁告慨浼村垂閻撳簶鏋栨繛鎴炲焹閸嬫挸顫濋悡搴㈢彎濡ょ姷鍋涢崯顖滄崲濠靛纾兼俊銈勮兌娴滄瑦绻濋悽闈涗沪闁搞劌鐖奸垾锕傚炊椤掆偓閻掑灚銇勯幒鎴濃偓鎼佸储鐎电硶鍋撶憴鍕闁荤啿鏅犻獮濠囨倷閸濆嫀銊╂煥閺冨倻鎽傞柛鐔插亾闂傚倸鍊风粈渚€骞夐敓鐘冲仭闁靛鏅涚壕鍦喐閻楀牆绗掓慨瑙勭叀閺岋綁寮崶顭戜哗闁诲繐绻掗弫濠氬箖瑜版帒鐐婃い蹇撳濮ｃ垽姊洪柅鐐茶嫰婢у瓨銇勯妷锔藉暗婵″弶鍔欓獮鎺懳旈埀顒傜不閿濆棛绡€闂傚牊绋撴晶娑欐叏閿濆懘鍙勬慨濠冩そ楠炴劖鎯旈敐鍌涱潔闂備焦妞块崢娲嚄閸洖绠查柕蹇曞閻旂厧绀傞柣鎾崇凹缁囨煟鎼粹€冲辅闁稿鎹囬弻宥堫檨闁告挻鐩獮鍐敋閳ь剟銆侀弴銏℃櫇闁逞屽墴瀹曞綊宕掗悙鏉戔偓鐢告煥濠靛棝顎楀ù婊嗗Г閹便劍绻濋崶鈺冩毇闂佸搫鐭夌槐鏇熺閿旂偓瀚氶柟缁樺笒椤垿姊?
+                // 婵犵數濮烽弫鍛婃叏娴兼潙鍨傞柣鎾崇岸閺嬫牗绻涢幋鐐茬劰闁稿鎸搁～婵嬫偂鎼淬垻褰庢俊銈囧Х閸嬫盯宕婊勫床婵犻潧顑呯壕鍏间繆閵堝嫯鍏屽ù婊勭懄缁绘繈鎮介棃娑楁勃闂佹悶鍔岄悥濂稿灳閿曞倸鐐婃い鎺嗗亾闁绘帒鐏氶妵鍕箳閹存績鍋撻幖浣稿偍閻庣數纭堕崑鎾舵喆閸曨剛顦ㄩ梺鑽ゅ暱閺呯娀鐛繝鍥ㄥ€烽柛婵嗗珋閵娾晜鐓ラ柡鍐ㄥ€婚幗鍌炴煕閻旀彃浜鹃梻鍌氬€搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧顦弲娑氬閸︻厽鍠愰柣妤€鐗嗙粭鎺撴叏鐟欏嫮鍙€闁哄矉缍佸顕€宕堕…鎴滃摋闂佽绻愮换鎺楀极婵犳艾绠栫憸鐗堝笒閻愬﹥銇勮箛鎾愁伀婵絻鍨藉娲焻閻愯尪瀚板褍鐡ㄩ妵鍕Ψ閿旇棄鏆楀┑鈥冲级閸旀瑩鐛幒鎳虫棃鍩€椤掑倻涓嶉柨婵嗘缁♀偓闂傚倸鐗婄粙鎾存櫠濞戞瑦鍙忛柨婵嗘嚇閸欏嫭鎱ㄦ繝鍐┿仢妤犵偞鍔栭幆鏃堟晲閸屾侗娼旈梻鍌欑劍濡炲潡宕㈠ú顏呭殑闁割偅娲栫粻鏌ユ煏韫囨洖顫嶉柣鏃傚帶缁€鍌炴煟閹惧磭鍑圭紒顔ㄥ洦鐓熼幖绮光偓鍐茶緟闂佺顑嗛幑鍥蓟瀹ュ牜妾ㄩ梺鍛婃尰閻╊垶鐛崘顕呮晪闁逞屽墴閵嗕線寮撮姀鈩冩珖闂侀€炲苯澧寸€规洖缍婂畷鎺楁倷閺夋垟鍋撻悽鍛婄叆婵犻潧妫濋妤€霉濠婂棗袚闁逛究鍔嶇换婵嬪炊閳哄啯姣囬梻浣告惈閻妲愰弴鐔侯浄闁挎梻鍋撶€氭岸鏌熺紒妯虹瑨妞ゎ偅鍨垮?
                 let mut param_types = Vec::new();
                 let mut fallback = false;
                 let mut generic_meta = Vec::new();
@@ -213,7 +214,7 @@ impl TypeChecker {
 
                 if fallback {
                     self.env.pop_scope();
-                    // 婵犵數濮烽弫鎼佸磻濞戔懞鍥箥椤斿墽鐓撻梺纭呮彧闂勫嫰宕愰悽鍛婄厽闁硅揪绲鹃ˉ澶愭煟椤撶噥娈滈柡灞剧〒娴狅箓宕滆婵洤鈹戦悙鑼濠⒀冩捣濡叉劙骞樼€涙ê顎撻梺鑽ゅ枑婢瑰棙绂掗幘顔解拺濞村吋鐟ч幃濂告煕鐎ｎ偅灏い鏇樺劦瀹曠喖顢楁担铏剐ゆ俊鐐€栭崝鎴﹀磿濞戙垹鍗抽柕蹇ョ磿閸樻悂姊洪崨濠傚Е闁告鏅☉鐢告倷椤掑倻顔曢梺鍛婄懃椤﹁鲸鏅堕悽鍛婄厸閻忕偠濮ら崵鍥煕閳规儳浜炬俊鐐€栫敮濠勭矆娴ｇ儤顐介柣鎰劋閻撴洟鏌￠崶銉ュ妤犵偞顨婇弻娑欑節閸曨偂妲愰梺?
+                    // 濠电姷鏁告慨鐑藉极閹间礁纾绘繛鎴旀嚍閸ヮ剙绠ユい鏂垮⒔閻撴捇姊虹涵鍛涧闂傚嫬瀚板畷鎰版偨閸涘﹦鍘介梺纭呮彧缁查箖藟婢舵劖鐓熸い鎾跺櫏濞堟粓鏌＄仦鍓с€掑ù鐙呯畵瀹曟粏顦┑顔兼搐閳规垿鎮欓懠顒€顣烘繝鈷€鍐╂崳婵″弶鍔欓獮妯尖偓娑櫭鎾绘⒑閼姐倕鏋戝鐟版缁傛帡骞橀瑙ｆ嫼婵炴潙鍚嬮悷褔骞冩總鍛婄厱閻庯綆鍋呯亸顓熴亜閺囨ê鍔︾€规洜鍠栭、妤佹媴閾忓墣銈嗕繆閻愵亜鈧牠宕濋幋锕€纾挎繛鎴欏灩閸楁娊鏌曡箛銉х？闁告ɑ鎮傚娲川婵犲倸袝闂佸憡顭囬弲顐⑩槈閻㈠憡鍊锋い鎺戝€婚鏇㈡⒑閸涘﹦鎳冩い锕侀哺閺呭爼鎮介崨濠勫幐闁诲繒鍋犳慨銈夊吹閸ヮ剚鐓曢柍瑙勫劤娴滅偓淇婇悙顏勨偓鏍暜婵犲嫮鐭嗗ù锝囧劋椤愪粙鏌ｉ幇顔煎妺闁绘挻娲熼弻锟犲炊閵夈儱顬堝Δ鐘靛仦椤ㄥ﹪寮诲☉娆戠瘈闁告洦鍋傚Σ鎰版⒑?
                     let unit = self.env.unit_ty();
                     let ty = self.env.fn_ty(vec![], unit.clone());
                     self.env.insert_fn(name.clone(), ty, vec![], unit);
@@ -774,7 +775,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 闂傚倷娴囬褏鎹㈤幇顔藉床闁归偊鍎靛☉姗嗙叆闁割偆鍠庨崜褰掓⒑鐠団€崇€婚悘鐐跺Г椤斿倿姊绘担鍛婂暈婵炲弶鐗楅弲鑸垫償閿濆洨鐒奸梺鍛婂灩濞存硟h闂傚倸鍊烽悞锔锯偓绗涘懐鐭欓柟娆¤娲ㄩ埀顒€婀辨刊顓㈠汲娴煎瓨鈷掑ù锝呮啞閹牊銇勯幋婵囶棦鐎规洘绻堥獮鎺楀籍閳ь剛鈧艾顭烽弻锝夊籍閸ャ儮鍋撻埀顒勬煕鐎ｎ偅灏柍钘夘槸閳诲骸螣閼姐倖姣夊┑锛勫亼閸婃牠宕归幎鑺ュ€块柨鏂垮⒔閻瑥顭块懜闈涘缂佺姷鏁婚弻鐔兼倻濡纰嶉梺閫炲苯澧痪缁㈠幘濡叉劙骞掗幘宕囩獮闁硅壈鎻槐鏇㈠礉閻戣姤鈷?
+    /// 闂傚倸鍊峰ù鍥敋瑜忛幑銏ゅ箛椤旇棄搴婇梺褰掑亰閸庨潧鈽夊鍡欏弳闂佸壊鍋嗛崰搴ㄥ礈瑜版帗鈷戦悹鍥ｂ偓宕団偓濠氭倶閻愯泛袚妞ゆ柨鍊垮缁樻媴閸涘﹤鏆堝┑鐐插级閻楁寮查懜鍨劅闁挎繂娲ㄩ悞濂告⒑閸涘﹤鐏╂繛瀛樼h闂傚倸鍊搁崐鐑芥倿閿旈敮鍋撶粭娑樻噽閻瑩鏌熷▎陇顕уú銊╁焵椤掆偓濠€杈ㄥ垔椤撱垹姹插ù鐓庣摠閳锋帒霉閿濆懏鍟為柟顖氱墛閵囧嫰骞嬪┑鍥舵＆閻庤娲樼换鍫ョ嵁閹烘绫嶉柍褜鍓涢埀顒佽壘椤兘寮婚敐澶婄睄闁搞儯鍎崑鎾诲焵椤掑嫭鐓曢悗锝庡亝鐏忣參鏌嶉挊澶樻Ц闁宠楠歌灒闁煎鍊栧В澶娾攽閿涘嫬浜奸柛濠冪墵瀹曞綊骞庨懞銉モ偓鍧楁煥閺傚灝鈷旈柣顓熺懃椤潡鎳滈棃娑橆潓缂備胶濮烽弫濠氬蓟閻斿吋鍊绘俊顖濐嚙绾板秹姊洪柅鐐茶嫰婢ь喚鐥紒銏犲箻婵″弶鍔欓獮鎺楀箻瀹曞洨鐛梺纭呭閹活亞妲愰弴銏犵闁绘垼濮ら埛?
     fn path_name(&self, path: &Path) -> TyResult<String> {
         path.as_simple()
             .map(|ident| ident.name.clone())
@@ -813,7 +814,7 @@ impl TypeChecker {
         })
     }
 
-    fn substitute_ty_vars(&self, ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
+    pub(super) fn substitute_ty_vars(&self, ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
         match &ty.kind {
             TyKind::Var(var_id) => subst.get(var_id).cloned().unwrap_or_else(|| ty.clone()),
             TyKind::Tuple(types) => Ty {
@@ -870,7 +871,7 @@ impl TypeChecker {
         }
     }
 
-    fn generic_lookup_key(&self, ty: &Ty) -> String {
+    pub(super) fn generic_lookup_key(&self, ty: &Ty) -> String {
         match &ty.kind {
             TyKind::Adt { name, args } => {
                 if args.is_empty() {
@@ -901,7 +902,7 @@ impl TypeChecker {
         }
     }
 
-    fn match_generic_impl_target(
+    pub(super) fn match_generic_impl_target(
         &self,
         pattern: &Ty,
         concrete: &Ty,
@@ -976,44 +977,6 @@ impl TypeChecker {
         }
     }
 
-    fn instantiate_method_function_ty(
-        &mut self,
-        fn_ty: &FunctionTy,
-        subst: &HashMap<TyVarId, Ty>,
-    ) -> FunctionTy {
-        let mut call_subst = subst.clone();
-        for generic_param in &fn_ty.generic_params {
-            call_subst.insert(*generic_param, self.env.new_ty_var());
-        }
-        FunctionTy::new(
-            fn_ty.has_self,
-            fn_ty
-                .param_types
-                .iter()
-                .map(|param| self.substitute_ty_vars(param, &call_subst))
-                .collect(),
-            self.substitute_ty_vars(&fn_ty.return_type, &call_subst),
-        )
-    }
-    fn lookup_generic_inherent_method(
-        &mut self,
-        receiver_ty: &Ty,
-        method_name: &str,
-    ) -> Option<FunctionTy> {
-        let lookup_key = self.generic_lookup_key(receiver_ty);
-        let impls = self.impl_registry.get_inherent_impls(&lookup_key);
-
-        for impl_info in impls {
-            let mut subst = HashMap::new();
-            if !self.match_generic_impl_target(&impl_info.target_type, receiver_ty, &mut subst) {
-                continue;
-            }
-            if let Some(fn_ty) = impl_info.get_method(method_name).cloned() {
-                return Some(self.instantiate_method_function_ty(&fn_ty, &subst));
-            }
-        }
-        None
-    }
 
     fn resolve_generic_type_args(
         &self,
@@ -1087,7 +1050,7 @@ impl TypeChecker {
         Err(TypeckError::UndefinedType { name })
     }
 
-    /// 闂傚倷娴囬褏鎹㈤幇顔藉床闁圭増婢樼粻鐗堢箾閿濆洤鐦剁紓鍌氬€搁崐椋庢閿熺姴纾诲鑸靛姦閺佸鎲搁弮鍫濈畺婵°倕鎳忛崐濠氭煠閹帒鍔氭繛鍫㈠枛濮婅櫣绮欓幐搴㈡嫳缂備緡鍠栭張顒傜矉閹烘鏁嶉柣鎰皺妤犲洭姊虹紒妯虹仴婵☆偅顨嗛弲鍫曨敍濠ф儳浜鹃悷娆忓缁€鈧悗娈垮枛婢у海鍒掑▎鎰窞闁归偊鍏涚槐鍫曟⒑閸涘﹥澶勯柛瀣嚇瀵娊濡烽埡鍌楁嫽婵炴挻鑹惧ú銈夊几閺冨牊鐓曢柡鍌涘閹癸綁鏌熼鍛珝妞ゃ垺娲熼弫鍐焵椤掑嫬鍨傞柛宀€鍋為崐鐢告煥濠靛棝顎楁鐐村灴閺屽秷顧侀柛鎾寸懇瀹曨垶骞嶉鐓庣亰闂佸壊鍋侀崕鏌ュ磻閺嶎厽鍊甸梻鍫熺⊕閹插憡銇勯敂鍝勭稻y闂傚倸鍊烽悞锔锯偓绗涘懐鐭欓柟娆¤娲、姗€濮€閻橀潧濮?
+    /// 闂傚倸鍊峰ù鍥敋瑜忛幑銏ゅ箛椤旇棄搴婇梺鍦濠㈡绮婚悧鍫㈢闁挎繂娲ら惁鍓佺磽閸屾艾鈧悂宕愭搴㈩偨闁跨喓濮寸壕璇差熆閼搁潧濮﹂柡浣割儑閹叉悂寮崼婵堢暫濠德板€曢幊蹇涘磹婵犳碍鐓犻柟顓熷笒閸旀碍绻涢崼銏犳灈婵﹨娅ｇ划娆撳箰鎼淬垺瀚崇紓鍌欑贰閸犳牠寮甸鍌滅焿闁圭儤顨忛弫宥夋煟閹邦垰鐨哄Δ鐘叉喘濮婅櫣绱掑Ο铏逛淮濠碘槅鍋呴〃鍡涘疾閸洦鏁嶆繝褎鍎虫禍楣冩偡濞嗗繐顏紒鈧埀顒勬倵濞堝灝鏋涘褍娴烽崚鎺戔枎閹邦剛绐為梺褰掑亰閸忔稓妲愰崼鏇熲拺闁告稑锕ユ径鍕煕鐎ｎ亝鍤囩€殿喗濞婃俊鐑藉煛閸屾瀚藉┑鐐存尰閼规儳煤閵堝鍑犻柡鍐ㄧ墛閻撴洟鏌￠崒娑橆嚋闁圭櫢缍侀弻鐔碱敋閸涱厽鐝濆銈冨灪濞茬喖寮崘顔肩劦妞ゆ帒瀚崹鍌炴煕瀹€鈧崑鐐哄磹閻㈠憡鐓ユ繝闈涙椤庢顨ラ悙鏉戠伌闁哄苯绉烽¨渚€鏌涢幘瀵告噰鐎规洦鍨堕獮宥夘敊閻撳海浜伴梻浣稿閸嬩線宕曢弻銉ョ；闁哄稁鍘介崐鐢告⒒閸喓鈯曢柟鎻掓啞閵囧嫰鏁傞崫鍕ɑy闂傚倸鍊搁崐鐑芥倿閿旈敮鍋撶粭娑樻噽閻瑩鏌熷▎陇顕уú顓€佸鈧慨鈧柣姗€娼ф慨?
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
             TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
@@ -1415,527 +1378,6 @@ impl TypeChecker {
         }
     }
 
-    fn resolve_struct_field_types(&mut self, struct_name: &str) -> TyResult<Vec<(String, Ty)>> {
-        let field_defs = self
-            .struct_field_defs
-            .get(struct_name)
-            .cloned()
-            .ok_or_else(|| {
-                TypeckError::Other(format!(
-                    "print cannot resolve fields for struct `{}`",
-                    struct_name
-                ))
-            })?;
-
-        let mut resolved = Vec::with_capacity(field_defs.len());
-        for (field_name, field_ty) in field_defs {
-            let ty = self.check_type(&field_ty)?;
-            resolved.push((field_name, ty));
-        }
-        Ok(resolved)
-    }
-
-    fn ensure_type_printable_for_print(
-        &mut self,
-        ty: &Ty,
-        context: &str,
-        visiting: &mut HashSet<String>,
-    ) -> TyResult<()> {
-        match &ty.kind {
-            TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Str => Ok(()),
-            TyKind::Ref(_, inner) if matches!(inner.kind, TyKind::Str) => Ok(()),
-            TyKind::Adt { name, .. } => self.ensure_struct_printable(name, context, visiting),
-            _ => Err(TypeckError::Other(format!(
-                "print does not support field `{}` of type {}",
-                context, ty.kind
-            ))),
-        }
-    }
-
-    fn ensure_struct_printable(
-        &mut self,
-        struct_name: &str,
-        context: &str,
-        visiting: &mut HashSet<String>,
-    ) -> TyResult<()> {
-        if !visiting.insert(struct_name.to_string()) {
-            return Ok(());
-        }
-
-        let fields = self.resolve_struct_field_types(struct_name)?;
-        for (field_name, field_ty) in fields {
-            let field_context = format!("{}.{}", context, field_name);
-            self.ensure_type_printable_for_print(&field_ty, &field_context, visiting)?;
-        }
-
-        visiting.remove(struct_name);
-        Ok(())
-    }
-
-    fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
-        let builtin_name = match &func.kind {
-            ExprKind::Ident(ident) => Some(ident.name.as_str()),
-            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.as_str()),
-            _ => None,
-        };
-
-        if builtin_name == Some("spawn") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "spawn is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let future_ty = self.check_expr(&args[0])?;
-            if !future_ty.is_future() {
-                return Err(TypeckError::Other(
-                    "spawn requires a Future value".to_string(),
-                ));
-            }
-
-            return Ok(future_ty);
-        }
-
-        if builtin_name == Some("spawn_task") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "spawn_task is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let future_ty = self.check_expr(&args[0])?;
-            if !future_ty.is_future() {
-                return Err(TypeckError::Other(
-                    "spawn_task requires a Future value".to_string(),
-                ));
-            }
-
-            return Ok(self.env.int_ty(IntKind::I64));
-        }
-
-        if builtin_name == Some("sleep") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "sleep is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let duration_ty = self.check_expr(&args[0])?;
-            let i64_ty = self.env.int_ty(IntKind::I64);
-            self.infer.unify(&duration_ty, &i64_ty)?;
-            return Ok(Ty::new(0, TyKind::Future(Box::new(self.env.unit_ty()))));
-        }
-
-        if builtin_name == Some("timeout") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "timeout is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 2 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 2,
-                    found: args.len(),
-                });
-            }
-
-            let future_ty = self.check_expr(&args[0])?;
-            if !future_ty.is_future() {
-                return Err(TypeckError::Other(
-                    "timeout requires a Future value".to_string(),
-                ));
-            }
-
-            let duration_ty = self.check_expr(&args[1])?;
-            let i64_ty = self.env.int_ty(IntKind::I64);
-            self.infer.unify(&duration_ty, &i64_ty)?;
-            return Ok(Ty::new(0, TyKind::Future(Box::new(self.env.bool_ty()))));
-        }
-
-        if builtin_name == Some("join") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "join is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 2 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 2,
-                    found: args.len(),
-                });
-            }
-
-            for arg in args {
-                let future_ty = self.check_expr(arg)?;
-                if !future_ty.is_future() {
-                    return Err(TypeckError::Other(
-                        "join requires Future values".to_string(),
-                    ));
-                }
-            }
-
-            return Ok(self.env.unit_ty());
-        }
-
-        if builtin_name == Some("cancel_task") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "cancel_task is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let task_ty = self.check_expr(&args[0])?;
-            let i64_ty = self.env.int_ty(IntKind::I64);
-            self.infer.unify(&task_ty, &i64_ty)?;
-            return Ok(self.env.bool_ty());
-        }
-
-        if builtin_name == Some("task_status") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "task_status is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let task_ty = self.check_expr(&args[0])?;
-            let i64_ty = self.env.int_ty(IntKind::I64);
-            self.infer.unify(&task_ty, &i64_ty)?;
-            return Ok(i64_ty);
-        }
-
-        if builtin_name == Some("select") {
-            if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "select is only allowed in async contexts".to_string(),
-                ));
-            }
-            if args.len() != 2 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 2,
-                    found: args.len(),
-                });
-            }
-
-            let left_future = self.check_expr(&args[0])?;
-            let right_future = self.check_expr(&args[1])?;
-            let TyKind::Future(left_inner) = &left_future.kind else {
-                return Err(TypeckError::Other(
-                    "select requires Future values".to_string(),
-                ));
-            };
-            let TyKind::Future(right_inner) = &right_future.kind else {
-                return Err(TypeckError::Other(
-                    "select requires Future values".to_string(),
-                ));
-            };
-
-            self.infer.unify(left_inner, right_inner)?;
-            let result_ty = self.infer.apply_subst(left_inner);
-            if !matches!(result_ty.kind, TyKind::Int(_) | TyKind::Bool | TyKind::Float(_)) {
-                return Err(TypeckError::Other(
-                    "select currently only supports Future values whose results are bool, integer, or float scalars"
-                        .to_string(),
-                ));
-            }
-            return Ok(result_ty);
-        }
-
-        // Special handling for `print` builtin function
-        // Check both Ident and Path (single-segment) since the parser may produce either
-        let is_print = match &func.kind {
-            ExprKind::Ident(ident) => ident.name == "print",
-            ExprKind::Path(path) => path.segments.len() == 1 && path.segments[0].name == "print",
-            _ => false,
-        };
-        if is_print {
-            // print expects exactly one argument
-            if args.len() != 1 {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 1,
-                    found: args.len(),
-                });
-            }
-
-            let arg_ty = self.check_expr(&args[0])?;
-            let mut visiting = HashSet::new();
-            let context = match &arg_ty.kind {
-                TyKind::Adt { name, .. } => name.clone(),
-                _ => "print argument".to_string(),
-            };
-            self.ensure_type_printable_for_print(&arg_ty, &context, &mut visiting)?;
-
-            // print returns unit
-            return Ok(self.env.unit_ty());
-        }
-
-        let direct_fn_name = match &func.kind {
-            ExprKind::Ident(ident) => Some(ident.name.clone()),
-            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.clone()),
-            _ => None,
-        };
-
-        let mut generic_ctx: Option<(String, GenericFunctionMeta, HashMap<TyVarId, TyVarId>)> =
-            None;
-        let func_ty = if let Some(name) = direct_fn_name {
-            match self.env.lookup(&name).cloned() {
-                Some(Symbol {
-                    kind: SymbolKind::Function { ty, .. },
-                    ..
-                }) => {
-                    if let Some(meta) = self.generic_function_metas.get(&name).cloned() {
-                        let (instantiated, var_map) =
-                            self.infer.instantiate_with_fresh_vars_and_map(ty);
-                        generic_ctx = Some((name, meta, var_map));
-                        instantiated
-                    } else {
-                        self.infer.instantiate_with_fresh_vars(ty)
-                    }
-                }
-                _ => self.check_expr(func)?,
-            }
-        } else {
-            self.check_expr(func)?
-        };
-
-        if let TyKind::Fn { params, ret, .. } = &func_ty.kind {
-            if params.len() != args.len() {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: params.len(),
-                    found: args.len(),
-                });
-            }
-
-            for (arg_ty, arg_expr) in params.iter().zip(args.iter()) {
-                let actual_ty = self.check_expr(arg_expr)?;
-                // Passing an unawaited Future as a function argument is an escape.
-                // The caller must `await` it at the call-site first.
-                if self.contains_future_escape_ty(&actual_ty) {
-                    return Err(TypeckError::Other(
-                        "future values cannot be passed as arguments; await the async call first"
-                            .to_string(),
-                    ));
-                }
-                self.infer.unify(arg_ty, &actual_ty)?;
-            }
-
-            if let Some((name, meta, var_map)) = generic_ctx.as_ref() {
-                self.enforce_generic_function_constraints(name, meta, var_map)?;
-            }
-
-            let resolved_ret = self.infer.apply_subst(ret);
-
-            let is_async_call = match &func.kind {
-                ExprKind::Ident(ident) => self.async_functions.contains(&ident.name),
-                ExprKind::Path(path) if path.segments.len() == 1 => {
-                    self.async_functions.contains(&path.segments[0].name)
-                }
-                _ => false,
-            };
-            if is_async_call {
-                Ok(Ty::new(0, TyKind::Future(Box::new(resolved_ret))))
-            } else {
-                Ok(resolved_ret)
-            }
-        } else {
-            Err(TypeckError::UndefinedFunction {
-                name: "closure".to_string(),
-            })
-        }
-    }
-
-    fn enforce_generic_function_constraints(
-        &mut self,
-        function_name: &str,
-        meta: &GenericFunctionMeta,
-        var_map: &HashMap<TyVarId, TyVarId>,
-    ) -> TyResult<()> {
-        for param in &meta.params {
-            let mut concrete_ty = if let Some(instantiated_var) = var_map.get(&param.var_id) {
-                let placeholder = Ty::new(0, TyKind::Var(*instantiated_var));
-                self.infer.apply_subst(&placeholder)
-            } else if let Some(default_ty) = &param.default {
-                // Generic parameter is not present in function type (phantom generic).
-                // In this case, default type is the only inference source.
-                self.infer.apply_subst(default_ty)
-            } else if param.bounds.is_empty() {
-                // Unused unconstrained generic parameter does not affect call typing.
-                // Keep backward compatibility for benchmark and existing code.
-                continue;
-            } else {
-                return Err(TypeckError::Other(format!(
-                    "cannot infer generic type parameter `{}` in call to `{}`",
-                    param.name, function_name
-                )));
-            };
-
-            if matches!(concrete_ty.kind, TyKind::Var(_)) {
-                if let Some(default_ty) = &param.default {
-                    let default_ty = self.infer.apply_subst(default_ty);
-                    self.infer.unify(&concrete_ty, &default_ty)?;
-                    concrete_ty = self.infer.apply_subst(&default_ty);
-                }
-            }
-
-            if matches!(concrete_ty.kind, TyKind::Var(_)) {
-                return Err(TypeckError::Other(format!(
-                    "cannot infer generic type parameter `{}` in call to `{}`",
-                    param.name, function_name
-                )));
-            }
-
-            for trait_name in &param.bounds {
-                let concrete_key = type_key(&concrete_ty);
-                if !self
-                    .impl_registry
-                    .implements_trait(trait_name, &concrete_key)
-                {
-                    return Err(TypeckError::Other(format!(
-                        "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
-                        function_name, concrete_key, trait_name, param.name
-                    )));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// 婵犵數濮烽。钘壩ｉ崨鏉戠；闁逞屽墴閺屾稓鈧綆鍋呭畷宀勬煛瀹€瀣？濞寸媴濡囬幏鐘诲箵閹烘埈娼ラ梻鍌欑閹碱偊鎯夋總绋跨獥閹兼番鍔岄悡婵嬫煛閸愩劎澧曢柛妤佸▕閺屻劌鈽夊Ο渚痪濡炪倖鏌ㄧ粔鐟邦潖閸濆娊铏圭磼濡　鏋忛梻浣告啞閺屻劎鎹㈠Ο璁崇箚闁圭虎鍠栫粈鍐煃閸濆嫬鈧崵绮旈崼鏇熲拺閻犲洠鈧磭鈧鏌涘☉鍗炵伇闁衡偓閵娾晜鈷掑ù锝囨嚀椤曟粎绱掔€ｎ偄鐏撮柟顖氭湰閹峰懘鎮滃Ο鍝勭哎婵犵妲呴崹浼村触鐎ｎ喖纾绘慨妞诲亾闁诡喗锕㈤幃娆撴濞戞顥氶梻浣虹帛閹稿鎮烽敂鐐床婵炴垶鐟ョ欢鐐烘倵閿濆骸浜炴い锔诲櫍閹泛顫濋鐘冲櫚闂佸搫鐭夌槐鏇㈠焵椤掑﹦绉甸柛瀣閹便劑宕堕浣哄幍闂佺偓鑹鹃崐绋跨暤閸℃瑢鍋撶憴鍕┛缂傚秳绀侀悾鐑藉箳閹存梹顫嶅┑鐐叉閸旓箓宕埀顒傜磽閸屾艾鈧娆㈤敓鐘茬；濠㈣埖鍔﹂弫瀣喐閺冨牆绠栨俊銈傚亾闁伙綇绻濋獮蹇涘籍閳ь剟鎯勯鐐叉槬闁逞屽墯閵囧嫰骞掗幋婵愪患闂佽棄鍟伴崰鏍蓟閺囩喎绶炴繛鎴炶壘閻繈姊?
-    fn check_method_call(
-        &mut self,
-        receiver: &Expr,
-        method: &Ident,
-        args: &[Expr],
-    ) -> TyResult<Ty> {
-        use crate::typeck::r#trait::type_key;
-
-        let receiver_ty = self.check_expr(receiver)?;
-        let receiver_key = type_key(&receiver_ty);
-
-        let mut arg_types = Vec::new();
-        for arg in args {
-            arg_types.push(self.check_expr(arg)?);
-        }
-
-        let method_name = &method.name;
-
-        // Built-in string method: (&str).len() -> i64
-        let is_str_ref =
-            matches!(&receiver_ty.kind, TyKind::Ref(_, inner) if matches!(inner.kind, TyKind::Str));
-        if is_str_ref && method_name == "len" {
-            if !args.is_empty() {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: 0,
-                    found: args.len(),
-                });
-            }
-            return Ok(self.env.int_ty(crate::typeck::ty::IntKind::I64));
-        }
-
-        // Inherent impl lookup first.
-        let exact_inherent = self
-            .impl_registry
-            .lookup_inherent_method(&receiver_key, method_name)
-            .cloned();
-        if let Some(fn_ty) = exact_inherent
-            .map(|fn_ty| self.instantiate_method_function_ty(&fn_ty, &HashMap::new()))
-            .or_else(|| self.lookup_generic_inherent_method(&receiver_ty, method_name))
-        {
-            if fn_ty.param_types.len() != args.len() {
-                return Err(TypeckError::ArgumentCountMismatch {
-                    expected: fn_ty.param_types.len(),
-                    found: args.len(),
-                });
-            }
-
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
-                self.infer.unify(expected, actual)?;
-            }
-
-            return Ok(self.infer.apply_subst(&fn_ty.return_type));
-        }
-
-        // Then trait impl lookup.
-        if let Some(fn_ty) =
-            self.select_trait_method_call_candidate(&receiver_key, method_name, args.len())?
-        {
-            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
-                self.infer.unify(expected, actual)?;
-            }
-            return Ok(self.infer.apply_subst(&fn_ty.return_type));
-        }
-
-        Err(TypeckError::MethodNotFound {
-            type_name: receiver_key,
-            method_name: method_name.clone(),
-        })
-    }
-
-    fn select_trait_method_call_candidate(
-        &mut self,
-        receiver_key: &str,
-        method_name: &str,
-        arg_count: usize,
-    ) -> TyResult<Option<FunctionTy>> {
-        let mut candidates = Vec::new();
-        for trait_name in self.trait_registry.all_traits() {
-            if let Some(fn_ty) = self
-                .impl_registry
-                .lookup_trait_method(&trait_name, receiver_key, method_name)
-                .cloned()
-            {
-                let instantiated = self.instantiate_method_function_ty(&fn_ty, &HashMap::new());
-                candidates.push(MethodCandidate {
-                    label: trait_name,
-                    param_count: instantiated.param_types.len(),
-                    value: instantiated,
-                });
-            }
-        }
-
-        match select_method_candidate(candidates, arg_count) {
-            MethodCandidateMatch::None => Ok(None),
-            MethodCandidateMatch::WrongArity { expected } => {
-                Err(TypeckError::ArgumentCountMismatch {
-                    expected,
-                    found: arg_count,
-                })
-            }
-            MethodCandidateMatch::One(fn_ty) => Ok(Some(fn_ty)),
-            MethodCandidateMatch::Ambiguous { labels } => Err(TypeckError::Other(
-                ambiguous_method_error(method_name, receiver_key, &labels),
-            )),
-        }
-    }
 
 }
 
@@ -1982,6 +1424,5 @@ mod tests {
         assert!(TypeChecker::ty_contains_future_escape(&fn_ty));
     }
 }
-
 
 
