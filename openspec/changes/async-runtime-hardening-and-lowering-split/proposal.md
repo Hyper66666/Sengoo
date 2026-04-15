@@ -2,20 +2,20 @@
 
 ## Why
 
-The async pipeline is broadly functional and heavily tested, but a few seams are
-still too fragile:
+The async pipeline was broadly functional and heavily tested, but a few seams
+were still too fragile:
 
-- `lowering.rs` still contains at least one user-reachable ICE path through
+- `lowering.rs` had a user-reachable ICE path through
   `current_block.expect(...)`.
-- `runtime.c` hardens async frame `load/store`, but `frame_free` still does not
+- `runtime.c` had hardened async frame `load/store`, but `frame_free` did not
   follow the same debug/release contract.
-- `async_lowering.rs` has already been split substantially; the remaining work
-  is to finish error-propagation cleanup and move structural pressure toward
+- `async_lowering.rs` had already been split substantially; the remaining work
+  was to finish error-propagation cleanup and move structural pressure toward
   `lowering.rs`.
 
 ## What Changes
 
-This change tracks:
+This change tracked:
 
 1. Recursive future-escape detection through wrapper/container type shapes.
 2. Stable ordinal-based async dispatch IDs instead of hashed IDs.
@@ -26,24 +26,22 @@ This change tracks:
 
 ## Current Status
 
-Already completed on `main`:
+Completed on `main`:
 
 - Recursive future-escape checks for `Ref/Ptr/Fn`
 - Stable ordinal-based async dispatch registry
 - Async-lowering hot-path `panic!/expect` cleanup for CFG/remap/result-dispatch
-- Debug/release contract for async frame `load/store`
+- Debug/release contract for async frame `load/store/free`
 - `async_lowering.rs` submodules for:
   - cfg planning
   - frame layout
   - poll synthesis
   - entry synthesis
   - dispatch synthesis
-
-Still open:
-
-- `lowering.rs current_block.expect(...)` -> non-ICE diagnostic path
-- `runtime.c sengoo_async_frame_free(...)` debug/release contract alignment
 - `lowering.rs` first-cut modular split for builtin/planning-heavy logic
+
+This change is complete. Follow-on work continues in separate roadmap items,
+especially `typeck/check.rs` modularization and later codegen restructuring.
 
 ## Scope Guard
 
