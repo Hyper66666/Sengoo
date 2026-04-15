@@ -74,7 +74,7 @@ use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::if_expr_helpers::lower_if_expr;
-use self::match_expr_helpers::{lower_enum_match_expr, lower_non_enum_match_expr};
+use self::match_expr_helpers::lower_match_expr;
 use self::loop_expr_helpers::lower_loop_expr;
 use self::while_expr_helpers::lower_while_expr;
 use self::for_expr_helpers::lower_for_expr;
@@ -1319,15 +1319,7 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Ref(_is_mut, expr) => lower_ref_expr(self, expr),
             HIRExpr::Deref(expr) => lower_deref_expr(self, expr),
             HIRExpr::Lambda { params, body } => lower_lambda_expr(self, params, body),
-            HIRExpr::Match { scrutinee, arms } => {
-                let scrutinee_local = self.lower_expr(scrutinee);
-                let scrutinee_ty = self.get_local_type(scrutinee_local).clone();
-
-                match scrutinee_ty {
-                    MIRType::Enum { .. } => lower_enum_match_expr(self, scrutinee_local, arms),
-                    _ => lower_non_enum_match_expr(self, scrutinee_local, arms),
-                }
-            }
+            HIRExpr::Match { scrutinee, arms } => lower_match_expr(self, scrutinee, arms),
             HIRExpr::MethodCall {
                 receiver,
                 method,
