@@ -1,5 +1,5 @@
-//! 类型检查器实现，负责对AST进行类型验证、推断和约束检查。
-//! 实现了Sengoo语言的类型系统，包括泛型、trait约束、类型转换等核心功能。
+//! 绫诲瀷妫€鏌ュ櫒瀹炵幇锛岃礋璐ｅAST杩涜绫诲瀷楠岃瘉銆佹帹鏂拰绾︽潫妫€鏌ャ€?
+//! 瀹炵幇浜哠engoo璇█鐨勭被鍨嬬郴缁燂紝鍖呮嫭娉涘瀷銆乼rait绾︽潫銆佺被鍨嬭浆鎹㈢瓑鏍稿績鍔熻兘銆?
 use crate::ast::pattern::Pattern;
 use crate::ast::Visibility;
 use crate::ast::*;
@@ -16,6 +16,8 @@ use crate::Result;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
+
+mod stmt_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -42,15 +44,15 @@ struct GenericTypeMeta {
     params: Vec<GenericTypeParamMeta>,
 }
 
-/// 类型检查器，负责对AST进行类型验证、推断和约束检查。
+/// 绫诲瀷妫€鏌ュ櫒锛岃礋璐ｅAST杩涜绫诲瀷楠岃瘉銆佹帹鏂拰绾︽潫妫€鏌ャ€?
 pub struct TypeChecker {
-    /// 类型环境，存储变量和类型的绑定关系。
+    /// 绫诲瀷鐜锛屽瓨鍌ㄥ彉閲忓拰绫诲瀷鐨勭粦瀹氬叧绯汇€?
     env: TypeEnv,
-    /// 类型推断器，用于类型变量的推断和统一。
+    /// 绫诲瀷鎺ㄦ柇鍣紝鐢ㄤ簬绫诲瀷鍙橀噺鐨勬帹鏂拰缁熶竴銆?
     infer: TypeInfer,
-    /// Trait注册表，存储所有已声明的trait信息。
+    /// Trait娉ㄥ唽琛紝瀛樺偍鎵€鏈夊凡澹版槑鐨則rait淇℃伅銆?
     trait_registry: TraitRegistry,
-    /// Impl注册表，存储所有trait实现的信息。
+    /// Impl娉ㄥ唽琛紝瀛樺偍鎵€鏈塼rait瀹炵幇鐨勪俊鎭€?
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
     struct_type_params: HashMap<String, Vec<TypeParam>>,
@@ -84,7 +86,7 @@ impl TypeChecker {
         &self.async_functions
     }
 
-    /// 返回类型环境的不可变引用。
+    /// 杩斿洖绫诲瀷鐜鐨勪笉鍙彉寮曠敤銆?
     pub fn env(&self) -> &TypeEnv {
         &self.env
     }
@@ -94,32 +96,32 @@ impl TypeChecker {
         self.env
     }
 
-    /// 返回类型推断器的不可变引用。
+    /// 杩斿洖绫诲瀷鎺ㄦ柇鍣ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
     pub fn infer(&self) -> &TypeInfer {
         &self.infer
     }
 
-    /// 返回trait注册表的不可变引用。
+    /// 杩斿洖trait娉ㄥ唽琛ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
     pub fn trait_registry(&self) -> &TraitRegistry {
         &self.trait_registry
     }
 
-    /// 返回impl注册表的不可变引用。
+    /// 杩斿洖impl娉ㄥ唽琛ㄧ殑涓嶅彲鍙樺紩鐢ㄣ€?
     pub fn impl_registry(&self) -> &ImplRegistry {
         &self.impl_registry
     }
 
-    /// 返回trait注册表的可变引用。
+    /// 杩斿洖trait娉ㄥ唽琛ㄧ殑鍙彉寮曠敤銆?
     pub fn trait_registry_mut(&mut self) -> &mut TraitRegistry {
         &mut self.trait_registry
     }
 
-    /// 返回impl注册表的可变引用。
+    /// 杩斿洖impl娉ㄥ唽琛ㄧ殑鍙彉寮曠敤銆?
     pub fn impl_registry_mut(&mut self) -> &mut ImplRegistry {
         &mut self.impl_registry
     }
 
-    /// 对整个程序进行类型检查，包括声明预处理和全量检查。
+    /// 瀵规暣涓▼搴忚繘琛岀被鍨嬫鏌ワ紝鍖呮嫭澹版槑棰勫鐞嗗拰鍏ㄩ噺妫€鏌ャ€?
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
@@ -156,7 +158,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 预声明顶层声明（函数、结构体、枚举等），将其类型信息注册到环境中。
+    /// 棰勫０鏄庨《灞傚０鏄庯紙鍑芥暟銆佺粨鏋勪綋銆佹灇涓剧瓑锛夛紝灏嗗叾绫诲瀷淇℃伅娉ㄥ唽鍒扮幆澧冧腑銆?
     fn declare_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -181,7 +183,7 @@ impl TypeChecker {
                     return Ok(());
                 }
 
-                // 处理泛型函数参数类型绑定，进行类型检查。
+                // 澶勭悊娉涘瀷鍑芥暟鍙傛暟绫诲瀷缁戝畾锛岃繘琛岀被鍨嬫鏌ャ€?
                 let mut param_types = Vec::new();
                 let mut fallback = false;
                 let mut generic_meta = Vec::new();
@@ -208,7 +210,7 @@ impl TypeChecker {
 
                 if fallback {
                     self.env.pop_scope();
-                    // 泛型参数绑定失败时回退处理。
+                    // 娉涘瀷鍙傛暟缁戝畾澶辫触鏃跺洖閫€澶勭悊銆?
                     let unit = self.env.unit_ty();
                     let ty = self.env.fn_ty(vec![], unit.clone());
                     self.env.insert_fn(name.clone(), ty, vec![], unit);
@@ -381,7 +383,7 @@ impl TypeChecker {
         result.unwrap_or_default()
     }
 
-    /// 对单个顶层声明进行类型检查。
+    /// 瀵瑰崟涓《灞傚０鏄庤繘琛岀被鍨嬫鏌ャ€?
     fn check_decl(&mut self, decl: &Decl) -> Result<()> {
         match &decl.kind {
             DeclKind::Function(fn_decl) => {
@@ -859,7 +861,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对函数声明进行完整的类型检查，包括参数、返回值和函数体。
+    /// 瀵瑰嚱鏁板０鏄庤繘琛屽畬鏁寸殑绫诲瀷妫€鏌ワ紝鍖呮嫭鍙傛暟銆佽繑鍥炲€煎拰鍑芥暟浣撱€?
     fn check_function_decl(&mut self, fn_decl: &Function) -> Result<()> {
         self.env.push_scope();
         let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
@@ -879,7 +881,7 @@ impl TypeChecker {
         self.validate_contracts_for_function(fn_decl, &ret_ty)?;
         self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
-        // 函数签名中的参数和返回值类型检查完毕，进行注册。
+        // 鍑芥暟绛惧悕涓殑鍙傛暟鍜岃繑鍥炲€肩被鍨嬫鏌ュ畬姣曪紝杩涜娉ㄥ唽銆?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env.insert_fn(
             fn_decl.name.name.clone(),
@@ -902,7 +904,7 @@ impl TypeChecker {
             self.check_block(&fn_decl.body)?
         };
 
-        // 检查函数体，处理隐式返回值。
+        // 妫€鏌ュ嚱鏁颁綋锛屽鐞嗛殣寮忚繑鍥炲€笺€?
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
             && matches!(ret_ty.kind, TyKind::Int(_));
@@ -915,7 +917,7 @@ impl TypeChecker {
 
         self.env.pop_scope();
 
-        // 泛型函数注册，将泛型元信息存入映射表。
+        // 娉涘瀷鍑芥暟娉ㄥ唽锛屽皢娉涘瀷鍏冧俊鎭瓨鍏ユ槧灏勮〃銆?
         let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
             .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
@@ -1045,7 +1047,7 @@ impl TypeChecker {
         Ok(metas)
     }
 
-    /// 对结构体声明进行类型检查，验证字段类型和泛型约束。
+    /// 瀵圭粨鏋勪綋澹版槑杩涜绫诲瀷妫€鏌ワ紝楠岃瘉瀛楁绫诲瀷鍜屾硾鍨嬬害鏉熴€?
     fn check_struct_decl(&mut self, struct_decl: &Struct) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&struct_decl.type_params)?;
@@ -1058,7 +1060,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对枚举声明进行类型检查，验证各枚举变体的类型。
+    /// 瀵规灇涓惧０鏄庤繘琛岀被鍨嬫鏌ワ紝楠岃瘉鍚勬灇涓惧彉浣撶殑绫诲瀷銆?
     fn check_enum_decl(&mut self, enum_decl: &Enum) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&enum_decl.type_params)?;
@@ -1078,7 +1080,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对类声明进行类型检查，包括继承关系和方法验证。
+    /// 瀵圭被澹版槑杩涜绫诲瀷妫€鏌ワ紝鍖呮嫭缁ф壙鍏崇郴鍜屾柟娉曢獙璇併€?
     fn check_class_decl(&mut self, class_decl: &Class) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&class_decl.type_params)?;
@@ -1145,7 +1147,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对常量声明进行类型检查，确保初始值类型匹配。
+    /// 瀵瑰父閲忓０鏄庤繘琛岀被鍨嬫鏌ワ紝纭繚鍒濆鍊肩被鍨嬪尮閰嶃€?
     fn check_const_decl(&mut self, const_decl: &Const) -> Result<()> {
         let ty = self.check_type(&const_decl.ty)?;
         let value_ty = self.check_expr(&const_decl.value)?;
@@ -1155,7 +1157,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对静态变量声明进行类型检查，确保初始值类型匹配。
+    /// 瀵归潤鎬佸彉閲忓０鏄庤繘琛岀被鍨嬫鏌ワ紝纭繚鍒濆鍊肩被鍨嬪尮閰嶃€?
     fn check_static_decl(&mut self, static_decl: &Static) -> Result<()> {
         let ty = self.check_type(&static_decl.ty)?;
         // Static.value is always present
@@ -1166,7 +1168,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对trait声明进行类型检查，验证方法签名和关联类型。
+    /// 瀵箃rait澹版槑杩涜绫诲瀷妫€鏌ワ紝楠岃瘉鏂规硶绛惧悕鍜屽叧鑱旂被鍨嬨€?
     fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         use crate::typeck::r#trait::{MethodSig, TraitInfo};
 
@@ -1183,13 +1185,13 @@ impl TypeChecker {
             matches!(trait_decl.vis, Visibility::Public),
         );
 
-        // 检查trait中各个方法的签名和实现。
+        // 妫€鏌rait涓悇涓柟娉曠殑绛惧悕鍜屽疄鐜般€?
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
                     self.env.push_scope();
                     let method_generic_meta = self.bind_type_params_with_meta(&method.type_params)?;
-                    // 绑定方法级别的泛型类型参数。
+                    // 缁戝畾鏂规硶绾у埆鐨勬硾鍨嬬被鍨嬪弬鏁般€?
                     let mut param_types = Vec::new();
                     let mut has_self = false;
 
@@ -1202,7 +1204,7 @@ impl TypeChecker {
                         }
                     }
 
-                    // 检查方法的返回类型。
+                    // 妫€鏌ユ柟娉曠殑杩斿洖绫诲瀷銆?
                     let ret_ty = if let Some(ret) = &method.return_type {
                         self.check_type(ret)?
                     } else {
@@ -1245,7 +1247,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 对impl块进行类型检查，验证实现是否符合trait约束。
+    /// 瀵筰mpl鍧楄繘琛岀被鍨嬫鏌ワ紝楠岃瘉瀹炵幇鏄惁绗﹀悎trait绾︽潫銆?
     fn check_impl_decl(&mut self, impl_decl: &Impl) -> Result<()> {
         use crate::typeck::r#trait::type_key;
         use crate::typeck::r#trait::{FunctionTy, ImplInfo};
@@ -1264,7 +1266,7 @@ impl TypeChecker {
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name);
 
-        // 检查impl块中各个方法的实现。
+        // 妫€鏌mpl鍧椾腑鍚勪釜鏂规硶鐨勫疄鐜般€?
         for item in &impl_decl.items {
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
@@ -1295,7 +1297,7 @@ impl TypeChecker {
             self.env.pop_scope();
         }
 
-        // 验证impl是否满足trait的约束要求。
+        // 楠岃瘉impl鏄惁婊¤冻trait鐨勭害鏉熻姹傘€?
         if let Some(trait_name) = impl_info.trait_name.clone() {
             // For trait impls, also register default methods from the trait
             // definition that are not overridden by the impl.
@@ -1307,7 +1309,7 @@ impl TypeChecker {
                     if !impl_info.has_method(method_name) {
                         if method_sig.has_default {
                             // This method has a default implementation in the trait
-                            // 该方法有默认实现，添加到impl信息中。
+                            // 璇ユ柟娉曟湁榛樿瀹炵幇锛屾坊鍔犲埌impl淇℃伅涓€?
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
@@ -1347,7 +1349,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 将路径（Path）解析为字符串名称。
+    /// 灏嗚矾寰勶紙Path锛夎В鏋愪负瀛楃涓插悕绉般€?
     fn path_name(&self, path: &Path) -> TyResult<String> {
         path.as_simple()
             .map(|ident| ident.name.clone())
@@ -1660,7 +1662,7 @@ impl TypeChecker {
         Err(TypeckError::UndefinedType { name })
     }
 
-    /// 将AST类型节点转换为内部类型表示（Ty）。
+    /// 灏咥ST绫诲瀷鑺傜偣杞崲涓哄唴閮ㄧ被鍨嬭〃绀猴紙Ty锛夈€?
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
             TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
@@ -1988,10 +1990,10 @@ impl TypeChecker {
         }
     }
 
-    /// 检查字面量表达式并返回其类型。
+    /// 妫€鏌ュ瓧闈㈤噺琛ㄨ揪寮忓苟杩斿洖鍏剁被鍨嬨€?
     fn check_literal(&mut self, lit: &Literal) -> TyResult<Ty> {
         Ok(match lit {
-            // 检查整数字面量，返回对应的整数类型。
+            // 妫€鏌ユ暣鏁板瓧闈㈤噺锛岃繑鍥炲搴旂殑鏁存暟绫诲瀷銆?
             Literal::Int(_) => self.env.int_ty(IntKind::I64),
             Literal::Float(_) => self.env.float_ty(FloatKind::F64),
             Literal::String(_) => {
@@ -2009,7 +2011,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查标识符表达式，查找变量或函数的类型。
+    /// 妫€鏌ユ爣璇嗙琛ㄨ揪寮忥紝鏌ユ壘鍙橀噺鎴栧嚱鏁扮殑绫诲瀷銆?
     fn check_ident(&mut self, ident: &Ident) -> TyResult<Ty> {
         let symbol = if let Some(symbol) = self.env.lookup(&ident.name) {
             symbol.clone()
@@ -2035,7 +2037,7 @@ impl TypeChecker {
         }
     }
 
-    /// 检查路径表达式，解析命名空间路径的类型。
+    /// 妫€鏌ヨ矾寰勮〃杈惧紡锛岃В鏋愬懡鍚嶇┖闂磋矾寰勭殑绫诲瀷銆?
     fn check_path(&mut self, path: &Path) -> TyResult<Ty> {
         if let Some(ident) = path.as_simple() {
             self.check_ident(ident)
@@ -2051,7 +2053,7 @@ impl TypeChecker {
         }
     }
 
-    /// 检查二元运算表达式，验证操作数类型兼容性并返回结果类型。
+    /// 妫€鏌ヤ簩鍏冭繍绠楄〃杈惧紡锛岄獙璇佹搷浣滄暟绫诲瀷鍏煎鎬у苟杩斿洖缁撴灉绫诲瀷銆?
     fn check_binary(&mut self, op: &BinOp, left: &Expr, right: &Expr) -> TyResult<Ty> {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
@@ -2140,7 +2142,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查一元运算表达式，验证操作数类型并返回结果类型。
+    /// 妫€鏌ヤ竴鍏冭繍绠楄〃杈惧紡锛岄獙璇佹搷浣滄暟绫诲瀷骞惰繑鍥炵粨鏋滅被鍨嬨€?
     fn check_unary(&mut self, op: &UnOp, operand: &Expr) -> TyResult<Ty> {
         let ty = self.check_expr(operand)?;
         Ok(match op {
@@ -2160,7 +2162,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查赋值表达式，验证目标和值的类型兼容性。
+    /// 妫€鏌ヨ祴鍊艰〃杈惧紡锛岄獙璇佺洰鏍囧拰鍊肩殑绫诲瀷鍏煎鎬с€?
     fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
@@ -2168,7 +2170,7 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查复合赋值表达式（如 +=、-= 等），验证类型兼容性。
+    /// 妫€鏌ュ鍚堣祴鍊艰〃杈惧紡锛堝 +=銆?= 绛夛級锛岄獙璇佺被鍨嬪吋瀹规€с€?
     fn check_assign_op(&mut self, _op: &AssignOp, target: &Expr, value: &Expr) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
@@ -2176,7 +2178,7 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    /// 检查索引表达式，验证基础对象可被索引且索引类型正确。
+    /// 妫€鏌ョ储寮曡〃杈惧紡锛岄獙璇佸熀纭€瀵硅薄鍙绱㈠紩涓旂储寮曠被鍨嬫纭€?
     fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
         let index_ty = self.check_expr(index)?;
@@ -2196,7 +2198,7 @@ impl TypeChecker {
         })
     }
 
-    /// 检查字段访问表达式，验证字段存在性和类型。
+    /// 妫€鏌ュ瓧娈佃闂〃杈惧紡锛岄獙璇佸瓧娈靛瓨鍦ㄦ€у拰绫诲瀷銆?
     fn check_field(&mut self, base: &Expr, name: &Ident) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
 
@@ -2660,7 +2662,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 检查方法调用表达式，进行方法解析和参数类型检查。
+    /// 妫€鏌ユ柟娉曡皟鐢ㄨ〃杈惧紡锛岃繘琛屾柟娉曡В鏋愬拰鍙傛暟绫诲瀷妫€鏌ャ€?
     fn check_method_call(
         &mut self,
         receiver: &Expr,
@@ -2779,7 +2781,7 @@ impl TypeChecker {
         Ok(self.env.tuple_ty(elem_types))
     }
 
-    /// 检查数组表达式，验证所有元素类型一致。
+    /// 妫€鏌ユ暟缁勮〃杈惧紡锛岄獙璇佹墍鏈夊厓绱犵被鍨嬩竴鑷淬€?
     fn check_array(&mut self, elems: &[Expr]) -> TyResult<Ty> {
         if elems.is_empty() {
             return Ok(self.env.array_ty(self.infer.fresh_ty_var(), 0));
@@ -2800,225 +2802,30 @@ impl TypeChecker {
         Ok(self.env.array_ty(first_ty, elems.len()))
     }
 
-    /// Lambda表达式类型检查，推断参数类型和返回类型。
-    /// Lambda表达式类型检查，推断参数类型和返回类型。
+    /// Lambda琛ㄨ揪寮忕被鍨嬫鏌ワ紝鎺ㄦ柇鍙傛暟绫诲瀷鍜岃繑鍥炵被鍨嬨€?
+    /// Lambda琛ㄨ揪寮忕被鍨嬫鏌ワ紝鎺ㄦ柇鍙傛暟绫诲瀷鍜岃繑鍥炵被鍨嬨€?
     fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
-        // 为每个lambda参数创建新的类型变量。
+        // 涓烘瘡涓猯ambda鍙傛暟鍒涘缓鏂扮殑绫诲瀷鍙橀噺銆?
         let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
 
-        // 推断参数类型约束。
+        // 鎺ㄦ柇鍙傛暟绫诲瀷绾︽潫銆?
         self.env.push_scope();
 
-        // 将参数绑定到作用域中。
+        // 灏嗗弬鏁扮粦瀹氬埌浣滅敤鍩熶腑銆?
         for (param, ty) in params.iter().zip(param_tys.iter()) {
             self.env.insert_var(param.name.clone(), ty.clone());
         }
 
-        // 检查lambda体的类型。
+        // 妫€鏌ambda浣撶殑绫诲瀷銆?
         let body_ty = self.check_expr(body)?;
 
-        // 清理作用域。
+        // 娓呯悊浣滅敤鍩熴€?
         self.env.pop_scope();
 
-        // 返回函数类型。
+        // 杩斿洖鍑芥暟绫诲瀷銆?
         Ok(self.env.fn_ty(param_tys, body_ty))
     }
 
-    /// 检查块表达式，按顺序检查所有语句并返回最终类型。
-    fn check_block(&mut self, block: &Block) -> TyResult<Ty> {
-        self.env.push_scope();
-
-        let mut result_ty = self.env.unit_ty();
-        for stmt in &block.stmts {
-            if let Some(ty) = self.check_stmt(stmt)? {
-                result_ty = ty;
-            }
-        }
-
-        self.env.pop_scope();
-        Ok(result_ty)
-    }
-
-    /// 检查单条语句，返回可选的类型（仅表达式语句有类型）。
-    fn check_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
-        match &stmt.kind {
-            StmtKind::Let {
-                name, ty, value, ..
-            } => {
-                let var_ty = if let Some(ty) = ty {
-                    self.check_type(ty)?
-                } else {
-                    self.infer.fresh_ty_var()
-                };
-
-                // 获取let绑定中初始值的类型。
-                let value_ty = match value {
-                    Some(v) => self.check_expr(v)?,
-                    None => self.env.unit_ty(),
-                };
-                self.infer.unify(&var_ty, &value_ty)?;
-
-                self.env.insert_var(name.name.clone(), var_ty);
-                Ok(None)
-            }
-            StmtKind::Const { name, ty, value } => {
-                let var_ty = self.check_type(ty)?;
-                let value_ty = self.check_expr(value)?;
-                self.infer.unify(&var_ty, &value_ty)?;
-                self.env.insert_var(name.name.clone(), var_ty);
-                Ok(None)
-            }
-            StmtKind::Expr(expr) => {
-                let ty = self.check_expr(expr)?;
-                Ok(Some(ty))
-            }
-            StmtKind::Item(item) => {
-                // 检查内联声明语句。
-                self.check_decl(item)
-                    .map_err(|e| TypeckError::Other(e.to_string()))?;
-                Ok(None)
-            }
-        }
-    }
-
-    /// 检查if条件表达式，验证条件为bool型且分支类型兼容。
-    fn check_if(
-        &mut self,
-        cond: &Expr,
-        then_branch: &Block,
-        else_branch: &Option<Box<Expr>>,
-    ) -> TyResult<Ty> {
-        let cond_ty = self.check_expr(cond)?;
-        let bool_ty = self.env.bool_ty();
-        self.infer.unify(&cond_ty, &bool_ty)?;
-
-        let then_ty = self.check_block(then_branch)?;
-        let else_ty = match else_branch {
-            Some(e) => self.check_expr(e)?,
-            None => self.env.unit_ty(),
-        };
-
-        self.infer.unify(&then_ty, &else_ty)?;
-        Ok(then_ty)
-    }
-
-    /// 检查while循环，验证条件为bool型。
-    fn check_while(&mut self, cond: &Expr, body: &Block) -> TyResult<Ty> {
-        let cond_ty = self.check_expr(cond)?;
-        let bool_ty = self.env.bool_ty();
-        self.infer.unify(&cond_ty, &bool_ty)?;
-
-        self.check_block(body)?;
-        Ok(self.env.unit_ty())
-    }
-
-    /// 检查for循环，验证迭代器类型和模式匹配。
-    fn check_for(&mut self, pattern: &Pattern, iter: &Expr, body: &Block) -> TyResult<Ty> {
-        let elem_ty = match &iter.kind {
-            ExprKind::Range { start, end, .. } => {
-                let range_ty = self.env.int_ty(IntKind::I64);
-                if let Some(start) = start.as_deref() {
-                    let start_ty = self.check_expr(start)?;
-                    self.infer.unify(&start_ty, &range_ty)?;
-                }
-                if let Some(end) = end.as_deref() {
-                    let end_ty = self.check_expr(end)?;
-                    self.infer.unify(&end_ty, &range_ty)?;
-                }
-                range_ty
-            }
-            _ => {
-                let iter_ty = self.check_expr(iter)?;
-                match &iter_ty.kind {
-                    TyKind::Array(elem, _) | TyKind::Slice(elem) => (**elem).clone(),
-                    _ => {
-                        return Err(TypeckError::Other(
-                            "for loop expects an array, slice, or range iterable".to_string(),
-                        ));
-                    }
-                }
-            }
-        };
-        // 检查for循环体。
-
-        self.env.push_scope();
-
-        // 绑定循环变量到模式中。
-        let var_name = match &pattern.kind {
-            crate::ast::pattern::PatternKind::Ident(name) => name.name.clone(),
-            crate::ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
-            _ => "_loop".to_string(),
-        };
-
-        self.env.insert_var(var_name, elem_ty);
-        self.check_block(body)?;
-        self.env.pop_scope();
-
-        Ok(self.env.unit_ty())
-    }
-
-    /// 检查loop循环体类型。
-    fn check_loop(&mut self, body: &Block) -> TyResult<Ty> {
-        self.check_block(body)?;
-        Ok(self.env.unit_ty())
-    }
-
-    /// 检查match表达式，验证所有分支类型一致。
-    fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> TyResult<Ty> {
-        self.check_expr(scrutinee)?;
-
-        let mut arm_types = Vec::new();
-        for arm in arms {
-            if let Some(guard) = &arm.guard {
-                self.check_expr(guard)?;
-            }
-            let arm_ty = self.check_expr(&arm.body)?;
-            arm_types.push(arm_ty);
-        }
-
-        let result_ty = arm_types
-            .first()
-            .cloned()
-            .unwrap_or_else(|| self.env.unit_ty());
-        for arm_ty in &arm_types {
-            self.infer.unify(&result_ty, arm_ty)?;
-        }
-
-        Ok(result_ty)
-    }
-
-    /// 检查return语句，验证返回值类型与函数返回类型匹配。
-    fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
-        match value {
-            Some(v) => {
-                let ty = self.check_expr(v)?;
-                if self.contains_future_escape_ty(&ty) {
-                    return Err(Self::future_escape_error());
-                }
-            }
-            None => {}
-        }
-        Ok(self.env.never_ty())
-    }
-
-    /// 检查break语句，验证可选值类型与循环类型匹配。
-    fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
-        match value {
-            Some(v) => {
-                let ty = self.check_expr(v)?;
-                if self.contains_future_escape_ty(&ty) {
-                    return Err(Self::future_escape_error());
-                }
-            }
-            None => {}
-        }
-        Ok(self.env.never_ty())
-    }
-
-    /// 检查continue语句，返回never类型。
-    fn check_continue(&mut self) -> TyResult<Ty> {
-        Ok(self.env.never_ty())
-    }
 }
 
 impl Default for TypeChecker {
