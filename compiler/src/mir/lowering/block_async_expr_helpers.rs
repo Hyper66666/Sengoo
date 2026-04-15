@@ -1,7 +1,8 @@
 ﻿use super::*;
+use super::body_lowering_helpers::lower_body_expr_to_new_block;
 
 pub(super) fn lower_block_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> Local {
-    ctx.lower_body(body);
+    lower_body_expr_to_new_block(ctx, body);
     Local::new(0, LocalKind::Return)
 }
 
