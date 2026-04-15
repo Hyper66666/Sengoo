@@ -1,0 +1,195 @@
+use super::*;
+
+impl TypeChecker {
+    /// 检查块表达式，按顺序检查所有语句并返回最终类型。
+    pub(super) fn check_block(&mut self, block: &Block) -> TyResult<Ty> {
+        self.env.push_scope();
+
+        let mut result_ty = self.env.unit_ty();
+        for stmt in &block.stmts {
+            if let Some(ty) = self.check_stmt(stmt)? {
+                result_ty = ty;
+            }
+        }
+
+        self.env.pop_scope();
+        Ok(result_ty)
+    }
+
+    /// 检查单条语句，返回可选的类型（仅表达式语句有类型）。
+    pub(super) fn check_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
+        match &stmt.kind {
+            StmtKind::Let {
+                name, ty, value, ..
+            } => {
+                let var_ty = if let Some(ty) = ty {
+                    self.check_type(ty)?
+                } else {
+                    self.infer.fresh_ty_var()
+                };
+
+                let value_ty = match value {
+                    Some(v) => self.check_expr(v)?,
+                    None => self.env.unit_ty(),
+                };
+                self.infer.unify(&var_ty, &value_ty)?;
+
+                self.env.insert_var(name.name.clone(), var_ty);
+                Ok(None)
+            }
+            StmtKind::Const { name, ty, value } => {
+                let var_ty = self.check_type(ty)?;
+                let value_ty = self.check_expr(value)?;
+                self.infer.unify(&var_ty, &value_ty)?;
+                self.env.insert_var(name.name.clone(), var_ty);
+                Ok(None)
+            }
+            StmtKind::Expr(expr) => {
+                let ty = self.check_expr(expr)?;
+                Ok(Some(ty))
+            }
+            StmtKind::Item(item) => {
+                self.check_decl(item)
+                    .map_err(|e| TypeckError::Other(e.to_string()))?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// 检查if条件表达式，验证条件为bool型且分支类型兼容。
+    pub(super) fn check_if(
+        &mut self,
+        cond: &Expr,
+        then_branch: &Block,
+        else_branch: &Option<Box<Expr>>,
+    ) -> TyResult<Ty> {
+        let cond_ty = self.check_expr(cond)?;
+        let bool_ty = self.env.bool_ty();
+        self.infer.unify(&cond_ty, &bool_ty)?;
+
+        let then_ty = self.check_block(then_branch)?;
+        let else_ty = match else_branch {
+            Some(e) => self.check_expr(e)?,
+            None => self.env.unit_ty(),
+        };
+
+        self.infer.unify(&then_ty, &else_ty)?;
+        Ok(then_ty)
+    }
+
+    /// 检查while循环，验证条件为bool型。
+    pub(super) fn check_while(&mut self, cond: &Expr, body: &Block) -> TyResult<Ty> {
+        let cond_ty = self.check_expr(cond)?;
+        let bool_ty = self.env.bool_ty();
+        self.infer.unify(&cond_ty, &bool_ty)?;
+
+        self.check_block(body)?;
+        Ok(self.env.unit_ty())
+    }
+
+    /// 检查for循环，验证迭代器类型和模式匹配。
+    pub(super) fn check_for(&mut self, pattern: &Pattern, iter: &Expr, body: &Block) -> TyResult<Ty> {
+        let elem_ty = match &iter.kind {
+            ExprKind::Range { start, end, .. } => {
+                let range_ty = self.env.int_ty(IntKind::I64);
+                if let Some(start) = start.as_deref() {
+                    let start_ty = self.check_expr(start)?;
+                    self.infer.unify(&start_ty, &range_ty)?;
+                }
+                if let Some(end) = end.as_deref() {
+                    let end_ty = self.check_expr(end)?;
+                    self.infer.unify(&end_ty, &range_ty)?;
+                }
+                range_ty
+            }
+            _ => {
+                let iter_ty = self.check_expr(iter)?;
+                match &iter_ty.kind {
+                    TyKind::Array(elem, _) | TyKind::Slice(elem) => (**elem).clone(),
+                    _ => {
+                        return Err(TypeckError::Other(
+                            "for loop expects an array, slice, or range iterable".to_string(),
+                        ));
+                    }
+                }
+            }
+        };
+
+        self.env.push_scope();
+
+        let var_name = match &pattern.kind {
+            crate::ast::pattern::PatternKind::Ident(name) => name.name.clone(),
+            crate::ast::pattern::PatternKind::Wildcard => "_loop".to_string(),
+            _ => "_loop".to_string(),
+        };
+
+        self.env.insert_var(var_name, elem_ty);
+        self.check_block(body)?;
+        self.env.pop_scope();
+
+        Ok(self.env.unit_ty())
+    }
+
+    /// 检查loop循环体类型。
+    pub(super) fn check_loop(&mut self, body: &Block) -> TyResult<Ty> {
+        self.check_block(body)?;
+        Ok(self.env.unit_ty())
+    }
+
+    /// 检查match表达式，验证所有分支类型一致。
+    pub(super) fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> TyResult<Ty> {
+        self.check_expr(scrutinee)?;
+
+        let mut arm_types = Vec::new();
+        for arm in arms {
+            if let Some(guard) = &arm.guard {
+                self.check_expr(guard)?;
+            }
+            let arm_ty = self.check_expr(&arm.body)?;
+            arm_types.push(arm_ty);
+        }
+
+        let result_ty = arm_types
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.env.unit_ty());
+        for arm_ty in &arm_types {
+            self.infer.unify(&result_ty, arm_ty)?;
+        }
+
+        Ok(result_ty)
+    }
+
+    /// 检查return语句，验证返回值类型与函数返回类型匹配。
+    pub(super) fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
+        match value {
+            Some(v) => {
+                let ty = self.check_expr(v)?;
+                if self.contains_future_escape_ty(&ty) {
+                    return Err(Self::future_escape_error());
+                }
+            }
+            None => {}
+        }
+        Ok(self.env.never_ty())
+    }
+
+    /// 检查break语句，验证可选值类型与循环类型匹配。
+    pub(super) fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
+        match value {
+            Some(v) => {
+                let ty = self.check_expr(v)?;
+                if self.contains_future_escape_ty(&ty) {
+                    return Err(Self::future_escape_error());
+                }
+            }
+            None => {}
+        }
+        Ok(self.env.never_ty())
+    }
+
+    /// 检查continue语句，返回never类型。
+    pub(super) fn check_continue(&mut self) -> TyResult<Ty> {
+        Ok(self.env.never_ty())
+    }
+}
