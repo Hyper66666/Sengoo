@@ -439,7 +439,7 @@ impl EnumVariant {
             name,
             fields: types
                 .into_iter()
-                .map(|ty| VariantField::Unnamed(ty))
+                .map(VariantField::Unnamed)
                 .collect(),
             discriminant: None,
             span,

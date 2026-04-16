@@ -30,11 +30,11 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
         }
         MIRType::Tuple(types) if types.is_empty() => "void".to_string(),
         MIRType::Tuple(types) => {
-            let field_types: Vec<String> = types.iter().map(|t| mir_type_to_llvm_str(t)).collect();
+            let field_types: Vec<String> = types.iter().map(mir_type_to_llvm_str).collect();
             format!("{{{}}}", field_types.join(", "))
         }
         MIRType::Fn { params, ret } => {
-            let param_str: Vec<String> = params.iter().map(|p| mir_type_to_llvm_str(p)).collect();
+            let param_str: Vec<String> = params.iter().map(mir_type_to_llvm_str).collect();
             format!("{} ({})*", mir_type_to_llvm_str(ret), param_str.join(", "))
         }
         MIRType::Struct { name, .. } => {
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_mir_constant_float() {
-        assert_eq!(mir_constant_to_llvm_str(&MirConstant::Float(3.14)), "3.14");
+        assert_eq!(mir_constant_to_llvm_str(&MirConstant::Float(2.5)), "2.5");
     }
 
     #[test]

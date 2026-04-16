@@ -1739,6 +1739,56 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_timeout_future_binding_can_be_awaited() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def child() -> i64 {
+    await sleep(20);
+    7
+}
+
+async def main() -> i64 {
+    let fut = timeout(child(), 1);
+    if await fut {
+        0
+    } else {
+        42
+    }
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("bound timeout source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-timeout-bound-fut", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-timeout-bound-fut",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("bound timeout native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_executes_spawned_future() {
     let Some(clang) = find_clang() else {
         return;
@@ -2976,9 +3026,7 @@ fn load_stdlib_surface_source() -> String {
 }
 
 fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::process::Output> {
-    let Some(clang) = find_clang() else {
-        return None;
-    };
+    let clang = find_clang()?;
 
     let combined = format!("{}\n\n{}", load_stdlib_surface_source(), source);
     let llvm_ir = compile_compiler_ir(&combined).expect("stdlib source should compile");

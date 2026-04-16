@@ -254,7 +254,7 @@ impl ImplRegistry {
     pub fn register_inherent(&mut self, type_key: String, info: ImplInfo) {
         self.inherent_impls
             .entry(type_key)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(info);
     }
 
@@ -262,7 +262,7 @@ impl ImplRegistry {
     pub fn register_trait_impl(&mut self, trait_name: String, type_key: String, info: ImplInfo) {
         self.trait_impls
             .entry(trait_name)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(type_key, info);
     }
 

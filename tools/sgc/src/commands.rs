@@ -219,6 +219,7 @@ pub(crate) fn can_skip_codegen_via_generic_cache(
             .all(|symbol| generic_symbols.contains(symbol))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn cmd_build(
     input: &str,
     output: Option<&str>,
@@ -800,6 +801,7 @@ pub(crate) async fn cmd_build(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn cmd_run(
     input: &str,
     opt_level: u8,

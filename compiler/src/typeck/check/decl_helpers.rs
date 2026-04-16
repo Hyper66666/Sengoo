@@ -138,7 +138,7 @@ impl TypeChecker {
         if !is_main_with_implicit_return {
             self.infer
                 .unify(&body_ty, &ret_ty)
-                .map_err(|e| CompileError::from(e))?;
+                .map_err(CompileError::from)?;
         }
 
         self.env.pop_scope();

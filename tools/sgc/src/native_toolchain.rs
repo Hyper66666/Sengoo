@@ -325,62 +325,6 @@ fn windows_compile_include_paths() -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_test_dir(label: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("sengoo-sgc-{label}-{}-{unique}", std::process::id()))
-    }
-
-    fn write_marker(path: &Path) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, "").unwrap();
-    }
-
-    #[test]
-    fn resolve_workspace_root_prefers_runtime_binary_ancestor() {
-        let runtime_root = temp_test_dir("runtime-root");
-        let stale_compiled_root = temp_test_dir("stale-compiled");
-        let exe_name = if cfg!(windows) { "sgc.exe" } else { "sgc" };
-        let exe_path = runtime_root.join("target").join("debug").join(exe_name);
-
-        write_marker(&runtime_root.join("Cargo.toml"));
-        write_marker(&runtime_root.join("runtime").join("Cargo.toml"));
-        write_marker(&runtime_root.join("tools").join("sgc").join("Cargo.toml"));
-        write_marker(&exe_path);
-
-        let resolved = resolve_workspace_root(Some(&exe_path), None, &stale_compiled_root);
-        assert_eq!(resolved, runtime_root);
-
-        let _ = fs::remove_dir_all(&resolved);
-    }
-
-    #[test]
-    fn resolve_workspace_root_falls_back_to_current_dir_ancestor() {
-        let runtime_root = temp_test_dir("cwd-root");
-        let stale_compiled_root = temp_test_dir("stale-cwd");
-        let cwd = runtime_root.join("bench").join("tests");
-
-        write_marker(&runtime_root.join("Cargo.toml"));
-        write_marker(&runtime_root.join("runtime").join("Cargo.toml"));
-        write_marker(&runtime_root.join("tools").join("sgc").join("Cargo.toml"));
-        fs::create_dir_all(&cwd).unwrap();
-
-        let resolved = resolve_workspace_root(None, Some(&cwd), &stale_compiled_root);
-        assert_eq!(resolved, runtime_root);
-
-        let _ = fs::remove_dir_all(&resolved);
-    }
-}
-
 #[cfg(windows)]
 fn run_windows_link_command(
     object_paths: &[PathBuf],
@@ -662,4 +606,60 @@ pub(crate) fn default_build_output_path_for_case(case: &Path) -> PathBuf {
     let build_dir = source_dir.join("build");
     let ext = if cfg!(windows) { ".exe" } else { "" };
     build_dir.join(format!("{}{}", stem, ext))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("sengoo-sgc-{label}-{}-{unique}", std::process::id()))
+    }
+
+    fn write_marker(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, "").unwrap();
+    }
+
+    #[test]
+    fn resolve_workspace_root_prefers_runtime_binary_ancestor() {
+        let runtime_root = temp_test_dir("runtime-root");
+        let stale_compiled_root = temp_test_dir("stale-compiled");
+        let exe_name = if cfg!(windows) { "sgc.exe" } else { "sgc" };
+        let exe_path = runtime_root.join("target").join("debug").join(exe_name);
+
+        write_marker(&runtime_root.join("Cargo.toml"));
+        write_marker(&runtime_root.join("runtime").join("Cargo.toml"));
+        write_marker(&runtime_root.join("tools").join("sgc").join("Cargo.toml"));
+        write_marker(&exe_path);
+
+        let resolved = resolve_workspace_root(Some(&exe_path), None, &stale_compiled_root);
+        assert_eq!(resolved, runtime_root);
+
+        let _ = fs::remove_dir_all(&resolved);
+    }
+
+    #[test]
+    fn resolve_workspace_root_falls_back_to_current_dir_ancestor() {
+        let runtime_root = temp_test_dir("cwd-root");
+        let stale_compiled_root = temp_test_dir("stale-cwd");
+        let cwd = runtime_root.join("bench").join("tests");
+
+        write_marker(&runtime_root.join("Cargo.toml"));
+        write_marker(&runtime_root.join("runtime").join("Cargo.toml"));
+        write_marker(&runtime_root.join("tools").join("sgc").join("Cargo.toml"));
+        fs::create_dir_all(&cwd).unwrap();
+
+        let resolved = resolve_workspace_root(None, Some(&cwd), &stale_compiled_root);
+        assert_eq!(resolved, runtime_root);
+
+        let _ = fs::remove_dir_all(&resolved);
+    }
 }

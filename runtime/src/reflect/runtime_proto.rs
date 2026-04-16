@@ -117,14 +117,14 @@ fn decode_varint(input: &[u8], index: &mut usize) -> Result<u64, i32> {
 fn encode_user_event_wire(id: u32, name: &str, ts: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(16 + name.len());
     // field 1: id (varint)
-    encode_varint((1 << 3 | 0) as u64, &mut out);
+    encode_varint((1 << 3) as u64, &mut out);
     encode_varint(id as u64, &mut out);
     // field 2: name (length-delimited)
     encode_varint((2 << 3 | 2) as u64, &mut out);
     encode_varint(name.len() as u64, &mut out);
     out.extend_from_slice(name.as_bytes());
     // field 3: ts (varint)
-    encode_varint((3 << 3 | 0) as u64, &mut out);
+    encode_varint((3 << 3) as u64, &mut out);
     encode_varint(ts, &mut out);
     out
 }

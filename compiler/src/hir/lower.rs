@@ -36,7 +36,8 @@ pub fn lower_ast(program: &Program, type_env: &TypeEnv) -> Module {
     module
 }
 
-fn build_class_index<'a>(program: &'a Program) -> HashMap<String, &'a ast::Class> {
+#[allow(clippy::needless_lifetimes)]
+fn build_class_index(program: &Program) -> HashMap<String, &ast::Class> {
     let mut index = HashMap::new();
     for decl in &program.decls {
         if let ast::DeclKind::Class(class_decl) = &decl.kind {
@@ -241,7 +242,7 @@ fn lower_struct(struct_decl: &ast::Struct, type_env: &TypeEnv) -> Result<HIRStru
         .fields
         .iter()
         .enumerate()
-        .filter_map(|(i, f)| {
+        .map(|(i, f)| {
             let ty = lower_type(&f.ty, type_env);
             let is_pub = matches!(f.vis, ast::Visibility::Public);
             let name = f
@@ -249,7 +250,7 @@ fn lower_struct(struct_decl: &ast::Struct, type_env: &TypeEnv) -> Result<HIRStru
                 .as_ref()
                 .map(|ident| ident.name.clone())
                 .unwrap_or_else(|| format!("_{}", i));
-            Some(HIRField { name, ty, is_pub })
+            HIRField { name, ty, is_pub }
         })
         .collect();
 
@@ -668,7 +669,8 @@ fn lower_type_alias(
 }
 
 /// 降低 AST 类型到 HIR 类型
-fn lower_type(ast_type: &ast::Type, type_env: &TypeEnv) -> HIRType {
+#[allow(clippy::only_used_in_recursion)]
+fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
     match &ast_type.kind {
         ast::TypeKind::Infer => HIRType::new(HIRTypeKind::Error),
         ast::TypeKind::Path(path) => {
@@ -704,31 +706,31 @@ fn lower_type(ast_type: &ast::Type, type_env: &TypeEnv) -> HIRType {
                 .as_simple()
                 .map(|ident| ident.name.as_str())
                 .unwrap_or("");
-            let lowered_args = args.iter().map(|arg| lower_type(arg, type_env)).collect();
+            let lowered_args = args.iter().map(|arg| lower_type(arg, _type_env)).collect();
             HIRType::named(name.to_string(), lowered_args)
         }
         ast::TypeKind::Tuple(types) => {
             if types.is_empty() {
                 HIRType::unit()
             } else {
-                let hir_types = types.iter().map(|t| lower_type(t, type_env)).collect();
+                let hir_types = types.iter().map(|t| lower_type(t, _type_env)).collect();
                 HIRType::tuple(hir_types)
             }
         }
         ast::TypeKind::Array(elem, len) => {
-            let elem_ty = lower_type(elem, type_env);
+            let elem_ty = lower_type(elem, _type_env);
             HIRType::array(elem_ty, *len as usize)
         }
-        ast::TypeKind::Slice(elem) => HIRType::slice(lower_type(elem, type_env)),
-        ast::TypeKind::Ptr { base, .. } => HIRType::pointer(lower_type(base, type_env)),
+        ast::TypeKind::Slice(elem) => HIRType::slice(lower_type(elem, _type_env)),
+        ast::TypeKind::Ptr { base, .. } => HIRType::pointer(lower_type(base, _type_env)),
         ast::TypeKind::Ref { base, is_mut } => {
-            HIRType::reference(*is_mut, lower_type(base, type_env))
+            HIRType::reference(*is_mut, lower_type(base, _type_env))
         }
         ast::TypeKind::Fn { params, ret } => {
-            let param_types = params.iter().map(|p| lower_type(p, type_env)).collect();
+            let param_types = params.iter().map(|p| lower_type(p, _type_env)).collect();
             let ret_type = Box::new(
                 ret.as_ref()
-                    .map_or(HIRType::unit(), |r| lower_type(r, type_env)),
+                    .map_or(HIRType::unit(), |r| lower_type(r, _type_env)),
             );
             HIRType::function(param_types, ret_type)
         }
@@ -858,9 +860,9 @@ fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                 });
             }
             ast::StmtKind::Const { name, ty, value } => {
-                let hir_ty = lower_type(&ty, type_env);
+                let hir_ty = lower_type(ty, type_env);
                 let hir_value =
-                    lower_expr(&value, type_env).unwrap_or_else(|_| HIRExpr::Lit(HIRLiteral::Null));
+                    lower_expr(value.as_ref(), type_env).unwrap_or(HIRExpr::Lit(HIRLiteral::Null));
                 hir_body.add_stmt(HIRStmt::Let {
                     name: name.name.clone(),
                     symbol: name.symbol,
@@ -1102,7 +1104,7 @@ fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr, String> {
             value
                 .as_ref()
                 .and_then(|v| lower_expr(v, type_env).ok())
-                .unwrap_or_else(|| HIRExpr::Lit(HIRLiteral::Null))
+                .unwrap_or(HIRExpr::Lit(HIRLiteral::Null))
         }
         ast::ExprKind::Await(expr) => HIRExpr::Await(Box::new(lower_expr(expr, type_env)?)),
         ast::ExprKind::AsyncBlock(block) => {

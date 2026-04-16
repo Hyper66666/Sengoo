@@ -14,6 +14,7 @@ use crate::{
     FRONTEND_SCHEDULER_SCHEMA_VERSION,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_module_graph_snapshot(
     input_path: &Path,
     source: &str,

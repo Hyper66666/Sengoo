@@ -114,14 +114,9 @@ fn run_roundtrip_bench(
             };
             workers.push(thread::spawn(move || {
                 let mut recv = vec![0u8; payload_len];
-                loop {
-                    match stream.read_exact(&mut recv) {
-                        Ok(()) => {
-                            if stream.write_all(&recv).is_err() {
-                                break;
-                            }
-                        }
-                        Err(_) => break,
+                while let Ok(()) = stream.read_exact(&mut recv) {
+                    if stream.write_all(&recv).is_err() {
+                        break;
                     }
                 }
             }));

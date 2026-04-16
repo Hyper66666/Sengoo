@@ -70,6 +70,7 @@ fn compact_manifest_for_serialization(
     compact
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn can_use_incremental_link_with_metadata(
     previous: &BuildCacheMetadata,
     llvm_ir_hash: u64,
@@ -116,6 +117,7 @@ pub(crate) fn can_use_incremental_link_with_metadata(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn can_use_incremental_link_with_run_metadata(
     previous: &RunCacheMetadata,
     llvm_ir_hash: u64,
@@ -321,6 +323,7 @@ pub(crate) fn build_cache_mismatch_reasons(
     reasons
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn derive_build_workset_plan(
     previous: Option<&BuildCacheMetadata>,
     impact: Option<&EditImpact>,
@@ -356,6 +359,7 @@ pub(crate) fn derive_build_workset_plan(
     derive_workset_plan_from_impact(impact, root_module)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn derive_run_workset_plan(
     previous: Option<&RunCacheMetadata>,
     impact: Option<&EditImpact>,

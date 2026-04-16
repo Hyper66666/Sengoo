@@ -65,7 +65,7 @@ impl<'source> Parser<'source> {
 
     fn parse_optional_where_clause(
         &mut self,
-        type_params: &mut Vec<TypeParam>,
+        type_params: &mut [TypeParam],
         terminators: &[TokenKind],
     ) -> Result<()> {
         if self.consume(TokenKind::WhereKw).is_none() {

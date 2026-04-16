@@ -472,7 +472,7 @@ pub(crate) fn ast_interface_signature(source: &str) -> Option<String> {
     Some(interface_signature_from_program(&program))
 }
 
-fn source_span_slice<'a>(source: &'a str, span: Span) -> Option<&'a str> {
+fn source_span_slice(source: &str, span: Span) -> Option<&str> {
     source.get(span.lo as usize..span.hi as usize)
 }
 
@@ -885,6 +885,7 @@ fn generic_type_param_signature(type_params: &[TypeParam]) -> String {
         .join(",")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_generic_item(
     out: &mut Vec<GenericItemFingerprint>,
     kind: &str,

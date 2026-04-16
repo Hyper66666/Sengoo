@@ -335,7 +335,7 @@ pub enum TokenKind {
     RawString(Option<String>),
 
     // 字节串
-    #[regex(r#"b"[^"\\]*(?:\\.[^"\\]*)*""#, |lex| Some(lex.slice()[2..lex.slice().len()-1].as_bytes().to_vec()))]
+    #[regex(r#"b"[^"\\]*(?:\\.[^"\\]*)*""#, |lex| { let slice = lex.slice(); Some(slice.as_bytes()[2..slice.len()-1].to_vec()) })]
     Bytes(Option<Vec<u8>>),
 
     // 字符
@@ -470,7 +470,7 @@ impl fmt::Display for Keyword {
 
 impl Keyword {
     /// 从字符串解析关键字
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn lookup(s: &str) -> Option<Self> {
         match s {
             "def" => Some(Keyword::Def),
             "fn" => Some(Keyword::Fn), // 函数类型
@@ -623,60 +623,60 @@ impl TokenKind {
 
     /// 检查是否为特定关键字
     pub fn matches_keyword(&self, kw: Keyword) -> bool {
-        match (self, kw) {
-            (TokenKind::DefKw, Keyword::Def) => true,
-            (TokenKind::FnKw, Keyword::Fn) => true,
-            (TokenKind::ClassKw, Keyword::Class) => true,
-            (TokenKind::StructKw, Keyword::Struct) => true,
-            (TokenKind::EnumKw, Keyword::Enum) => true,
-            (TokenKind::ImplKw, Keyword::Impl) => true,
-            (TokenKind::TraitKw, Keyword::Trait) => true,
-            (TokenKind::TypeKw, Keyword::Type) => true,
-            (TokenKind::ConstKw, Keyword::Const) => true,
-            (TokenKind::StaticKw, Keyword::Static) => true,
-            (TokenKind::LetKw, Keyword::Let) => true,
-            (TokenKind::IfKw, Keyword::If) => true,
-            (TokenKind::ElifKw, Keyword::Elif) => true,
-            (TokenKind::ElseKw, Keyword::Else) => true,
-            (TokenKind::MatchKw, Keyword::Match) => true,
-            (TokenKind::CaseKw, Keyword::Case) => true,
-            (TokenKind::DefaultKw, Keyword::Default) => true,
-            (TokenKind::ForKw, Keyword::For) => true,
-            (TokenKind::WhileKw, Keyword::While) => true,
-            (TokenKind::LoopKw, Keyword::Loop) => true,
-            (TokenKind::BreakKw, Keyword::Break) => true,
-            (TokenKind::ContinueKw, Keyword::Continue) => true,
-            (TokenKind::ReturnKw, Keyword::Return) => true,
-            (TokenKind::YieldKw, Keyword::Yield) => true,
-            (TokenKind::AwaitKw, Keyword::Await) => true,
-            (TokenKind::AsyncKw, Keyword::Async) => true,
-            (TokenKind::ParallelKw, Keyword::Parallel) => true,
-            (TokenKind::ImportKw, Keyword::Import) => true,
-            (TokenKind::FromKw, Keyword::From) => true,
-            (TokenKind::AsKw, Keyword::As) => true,
-            (TokenKind::ExportKw, Keyword::Export) => true,
-            (TokenKind::ExternKw, Keyword::Extern) => true,
-            (TokenKind::UnsafeKw, Keyword::Unsafe) => true,
-            (TokenKind::TryKw, Keyword::Try) => true,
-            (TokenKind::ExceptKw, Keyword::Except) => true,
-            (TokenKind::FinallyKw, Keyword::Finally) => true,
-            (TokenKind::RaiseKw, Keyword::Raise) => true,
-            (TokenKind::ThrowKw, Keyword::Throw) => true,
-            (TokenKind::PubKw, Keyword::Pub) => true,
-            (TokenKind::PrivKw, Keyword::Priv) => true,
-            (TokenKind::WhereKw, Keyword::Where) => true,
-            (TokenKind::RequiresKw, Keyword::Requires) => true,
-            (TokenKind::EnsuresKw, Keyword::Ensures) => true,
-            (TokenKind::SelfKw, Keyword::SelfKw) => true,
-            (TokenKind::SelfLowerKw, Keyword::SelfLower) => true,
-            (TokenKind::TrueKw, Keyword::True) => true,
-            (TokenKind::FalseKw, Keyword::False) => true,
-            (TokenKind::NoneKw, Keyword::None) => true,
-            (TokenKind::InKw, Keyword::In) => true,
-            (TokenKind::IsKw, Keyword::Is) => true,
-            (TokenKind::PassKw, Keyword::Pass) => true,
-            _ => false,
-        }
+        matches!(
+            (self, kw),
+            (TokenKind::DefKw, Keyword::Def)
+                | (TokenKind::FnKw, Keyword::Fn)
+                | (TokenKind::ClassKw, Keyword::Class)
+                | (TokenKind::StructKw, Keyword::Struct)
+                | (TokenKind::EnumKw, Keyword::Enum)
+                | (TokenKind::ImplKw, Keyword::Impl)
+                | (TokenKind::TraitKw, Keyword::Trait)
+                | (TokenKind::TypeKw, Keyword::Type)
+                | (TokenKind::ConstKw, Keyword::Const)
+                | (TokenKind::StaticKw, Keyword::Static)
+                | (TokenKind::LetKw, Keyword::Let)
+                | (TokenKind::IfKw, Keyword::If)
+                | (TokenKind::ElifKw, Keyword::Elif)
+                | (TokenKind::ElseKw, Keyword::Else)
+                | (TokenKind::MatchKw, Keyword::Match)
+                | (TokenKind::CaseKw, Keyword::Case)
+                | (TokenKind::DefaultKw, Keyword::Default)
+                | (TokenKind::ForKw, Keyword::For)
+                | (TokenKind::WhileKw, Keyword::While)
+                | (TokenKind::LoopKw, Keyword::Loop)
+                | (TokenKind::BreakKw, Keyword::Break)
+                | (TokenKind::ContinueKw, Keyword::Continue)
+                | (TokenKind::ReturnKw, Keyword::Return)
+                | (TokenKind::YieldKw, Keyword::Yield)
+                | (TokenKind::AwaitKw, Keyword::Await)
+                | (TokenKind::AsyncKw, Keyword::Async)
+                | (TokenKind::ParallelKw, Keyword::Parallel)
+                | (TokenKind::ImportKw, Keyword::Import)
+                | (TokenKind::FromKw, Keyword::From)
+                | (TokenKind::AsKw, Keyword::As)
+                | (TokenKind::ExportKw, Keyword::Export)
+                | (TokenKind::ExternKw, Keyword::Extern)
+                | (TokenKind::UnsafeKw, Keyword::Unsafe)
+                | (TokenKind::TryKw, Keyword::Try)
+                | (TokenKind::ExceptKw, Keyword::Except)
+                | (TokenKind::FinallyKw, Keyword::Finally)
+                | (TokenKind::RaiseKw, Keyword::Raise)
+                | (TokenKind::ThrowKw, Keyword::Throw)
+                | (TokenKind::PubKw, Keyword::Pub)
+                | (TokenKind::PrivKw, Keyword::Priv)
+                | (TokenKind::WhereKw, Keyword::Where)
+                | (TokenKind::RequiresKw, Keyword::Requires)
+                | (TokenKind::EnsuresKw, Keyword::Ensures)
+                | (TokenKind::SelfKw, Keyword::SelfKw)
+                | (TokenKind::SelfLowerKw, Keyword::SelfLower)
+                | (TokenKind::TrueKw, Keyword::True)
+                | (TokenKind::FalseKw, Keyword::False)
+                | (TokenKind::NoneKw, Keyword::None)
+                | (TokenKind::InKw, Keyword::In)
+                | (TokenKind::IsKw, Keyword::Is)
+                | (TokenKind::PassKw, Keyword::Pass)
+        )
     }
 
     /// 检查是否为标识符
@@ -798,6 +798,10 @@ impl Token {
         self.span.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.span.is_empty()
+    }
+
     /// 是否为 EOF（通过检查 span 是否为空来判断）
     pub fn is_eof(&self) -> bool {
         self.span.is_empty()
@@ -914,10 +918,10 @@ mod tests {
 
     #[test]
     fn test_keyword_from_str() {
-        assert_eq!(Keyword::from_str("fn"), Some(Keyword::Fn));
-        assert_eq!(Keyword::from_str("let"), Some(Keyword::Let));
-        assert_eq!(Keyword::from_str("if"), Some(Keyword::If));
-        assert_eq!(Keyword::from_str("unknown"), None);
+        assert_eq!(Keyword::lookup("fn"), Some(Keyword::Fn));
+        assert_eq!(Keyword::lookup("let"), Some(Keyword::Let));
+        assert_eq!(Keyword::lookup("if"), Some(Keyword::If));
+        assert_eq!(Keyword::lookup("unknown"), None);
     }
 
     #[test]

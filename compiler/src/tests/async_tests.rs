@@ -241,6 +241,24 @@ async def main() -> i64 {
 }
 
 #[test]
+fn timeout_future_binding_can_be_awaited() {
+    let source = r#"
+async def child() -> i64 { 1 }
+async def main() -> i64 {
+    let fut = timeout(child(), 1);
+    if await fut { 1 } else { 0 }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "timeout future bindings should remain awaitable, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
 fn timeout_lowering_emits_runtime_timeout_call() {
     let source = r#"
 async def helper() -> i64 { 1 }
@@ -906,6 +924,71 @@ async def main() -> i64 {
     assert!(
         ir.contains("@sengoo_async_frame_alloc"),
         "IR should declare async frame alloc"
+    );
+}
+
+#[test]
+fn sleep_builtin_ir_contains_runtime_declarations() {
+    let source = r#"
+async def main() -> i64 {
+    await sleep(1);
+    0
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("sleep builtin should compile to IR");
+    assert!(
+        ir.contains("declare i64 @sengoo_async_sleep__start(i64)"),
+        "IR should declare sleep start helper"
+    );
+    assert!(
+        ir.contains("declare i64 @sengoo_async_sleep__poll(i64)"),
+        "IR should declare sleep poll helper"
+    );
+    assert!(
+        ir.contains("declare void @sengoo_async_sleep__result(i64)"),
+        "IR should declare sleep result helper"
+    );
+    assert!(
+        ir.contains("declare i1 @sengoo_async_sleep__cancel(i64)"),
+        "IR should declare sleep cancel helper"
+    );
+    assert!(
+        ir.contains("declare void @sengoo_async_sleep__drop(i64)"),
+        "IR should declare sleep drop helper"
+    );
+}
+
+#[test]
+fn timeout_builtin_ir_contains_runtime_declarations() {
+    let source = r#"
+async def child() -> i64 { 1 }
+async def main() -> i64 {
+    let fut = timeout(child(), 1);
+    if await fut { 1 } else { 0 }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("timeout builtin should compile to IR");
+    assert!(
+        ir.contains("declare i64 @sengoo_async_timeout_bool__start(i64, i64, i64)"),
+        "IR should declare timeout start helper"
+    );
+    assert!(
+        ir.contains("declare i64 @sengoo_async_timeout_bool__poll(i64)"),
+        "IR should declare timeout poll helper"
+    );
+    assert!(
+        ir.contains("declare i1 @sengoo_async_timeout_bool__result(i64)"),
+        "IR should declare timeout result helper"
+    );
+    assert!(
+        ir.contains("declare i1 @sengoo_async_timeout_bool__cancel(i64)"),
+        "IR should declare timeout cancel helper"
+    );
+    assert!(
+        ir.contains("declare void @sengoo_async_timeout_bool__drop(i64)"),
+        "IR should declare timeout drop helper"
     );
 }
 

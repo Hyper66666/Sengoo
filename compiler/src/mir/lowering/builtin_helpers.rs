@@ -412,10 +412,12 @@ mod tests {
         let inherent_templates = Vec::new();
         let trait_templates = Vec::new();
 
-        let mut options = MirLowerOptions::default();
-        options.async_functions = ["left".to_string(), "right".to_string()]
-            .into_iter()
-            .collect();
+        let options = MirLowerOptions {
+            async_functions: ["left".to_string(), "right".to_string()]
+                .into_iter()
+                .collect(),
+            ..MirLowerOptions::default()
+        };
 
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(

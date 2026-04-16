@@ -24,6 +24,7 @@ impl Allocator {
 
     /// 释放内存
     #[no_mangle]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub extern "C" fn sengoo_free(ptr: *mut u8, size: usize, align: usize) {
         if ptr.is_null() {
             return;
@@ -37,6 +38,7 @@ impl Allocator {
 
     /// 重新分配内存
     #[no_mangle]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub extern "C" fn sengoo_realloc(
         ptr: *mut u8,
         old_size: usize,
@@ -57,6 +59,7 @@ impl Allocator {
 
 /// 字符串长度
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_str_len(s: *const u8) -> usize {
     if s.is_null() {
         return 0;
@@ -74,6 +77,7 @@ pub extern "C" fn sengoo_str_len(s: *const u8) -> usize {
 
 /// 字符串比较
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_str_compare(s1: *const u8, s2: *const u8) -> i32 {
     if s1.is_null() && s2.is_null() {
         return 0;
@@ -107,6 +111,7 @@ pub extern "C" fn sengoo_str_compare(s1: *const u8, s2: *const u8) -> i32 {
 
 /// 字符串复制
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_str_copy(src: *const u8, dst: *mut u8, max_len: usize) -> usize {
     if src.is_null() || dst.is_null() {
         return 0;
@@ -135,6 +140,7 @@ pub extern "C" fn sengoo_str_copy(src: *const u8, dst: *mut u8, max_len: usize) 
 
 /// 字符串拼接 - 分配新字符串
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_str_concat(s1: *const u8, s2: *const u8) -> *mut u8 {
     let len1 = sengoo_str_len(s1);
     let len2 = sengoo_str_len(s2);
@@ -193,9 +199,10 @@ pub extern "C" fn sengoo_print_f64(value: f64) {
 
 /// 打印字符串到 stdout
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_print_str(ptr: *const u8) {
     if ptr.is_null() {
-        println!("");
+        println!();
         return;
     }
     unsafe {
@@ -264,6 +271,7 @@ pub extern "C" fn sengoo_abs_f64(x: f64) -> f64 {
 
 /// 带溢出检查的加法
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_add_overflow_i32(a: i32, b: i32, overflow: *mut bool) -> i32 {
     match a.checked_add(b) {
         Some(result) => {
@@ -283,6 +291,7 @@ pub extern "C" fn sengoo_add_overflow_i32(a: i32, b: i32, overflow: *mut bool) -
 
 /// 带溢出检查的减法
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_sub_overflow_i32(a: i32, b: i32, overflow: *mut bool) -> i32 {
     match a.checked_sub(b) {
         Some(result) => {
@@ -302,6 +311,7 @@ pub extern "C" fn sengoo_sub_overflow_i32(a: i32, b: i32, overflow: *mut bool) -
 
 /// 带溢出检查的乘法
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_mul_overflow_i32(a: i32, b: i32, overflow: *mut bool) -> i32 {
     match a.checked_mul(b) {
         Some(result) => {
@@ -325,6 +335,7 @@ pub extern "C" fn sengoo_mul_overflow_i32(a: i32, b: i32, overflow: *mut bool) -
 
 /// 内存复制
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_memcpy(dst: *mut u8, src: *const u8, count: usize) {
     if dst.is_null() || src.is_null() || count == 0 {
         return;
@@ -336,6 +347,7 @@ pub extern "C" fn sengoo_memcpy(dst: *mut u8, src: *const u8, count: usize) {
 
 /// 内存移动
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_memmove(dst: *mut u8, src: *const u8, count: usize) {
     if dst.is_null() || src.is_null() || count == 0 {
         return;
@@ -347,6 +359,7 @@ pub extern "C" fn sengoo_memmove(dst: *mut u8, src: *const u8, count: usize) {
 
 /// 内存填充
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_memset(dst: *mut u8, value: u8, count: usize) {
     if dst.is_null() || count == 0 {
         return;
@@ -358,6 +371,7 @@ pub extern "C" fn sengoo_memset(dst: *mut u8, value: u8, count: usize) {
 
 /// 内存比较
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_memcmp(s1: *const u8, s2: *const u8, count: usize) -> i32 {
     if s1.is_null() && s2.is_null() {
         return 0;
@@ -389,6 +403,7 @@ pub extern "C" fn sengoo_memcmp(s1: *const u8, s2: *const u8, count: usize) -> i
 
 /// Panic 处理函数
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_panic(msg: *const u8, len: usize) -> ! {
     if !msg.is_null() && len > 0 {
         let slice = unsafe { std::slice::from_raw_parts(msg, len) };
@@ -402,6 +417,7 @@ pub extern "C" fn sengoo_panic(msg: *const u8, len: usize) -> ! {
 
 /// 断言失败
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn sengoo_assert_fail(
     file: *const u8,
     file_len: usize,
@@ -455,7 +471,7 @@ mod tests {
     fn test_abs() {
         assert_eq!(sengoo_abs_i32(-42), 42);
         assert_eq!(sengoo_abs_i32(42), 42);
-        assert_eq!(sengoo_abs_f64(-3.14), 3.14);
+        assert_eq!(sengoo_abs_f64(-std::f64::consts::PI), std::f64::consts::PI);
     }
 
     #[test]
@@ -491,8 +507,8 @@ mod tests {
     #[test]
     fn test_print_f64() {
         sengoo_print_f64(0.0);
-        sengoo_print_f64(3.14);
-        sengoo_print_f64(-2.718);
+        sengoo_print_f64(std::f64::consts::PI);
+        sengoo_print_f64(-std::f64::consts::E);
         sengoo_print_f64(f64::INFINITY);
         sengoo_print_f64(f64::NAN);
     }

@@ -146,17 +146,13 @@ impl<'source> Parser<'source> {
         let lo = self.current_span().lo;
         let mut segments = Vec::new();
 
-        loop {
-            if let Some(token) = self.current() {
-                if matches!(token.kind, TokenKind::Ident) {
-                    let span = token.span;
-                    self.advance();
-                    segments.push(self.intern_ident(span));
+        while let Some(token) = self.current() {
+            if matches!(token.kind, TokenKind::Ident) {
+                let span = token.span;
+                self.advance();
+                segments.push(self.intern_ident(span));
 
-                    if self.consume(TokenKind::ColonColon).is_none() {
-                        break;
-                    }
-                } else {
+                if self.consume(TokenKind::ColonColon).is_none() {
                     break;
                 }
             } else {
