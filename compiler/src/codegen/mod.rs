@@ -2,6 +2,7 @@ pub mod common;
 
 pub mod jit;
 mod declaration_helpers;
+mod module_helpers;
 
 
 
@@ -168,134 +169,6 @@ impl Codegen {
 
 
 
-    fn emit_string_constants(&mut self) {
-
-        if !self.strings.is_empty() {
-
-            self.declarations.push_str("; String Constants\n");
-
-            for (i, s) in self.strings.iter().enumerate() {
-
-                // Escape string contents before emitting LLVM string constants.
-                let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
-
-                self.declarations.push_str(&format!(
-
-                    "@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
-
-                    i,
-
-                    s.len() + 1,
-
-                    escaped
-
-                ));
-
-            }
-
-            self.declarations.push_str("\n");
-
-        }
-
-    }
-
-
-
-    /// 濠电偛顦崝宀勫船閻ｅ备鍋撳☉娆樻畼妞ゆ垳鐒︾粙澶愬箵閹烘柨鐓戦梻浣瑰絻缁绘劙鎳熼悢鍛婁氦闁哄倹瀵х粈鈧梺绋跨箺濞夋盯宕ｈ箛鏇氭勃闁逞屽墰缁參鏁冮埀顒冦亹閸ф瑙︾€广儱鍟犻崑?
-    fn add_string(&mut self, s: &str) -> String {
-
-        let idx = self.string_counter;
-
-        self.string_counter += 1;
-
-        self.strings.push(s.to_string());
-
-        format!("@.str.{}", idx)
-
-    }
-
-
-
-    /// 闂佽顔栭崑鍛嚕?MIR 婵炴垶鎼╅崢濂稿吹椤撱垺鍋濋柟娈垮枟閻ｈ京绱撴担瑙勫鞍闁诲寒鍨遍幏鍛村箻閹偊娼堕梺鎼炲妼椤戞垹妲愬┑瀣祦闁割偅娲﹂弳鏇㈡煕韫囨挾澧㈤柡浣规崌楠?LLVM named struct type闂?
-    fn emit_struct_types(&mut self, mir_fns: &[MirFunction]) {
-
-        let mut seen = HashSet::new();
-
-        for func in mir_fns {
-
-            for (_, ty) in &func.locals {
-
-                self.collect_struct_types(ty, &mut seen);
-
-            }
-
-        }
-
-    }
-
-
-
-    /// 闂備緡鍋呯敮鎺旂礊婵犲洤缁╅柛顐ｆ礃閼茬姷绱撴担瑙勫鞍闁诲寒鍨遍幏鍛村箻瀹曞洦鎲诲┑鐐茬墕閸氣偓闁煎灚鍨甸悾鐢典沪缁涘顔囬梺?LLVM named type闂?
-    fn collect_struct_types(&mut self, ty: &MIRType, seen: &mut HashSet<String>) {
-
-        match ty {
-
-            MIRType::Struct { name, fields } => {
-
-                if seen.insert(name.clone()) {
-
-                    // 闂佺绻愰悧鎾诲焵椤掍礁绗掔紓宥咃攻瀵板嫰宕熼鐔封偓鐐烘倵濞戞瑯娈曟い鏂跨焸閺屽苯鐣濋埀顒€鈻撻幋婵堟殼閻忕偟鐡斿▓鎵磽娴ｈ灏伴柣搴灡閹峰懘骞橀幆閭︽蕉闂佹悶鍔岄鍐焵?
-                    for (_, ft) in fields {
-
-                        self.collect_struct_types(ft, seen);
-
-                    }
-
-                    let field_types: Vec<String> = fields
-
-                        .iter()
-
-                        .map(|(_, ft)| self.mir_type_to_llvm_cached(ft))
-
-                        .collect();
-
-                    self.declarations.push_str(&format!(
-
-                        "%{} = type {{ {} }}\n",
-
-                        name,
-
-                        field_types.join(", ")
-
-                    ));
-
-                }
-
-            }
-
-            // Recurse into composite types that may contain structs
-
-            MIRType::Array(elem, _) | MIRType::Ptr(elem) | MIRType::Ref(elem) => {
-
-                self.collect_struct_types(elem, seen);
-
-            }
-
-            MIRType::Tuple(types) => {
-
-                for t in types {
-
-                    self.collect_struct_types(t, seen);
-
-                }
-
-            }
-
-            _ => {}
-
-        }
-
-    }
 
 
 
@@ -620,32 +493,6 @@ impl Codegen {
 
 
 
-    /// Collect string literals referenced by a MIR function.
-    fn collect_string_constants(&mut self, mir_fn: &MirFunction) {
-
-        for bb in &mir_fn.basic_blocks {
-
-            for inst in mir_fn.block_instructions(bb) {
-
-                if let mir::Instruction::Assign {
-
-                    value: mir::MirConstant::String(s),
-
-                    ..
-
-                } = inst
-
-                {
-
-                    self.add_string(s);
-
-                }
-
-            }
-
-        }
-
-    }
 
 
 
