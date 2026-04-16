@@ -183,9 +183,8 @@ impl<'a> LoweringContext<'a> {
     pub(super) fn lower_async_wait(&mut self, future_handle: Local) -> Local {
         let func_name = self.resolve_async_base_name(future_handle);
         if func_name == "unknown" {
-            self.errors.push(
-                "unable to resolve async future origin during MIR lowering".to_string(),
-            );
+            self.errors
+                .push("unable to resolve async future origin during MIR lowering".to_string());
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
@@ -286,14 +285,6 @@ impl<'a> LoweringContext<'a> {
         }
 
         let result_ty = self.async_await_result_type(first_handle);
-        let Some(select_runtime) = select_runtime_function_name(&result_ty) else {
-            self.errors.push(
-                "select currently only supports Future values whose results are bool, integer, or float scalars during MIR lowering"
-                    .to_string(),
-            );
-            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-        };
-
         let second_result_ty = self.async_await_result_type(second_handle);
         if second_result_ty != result_ty {
             self.errors.push(
@@ -321,13 +312,57 @@ impl<'a> LoweringContext<'a> {
             value: MirConstant::Int(second_kind_id),
         });
 
-        let result_local = self.add_local(None, LocalKind::Temp, result_ty);
+        let winner = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Call {
-            destination: result_local,
-            func: select_runtime,
+            destination: winner,
+            func:
+                crate::mir::async_dispatch_synthesis_helpers::select_winner_runtime_function_name()
+                    .to_string(),
             args: vec![first_kind, first_handle, second_kind, second_handle],
         });
-        result_local
+
+        let first_ready = self.new_block();
+        let second_ready = self.new_block();
+        let join_block = self.new_block();
+        self.set_terminator(Terminator::If {
+            cond: winner,
+            then_block: second_ready,
+            else_block: first_ready,
+        });
+
+        self.set_current_block(first_ready);
+        let first_result = self.add_local(None, LocalKind::Temp, result_ty.clone());
+        self.push_inst(Instruction::Call {
+            destination: first_result,
+            func: format!("{first_name}__result"),
+            args: vec![first_handle],
+        });
+        self.set_terminator(Terminator::Goto(join_block));
+        let first_end = self.current_block();
+
+        self.set_current_block(second_ready);
+        let second_result = self.add_local(None, LocalKind::Temp, result_ty.clone());
+        self.push_inst(Instruction::Call {
+            destination: second_result,
+            func: format!("{second_name}__result"),
+            args: vec![second_handle],
+        });
+        self.set_terminator(Terminator::Goto(join_block));
+        let second_end = self.current_block();
+
+        self.set_current_block(join_block);
+        if is_void_like(&result_ty) {
+            self.add_local(None, LocalKind::Temp, MIR_UNIT)
+        } else {
+            let result_local = self.add_local(None, LocalKind::Temp, result_ty);
+            let incoming = vec![(first_result, first_end), (second_result, second_end)];
+            self.push_inst(Instruction::Phi {
+                destination: result_local,
+                incoming: incoming.clone(),
+            });
+            self.propagate_future_origin_through_phi(result_local, &incoming);
+            result_local
+        }
     }
 }
 
@@ -363,10 +398,12 @@ mod tests {
         let result = ctx.try_lower_builtin_call("task_status", &[task]);
 
         assert!(result.is_some(), "expected builtin dispatch to return Some");
-        let has_task_status_call = ctx.mir_fn.instructions.iter().any(|inst| matches!(
-            inst,
-            Instruction::Call { func, .. } if func == "sengoo_async_task_status"
-        ));
+        let has_task_status_call = ctx.mir_fn.instructions.iter().any(|inst| {
+            matches!(
+                inst,
+                Instruction::Call { func, .. } if func == "sengoo_async_task_status"
+            )
+        });
         assert!(
             has_task_status_call,
             "expected builtin dispatch to emit task_status runtime call"
@@ -399,7 +436,10 @@ mod tests {
             ctx.try_lower_builtin_call("user_function", &[]).is_none(),
             "non-builtin names should bypass builtin dispatch"
         );
-        assert!(ctx.errors.is_empty(), "non-builtin dispatch should stay silent");
+        assert!(
+            ctx.errors.is_empty(),
+            "non-builtin dispatch should stay silent"
+        );
     }
 
     #[test]
@@ -447,6 +487,96 @@ mod tests {
                 .any(|err| err.contains("matching result types")),
             "expected mismatched future type diagnostic, got {:?}",
             ctx.errors
+        );
+    }
+
+    #[test]
+    fn lower_builtin_select_branches_on_winner_and_merges_non_scalar_results() {
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let mut lambda_counter = 0usize;
+        let known_functions = HashSet::new();
+        let function_sigs = HashMap::new();
+        let struct_defs = HashMap::new();
+        let inherent_templates = Vec::new();
+        let trait_templates = Vec::new();
+
+        let options = MirLowerOptions {
+            async_functions: ["left".to_string(), "right".to_string()]
+                .into_iter()
+                .collect(),
+            ..MirLowerOptions::default()
+        };
+
+        let start_block = mir_fn.start_block;
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            options,
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let tuple_ty = MIRType::Tuple(vec![MIR_I64, MIR_BOOL]);
+        let left = ctx.add_local(
+            None,
+            LocalKind::Temp,
+            MIRType::Future(Box::new(tuple_ty.clone())),
+        );
+        let right = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(tuple_ty)));
+        ctx.future_origins.insert(left, "left".to_string());
+        ctx.future_origins.insert(right, "right".to_string());
+
+        let result = ctx.lower_builtin_select(&[left, right]);
+
+        assert!(
+            ctx.errors.is_empty(),
+            "unexpected lowering errors: {:?}",
+            ctx.errors
+        );
+        assert_eq!(
+            ctx.get_local_type(result),
+            &MIRType::Tuple(vec![MIR_I64, MIR_BOOL])
+        );
+        assert!(
+            ctx.mir_fn.instructions.iter().any(|inst| matches!(
+                inst,
+                Instruction::Call { func, .. } if func == "sengoo_async_select_winner"
+            )),
+            "select lowering should call the winner runtime"
+        );
+        assert!(
+            ctx.mir_fn.instructions.iter().any(|inst| matches!(
+                inst,
+                Instruction::Call { func, args, .. } if func == "left__result" && args == &vec![left]
+            )),
+            "select lowering should collect the left future result"
+        );
+        assert!(
+            ctx.mir_fn.instructions.iter().any(|inst| matches!(
+                inst,
+                Instruction::Call { func, args, .. } if func == "right__result" && args == &vec![right]
+            )),
+            "select lowering should collect the right future result"
+        );
+        assert!(
+            ctx.mir_fn.instructions.iter().any(|inst| matches!(
+                inst,
+                Instruction::Phi { destination, incoming }
+                    if *destination == result && incoming.len() == 2
+            )),
+            "select lowering should merge branch results with a phi"
+        );
+        assert!(
+            matches!(
+                ctx.mir_fn.basic_blocks[start_block].terminator,
+                Some(Terminator::If { .. })
+            ),
+            "select lowering should branch on the winner result"
         );
     }
 }

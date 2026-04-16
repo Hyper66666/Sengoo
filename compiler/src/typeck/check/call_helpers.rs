@@ -285,14 +285,7 @@ impl TypeChecker {
             };
 
             self.infer.unify(left_inner, right_inner)?;
-            let result_ty = self.infer.apply_subst(left_inner);
-            if !matches!(result_ty.kind, TyKind::Int(_) | TyKind::Bool | TyKind::Float(_)) {
-                return Err(TypeckError::Other(
-                    "select currently only supports Future values whose results are bool, integer, or float scalars"
-                        .to_string(),
-                ));
-            }
-            return Ok(result_ty);
+            return Ok(self.infer.apply_subst(left_inner));
         }
 
         // Special handling for `print` builtin function

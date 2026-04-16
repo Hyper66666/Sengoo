@@ -308,6 +308,36 @@ fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
 }
 
 #[cfg(feature = "native-bridge")]
+const SELECT_WINNER_FIRST: i64 = 0;
+
+#[cfg(feature = "native-bridge")]
+const SELECT_WINNER_SECOND: i64 = 1;
+
+#[cfg(feature = "native-bridge")]
+unsafe fn wait_for_first_ready_winner(
+    first_kind: i64,
+    first_handle: i64,
+    second_kind: i64,
+    second_handle: i64,
+) -> i64 {
+    loop {
+        clear_poll_wakeup_hint();
+        if sengoo_async_poll_dispatch(first_kind, first_handle) != 0 {
+            return SELECT_WINNER_FIRST;
+        }
+        let first_hint = take_poll_wakeup_hint();
+
+        clear_poll_wakeup_hint();
+        if sengoo_async_poll_dispatch(second_kind, second_handle) != 0 {
+            return SELECT_WINNER_SECOND;
+        }
+        let second_hint = take_poll_wakeup_hint();
+
+        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
+    }
+}
+
+#[cfg(feature = "native-bridge")]
 unsafe fn wait_for_first_ready<T>(
     first_kind: i64,
     first_handle: i64,
@@ -315,20 +345,10 @@ unsafe fn wait_for_first_ready<T>(
     second_handle: i64,
     dispatch: unsafe extern "C" fn(i64, i64) -> T,
 ) -> T {
-    loop {
-        clear_poll_wakeup_hint();
-        if sengoo_async_poll_dispatch(first_kind, first_handle) != 0 {
-            return dispatch(first_kind, first_handle);
-        }
-        let first_hint = take_poll_wakeup_hint();
-
-        clear_poll_wakeup_hint();
-        if sengoo_async_poll_dispatch(second_kind, second_handle) != 0 {
-            return dispatch(second_kind, second_handle);
-        }
-        let second_hint = take_poll_wakeup_hint();
-
-        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
+    match wait_for_first_ready_winner(first_kind, first_handle, second_kind, second_handle) {
+        SELECT_WINNER_FIRST => dispatch(first_kind, first_handle),
+        SELECT_WINNER_SECOND => dispatch(second_kind, second_handle),
+        winner => unreachable!("unexpected async select winner: {winner}"),
     }
 }
 
@@ -702,6 +722,17 @@ macro_rules! define_async_select {
             }
         }
     };
+}
+
+#[cfg(feature = "native-bridge")]
+#[no_mangle]
+pub extern "C" fn sengoo_async_select_winner(
+    first_kind: i64,
+    first_handle: i64,
+    second_kind: i64,
+    second_handle: i64,
+) -> i64 {
+    unsafe { wait_for_first_ready_winner(first_kind, first_handle, second_kind, second_handle) }
 }
 
 #[cfg(feature = "native-bridge")]
@@ -1139,6 +1170,46 @@ mod tests {
 
         assert!(result);
         unsafe { sengoo_async_sleep__result(pending) };
+    }
+
+    #[test]
+    fn select_winner_returns_zero_when_first_future_wins() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let ready = sengoo_async_sleep__start(0);
+        let pending = sengoo_async_sleep__start(10);
+
+        let winner = sengoo_async_select_winner(
+            async_select_hint_kind_id_for_tests(),
+            ready,
+            async_spawn_kind_id_for_tests(),
+            pending,
+        );
+
+        assert_eq!(winner, 0);
+        unsafe {
+            sengoo_async_sleep__result(ready);
+            sengoo_async_sleep__result(pending);
+        }
+    }
+
+    #[test]
+    fn select_winner_returns_one_when_second_future_wins() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let pending = sengoo_async_sleep__start(10);
+        let ready = sengoo_async_sleep__start(0);
+
+        let winner = sengoo_async_select_winner(
+            async_spawn_kind_id_for_tests(),
+            pending,
+            async_select_hint_kind_id_for_tests(),
+            ready,
+        );
+
+        assert_eq!(winner, 1);
+        unsafe {
+            sengoo_async_sleep__result(pending);
+            sengoo_async_sleep__result(ready);
+        }
     }
 
     #[test]

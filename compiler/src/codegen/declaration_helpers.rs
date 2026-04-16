@@ -1,5 +1,8 @@
 use super::*;
-use crate::mir::async_dispatch_synthesis_helpers::select_runtime_declaration;
+use crate::mir::async_dispatch_synthesis_helpers::{
+    select_runtime_declaration, select_winner_runtime_declaration,
+    select_winner_runtime_function_name,
+};
 
 impl Codegen {
     /// Declare external runtime functions used by generated LLVM IR.
@@ -181,6 +184,18 @@ impl Codegen {
 
     /// Declare the async select runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
+        let winner_decl = select_winner_runtime_declaration();
+        let needs_winner = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| matches!(
+                inst,
+                mir::Instruction::Call { func, .. }
+                    if func == select_winner_runtime_function_name()
+            ))
+        });
+        if needs_winner && !self.declarations.contains(winner_decl) {
+            self.declarations.push_str(winner_decl);
+        }
+
         let mut needed = std::collections::BTreeSet::new();
         for mir_fn in mir_fns {
             for inst in &mir_fn.instructions {
@@ -356,6 +371,27 @@ mod tests {
         cg.maybe_declare_select_runtime_function(&[mir_fn]);
 
         let needle = "declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n";
+        assert_eq!(cg.declarations.matches(needle).count(), 1);
+    }
+
+    #[test]
+    fn maybe_declare_select_runtime_function_adds_winner_decl_once() {
+        let mut cg = Codegen::new();
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        let dest = mir_fn.add_local(LocalKind::Temp, crate::mir::MIR_I64);
+        mir_fn.push_inst_to_block(
+            mir_fn.start_block,
+            mir::Instruction::Call {
+                destination: dest,
+                func: "sengoo_async_select_winner".to_string(),
+                args: vec![],
+            },
+        );
+
+        cg.maybe_declare_select_runtime_function(&[mir_fn.clone()]);
+        cg.maybe_declare_select_runtime_function(&[mir_fn]);
+
+        let needle = "declare i64 @sengoo_async_select_winner(i64, i64, i64, i64)\n";
         assert_eq!(cg.declarations.matches(needle).count(), 1);
     }
 }

@@ -5,6 +5,7 @@
 use super::common;
 use crate::mir::async_dispatch_synthesis_helpers::{
     select_runtime_declaration, select_runtime_function_name, select_runtime_return_type,
+    select_winner_runtime_declaration, select_winner_runtime_function_name,
 };
 use crate::mir::{self, Local, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
@@ -65,6 +66,8 @@ impl JITCodegen {
         self.extern_decls.push_str("declare void @free(i8*)\n");
         self.extern_decls
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
+        self.extern_decls
+            .push_str(select_winner_runtime_declaration());
         for ty in [
             MIRType::Int(8),
             MIRType::Int(16),
@@ -105,6 +108,18 @@ impl JITCodegen {
         self.function_signatures.insert(
             "sengoo_async_spawn_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            select_winner_runtime_function_name().to_string(),
+            (
+                vec![
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                ],
+                MIRType::Int(64),
+            ),
         );
         for ty in [
             MIRType::Int(8),

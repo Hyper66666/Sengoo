@@ -5,6 +5,18 @@ use crate::mir::{
 };
 use crate::CompileError;
 
+const ASYNC_SELECT_WINNER_FUNCTION: &str = "sengoo_async_select_winner";
+const ASYNC_SELECT_WINNER_DECLARATION: &str =
+    "declare i64 @sengoo_async_select_winner(i64, i64, i64, i64)\n";
+
+pub fn select_winner_runtime_function_name() -> &'static str {
+    ASYNC_SELECT_WINNER_FUNCTION
+}
+
+pub fn select_winner_runtime_declaration() -> &'static str {
+    ASYNC_SELECT_WINNER_DECLARATION
+}
+
 pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {
     match ty {
         MIRType::Bool => Some("bool"),
