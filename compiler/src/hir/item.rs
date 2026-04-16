@@ -157,6 +157,7 @@ pub struct HIRTrait {
 
 /// HIR Trait 项
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum HIRTraitItem {
     Function(HIRFunction),
     Const(String, HIRType),

@@ -230,13 +230,14 @@ impl fmt::Display for TyKind {
 }
 
 /// 整数类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum IntKind {
     I8,
     I16,
     I32,
     I64,
     I128,
+    #[default]
     ISize,
     U8,
     U16,
@@ -266,11 +267,6 @@ impl fmt::Display for IntKind {
 }
 
 impl IntKind {
-    /// 获取默认的整数类型
-    pub fn default() -> Self {
-        IntKind::ISize
-    }
-
     /// 是否为有符号整数
     pub fn is_signed(&self) -> bool {
         matches!(
@@ -293,9 +289,10 @@ impl IntKind {
 }
 
 /// 浮点类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FloatKind {
     F32,
+    #[default]
     F64,
 }
 
@@ -309,11 +306,6 @@ impl fmt::Display for FloatKind {
 }
 
 impl FloatKind {
-    /// 获取默认的浮点类型
-    pub fn default() -> Self {
-        FloatKind::F64
-    }
-
     /// 获取位宽
     pub fn bits(&self) -> usize {
         match self {
@@ -445,9 +437,7 @@ impl Subst {
     /// 合并两个替换
     pub fn union(mut self, other: Subst) -> Self {
         for (var, ty) in other.map {
-            if !self.map.contains_key(&var) {
-                self.map.insert(var, ty);
-            }
+            self.map.entry(var).or_insert(ty);
         }
         self
     }

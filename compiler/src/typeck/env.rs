@@ -299,16 +299,12 @@ impl TypeEnv {
     /// 查找符号（在当前及父作用域中查找）
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
         let mut current = self.current;
-        loop {
-            if let Some(scope) = self.scopes.get(current) {
-                if let Some(symbol) = scope.get(name) {
-                    return Some(symbol);
-                }
-                if let Some(parent) = scope.parent {
-                    current = parent;
-                } else {
-                    break;
-                }
+        while let Some(scope) = self.scopes.get(current) {
+            if let Some(symbol) = scope.get(name) {
+                return Some(symbol);
+            }
+            if let Some(parent) = scope.parent {
+                current = parent;
             } else {
                 break;
             }

@@ -88,6 +88,7 @@ fn default_frontend_jobs_wire() -> String {
     "auto".to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn daemon_request_build(
     input: &str,
     output: Option<&str>,
@@ -122,6 +123,7 @@ pub(super) fn daemon_request_build(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn daemon_request_run(
     input: &str,
     opt_level: u8,
@@ -156,6 +158,7 @@ fn daemon_request_run(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_build_via_daemon(
     addr: &str,
     input: &str,
@@ -188,6 +191,7 @@ pub(crate) async fn dispatch_build_via_daemon(
     dispatch_daemon_request(addr, &request, "build").await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_run_via_daemon(
     addr: &str,
     input: &str,

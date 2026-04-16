@@ -38,7 +38,7 @@ fn remap_instruction(
             operand,
         } => Instruction::Unary {
             destination: remap_local(*destination, local_map)?,
-            op: op.clone(),
+            op: *op,
             operand: remap_local(*operand, local_map)?,
         },
         Instruction::Binary {
@@ -48,7 +48,7 @@ fn remap_instruction(
             right,
         } => Instruction::Binary {
             destination: remap_local(*destination, local_map)?,
-            op: op.clone(),
+            op: *op,
             left: remap_local(*left, local_map)?,
             right: remap_local(*right, local_map)?,
         },
@@ -199,6 +199,7 @@ fn emit_ready_return(f: &mut MirFunction, block: usize) {
     f.basic_blocks[block].set_terminator(Terminator::Return(Some(ready)));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_pending_return(
     f: &mut MirFunction,
     block: usize,
@@ -244,6 +245,7 @@ fn emit_pending_return(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_suspend_transition(
     f: &mut MirFunction,
     block: usize,

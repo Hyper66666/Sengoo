@@ -222,9 +222,9 @@ fn parse_url_str(raw: &str) -> Result<ParsedUrl, NetErrorCode> {
         let port = port.parse::<u16>().map_err(|_| NetErrorCode::InvalidUrl)?;
         (host.to_string(), port)
     } else {
-        let default_port = if scheme.eq_ignore_ascii_case("https") {
-            443
-        } else if scheme.eq_ignore_ascii_case("wss") {
+        let default_port = if scheme.eq_ignore_ascii_case("https")
+            || scheme.eq_ignore_ascii_case("wss")
+        {
             443
         } else {
             80
@@ -767,7 +767,7 @@ fn base64_encode(input: &[u8]) -> String {
 
 fn sha1_digest(input: &[u8]) -> [u8; 20] {
     fn left_rotate(value: u32, bits: u32) -> u32 {
-        (value << bits) | (value >> (32 - bits))
+        value.rotate_left(bits)
     }
 
     let mut message = input.to_vec();
@@ -1173,7 +1173,9 @@ pub extern "C" fn sengoo_tcp_connect(host: *const u8, port: u16, timeout_ms: u32
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_tcp_send(handle: u64, data: *const u8, len: usize) -> i64 {
+/// # Safety
+/// If `data` is non-null, it must point to `len` readable bytes.
+pub unsafe extern "C" fn sengoo_tcp_send(handle: u64, data: *const u8, len: usize) -> i64 {
     reset_last_error();
     if data.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
@@ -1192,7 +1194,9 @@ pub extern "C" fn sengoo_tcp_send(handle: u64, data: *const u8, len: usize) -> i
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_tcp_recv(
+/// # Safety
+/// If `buffer` is non-null, it must point to `capacity` writable bytes.
+pub unsafe extern "C" fn sengoo_tcp_recv(
     handle: u64,
     buffer: *mut u8,
     capacity: usize,
@@ -1294,7 +1298,9 @@ pub extern "C" fn sengoo_udp_connect(handle: u64, host: *const u8, port: u16) ->
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_udp_send(handle: u64, data: *const u8, len: usize) -> i64 {
+/// # Safety
+/// If `data` is non-null, it must point to `len` readable bytes.
+pub unsafe extern "C" fn sengoo_udp_send(handle: u64, data: *const u8, len: usize) -> i64 {
     reset_last_error();
     if data.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
@@ -1313,7 +1319,9 @@ pub extern "C" fn sengoo_udp_send(handle: u64, data: *const u8, len: usize) -> i
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_udp_recv(
+/// # Safety
+/// If `buffer` is non-null, it must point to `capacity` writable bytes.
+pub unsafe extern "C" fn sengoo_udp_recv(
     handle: u64,
     buffer: *mut u8,
     capacity: usize,
@@ -1384,7 +1392,9 @@ pub extern "C" fn sengoo_http_get(url: *const u8, timeout_ms: u32) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_http_post(
+/// # Safety
+/// If `body` is non-null, it must point to `len` readable bytes.
+pub unsafe extern "C" fn sengoo_http_post(
     url: *const u8,
     body: *const u8,
     len: usize,
@@ -1489,7 +1499,9 @@ pub extern "C" fn sengoo_ws_connect(url: *const u8, timeout_ms: u32) -> u64 {
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_ws_send_text(handle: u64, data: *const u8, len: usize) -> i64 {
+/// # Safety
+/// If `data` is non-null, it must point to `len` readable bytes.
+pub unsafe extern "C" fn sengoo_ws_send_text(handle: u64, data: *const u8, len: usize) -> i64 {
     reset_last_error();
     if data.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
@@ -1857,11 +1869,11 @@ mod tests {
         assert!(handle != 0, "tcp connect should create handle");
 
         let msg = b"ping";
-        let sent = sengoo_tcp_send(handle, msg.as_ptr(), msg.len());
+        let sent = unsafe { sengoo_tcp_send(handle, msg.as_ptr(), msg.len()) };
         assert_eq!(sent, msg.len() as i64, "tcp send should send payload");
 
         let mut out = [0u8; 16];
-        let received = sengoo_tcp_recv(handle, out.as_mut_ptr(), out.len(), 2_000);
+        let received = unsafe { sengoo_tcp_recv(handle, out.as_mut_ptr(), out.len(), 2_000) };
         assert_eq!(
             received,
             msg.len() as i64,
@@ -1893,11 +1905,11 @@ mod tests {
         );
 
         let msg = b"pong";
-        let sent = sengoo_udp_send(handle, msg.as_ptr(), msg.len());
+        let sent = unsafe { sengoo_udp_send(handle, msg.as_ptr(), msg.len()) };
         assert_eq!(sent, msg.len() as i64, "udp send should send payload");
 
         let mut out = [0u8; 16];
-        let received = sengoo_udp_recv(handle, out.as_mut_ptr(), out.len(), 2_000);
+        let received = unsafe { sengoo_udp_recv(handle, out.as_mut_ptr(), out.len(), 2_000) };
         assert_eq!(
             received,
             msg.len() as i64,
@@ -2013,7 +2025,7 @@ mod tests {
         assert!(handle != 0, "ws connect should produce handle");
 
         let msg = b"ping";
-        assert_eq!(sengoo_ws_send_text(handle, msg.as_ptr(), msg.len()), 4);
+        assert_eq!(unsafe { sengoo_ws_send_text(handle, msg.as_ptr(), msg.len()) }, 4);
 
         let mut out = [0u8; 16];
         let received = sengoo_ws_recv_text(handle, out.as_mut_ptr(), out.len(), 2_000);
@@ -2201,7 +2213,7 @@ mod tests {
 
     #[test]
     fn invalid_argument_sets_error_mapping() {
-        let ret = sengoo_tcp_send(999, std::ptr::null(), 5);
+        let ret = unsafe { sengoo_tcp_send(999, std::ptr::null(), 5) };
         assert_eq!(ret, -1);
         assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_INVALID_ARGUMENT);
 

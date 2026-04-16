@@ -328,6 +328,7 @@ pub(crate) fn incremental_link_mode_from_env() -> IncrementalLinkMode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn classify_edit_impact(
     previous_root_interface_hash: u64,
     previous_root_implementation_hash: u64,
@@ -340,15 +341,11 @@ pub(crate) fn classify_edit_impact(
 ) -> EditImpact {
     let mut module_changes: Vec<(String, ModuleChangeKind)> = Vec::new();
 
-    if previous_root_interface_hash == 0
+    let root_interface_changed = (previous_root_interface_hash == 0
         && previous_root_implementation_hash == 0
-        && (root_interface_hash != 0 || root_implementation_hash != 0)
-    {
-        module_changes.push((
-            current_graph.root_module.clone(),
-            ModuleChangeKind::Interface,
-        ));
-    } else if previous_root_interface_hash != root_interface_hash {
+        && (root_interface_hash != 0 || root_implementation_hash != 0))
+        || previous_root_interface_hash != root_interface_hash;
+    if root_interface_changed {
         module_changes.push((
             current_graph.root_module.clone(),
             ModuleChangeKind::Interface,

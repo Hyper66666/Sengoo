@@ -6,60 +6,40 @@ enum RunEngine {
     Lli,
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 enum ReflectionMode {
+    #[default]
     Auto,
     On,
     Off,
 }
 
-impl Default for ReflectionMode {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 enum FrontendMemoryMode {
+    #[default]
     Auto,
     LowMemory,
     Stream,
     Legacy,
 }
 
-impl Default for FrontendMemoryMode {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 enum ErrorFormat {
+    #[default]
     Text,
     Json,
 }
 
-impl Default for ErrorFormat {
-    fn default() -> Self {
-        Self::Text
-    }
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 enum ContractChecksMode {
+    #[default]
     Auto,
     On,
     Off,
-}
-
-impl Default for ContractChecksMode {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 const BUILD_GRAPH_SCHEMA_VERSION: u32 = 4;

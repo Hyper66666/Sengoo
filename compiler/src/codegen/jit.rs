@@ -200,7 +200,7 @@ impl JITCodegen {
 
         // 声明运行时函数
         self.ir.push_str(&self.extern_decls);
-        self.ir.push_str("\n");
+        self.ir.push('\n');
 
         // 鐢熸垚鎵€鏈夊嚱鏁?
         for mir_fn in mir_fns {
@@ -229,7 +229,7 @@ impl JITCodegen {
                     escaped
                 ));
             }
-            self.ir.push_str("\n");
+            self.ir.push('\n');
         }
     }
 
@@ -350,10 +350,11 @@ impl JITCodegen {
                     MirConstant::String(s) => {
                         // 创建字符串常量
                         let str_ref = self.add_string(s);
+                        let string_ty = format!("[{} x i8]", s.len() + 1);
                         self.ir.push_str(&format!(
                             "{} = bitcast {} {} to i8*\n",
                             dest,
-                            format!("[{} x i8]", s.len() + 1),
+                            string_ty,
                             str_ref
                         ));
                     }
@@ -550,10 +551,11 @@ impl JITCodegen {
 
                 // 瀛樺偍缁撴灉
                 self.emit_indent();
+                let result_reg = format!("{dest}.res");
                 self.ir.push_str(&format!(
                     "store {} {}, {}* {}\n",
                     llvm_ty,
-                    format!("{}.res", dest),
+                    result_reg,
                     llvm_ty,
                     self.local_reg(*destination)
                 ));
@@ -691,7 +693,7 @@ impl JITCodegen {
                         // 1. 浠?destination alloca 鍔犺浇鎸囬拡鍊?
                         self.emit_indent();
                         let ptr_temp = format!("{}.destptr", dest_reg);
-                        let ptr_ptr_ty = format!("{}*", format!("{}*", inner_ty));
+                        let ptr_ptr_ty = format!("{inner_ty}**");
                         let ptr_ty = format!("{}*", inner_ty);
                         self.ir.push_str(&format!(
                             "{} = load {}, {} {}\n",
@@ -720,7 +722,7 @@ impl JITCodegen {
 
                         self.emit_indent();
                         let ptr_temp = format!("{}.destptr", dest_reg);
-                        let ptr_ptr_ty = format!("{}*", format!("{}*", inner_ty));
+                        let ptr_ptr_ty = format!("{inner_ty}**");
                         let ptr_ty = format!("{}*", inner_ty);
                         self.ir.push_str(&format!(
                             "{} = load {}, {} {}\n",
@@ -744,8 +746,7 @@ impl JITCodegen {
                     MIRType::Tuple(_) => {
                         // 结构体类型：使用逐字段复制
                         if let MIRType::Tuple(field_tys) = &dest_ty {
-                            for i in 0..field_tys.len() {
-                                let field_ty = &field_tys[i];
+                            for (i, field_ty) in field_tys.iter().enumerate() {
                                 let llvm_field_ty = self.mir_type_to_llvm_str(field_ty);
 
                                 // 鑾峰彇婧愬瓧娈靛湴鍧€
@@ -888,7 +889,7 @@ impl JITCodegen {
                         // destination 是 Ptr(T)，在 LLVM 中是 T**
                         // addr_temp 鏄?T*锛岄渶瑕佸瓨鍌ㄥ埌 T**
                         self.emit_indent();
-                        let dest_ptr_ptr_ty = format!("{}*", format!("{}*", llvm_elem_ty));
+                        let dest_ptr_ptr_ty = format!("{llvm_elem_ty}**");
                         let addr_ptr_ty = format!("{}*", llvm_elem_ty); // addr_temp 鐨勭被鍨嬫槸 T*
                         self.ir.push_str(&format!(
                             "store {} {}, {} {}\n",
@@ -916,7 +917,7 @@ impl JITCodegen {
                         // destination 是 Ptr(T)，在 LLVM 中是 T**
                         // addr_temp 鏄?T*锛岄渶瑕佸瓨鍌ㄥ埌 T**
                         self.emit_indent();
-                        let dest_ptr_ptr_ty = format!("{}*", format!("{}*", llvm_elem_ty));
+                        let dest_ptr_ptr_ty = format!("{llvm_elem_ty}**");
                         let addr_ptr_ty = format!("{}*", llvm_elem_ty); // addr_temp 鐨勭被鍨嬫槸 T*
                         self.ir.push_str(&format!(
                             "store {} {}, {} {}\n",
@@ -1248,12 +1249,13 @@ impl JITCodegen {
                     if llvm_local_ty != llvm_ret_ty {
                         // 类型不匹配，使用 bitcast 转换指针
                         let bitcast_temp = format!("%ptr.{}", local.id);
+                        let ret_ptr_ty = format!("{}*", llvm_ret_ty);
                         self.ir.push_str(&format!(
                             "{} = bitcast {} {} to {}\n",
                             bitcast_temp,
                             local_ptr_ty,
                             reg,
-                            format!("{}*", llvm_ret_ty)
+                            ret_ptr_ty
                         ));
                         self.emit_indent();
                         self.ir.push_str(&format!(

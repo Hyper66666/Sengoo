@@ -137,12 +137,10 @@ fn char_to_byte_index(s: &str, character: u32) -> usize {
         return 0;
     }
 
-    let mut seen = 0usize;
-    for (idx, _) in s.char_indices() {
+    for (seen, (idx, _)) in s.char_indices().enumerate() {
         if seen == target {
             return idx;
         }
-        seen += 1;
     }
     s.len()
 }
@@ -1128,7 +1126,7 @@ fn diagnostic_range_from_payload(content: &str, payload: &SgcErrorPayload) -> Op
 }
 
 fn source_span_to_range(content: &str, span: &miette::SourceSpan) -> Option<Range> {
-    let lo: usize = span.offset().into();
+    let lo: usize = span.offset();
     if lo > content.len() {
         return None;
     }
@@ -1221,7 +1219,7 @@ fn compiler_diagnostics_from_sgc_json(uri: &Url, content: &str) -> Vec<Diagnosti
 
     let (message, code, range) = if let Some(payload) = payload {
         let range = diagnostic_range_from_payload(content, &payload)
-            .or_else(|| fallback_range.clone())
+            .or(fallback_range)
             .unwrap_or_else(|| full_document_range(content));
         let mut message = payload
             .message

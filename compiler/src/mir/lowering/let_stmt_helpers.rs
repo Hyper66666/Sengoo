@@ -8,11 +8,8 @@ pub(super) fn lower_let_stmt(
     value: Option<&HIRExpr>,
     is_mut: bool,
 ) {
-    let kind = if is_mut {
-        LocalKind::User
-    } else {
-        LocalKind::User
-    };
+    let _ = is_mut;
+    let kind = LocalKind::User;
     let mir_ty = ty.clone().into();
 
     if let Some(value_expr) = value {
@@ -93,7 +90,7 @@ pub(super) fn lower_let_stmt(
                 .locals
                 .iter()
                 .find(|(l, _)| l == &value_local)
-                .map(|(l, _t)| l.clone());
+                .map(|(l, _t)| *l);
 
             let value_info = match value_info_opt {
                 Some(info) => info,

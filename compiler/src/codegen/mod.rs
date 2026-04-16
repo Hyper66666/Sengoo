@@ -210,7 +210,7 @@ impl Codegen {
 
 
 
-        self.ir.push_str("\n");
+        self.ir.push('\n');
 
         self.ir.push_str(&format!("; Function: {}\n", mir_fn.name));
 
@@ -433,7 +433,7 @@ impl Codegen {
 
                     mir::MirConstant::GlobalRef(name) => {
                         let dest_ty = self.get_local_type(mir_fn, *destination);
-                        let llvm_dest_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                        let llvm_dest_ty = self.mir_type_to_llvm_cached(dest_ty);
                         if matches!(dest_ty, MIRType::Fn { .. }) {
                             self.ir.push_str(&format!(
                                 "{} = bitcast {} @{} to {}
@@ -947,7 +947,7 @@ impl Codegen {
 
                                 let field_ty = self.get_local_type(mir_fn, *field_local);
 
-                                let field_llvm = self.mir_type_to_llvm_cached(&field_ty);
+                                let field_llvm = self.mir_type_to_llvm_cached(field_ty);
 
                                 let temp = if i < fields.len() - 1 {
 
@@ -1053,7 +1053,7 @@ impl Codegen {
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
 
-                let ret_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                let ret_ty = self.mir_type_to_llvm_cached(dest_ty);
 
 
 
@@ -1083,7 +1083,7 @@ impl Codegen {
 
                     let arg_ty = self.get_local_type(mir_fn, arg_local);
 
-                    let llvm_arg_ty = self.mir_type_to_llvm_cached(&arg_ty);
+                    let llvm_arg_ty = self.mir_type_to_llvm_cached(arg_ty);
 
                     let val = self.operand_value(arg_local, mir_fn);
 
@@ -1271,7 +1271,7 @@ impl Codegen {
 
                 let src_ty = self.get_local_type(mir_fn, *value);
 
-                let src_llvm = self.mir_type_to_llvm_cached(&src_ty);
+                let src_llvm = self.mir_type_to_llvm_cached(src_ty);
 
                 let dst_llvm = self.mir_type_to_llvm_cached(to);
 
@@ -1463,7 +1463,7 @@ impl Codegen {
 
                 let base_ty = self.get_local_type(mir_fn, *base);
 
-                let base_llvm = self.mir_type_to_llvm_cached(&base_ty);
+                let base_llvm = self.mir_type_to_llvm_cached(base_ty);
 
                 self.emit_indent();
 
@@ -1497,7 +1497,7 @@ impl Codegen {
 
                 let src_ty = self.get_local_type(mir_fn, *value);
 
-                let src_llvm = self.mir_type_to_llvm_cached(&src_ty);
+                let src_llvm = self.mir_type_to_llvm_cached(src_ty);
 
                 self.emit_indent();
 
@@ -1529,13 +1529,13 @@ impl Codegen {
 
                 let src_ty = self.get_local_type(mir_fn, *value);
 
-                let src_llvm = self.mir_type_to_llvm_cached(&src_ty);
+                let src_llvm = self.mir_type_to_llvm_cached(src_ty);
 
                 let new_val = self.operand_value(*new_value, mir_fn);
 
                 let new_ty = self.get_local_type(mir_fn, *new_value);
 
-                let new_llvm = self.mir_type_to_llvm_cached(&new_ty);
+                let new_llvm = self.mir_type_to_llvm_cached(new_ty);
 
                 self.emit_indent();
 
@@ -1741,7 +1741,7 @@ impl Codegen {
 
                 }
 
-                let llvm_ty = self.mir_type_to_llvm_cached(&ty);
+                let llvm_ty = self.mir_type_to_llvm_cached(ty);
 
 
 
@@ -1828,7 +1828,7 @@ impl Codegen {
 
                         } else {
 
-                            self.mir_type_to_llvm_cached(&ty)
+                            self.mir_type_to_llvm_cached(ty)
 
                         };
 
@@ -1923,7 +1923,7 @@ impl Codegen {
 
                 for (value, target) in targets {
 
-                    self.ir.push_str(&format!("\n"));
+                    self.ir.push('\n');
 
                     self.emit_indent();
 
@@ -1935,7 +1935,7 @@ impl Codegen {
 
 
 
-                self.ir.push_str(&format!("\n"));
+                self.ir.push('\n');
 
                 self.emit_indent();
 
@@ -1983,7 +1983,7 @@ impl Codegen {
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
 
-                let ret_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                let ret_ty = self.mir_type_to_llvm_cached(dest_ty);
 
 
 
@@ -1997,7 +1997,7 @@ impl Codegen {
 
                             let arg_ty = self.get_local_type(mir_fn, *local);
 
-                            let llvm_arg_ty = self.mir_type_to_llvm_cached(&arg_ty);
+                            let llvm_arg_ty = self.mir_type_to_llvm_cached(arg_ty);
 
                             let val = self.operand_value(*local, mir_fn);
 
@@ -2254,5 +2254,11 @@ impl Codegen {
 
     }
 
+}
+
+impl Default for Codegen {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 

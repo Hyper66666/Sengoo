@@ -42,9 +42,7 @@ use std::collections::HashSet;
 ///
 /// For async `main`, the original body is renamed to `main__body` and a new
 /// `main` wrapper is generated that drives the async helpers.
-pub fn expand_async_functions(
-    mir_fns: &mut Vec<MirFunction>,
-) -> Result<Vec<MirFunction>, CompileError> {
+pub fn expand_async_functions(mir_fns: &mut [MirFunction]) -> Result<Vec<MirFunction>, CompileError> {
     let async_fn_names: Vec<String> = mir_fns
         .iter()
         .filter(|f| f.is_async)
@@ -275,7 +273,7 @@ fn synthesize_poll(
     }
 
     match build_async_cfg_plan(mir_fn) {
-        Ok(plan) => return synthesize_cfg_poll(layout, mir_fn, &plan, spill_user_locals),
+        Ok(plan) => synthesize_cfg_poll(layout, mir_fn, &plan, spill_user_locals),
         Err(reason) => {
             let _ = (bb0, state, result_storage_ty, n_states);
             Err(CompileError::Codegen(format!(

@@ -210,6 +210,12 @@ impl OptPipeline {
     }
 }
 
+impl Default for OptPipeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Build a MIR optimization pipeline for the selected level.
 pub fn pipeline_for_level(level: MirOptLevel) -> OptPipeline {
     let mut pipeline = OptPipeline::new();

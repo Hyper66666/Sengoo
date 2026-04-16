@@ -77,6 +77,12 @@ impl Program {
     }
 }
 
+impl Default for Program {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Node for Program {
     fn span(&self) -> Span {
         if self.decls.is_empty() {

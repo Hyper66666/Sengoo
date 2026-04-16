@@ -17,6 +17,7 @@ use sengoo_compiler::{compile_to_ir, CompileError};
 mod bench;
 mod cache;
 mod cli;
+#[cfg_attr(not(test), allow(dead_code))]
 mod cranelift_fast_jit;
 mod commands;
 mod daemon;
@@ -322,7 +323,7 @@ fn line_column_for_offset(source: &str, offset: usize) -> (u32, u32) {
 }
 
 fn location_from_source_span(source: &str, span: &miette::SourceSpan) -> CompilerErrorLocationJson {
-    let lo_usize: usize = span.offset().into();
+    let lo_usize: usize = span.offset();
     let lo_clamped = lo_usize.min(source.len());
     let mut hi_clamped = lo_clamped.saturating_add(span.len()).min(source.len());
     if hi_clamped == lo_clamped && lo_clamped < source.len() {
@@ -680,6 +681,7 @@ async fn cmd_dump_ast(input: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn escape_html(raw: &str) -> String {
     raw.chars()
         .map(|ch| match ch {
@@ -693,6 +695,7 @@ fn escape_html(raw: &str) -> String {
         .collect::<String>()
 }
 
+#[allow(dead_code)]
 fn sanitize_doc_name(raw: &str) -> String {
     let mut out = String::new();
     for ch in raw.chars() {
@@ -708,6 +711,7 @@ fn sanitize_doc_name(raw: &str) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn render_doc_index(module_id: &str, module_page_name: &str, fn_count: usize) -> String {
     let module_id = escape_html(module_id);
     let module_page_name = escape_html(module_page_name);
@@ -747,6 +751,7 @@ fn render_doc_index(module_id: &str, module_page_name: &str, fn_count: usize) ->
     )
 }
 
+#[allow(dead_code)]
 fn render_doc_module(module_id: &str, signatures: &[FunctionSignatureInfo]) -> String {
     let mut items = String::new();
     if signatures.is_empty() {
@@ -800,6 +805,7 @@ fn render_doc_module(module_id: &str, signatures: &[FunctionSignatureInfo]) -> S
     )
 }
 
+#[allow(dead_code)]
 async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
     let input_path = Path::new(input);
     let module_id = canonical_or_lossy(input_path);

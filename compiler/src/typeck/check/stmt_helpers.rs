@@ -162,28 +162,22 @@ impl TypeChecker {
 
     /// 检查return语句，验证返回值类型与函数返回类型匹配。
     pub(super) fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
-        match value {
-            Some(v) => {
-                let ty = self.check_expr(v)?;
-                if self.contains_future_escape_ty(&ty) {
-                    return Err(Self::future_escape_error());
-                }
+        if let Some(v) = value {
+            let ty = self.check_expr(v)?;
+            if self.contains_future_escape_ty(&ty) {
+                return Err(Self::future_escape_error());
             }
-            None => {}
         }
         Ok(self.env.never_ty())
     }
 
     /// 检查break语句，验证可选值类型与循环类型匹配。
     pub(super) fn check_break(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
-        match value {
-            Some(v) => {
-                let ty = self.check_expr(v)?;
-                if self.contains_future_escape_ty(&ty) {
-                    return Err(Self::future_escape_error());
-                }
+        if let Some(v) = value {
+            let ty = self.check_expr(v)?;
+            if self.contains_future_escape_ty(&ty) {
+                return Err(Self::future_escape_error());
             }
-            None => {}
         }
         Ok(self.env.never_ty())
     }

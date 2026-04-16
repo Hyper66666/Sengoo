@@ -66,6 +66,7 @@ pub(crate) fn build_graph_v2_for_source(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_graph_v2_with_function_fingerprints_for_source(
     input_path: &Path,
     module_fingerprints: &[ModuleFingerprint],

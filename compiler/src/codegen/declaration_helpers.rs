@@ -15,7 +15,7 @@ impl Codegen {
 
             .push_str("declare i32 @printf(i8*, ...)\n");
 
-        self.declarations.push_str("\n");
+        self.declarations.push('\n');
 
 
 
@@ -41,7 +41,7 @@ impl Codegen {
 
             .push_str("declare void @sengoo_print_str(i8*)\n");
 
-        self.declarations.push_str("\n");
+        self.declarations.push('\n');
 
 
 
@@ -63,7 +63,7 @@ impl Codegen {
 
             .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
 
-        self.declarations.push_str("\n");
+        self.declarations.push('\n');
 
 
 
@@ -79,7 +79,7 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_frame_load(i64, i64)\n");
         self.declarations
             .push_str("declare i64 @sengoo_async_run_main_i64(i64)\n");
-        self.declarations.push_str("\n");
+        self.declarations.push('\n');
 
         self.declare_user_extern_functions();
 
@@ -153,7 +153,7 @@ impl Codegen {
 
 
 
-        self.declarations.push_str("\n");
+        self.declarations.push('\n');
 
     }
 

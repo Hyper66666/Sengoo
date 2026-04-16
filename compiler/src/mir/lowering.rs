@@ -320,6 +320,7 @@ pub fn lower_hir_with_options(
     Ok(results)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_function(
     fn_item: &hir::HIRFunction,
     lambda_counter: &mut usize,
@@ -466,6 +467,7 @@ struct LoweringContext<'a> {
 }
 
 impl<'a> LoweringContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         mir_fn: &'a mut MirFunction,
         lambda_counter: &'a mut usize,
@@ -1173,7 +1175,7 @@ fn set_terminator(&mut self, term: Terminator) {
                 let already_terminated = self
                     .mir_fn
                     .block_mut(cur)
-                    .map_or(false, |b| b.terminator.is_some());
+                    .is_some_and(|b| b.terminator.is_some());
                 if !already_terminated {
                     // 为函数体末尾生成隐式return指令。
                     // 检查是否为main函数的隐式返回情况。
@@ -1197,7 +1199,7 @@ fn set_terminator(&mut self, term: Terminator) {
             let already_terminated = self
                 .mir_fn
                 .block_mut(cur)
-                .map_or(false, |b| b.terminator.is_some());
+                .is_some_and(|b| b.terminator.is_some());
             if !already_terminated {
                 self.set_terminator(Terminator::Return(None));
             }
@@ -1354,11 +1356,8 @@ fn set_terminator(&mut self, term: Terminator) {
             .unwrap_or_else(|| self.infer_poll_func_from_last_call())
     }
 
-    /// 从模式中提取可用于匹配的枚举判别值。
-    /// 从枚举模式中提取判别值（discriminant）用于匹配检查。
-
-    /// 根据给定值生成与 HIR 模式匹配的判断逻辑。
-    /// 判断值是否匹配给定的HIR模式，用于运行时合约检查。
+    /// 从枚举模式中提取判别值（discriminant）并生成匹配判断逻辑。
+    /// 判断给定值是否匹配 HIR 模式，用于运行时合约检查。
     fn matches_pattern(&mut self, pat: &crate::hir::HIRPattern, value: Local) -> Local {
         let result = self.add_local(None, LocalKind::Temp, MIR_BOOL);
 
