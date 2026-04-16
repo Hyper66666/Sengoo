@@ -29,8 +29,8 @@ use super::{
 };
 use crate::cli::Cli;
 use clap::Parser as _;
-use serde_json::Value;
 use sengoo_compiler::compile_to_ir as compile_compiler_ir;
+use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -375,7 +375,10 @@ fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
         "sengoo_hashmap_iter_free_i64_status",
         "sengoo_hashmap_iter_reset_i64_status",
     ] {
-        assert!(runtime_c.contains(symbol), "runtime stdlib missing symbol: {symbol}");
+        assert!(
+            runtime_c.contains(symbol),
+            "runtime stdlib missing symbol: {symbol}"
+        );
     }
 }
 
@@ -405,7 +408,10 @@ fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
         "sengoo_result_and_then_mul_i64",
         "sengoo_result_map_err_add_i64",
     ] {
-        assert!(runtime_c.contains(symbol), "runtime stdlib missing symbol: {symbol}");
+        assert!(
+            runtime_c.contains(symbol),
+            "runtime stdlib missing symbol: {symbol}"
+        );
     }
 }
 
@@ -429,8 +435,14 @@ fn openspec_acceptance_scripts_target_real_test_filters() {
         "cargo test -p sengoo-compiler stdlib_surface_",
         "cargo test -p sgc stdlib_surface_runtime_",
     ] {
-        assert!(ps.contains(needle), "ps1 missing updated acceptance command: {needle}");
-        assert!(sh.contains(needle), "sh missing updated acceptance command: {needle}");
+        assert!(
+            ps.contains(needle),
+            "ps1 missing updated acceptance command: {needle}"
+        );
+        assert!(
+            sh.contains(needle),
+            "sh missing updated acceptance command: {needle}"
+        );
     }
 }
 
@@ -460,8 +472,14 @@ fn openspec_acceptance_scripts_cover_all_capabilities() {
         "docs-and-api-reference",
         "stdlib-core-collections",
     ] {
-        assert!(ps.contains(capability), "ps1 missing capability: {capability}");
-        assert!(sh.contains(capability), "sh missing capability: {capability}");
+        assert!(
+            ps.contains(capability),
+            "ps1 missing capability: {capability}"
+        );
+        assert!(
+            sh.contains(capability),
+            "sh missing capability: {capability}"
+        );
     }
 }
 #[test]
@@ -514,14 +532,7 @@ fn build_force_rebuild_flag_parses() {
 #[test]
 fn build_output_flag_parses() {
     assert!(
-        Cli::try_parse_from([
-            "sgc",
-            "build",
-            "tests/demo.sg",
-            "--output",
-            "dist/app",
-        ])
-        .is_ok()
+        Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--output", "dist/app",]).is_ok()
     );
 }
 
@@ -537,8 +548,7 @@ fn check_subcommand_parses() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn doc_command_generates_rustdoc_like_layout() {
-    let root =
-        std::env::temp_dir().join(format!("sengoo-sgc-doc-gen-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("sengoo-sgc-doc-gen-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
 
@@ -678,8 +688,8 @@ fn render_compile_error_json_with_location_serializes_structured_fields() {
 fn location_from_compile_error_extracts_invalid_pattern_span() {
     let src = "def main() -> i64 {\n    let = 1;\n}\n";
     let error = super::compile_to_ir(src).expect_err("source should fail parsing");
-    let location =
-        super::location_from_compile_error(src, &error).expect("parse errors should include location");
+    let location = super::location_from_compile_error(src, &error)
+        .expect("parse errors should include location");
 
     assert!(location.line.unwrap_or(0) > 0);
     assert!(location.column.unwrap_or(0) > 0);
@@ -1497,10 +1507,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-native-main", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-native-main",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-native-main", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -1722,11 +1729,15 @@ async def main() -> i64 {
 }
 "#;
 
-    let llvm_ir = compile_source(source, 1).expect("timeout-ready source should compile to LLVM IR");
+    let llvm_ir =
+        compile_source(source, 1).expect("timeout-ready source should compile to LLVM IR");
     let ll_path = temp_artifact("async-timeout-ready", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact("async-timeout-ready", if cfg!(windows) { "exe" } else { "" });
+    let exe_path = temp_artifact(
+        "async-timeout-ready",
+        if cfg!(windows) { "exe" } else { "" },
+    );
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -1870,7 +1881,10 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-spawn-task-status", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact("async-spawn-task-status", if cfg!(windows) { "exe" } else { "" });
+    let exe_path = temp_artifact(
+        "async-spawn-task-status",
+        if cfg!(windows) { "exe" } else { "" },
+    );
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -1913,7 +1927,10 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-cancel-task-status", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact("async-cancel-task-status", if cfg!(windows) { "exe" } else { "" });
+    let exe_path = temp_artifact(
+        "async-cancel-task-status",
+        if cfg!(windows) { "exe" } else { "" },
+    );
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -1981,7 +1998,8 @@ async def main() -> i64 {
 }
 "#;
 
-    let llvm_ir = compile_source(source, 1).expect("spawn polling source should compile to LLVM IR");
+    let llvm_ir =
+        compile_source(source, 1).expect("spawn polling source should compile to LLVM IR");
     let ll_path = temp_artifact("async-spawn-polling", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
@@ -1990,14 +2008,7 @@ async def main() -> i64 {
         "async-spawn-polling",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(
-        &clang,
-        &ll_path,
-        &exe_path,
-        Some(&custom_runtime_c_str),
-        1,
-    )
-    .unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2072,14 +2083,7 @@ async def main() -> i64 {
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
 
     let exe_path = temp_artifact("async-join", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(
-        &clang,
-        &ll_path,
-        &exe_path,
-        Some(&custom_runtime_c_str),
-        1,
-    )
-    .unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2146,14 +2150,7 @@ async def main() -> i64 {
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
 
     let exe_path = temp_artifact("async-select", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(
-        &clang,
-        &ll_path,
-        &exe_path,
-        Some(&custom_runtime_c_str),
-        1,
-    )
-    .unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2254,6 +2251,171 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_select_returns_first_completed_struct_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+struct Choice {
+    value: i64,
+    ready: bool,
+}
+
+async def fast() -> Choice {
+    Choice { value: 7, ready: true }
+}
+
+async def slow_step() -> i64 { 0 }
+
+async def slow() -> Choice {
+    let waited = await slow_step();
+    Choice { value: 9, ready: false }
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    if picked.ready { picked.value } else { 0 }
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("struct select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-struct", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-select-struct",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("struct select executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_select_returns_first_completed_generic_struct_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+struct Wrap<T> {
+    value: T,
+    bonus: i64,
+}
+
+async def fast() -> Wrap<i64> {
+    Wrap { value: 40, bonus: 2 }
+}
+
+async def slow_step() -> i64 { 0 }
+
+async def slow() -> Wrap<i64> {
+    let waited = await slow_step();
+    Wrap { value: 9, bonus: 1 }
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    picked.value + picked.bonus
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("generic struct select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-generic-struct", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-select-generic-struct",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("generic struct select executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_select_returns_first_completed_tuple_value() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+async def fast() -> (i64, bool) {
+    (7, true)
+}
+
+async def slow_step() -> i64 { 0 }
+
+async def slow() -> (i64, bool) {
+    let waited = await slow_step();
+    (9, false)
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    if picked.1 { picked.0 } else { 0 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("tuple select source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-tuple", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact("async-select-tuple", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("tuple select executable should run");
+    assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_preserves_live_locals_across_resume() {
     let Some(clang) = find_clang() else {
         return;
@@ -2282,10 +2444,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-live-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-live-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-live-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2375,10 +2534,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-loop-body", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-loop-body",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-loop-body", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2468,10 +2624,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-match-arms", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-match-arms",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-match-arms", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2513,10 +2666,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-bool-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-bool-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-bool-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2559,10 +2709,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-ref-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-ref-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-ref-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2604,10 +2751,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-f64-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-f64-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-f64-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2666,10 +2810,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
-    let exe_path = temp_artifact(
-        "async-f32-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-f32-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2779,10 +2920,7 @@ def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
-    let exe_path = temp_artifact(
-        "async-frame-guard",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-frame-guard", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2892,10 +3030,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-struct-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-struct-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-struct-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -2937,10 +3072,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-array-local", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(
-        "async-array-local",
-        if cfg!(windows) { "exe" } else { "" },
-    );
+    let exe_path = temp_artifact("async-array-local", if cfg!(windows) { "exe" } else { "" });
     compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
 
     let output = Command::new(&exe_path)
@@ -3033,8 +3165,14 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
     let ll_path = temp_artifact(&format!("stdlib-runtime-{}", tag), "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
 
-    let exe_path = temp_artifact(&format!("stdlib-runtime-{}", tag), if cfg!(windows) { "exe" } else { "" });
-    let obj_path = temp_artifact(&format!("stdlib-runtime-{}", tag), if cfg!(windows) { "obj" } else { "o" });
+    let exe_path = temp_artifact(
+        &format!("stdlib-runtime-{}", tag),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let obj_path = temp_artifact(
+        &format!("stdlib-runtime-{}", tag),
+        if cfg!(windows) { "obj" } else { "o" },
+    );
     compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -3049,13 +3187,18 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         let _ = fs::remove_file(&exe_path);
         return None;
     }
-    let runtime_obj = temp_artifact(&format!("stdlib-runtime-c-{}", tag), if cfg!(windows) { "obj" } else { "o" });
+    let runtime_obj = temp_artifact(
+        &format!("stdlib-runtime-c-{}", tag),
+        if cfg!(windows) { "obj" } else { "o" },
+    );
     compile_ir_to_object(&clang, &runtime_c, &runtime_obj, 2).unwrap();
 
     let object_paths = vec![obj_path.clone(), runtime_obj.clone()];
     link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
 
-    let output = Command::new(&exe_path).output().expect("stdlib binary should run");
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("stdlib binary should run");
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&obj_path);
@@ -3094,7 +3237,8 @@ def main() -> i64 {
 
 #[test]
 fn stdlib_surface_runtime_handles_boundary_values_and_resource_methods() {
-    let output = require_stdlib_runtime_output!("boundary", 
+    let output = require_stdlib_runtime_output!(
+        "boundary",
         r#"
 def main() -> i64 {
     let vec = vec_new_i64();
@@ -3122,8 +3266,6 @@ def main() -> i64 {
 
     assert_eq!(output.status.code(), Some(76));
 }
-
-
 
 #[test]
 fn stdlib_surface_runtime_vec_remove_shifts_tail_elements() {
@@ -3175,8 +3317,6 @@ def main() -> i64 {
     assert_eq!(output.status.code(), Some(1));
 }
 
-
-
 #[test]
 fn stdlib_surface_runtime_hashmap_iter_sums_all_values() {
     let output = require_stdlib_runtime_output!(
@@ -3204,7 +3344,6 @@ def main() -> i64 {
 
     assert_eq!(output.status.code(), Some(60));
 }
-
 
 #[test]
 fn stdlib_surface_runtime_iterator_map_with_executes_non_capturing_lambda() {
@@ -5357,12 +5496,6 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
     assert_eq!(plan, BuildWorksetPlan::FullRebuild);
 }
 
-
-
-
-
-
-
 #[test]
 fn stdlib_surface_runtime_iterator_filter_with_executes_non_capturing_lambda() {
     let output = require_stdlib_runtime_output!(
@@ -5654,7 +5787,11 @@ def main() -> i64 {
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Option unwrap failed"), "stderr should mention unwrap failure: {}", stderr);
+    assert!(
+        stderr.contains("Option unwrap failed"),
+        "stderr should mention unwrap failure: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -5687,8 +5824,16 @@ def main() -> i64 {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stdout.contains("custom expect failure"), "stdout should include custom message: {}", stdout);
-    assert!(stderr.contains("Option unwrap failed"), "stderr should include fatal message: {}", stderr);
+    assert!(
+        stdout.contains("custom expect failure"),
+        "stdout should include custom message: {}",
+        stdout
+    );
+    assert!(
+        stderr.contains("Option unwrap failed"),
+        "stderr should include fatal message: {}",
+        stderr
+    );
 }
 
 #[test]
@@ -5705,8 +5850,14 @@ def main() -> i64 {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stdout.contains("result expect failure"), "stdout should include custom message: {}", stdout);
-    assert!(stderr.contains("Result unwrap failed"), "stderr should include fatal message: {}", stderr);
+    assert!(
+        stdout.contains("result expect failure"),
+        "stdout should include custom message: {}",
+        stdout
+    );
+    assert!(
+        stderr.contains("Result unwrap failed"),
+        "stderr should include fatal message: {}",
+        stderr
+    );
 }
-
-

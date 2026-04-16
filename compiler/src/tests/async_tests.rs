@@ -559,7 +559,7 @@ async def main() -> i64 {
 }
 
 #[test]
-fn select_lowering_emits_runtime_select_call() {
+fn select_lowering_emits_winner_runtime_call_and_result_phi() {
     let source = r#"
 async def first_step() -> i64 { 1 }
 async def second_step() -> i64 { 2 }
@@ -571,21 +571,50 @@ async def main() -> i64 {
 "#;
 
     let mir_fns = compile_to_mir(source).expect("select source should lower to MIR");
-    let has_select_call = mir_fns.iter().any(|mir_fn| {
-        mir_fn.instructions.iter().any(|inst| match inst {
-            Instruction::Call { func, .. } => func == "sengoo_async_select_i64",
-            _ => false,
-        })
-    });
+    let mut saw_winner = false;
+    let mut saw_first_result = false;
+    let mut saw_second_result = false;
+    let mut saw_phi = false;
+    for mir_fn in &mir_fns {
+        for inst in &mir_fn.instructions {
+            match inst {
+                Instruction::Call { func, .. } if func == "sengoo_async_select_winner" => {
+                    saw_winner = true;
+                }
+                Instruction::Call { func, .. } if func == "first_step__result" => {
+                    saw_first_result = true;
+                }
+                Instruction::Call { func, .. } if func == "second_step__result" => {
+                    saw_second_result = true;
+                }
+                Instruction::Phi { incoming, .. } if incoming.len() == 2 => {
+                    saw_phi = true;
+                }
+                _ => {}
+            }
+        }
+    }
 
     assert!(
-        has_select_call,
-        "select lowering should emit a runtime select call"
+        saw_winner,
+        "select lowering should emit the winner runtime call"
+    );
+    assert!(
+        saw_first_result,
+        "select lowering should emit the first future result call"
+    );
+    assert!(
+        saw_second_result,
+        "select lowering should emit the second future result call"
+    );
+    assert!(
+        saw_phi,
+        "select lowering should merge select results with a phi"
     );
 }
 
 #[test]
-fn select_lowering_emits_runtime_select_bool_call() {
+fn select_lowering_emits_winner_runtime_decl_for_bool_select() {
     let source = r#"
 async def first_step() -> bool { true }
 async def second_step() -> bool { false }
@@ -597,16 +626,16 @@ async def main() -> i64 {
 "#;
 
     let llvm_ir = compile_to_ir(source).expect("bool select source should lower to LLVM IR");
-    let has_select_call = llvm_ir.contains("@sengoo_async_select_bool(");
+    let has_select_call = llvm_ir.contains("@sengoo_async_select_winner(");
 
     assert!(
         has_select_call,
-        "select lowering should emit a bool runtime select call"
+        "select lowering should emit the winner runtime declaration"
     );
 }
 
 #[test]
-fn select_lowering_emits_runtime_select_f64_call() {
+fn select_lowering_emits_winner_runtime_decl_for_f64_select() {
     let source = r#"
 async def first_step() -> f64 { 3.5 }
 async def second_step() -> f64 { 1.5 }
@@ -618,11 +647,11 @@ async def main() -> i64 {
 "#;
 
     let llvm_ir = compile_to_ir(source).expect("f64 select source should lower to LLVM IR");
-    let has_select_call = llvm_ir.contains("@sengoo_async_select_f64(");
+    let has_select_call = llvm_ir.contains("@sengoo_async_select_winner(");
 
     assert!(
         has_select_call,
-        "select lowering should emit an f64 runtime select call"
+        "select lowering should emit the winner runtime declaration"
     );
 }
 
@@ -644,6 +673,54 @@ async def main() -> i64 {
     assert!(
         result.is_ok(),
         "select should accept timeout-produced bool futures, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn select_builtin_returns_first_completed_struct_value() {
+    let source = r#"
+struct Point { x: i64, y: i64 }
+
+async def fast() -> Point { Point { x: 7, y: 9 } }
+async def slow() -> Point { Point { x: 1, y: 2 } }
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    picked.x + picked.y
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "select builtin should compile for struct futures, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn select_builtin_non_scalar_struct_futures_lower_to_mir() {
+    let source = r#"
+struct Point { x: i64, y: i64 }
+
+async def fast() -> Point { Point { x: 7, y: 9 } }
+async def slow() -> Point { Point { x: 1, y: 2 } }
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select(first, second);
+    picked.x
+}
+"#;
+
+    let result = compile_to_mir(source);
+    assert!(
+        result.is_ok(),
+        "select builtin should lower for struct futures, got: {:?}",
         result.err()
     );
 }

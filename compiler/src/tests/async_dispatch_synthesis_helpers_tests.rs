@@ -1,6 +1,7 @@
 use crate::mir::async_dispatch_helpers::build_async_dispatch_registry;
 use crate::mir::async_dispatch_synthesis_helpers::{
     select_result_dispatch_name, select_runtime_declaration, select_runtime_function_name,
+    select_winner_runtime_declaration, select_winner_runtime_function_name,
     synthesize_result_dispatch, synthesize_spawn_poll_dispatch,
 };
 use crate::mir::{MIRType, Terminator, MIR_BOOL, MIR_I64};
@@ -18,6 +19,14 @@ fn async_dispatch_synthesis_helpers_map_scalar_types_to_expected_symbols() {
     assert_eq!(
         select_runtime_declaration(&MIR_BOOL).as_deref(),
         Some("declare i1 @sengoo_async_select_bool(i64, i64, i64, i64)\n")
+    );
+    assert_eq!(
+        select_winner_runtime_function_name(),
+        "sengoo_async_select_winner"
+    );
+    assert_eq!(
+        select_winner_runtime_declaration(),
+        "declare i64 @sengoo_async_select_winner(i64, i64, i64, i64)\n"
     );
 }
 
