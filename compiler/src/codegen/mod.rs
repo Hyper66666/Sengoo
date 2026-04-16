@@ -1,6 +1,7 @@
 pub mod common;
 
 pub mod jit;
+mod declaration_helpers;
 
 
 
@@ -9,7 +10,6 @@ pub use jit::JITCodegen;
 
 
 use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64};
-use crate::mir::async_dispatch_synthesis_helpers::select_runtime_declaration;
 
 use std::collections::{HashMap, HashSet};
 
@@ -72,16 +72,16 @@ pub struct Codegen {
     /// Collected string literals emitted for the current module.
     strings: Vec<String>,
 
-    /// 鐎涙顑佹稉鎻掔埗闁插繗顓搁弫鏉挎珤閵?
+    /// 闁诲孩绋掗〃鍫ヮ敄娴ｅ湱鈻旈柟缁樺笧閸╂姊洪幓鎺旂妞ゆ挻鎮傚顐﹀级閹稿海褰滈梺?
     string_counter: usize,
 
     /// Cache local names for O(1) lookup during code generation.
     pub(crate) name_cache: Vec<String>,
 
-    /// 缂傛挸鐡?MIR 缁鐎烽崚?LLVM 缁鐎风€涙顑佹稉鑼畱閺勭姴鐨犻妴?
+    /// 缂傚倸鍊归幐鎼佹偤?MIR 缂備緡鍋夐褔鎮楅悜钘夌?LLVM 缂備緡鍋夐褔鎮楁搴樺亾濞戞瑯娈樻い鎴滅劍缁嬪鎳犻浣烘殸闂佸搫瀚慨鎾儍閻樿违?
     type_str_cache: HashMap<MIRType, String>,
 
-    /// 娑?`load` 閹稿洣鎶ら悽鐔稿灇閸烆垯绔撮惃?SSA 娑撳瓨妞傜€靛嫬鐡ㄩ崳銊ユ倳閵?
+    /// 婵?`load` 闂佸湱顭堝ú锝夊箮閵堝鍋ㄩ柣鏃傤焾閻忓洭鏌涢悜鍡楃仧缂佹梹鎸抽幆?SSA 婵炴垶鎸搁悺銊ヮ渻閸屾壕鍋撻棃娑橆仼闁宦板姂瀹曟娊濡搁妷锕€鈧娊鏌?
     load_counter: usize,
 
 }
@@ -143,7 +143,7 @@ impl Codegen {
 
 
 
-        // 閺嶈宓侀惄顔界垼楠炲啿褰寸拋鍓х枂 target triple閿涘矂浼╅崗?clang 閹?`-Woverride-module`閵?
+        // 闂佸搫绉烽～澶婄暤娓氣偓閹嫰顢欓悾灞界伇濡ょ姷鍋涢崯鑳亹鐎靛憡濯奸柛鎾楀懏鐎?target triple闂佹寧绋戦惌鍌涘閳哄懎绀?clang 闂?`-Woverride-module`闂?
         if cfg!(target_os = "windows") {
 
             self.declarations
@@ -168,335 +168,6 @@ impl Codegen {
 
 
 
-    /// Declare external runtime functions used by generated LLVM IR.
-    fn declare_runtime_functions(&mut self) {
-
-        self.declarations
-
-            .push_str("; External C library functions\n");
-
-        self.declarations.push_str("declare i32 @puts(i8*)\n");
-
-        self.declarations
-
-            .push_str("declare i32 @printf(i8*, ...)\n");
-
-        self.declarations.push_str("\n");
-
-
-
-        // Sengoo runtime print functions
-
-        self.declarations
-
-            .push_str("; Sengoo runtime print functions\n");
-
-        self.declarations
-
-            .push_str("declare void @sengoo_print_i64(i64)\n");
-
-        self.declarations
-
-            .push_str("declare void @sengoo_print_bool(i64)\n");
-
-        self.declarations
-
-            .push_str("declare void @sengoo_print_f64(double)\n");
-
-        self.declarations
-
-            .push_str("declare void @sengoo_print_str(i8*)\n");
-
-        self.declarations.push_str("\n");
-
-
-
-        // Sengoo runtime string functions
-
-        self.declarations
-
-            .push_str("; Sengoo runtime string functions\n");
-
-        self.declarations
-
-            .push_str("declare i64 @sengoo_str_len(i8*)\n");
-
-        self.declarations
-
-            .push_str("declare i8* @sengoo_str_concat(i8*, i8*)\n");
-
-        self.declarations
-
-            .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
-
-        self.declarations.push_str("\n");
-
-
-
-        self.declarations
-            .push_str("; Sengoo async runtime functions\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_frame_alloc(i64)\n");
-        self.declarations
-            .push_str("declare void @sengoo_async_frame_free(i64)\n");
-        self.declarations
-            .push_str("declare void @sengoo_async_frame_store(i64, i64, i64)\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_frame_load(i64, i64)\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_run_main_i64(i64)\n");
-        self.declarations.push_str("\n");
-
-        self.declare_user_extern_functions();
-
-    }
-
-
-
-    fn declare_user_extern_functions(&mut self) {
-
-        if self.ffi.extern_decls.is_empty() {
-
-            return;
-
-        }
-
-
-
-        self.declarations
-
-            .push_str("; User-declared extern FFI functions\n");
-
-        let mut seen = HashSet::new();
-
-        let extern_decls = self.ffi.extern_decls.clone();
-
-
-
-        for decl in extern_decls {
-
-            if !seen.insert(decl.name.clone()) {
-
-                continue;
-
-            }
-
-
-
-            if let Some(link_name) = &decl.link_name {
-
-                self.declarations
-
-                    .push_str(&format!("; link(name = \"{}\")\n", link_name));
-
-            }
-
-            self.declarations
-
-                .push_str(&format!("; ABI: {}\n", decl.abi.as_str()));
-
-
-
-            let ret = self.mir_type_to_llvm_cached(&decl.ret);
-
-            let params = decl
-
-                .params
-
-                .iter()
-
-                .map(|p| self.mir_type_to_llvm_cached(p))
-
-                .collect::<Vec<_>>()
-
-                .join(", ");
-
-            self.declarations
-
-                .push_str(&format!("declare {} @{}({})\n", ret, decl.name, params));
-
-        }
-
-
-
-        self.declarations.push_str("\n");
-
-    }
-
-
-
-    /// Declare the async spawn runtime hook only when the module actually uses it.
-    fn maybe_declare_spawn_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        let needs_spawn = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => func == "sengoo_async_spawn_raw",
-                _ => false,
-            })
-        });
-        if !needs_spawn
-            || self
-                .declarations
-                .contains("declare i64 @sengoo_async_spawn_raw(i64, i64)\n")
-        {
-            return;
-        }
-
-        self.declarations
-            .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
-    }
-
-    /// Declare the async select runtime hook only when the module actually uses it.
-    fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        let mut needed = std::collections::BTreeSet::new();
-        for mir_fn in mir_fns {
-            for inst in &mir_fn.instructions {
-                if let mir::Instruction::Call { func, .. } = inst {
-                    if func
-                        .strip_prefix("sengoo_async_select_")
-                        .is_some_and(|suffix| matches!(suffix, "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64"))
-                    {
-                        needed.insert(func.clone());
-                    }
-                }
-            }
-        }
-
-        for func in needed {
-            let suffix = func
-                .strip_prefix("sengoo_async_select_")
-                .expect("filtered select runtime function should keep prefix");
-            let ty = match suffix {
-                "bool" => MIRType::Bool,
-                "i8" => MIRType::Int(8),
-                "i16" => MIRType::Int(16),
-                "i32" => MIRType::Int(32),
-                "i64" => MIRType::Int(64),
-                "f32" => MIRType::Float(32),
-                "f64" => MIRType::Float(64),
-                _ => continue,
-            };
-            let decl = select_runtime_declaration(&ty)
-                .expect("needed select runtime declaration should exist");
-            if !self.declarations.contains(&decl) {
-                self.declarations.push_str(&decl);
-            }
-        }
-    }
-
-    fn maybe_declare_sleep_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
-        let needs_sleep = mir_fns.iter().any(|mir_fn| {
-            let has_sleep_call = mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => {
-                    matches!(
-                        func.as_str(),
-                        "sengoo_async_sleep__start"
-                            | "sengoo_async_sleep__poll"
-                            | "sengoo_async_sleep__result"
-                            | "sengoo_async_sleep__cancel"
-                            | "sengoo_async_sleep__drop"
-                    )
-                }
-                _ => false,
-            });
-            let has_sleep_suspend = mir_fn.basic_blocks.iter().any(|bb| match &bb.terminator {
-                Some(mir::Terminator::Suspend { poll_func, .. }) => {
-                    poll_func == "sengoo_async_sleep__poll"
-                }
-                _ => false,
-            });
-            has_sleep_call || has_sleep_suspend
-        });
-
-        if !needs_sleep
-            || self
-                .declarations
-                .contains("declare i64 @sengoo_async_sleep__start(i64)\n")
-        {
-            return;
-        }
-
-        self.declarations
-            .push_str("declare i64 @sengoo_async_sleep__start(i64)\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_sleep__poll(i64)\n");
-        self.declarations
-            .push_str("declare void @sengoo_async_sleep__result(i64)\n");
-        self.declarations
-            .push_str("declare i1 @sengoo_async_sleep__cancel(i64)\n");
-        self.declarations
-            .push_str("declare void @sengoo_async_sleep__drop(i64)\n");
-    }
-
-    fn maybe_declare_timeout_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
-        let needs_timeout = mir_fns.iter().any(|mir_fn| {
-            let has_timeout_call = mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => {
-                    matches!(
-                        func.as_str(),
-                        "sengoo_async_timeout_bool__start"
-                            | "sengoo_async_timeout_bool__poll"
-                            | "sengoo_async_timeout_bool__result"
-                            | "sengoo_async_timeout_bool__cancel"
-                            | "sengoo_async_timeout_bool__drop"
-                    )
-                }
-                _ => false,
-            });
-            let has_timeout_suspend = mir_fn.basic_blocks.iter().any(|bb| match &bb.terminator {
-                Some(mir::Terminator::Suspend { poll_func, .. }) => {
-                    poll_func == "sengoo_async_timeout_bool__poll"
-                }
-                _ => false,
-            });
-            has_timeout_call || has_timeout_suspend
-        });
-
-        if !needs_timeout
-            || self
-                .declarations
-                .contains("declare i64 @sengoo_async_timeout_bool__start(i64, i64, i64)\n")
-        {
-            return;
-        }
-
-        self.declarations
-            .push_str("declare i64 @sengoo_async_timeout_bool__start(i64, i64, i64)\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_timeout_bool__poll(i64)\n");
-        self.declarations
-            .push_str("declare i1 @sengoo_async_timeout_bool__result(i64)\n");
-        self.declarations
-            .push_str("declare i1 @sengoo_async_timeout_bool__cancel(i64)\n");
-        self.declarations
-            .push_str("declare void @sengoo_async_timeout_bool__drop(i64)\n");
-    }
-
-    fn maybe_declare_async_task_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
-        let needs_task_runtime = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => {
-                    matches!(
-                        func.as_str(),
-                        "sengoo_async_cancel_task" | "sengoo_async_task_status"
-                    )
-                }
-                _ => false,
-            })
-        });
-
-        if !needs_task_runtime
-            || self
-                .declarations
-                .contains("declare i1 @sengoo_async_cancel_task(i64)\n")
-        {
-            return;
-        }
-
-        self.declarations
-            .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
-        self.declarations
-            .push_str("declare i64 @sengoo_async_task_status(i64)\n");
-    }
     fn emit_string_constants(&mut self) {
 
         if !self.strings.is_empty() {
@@ -530,7 +201,7 @@ impl Codegen {
 
 
 
-    /// 濞夈劌鍞界€涙顑佹稉鎻掔埗闁插繐鑻熸潻鏂挎礀閸忚泛鍙忕仦鈧粭锕€褰块崥宥冣偓?
+    /// 濠电偛顦崝宀勫船閻ｅ备鍋撳☉娆樻畼妞ゆ垳鐒︾粙澶愬箵閹烘柨鐓戦梻浣瑰絻缁绘劙鎳熼悢鍛婁氦闁哄倹瀵х粈鈧梺绋跨箺濞夋盯宕ｈ箛鏇氭勃闁逞屽墰缁參鏁冮埀顒冦亹閸ф瑙︾€广儱鍟犻崑?
     fn add_string(&mut self, s: &str) -> String {
 
         let idx = self.string_counter;
@@ -545,7 +216,7 @@ impl Codegen {
 
 
 
-    /// 閹殿偅寮?MIR 娑擃厼鍤悳鎵畱缂佹挻鐎担鎾惰閸ㄥ绱濋獮鍫曨暕閸忓牏鏁撻幋?LLVM named struct type閵?
+    /// 闂佽顔栭崑鍛嚕?MIR 婵炴垶鎼╅崢濂稿吹椤撱垺鍋濋柟娈垮枟閻ｈ京绱撴担瑙勫鞍闁诲寒鍨遍幏鍛村箻閹偊娼堕梺鎼炲妼椤戞垹妲愬┑瀣祦闁割偅娲﹂弳鏇㈡煕韫囨挾澧㈤柡浣规崌楠?LLVM named struct type闂?
     fn emit_struct_types(&mut self, mir_fns: &[MirFunction]) {
 
         let mut seen = HashSet::new();
@@ -564,7 +235,7 @@ impl Codegen {
 
 
 
-    /// 闁帒缍婇弨鍫曟肠缂佹挻鐎担鎾崇摟濞堝吀鑵戝畵灞筋殰閻?LLVM named type閵?
+    /// 闂備緡鍋呯敮鎺旂礊婵犲洤缁╅柛顐ｆ礃閼茬姷绱撴担瑙勫鞍闁诲寒鍨遍幏鍛村箻瀹曞洦鎲诲┑鐐茬墕閸氣偓闁煎灚鍨甸悾鐢典沪缁涘顔囬梺?LLVM named type闂?
     fn collect_struct_types(&mut self, ty: &MIRType, seen: &mut HashSet<String>) {
 
         match ty {
@@ -573,7 +244,7 @@ impl Codegen {
 
                 if seen.insert(name.clone()) {
 
-                    // 閸忓牓鈧帒缍婃径鍕倞鐎涙顔岄柌宀€娈戝畵灞筋殰缂佹挻鐎担鎾惰閸ㄥ鈧?
+                    // 闂佺绻愰悧鎾诲焵椤掍礁绗掔紓宥咃攻瀵板嫰宕熼鐔封偓鐐烘倵濞戞瑯娈曟い鏂跨焸閺屽苯鐣濋埀顒€鈻撻幋婵堟殼閻忕偟鐡斿▓鎵磽娴ｈ灏伴柣搴灡閹峰懘骞橀幆閭︽蕉闂佹悶鍔岄鍐焵?
                     for (_, ft) in fields {
 
                         self.collect_struct_types(ft, seen);
@@ -710,7 +381,7 @@ impl Codegen {
 
 
 
-        // 濡絾鐗曢崢娑㈠绩閸洘鑲犻柟纰樺亾闁哄牆顦悺褏绮敂鑳洬閻㈩垱鎮傞崳?
+        // 濠碘槅鍋撶徊楣冩偋閺囥垹鍌ㄦ繛鎴欏灩缂佲晠鏌涢锝嗙闁艰尙濞€閺岀喓鍠婂Ο杞板闂備礁鎼悧鍡浰囬鐐村仱鐟滃繒鍒掗銏℃櫆闁兼剚鍨煎ú顒勬煟閵忊晛鐏￠柟顔煎€垮畷?
         for mir_fn in mir_fns {
 
             self.collect_string_constants(mir_fn);
@@ -732,7 +403,7 @@ impl Codegen {
 
 
 
-        // 娑撶儤膩閸фぞ鑵戦惃鍕槨娑擃亜鍤遍弫鎵晸閹?LLVM IR閵?
+        // 婵炴垶鎸鹃崕銈堝暞闂佺鍕╀沪闁煎灚鍨块幆鍐礋椤掑倹袞婵炴垶鎼╂禍婊堝吹闁秴鏋侀柟娈垮枟閺呮悂鏌?LLVM IR闂?
         for mir_fn in mir_fns {
 
             self.codegen_function(mir_fn)?;
@@ -1186,7 +857,7 @@ impl Codegen {
 
                     mir::MirConstant::String(s) => {
 
-                        // 鐏忓棗鐡х粭锔胯鐢悂鍣洪弰鐘茬殸閸掓澘鍑″▔銊ュ斀閻ㄥ嫬鍙忕仦鈧€涙顑佹稉鑼儊閸欐灚鈧?
+                        // 闁诲繐绻愬Λ妤呮偤瑜忕划顓㈡晜閼愁垼娲柣銏╁灡閹倿宕冲ú顏勫強闁绘灏欏▓鎼佹煕閹烘挻绶查柛鎴斺偓鏂ユ灃闁靛鍎遍弬鈧梺姹囧妼鐎氼剟宕ｈ箛鏇氭勃闁逞屽墰閳ь剚绋掗〃鍫ヮ敄娴ｅ湱鈻旈柤纰卞墻閸庡﹪鏌涘▎鎰粵闁?
                         let str_idx = self.strings.iter().position(|x| x == s).unwrap_or(0);
 
                         let str_ref = format!("@.str.{}", str_idx);
@@ -1297,7 +968,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 婵″倹鐏夐幙宥勭稊閺佺増妲搁悽銊﹀煕閸欐﹢鍣洪敍宀勬付鐟曚礁鍘?load
+                // 婵犵鈧啿鈧綊鎮樻径鎰鐎广儱瀚粙濠囨煛娴ｅ搫顣兼俊鍙夋倐閹粙濡搁敃鈧悡鏇㈡煕濞嗘劧鑰块柛锝嗘そ閺佸秴鐣濋崟顑跨帛闁荤喐娲戠粈渚€宕?load
 
                 let left_val = self.operand_value(*left, mir_fn);
 
@@ -1501,7 +1172,7 @@ impl Codegen {
 
                 let dest = self.local_name(*destination);
 
-                // 娴ｈ法鏁?id 閻╁瓨甯寸槐銏犵穿閿涘(1) 閺屻儲澹?
+                // 婵炶揪缍€濞夋洟寮?id 闂佺儵鏅涢悺銊ф暜鐎靛憡顫曢柕蹇曞Х缁屽潡鏌ㄥ☉姗嗗妺(1) 闂佸搫琚崕鍙夌珶?
 
                 let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
@@ -1509,8 +1180,8 @@ impl Codegen {
 
                 self.emit_indent();
 
-                // 閺嶈宓佸┃?local 閻?kind 閸滃瞼琚崹瀣灲閺傤叀绻栨稉鈧弶鈩冩Ц閸氾箓娓剁憰浣烘埂濮濓絽褰傞崙?load閵?                // 1. 閻劍鍩涢崣姗€鍣洪柅姘埗鐎电懓绨?alloca閿涘矁顕伴崣鏍ㄦ闂団偓鐟?load閵?
-                // 2. 閹稿洭鎷￠幋鏍х穿閻劎琚崹瀣╃瘍闂団偓鐟?load閿涘本澧犻懗钘夌繁閸掓澘鍙鹃幐鍥ф倻閻ㄥ嫬鈧鈧?
+                // 闂佸搫绉烽～澶婄暤娴ｇ硶鏀?local 闂?kind 闂佸憡绮岄惉鑲╂偖椤愶箑鍨傞悗锝庝簻閻忔煡鏌￠崒銈呭绩缂佺粯鐗楃粙澶愬焵椤掑嫬绾ч柍鈺佸暞绗戦梺鍛婄啲缁犳挸銆掗崜浣瑰暫濞达絿鍎ら崺鍌涙叏濠垫挾鍒扮憸鏉垮€垮畷?load闂?                // 1. 闂佹椿娼块崝宥夊春濞戙垹鐭楁慨妞诲亾闁革絾妞介弻鍛潩椤掑倸鐓戦柣搴ｆ暩閹虫挾鑺?alloca闂佹寧绋戦惌渚€顢氭导鏉戠煑闁哄秲鍔嶉ˇ褔姊婚崶锝呬壕闁?load闂?
+                // 2. 闂佸湱顭堝ú顓㈠箯閿熺姴绠ｉ柡宓懐鈹涢梺娲绘娇閸斿海鎮锕€鍨傞悗锝傛櫇閻﹀秹姊婚崶锝呬壕闁?load闂佹寧绋戦張顒佹櫠閻樼粯鍤勯柦妯侯槺缁讳線鏌涢幒鎾寸凡闁告瑩绠栭獮鎰板炊瑜庨崐濠氭煟閵娿儱顏╅柍褜鍓涢鏇㈠焵?
                 let needs_load = local_info.kind == LocalKind::User
 
                     || matches!(src_ty, MIRType::Ptr(_) | MIRType::Ref(_));
@@ -1523,7 +1194,7 @@ impl Codegen {
 
                     let llvm_ty = self.mir_type_to_llvm_cached(src_ty);
 
-                    // load 閻ㄥ嫮琚崹瀣絿閸愬厖绨┃鎰惙娴ｆ粍鏆熺€圭偤妾幐鍥ф倻閻ㄥ嫬鍘撶槐鐘佃閸ㄥ鈧?
+                    // load 闂佹眹鍔岀€氼喚鎮锕€鍨傞悗锝庝簻缁插潡鏌涢幇顒€甯犵紒顭戝墮閳瑰啴骞囬鐔稿劌婵炶揪绲剧划宥夊汲閻旇　鍋撻崷顓炰槐婵＄虎鍨堕獮鎰板炊瑜庨崐濠氭煟閵娿儱顏╅柛妯绘尵濡叉劙鎮╂担鍐炬蕉闂佹悶鍔岄鍐焵?
                     let load_ty = match src_ty {
 
                         MIRType::Ptr(inner) | MIRType::Ref(inner) => {
@@ -1603,7 +1274,7 @@ impl Codegen {
 
 
 
-                // 閺嶈宓?index local 閻?kind 閸愬啿鐣鹃弰顖氭儊闂団偓鐟曚礁鍘?load 缁便垹绱╅崐绗衡偓?
+                // 闂佸搫绉烽～澶婄暤?index local 闂?kind 闂佸憡鍔曢崯鍧楁偩妤ｅ啫鍙婃い鏍ㄧ閸庡﹪姊婚崶锝呬壕闁荤喐娲戠粈渚€宕?load 缂備椒绌堕崹鍦閳哄懎纾圭紒妤勩€€閸?
                 let idx_local_info = &mir_fn.locals[index.index()].0;
 
 
@@ -1612,7 +1283,7 @@ impl Codegen {
 
                 if idx_local_info.kind == LocalKind::User {
 
-                    // 閻劍鍩涚槐銏犵穿閸欐﹢鍣洪棁鈧憰浣稿帥 load閵?
+                    // 闂佹椿娼块崝宥夊春濞戞碍顫曢柕蹇曞Х缁屽潡鏌涘▎鎰惰€块柛锝嗘そ濡線鍩€椤掑倹鍟哄ù锝囶焾鐢?load闂?
                     let idx_reg = self.local_name(*index);
 
                     let idx_temp = format!("%idx.{}", destination.id);
@@ -1633,7 +1304,7 @@ impl Codegen {
 
                 } else {
 
-                    // 娑撳瓨妞傜槐銏犵穿閸婄厧褰查惄瀛樺复娴ｆ粈璐?getelementptr 閸嬪繒些閵?
+                    // 婵炴垶鎸搁悺銊ヮ渻閸屾粍顫曢柕蹇曞Х缁屽潡鏌涙繝鍕付鐟滅増鐓￠幆鍕偓娑櫭径宥吤归敐鍡欑焼閻?getelementptr 闂佺顑呯换鎺嶇昂闂?
                     let idx_reg = self.local_name(*index);
 
                     self.ir.push_str(&format!(
@@ -1658,7 +1329,7 @@ impl Codegen {
 
             } => {
 
-                // 婢跺嫮鎮婇弫鎵矋/缂佹挻鐎担鎾逛粵閸氬牄鈧?
+                // 婵犮垼娉涚€氼噣骞冩繝鍥ф瀬闁规鍠氶惌?缂傚倷鐒﹂幐濠氭倵椤栨稒濯撮柟楣冣偓娑氶┏闂佸憡鑹鹃悧鍕焵?
                 let dest = self.local_name(*destination);
 
 
@@ -1667,12 +1338,12 @@ impl Codegen {
 
                     MIRType::Array(elem_ty, _len) => {
 
-                        // 閺佹壆绮嶉懕姘値閹稿鍘撶槐鐘烩偓鎰嚋閸愭瑥鍙嗛惄顔界垼閸︽澘娼冮敍灞煎▏閻?store 鐎瑰本鍨氶妴?
+                        // 闂佽桨鐒︽竟鍡欏垝瀹ュ鍤傛慨姗嗗墯閸娿倝鏌熺粙娆炬Ц闁告ɑ鎸惧Σ鎰版偐閻戔晛浜鹃柟閭︿邯閸ゅ鏌涢幇顓犳噧闁告瑥妫濋幆鍕敊閻ｅ苯鐏遍梺闈╅檮濠㈡ê顭囬崘顔芥櫖閻忕偟鍘ч埢蹇涙煟?store 闁诲海鎳撻張顒勫垂濮樿泛违?
                         let elem_llvm_ty = self.mir_type_to_llvm_cached(elem_ty);
 
                         for (i, field_local) in fields.iter().enumerate() {
 
-                            // 鐠侊紕鐣昏ぐ鎾冲閸忓啰绀岄惃鍕勾閸р偓閵?
+                            // 闁荤姳绶ょ槐鏇㈡偩閺勫繈浜归柟鎯у暱椤ゅ懘鏌涜箛鎾虫殶缂佲偓瀹€鍕剭闁告洦鍋呴崟楣冩煕瑜夐崑鎾绘煏?
                             let elem_ptr = format!("{}.elem.{}", dest, i);
 
                             self.emit_indent();
@@ -1789,7 +1460,7 @@ impl Codegen {
 
                     _ => {
 
-                        // 閸忔湹绮猾璇茬€烽弳鍌涙鐠哄疇绻?
+                        // 闂佺绻戝﹢鍦垝椤掑倻灏甸悹鍥皺閳ь剛鍏樺鎶藉磼濞戞瑯妲柣鐘叉惈閻ゅ洨鎹?
 
                     }
 
@@ -1828,7 +1499,7 @@ impl Codegen {
 
             } => {
 
-                // 閻㈢喐鍨氶崙鑺ユ殶鐠嬪啰鏁ら妴?
+                // 闂佹眹鍨婚崰鎰板垂濮樿泛绀勯柤鎭掑劜濞堝爼鎮圭€ｎ亜鏆熼柡浣靛€濇俊?
                 let dest = self.local_name(*destination);
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
@@ -1837,7 +1508,7 @@ impl Codegen {
 
 
 
-                // 鐎?`print` 閸嬫氨澹掑▓濠傤槱閻炲棴绱濈€圭偤妾梽宥呭煂 `puts`閵?
+                // 闁?`print` 闂佺顑嗗銊︾珶閹烘垟鏋斿┑鐘插亞濡查亶鏌ｉ悙鍙夛紨缂佽鲸绻勯埀顒€婀遍崑銈咁瀶椤栫偞鈷旂€广儱鎳庨悡?`puts`闂?
                 let is_print = func == "print";
 
                 let actual_func = if is_print { "puts" } else { func };
@@ -1932,7 +1603,7 @@ impl Codegen {
 
 
 
-                // 娴ｈ法鏁?extractvalue 閸欐牕鍤崚銈呭焼閸婄鈧?                self.emit_indent();
+                // 婵炶揪缍€濞夋洟寮?extractvalue 闂佸憡鐟﹂悧鏇㈠吹椤撱垹绀嗛柕鍫濇噹閻掑ジ鏌涙繝鍕靛劆闁?                self.emit_indent();
 
                 self.ir.push_str(&format!(
 
@@ -1956,7 +1627,7 @@ impl Codegen {
 
             } => {
 
-                // 閺嬪嫰鈧姵鐏囨稉鎯р偓绗衡偓?                // 瑜版挸澧?LLVM 娑擃厾娈戦弸姘鐞涖劎銇氭稉?`{ 閸掋倕鍩嗛崐? 鏉炲€熷祹 }`閵?
+                // 闂佸搫顑呯€氫即鍩€椤掑倸校闁诲繐娲︾粙澶愬箚瑜夐崑鎾剁箔鐞涒€充壕?                // 閻熸粎澧楅幐鍛婃櫠?LLVM 婵炴垶鎼╅崢鎯р枔閹达箑鍑犳慨姗嗗亜椤╊剟鎮跺☉鏍у闁靛洦纰嶇粙?`{ 闂佸憡甯囬崐鏇㈠春閸℃稑纾? 闁哄鍋涢埀顒傚枎缁?}`闂?
                 let dest = self.local_name(*destination);
 
 
@@ -2016,14 +1687,14 @@ impl Codegen {
 
             } => {
 
-                // 閹绘劕褰囬弸姘鏉炲€熷祹閵?
+                // 闂佸湱绮崝鏇°亹閸ヮ剙鍑犳慨姗嗗亜椤╊剟寮堕悙娴嬪亾閻旈銈归梺?
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
 
 
 
-                // 鏉炲€熷祹娴ｅ秳绨紒鎾寸€惃鍕儑 1 娑擃亜鐡у▓鐐光偓?                self.emit_indent();
+                // 闁哄鍋涢埀顒傚枎缁佺懓霉閿濆懐小缂侇煈鍓涚槐鎺楀箻鐎电硶鍋撻鐐村剭闁告洦鍙庨崕?1 婵炴垶鎼╂禍婊堟偤瑜嶉埢鎾绘倷閸忓浜?                self.emit_indent();
 
                 self.ir.push_str(&format!(
 
@@ -2061,7 +1732,7 @@ impl Codegen {
 
                 match (&src_ty, to) {
 
-                    // Int -> Int閿涙碍澧跨€圭晫鏁?sext閿涘瞼缂夌粣鍕暏 trunc閵?
+                    // Int -> Int闂佹寧绋掔喊宥嗘櫠鐠恒劉鍋撻崷顓熸珪闁?sext闂佹寧绋戦惉鑲╃磽婢跺瞼鐜婚柛鏇ㄥ幗閺?trunc闂?
                     (MIRType::Int(a), MIRType::Int(b)) if a < b => {
 
                         self.ir.push_str(&format!(
@@ -2086,7 +1757,7 @@ impl Codegen {
 
                     }
 
-                    // Float -> Float閿涙碍澧跨€圭晫鏁?fpext閿涘瞼缂夌粣鍕暏 fptrunc閵?
+                    // Float -> Float闂佹寧绋掔喊宥嗘櫠鐠恒劉鍋撻崷顓熸珪闁?fpext闂佹寧绋戦惉鑲╃磽婢跺瞼鐜婚柛鏇ㄥ幗閺?fptrunc闂?
                     (MIRType::Float(a), MIRType::Float(b)) if a < b => {
 
                         self.ir.push_str(&format!(
@@ -2111,7 +1782,7 @@ impl Codegen {
 
                     }
 
-                    // Int -> Float閿涙矮濞囬悽?sitofp閿涘牊婀佺粭锕€褰块弫瀛樻殶鏉烆剚璇為悙鐧哥礆閵?
+                    // Int -> Float闂佹寧绋掗惌顔界箾閸ヮ剚鍋?sitofp闂佹寧绋戦悧濠傦耿娴ｈ櫣绠旈柨鏇楀亾鐟滄澘娼″顐も偓娑櫳戝▓鍫曞级閻戝棗澧悹鍥╁仱閹瑩鎯傞崫銉ь槴闂?
                     (MIRType::Int(_), MIRType::Float(_)) => {
 
                         self.ir.push_str(&format!(
@@ -2124,7 +1795,7 @@ impl Codegen {
 
                     }
 
-                    // Float -> Int閿涙矮濞囬悽?fptosi閿涘牊璇為悙纭呮祮閺堝顑侀崣閿嬫殻閺佸府绱氶妴?
+                    // Float -> Int闂佹寧绋掗惌顔界箾閸ヮ剚鍋?fptosi闂佹寧绋戦悧濠勬嫚閻愮儤鍊风痪顓炴噺缁侇噣鏌￠崼婵愭Ш妞ゆ垳绶氬畷锝夋煥鐎ｎ偅顔掗梺杞扮鎼存粎妲愬璺何?
                     (MIRType::Float(_), MIRType::Int(_)) => {
 
                         self.ir.push_str(&format!(
@@ -2137,7 +1808,7 @@ impl Codegen {
 
                     }
 
-                    // Bool -> Int閿涙矮濞囬悽?zext閿涘潟1 閹碘晛鍩?iN閿涘鈧?
+                    // Bool -> Int闂佹寧绋掗惌顔界箾閸ヮ剚鍋?zext闂佹寧绋戝? 闂佸湱顣介弲娑㈠春?iN闂佹寧绋戦ˇ顓㈠焵?
                     (MIRType::Bool, MIRType::Int(_)) => {
 
                         self.ir.push_str(&format!(
@@ -2150,7 +1821,7 @@ impl Codegen {
 
                     }
 
-                    // Int -> Bool閿涙矮濞囬悽?trunc閿涘潟N 閹搭亜鍩?i1閿涘鈧?
+                    // Int -> Bool闂佹寧绋掗惌顔界箾閸ヮ剚鍋?trunc闂佹寧绋戝鐑?闂佽鎯屾禍婊堝春?i1闂佹寧绋戦ˇ顓㈠焵?
                     (MIRType::Int(_), MIRType::Bool) => {
 
                         self.ir.push_str(&format!(
@@ -2598,10 +2269,10 @@ impl Codegen {
 
                     } else {
 
-                        // 鏉╂柨娲栭棃?unit 閸婂吋妞傞敍宀勨偓姘崇箖 operand_value 閹稿娓堕崝鐘烘祰鏉╂柨娲栫€靛嫬鐡ㄩ崳銊ｂ偓?
+                        // 闁哄鏅滈弻銊ッ洪弽顓燁棃?unit 闂佺锕ら崥瀣渻閸岀偞鏅€光偓閸曘劌浜炬慨妯虹－缁?operand_value 闂佸湱顭堥ˇ闈涖€掗崼鏇炵闁绘鍎ょ粊浼村级閳哄倹鐓ユ繛鍙夌墱閳ь剟娼х€氼剟鎮洪妸鈺侀棷闁靛绲洪崑?
                         let reg = self.operand_value(*v, mir_fn);
 
-                        // unit 閸?LLVM 娑擃厾鏁?i8 0 鐞涖劎銇氶敍宀冣偓灞肩瑝閺?void閵?
+                        // unit 闂?LLVM 婵炴垶鎼╅崢楣冨极?i8 0 闁荤偞绋忛崝搴ㄥΦ濮樿埖鏅€光偓閸愶絽浜鹃悘鐐跺亹閻熸繈鏌?void闂?
                         let llvm_ty = if matches!(ty, MIRType::Unit) {
 
                             "i8".to_string()
@@ -2620,7 +2291,7 @@ impl Codegen {
 
                 } else {
 
-                    // 閺冪姵妯夊蹇氱箲閸ョ偛鈧吋妞傞敍瀹峬ain` 姒涙顓绘潻鏂挎礀 0閵?
+                    // 闂佸搫鍟版慨闈浳熸径濠庡殨闊洦姘ㄧ粻鏌ユ煕閵壯冧粶闁逞屽墮閸氬顪冮崒鐐存櫖閻庣懓瓒卆in` 婵帗绋掗…鍫ヮ敇缂佹ɑ浜ら柡鍌涘缁€鈧?0闂?
                     if mir_fn.name == "main" {
 
                         self.emit_indent();
@@ -2687,7 +2358,7 @@ impl Codegen {
 
 
 
-                // 閻㈢喐鍨?switch 閹稿洣鎶?
+                // 闂佹眹鍨婚崰鎰板垂?switch 闂佸湱顭堝ú锝夊箮?
 
                 self.ir.push_str(&format!(
 
@@ -2699,7 +2370,7 @@ impl Codegen {
 
 
 
-                // 濞ｈ濮炲В蹇庨嚋 case
+                // 濠电儑缍€椤曆勬叏閻愭畫鎺曠疀鎼淬劌娈?case
 
                 for (value, target) in targets {
 
@@ -2942,7 +2613,7 @@ impl Codegen {
 
 
 
-    /// 缂傛挸鐡?MIR 缁鐎烽崚?LLVM 缁鐎风€涙顑佹稉璇х礉闁灝鍘ら柌宥咁槻閸掑棝鍘ゆ稉搴ㄢ偓鎺戠秺鏉烆剚宕查妴?
+    /// 缂傚倸鍊归幐鎼佹偤?MIR 缂備緡鍋夐褔鎮楅悜钘夌?LLVM 缂備緡鍋夐褔鎮楁搴樺亾濞戞瑯娈樻い鎴滅劍缁嬪鎷犺缁€澶愭⒑椤掆偓閻忔繈宕㈤妶澶嬬厒鐎广儱鎷嬪Σ濠氭煕閹烘垶顥㈤柛妯稿€栫粙澶嬫償閵娿垹浜鹃柟鐑樺灩缁夋椽寮堕悜鍡楀鐎规洘鐓℃俊?
     fn mir_type_to_llvm_cached(&mut self, ty: &MIRType) -> String {
 
         if let Some(cached) = self.type_str_cache.get(ty) {
@@ -2965,7 +2636,7 @@ impl Codegen {
 
     fn get_local_type<'a>(&self, mir_fn: &'a MirFunction, local: Local) -> &'a MIRType {
 
-        // 閺嶈宓?`local.id` 娴?locals 鐞涖劋鑵戦崣鏍閸ㄥ绱濈紓铏规阜閸ョ偤鈧偓閸?`MIR_I64`閵?
+        // 闂佸搫绉烽～澶婄暤?`local.id` 婵?locals 闁荤偞绋忛崝瀣嚈閹达箑鐭楅柡宥庡亯椤箓鏌涢妸銉劀缂佽鲸绻勭槐鎾绘惞鐟欏嫰妲ｉ梺鎼炲劤閸嬨倝鍩€椤戣棄浜鹃梺?`MIR_I64`闂?
         mir_fn
 
             .locals
@@ -2980,7 +2651,7 @@ impl Codegen {
 
 
 
-    /// 閼惧嘲褰囬幙宥勭稊閺佹澘顕惔鏃傛畱 SSA 閸婅壈銆冪粈鎭掆偓?
+    /// 闂佸吋鍎抽崲鑼躲亹閸ヮ剙绠肩€广儱瀚粙濠囨煛娴ｈ绶叉い鏇ㄥ枟閹棃寮崒娑氭殸 SSA 闂佺锕ㄦ竟鍫ュΥ閸愵亞鐭嗛柟顓熷坊閸?
     /// Resolve an operand to an LLVM value, loading from stack slots when needed.
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
 
@@ -2993,7 +2664,7 @@ impl Codegen {
 
             LocalKind::User => {
 
-                // 閻劍鍩涢崣姗€鍣洪棁鈧憰浣稿帥 load閿涘苯娲滄稉?MIR 娑擃厼鐣犳禒顒勨偓姘埗鐞涖劎銇氭稉鍝勬勾閸р偓閸婄鈧?
+                // 闂佹椿娼块崝宥夊春濞戙垹鐭楁慨妞诲亾闁革絾妞藉Λ渚€鍩€椤掑倹鍟哄ù锝囶焾鐢?load闂佹寧绋戦懟顖毭哄鍕枖?MIR 婵炴垶鎼╅崢濂告偩閻樺磭顩锋い鎺戝閸嬫挸顫濋鍌氱厬闁荤偞绋忛崝搴ㄥΦ濮橆厾鈻旈柛婵嗗閸曢箖鏌涜閸嬫捇鏌涙繝鍕靛劆闁?
                 let ty = self.get_local_type(mir_fn, local);
 
                 let llvm_ty = self.mir_type_to_llvm_cached(ty);
@@ -3024,7 +2695,7 @@ impl Codegen {
 
             _ => {
 
-                // 閸欏倹鏆熼妴浣峰閺冭泛褰夐柌蹇曠搼閻╁瓨甯存担璺ㄦ暏鐎靛嫬鐡ㄩ崳銊ユ倳
+                // 闂佸憡鐟ラ崐褰掑汲閻旂厧违濞达絽鍢查ˇ鏌ユ煛閸愵厽纭剧憸鏉款樀閺屽矁绠涢弴鐘虫儯闂佺儵鏅涢悺銊ф暜鐎涙ɑ濯撮悹鎭掑妽閺嗗繘鎮楅棃娑橆仼闁宦板姂瀹曟娊濡搁妷锕€鈧?
 
                 self.local_name(local)
 
