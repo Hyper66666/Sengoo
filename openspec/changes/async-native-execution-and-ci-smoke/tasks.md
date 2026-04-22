@@ -1,8 +1,8 @@
 ## 1. Async Frontend Boundaries
 
 - [x] 1.1 Preserve `async` / `await` semantics through HIR and stop silently erasing phase-1 async constructs during lowering.
-- [x] 1.2 Add explicit compiler diagnostics for unsupported phase-1 constructs such as `async { ... }` and non-async await operands.
-- [x] 1.3 Add compiler tests that cover valid `await async_fn(...)` usage and invalid phase-1 async forms.
+- [x] 1.2 Add explicit compiler diagnostics for unsupported async constructs such as non-async await operands and still-unimplemented concurrency/runtime forms.
+- [x] 1.3 Add compiler tests that cover valid async function and async-block await usage plus invalid non-async await forms.
 
 ## 2. Async Lowering and Code Generation
 
@@ -18,11 +18,11 @@
 
 ## 4. LLM Scheduler Smoke Preset
 
-- [ ] 4.1 Add a deterministic `ci-smoke` preset to `bench/llm_scheduler_bench.py` with fixed tiny workload parameters.
-- [ ] 4.2 Preserve checksum parity validation and standard JSON report output when the smoke preset is used.
-- [ ] 4.3 Add smoke-oriented script or integration tests that verify preset expansion, successful report generation, and checksum mismatch failure behavior.
+- [x] 4.1 Add a deterministic `ci-smoke` preset to `bench/llm_scheduler_bench.py` with fixed tiny workload parameters.
+- [x] 4.2 Preserve checksum parity validation and standard JSON report output when the smoke preset is used.
+- [x] 4.3 Add smoke-oriented script or integration tests that verify preset expansion, successful report generation, and checksum mismatch failure behavior.
 
 ## 5. Documentation and Follow-up Capture
 
-- [ ] 5.1 Document the phase-1 async execution boundary and smoke preset usage where developers already look for benchmark/runtime guidance.
-- [ ] 5.2 Keep deferred async expansion goals explicitly recorded in the change artifacts so later follow-up changes have a stable starting point.
+- [x] 5.1 Document the phase-1 async execution boundary and smoke preset usage where developers already look for benchmark/runtime guidance.
+- [x] 5.2 Keep deferred async expansion goals explicitly recorded in the change artifacts so later follow-up changes have a stable starting point.
