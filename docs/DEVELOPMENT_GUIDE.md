@@ -162,6 +162,8 @@ python ./python_interop_bench.py
 python ./bootstrap_generality_bench.py
 ```
 
+For the deterministic async/runtime smoke path, use the `ci-smoke` preset from the same benchmark repository. It keeps the normal JSON report shape, uses a tiny fixed workload, and fails fast if the Python and Sengoo checksums diverge.
+
 ### 10. Developer Workflow and Change Discipline
 
 For reliable collaboration:

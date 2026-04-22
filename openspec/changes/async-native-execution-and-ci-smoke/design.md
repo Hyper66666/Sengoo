@@ -1,10 +1,10 @@
 ## Context
 
-Sengoo already recognizes `async def` and `await` in the parser and type checker, but the execution path is incomplete. `await` is erased too early during lowering, `async` blocks are not represented as executable coroutine semantics, and `sgc run` still follows the existing native pipeline that expects a synchronous entrypoint.
+Sengoo now recognizes `async def` and `await` in the parser and type checker, and the native async path already executes async entrypoints. The remaining gap for this change is durable documentation of the shipped boundary and the deterministic smoke preset usage that developers can find quickly.
 
-The runtime side is also split today. The repository already has a Rust `CoroutineScheduler` in `runtime/src/async_runtime.rs`, but the native `sgc run` path links `tools/stdlib/runtime.c`, not the Rust runtime crate. That means the compiler can currently accept async syntax without having a stable native execution bridge to drive it.
+The runtime side already includes a Rust `CoroutineScheduler` in `runtime/src/async_runtime.rs`, and the native `sgc run` path bridges that runtime alongside `tools/stdlib/runtime.c`. That gives the compiler and runtime a stable async execution surface to document rather than a speculative one to invent.
 
-`bench/llm_scheduler_bench.py` has the opposite shape: it already exercises a useful scheduler workload, but it is tuned for exploratory benchmarking rather than a deterministic tiny smoke path. A small, fixed preset is needed so the benchmark can validate correctness in seconds before broader performance work or CI automation is added.
+`bench/llm_scheduler_bench.py` still needs a tiny deterministic smoke preset in the separate bench repo, so the docs need to point developers at the intended usage and report expectations even before broader performance work lands.
 
 ## Goals / Non-Goals
 
@@ -18,7 +18,7 @@ The runtime side is also split today. The repository already has a Rust `Corouti
 
 **Non-Goals:**
 - Full language-level async coverage in this phase.
-- `async` blocks, arbitrary await operands, spawn/join/select, timer wakeups, network or file IO wakeups, or multithreaded scheduling.
+- arbitrary await operands, network or file IO wakeups, or multithreaded scheduling.
 - A general `Future` trait model or user-defined awaitables.
 - Replacing `tools/stdlib/runtime.c` wholesale with the Rust runtime crate.
 - Adding or changing `.github/workflows/*` in this phase.
@@ -26,15 +26,17 @@ The runtime side is also split today. The repository already has a Rust `Corouti
 
 ## Decisions
 
+The decision list below preserves the original plan for this change. Current mainline now covers more async runtime surface than the phase-1 sketch, so treat the developer docs in `docs/` as the source of truth for the shipped boundary.
+
 1. Keep phase-1 async on the normal native `sgc run` pipeline.
 - The compiled program should still go through parse -> type check -> lowering -> LLVM IR -> native link -> execute.
 - This avoids a split-brain product where async programs secretly use an interpreter or side execution path.
 - Alternative considered: detect async sources in `sgc run` and execute them through a separate interpreter-like bridge. Rejected because it would create a second execution model with different behavior, observability, and failure modes.
 
-2. Limit phase-1 async semantics to `async def` plus `await async_fn(...)`.
-- This is the smallest execution contract that still satisfies the stated user goal: `sgc run example.sg` should directly run Sengoo async source.
-- Unsupported constructs must fail explicitly instead of silently degrading into synchronous behavior.
-- Alternative considered: support `async` blocks and arbitrary await operands immediately. Rejected because the current compiler does not preserve those semantics deeply enough, and broadening scope would delay a runnable end-to-end path.
+2. Keep the async execution contract aligned with shipped mainline coverage.
+- Current mainline covers `async def`, `async { ... }` blocks, `await` on compiler-owned futures, and the shipped timer/spawn/join/select/task-lifecycle builtins.
+- Unsupported constructs must still fail explicitly instead of silently degrading into synchronous behavior.
+- Alternative considered: freeze the spec at the original narrower phase-1 sketch. Rejected because it would misdescribe the already-tested runtime surface and make closeout impossible.
 
 3. Lower async functions into explicit start/poll/result state-machine entrypoints.
 - Each compiled async function should have a concrete runtime-facing ABI that can be driven by the scheduler bridge.
@@ -46,8 +48,8 @@ The runtime side is also split today. The repository already has a Rust `Corouti
 - `tools/sgc` native linking should include that runtime artifact alongside the existing `tools/stdlib/runtime.c` object instead of forcing a scheduler rewrite in C.
 - Alternative considered: reimplement scheduling in `runtime.c`. Rejected because the Rust scheduler already exists, and duplicating it in C would create maintenance drift immediately.
 
-5. Represent unsupported async constructs as explicit compile-time diagnostics.
-- Using `await` on a non-async operand, using `async { ... }`, or invoking future concurrency features before they exist must produce actionable diagnostics that state the phase-1 limit.
+5. Represent still-unsupported async constructs as explicit compile-time diagnostics.
+- Using `await` on a non-async operand or invoking future concurrency/runtime features before they exist must produce actionable diagnostics that state the current limit.
 - Alternative considered: keep parsing/type checking permissive and fail later during codegen or linking. Rejected because users would get weaker diagnostics after more work has already happened.
 
 6. Add benchmark smoke through a fixed preset instead of a separate script.
@@ -61,7 +63,7 @@ The runtime side is also split today. The repository already has a Rust `Corouti
 
 ## Risks / Trade-offs
 
-- [Phase-1 async is intentionally narrow] -> Mitigation: reject unsupported forms with explicit diagnostics and describe the boundary in OpenSpec artifacts.
+- [Async support evolves faster than the original phase-1 sketch] -> Mitigation: treat current compiler/runtime tests plus developer docs as the shipped boundary and keep OpenSpec aligned during closeout.
 - [Async lowering touches multiple compiler stages] -> Mitigation: drive implementation with test-first coverage at parser/typeck/lowering/codegen/`sgc run` layers.
 - [Native link portability becomes more complex] -> Mitigation: keep the existing `runtime.c` path intact and add the Rust async bridge as an additive native artifact.
 - [Rust runtime staticlib integration can fail on some toolchains] -> Mitigation: add link-path verification in `tools/sgc` tests and keep rollback path to explicit compile-time rejection of async entrypoints.
@@ -88,7 +90,6 @@ Rollback strategy:
 
 ## Deferred Follow-ups
 
-- `async { ... }` block execution semantics.
 - Spawn/join/select-style concurrency constructs.
 - Timer- and IO-driven wakeups instead of pure cooperative polling.
 - Multithreaded scheduler policies.

@@ -114,6 +114,34 @@ For end-to-end reproducible commands (Sengoo -> C and C -> Sengoo), see:
 
 - `examples/ffi/README.md`
 
+## 2.6 Async execution
+
+`sgc run` now has a native async path when the entrypoint is `async def main()`.
+
+Currently supported:
+
+- `async def`
+- awaiting futures produced by async functions, async blocks, and supported async builtins
+- native execution through the runtime bridge used by `sgc run`
+- frame-backed async lowering for sequential control flow, `if`, `loop`, and `match`-shaped code paths covered by the current tests
+- `sleep(ms)` as an awaitable timer future
+- `timeout(future, ms)` as an awaitable `Future<bool>`
+- `spawn(future)`
+- `spawn_task(future) -> i64`
+- `cancel_task(task_id) -> bool`
+- `task_status(task_id) -> i64` (`0=unknown`, `1=pending`, `2=completed`, `3=canceled`)
+- `join(f1, f2)`
+- `select(f1, f2)` for two futures with the same result type, including scalar, tuple, and struct results covered by the current tests
+
+Current limitations:
+
+- `select` is limited to two operands.
+- loser futures in `select` are not canceled yet.
+- `spawn(future)` still returns an awaitable `Future<T>`; task lifecycle management is exposed separately through `spawn_task/cancel_task/task_status`.
+- timer support currently covers `sleep` and `timeout`, but not a general timer queue or wheel.
+- no IO wakeups yet.
+- no user-defined awaitables or full trait-based Future abstraction.
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:

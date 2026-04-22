@@ -1,14 +1,13 @@
 ## Why
 
-Sengoo currently parses and type-checks `async` and `await`, but `sgc run example.sg` still cannot execute a Sengoo async entrypoint end to end. The benchmark side has the opposite problem: `bench/llm_scheduler_bench.py` works as an exploratory tool, but it lacks a fixed tiny smoke mode that can validate the path quickly and deterministically before broader performance work continues.
+Sengoo now parses and type-checks `async` and `await`, and the native async path is already exercised by tests. The remaining work for this change is to document the shipped execution boundary and the benchmark smoke preset where developers already look for runtime and benchmark guidance.
 
 ## What Changes
 
-- Define a direct native async execution path so `sgc run <file>` can compile and run a Sengoo source file whose entrypoint is `async def main()`.
-- Define the minimal phase-1 async execution contract: preserve `async`/`await` semantics through lowering and codegen, generate a synchronous wrapper entrypoint, and drive async execution through a native runtime scheduler bridge.
-- Define explicit phase-1 async scope and failure behavior: support `async def` and `await async_fn(...)`, and fail clearly for unsupported constructs such as `async` blocks, arbitrary await operands, and advanced concurrency primitives.
-- Define a deterministic CI smoke mode for `bench/llm_scheduler_bench.py` with fixed tiny workload parameters, report generation, and checksum parity validation between Python and Sengoo runners.
-- Document the deferred follow-up goals for later async expansion, including `async` blocks, spawn/join-style concurrency, timer or IO-driven wakeups, and multithreaded scheduling.
+- Document the native async execution path so `sgc run <file>` can run a Sengoo source file whose entrypoint is `async def main()`.
+- Document the current async execution surface and the remaining limits in the developer-facing docs and change artifacts.
+- Document a deterministic CI smoke mode for `bench/llm_scheduler_bench.py` with fixed tiny workload parameters, report generation, and checksum parity validation between Python and Sengoo runners.
+- Keep the deferred follow-up goals explicit so later async expansion has a stable starting point.
 
 ## Capabilities
 

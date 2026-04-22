@@ -21,9 +21,9 @@ The compiler SHALL fail with actionable diagnostics when source uses async const
 - **WHEN** source uses `await` on a literal, a synchronous function result, or another operand that is not a Sengoo async call result
 - **THEN** compilation fails with a diagnostic that explains phase-1 await requires an async call result
 
-#### Scenario: Async blocks are rejected in phase 1
+#### Scenario: Async blocks execute through the native async path
 - **WHEN** source uses an `async { ... }` block
-- **THEN** compilation fails with a diagnostic that states async blocks are not supported in the current phase
+- **THEN** compilation succeeds and the block can be awaited directly or through a bound future value
 
 ### Requirement: Native execution SHALL use a runtime scheduler bridge
 Compiled async programs SHALL execute through a native runtime bridge that can create scheduler state, drive the root async task to completion, and recover the final program result.
