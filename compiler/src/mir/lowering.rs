@@ -1,4 +1,4 @@
-﻿//! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
+//! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
 use crate::hir::{
     self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType,
@@ -6,7 +6,6 @@ use crate::hir::{
 use crate::hir::HIRTrait;
 use crate::method_resolution::explicit_hir_method_param_count;
 use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
-use crate::mir::async_dispatch_synthesis_helpers::select_runtime_function_name;
 use crate::mir::lowering_helpers::{
     collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };

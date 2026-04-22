@@ -346,6 +346,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn spawn_task_builtin_rejects_non_future_argument() {
+    let source = r#"
+async def main() -> i64 {
+    let task = spawn_task(1);
+    task
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("spawn_task should reject non-future input");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("spawn_task requires a Future value"),
+        "error should mention Future requirement, got: {}",
+        msg
+    );
+}
+
+#[test]
 fn cancel_task_builtin_requires_async_context() {
     let source = r#"
 def main() -> i64 {
@@ -364,6 +382,26 @@ def main() -> i64 {
 }
 
 #[test]
+fn cancel_task_builtin_rejects_non_i64_task_id() {
+    let source = r#"
+async def main() -> i64 {
+    if cancel_task(true) { 1 } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("cancel_task should reject non-i64 task ids");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            || msg.contains("cannot unify")
+            || msg.contains("expected")
+            || msg.contains("类型不匹配"),
+        "unexpected cancel_task task-id diagnostic: {}",
+        msg
+    );
+}
+
+#[test]
 fn task_status_builtin_requires_async_context() {
     let source = r#"
 def main() -> i64 {
@@ -377,6 +415,26 @@ def main() -> i64 {
     assert!(
         msg.contains("task_status is only allowed in async contexts"),
         "error should mention async context restriction, got: {}",
+        msg
+    );
+}
+
+#[test]
+fn task_status_builtin_rejects_non_i64_task_id() {
+    let source = r#"
+async def main() -> i64 {
+    task_status(false)
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("task_status should reject non-i64 task ids");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            || msg.contains("cannot unify")
+            || msg.contains("expected")
+            || msg.contains("类型不匹配"),
+        "unexpected task_status task-id diagnostic: {}",
         msg
     );
 }
@@ -429,6 +487,32 @@ async def main() -> i64 {
     assert!(call_names.contains("sengoo_async_spawn_raw"));
     assert!(call_names.contains("sengoo_async_cancel_task"));
     assert!(call_names.contains("sengoo_async_task_status"));
+}
+
+#[test]
+fn task_lifecycle_ir_contains_runtime_declarations() {
+    let source = r#"
+async def child() -> i64 { 7 }
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let canceled = cancel_task(task);
+    if canceled { task_status(task) } else { 0 }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("task lifecycle source should compile to IR");
+    assert!(
+        ir.contains("declare i64 @sengoo_async_spawn_raw(i64, i64)"),
+        "IR should declare spawn_task runtime helper"
+    );
+    assert!(
+        ir.contains("declare i1 @sengoo_async_cancel_task(i64)"),
+        "IR should declare cancel_task runtime helper"
+    );
+    assert!(
+        ir.contains("declare i64 @sengoo_async_task_status(i64)"),
+        "IR should declare task_status runtime helper"
+    );
 }
 
 #[test]
@@ -739,7 +823,8 @@ async def main() -> i64 {
 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("select should reject mismatched future result types");
+    let err =
+        compile_to_ir(source).expect_err("select should reject mismatched future result types");
     let msg = err.to_string();
     assert!(
         msg.contains("type mismatch")
@@ -963,13 +1048,13 @@ async def main() -> i64 {
     );
 
     let main_fn = mir_fns.iter().find(|f| f.name == "main").unwrap();
-    assert!(
-        !main_fn.is_async,
-        "wrapper main should not be marked async"
-    );
+    assert!(!main_fn.is_async, "wrapper main should not be marked async");
 
     let body_fn = mir_fns.iter().find(|f| f.name == "main__body").unwrap();
-    assert!(body_fn.is_async, "body function should still be marked async");
+    assert!(
+        body_fn.is_async,
+        "body function should still be marked async"
+    );
 }
 
 #[test]
@@ -990,10 +1075,7 @@ async def main() -> i64 {
         "IR should contain main__start, got:\n{}",
         &ir[..ir.len().min(2000)]
     );
-    assert!(
-        ir.contains("@main__poll"),
-        "IR should contain main__poll"
-    );
+    assert!(ir.contains("@main__poll"), "IR should contain main__poll");
     assert!(
         ir.contains("@main__result"),
         "IR should contain main__result"
