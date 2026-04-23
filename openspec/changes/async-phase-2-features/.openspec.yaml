@@ -1,0 +1,46 @@
+id: async-phase-2-features
+title: Async Phase-2 Features (shipped core concurrency surface)
+status: completed
+priority: medium
+created: 2026-03-11
+updated: 2026-04-23
+
+summary: |
+  Record the shipped Phase-2 async surface that already exists on `main`:
+  async blocks, spawn/join/select, sleep/timeout, and task lifecycle builtins,
+  while documenting the remaining type/runtime boundaries truthfully.
+
+motivation: |
+  The repository no longer needs a speculative Phase-2 proposal. The compiler
+  and native runtime already ship the core Phase-2 async surface, but this
+  change directory had only a completed `.openspec.yaml` with no supporting
+  proposal, tasks, or evidence trail.
+
+problem: |
+  OpenSpec state drift made this area misleading:
+
+  - the change claimed completion without artifact-level evidence
+  - shipped features and remaining boundaries were mixed together
+  - later roadmaps risked re-planning completed async work
+
+goals:
+  - Capture the shipped async Phase-2 surface with evidence-backed artifacts
+  - Document the current remaining boundaries (type support, cyclic CFG, richer runtime semantics)
+  - Prevent completed async work from being tracked as greenfield backlog again
+
+non_goals:
+  - Re-implement async block / spawn / join / select from scratch
+  - Claim full async IO/reactor support
+  - Claim all future result types are equally supported in every async primitive
+  - Resolve cyclic async CFG and payload-carrying enum gaps in this change
+
+acceptance_criteria:
+  - Change artifacts reference compiler and `sgc` evidence for async block, spawn/join/select, sleep/timeout, and task lifecycle builtins
+  - The artifacts state that the core Phase-2 surface is shipped on `main`
+  - Remaining boundaries are documented explicitly instead of being hidden under a generic "completed" label
+
+references:
+  - compiler/src/tests/async_tests.rs
+  - tools/sgc/src/tests.rs
+  - runtime/src/async_runtime.rs
+  - docs/plans/2026-03-12-3-month-development-roadmap.md

@@ -1,0 +1,155 @@
+id: stdlib-generic-support
+title: Stdlib Generic Surface Consolidation
+status: proposed
+priority: P1
+created: 2026-04-23
+updated: 2026-04-23
+
+summary: |
+  Consolidate and formalize the generic standard-library surface that already
+  exists in the repository, then stage true generic container runtime support
+  as separate follow-up work.
+
+motivation: |
+  The compiler already supports generic functions, structs, where clauses,
+  default type arguments, and generic aliases. The stdlib also already exposes
+  generic-facing `Option<T>`, `Result<T, E>`, `Vec<T>`, and `HashMap<K, V>`
+  declarations in `tools/stdlib/collections.sg`, and current compiler tests
+  verify multiple stdlib generic instantiations.
+
+  The real problem is not "stdlib has no generics". The real problem is that
+  the repository does not clearly distinguish between:
+
+  1. generic source-level declarations
+  2. monomorphized method/codegen support
+  3. runtime-operational container support
+
+  That ambiguity makes planning sloppy. This change narrows the scope to
+  documenting and hardening the generic surface that already ships, while
+  deferring true generic container runtime work to a dedicated phase-B change.
+
+problem: |
+  Current stdlib generic support is partially real but poorly framed:
+
+  - `Option<T>` / `Result<T, E>` already exist as generic tagged structs
+  - `Vec<T>` / `HashMap<K, V>` already exist as generic handle-shell types
+  - compiler tests already verify distinct monomorphized stdlib generic
+    instances
+  - runtime-operational methods for containers still depend on specialized
+    helper families rather than a truly generic container runtime model
+
+  Without an explicit boundary, proposals overpromise full generic stdlib
+  support and under-specify the actual runtime work that remains.
+
+goals:
+  - Inventory and document the shipped stdlib generic surface accurately
+  - Harden `Option<T>` / `Result<T, E>` generic specialization behavior
+  - Clarify the current `Vec<T>` / `HashMap<K, V>` runtime boundary
+  - Record the imported-type boundary truthfully in cross-module verification
+  - Track the current repeated-build cache-reuse blocker truthfully
+  - Capture a clean follow-up lane for true generic container runtime support
+
+non_goals:
+  - Rewriting `Option<T>` / `Result<T, E>` to enums in this change
+  - Adding language-level `None` / `Some` / `Ok` / `Err` constructor syntax
+  - Replacing handle-backed containers with inline `ptr/len/cap` storage
+  - Generalized drop/destructor semantics for arbitrary `T`
+  - Full generic runtime FFI coverage for every container operation
+  - Async-generic feature expansion
+
+design:
+  approach: |
+    Treat current repository state as the starting point, not a blank slate.
+
+    **Stage 1: Inventory**
+    - Audit `tools/stdlib/collections.sg`
+    - Audit existing `stdlib_surface_tests` and `sgc` stdlib coverage
+    - Write down what is already supported
+
+    **Stage 2: Harden `Option<T>` / `Result<T, E>`**
+    - Keep the current tagged-struct representation
+    - Treat the tagged-struct layout regression as the baseline proof for 2.1
+    - Verify method specialization and mixed-type monomorphization
+    - Add cross-module boundary coverage where missing
+
+    **Stage 3: Clarify `Vec<T>` / `HashMap<K, V>`**
+    - Keep the current handle-shell model in this phase
+    - Document which methods are generic at the type surface only
+    - Document which methods remain specialized through runtime helpers
+
+    **Stage 4: Verify and capture follow-up**
+    - Repeated-build cache verification, or explicit blocker documentation when
+      stdlib generic impl-method instantiations do not enter `sgc`
+      generic-instance planning
+    - Backward compatibility checks
+    - Phase-B design capture for true generic container runtime support
+
+  components:
+    - tools/stdlib/collections.sg: current stdlib generic surface
+    - compiler/src/tests/stdlib_surface_tests.rs: compiler-level stdlib generic coverage
+    - tools/sgc/src/tests.rs: runtime/integration-level stdlib coverage
+    - compiler/src/mir/generic_methods.rs: template specialization
+    - tools/sgc/src/generic_cache.rs: generic instance caching
+
+tasks:
+  - id: inventory-current-surface
+    title: Inventory current stdlib generic surface
+    description: |
+      Audit existing stdlib declarations and tests to establish the real
+      baseline before changing the proposal further.
+    estimate: 4 hours
+
+  - id: harden-option-result
+    title: Harden Option/Result specialization behavior
+    description: |
+      Keep the current tagged-struct representation and verify mixed-type
+      method specialization, return types, and the current cross-module
+      boundary.
+    estimate: 8 hours
+
+  - id: clarify-container-boundary
+    title: Clarify Vec/HashMap type-surface vs runtime boundary
+    description: |
+      Document and test the current handle-shell container model so the change
+      does not overclaim fully generic runtime support.
+    estimate: 6 hours
+
+  - id: verify-codegen-cache
+    title: Verify stdlib generic codegen and cache reuse
+    description: |
+      Add cross-module boundary checks around stdlib generic behavior and
+      verify repeated-build cache reuse for stdlib generic impl-method
+      instantiations that now enter `sgc` generic-instance planning, while
+      documenting remaining edge-case risk outside the current stdlib shapes.
+    estimate: 6 hours
+
+  - id: capture-phase-b
+    title: Capture phase-B generic container runtime design
+    description: |
+      Record the deferred architectural decision for true generic container
+      runtime support in a design note instead of sneaking it into this change.
+    estimate: 4 hours
+
+acceptance_criteria:
+  - "`Option<T>` and `Result<T, E>` generic surface compiles across multiple concrete instantiations already covered by stdlib tests"
+  - "Cross-module stdlib generic boundaries are documented truthfully, including the current imported-type limitation"
+  - "`Vec<T>` / `HashMap<K, V>` docs and tests explicitly distinguish generic surface support from runtime-operational support"
+  - "Existing `generic_typeck`, compiler `stdlib_surface_`, and `sgc` `stdlib_surface_runtime_` suites still pass"
+  - "Repeated-build stdlib generic cache reuse is verified for typed-receiver and chained method-return receiver impl-method instantiations that enter the current `sgc` planning path"
+
+risks:
+  - Proposal drift may continue if tests and docs are not treated as the source of truth
+  - Generic cache reuse may still expose edge cases once cross-module coverage or same-name impl-method shapes expand beyond the stdlib scenarios verified in this change
+  - Container-runtime follow-up may be larger than expected once a real representation strategy is chosen
+
+dependencies:
+  - Related: trait-specialization-refactor
+  - Related: async-phase-2-features
+  - Follow-up: true-generic-container-runtime (new future change)
+
+references:
+  - tools/stdlib/collections.sg
+  - compiler/src/tests/stdlib_surface_tests.rs
+  - tools/sgc/src/tests.rs
+  - compiler/src/mir/generic_methods.rs
+  - tools/sgc/src/generic_cache.rs

@@ -5,14 +5,29 @@ use std::path::Path;
 fn load_stdlib_surface() -> String {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
-    let stdlib_path = workspace_root.join("tools").join("stdlib").join("collections.sg");
-    fs::read_to_string(&stdlib_path)
-        .unwrap_or_else(|err| panic!("failed to read stdlib surface {}: {err}", stdlib_path.display()))
+    let stdlib_path = workspace_root
+        .join("tools")
+        .join("stdlib")
+        .join("collections.sg");
+    fs::read_to_string(&stdlib_path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read stdlib surface {}: {err}",
+            stdlib_path.display()
+        )
+    })
 }
 
 fn compile_with_stdlib(program: &str) -> String {
     let source = format!("{}\n\n{}", load_stdlib_surface(), program);
-    compile_to_ir(&source).unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
+    compile_to_ir(&source)
+        .unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
+}
+
+fn compile_with_stdlib_error(program: &str) -> String {
+    let source = format!("{}\n\n{}", load_stdlib_surface(), program);
+    compile_to_ir(&source)
+        .expect_err("stdlib surface program should fail")
+        .to_string()
 }
 
 #[test]
@@ -79,8 +94,6 @@ def main() -> i64 {
     assert!(ir.contains("result_err_i64"));
 }
 
-
-
 #[test]
 fn stdlib_surface_vec_remove_and_contains_compile() {
     let ir = compile_with_stdlib(
@@ -108,8 +121,6 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_vec_contains_i64"));
     assert!(ir.contains("sengoo_vec_remove_or_default_i64"));
 }
-
-
 
 #[test]
 fn stdlib_surface_iterator_higher_order_adapters_compile() {
@@ -181,7 +192,6 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_hashmap_clear_i64_status"));
 }
 
-
 #[test]
 fn function_value_parameter_uses_indirect_call_ir() {
     let source = r#"
@@ -197,8 +207,12 @@ def main() -> i64 {
 
     let ir = compile_to_ir(source)
         .unwrap_or_else(|err| panic!("function-value call should compile: {err}"));
-    assert!(!ir.contains("call i64 @f("), "indirect call should not lower to literal @f
-{}", ir);
+    assert!(
+        !ir.contains("call i64 @f("),
+        "indirect call should not lower to literal @f
+{}",
+        ir
+    );
 }
 
 #[test]
@@ -225,8 +239,9 @@ def main() -> i64 {
 }
 "#;
 
-    let ir = compile_to_ir(source)
-        .unwrap_or_else(|err| panic!("struct-returning function should preserve receiver type: {err}"));
+    let ir = compile_to_ir(source).unwrap_or_else(|err| {
+        panic!("struct-returning function should preserve receiver type: {err}")
+    });
     assert!(ir.contains("Point_sum"));
 }
 
@@ -285,6 +300,64 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_vec_runtime_mutators_remain_i64_only() {
+    let i64_ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let vec: Vec<i64> = Vec { handle: 0, marker: 0 };
+    if vec.push(1) { 1 } else { 0 }
+}
+"#,
+    );
+    assert!(i64_ir.contains("sengoo_vec_push_i64"));
+
+    let err = compile_with_stdlib_error(
+        r#"
+def main() -> i64 {
+    let vec: Vec<bool> = Vec { handle: 0, marker: false };
+    vec.push(true);
+    0
+}
+"#,
+    );
+
+    assert!(
+        err.contains("Vec<bool>") && err.contains("push"),
+        "expected Vec<bool>.push to be absent while Vec<i64>.push stays runtime-backed, got: {}",
+        err
+    );
+}
+
+#[test]
+fn stdlib_surface_hashmap_runtime_mutators_remain_i64_only() {
+    let i64_ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let map: HashMap<i64, i64> = HashMap { handle: 0, key_marker: 0, value_marker: 0 };
+    if map.insert(1, 2) { 1 } else { 0 }
+}
+"#,
+    );
+    assert!(i64_ir.contains("sengoo_hashmap_insert_i64"));
+
+    let err = compile_with_stdlib_error(
+        r#"
+def main() -> i64 {
+    let map: HashMap<bool, bool> = HashMap { handle: 0, key_marker: false, value_marker: false };
+    map.insert(true, false);
+    0
+}
+"#,
+    );
+
+    assert!(
+        err.contains("HashMap<bool,bool>") && err.contains("insert"),
+        "expected HashMap<bool, bool>.insert to be absent while HashMap<i64, i64>.insert stays runtime-backed, got: {}",
+        err
+    );
+}
+
+#[test]
 fn stdlib_surface_generic_bool_methods_emit_bool_returns() {
     let ir = compile_with_stdlib(
         r#"
@@ -309,10 +382,18 @@ def main() -> i64 {
         .split("; Function: ")
         .next()
         .unwrap();
-    assert!(option_section.contains("ret i1"), "Option_bool_is_none should return i1
-{}", option_section);
-    assert!(!option_section.contains("ret i64"), "Option_bool_is_none should not return i64
-{}", option_section);
+    assert!(
+        option_section.contains("ret i1"),
+        "Option_bool_is_none should return i1
+{}",
+        option_section
+    );
+    assert!(
+        !option_section.contains("ret i64"),
+        "Option_bool_is_none should not return i64
+{}",
+        option_section
+    );
 
     let option_unwrap_section = ir
         .split("; Function: Option_bool_unwrap_or")
@@ -321,10 +402,18 @@ def main() -> i64 {
         .split("; Function: ")
         .next()
         .unwrap();
-    assert!(option_unwrap_section.contains("define i1 @Option_bool_unwrap_or"), "Option_bool_unwrap_or should return i1
-{}", option_unwrap_section);
-    assert!(!option_unwrap_section.contains("define i64 @Option_bool_unwrap_or"), "Option_bool_unwrap_or should not return i64
-{}", option_unwrap_section);
+    assert!(
+        option_unwrap_section.contains("define i1 @Option_bool_unwrap_or"),
+        "Option_bool_unwrap_or should return i1
+{}",
+        option_unwrap_section
+    );
+    assert!(
+        !option_unwrap_section.contains("define i64 @Option_bool_unwrap_or"),
+        "Option_bool_unwrap_or should not return i64
+{}",
+        option_unwrap_section
+    );
 
     let result_section = ir
         .split("; Function: Result_bool_i64_is_err")
@@ -333,10 +422,18 @@ def main() -> i64 {
         .split("; Function: ")
         .next()
         .unwrap();
-    assert!(result_section.contains("ret i1"), "Result_bool_i64_is_err should return i1
-{}", result_section);
-    assert!(!result_section.contains("ret i64"), "Result_bool_i64_is_err should not return i64
-{}", result_section);
+    assert!(
+        result_section.contains("ret i1"),
+        "Result_bool_i64_is_err should return i1
+{}",
+        result_section
+    );
+    assert!(
+        !result_section.contains("ret i64"),
+        "Result_bool_i64_is_err should not return i64
+{}",
+        result_section
+    );
 
     let result_unwrap_section = ir
         .split("; Function: Result_bool_i64_unwrap_or")
@@ -345,10 +442,18 @@ def main() -> i64 {
         .split("; Function: ")
         .next()
         .unwrap();
-    assert!(result_unwrap_section.contains("define i1 @Result_bool_i64_unwrap_or"), "Result_bool_i64_unwrap_or should return i1
-{}", result_unwrap_section);
-    assert!(!result_unwrap_section.contains("define i64 @Result_bool_i64_unwrap_or"), "Result_bool_i64_unwrap_or should not return i64
-{}", result_unwrap_section);
+    assert!(
+        result_unwrap_section.contains("define i1 @Result_bool_i64_unwrap_or"),
+        "Result_bool_i64_unwrap_or should return i1
+{}",
+        result_unwrap_section
+    );
+    assert!(
+        !result_unwrap_section.contains("define i64 @Result_bool_i64_unwrap_or"),
+        "Result_bool_i64_unwrap_or should not return i64
+{}",
+        result_unwrap_section
+    );
 }
 #[test]
 fn stdlib_surface_generic_result_projection_methods_compile() {
@@ -369,12 +474,24 @@ def main() -> i64 {
 "#,
     );
 
-    assert!(ir.contains("; Function: Result_bool_i64_ok"), "expected Result<bool, i64>.ok specialization
-{}", ir);
-    assert!(ir.contains("; Function: Result_i64_bool_err"), "expected Result<i64, bool>.err specialization
-{}", ir);
-    assert!(ir.contains("; Function: Option_bool_unwrap_or"), "expected Option<bool>.unwrap_or specialization
-{}", ir);
+    assert!(
+        ir.contains("; Function: Result_bool_i64_ok"),
+        "expected Result<bool, i64>.ok specialization
+{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Result_i64_bool_err"),
+        "expected Result<i64, bool>.err specialization
+{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Option_bool_unwrap_or"),
+        "expected Option<bool>.unwrap_or specialization
+{}",
+        ir
+    );
 }
 
 #[test]
@@ -456,6 +573,63 @@ def main() -> i64 {
     assert!(
         ir.contains("%Option_i64 = type { i1, i64 }"),
         "expected distinct LLVM struct for Option<i64>\n{}",
+        ir
+    );
+}
+
+#[test]
+fn stdlib_surface_option_and_result_remain_tagged_struct_layouts() {
+    let ir = compile_with_stdlib(
+        r#"
+def option_flag(opt: Option<bool>) -> bool {
+    opt.unwrap_or(false)
+}
+
+def option_sum(opt: Option<i64>) -> i64 {
+    opt.unwrap_or(0)
+}
+
+def result_flag(res: Result<bool, i64>) -> bool {
+    res.unwrap_or(false)
+}
+
+def result_sum(res: Result<i64, bool>) -> i64 {
+    res.unwrap_or(0)
+}
+
+def main() -> i64 {
+    let bool_opt: Option<bool> = Option { is_some: true, value: true };
+    let int_opt: Option<i64> = Option { is_some: true, value: 7 };
+    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 6 };
+    let err_result: Result<i64, bool> = Result { is_ok: false, value: 9, error: true };
+
+    if option_flag(bool_opt) && result_flag(ok_result) {
+        option_sum(int_opt) + result_sum(err_result)
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("%Option_bool = type { i1, i1 }"),
+        "expected Option<bool> tagged-struct layout\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("%Option_i64 = type { i1, i64 }"),
+        "expected Option<i64> tagged-struct layout\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("%Result_bool_i64 = type { i1, i1, i64 }"),
+        "expected Result<bool, i64> tagged-struct layout\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("%Result_i64_bool = type { i1, i64, i1 }"),
+        "expected Result<i64, bool> tagged-struct layout\n{}",
         ir
     );
 }
