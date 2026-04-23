@@ -3,12 +3,10 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
-use crate::mir::async_dispatch_synthesis_helpers::{
-    select_runtime_declaration, select_runtime_function_name, select_runtime_return_type,
-    select_winner_runtime_declaration, select_winner_runtime_function_name,
-};
 use crate::mir::{self, Local, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
+
+mod declaration_helpers;
 
 /// LLVM JIT 浠ｇ爜鐢熸垚鍣?
 pub struct JITCodegen {
@@ -52,152 +50,6 @@ impl JITCodegen {
 
         // 声明外部运行时函数
         self.declare_runtime_functions();
-    }
-
-    /// 声明运行时函数
-    fn declare_runtime_functions(&mut self) {
-        // 澹版槑澶栭儴 C 鍑芥暟
-        self.extern_decls.push_str("declare i32 @puts(i8*)\n");
-        self.extern_decls
-            .push_str("declare i32 @printf(i8*, ...)\n");
-        self.extern_decls
-            .push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64)\n");
-        self.extern_decls.push_str("declare i8* @malloc(i64)\n");
-        self.extern_decls.push_str("declare void @free(i8*)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
-        self.extern_decls
-            .push_str(select_winner_runtime_declaration());
-        for ty in [
-            MIRType::Int(8),
-            MIRType::Int(16),
-            MIRType::Int(32),
-            MIRType::Int(64),
-            MIRType::Bool,
-            MIRType::Float(32),
-            MIRType::Float(64),
-        ] {
-            if let Some(decl) = select_runtime_declaration(&ty) {
-                self.extern_decls.push_str(&decl);
-            }
-        }
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_sleep__start(i64)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_sleep__poll(i64)\n");
-        self.extern_decls
-            .push_str("declare void @sengoo_async_sleep__result(i64)\n");
-        self.extern_decls
-            .push_str("declare i1 @sengoo_async_sleep__cancel(i64)\n");
-        self.extern_decls
-            .push_str("declare void @sengoo_async_sleep__drop(i64)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_timeout_bool__start(i64, i64, i64)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_timeout_bool__poll(i64)\n");
-        self.extern_decls
-            .push_str("declare i1 @sengoo_async_timeout_bool__result(i64)\n");
-        self.extern_decls
-            .push_str("declare i1 @sengoo_async_timeout_bool__cancel(i64)\n");
-        self.extern_decls
-            .push_str("declare void @sengoo_async_timeout_bool__drop(i64)\n");
-        self.extern_decls
-            .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
-        self.extern_decls
-            .push_str("declare i64 @sengoo_async_task_status(i64)\n");
-        self.function_signatures.insert(
-            "sengoo_async_spawn_raw".to_string(),
-            (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
-        );
-        self.function_signatures.insert(
-            select_winner_runtime_function_name().to_string(),
-            (
-                vec![
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                    MIRType::Int(64),
-                ],
-                MIRType::Int(64),
-            ),
-        );
-        for ty in [
-            MIRType::Int(8),
-            MIRType::Int(16),
-            MIRType::Int(32),
-            MIRType::Int(64),
-            MIRType::Bool,
-            MIRType::Float(32),
-            MIRType::Float(64),
-        ] {
-            if let (Some(name), Some(ret_ty)) =
-                (select_runtime_function_name(&ty), select_runtime_return_type(&ty))
-            {
-                self.function_signatures.insert(
-                    name,
-                    (
-                        vec![
-                            MIRType::Int(64),
-                            MIRType::Int(64),
-                            MIRType::Int(64),
-                            MIRType::Int(64),
-                        ],
-                        ret_ty,
-                    ),
-                );
-            }
-        }
-        self.function_signatures.insert(
-            "sengoo_async_sleep__start".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Int(64)),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_sleep__poll".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Int(64)),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_sleep__result".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Unit),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_sleep__cancel".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Bool),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_sleep__drop".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Unit),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_timeout_bool__start".to_string(),
-            (
-                vec![MIRType::Int(64), MIRType::Int(64), MIRType::Int(64)],
-                MIRType::Int(64),
-            ),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_timeout_bool__poll".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Int(64)),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_timeout_bool__result".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Bool),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_timeout_bool__cancel".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Bool),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_timeout_bool__drop".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Unit),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_cancel_task".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Bool),
-        );
-        self.function_signatures.insert(
-            "sengoo_async_task_status".to_string(),
-            (vec![MIRType::Int(64)], MIRType::Int(64)),
-        );
     }
 
     /// 鐢熸垚瀹屾暣鐨?LLVM IR 妯″潡
@@ -368,9 +220,7 @@ impl JITCodegen {
                         let string_ty = format!("[{} x i8]", s.len() + 1);
                         self.ir.push_str(&format!(
                             "{} = bitcast {} {} to i8*\n",
-                            dest,
-                            string_ty,
-                            str_ref
+                            dest, string_ty, str_ref
                         ));
                     }
                     _ => {
@@ -1176,7 +1026,9 @@ impl JITCodegen {
                         let discr_reg = fields
                             .first()
                             .map(|local| self.local_reg(*local))
-                            .ok_or_else(|| "enum aggregate missing discriminant field".to_string())?;
+                            .ok_or_else(|| {
+                                "enum aggregate missing discriminant field".to_string()
+                            })?;
                         let discr_loaded = format!("%.enum.discr.{}", destination.id);
                         self.emit_indent();
                         self.ir.push_str(&format!(
@@ -1198,7 +1050,8 @@ impl JITCodegen {
                         };
 
                         self.emit_indent();
-                        self.ir.push_str(&format!("{} = alloca {}\n", dest, llvm_enum_ty));
+                        self.ir
+                            .push_str(&format!("{} = alloca {}\n", dest, llvm_enum_ty));
 
                         let discr_ptr = format!("%.ptr.{}.0", destination.id);
                         self.emit_indent();
@@ -1207,10 +1060,8 @@ impl JITCodegen {
                             discr_ptr, llvm_enum_ty, llvm_enum_ty, dest
                         ));
                         self.emit_indent();
-                        self.ir.push_str(&format!(
-                            "store i64 {}, i64* {}\n",
-                            discr_loaded, discr_ptr
-                        ));
+                        self.ir
+                            .push_str(&format!("store i64 {}, i64* {}\n", discr_loaded, discr_ptr));
 
                         let payload_ptr = format!("%.ptr.{}.1", destination.id);
                         self.emit_indent();
@@ -1267,10 +1118,7 @@ impl JITCodegen {
                         let ret_ptr_ty = format!("{}*", llvm_ret_ty);
                         self.ir.push_str(&format!(
                             "{} = bitcast {} {} to {}\n",
-                            bitcast_temp,
-                            local_ptr_ty,
-                            reg,
-                            ret_ptr_ty
+                            bitcast_temp, local_ptr_ty, reg, ret_ptr_ty
                         ));
                         self.emit_indent();
                         self.ir.push_str(&format!(
