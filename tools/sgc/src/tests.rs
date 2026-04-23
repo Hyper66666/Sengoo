@@ -3216,6 +3216,86 @@ macro_rules! require_stdlib_runtime_output {
     }};
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn stdlib_surface_cross_module_generic_type_imports_remain_outside_current_boundary() {
+    let root = std::env::temp_dir().join(format!(
+        "sengoo-stdlib-generic-cross-module-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let main_path = root.join("main.sg");
+    let util_path = root.join("util.sg");
+    let collections_path = root.join("collections.sg");
+    fs::write(&collections_path, load_stdlib_surface_source()).unwrap();
+    fs::write(
+        &util_path,
+        r#"
+import collections;
+
+def util_ok_flag() -> Option<bool> {
+    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
+    ok_result.ok()
+}
+
+def util_err_flag() -> Option<bool> {
+    let err_result: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    err_result.err()
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &main_path,
+        r#"
+import collections;
+import util;
+
+def main() -> i64 {
+    let imported: Option<bool> = util_ok_flag();
+    if imported.unwrap_or(false) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let main_source = fs::read_to_string(&main_path).unwrap();
+    let snapshot = collect_module_graph_snapshot(
+        &main_path,
+        &main_source,
+        None,
+        None,
+        FrontendProbeMode::VerifyAll,
+        FrontendJobs::Auto,
+        false,
+        true,
+    );
+    let root_module = super::canonical_or_lossy(&main_path);
+    let root_deps = snapshot
+        .dependency_edges
+        .get(&root_module)
+        .expect("main module should appear in dependency graph");
+    assert!(
+        snapshot.module_fingerprints.len() >= 2 && !root_deps.is_empty(),
+        "expected imported files to participate in the frontend dependency graph"
+    );
+
+    let err_text = super::frontend_probe_module_full(&main_path.to_string_lossy(), &main_source)
+        .expect_err("cross-module imported stdlib generic type names are not supported yet");
+    assert!(
+        err_text.contains("type Option is not generic"),
+        "expected current imported-generic-type boundary to be explicit, got: {}",
+        err_text
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn runtime_function_value_parameter_executes_non_capturing_lambda() {
     let output = require_stdlib_runtime_output!(
@@ -4236,6 +4316,223 @@ def main() -> i64 { ga(0, 1) + gb(0, 1) }
         before_gb_instance.instance_key,
         after_gb_instance.instance_key
     );
+}
+
+fn stdlib_impl_method_instance_source() -> String {
+    format!(
+        "{}\n\n{}",
+        load_stdlib_surface_source(),
+        r#"
+def main() -> bool {
+    let opt: Option<bool> = Option { is_some: true, value: true };
+    let ok_result: Result<bool, bool> = opt.ok_or(false);
+    let res: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
+    opt.unwrap_or(false) && ok_result.ok().unwrap_or(false) && res.unwrap_or(false)
+}
+"#
+    )
+}
+
+fn stdlib_chained_impl_method_instance_source() -> String {
+    format!(
+        "{}\n\n{}",
+        load_stdlib_surface_source(),
+        r#"
+def main() -> bool {
+    let ok_result: Result<bool, i64> = Result { is_ok: true, value: true, error: 9 };
+    let err_result: Result<i64, bool> = Result { is_ok: false, value: 0, error: true };
+    ok_result.ok().unwrap_or(false) && err_result.err().unwrap_or(false)
+}
+"#
+    )
+}
+
+#[test]
+fn generic_fingerprints_collect_stdlib_impl_method_instances_from_typed_receivers() {
+    let source = stdlib_impl_method_instance_source();
+    sengoo_compiler::Parser::parse(&source).expect("stdlib impl-method source should parse");
+    let (_, instances) = generic_fingerprints_for_module("tests/main.sg", &source);
+
+    let option_unwrap = instances
+        .iter()
+        .find(|inst| {
+            inst.item_stable_id
+                .ends_with("::impl::Option<T>::unwrap_or")
+        })
+        .expect("expected Option<T>::unwrap_or instance");
+    assert_eq!(option_unwrap.canonical_type_args, vec!["bool".to_string()]);
+
+    let option_ok_or = instances
+        .iter()
+        .find(|inst| inst.item_stable_id.ends_with("::impl::Option<T>::ok_or"))
+        .expect("expected Option<T>::ok_or instance");
+    assert_eq!(
+        option_ok_or.canonical_type_args,
+        vec!["bool".to_string(), "bool".to_string()]
+    );
+
+    let result_unwrap = instances
+        .iter()
+        .find(|inst| {
+            inst.item_stable_id
+                .ends_with("::impl::Result<T,E>::unwrap_or")
+        })
+        .expect("expected Result<T,E>::unwrap_or instance");
+    assert_eq!(
+        result_unwrap.canonical_type_args,
+        vec!["bool".to_string(), "i64".to_string()]
+    );
+}
+
+#[test]
+fn generic_fingerprints_collect_chained_stdlib_impl_method_return_instances() {
+    let source = stdlib_chained_impl_method_instance_source();
+    let (_, instances) = generic_fingerprints_for_module("tests/main.sg", &source);
+
+    assert!(
+        instances.iter().any(|inst| {
+            inst.item_stable_id.ends_with("::impl::Result<T,E>::ok")
+                && inst.canonical_type_args == vec!["bool".to_string(), "i64".to_string()]
+        }),
+        "expected Result<bool,i64>::ok instance"
+    );
+    assert!(
+        instances.iter().any(|inst| {
+            inst.item_stable_id.ends_with("::impl::Result<T,E>::err")
+                && inst.canonical_type_args == vec!["i64".to_string(), "bool".to_string()]
+        }),
+        "expected Result<i64,bool>::err instance"
+    );
+    assert!(
+        instances.iter().any(|inst| {
+            inst.item_stable_id
+                .ends_with("::impl::Option<T>::unwrap_or")
+                && inst.canonical_type_args == vec!["bool".to_string()]
+        }),
+        "expected chained Option<bool>::unwrap_or instance"
+    );
+}
+
+#[test]
+fn generic_fingerprints_bind_impl_method_generics_from_parameter_templates() {
+    let source = r#"
+struct Boxed<T> {
+    value: T,
+}
+
+impl<T> Boxed<T> {
+    def choose_second<U>(self, fixed: i64, value: U) -> U {
+        value
+    }
+}
+
+def main() -> bool {
+    let boxed: Boxed<i64> = Boxed { value: 7 };
+    boxed.choose_second(1, false)
+}
+"#;
+
+    let (_, instances) = generic_fingerprints_for_module("tests/main.sg", source);
+    let choose_second = instances
+        .iter()
+        .find(|inst| {
+            inst.item_stable_id
+                .ends_with("::impl::Boxed<T>::choose_second")
+        })
+        .expect("expected Boxed<T>::choose_second instance");
+    assert_eq!(
+        choose_second.canonical_type_args,
+        vec!["i64".to_string(), "bool".to_string()]
+    );
+}
+
+#[test]
+fn generic_fingerprints_ignore_impl_method_calls_with_wrong_arity() {
+    let source = r#"
+struct Boxed<T> {
+    value: T,
+}
+
+impl<T> Boxed<T> {
+    def choose_second<U>(self, fixed: i64, value: U) -> U {
+        value
+    }
+}
+
+def main() -> bool {
+    let boxed: Boxed<i64> = Boxed { value: 7 };
+    boxed.choose_second(false);
+    boxed.choose_second(1, false, false);
+    false
+}
+"#;
+
+    let (_, instances) = generic_fingerprints_for_module("tests/main.sg", source);
+    assert!(
+        !instances.iter().any(|inst| {
+            inst.item_stable_id
+                .ends_with("::impl::Boxed<T>::choose_second")
+        }),
+        "wrong-arity impl-method calls should not enter generic instance planning"
+    );
+}
+
+#[test]
+fn generic_instance_plan_reuses_stdlib_impl_method_instances_on_warm_cache() {
+    let source = stdlib_impl_method_instance_source();
+    let (items, instances) = generic_fingerprints_for_module("tests/main.sg", &source);
+    let graph = generic_graph_with_items(items, instances);
+    let flags = ["emit_llvm=false".to_string()];
+
+    let (_, cold_cache) = derive_generic_instance_plan(None, &graph, 1, &flags);
+    let (warm_stats, _) = derive_generic_instance_plan(Some(&cold_cache), &graph, 1, &flags);
+
+    assert_eq!(warm_stats.total_instances, 4);
+    assert_eq!(warm_stats.cache_hits, 4);
+    assert_eq!(warm_stats.rebuilt_instances, 0);
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Option<T>::ok_or<bool,bool>")));
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Option<T>::unwrap_or<bool>")));
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Result<T,E>::ok<bool,bool>")));
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Result<T,E>::unwrap_or<bool,i64>")));
+}
+
+#[test]
+fn generic_instance_plan_reuses_chained_stdlib_impl_method_instances_on_warm_cache() {
+    let source = stdlib_chained_impl_method_instance_source();
+    let (items, instances) = generic_fingerprints_for_module("tests/main.sg", &source);
+    let graph = generic_graph_with_items(items, instances);
+    let flags = ["emit_llvm=false".to_string()];
+
+    let (_, cold_cache) = derive_generic_instance_plan(None, &graph, 1, &flags);
+    let (warm_stats, _) = derive_generic_instance_plan(Some(&cold_cache), &graph, 1, &flags);
+
+    assert_eq!(warm_stats.total_instances, 3);
+    assert_eq!(warm_stats.cache_hits, 3);
+    assert_eq!(warm_stats.rebuilt_instances, 0);
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Result<T,E>::ok<bool,i64>")));
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Result<T,E>::err<i64,bool>")));
+    assert!(warm_stats
+        .reuse_instance_keys
+        .iter()
+        .any(|key| key.contains("::impl::Option<T>::unwrap_or<bool>")));
 }
 
 fn generic_graph_with_items(
