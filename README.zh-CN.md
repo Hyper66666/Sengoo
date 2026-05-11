@@ -298,36 +298,35 @@ sgc build <file.sg> -O 2 --force-rebuild
 sgc daemon --addr 127.0.0.1:48765
 ```
 
-## Async ??
+## 异步执行
 
-???? `async def main()` ??`sgc run` ????? async ?????
+当入口写成 `async def main()` 时，`sgc run` 已支持原生异步执行路径。
 
-?????
+目前支持：
 
 - `async def`
-- `await async_fn(...)`
-- `async { ... }` ????????????
-- ?? `sgc run` ?? runtime bridge ???? async
-- ???????? frame-backed async lowering????????? `if`?`loop`?`match` ????
-- ?? `await` ? `sleep(ms)` ?? future
-- ?? `await` ? `timeout(future, ms)`??? `Future<bool>`
+- 等待 async 函数、async 块以及内置 async 工具产生的 future
+- 通过 `sgc run` 复用的 runtime bridge 进行原生执行
+- 顺序控制流、`if`、`loop`、`match` 型代码路径的 frame-backed async lowering（已被当前测试覆盖）
+- `sleep(ms)`：可等待的定时器 future
+- `timeout(future, ms)`：可等待的 `Future<bool>`
 - `spawn(future)`
 - `spawn_task(future) -> i64`
 - `cancel_task(task_id) -> bool`
-- `task_status(task_id) -> i64`?`0=unknown`?`1=pending`?`2=completed`?`3=canceled`?
+- `task_status(task_id) -> i64`（`0=unknown`，`1=pending`，`2=completed`，`3=canceled`）
 - `join(f1, f2)`
-- ???????????? future ? `select(f1, f2)`??? `Future<bool>`?`Future<i8/i16/i32/i64>`?`Future<f32/f64>`
+- `select(f1, f2)`：两个结果类型相同的 future，包含标量、tuple、struct 结果（已被当前测试覆盖）
 
-?????
+当前限制：
 
-- `select` ?????????????????? future ??????? `bool`??????
-- `select` ????? future ??????
-- `spawn(future)` ????? `await` ? `Future<T>`??????????? `spawn_task/cancel_task/task_status` ????
-- timer ???? `sleep` ? `timeout`??????? timer queue / wheel
-- ??? IO wakeup
-- ???????? awaitable?????? trait-based Future ??
+- `select` 目前只支持两个操作数
+- `select` 中失败的一方 future 暂未取消
+- `spawn(future)` 仍返回可 `await` 的 `Future<T>`；任务生命周期管理通过 `spawn_task/cancel_task/task_status` 单独暴露
+- 定时器支持目前只覆盖 `sleep` 和 `timeout`，尚未实现通用 timer queue/wheel
+- 暂无 IO 唤醒
+- 暂无用户自定义 awaitable 或完整的 trait-based Future 抽象
 
-?????
+最小示例：
 
 ```sg
 async def add1(x: i64) -> i64 {
@@ -342,7 +341,7 @@ async def main() -> i64 {
 }
 ```
 
-?????????
+任务生命周期示例：
 
 ```sg
 async def child() -> i64 {
@@ -359,7 +358,7 @@ async def main() -> i64 {
 }
 ```
 
-Timer ???
+定时器示例：
 
 ```sg
 async def work() -> i64 {
@@ -375,6 +374,12 @@ async def main() -> i64 {
         0
     }
 }
+```
+
+运行方式与同步程序一致：
+
+```bash
+sgc run <file.sg> -O 1
 ```
 
 ## VS Code 扩展
@@ -433,6 +438,13 @@ Sengoo/
 - 真实编辑场景下更强的增量一致性
 - 更好的 interop 与 reflection 易用性
 - 工具链和开发体验打磨
+
+近期工程重构（2026 年 5 月）：
+
+- Runtime：`NetRuntime` 实例现在统一接管 TCP / UDP / HTTP / WS / HttpServer 全部状态；`runtime/src/net.rs` 的 extern C ABI 已退化为薄壳层，旧的全局访问器（`udp_sockets`、`http_responses`、`ws_streams`、`http_servers`、`next_handle`）全部移除。覆盖：`cargo test -p sengoo-runtime --lib` 通过 42/42，另含 19 个 `net::tests` 与 6 个 instance 级 smoke 测试。
+- Runtime：Lua54 反射测试通过仅用于测试的互斥锁串行化，避免在动态库可用时全局 `LUA54_LAST_ERROR` 出现并发竞争。
+- Typeck：`SymbolKind::Function` 不再重复持有 `params`/`ret`；新增 `env.declare_fn(name, params, ret)` helper，把原先 `fn_ty(...).clone()` + `insert_fn(...)` 两次调用合并为一次，函数声明位点的多余 params/ret 克隆全部消除。`cargo test -p sengoo-compiler --lib` 通过 539/539。
+- HIR：类继承解析在递归保护 HashSet、按类查找 HashMap 与本地去重集合中全程借用 AST 字符串切片，不改行为的前提下把 `compiler/src/hir/lower.rs` 的 `.clone()` 计数从 59 降到 52。
 
 说明：
 
