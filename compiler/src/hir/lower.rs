@@ -358,10 +358,10 @@ struct EffectiveClassField<'a> {
 fn resolve_effective_class_fields<'a>(
     class_decl: &'a ast::Class,
     class_index: &HashMap<String, &'a ast::Class>,
-    visiting: &mut HashSet<String>,
+    visiting: &mut HashSet<&'a str>,
 ) -> Result<Vec<EffectiveClassField<'a>>, String> {
-    let class_name = class_decl.name.name.clone();
-    if !visiting.insert(class_name.clone()) {
+    let class_name: &str = &class_decl.name.name;
+    if !visiting.insert(class_name) {
         return Err(format!(
             "cyclic class inheritance detected while lowering `{}`",
             class_name
@@ -409,17 +409,17 @@ fn resolve_effective_class_fields<'a>(
         });
     }
 
-    visiting.remove(&class_name);
+    visiting.remove(class_name);
     Ok(merged_fields)
 }
 
 fn resolve_effective_class_methods<'a>(
     class_decl: &'a ast::Class,
     class_index: &HashMap<String, &'a ast::Class>,
-    visiting: &mut HashSet<String>,
+    visiting: &mut HashSet<&'a str>,
 ) -> Result<Vec<&'a ast::Function>, String> {
-    let class_name = class_decl.name.name.clone();
-    if !visiting.insert(class_name.clone()) {
+    let class_name: &str = &class_decl.name.name;
+    if !visiting.insert(class_name) {
         return Err(format!(
             "cyclic class inheritance detected while lowering `{}`",
             class_name
@@ -438,27 +438,27 @@ fn resolve_effective_class_methods<'a>(
         Vec::new()
     };
 
-    let mut index_by_name: HashMap<String, usize> = resolved_methods
+    let mut index_by_name: HashMap<&'a str, usize> = resolved_methods
         .iter()
         .enumerate()
-        .map(|(index, method)| (method.name.name.clone(), index))
+        .map(|(index, method)| (method.name.name.as_str(), index))
         .collect();
-    let mut local_seen = HashSet::new();
+    let mut local_seen: HashSet<&'a str> = HashSet::new();
 
     for member in &class_decl.members {
         let ast::ClassMember::Method(method) = member else {
             continue;
         };
 
-        let method_name = method.name.name.clone();
-        if !local_seen.insert(method_name.clone()) {
+        let method_name: &'a str = method.name.name.as_str();
+        if !local_seen.insert(method_name) {
             return Err(format!(
                 "duplicate method `{}` in class `{}`",
                 method_name, class_name
             ));
         }
 
-        if let Some(existing_index) = index_by_name.get(&method_name).copied() {
+        if let Some(existing_index) = index_by_name.get(method_name).copied() {
             resolved_methods[existing_index] = method;
         } else {
             index_by_name.insert(method_name, resolved_methods.len());
@@ -466,13 +466,13 @@ fn resolve_effective_class_methods<'a>(
         }
     }
 
-    visiting.remove(&class_name);
+    visiting.remove(class_name);
     Ok(resolved_methods)
 }
 
-fn lower_class_bundle(
-    class_decl: &ast::Class,
-    class_index: &HashMap<String, &ast::Class>,
+fn lower_class_bundle<'a>(
+    class_decl: &'a ast::Class,
+    class_index: &HashMap<String, &'a ast::Class>,
     type_env: &TypeEnv,
 ) -> Result<(HIRStruct, Option<HIRImpl>), String> {
     let name = class_decl.name.name.clone();
