@@ -44,7 +44,7 @@ impl Codegen {
                     }
 
                     mir::MirConstant::String(s) => {
-                        // 闁诲繐绻愬Λ妤呮偤瑜忕划顓㈡晜閼愁垼娲柣銏╁灡閹倿宕冲ú顏勫強闁绘灏欏▓鎼佹煕閹烘挻绶查柛鎴斺偓鏂ユ灃闁靛鍎遍弬鈧梺姹囧妼鐎氼剟宕ｈ箛鏇氭勃闁逞屽墰閳ь剚绋掗〃鍫ヮ敄娴ｅ湱鈻旈柤纰卞墻閸庡﹪鏌涘▎鎰粵闁?
+                        // String constants are stored in the module string table.
                         let str_idx = self.strings.iter().position(|x| x == s).unwrap_or(0);
 
                         let str_ref = format!("@.str.{}", str_idx);
@@ -127,7 +127,7 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
 
-                // 婵犵鈧啿鈧綊鎮樻径鎰鐎广儱瀚粙濠囨煛娴ｅ搫顣兼俊鍙夋倐閹粙濡搁敃鈧悡鏇㈡煕濞嗘劧鑰块柛锝嗘そ閺佸秴鐣濋崟顑跨帛闁荤喐娲戠粈渚€宕?load
+                // Binary operands are resolved through operand_value, which loads stack slots.
 
                 let left_val = self.operand_value(*left, mir_fn);
 
@@ -253,14 +253,14 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
 
-                // 婵炶揪缍€濞夋洟寮?id 闂佺儵鏅涢悺銊ф暜鐎靛憡顫曢柕蹇曞Х缁屽潡鏌ㄥ☉姗嗗妺(1) 闂佸搫琚崕鍙夌珶?
+                // Add one pointer level when storing into an alloca destination.
 
                 let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
                 self.emit_indent();
 
-                // 闂佸搫绉烽～澶婄暤娴ｇ硶鏀?local 闂?kind 闂佸憡绮岄惉鑲╂偖椤愶箑鍨傞悗锝庝簻閻忔煡鏌￠崒銈呭绩缂佺粯鐗楃粙澶愬焵椤掑嫬绾ч柍鈺佸暞绗戦梺鍛婄啲缁犳挸銆掗崜浣瑰暫濞达絿鍎ら崺鍌涙叏濠垫挾鍒扮憸鏉垮€垮畷?load闂?                // 1. 闂佹椿娼块崝宥夊春濞戙垹鐭楁慨妞诲亾闁革絾妞介弻鍛潩椤掑倸鐓戦柣搴ｆ暩閹虫挾鑺?alloca闂佹寧绋戦惌渚€顢氭导鏉戠煑闁哄秲鍔嶉ˇ褔姊婚崶锝呬壕闁?load闂?
-                // 2. 闂佸湱顭堝ú顓㈠箯閿熺姴绠ｉ柡宓懐鈹涢梺娲绘娇閸斿海鎮锕€鍨傞悗锝傛櫇閻﹀秹姊婚崶锝呬壕闁?load闂佹寧绋戦張顒佹櫠閻樼粯鍤勯柦妯侯槺缁讳線鏌涢幒鎾寸凡闁告瑩绠栭獮鎰板炊瑜庨崐濠氭煟閵娿儱顏╅柍褜鍓涢鏇㈠焵?
+                // User locals and pointer-like sources need an explicit load before assignment.
+                // Other temporaries can be stored using their existing SSA/local name.
                 let needs_load = local_info.kind == LocalKind::User
                     || matches!(src_ty, MIRType::Ptr(_) | MIRType::Ref(_));
 
@@ -269,7 +269,7 @@ impl Codegen {
 
                     let llvm_ty = self.mir_type_to_llvm_cached(src_ty);
 
-                    // load 闂佹眹鍔岀€氼喚鎮锕€鍨傞悗锝庝簻缁插潡鏌涢幇顒€甯犵紒顭戝墮閳瑰啴骞囬鐔稿劌婵炶揪绲剧划宥夊汲閻旇　鍋撻崷顓炰槐婵＄虎鍨堕獮鎰板炊瑜庨崐濠氭煟閵娿儱顏╅柛妯绘尵濡叉劙鎮╂担鍐炬蕉闂佹悶鍔岄鍐焵?
+                    // Select the load type from the source pointer or reference element type.
                     let load_ty = match src_ty {
                         MIRType::Ptr(inner) | MIRType::Ref(inner) => {
                             self.mir_type_to_llvm_cached(inner)
@@ -325,13 +325,13 @@ impl Codegen {
 
                 let base_reg = self.local_name(*base);
 
-                // 闂佸搫绉烽～澶婄暤?index local 闂?kind 闂佸憡鍔曢崯鍧楁偩妤ｅ啫鍙婃い鏍ㄧ閸庡﹪姊婚崶锝呬壕闁荤喐娲戠粈渚€宕?load 缂備椒绌堕崹鍦閳哄懎纾圭紒妤勩€€閸?
+                // User index locals must be loaded before getelementptr.
                 let idx_local_info = &mir_fn.locals[index.index()].0;
 
                 self.emit_indent();
 
                 if idx_local_info.kind == LocalKind::User {
-                    // 闂佹椿娼块崝宥夊春濞戞碍顫曢柕蹇曞Х缁屽潡鏌涘▎鎰惰€块柛锝嗘そ濡線鍩€椤掑倹鍟哄ù锝囶焾鐢?load闂?
+                    // Load the user index local into an SSA value.
                     let idx_reg = self.local_name(*index);
 
                     let idx_temp = format!("%idx.{}", destination.id);
@@ -346,7 +346,7 @@ impl Codegen {
                         dest, base_reg, idx_temp
                     ));
                 } else {
-                    // 婵炴垶鎸搁悺銊ヮ渻閸屾粍顫曢柕蹇曞Х缁屽潡鏌涙繝鍕付鐟滅増鐓￠幆鍕偓娑櫭径宥吤归敐鍡欑焼閻?getelementptr 闂佺顑呯换鎺嶇昂闂?
+                    // Non-user index locals can be used directly in getelementptr.
                     let idx_reg = self.local_name(*index);
 
                     self.ir.push_str(&format!(
@@ -363,16 +363,16 @@ impl Codegen {
 
                 ty,
             } => {
-                // 婵犮垼娉涚€氼噣骞冩繝鍥ф瀬闁规鍠氶惌?缂傚倷鐒﹂幐濠氭倵椤栨稒濯撮柟楣冣偓娑氶┏闂佸憡鑹鹃悧鍕焵?
+                // Aggregate initialization handles array and struct-like values.
                 let dest = self.local_name(*destination);
 
                 match ty {
                     MIRType::Array(elem_ty, _len) => {
-                        // 闂佽桨鐒︽竟鍡欏垝瀹ュ鍤傛慨姗嗗墯閸娿倝鏌熺粙娆炬Ц闁告ɑ鎸惧Σ鎰版偐閻戔晛浜鹃柟閭︿邯閸ゅ鏌涢幇顓犳噧闁告瑥妫濋幆鍕敊閻ｅ苯鐏遍梺闈╅檮濠㈡ê顭囬崘顔芥櫖閻忕偟鍘ч埢蹇涙煟?store 闁诲海鎳撻張顒勫垂濮樿泛违?
+                        // Store each array element into its computed element slot.
                         let elem_llvm_ty = self.mir_type_to_llvm_cached(elem_ty);
 
                         for (i, field_local) in fields.iter().enumerate() {
-                            // 闁荤姳绶ょ槐鏇㈡偩閺勫繈浜归柟鎯у暱椤ゅ懘鏌涜箛鎾虫殶缂佲偓瀹€鍕剭闁告洦鍋呴崟楣冩煕瑜夐崑鎾绘煏?
+                            // Compute the pointer for the current aggregate element.
                             let elem_ptr = format!("{}.elem.{}", dest, i);
 
                             self.emit_indent();
@@ -460,7 +460,7 @@ impl Codegen {
 
                     _ => {
 
-                        // 闂佺绻戝﹢鍦垝椤掑倻灏甸悹鍥皺閳ь剛鍏樺鎶藉磼濞戞瑯妲柣鐘叉惈閻ゅ洨鎹?
+                        // Other aggregate forms do not need extra emission here.
                     }
                 }
             }
@@ -488,14 +488,14 @@ impl Codegen {
 
                 args,
             } => {
-                // 闂佹眹鍨婚崰鎰板垂濮樿泛绀勯柤鎭掑劜濞堝爼鎮圭€ｎ亜鏆熼柡浣靛€濇俊?
+                // Emit a direct function call.
                 let dest = self.local_name(*destination);
 
                 let dest_ty = self.get_local_type(mir_fn, *destination);
 
                 let ret_ty = self.mir_type_to_llvm_cached(dest_ty);
 
-                // 闁?`print` 闂佺顑嗗銊︾珶閹烘垟鏋斿┑鐘插亞濡查亶鏌ｉ悙鍙夛紨缂佽鲸绻勯埀顒€婀遍崑銈咁瀶椤栫偞鈷旂€广儱鎳庨悡?`puts`闂?
+                // Lower the built-in print function through puts when applicable.
                 let is_print = func == "print";
 
                 let actual_func = if is_print { "puts" } else { func };
@@ -554,7 +554,7 @@ impl Codegen {
 
                 let src = self.local_name(*source);
 
-                // 婵炶揪缍€濞夋洟寮?extractvalue 闂佸憡鐟﹂悧鏇㈠吹椤撱垹绀嗛柕鍫濇噹閻掑ジ鏌涙繝鍕靛劆闁?                self.emit_indent();
+                // ExtractValue reads a field from an aggregate source value.
 
                 self.ir.push_str(&format!(
                     "{} = extractvalue {{ i64, i64 }} {}, 0\n",
@@ -571,7 +571,7 @@ impl Codegen {
 
                 enum_type: _,
             } => {
-                // 闂佸搫顑呯€氫即鍩€椤掑倸校闁诲繐娲︾粙澶愬箚瑜夐崑鎾剁箔鐞涒€充壕?                // 閻熸粎澧楅幐鍛婃櫠?LLVM 婵炴垶鎼╅崢鎯р枔閹达箑鍑犳慨姗嗗亜椤╊剟鎮跺☉鏍у闁靛洦纰嶇粙?`{ 闂佸憡甯囬崐鏇㈠春閸℃稑纾? 闁哄鍋涢埀顒傚枎缁?}`闂?
+                // Enum construction is represented as an LLVM aggregate literal.
                 let dest = self.local_name(*destination);
 
                 // Materialize the discriminant first.
@@ -610,12 +610,12 @@ impl Codegen {
 
                 source,
             } => {
-                // 闂佸湱绮崝鏇°亹閸ヮ剙鍑犳慨姗嗗亜椤╊剟寮堕悙娴嬪亾閻旈銈归梺?
+                // Bitcast reinterprets the source bits as the destination type.
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
 
-                // 闁哄鍋涢埀顒傚枎缁佺懓霉閿濆懐小缂侇煈鍓涚槐鎺楀箻鐎电硶鍋撻鐐村剭闁告洦鍙庨崕?1 婵炴垶鎼╂禍婊堟偤瑜嶉埢鎾绘倷閸忓浜?                self.emit_indent();
+                // The cast emits one conversion instruction into the destination local.
 
                 self.ir.push_str(&format!(
                     "{} = extractvalue {{ i64, i64 }} {}, 1\n",
@@ -643,7 +643,7 @@ impl Codegen {
                 self.emit_indent();
 
                 match (&src_ty, to) {
-                    // Int -> Int闂佹寧绋掔喊宥嗘櫠鐠恒劉鍋撻崷顓熸珪闁?sext闂佹寧绋戦惉鑲╃磽婢跺瞼鐜婚柛鏇ㄥ幗閺?trunc闂?
+                    // Int-to-int casts use sext or trunc depending on destination width.
                     (MIRType::Int(a), MIRType::Int(b)) if a < b => {
                         self.ir.push_str(&format!(
                             "{} = sext {} {} to {}\n",
@@ -658,7 +658,7 @@ impl Codegen {
                         ));
                     }
 
-                    // Float -> Float闂佹寧绋掔喊宥嗘櫠鐠恒劉鍋撻崷顓熸珪闁?fpext闂佹寧绋戦惉鑲╃磽婢跺瞼鐜婚柛鏇ㄥ幗閺?fptrunc闂?
+                    // Float-to-float casts use fpext or fptrunc depending on destination width.
                     (MIRType::Float(a), MIRType::Float(b)) if a < b => {
                         self.ir.push_str(&format!(
                             "{} = fpext {} {} to {}\n",
@@ -673,7 +673,7 @@ impl Codegen {
                         ));
                     }
 
-                    // Int -> Float闂佹寧绋掗惌顔界箾閸ヮ剚鍋?sitofp闂佹寧绋戦悧濠傦耿娴ｈ櫣绠旈柨鏇楀亾鐟滄澘娼″顐も偓娑櫳戝▓鍫曞级閻戝棗澧悹鍥╁仱閹瑩鎯傞崫銉ь槴闂?
+                    // Int-to-float casts use sitofp.
                     (MIRType::Int(_), MIRType::Float(_)) => {
                         self.ir.push_str(&format!(
                             "{} = sitofp {} {} to {}\n",
@@ -681,7 +681,7 @@ impl Codegen {
                         ));
                     }
 
-                    // Float -> Int闂佹寧绋掗惌顔界箾閸ヮ剚鍋?fptosi闂佹寧绋戦悧濠勬嫚閻愮儤鍊风痪顓炴噺缁侇噣鏌￠崼婵愭Ш妞ゆ垳绶氬畷锝夋煥鐎ｎ偅顔掗梺杞扮鎼存粎妲愬璺何?
+                    // Float-to-int casts use fptosi.
                     (MIRType::Float(_), MIRType::Int(_)) => {
                         self.ir.push_str(&format!(
                             "{} = fptosi {} {} to {}\n",

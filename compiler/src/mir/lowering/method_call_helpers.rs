@@ -128,9 +128,13 @@ pub(super) fn emit_resolved_method_call(
         .get(resolved_func_name)
         .map(|sig| sig.ret_type.clone())
         .unwrap_or(MIR_I64);
-    let result_local = ctx.add_local(None, LocalKind::Temp, ret_type.clone());
-    if let MIRType::Struct { name, .. } = &ret_type {
-        ctx.type_names.insert(result_local, name.clone());
+    let struct_type_name = match &ret_type {
+        MIRType::Struct { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    let result_local = ctx.add_local(None, LocalKind::Temp, ret_type);
+    if let Some(name) = struct_type_name {
+        ctx.type_names.insert(result_local, name);
     }
 
     let mut call_args = vec![receiver_local];
@@ -150,10 +154,7 @@ pub(super) fn lower_method_call_from_locals(
     method: &str,
     arg_locals: &[Local],
 ) -> Local {
-    let receiver_ty = ctx.get_local_type(receiver_local).clone();
-    if let Some(result_local) =
-        try_lower_string_len_method_call(ctx, receiver_local, &receiver_ty, method)
-    {
+    if let Some(result_local) = try_lower_string_len_method_call(ctx, receiver_local, method) {
         return result_local;
     }
 

@@ -48,8 +48,7 @@ impl<'a> LoweringContext<'a> {
                 });
             }
 
-            let local_ty = self.get_local_type(var_local).clone();
-            if let MIRType::Fn { ret, .. } = &local_ty {
+            if let MIRType::Fn { ret, .. } = self.get_local_type(var_local) {
                 return CallTargetResolution::Planned(CallTargetPlan {
                     func_name: mir_local_name(var_local),
                     ret_type: (**ret).clone(),

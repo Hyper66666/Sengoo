@@ -76,16 +76,16 @@ pub struct Codegen {
     /// Collected string literals emitted for the current module.
     strings: Vec<String>,
 
-    /// 闁诲孩绋掗〃鍫ヮ敄娴ｅ湱鈻旈柟缁樺笧閸╂姊洪幓鎺旂妞ゆ挻鎮傚顐﹀级閹稿海褰滈梺?
+    /// Monotonic counter used to name generated string constants.
     string_counter: usize,
 
     /// Cache local names for O(1) lookup during code generation.
     pub(crate) name_cache: Vec<String>,
 
-    /// 缂傚倸鍊归幐鎼佹偤?MIR 缂備緡鍋夐褔鎮楅悜钘夌?LLVM 缂備緡鍋夐褔鎮楁搴樺亾濞戞瑯娈樻い鎴滅劍缁嬪鎳犻浣烘殸闂佸搫瀚慨鎾儍閻樿违?
+    /// Cache MIR-to-LLVM type strings to avoid repeated formatting during codegen.
     type_str_cache: HashMap<MIRType, String>,
 
-    /// 婵?`load` 闂佸湱顭堝ú锝夊箮閵堝鍋ㄩ柣鏃傤焾閻忓洭鏌涢悜鍡楃仧缂佹梹鎸抽幆?SSA 婵炴垶鎸搁悺銊ヮ渻閸屾壕鍋撻棃娑橆仼闁宦板姂瀹曟娊濡搁妷锕€鈧娊鏌?
+    /// Counter used to create stable temporary names for generated load instructions.
     load_counter: usize,
 
 }
@@ -406,7 +406,7 @@ impl Codegen {
 
 
 
-    /// 缂傚倸鍊归幐鎼佹偤?MIR 缂備緡鍋夐褔鎮楅悜钘夌?LLVM 缂備緡鍋夐褔鎮楁搴樺亾濞戞瑯娈樻い鎴滅劍缁嬪鎷犺缁€澶愭⒑椤掆偓閻忔繈宕㈤妶澶嬬厒鐎广儱鎷嬪Σ濠氭煕閹烘垶顥㈤柛妯稿€栫粙澶嬫償閵娿垹浜鹃柟鐑樺灩缁夋椽寮堕悜鍡楀鐎规洘鐓℃俊?
+    /// Convert a MIR type to LLVM IR text, using the local cache when possible.
     fn mir_type_to_llvm_cached(&mut self, ty: &MIRType) -> String {
 
         if let Some(cached) = self.type_str_cache.get(ty) {
@@ -429,7 +429,7 @@ impl Codegen {
 
     fn get_local_type<'a>(&self, mir_fn: &'a MirFunction, local: Local) -> &'a MIRType {
 
-        // 闂佸搫绉烽～澶婄暤?`local.id` 婵?locals 闁荤偞绋忛崝瀣嚈閹达箑鐭楅柡宥庡亯椤箓鏌涢妸銉劀缂佽鲸绻勭槐鎾绘惞鐟欏嫰妲ｉ梺鎼炲劤閸嬨倝鍩€椤戣棄浜鹃梺?`MIR_I64`闂?
+        // Generated temporaries can appear outside the locals table; keep legacy i64 fallback.
         mir_fn
 
             .locals
@@ -444,7 +444,6 @@ impl Codegen {
 
 
 
-    /// 闂佸吋鍎抽崲鑼躲亹閸ヮ剙绠肩€广儱瀚粙濠囨煛娴ｈ绶叉い鏇ㄥ枟閹棃寮崒娑氭殸 SSA 闂佺锕ㄦ竟鍫ュΥ閸愵亞鐭嗛柟顓熷坊閸?
     /// Resolve an operand to an LLVM value, loading from stack slots when needed.
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
 
@@ -457,7 +456,7 @@ impl Codegen {
 
             LocalKind::User => {
 
-                // 闂佹椿娼块崝宥夊春濞戙垹鐭楁慨妞诲亾闁革絾妞藉Λ渚€鍩€椤掑倹鍟哄ù锝囶焾鐢?load闂佹寧绋戦懟顖毭哄鍕枖?MIR 婵炴垶鎼╅崢濂告偩閻樺磭顩锋い鎺戝閸嬫挸顫濋鍌氱厬闁荤偞绋忛崝搴ㄥΦ濮橆厾鈻旈柛婵嗗閸曢箖鏌涜閸嬫捇鏌涙繝鍕靛劆闁?
+                // User locals are stack slots, so load from the alloca before use.
                 let ty = self.get_local_type(mir_fn, local);
 
                 let llvm_ty = self.mir_type_to_llvm_cached(ty);
@@ -488,8 +487,8 @@ impl Codegen {
 
             _ => {
 
-                // 闂佸憡鐟ラ崐褰掑汲閻旂厧违濞达絽鍢查ˇ鏌ユ煛閸愵厽纭剧憸鏉款樀閺屽矁绠涢弴鐘虫儯闂佺儵鏅涢悺銊ф暜鐎涙ɑ濯撮悹鎭掑妽閺嗗繘鎮楅棃娑橆仼闁宦板姂瀹曟娊濡搁妷锕€鈧?
 
+                // Temporaries and parameters are already valid LLVM operand names.
                 self.local_name(local)
 
             }

@@ -432,9 +432,8 @@ impl JITCodegen {
             } => {
                 let dest = self.local_name(*destination);
                 let src_ty = self.get_local_type(mir_fn, *value);
-                let dst_ty = to.clone();
                 let src_llvm = self.mir_type_to_llvm_str(&src_ty);
-                let dst_llvm = self.mir_type_to_llvm_str(&dst_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(to);
                 let src_reg = self.local_reg(*value);
 
                 self.emit_indent();
@@ -444,7 +443,7 @@ impl JITCodegen {
                     src_temp, src_llvm, src_llvm, src_reg
                 ));
 
-                if src_ty == dst_ty {
+                if src_ty == *to {
                     self.emit_indent();
                     self.ir.push_str(&format!(
                         "store {} {}, {}* {}\n",
@@ -453,7 +452,7 @@ impl JITCodegen {
                 } else {
                     self.emit_indent();
                     let casted = format!("{}.cast.out", dest);
-                    self.emit_cast_value(&casted, &src_temp, &src_ty, &dst_ty);
+                    self.emit_cast_value(&casted, &src_temp, &src_ty, to);
                     self.emit_indent();
                     self.ir.push_str(&format!(
                         "store {} {}, {}* {}\n",
@@ -468,12 +467,11 @@ impl JITCodegen {
             } => {
                 let dest = self.local_name(*destination);
                 let src_ty = self.get_local_type(mir_fn, *value);
-                let dst_ty = to.clone();
                 let src_llvm = self.mir_type_to_llvm_str(&src_ty);
-                let dst_llvm = self.mir_type_to_llvm_str(&dst_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(to);
                 let src_reg = self.local_reg(*value);
 
-                if !common::supports_mir_bitcast(&src_ty, &dst_ty) {
+                if !common::supports_mir_bitcast(&src_ty, to) {
                     return Err(format!(
                         "invalid MIR bitcast from {} to {}",
                         src_llvm, dst_llvm
@@ -686,14 +684,6 @@ impl JITCodegen {
             } => {
                 // 结构体字段地址计算: ptr = &base.field（字段索引是常量）
                 let base_ty = self.get_local_type(mir_fn, *base);
-                let elem_ty = match &base_ty {
-                    MIRType::Tuple(tys) if (*field as usize) < tys.len() => {
-                        tys[*field as usize].clone()
-                    }
-                    _ => MIRType::int(64),
-                };
-
-                let _llvm_elem_ty = self.mir_type_to_llvm_str(&elem_ty);
                 let llvm_base_ty = self.mir_type_to_llvm_str(&base_ty);
                 let dest = self.local_name(*destination);
                 let base_reg = self.local_reg(*base);
@@ -996,8 +986,8 @@ impl JITCodegen {
                         }
 
                         // 涓哄厓缁勫垎閰嶇┖闂达紙浣跨敤 LLVM 缁撴瀯浣擄級
-                        let struct_fields: Vec<String> =
-                            field_values.iter().map(|(_, ty)| ty.clone()).collect();
+                        let struct_fields: Vec<&str> =
+                            field_values.iter().map(|(_, ty)| ty.as_str()).collect();
                         let llvm_struct_ty = format!("{{{}}}", struct_fields.join(", "));
                         self.emit_indent();
                         self.ir

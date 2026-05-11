@@ -5,16 +5,24 @@ pub(super) fn emit_call_from_plan(
     ctx: &mut LoweringContext<'_>,
     plan: CallInvocationPlan,
 ) -> Local {
-    let local = ctx.add_local(None, LocalKind::Temp, plan.local_ty.clone());
-    if let Some(type_name) = plan.struct_type_name {
+    let CallInvocationPlan {
+        actual_func,
+        local_ty,
+        final_args,
+        future_origin,
+        struct_type_name,
+    } = plan;
+
+    let local = ctx.add_local(None, LocalKind::Temp, local_ty);
+    if let Some(type_name) = struct_type_name {
         ctx.type_names.insert(local, type_name);
     }
     ctx.push_inst(Instruction::Call {
         destination: local,
-        func: plan.actual_func,
-        args: plan.final_args,
+        func: actual_func,
+        args: final_args,
     });
-    if let Some(origin) = plan.future_origin {
+    if let Some(origin) = future_origin {
         ctx.future_origins.insert(local, origin);
     }
     local

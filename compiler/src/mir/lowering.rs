@@ -607,8 +607,12 @@ impl<'a> LoweringContext<'a> {
         let mut subst: HashMap<String, MIRType> = HashMap::new();
         for field in &def.fields {
             let local = field_locals.get(&field.name)?;
-            let actual_ty = self.get_local_type(*local).clone();
-            bind_mir_subst_from_hir_type(&field.ty, &actual_ty, self.struct_defs, &mut subst);
+            bind_mir_subst_from_hir_type(
+                &field.ty,
+                self.get_local_type(*local),
+                self.struct_defs,
+                &mut subst,
+            );
         }
 
         if !def.type_params.is_empty()
@@ -716,7 +720,8 @@ impl<'a> LoweringContext<'a> {
             .collect();
         let capture_args: Vec<Local> = free_vars.iter().map(|(_, local)| *local).collect();
 
-        let mut async_fn = MirFunction::new(async_block_name.clone(), capture_types.clone(), MIR_UNIT);
+        let capture_arity = capture_types.len();
+        let mut async_fn = MirFunction::new(async_block_name.clone(), capture_types, MIR_UNIT);
         async_fn.is_async = true;
         let async_start = async_fn.start_block;
 
@@ -781,7 +786,7 @@ impl<'a> LoweringContext<'a> {
         self.options.async_functions.insert(async_block_name.clone());
         self.function_sigs.insert(
             async_block_name.clone(),
-            build_function_sig(result_ty.clone(), capture_types.len(), vec![]),
+            build_function_sig(result_ty.clone(), capture_arity, vec![]),
         );
 
         self.lambda_functions.push(async_fn);
@@ -1042,8 +1047,8 @@ fn set_terminator(&mut self, term: Terminator) {
             .basic_blocks
             .iter()
             .enumerate()
-            .filter_map(|(block_id, block)| match block.terminator.clone() {
-                Some(Terminator::Return(value)) => Some((block_id, value)),
+            .filter_map(|(block_id, block)| match &block.terminator {
+                Some(Terminator::Return(value)) => Some((block_id, *value)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1242,7 +1247,6 @@ fn set_terminator(&mut self, term: Terminator) {
             MIRType::Struct { name, fields } => {
                 self.emit_print_str_literal(&format!("{} {{ ", name));
 
-                let fields = fields.clone();
                 for (index, (field_name, field_ty)) in fields.iter().enumerate() {
                     if index > 0 {
                         self.emit_print_str_literal(", ");
@@ -1331,9 +1335,8 @@ fn set_terminator(&mut self, term: Terminator) {
         let instructions = block
             .instructions
             .iter()
-            .map(|inst_id| self.mir_fn.instruction(*inst_id).clone())
-            .collect::<Vec<_>>();
-        infer_last_async_start_base(&instructions).unwrap_or_else(|| "unknown".to_string())
+            .map(|inst_id| self.mir_fn.instruction(*inst_id));
+        infer_last_async_start_base(instructions).unwrap_or_else(|| "unknown".to_string())
     }
 
     /// Resolve the async function base name for a given future handle local.
@@ -1348,10 +1351,9 @@ fn set_terminator(&mut self, term: Terminator) {
         let instructions = block
             .instructions
             .iter()
-            .map(|inst_id| self.mir_fn.instruction(*inst_id).clone())
-            .collect::<Vec<_>>();
+            .map(|inst_id| self.mir_fn.instruction(*inst_id));
 
-        infer_async_base_name_from_instructions(handle, &instructions, &self.future_origins)
+        infer_async_base_name_from_instructions(handle, instructions, &self.future_origins)
             .unwrap_or_else(|| self.infer_poll_func_from_last_call())
     }
 

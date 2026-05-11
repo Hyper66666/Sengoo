@@ -350,11 +350,16 @@ fn class_parent_name(class_decl: &ast::Class) -> Option<String> {
     })
 }
 
-fn resolve_effective_class_fields(
-    class_decl: &ast::Class,
-    class_index: &HashMap<String, &ast::Class>,
+struct EffectiveClassField<'a> {
+    name: String,
+    field: &'a ast::StructField,
+}
+
+fn resolve_effective_class_fields<'a>(
+    class_decl: &'a ast::Class,
+    class_index: &HashMap<String, &'a ast::Class>,
     visiting: &mut HashSet<String>,
-) -> Result<Vec<ast::StructField>, String> {
+) -> Result<Vec<EffectiveClassField<'a>>, String> {
     let class_name = class_decl.name.name.clone();
     if !visiting.insert(class_name.clone()) {
         return Err(format!(
@@ -375,9 +380,7 @@ fn resolve_effective_class_fields(
         })?;
         let parent_fields = resolve_effective_class_fields(parent_decl, class_index, visiting)?;
         for parent_field in parent_fields {
-            if let Some(parent_field_name) = parent_field.name.as_ref() {
-                seen_names.insert(parent_field_name.name.clone());
-            }
+            seen_names.insert(parent_field.name.clone());
             merged_fields.push(parent_field);
         }
     }
@@ -400,26 +403,21 @@ fn resolve_effective_class_fields(
             ));
         }
 
-        let mut normalized_field = field.clone();
-        if normalized_field.name.is_none() {
-            normalized_field.name = Some(ast::Ident::with_symbol(
-                field_name,
-                SymbolId::INVALID,
-                field.span,
-            ));
-        }
-        merged_fields.push(normalized_field);
+        merged_fields.push(EffectiveClassField {
+            name: field_name,
+            field,
+        });
     }
 
     visiting.remove(&class_name);
     Ok(merged_fields)
 }
 
-fn resolve_effective_class_methods(
-    class_decl: &ast::Class,
-    class_index: &HashMap<String, &ast::Class>,
+fn resolve_effective_class_methods<'a>(
+    class_decl: &'a ast::Class,
+    class_index: &HashMap<String, &'a ast::Class>,
     visiting: &mut HashSet<String>,
-) -> Result<Vec<ast::Function>, String> {
+) -> Result<Vec<&'a ast::Function>, String> {
     let class_name = class_decl.name.name.clone();
     if !visiting.insert(class_name.clone()) {
         return Err(format!(
@@ -461,10 +459,10 @@ fn resolve_effective_class_methods(
         }
 
         if let Some(existing_index) = index_by_name.get(&method_name).copied() {
-            resolved_methods[existing_index] = method.clone();
+            resolved_methods[existing_index] = method;
         } else {
             index_by_name.insert(method_name, resolved_methods.len());
-            resolved_methods.push(method.clone());
+            resolved_methods.push(method);
         }
     }
 
@@ -489,16 +487,11 @@ fn lower_class_bundle(
     let effective_fields =
         resolve_effective_class_fields(class_decl, class_index, &mut field_visiting)?;
     let fields = effective_fields
-        .iter()
-        .enumerate()
-        .map(|(field_index, field)| HIRField {
-            name: field
-                .name
-                .as_ref()
-                .map(|ident| ident.name.clone())
-                .unwrap_or_else(|| format!("_{}", field_index)),
-            ty: lower_type(&field.ty, type_env),
-            is_pub: matches!(field.vis, ast::Visibility::Public),
+        .into_iter()
+        .map(|effective_field| HIRField {
+            name: effective_field.name,
+            ty: lower_type(&effective_field.field.ty, type_env),
+            is_pub: matches!(effective_field.field.vis, ast::Visibility::Public),
         })
         .collect();
 

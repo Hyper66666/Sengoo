@@ -22,10 +22,10 @@ impl Codegen {
 
                         self.ir.push_str("ret i64 0\n");
                     } else {
-                        // 闁哄鏅滈弻銊ッ洪弽顓燁棃?unit 闂佺锕ら崥瀣渻閸岀偞鏅€光偓閸曘劌浜炬慨妯虹－缁?operand_value 闂佸湱顭堥ˇ闈涖€掗崼鏇炵闁绘鍎ょ粊浼村级閳哄倹鐓ユ繛鍙夌墱閳ь剟娼х€氼剟鎮洪妸鈺侀棷闁靛绲洪崑?
+                        // Non-unit returns use operand_value to resolve the return register.
                         let reg = self.operand_value(*v, mir_fn);
 
-                        // unit 闂?LLVM 婵炴垶鎼╅崢楣冨极?i8 0 闁荤偞绋忛崝搴ㄥΦ濮樿埖鏅€光偓閸愶絽浜鹃悘鐐跺亹閻熸繈鏌?void闂?
+                        // Unit values are represented as i8 0 instead of LLVM void here.
                         let llvm_ty = if matches!(ty, MIRType::Unit) {
                             "i8".to_string()
                         } else {
@@ -37,7 +37,7 @@ impl Codegen {
                         self.ir.push_str(&format!("ret {} {}\n", llvm_ty, reg));
                     }
                 } else {
-                    // 闂佸搫鍟版慨闈浳熸径濠庡殨闊洦姘ㄧ粻鏌ユ煕閵壯冧粶闁逞屽墮閸氬顪冮崒鐐存櫖閻庣懓瓒卆in` 婵帗绋掗…鍫ヮ敇缂佹ɑ浜ら柡鍌涘缁€鈧?0闂?
+                    // Functions without an explicit return emit a default return value.
                     if mir_fn.name == "main" {
                         self.emit_indent();
 
@@ -91,7 +91,7 @@ impl Codegen {
                     discr_reg, otherwise
                 ));
 
-                // 濠电儑缍€椤曆勬叏閻愭畫鎺曠疀鎼淬劌娈?case
+                // Emit each switch case target.
 
                 for (value, target) in targets {
                     self.ir.push('\n');
