@@ -1,0 +1,37 @@
+# Rust build artifacts
+/target/
+**/target/
+Cargo.lock
+
+# Editor / IDE
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+
+# OS clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project build output
+/build/
+/examples/build/
+/.tmp-target-verify/
+
+# Temporary or scratch files
+_tmp_*
+*.rcgu.o
+*.pdb
+
+# Generated / vendored
+node_modules/
+agent-team-workspace/
+
+# Local project duplicates (must NEVER be committed)
+_main_submit/
+linux-dist-copy/
+
+# Local windsurf scratch
+.windsurf-history/
