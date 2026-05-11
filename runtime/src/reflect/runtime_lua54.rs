@@ -543,6 +543,15 @@ pub extern "C" fn sengoo_lua54_call_i64(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn lua54_test_guard() -> MutexGuard<'static, ()> {
+        static LUA54_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LUA54_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn c_str(s: &str) -> Vec<u8> {
         let mut bytes = s.as_bytes().to_vec();
@@ -552,6 +561,7 @@ mod tests {
 
     #[test]
     fn lua54_open_missing_library_reports_error() {
+        let _guard = lua54_test_guard();
         let path = c_str("missing-lua54-runtime-bridge.dll");
         let handle = sengoo_lua54_open(path.as_ptr());
         assert_eq!(handle, 0);
@@ -564,6 +574,7 @@ mod tests {
 
     #[test]
     fn lua54_exec_and_call_i64_when_library_available() {
+        let _guard = lua54_test_guard();
         let handle = sengoo_lua54_open(std::ptr::null());
         if handle == 0 {
             // CI and dev environments may not ship Lua 5.4 dynamic library.
@@ -596,6 +607,7 @@ mod tests {
 
     #[test]
     fn lua54_call_missing_function_reports_runtime_error() {
+        let _guard = lua54_test_guard();
         let handle = sengoo_lua54_open(std::ptr::null());
         if handle == 0 {
             return;
