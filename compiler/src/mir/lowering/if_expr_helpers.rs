@@ -87,7 +87,15 @@ mod tests {
 
     #[test]
     fn lower_if_expr_emits_phi_for_value_branches() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,

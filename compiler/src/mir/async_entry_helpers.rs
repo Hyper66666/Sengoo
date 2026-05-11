@@ -1,5 +1,9 @@
-﻿use super::async_frame_helpers::{push_frame_load_into_typed, push_frame_store_typed, AsyncFrameLayout};
-use crate::mir::{Instruction, Local, LocalKind, MirConstant, MirFunction, Terminator, MIR_I64, MIR_UNIT};
+use super::async_frame_helpers::{
+    push_frame_load_into_typed, push_frame_store_typed, AsyncFrameLayout,
+};
+use crate::mir::{
+    Instruction, Local, LocalKind, MirConstant, MirFunction, Terminator, MIR_I64, MIR_UNIT,
+};
 use crate::CompileError;
 
 pub(crate) fn count_await_points(mir_fn: &MirFunction) -> usize {

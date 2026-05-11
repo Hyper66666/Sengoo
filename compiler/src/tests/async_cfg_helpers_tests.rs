@@ -23,5 +23,8 @@ async def main() -> i64 {
     let plan = build_async_cfg_plan(body).expect("async cfg plan should build");
     let live_in = compute_live_in_user_locals(body, &plan).expect("liveness should compute");
 
-    assert!(!live_in.is_empty(), "simple async body should produce live-in state");
+    assert!(
+        !live_in.is_empty(),
+        "simple async body should produce live-in state"
+    );
 }

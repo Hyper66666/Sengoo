@@ -1,6 +1,6 @@
 use crate::hir::{
-    HIRBody, HIRExpr, HIRFunction, HIRLiteral, HIRMatchArm, HIRParam, HIRPattern, HIRStmt,
-    HIRType, IntKind,
+    HIRBody, HIRExpr, HIRFunction, HIRLiteral, HIRMatchArm, HIRParam, HIRPattern, HIRStmt, HIRType,
+    IntKind,
 };
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
@@ -33,7 +33,10 @@ fn hir_type_placeholder_and_concrete_checks_respect_known_named_types() {
         &known_named_types
     ));
     assert!(!hir_type_is_concrete(
-        &HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+        &HIRType::named(
+            "Vec".to_string(),
+            vec![HIRType::named("T".to_string(), vec![])]
+        ),
         &known_named_types
     ));
 }

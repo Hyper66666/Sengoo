@@ -101,9 +101,7 @@ pub(crate) fn compute_live_in_user_locals(
                     live
                 }
                 Terminator::Switch {
-                    targets,
-                    otherwise,
-                    ..
+                    targets, otherwise, ..
                 } => {
                     let mut live = live_in.get(otherwise).cloned().unwrap_or_default();
                     for (_, target) in targets {
@@ -161,7 +159,9 @@ pub(crate) fn collect_spill_user_locals(
         .collect()
 }
 
-pub(crate) fn build_async_cfg_plan(mir_fn: &MirFunction) -> Result<AsyncCfgPlan, AsyncCfgPlanError> {
+pub(crate) fn build_async_cfg_plan(
+    mir_fn: &MirFunction,
+) -> Result<AsyncCfgPlan, AsyncCfgPlanError> {
     let mut ordered_blocks = Vec::new();
     let mut suspend_points = Vec::new();
     let mut visited = HashSet::<usize>::new();
@@ -178,10 +178,7 @@ pub(crate) fn build_async_cfg_plan(mir_fn: &MirFunction) -> Result<AsyncCfgPlan,
         }
 
         let basic_block = mir_fn.basic_blocks.get(block).ok_or_else(|| {
-            AsyncCfgPlanError::new(format!(
-                "block {} is missing from the async CFG",
-                block
-            ))
+            AsyncCfgPlanError::new(format!("block {} is missing from the async CFG", block))
         })?;
         let terminator = basic_block.terminator.clone().ok_or_else(|| {
             AsyncCfgPlanError::new(format!(
@@ -358,8 +355,9 @@ fn instruction_user_uses(inst: &Instruction) -> HashSet<Local> {
                 push_user_local(&mut uses, *arg);
             }
         }
-        Instruction::Discriminant { source, .. }
-        | Instruction::ExtractPayload { source, .. } => push_user_local(&mut uses, *source),
+        Instruction::Discriminant { source, .. } | Instruction::ExtractPayload { source, .. } => {
+            push_user_local(&mut uses, *source)
+        }
         Instruction::EnumConstruct { payload, .. } => {
             if let Some(payload) = payload {
                 push_user_local(&mut uses, *payload);

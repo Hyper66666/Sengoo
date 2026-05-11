@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(super) fn lower_for_expr(
     ctx: &mut LoweringContext<'_>,
@@ -11,7 +11,14 @@ pub(super) fn lower_for_expr(
             start,
             end,
             inclusive,
-        } => lower_range_for_expr(ctx, var_name, start.as_deref(), end.as_deref(), *inclusive, body),
+        } => lower_range_for_expr(
+            ctx,
+            var_name,
+            start.as_deref(),
+            end.as_deref(),
+            *inclusive,
+            body,
+        ),
         _ => {
             let iter_local = ctx.lower_expr(iter);
             let iter_ty = ctx.get_local_type(iter_local).clone();
@@ -88,7 +95,11 @@ pub(super) fn lower_range_for_expr(
     });
 
     let cond_local = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
-    let compare_op = if inclusive { MirBinOp::Le } else { MirBinOp::Lt };
+    let compare_op = if inclusive {
+        MirBinOp::Le
+    } else {
+        MirBinOp::Lt
+    };
     ctx.push_inst(Instruction::Binary {
         destination: cond_local,
         op: compare_op,
@@ -326,14 +337,22 @@ mod tests {
         ctx.set_current_block(start_block);
 
         let iter_local = ctx.add_local(None, LocalKind::User, MIRType::Array(Box::new(MIR_I64), 3));
-        let result = lower_array_for_expr(&mut ctx, "x", iter_local, &MIR_I64, 3, &HIRBody::empty());
+        let result =
+            lower_array_for_expr(&mut ctx, "x", iter_local, &MIR_I64, 3, &HIRBody::empty());
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
             inst,
-            Instruction::Binary { op: MirBinOp::Lt, .. }
+            Instruction::Binary {
+                op: MirBinOp::Lt,
+                ..
+            }
         )));
-        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Load { .. })));
+        assert!(ctx
+            .mir_fn
+            .instructions
+            .iter()
+            .any(|inst| matches!(inst, Instruction::Load { .. })));
     }
     #[test]
     fn lower_range_for_expr_uses_inclusive_comparison_when_requested() {
@@ -372,7 +391,10 @@ mod tests {
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
             inst,
-            Instruction::Binary { op: MirBinOp::Le, .. }
+            Instruction::Binary {
+                op: MirBinOp::Le,
+                ..
+            }
         )));
     }
 }

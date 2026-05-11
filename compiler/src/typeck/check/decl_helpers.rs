@@ -151,7 +151,6 @@ impl TypeChecker {
         Ok(())
     }
 
-
     pub(super) fn validate_ffi_function_decl(
         &mut self,
         fn_decl: &Function,
@@ -322,7 +321,11 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_class_method_decl(&mut self, class_name: &str, method: &Function) -> Result<()> {
+    pub(super) fn check_class_method_decl(
+        &mut self,
+        class_name: &str,
+        method: &Function,
+    ) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&method.type_params)?;
 

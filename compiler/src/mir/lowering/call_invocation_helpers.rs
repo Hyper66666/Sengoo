@@ -22,7 +22,8 @@ pub(super) fn build_call_invocation_plan(
         ret_type.clone()
     };
 
-    let mut final_args = Vec::with_capacity(arg_locals.len() + usize::from(env_ptr_local.is_some()));
+    let mut final_args =
+        Vec::with_capacity(arg_locals.len() + usize::from(env_ptr_local.is_some()));
     if let Some(env_ptr) = env_ptr_local {
         final_args.push(env_ptr);
     }
@@ -67,7 +68,10 @@ mod tests {
         assert_eq!(plan.local_ty, MIRType::Future(Box::new(MIR_BOOL)));
         assert_eq!(
             plan.final_args,
-            vec![Local::new(7, LocalKind::Temp), Local::new(8, LocalKind::Temp)]
+            vec![
+                Local::new(7, LocalKind::Temp),
+                Local::new(8, LocalKind::Temp)
+            ]
         );
         assert_eq!(plan.future_origin.as_deref(), Some("worker"));
         assert_eq!(plan.struct_type_name, None);

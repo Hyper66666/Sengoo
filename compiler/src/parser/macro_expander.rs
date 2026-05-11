@@ -58,7 +58,10 @@ fn extract_macro_definitions(source: &str) -> Result<(String, HashMap<String, De
     Ok((source_without_definitions, macros))
 }
 
-fn expand_macro_invocations(source: &str, macros: &HashMap<String, DeclarativeMacro>) -> Result<String> {
+fn expand_macro_invocations(
+    source: &str,
+    macros: &HashMap<String, DeclarativeMacro>,
+) -> Result<String> {
     let mut expanded = source.to_string();
 
     for pass in 0..MAX_EXPANSION_PASSES {
@@ -86,8 +89,9 @@ fn expand_macro_invocations(source: &str, macros: &HashMap<String, DeclarativeMa
                 continue;
             }
 
-            let (name_start, name_end) = parse_ident_range(bytes, i)
-                .ok_or_else(|| parse_error("internal macro parser error while reading identifier"))?;
+            let (name_start, name_end) = parse_ident_range(bytes, i).ok_or_else(|| {
+                parse_error("internal macro parser error while reading identifier")
+            })?;
             let mut cursor = skip_ws(bytes, name_end);
             if cursor >= bytes.len() || bytes[cursor] != b'!' {
                 output.extend_from_slice(&bytes[i..name_end]);
@@ -107,7 +111,8 @@ fn expand_macro_invocations(source: &str, macros: &HashMap<String, DeclarativeMa
                 i = name_end;
                 continue;
             };
-            let (arg_start, arg_end, after_invocation) = parse_balanced(bytes, cursor, bytes[cursor], close)?;
+            let (arg_start, arg_end, after_invocation) =
+                parse_balanced(bytes, cursor, bytes[cursor], close)?;
             let macro_name = &expanded[name_start..name_end];
             let args = &expanded[arg_start..arg_end];
 
@@ -136,7 +141,11 @@ fn expand_macro_invocations(source: &str, macros: &HashMap<String, DeclarativeMa
     Ok(expanded)
 }
 
-fn expand_single_invocation(name: &str, definition: &DeclarativeMacro, args: &str) -> Result<String> {
+fn expand_single_invocation(
+    name: &str,
+    definition: &DeclarativeMacro,
+    args: &str,
+) -> Result<String> {
     let args = split_top_level(args)?
         .into_iter()
         .map(|value| value.trim().to_string())
@@ -264,7 +273,9 @@ fn parse_pattern_params(pattern: &str) -> Result<Vec<PatternParam>> {
         }
 
         let Some((name, fragment)) = trimmed[1..].split_once(':') else {
-            return Err(parse_error("invalid macro placeholder, expected `$name:fragment`"));
+            return Err(parse_error(
+                "invalid macro placeholder, expected `$name:fragment`",
+            ));
         };
         let name = name.trim();
         let fragment = fragment.trim();
@@ -340,7 +351,11 @@ fn split_top_level(input: &str) -> Result<Vec<&str>> {
             b']' => bracket_depth -= 1,
             b'<' => angle_depth += 1,
             b'>' => angle_depth -= 1,
-            b',' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 && angle_depth == 0 => {
+            b',' if paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && angle_depth == 0 =>
+            {
                 parts.push(&input[start..i]);
                 start = i + 1;
             }
@@ -430,7 +445,9 @@ fn parse_balanced(
         i += 1;
     }
 
-    Err(parse_error("unbalanced delimiters in macro definition/invocation"))
+    Err(parse_error(
+        "unbalanced delimiters in macro definition/invocation",
+    ))
 }
 
 fn skip_ws(bytes: &[u8], mut i: usize) -> usize {

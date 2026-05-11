@@ -2,8 +2,8 @@
 //!
 //! 将 Token 流解析为 AST。
 
-mod derive_expander;
 mod decl;
+mod derive_expander;
 mod expr;
 mod macro_expander;
 mod pat;
@@ -68,7 +68,8 @@ impl<'source> Parser<'source> {
             match self.parse_decl() {
                 Ok(decl) => decls.push(decl),
                 Err(CompileError::ParseError(e)) => {
-                    self.errors.push(e.with_span(source_span(self.current_span())));
+                    self.errors
+                        .push(e.with_span(source_span(self.current_span())));
                     self.recover_to_decl();
                 }
                 Err(_) => break,
@@ -224,7 +225,3 @@ impl<'source> Parser<'source> {
 fn source_span(span: Span) -> SourceSpan {
     (span.lo as usize, span.len() as usize).into()
 }
-
-
-
-

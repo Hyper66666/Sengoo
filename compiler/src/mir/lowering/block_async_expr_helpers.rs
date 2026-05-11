@@ -1,5 +1,5 @@
-﻿use super::*;
 use super::body_lowering_helpers::lower_body_expr_to_new_block;
+use super::*;
 
 pub(super) fn lower_block_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> Local {
     lower_body_expr_to_new_block(ctx, body);
@@ -66,7 +66,10 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let result = lower_block_expr(&mut ctx, &HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Int(1))));
+        let result = lower_block_expr(
+            &mut ctx,
+            &HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Int(1))),
+        );
 
         assert_eq!(result, Local::new(0, LocalKind::Return));
     }
@@ -96,10 +99,12 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let future_local = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_BOOL)));
+        let future_local =
+            ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_BOOL)));
         ctx.local_names.insert("f".to_string(), future_local);
         ctx.bind_local_symbol(SymbolId::new(1), future_local);
-        ctx.future_origins.insert(future_local, "worker".to_string());
+        ctx.future_origins
+            .insert(future_local, "worker".to_string());
 
         let result = lower_await_expr(
             &mut ctx,
@@ -141,7 +146,10 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let result = lower_async_block_expr(&mut ctx, &HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Int(1))));
+        let result = lower_async_block_expr(
+            &mut ctx,
+            &HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Int(1))),
+        );
 
         assert!(ctx.future_origins.contains_key(&result));
         assert!(ctx.lambda_functions.iter().any(|f| f.is_async));

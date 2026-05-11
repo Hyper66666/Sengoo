@@ -24,7 +24,11 @@ fn receiver_type_prefix_maps_scalar_pointer_and_struct_types() {
 #[test]
 fn method_dispatch_name_prefers_explicit_type_name_over_shape_based_prefix() {
     assert_eq!(
-        method_dispatch_name(Some("Vec_i64"), &MIRType::Array(Box::new(MIRType::Int(64)), 3), "len"),
+        method_dispatch_name(
+            Some("Vec_i64"),
+            &MIRType::Array(Box::new(MIRType::Int(64)), 3),
+            "len"
+        ),
         "Vec_i64_len"
     );
     assert_eq!(
@@ -36,7 +40,10 @@ fn method_dispatch_name_prefers_explicit_type_name_over_shape_based_prefix() {
 #[test]
 fn receiver_type_display_prefers_explicit_name_and_has_pointer_fallback() {
     assert_eq!(
-        receiver_type_display(Some("Map_i64_bool"), &MIRType::Tuple(vec![MIRType::Int(64)])),
+        receiver_type_display(
+            Some("Map_i64_bool"),
+            &MIRType::Tuple(vec![MIRType::Int(64)])
+        ),
         "Map_i64_bool"
     );
     assert_eq!(

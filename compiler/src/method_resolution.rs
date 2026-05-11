@@ -53,7 +53,8 @@ pub(crate) fn select_method_candidate<T>(
         0 => {
             if total_candidates == 1 {
                 MethodCandidateMatch::WrongArity {
-                    expected: single_expected.expect("single candidate should record expected arity"),
+                    expected: single_expected
+                        .expect("single candidate should record expected arity"),
                 }
             } else {
                 MethodCandidateMatch::None

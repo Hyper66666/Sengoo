@@ -18,7 +18,8 @@ pub(super) fn lower_lambda_expr(
         1
     };
 
-    let mut lambda_fn = MirFunction::new(lambda_name.clone(), param_types.clone(), ret_type.clone());
+    let mut lambda_fn =
+        MirFunction::new(lambda_name.clone(), param_types.clone(), ret_type.clone());
     let lambda_start = lambda_fn.start_block;
     let mut lambda_ctx = LoweringContext::new(
         &mut lambda_fn,
@@ -39,17 +40,15 @@ pub(super) fn lower_lambda_expr(
         lambda_ctx.local_names.insert(env_ptr_name, env_local);
 
         for (i, (var_name, _)) in free_vars.iter().enumerate() {
-            let captured_local = lambda_ctx.add_local(Some(var_name.clone()), LocalKind::Temp, MIR_I64);
+            let captured_local =
+                lambda_ctx.add_local(Some(var_name.clone()), LocalKind::Temp, MIR_I64);
             let index_local = lambda_ctx.add_local(None, LocalKind::Temp, MIR_I64);
             lambda_ctx.push_inst(Instruction::Assign {
                 destination: index_local,
                 value: MirConstant::Int(i as i64),
             });
-            let ptr_local = lambda_ctx.add_local(
-                None,
-                LocalKind::Temp,
-                MIRType::Ptr(Box::new(MIR_I64)),
-            );
+            let ptr_local =
+                lambda_ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(MIR_I64)));
             lambda_ctx.push_inst(Instruction::IndexAddr {
                 destination: ptr_local,
                 base: env_local,
@@ -59,7 +58,9 @@ pub(super) fn lower_lambda_expr(
                 destination: captured_local,
                 source: ptr_local,
             });
-            lambda_ctx.local_names.insert(var_name.clone(), captured_local);
+            lambda_ctx
+                .local_names
+                .insert(var_name.clone(), captured_local);
         }
 
         for (i, param_name) in params.iter().enumerate() {
@@ -154,7 +155,15 @@ mod tests {
 
     #[test]
     fn lower_lambda_expr_registers_signature_and_lambda_name() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -176,7 +185,11 @@ mod tests {
         );
 
         assert!(matches!(ctx.get_local_type(result), MIRType::Fn { .. }));
-        let lambda_name = ctx.lambda_names.get(&result).cloned().expect("lambda name should be recorded");
+        let lambda_name = ctx
+            .lambda_names
+            .get(&result)
+            .cloned()
+            .expect("lambda name should be recorded");
         assert!(ctx.function_sigs.contains_key(&lambda_name));
         assert!(ctx.lambda_functions.iter().any(|f| f.name == lambda_name));
     }

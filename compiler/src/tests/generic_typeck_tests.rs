@@ -1,4 +1,6 @@
-use crate::{compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
+use crate::{
+    compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker,
+};
 use std::collections::HashSet;
 
 #[test]
@@ -321,8 +323,9 @@ def main() -> i64 {
 "#;
 
     let ir = compile_to_ir(source).expect("generic impl method should compile to IR");
-    assert!(ir.contains("Box_i64_get"), "expected monomorphized method call in IR\n{}", ir);
+    assert!(
+        ir.contains("Box_i64_get"),
+        "expected monomorphized method call in IR\n{}",
+        ir
+    );
 }
-
-
-

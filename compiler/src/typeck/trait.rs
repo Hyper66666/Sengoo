@@ -101,7 +101,8 @@ impl MethodSig {
             has_default: true,
         }
     }
-}/// Impl 信息
+}
+/// Impl 信息
 #[derive(Debug, Clone)]
 pub struct ImplInfo {
     /// 目标类型
@@ -252,10 +253,7 @@ impl ImplRegistry {
 
     /// 注册固有 impl
     pub fn register_inherent(&mut self, type_key: String, info: ImplInfo) {
-        self.inherent_impls
-            .entry(type_key)
-            .or_default()
-            .push(info);
+        self.inherent_impls.entry(type_key).or_default().push(info);
     }
 
     /// 注册 Trait impl

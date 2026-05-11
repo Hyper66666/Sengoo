@@ -1,5 +1,5 @@
-use super::*;
 use super::method_builtin_helpers::try_lower_string_len_method_call;
+use super::*;
 use crate::mir::method_dispatch_helpers::{build_method_dispatch_plan, MethodDispatchPlan};
 use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
 
@@ -61,13 +61,17 @@ where
     {
         return Ok(dispatch_plan.func_name.clone());
     }
-    if let Some(generated_name) = ctx.try_materialize_inherent_method(receiver_ty, method, arg_locals)
+    if let Some(generated_name) =
+        ctx.try_materialize_inherent_method(receiver_ty, method, arg_locals)
     {
         return Ok(generated_name);
     }
-    if let Some(generated_name) =
-        ctx.try_materialize_trait_method(receiver_ty, method, arg_locals, &dispatch_plan.type_display)?
-    {
+    if let Some(generated_name) = ctx.try_materialize_trait_method(
+        receiver_ty,
+        method,
+        arg_locals,
+        &dispatch_plan.type_display,
+    )? {
         return Ok(generated_name);
     }
 
@@ -158,18 +162,14 @@ pub(super) fn lower_method_call_from_locals(
         return result_local;
     }
 
-    let resolved_func_name = match resolve_method_call_target_with_ctx(
-        ctx,
-        receiver_local,
-        method,
-        arg_locals,
-    ) {
-        Ok(name) => name,
-        Err(error) => {
-            ctx.errors.push(error);
-            return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
-        }
-    };
+    let resolved_func_name =
+        match resolve_method_call_target_with_ctx(ctx, receiver_local, method, arg_locals) {
+            Ok(name) => name,
+            Err(error) => {
+                ctx.errors.push(error);
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
+        };
     emit_resolved_method_call(ctx, receiver_local, arg_locals, &resolved_func_name)
 }
 
@@ -347,11 +347,17 @@ mod tests {
 
         let result = emit_resolved_method_call(&mut ctx, receiver, &[], "Point_sum");
 
-        assert_eq!(ctx.get_local_type(result), &MIRType::Struct {
-            name: "Point".to_string(),
-            fields: vec![],
-        });
-        assert_eq!(ctx.type_names.get(&result).map(String::as_str), Some("Point"));
+        assert_eq!(
+            ctx.get_local_type(result),
+            &MIRType::Struct {
+                name: "Point".to_string(),
+                fields: vec![],
+            }
+        );
+        assert_eq!(
+            ctx.type_names.get(&result).map(String::as_str),
+            Some("Point")
+        );
     }
     #[test]
     fn lower_method_call_from_locals_records_resolution_error_as_unit_temp() {

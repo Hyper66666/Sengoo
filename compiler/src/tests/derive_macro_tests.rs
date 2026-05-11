@@ -35,7 +35,8 @@ def main() -> i64 {
 
     let err = compile_to_ir(source).expect_err("derive on const should fail");
     assert!(
-        err.to_string().contains("derive attribute is only supported"),
+        err.to_string()
+            .contains("derive attribute is only supported"),
         "error should mention derive target restriction, got: {}",
         err
     );

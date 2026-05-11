@@ -8,14 +8,20 @@ fn build_function_sig_preserves_env_and_counts() {
     let sig = build_function_sig(
         MIR_BOOL,
         2,
-        vec![("capture".to_string(), MIR_I64), ("flag".to_string(), MIR_BOOL)],
+        vec![
+            ("capture".to_string(), MIR_I64),
+            ("flag".to_string(), MIR_BOOL),
+        ],
     );
 
     assert_eq!(sig.ret_type, MIR_BOOL);
     assert_eq!(sig.param_count, 2);
     assert_eq!(
         sig.env,
-        vec![("capture".to_string(), MIR_I64), ("flag".to_string(), MIR_BOOL)]
+        vec![
+            ("capture".to_string(), MIR_I64),
+            ("flag".to_string(), MIR_BOOL)
+        ]
     );
 }
 

@@ -1,9 +1,6 @@
-﻿use super::*;
+use super::*;
 
-pub(super) fn lower_body_expr_to_new_block(
-    ctx: &mut LoweringContext<'_>,
-    body: &HIRBody,
-) -> usize {
+pub(super) fn lower_body_expr_to_new_block(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> usize {
     let entry_block = ctx.new_block();
     ctx.lower_body_to_block(body, entry_block);
     entry_block

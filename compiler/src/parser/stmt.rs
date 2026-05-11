@@ -276,4 +276,3 @@ impl<'source> Parser<'source> {
         Ok(kind)
     }
 }
-

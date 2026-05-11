@@ -57,7 +57,8 @@ def main() -> i64 {
     0
 }
 "#;
-    let err = compile_to_ir(source).expect_err("mixed-width unsigned arithmetic should be rejected for now");
+    let err = compile_to_ir(source)
+        .expect_err("mixed-width unsigned arithmetic should be rejected for now");
     let msg = err.to_string();
     assert!(
         msg.contains("type check error"),
@@ -89,7 +90,10 @@ def main() -> i64 {
         .iter()
         .any(|inst| matches!(inst, Instruction::Cast { .. }));
 
-    assert!(has_cast, "MIR should contain Cast instructions for signed mixed-width arithmetic");
+    assert!(
+        has_cast,
+        "MIR should contain Cast instructions for signed mixed-width arithmetic"
+    );
 }
 
 fn build_cast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant) -> MirFunction {
@@ -120,7 +124,11 @@ fn build_cast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant
     func
 }
 
-fn build_bitcast_fixture(source_ty: MIRType, target_ty: MIRType, value: MirConstant) -> MirFunction {
+fn build_bitcast_fixture(
+    source_ty: MIRType,
+    target_ty: MIRType,
+    value: MirConstant,
+) -> MirFunction {
     let mut func = MirFunction::new("main".to_string(), vec![], target_ty.clone());
     let source = func.add_local(LocalKind::Temp, source_ty);
     let casted = func.add_local(LocalKind::Temp, target_ty);

@@ -53,7 +53,11 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn validate_contracts_for_function(&mut self, fn_decl: &Function, ret_ty: &Ty) -> Result<()> {
+    pub(super) fn validate_contracts_for_function(
+        &mut self,
+        fn_decl: &Function,
+        ret_ty: &Ty,
+    ) -> Result<()> {
         if let Some(precondition) = &fn_decl.precondition {
             let pre_ty = self.check_expr(precondition).map_err(CompileError::from)?;
             self.infer

@@ -217,7 +217,12 @@ fn collect_vars_from_expr(
         HIRExpr::Field { base, .. } => {
             collect_vars_from_expr(base, param_names, local_names, free_vars);
         }
-        HIRExpr::For { var_name, iter, body, .. } => {
+        HIRExpr::For {
+            var_name,
+            iter,
+            body,
+            ..
+        } => {
             collect_vars_from_expr(iter, param_names, local_names, free_vars);
             let mut extended_params = param_names.clone();
             extended_params.insert(var_name.clone());

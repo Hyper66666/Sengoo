@@ -68,7 +68,15 @@ mod tests {
 
     #[test]
     fn lower_ref_expr_emits_index_addr() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -87,7 +95,10 @@ mod tests {
         ctx.local_names.insert("x".to_string(), x);
         ctx.bind_local_symbol(SymbolId::new(1), x);
 
-        let expr = HIRExpr::Var { name: "x".to_string(), symbol: SymbolId::new(1) };
+        let expr = HIRExpr::Var {
+            name: "x".to_string(),
+            symbol: SymbolId::new(1),
+        };
         let result = lower_ref_expr(&mut ctx, &expr);
 
         assert!(matches!(ctx.get_local_type(result), MIRType::Ptr(_)));
@@ -96,7 +107,15 @@ mod tests {
 
     #[test]
     fn lower_deref_expr_emits_load_from_pointer() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -115,7 +134,10 @@ mod tests {
         ctx.local_names.insert("p".to_string(), ptr);
         ctx.bind_local_symbol(SymbolId::new(2), ptr);
 
-        let expr = HIRExpr::Var { name: "p".to_string(), symbol: SymbolId::new(2) };
+        let expr = HIRExpr::Var {
+            name: "p".to_string(),
+            symbol: SymbolId::new(2),
+        };
         let result = lower_deref_expr(&mut ctx, &expr);
 
         assert_eq!(ctx.get_local_type(result), &MIR_I64);

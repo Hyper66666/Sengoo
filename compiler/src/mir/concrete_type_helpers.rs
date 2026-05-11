@@ -17,9 +17,9 @@ pub(crate) fn collect_concrete_named_types_from_type(
     }
 
     match &ty.kind {
-        HIRTypeKind::Ref(_, inner)
-        | HIRTypeKind::Ptr(inner)
-        | HIRTypeKind::Slice(inner) => collect_concrete_named_types_from_type(inner, known_named_types, out),
+        HIRTypeKind::Ref(_, inner) | HIRTypeKind::Ptr(inner) | HIRTypeKind::Slice(inner) => {
+            collect_concrete_named_types_from_type(inner, known_named_types, out)
+        }
         HIRTypeKind::Array(elem, _) => {
             collect_concrete_named_types_from_type(elem, known_named_types, out)
         }
@@ -50,9 +50,7 @@ pub(crate) fn collect_concrete_named_types_from_expr(
 ) {
     match expr {
         HIRExpr::Lit(_) | HIRExpr::Var { .. } | HIRExpr::Continue => {}
-        HIRExpr::Unary(_, inner)
-        | HIRExpr::Deref(inner)
-        | HIRExpr::Ref(_, inner) => {
+        HIRExpr::Unary(_, inner) | HIRExpr::Deref(inner) | HIRExpr::Ref(_, inner) => {
             collect_concrete_named_types_from_expr(inner, known_named_types, out);
         }
         HIRExpr::Binary(_, lhs, rhs)
@@ -215,14 +213,22 @@ pub(crate) fn collect_concrete_named_types_from_items(
                 );
                 for method in &impl_item.items {
                     for param in &method.params {
-                        collect_concrete_named_types_from_type(&param.ty, known_named_types, &mut out);
+                        collect_concrete_named_types_from_type(
+                            &param.ty,
+                            known_named_types,
+                            &mut out,
+                        );
                     }
                     collect_concrete_named_types_from_type(
                         &method.return_type,
                         known_named_types,
                         &mut out,
                     );
-                    collect_concrete_named_types_from_body(&method.body, known_named_types, &mut out);
+                    collect_concrete_named_types_from_body(
+                        &method.body,
+                        known_named_types,
+                        &mut out,
+                    );
                 }
             }
             HIRItem::Struct(struct_item) => {

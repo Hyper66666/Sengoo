@@ -308,8 +308,14 @@ mod tests {
 
     #[test]
     fn test_supports_mir_bitcast_rejects_mismatched_widths() {
-        assert!(!supports_mir_bitcast(&MIRType::Float(32), &MIRType::Int(64)));
-        assert!(!supports_mir_bitcast(&MIRType::Float(64), &MIRType::Int(32)));
+        assert!(!supports_mir_bitcast(
+            &MIRType::Float(32),
+            &MIRType::Int(64)
+        ));
+        assert!(!supports_mir_bitcast(
+            &MIRType::Float(64),
+            &MIRType::Int(32)
+        ));
         assert!(!supports_mir_bitcast(
             &MIRType::Ref(Box::new(MIRType::Int(64))),
             &MIRType::Int(64)

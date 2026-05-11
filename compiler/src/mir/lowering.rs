@@ -1,91 +1,90 @@
 //! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
-use crate::hir::{
-    self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType,
+use super::generic_methods::{
+    collect_inherent_method_templates, collect_trait_method_templates_for_impl,
+    ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
 };
 use crate::hir::HIRTrait;
+use crate::hir::{self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType};
 use crate::method_resolution::explicit_hir_method_param_count;
 use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
-use crate::mir::lowering_helpers::{
-    collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
-};
-use crate::mir::local_type_helpers::collect_local_types;
-use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
-use crate::mir::method_specialization_helpers::{
-    resolve_trait_method_specialization,
-};
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::direct_call_helpers::collect_direct_call_names;
+use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
 use crate::mir::impl_specialization_helpers::{
-    resolve_inherent_method_specialization,
-    expand_impl_variants, impl_type_prefix,
+    expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
 };
-use crate::mir::type_mapping_helpers::{
-    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
-    hir_type_to_mir_with_structs_and_subst,
+use crate::mir::local_type_helpers::collect_local_types;
+use crate::mir::lowering_helpers::{
+    collect_free_vars, collect_free_vars_in_body, collect_named_symbols,
 };
+use crate::mir::method_specialization_helpers::resolve_trait_method_specialization;
 use crate::mir::pattern_helpers::{
     build_match_switch_plan, pattern_binding_plan, pattern_match_plan, PatternBindingPlan,
     PatternMatchPlan,
 };
 use crate::mir::type_helpers::is_void_like;
+use crate::mir::type_mapping_helpers::{
+    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
+    hir_type_to_mir_with_structs_and_subst,
+};
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
     Terminator, MIR_BOOL, MIR_I64, MIR_UNIT,
 };
-use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
-use super::generic_methods::{
-    collect_inherent_method_templates, collect_trait_method_templates_for_impl,
-    ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
-};
 use crate::symbol::SymbolId;
+use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
 use std::collections::{HashMap, HashSet};
 
-mod builtin_helpers;
-mod assignment_helpers;
 mod aggregate_expr_helpers;
-mod pointer_expr_helpers;
-mod call_expr_helpers;
-mod if_expr_helpers;
-mod match_expr_helpers;
-mod loop_expr_helpers;
-mod while_expr_helpers;
-mod for_expr_helpers;
-mod loop_control_helpers;
-mod lambda_expr_helpers;
-mod let_stmt_helpers;
-mod op_expr_helpers;
-mod call_emission_helpers;
-mod call_invocation_helpers;
-mod named_call_helpers;
-mod non_named_call_helpers;
-mod call_target_helpers;
-mod method_call_helpers;
-mod method_expr_helpers;
-mod method_builtin_helpers;
+mod assignment_helpers;
 mod block_async_expr_helpers;
 mod body_lowering_helpers;
-use self::aggregate_expr_helpers::{lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr};
-use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
+mod builtin_helpers;
+mod call_emission_helpers;
+mod call_expr_helpers;
+mod call_invocation_helpers;
+mod call_target_helpers;
+mod for_expr_helpers;
+mod if_expr_helpers;
+mod lambda_expr_helpers;
+mod let_stmt_helpers;
+mod loop_control_helpers;
+mod loop_expr_helpers;
+mod match_expr_helpers;
+mod method_builtin_helpers;
+mod method_call_helpers;
+mod method_expr_helpers;
+mod named_call_helpers;
+mod non_named_call_helpers;
+mod op_expr_helpers;
+mod pointer_expr_helpers;
+mod while_expr_helpers;
+use self::aggregate_expr_helpers::{
+    lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr,
+};
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
+use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
-use self::if_expr_helpers::lower_if_expr;
-use self::match_expr_helpers::lower_match_expr;
-use self::loop_expr_helpers::lower_loop_expr;
-use self::while_expr_helpers::lower_while_expr;
-use self::for_expr_helpers::lower_for_expr;
-use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
-use self::lambda_expr_helpers::lower_lambda_expr;
-use self::op_expr_helpers::{lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr};
-use self::let_stmt_helpers::lower_let_stmt;
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::CallTargetResolution;
+use self::for_expr_helpers::lower_for_expr;
+use self::if_expr_helpers::lower_if_expr;
+use self::lambda_expr_helpers::lower_lambda_expr;
+use self::let_stmt_helpers::lower_let_stmt;
+use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
+use self::loop_expr_helpers::lower_loop_expr;
+use self::match_expr_helpers::lower_match_expr;
 use self::method_expr_helpers::lower_method_call_expr;
-use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};
+use self::op_expr_helpers::{
+    lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr,
+};
+use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
+use self::while_expr_helpers::lower_while_expr;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,7 +160,11 @@ pub fn lower_hir_with_options(
                 known_functions.insert(fn_item.name.clone());
                 known_function_sigs.insert(
                     fn_item.name.clone(),
-                    build_hir_function_sig(&fn_item.return_type, fn_item.params.len(), &struct_defs),
+                    build_hir_function_sig(
+                        &fn_item.return_type,
+                        fn_item.params.len(),
+                        &struct_defs,
+                    ),
                 );
             }
             HIRItem::ExternBlock(extern_block) => {
@@ -180,11 +183,9 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
-                for impl_item in expand_impl_variants(
-                    impl_item,
-                    &concrete_named_types,
-                    &known_named_types,
-                ) {
+                for impl_item in
+                    expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
+                {
                     let type_prefix = impl_type_prefix(&impl_item.target_type);
                     if let Some(trait_name) = &impl_item.trait_name {
                         let collected = collect_trait_method_templates_for_impl(
@@ -203,8 +204,12 @@ pub fn lower_hir_with_options(
                             );
                             known_functions.insert(registration.name);
                         }
-                        eager_trait_functions
-                            .extend(collected.eager_methods.into_iter().map(|method| method.function));
+                        eager_trait_functions.extend(
+                            collected
+                                .eager_methods
+                                .into_iter()
+                                .map(|method| method.function),
+                        );
                         trait_method_templates.extend(collected.templates);
                     } else {
                         for method in &impl_item.items {
@@ -256,11 +261,9 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
-                for impl_item in expand_impl_variants(
-                    impl_item,
-                    &concrete_named_types,
-                    &known_named_types,
-                ) {
+                for impl_item in
+                    expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
+                {
                     if impl_item.trait_name.is_some() {
                         continue;
                     }
@@ -514,7 +517,6 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
         if self.known_functions.contains(&specialized.name) {
             return Some(specialized.name);
@@ -710,7 +712,6 @@ impl<'a> LoweringContext<'a> {
         collect_free_vars_in_body(body, &self.local_names)
     }
 
-
     fn lower_async_block(&mut self, body: &HIRBody) -> Local {
         let async_block_name = self.async_block_name();
         let free_vars = self.collect_async_block_free_vars(body);
@@ -783,7 +784,9 @@ impl<'a> LoweringContext<'a> {
         }
 
         self.known_functions.insert(async_block_name.clone());
-        self.options.async_functions.insert(async_block_name.clone());
+        self.options
+            .async_functions
+            .insert(async_block_name.clone());
         self.function_sigs.insert(
             async_block_name.clone(),
             build_function_sig(result_ty.clone(), capture_arity, vec![]),
@@ -798,11 +801,9 @@ impl<'a> LoweringContext<'a> {
             func: format!("{}__start", async_block_name),
             args: capture_args,
         });
-        self.future_origins
-            .insert(future_local, async_block_name);
+        self.future_origins.insert(future_local, async_block_name);
         future_local
     }
-
 
     /// 弹出当前循环的break/continue目标。
     fn pop_loop(&mut self) {
@@ -868,27 +869,27 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 设置当前基本块为指定块。
-fn set_current_block(&mut self, block: usize) {
-    self.current_block = Some(block);
-}
+    fn set_current_block(&mut self, block: usize) {
+        self.current_block = Some(block);
+    }
 
-fn current_block_or_error(&mut self, context: &str) -> usize {
-    match self.current_block {
-        Some(block) => block,
-        None => {
-            self.errors.push(format!(
-                "internal MIR lowering error: no current block set while {context}"
-            ));
-            self.mir_fn.start_block
+    fn current_block_or_error(&mut self, context: &str) -> usize {
+        match self.current_block {
+            Some(block) => block,
+            None => {
+                self.errors.push(format!(
+                    "internal MIR lowering error: no current block set while {context}"
+                ));
+                self.mir_fn.start_block
+            }
         }
     }
-}
 
     /// 返回当前正在生成的基本块索引。
-fn current_block(&self) -> usize {
-    debug_assert!(self.current_block.is_some(), "no current block set");
-    self.current_block.unwrap_or(self.mir_fn.start_block)
-}
+    fn current_block(&self) -> usize {
+        debug_assert!(self.current_block.is_some(), "no current block set");
+        self.current_block.unwrap_or(self.mir_fn.start_block)
+    }
 
     fn propagate_future_origin_through_phi(
         &mut self,
@@ -931,7 +932,7 @@ fn current_block(&self) -> usize {
         // Determine if a cast between two types is valid and, if so,
         // which direction to cast (returns the common target type).
         match (&left_ty, &right_ty) {
-        // 对整数和浮点数类型进行隐式类型提升（宽化）。
+            // 对整数和浮点数类型进行隐式类型提升（宽化）。
             (MIRType::Int(a), MIRType::Int(b)) => {
                 let target_bits = std::cmp::max(*a, *b);
                 let target_ty = MIRType::Int(target_bits);
@@ -948,7 +949,7 @@ fn current_block(&self) -> usize {
                 (new_left, new_right)
             }
 
-        // 两个浮点数操作数：选择较大位宽的类型。
+            // 两个浮点数操作数：选择较大位宽的类型。
             (MIRType::Float(a), MIRType::Float(b)) => {
                 let target_bits = std::cmp::max(*a, *b);
                 let target_ty = MIRType::Float(target_bits);
@@ -965,7 +966,7 @@ fn current_block(&self) -> usize {
                 (new_left, new_right)
             }
 
-        // 整数与浮点数混合：将整数转为浮点数。
+            // 整数与浮点数混合：将整数转为浮点数。
             (MIRType::Int(_), MIRType::Float(b)) => {
                 let target_ty = MIRType::Float(*b);
                 let new_left = self.insert_cast(left, target_ty);
@@ -977,7 +978,7 @@ fn current_block(&self) -> usize {
                 (left, new_right)
             }
 
-        // 布尔与整数混合：将bool转为对应位宽的整数。
+            // 布尔与整数混合：将bool转为对应位宽的整数。
             (MIRType::Bool, MIRType::Int(b)) => {
                 let target_ty = MIRType::Int(*b);
                 let new_left = self.insert_cast(left, target_ty);
@@ -989,7 +990,7 @@ fn current_block(&self) -> usize {
                 (left, new_right)
             }
 
-        // 其他类型组合：无需自动转换，直接返回左侧类型。
+            // 其他类型组合：无需自动转换，直接返回左侧类型。
             _ => {
                 self.errors.push(format!(
                     "type mismatch in binary operation: left operand has type {:?}, right operand has type {:?}",
@@ -1013,18 +1014,18 @@ fn current_block(&self) -> usize {
     }
 
     /// 向当前基本块追加一条MIR指令。
-fn push_inst(&mut self, inst: Instruction) {
-    let block_id = self.current_block_or_error("emitting MIR instruction");
-    self.mir_fn.push_inst_to_block(block_id, inst);
-}
+    fn push_inst(&mut self, inst: Instruction) {
+        let block_id = self.current_block_or_error("emitting MIR instruction");
+        self.mir_fn.push_inst_to_block(block_id, inst);
+    }
 
     /// 向当前基本块追加terminator终止指令。
-fn set_terminator(&mut self, term: Terminator) {
-    let block_id = self.current_block_or_error("emitting MIR terminator");
-    if let Some(block) = self.mir_fn.block_mut(block_id) {
-        block.set_terminator(term);
+    fn set_terminator(&mut self, term: Terminator) {
+        let block_id = self.current_block_or_error("emitting MIR terminator");
+        if let Some(block) = self.mir_fn.block_mut(block_id) {
+            block.set_terminator(term);
+        }
     }
-}
 
     fn inject_precondition_check(&mut self, precondition: &HIRExpr, entry_block: usize) -> usize {
         self.set_current_block(entry_block);
@@ -1133,7 +1134,6 @@ fn set_terminator(&mut self, term: Terminator) {
 
         cond_local
     }
-
 
     /// 将HIR函数体降级为基本块（不计算返回值）。
     fn lower_body_to_block(&mut self, body: &HIRBody, target_block: usize) {
@@ -1306,7 +1306,9 @@ fn set_terminator(&mut self, term: Terminator) {
             HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),
             HIRExpr::Continue => lower_continue_expr(self),
             HIRExpr::Assign { target, value } => lower_assign_expr(self, target, value),
-            HIRExpr::AssignOp { target, op, value } => lower_assign_op_expr(self, target, op, value),
+            HIRExpr::AssignOp { target, op, value } => {
+                lower_assign_op_expr(self, target, op, value)
+            }
             HIRExpr::Array(elems) => lower_array_expr(self, elems),
             HIRExpr::Index { base, index } => lower_index_expr(self, base, index),
             HIRExpr::Struct { name, fields } => lower_struct_expr(self, name, fields),
@@ -1446,7 +1448,7 @@ fn set_terminator(&mut self, term: Terminator) {
     }
 
     /// 将HIR二元运算符转换为MIR二元运算符。
-fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
+    fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
         match op {
             hir::HIRBinaryOp::Add => MirBinOp::Add,
             hir::HIRBinaryOp::Sub => MirBinOp::Sub,

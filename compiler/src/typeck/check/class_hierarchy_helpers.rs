@@ -288,7 +288,7 @@ impl TypeChecker {
         let sig = FunctionTy::new(method.self_param.is_some(), param_types, ret_ty);
         self.env.pop_scope();
         Ok(sig)
-}
+    }
 }
 
 #[cfg(test)]
@@ -317,7 +317,11 @@ mod tests {
 
         let mut state = HashMap::new();
         let mut stack = Vec::new();
-        let err = checker.detect_class_cycle("A", &mut state, &mut stack).unwrap_err();
-        assert!(matches!(err, TypeckError::Other(msg) if msg.contains("cyclic class inheritance detected")));
+        let err = checker
+            .detect_class_cycle("A", &mut state, &mut stack)
+            .unwrap_err();
+        assert!(
+            matches!(err, TypeckError::Other(msg) if msg.contains("cyclic class inheritance detected"))
+        );
     }
 }

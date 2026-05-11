@@ -447,7 +447,11 @@ mod tests {
             items: vec![hir::HIRFunction {
                 name: "i64_id".to_string(),
                 type_params: Vec::new(),
-                params: vec![HIRParam::new("self".to_string(), SymbolId::INVALID, i64_ty())],
+                params: vec![HIRParam::new(
+                    "self".to_string(),
+                    SymbolId::INVALID,
+                    i64_ty(),
+                )],
                 return_type: i64_ty(),
                 precondition: None,
                 postcondition: None,
@@ -531,7 +535,11 @@ mod tests {
             items: vec![hir::HIRFunction {
                 name: "i64_id".to_string(),
                 type_params: Vec::new(),
-                params: vec![HIRParam::new("self".to_string(), SymbolId::INVALID, i64_ty())],
+                params: vec![HIRParam::new(
+                    "self".to_string(),
+                    SymbolId::INVALID,
+                    i64_ty(),
+                )],
                 return_type: i64_ty(),
                 precondition: None,
                 postcondition: None,
@@ -561,4 +569,3 @@ mod tests {
         }));
     }
 }
-

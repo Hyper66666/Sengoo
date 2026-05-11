@@ -88,7 +88,12 @@ impl TypeChecker {
     }
 
     /// 检查for循环，验证迭代器类型和模式匹配。
-    pub(super) fn check_for(&mut self, pattern: &Pattern, iter: &Expr, body: &Block) -> TyResult<Ty> {
+    pub(super) fn check_for(
+        &mut self,
+        pattern: &Pattern,
+        iter: &Expr,
+        body: &Block,
+    ) -> TyResult<Ty> {
         let elem_ty = match &iter.kind {
             ExprKind::Range { start, end, .. } => {
                 let range_ty = self.env.int_ty(IntKind::I64);

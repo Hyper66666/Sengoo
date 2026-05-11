@@ -1,6 +1,4 @@
-use crate::hir::{
-    self, HIRBody, HIRExpr, HIRMatchArm, HIRParam, HIRStmt, HIRType, HIRTypeKind,
-};
+use crate::hir::{self, HIRBody, HIRExpr, HIRMatchArm, HIRParam, HIRStmt, HIRType, HIRTypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn hir_type_is_placeholder_name(
@@ -8,7 +6,9 @@ pub(crate) fn hir_type_is_placeholder_name(
     known_named_types: &HashSet<String>,
 ) -> Option<String> {
     match &ty.kind {
-        HIRTypeKind::Named { name, args } if args.is_empty() && !known_named_types.contains(name) => {
+        HIRTypeKind::Named { name, args }
+            if args.is_empty() && !known_named_types.contains(name) =>
+        {
             Some(name.clone())
         }
         _ => None,
@@ -26,9 +26,9 @@ pub(crate) fn hir_type_is_concrete(ty: &HIRType, known_named_types: &HashSet<Str
         | HIRTypeKind::Bytes
         | HIRTypeKind::Int(_)
         | HIRTypeKind::Float(_) => true,
-        HIRTypeKind::Ref(_, inner)
-        | HIRTypeKind::Ptr(inner)
-        | HIRTypeKind::Slice(inner) => hir_type_is_concrete(inner, known_named_types),
+        HIRTypeKind::Ref(_, inner) | HIRTypeKind::Ptr(inner) | HIRTypeKind::Slice(inner) => {
+            hir_type_is_concrete(inner, known_named_types)
+        }
         HIRTypeKind::Array(elem, _) => hir_type_is_concrete(elem, known_named_types),
         HIRTypeKind::Tuple(items) => items
             .iter()
@@ -80,7 +80,9 @@ pub(crate) fn substitute_hir_type(ty: &HIRType, subst: &HashMap<String, HIRType>
         ),
         HIRTypeKind::Named { name, args } => HIRType::named(
             name.clone(),
-            args.iter().map(|arg| substitute_hir_type(arg, subst)).collect(),
+            args.iter()
+                .map(|arg| substitute_hir_type(arg, subst))
+                .collect(),
         ),
         _ => ty.clone(),
     }
@@ -89,7 +91,9 @@ pub(crate) fn substitute_hir_type(ty: &HIRType, subst: &HashMap<String, HIRType>
 pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRType>) -> HIRExpr {
     match expr {
         HIRExpr::Lit(_) | HIRExpr::Var { .. } | HIRExpr::Continue => expr.clone(),
-        HIRExpr::Unary(op, inner) => HIRExpr::Unary(*op, Box::new(substitute_hir_expr(inner, subst))),
+        HIRExpr::Unary(op, inner) => {
+            HIRExpr::Unary(*op, Box::new(substitute_hir_expr(inner, subst)))
+        }
         HIRExpr::Binary(op, lhs, rhs) => HIRExpr::Binary(
             *op,
             Box::new(substitute_hir_expr(lhs, subst)),
@@ -146,7 +150,10 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
         },
         HIRExpr::Call { func, args } => HIRExpr::Call {
             func: Box::new(substitute_hir_expr(func, subst)),
-            args: args.iter().map(|arg| substitute_hir_expr(arg, subst)).collect(),
+            args: args
+                .iter()
+                .map(|arg| substitute_hir_expr(arg, subst))
+                .collect(),
         },
         HIRExpr::MethodCall {
             receiver,
@@ -155,7 +162,10 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
         } => HIRExpr::MethodCall {
             receiver: Box::new(substitute_hir_expr(receiver, subst)),
             method: method.clone(),
-            args: args.iter().map(|arg| substitute_hir_expr(arg, subst)).collect(),
+            args: args
+                .iter()
+                .map(|arg| substitute_hir_expr(arg, subst))
+                .collect(),
         },
         HIRExpr::Struct { name, fields } => HIRExpr::Struct {
             name: name.clone(),
@@ -165,7 +175,10 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
                 .collect(),
         },
         HIRExpr::Array(items) => HIRExpr::Array(
-            items.iter().map(|item| substitute_hir_expr(item, subst)).collect(),
+            items
+                .iter()
+                .map(|item| substitute_hir_expr(item, subst))
+                .collect(),
         ),
         HIRExpr::Index { base, index } => HIRExpr::Index {
             base: Box::new(substitute_hir_expr(base, subst)),
@@ -185,10 +198,14 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             value: Box::new(substitute_hir_expr(value, subst)),
         },
         HIRExpr::Return(value) => HIRExpr::Return(
-            value.as_ref().map(|value| Box::new(substitute_hir_expr(value, subst))),
+            value
+                .as_ref()
+                .map(|value| Box::new(substitute_hir_expr(value, subst))),
         ),
         HIRExpr::Break(value) => HIRExpr::Break(
-            value.as_ref().map(|value| Box::new(substitute_hir_expr(value, subst))),
+            value
+                .as_ref()
+                .map(|value| Box::new(substitute_hir_expr(value, subst))),
         ),
         HIRExpr::Block(body) => HIRExpr::Block(Box::new(substitute_hir_body(body, subst))),
         HIRExpr::Cast(inner, ty) => HIRExpr::Cast(
@@ -199,26 +216,37 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             Box::new(substitute_hir_expr(inner, subst)),
             substitute_hir_type(ty, subst),
         ),
-        HIRExpr::Ref(is_mut, inner) => HIRExpr::Ref(*is_mut, Box::new(substitute_hir_expr(inner, subst))),
+        HIRExpr::Ref(is_mut, inner) => {
+            HIRExpr::Ref(*is_mut, Box::new(substitute_hir_expr(inner, subst)))
+        }
         HIRExpr::Deref(inner) => HIRExpr::Deref(Box::new(substitute_hir_expr(inner, subst))),
         HIRExpr::Range {
             start,
             end,
             inclusive,
         } => HIRExpr::Range {
-            start: start.as_ref().map(|value| Box::new(substitute_hir_expr(value, subst))),
-            end: end.as_ref().map(|value| Box::new(substitute_hir_expr(value, subst))),
+            start: start
+                .as_ref()
+                .map(|value| Box::new(substitute_hir_expr(value, subst))),
+            end: end
+                .as_ref()
+                .map(|value| Box::new(substitute_hir_expr(value, subst))),
             inclusive: *inclusive,
         },
         HIRExpr::Tuple(items) => HIRExpr::Tuple(
-            items.iter().map(|item| substitute_hir_expr(item, subst)).collect(),
+            items
+                .iter()
+                .map(|item| substitute_hir_expr(item, subst))
+                .collect(),
         ),
         HIRExpr::Lambda { params, body } => HIRExpr::Lambda {
             params: params.clone(),
             body: Box::new(substitute_hir_expr(body, subst)),
         },
         HIRExpr::Await(inner) => HIRExpr::Await(Box::new(substitute_hir_expr(inner, subst))),
-        HIRExpr::AsyncBlock(body) => HIRExpr::AsyncBlock(Box::new(substitute_hir_body(body, subst))),
+        HIRExpr::AsyncBlock(body) => {
+            HIRExpr::AsyncBlock(Box::new(substitute_hir_body(body, subst)))
+        }
     }
 }
 
@@ -234,7 +262,9 @@ pub(crate) fn substitute_hir_stmt(stmt: &HIRStmt, subst: &HashMap<String, HIRTyp
             name: name.clone(),
             symbol: *symbol,
             ty: substitute_hir_type(ty, subst),
-            value: value.as_ref().map(|value| substitute_hir_expr(value, subst)),
+            value: value
+                .as_ref()
+                .map(|value| substitute_hir_expr(value, subst)),
             is_mut: *is_mut,
         },
         HIRStmt::Expr(expr) => HIRStmt::Expr(substitute_hir_expr(expr, subst)),
@@ -266,11 +296,13 @@ pub(crate) fn substitute_hir_function(
         params: function
             .params
             .iter()
-            .map(|param| HIRParam::new(
-                param.name.clone(),
-                param.symbol,
-                substitute_hir_type(&param.ty, subst),
-            ))
+            .map(|param| {
+                HIRParam::new(
+                    param.name.clone(),
+                    param.symbol,
+                    substitute_hir_type(&param.ty, subst),
+                )
+            })
             .collect(),
         return_type: substitute_hir_type(&function.return_type, subst),
         precondition: function

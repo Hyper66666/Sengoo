@@ -1,7 +1,11 @@
 use super::*;
 
 impl TypeChecker {
-    pub(super) fn set_generic_function_meta(&mut self, name: String, params: Vec<GenericTypeParamMeta>) {
+    pub(super) fn set_generic_function_meta(
+        &mut self,
+        name: String,
+        params: Vec<GenericTypeParamMeta>,
+    ) {
         if params.is_empty() {
             self.generic_function_metas.remove(&name);
         } else {
@@ -10,7 +14,11 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn set_generic_type_meta(&mut self, name: String, params: Vec<GenericTypeParamMeta>) {
+    pub(super) fn set_generic_type_meta(
+        &mut self,
+        name: String,
+        params: Vec<GenericTypeParamMeta>,
+    ) {
         if params.is_empty() {
             self.generic_type_metas.remove(&name);
         } else {

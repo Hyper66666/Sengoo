@@ -1,5 +1,8 @@
-﻿use crate::compile_to_mir;
-use crate::mir::async_cfg_helpers::{build_async_cfg_plan, collect_spill_user_locals, collect_user_locals, compute_live_in_user_locals};
+use crate::compile_to_mir;
+use crate::mir::async_cfg_helpers::{
+    build_async_cfg_plan, collect_spill_user_locals, collect_user_locals,
+    compute_live_in_user_locals,
+};
 use crate::mir::async_frame_helpers::build_async_frame_layout;
 use crate::mir::async_poll_helpers::synthesize_cfg_poll;
 

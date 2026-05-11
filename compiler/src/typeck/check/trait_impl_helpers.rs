@@ -20,7 +20,8 @@ impl TypeChecker {
             match item {
                 TraitItem::Function(method) => {
                     self.env.push_scope();
-                    let method_generic_meta = self.bind_type_params_with_meta(&method.type_params)?;
+                    let method_generic_meta =
+                        self.bind_type_params_with_meta(&method.type_params)?;
                     let mut param_types = Vec::new();
                     let mut has_self = false;
 
