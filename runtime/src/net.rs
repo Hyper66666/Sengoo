@@ -153,7 +153,7 @@ struct NetRuntime {
     http_servers: Mutex<HashMap<u64, HttpServerState>>,
 }
 
-enum TcpRecvOutcome {
+enum RecvOutcome {
     Bytes(i64),
     Timeout,
 }
@@ -246,7 +246,7 @@ impl NetRuntime {
         handle: u64,
         buffer: &mut [u8],
         timeout_ms: u32,
-    ) -> Result<TcpRecvOutcome, NetErrorCode> {
+    ) -> Result<RecvOutcome, NetErrorCode> {
         let mut table = self
             .tcp_streams
             .lock()
@@ -260,9 +260,9 @@ impl NetRuntime {
         }
 
         match stream.read(buffer) {
-            Ok(n) => Ok(TcpRecvOutcome::Bytes(n as i64)),
-            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(TcpRecvOutcome::Timeout),
-            Err(err) if err.kind() == ErrorKind::TimedOut => Ok(TcpRecvOutcome::Timeout),
+            Ok(n) => Ok(RecvOutcome::Bytes(n as i64)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(RecvOutcome::Timeout),
+            Err(err) if err.kind() == ErrorKind::TimedOut => Ok(RecvOutcome::Timeout),
             Err(err) => Err(classify_io_error(&err)),
         }
     }
@@ -280,30 +280,328 @@ impl NetRuntime {
             Err(NetErrorCode::HandleNotFound)
         }
     }
+
+    fn udp_bind(&self, host: &str, port: u16) -> Result<u64, NetErrorCode> {
+        let addr = format!("{}:{}", host, port);
+        let socket = UdpSocket::bind(addr).map_err(|err| classify_io_error(&err))?;
+        socket
+            .set_nonblocking(false)
+            .map_err(|err| classify_io_error(&err))?;
+
+        let handle = self.alloc_handle();
+        self.udp_sockets
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .insert(handle, socket);
+        Ok(handle)
+    }
+
+    fn udp_connect(&self, handle: u64, addr: &str) -> Result<i64, NetErrorCode> {
+        let mut table = self
+            .udp_sockets
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let socket = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        socket
+            .connect(addr)
+            .map(|_| 1)
+            .map_err(|_| NetErrorCode::ConnectFailed)
+    }
+
+    fn udp_send(&self, handle: u64, payload: &[u8]) -> Result<i64, NetErrorCode> {
+        let mut table = self
+            .udp_sockets
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let socket = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        socket
+            .send(payload)
+            .map(|n| n as i64)
+            .map_err(|err| classify_io_error(&err))
+    }
+
+    fn udp_recv(
+        &self,
+        handle: u64,
+        buffer: &mut [u8],
+        timeout_ms: u32,
+    ) -> Result<RecvOutcome, NetErrorCode> {
+        let mut table = self
+            .udp_sockets
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let socket = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        if timeout_ms != 0 {
+            socket
+                .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+                .map_err(|err| classify_io_error(&err))?;
+        }
+        match socket.recv(buffer) {
+            Ok(n) => Ok(RecvOutcome::Bytes(n as i64)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(RecvOutcome::Timeout),
+            Err(err) if err.kind() == ErrorKind::TimedOut => Ok(RecvOutcome::Timeout),
+            Err(err) => Err(classify_io_error(&err)),
+        }
+    }
+
+    fn udp_close(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let removed = self
+            .udp_sockets
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .remove(&handle)
+            .is_some();
+        if removed {
+            Ok(1)
+        } else {
+            Err(NetErrorCode::HandleNotFound)
+        }
+    }
+
+    fn http_store(&self, response: HttpResponseEntry) -> Result<u64, NetErrorCode> {
+        let handle = self.alloc_handle();
+        self.http_responses
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .insert(handle, response);
+        Ok(handle)
+    }
+
+    fn http_status(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let table = self
+            .http_responses
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        table
+            .get(&handle)
+            .map(|resp| resp.status_code)
+            .ok_or(NetErrorCode::HandleNotFound)
+    }
+
+    fn http_body_len(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let table = self
+            .http_responses
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        table
+            .get(&handle)
+            .map(|resp| resp.body.len() as i64)
+            .ok_or(NetErrorCode::HandleNotFound)
+    }
+
+    fn http_body_copy(
+        &self,
+        handle: u64,
+        buffer: *mut u8,
+        capacity: usize,
+    ) -> Result<i64, NetErrorCode> {
+        let table = self
+            .http_responses
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let response = table.get(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        Ok(copy_bytes_to_buffer(&response.body, buffer, capacity))
+    }
+
+    fn http_close(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let removed = self
+            .http_responses
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .remove(&handle)
+            .is_some();
+        if removed {
+            Ok(1)
+        } else {
+            Err(NetErrorCode::HandleNotFound)
+        }
+    }
+
+    fn ws_store(&self, stream: TcpStream) -> Result<u64, NetErrorCode> {
+        let handle = self.alloc_handle();
+        self.ws_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .insert(handle, stream);
+        Ok(handle)
+    }
+
+    fn ws_send_text(&self, handle: u64, payload: &[u8]) -> Result<i64, NetErrorCode> {
+        let mut table = self
+            .ws_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let stream = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        ws_write_frame(stream, 0x1, payload, true)
+            .map(|_| payload.len() as i64)
+            .map_err(|err| classify_io_error(&err))
+    }
+
+    fn ws_recv_text(
+        &self,
+        handle: u64,
+        buffer: *mut u8,
+        capacity: usize,
+        timeout_ms: u32,
+    ) -> Result<i64, NetErrorCode> {
+        let mut table = self
+            .ws_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let stream = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        if timeout_ms != 0 {
+            stream
+                .set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+                .map_err(|err| classify_io_error(&err))?;
+        }
+        loop {
+            let Some((opcode, payload)) = ws_read_frame(stream) else {
+                return Err(NetErrorCode::WebSocketProtocolError);
+            };
+            match opcode {
+                0x1 => return Ok(copy_bytes_to_buffer(&payload, buffer, capacity)),
+                0x9 => {
+                    ws_write_frame(stream, 0xA, &payload, true)
+                        .map_err(|err| classify_io_error(&err))?;
+                }
+                0x8 => {
+                    set_last_error(NetErrorCode::RemoteClosed);
+                    return Ok(0);
+                }
+                0xA => {}
+                _ => return Err(NetErrorCode::WebSocketProtocolError),
+            }
+        }
+    }
+
+    fn ws_close(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let mut stream = self
+            .ws_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .remove(&handle)
+            .ok_or(NetErrorCode::HandleNotFound)?;
+        ws_write_frame(&mut stream, 0x8, &[], true).map_err(|err| classify_io_error(&err))?;
+        Ok(1)
+    }
+
+    fn http_server_store(&self, state: HttpServerState) -> Result<u64, NetErrorCode> {
+        let handle = self.alloc_handle();
+        self.http_servers
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .insert(handle, state);
+        Ok(handle)
+    }
+
+    fn http_server_local_port(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let table = self
+            .http_servers
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let state = table.get(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        state
+            .listener
+            .local_addr()
+            .map(|addr| addr.port() as i64)
+            .map_err(|err| classify_io_error(&err))
+    }
+
+    fn http_server_with_state<F, R>(&self, handle: u64, f: F) -> Result<R, NetErrorCode>
+    where
+        F: FnOnce(&mut HttpServerState) -> R,
+    {
+        let mut table = self
+            .http_servers
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let state = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        Ok(f(state))
+    }
+
+    fn http_server_set_limits(
+        &self,
+        handle: u64,
+        max_header_bytes: usize,
+        max_body_bytes: usize,
+    ) -> Result<i64, NetErrorCode> {
+        self.http_server_with_state(handle, |state| {
+            state.max_header_bytes = max_header_bytes;
+            state.max_body_bytes = max_body_bytes;
+            1
+        })
+    }
+
+    fn http_server_add_route(
+        &self,
+        handle: u64,
+        route: HttpServerRoute,
+    ) -> Result<i64, NetErrorCode> {
+        self.http_server_with_state(handle, |state| {
+            state.routes.push(route);
+            1
+        })
+    }
+
+    fn http_server_add_middleware(
+        &self,
+        handle: u64,
+        middleware: HttpServerMiddleware,
+    ) -> Result<i64, NetErrorCode> {
+        self.http_server_with_state(handle, |state| {
+            state.middlewares.push(middleware);
+            1
+        })
+    }
+
+    fn http_server_snapshot(
+        &self,
+        handle: u64,
+    ) -> Result<
+        (
+            TcpListener,
+            Vec<HttpServerRoute>,
+            Vec<HttpServerMiddleware>,
+            usize,
+            usize,
+        ),
+        NetErrorCode,
+    > {
+        let table = self
+            .http_servers
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let state = table.get(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        let listener = state
+            .listener
+            .try_clone()
+            .map_err(|err| classify_io_error(&err))?;
+        Ok((
+            listener,
+            state.routes.clone(),
+            state.middlewares.clone(),
+            state.max_header_bytes,
+            state.max_body_bytes,
+        ))
+    }
+
+    fn http_server_close(&self, handle: u64) -> Result<i64, NetErrorCode> {
+        let removed = self
+            .http_servers
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .remove(&handle)
+            .is_some();
+        if removed {
+            Ok(1)
+        } else {
+            Err(NetErrorCode::HandleNotFound)
+        }
+    }
 }
 
 fn net_runtime() -> &'static NetRuntime {
     NET_RUNTIME.get_or_init(NetRuntime::new)
-}
-
-fn udp_sockets() -> &'static Mutex<HashMap<u64, UdpSocket>> {
-    &net_runtime().udp_sockets
-}
-
-fn http_responses() -> &'static Mutex<HashMap<u64, HttpResponseEntry>> {
-    &net_runtime().http_responses
-}
-
-fn ws_streams() -> &'static Mutex<HashMap<u64, TcpStream>> {
-    &net_runtime().ws_streams
-}
-
-fn http_servers() -> &'static Mutex<HashMap<u64, HttpServerState>> {
-    &net_runtime().http_servers
-}
-
-fn next_handle() -> u64 {
-    net_runtime().alloc_handle()
 }
 
 #[no_mangle]
@@ -1302,8 +1600,8 @@ pub unsafe extern "C" fn sengoo_tcp_recv(
     }
     let target = unsafe { std::slice::from_raw_parts_mut(buffer, capacity) };
     match net_runtime().tcp_recv(handle, target, timeout_ms) {
-        Ok(TcpRecvOutcome::Bytes(n)) => n,
-        Ok(TcpRecvOutcome::Timeout) => {
+        Ok(RecvOutcome::Bytes(n)) => n,
+        Ok(RecvOutcome::Timeout) => {
             set_last_error(NetErrorCode::Timeout);
             0
         }
@@ -1328,23 +1626,9 @@ pub extern "C" fn sengoo_udp_bind(host: *const u8, port: u16) -> u64 {
             Err(code) => return fail_handle(code),
         }
     };
-    let addr = format!("{}:{}", host, port);
-    let socket = match UdpSocket::bind(addr) {
-        Ok(socket) => socket,
-        Err(err) => return fail_handle(classify_io_error(&err)),
-    };
-    if let Err(err) = socket.set_nonblocking(false) {
-        return fail_handle(classify_io_error(&err));
-    }
-
-    let handle = next_handle();
-    match udp_sockets().lock() {
-        Ok(mut table) => {
-            table.insert(handle, socket);
-            handle
-        }
-        Err(_) => fail_handle(NetErrorCode::InternalError),
-    }
+    net_runtime()
+        .udp_bind(&host, port)
+        .unwrap_or_else(fail_handle)
 }
 
 #[no_mangle]
@@ -1354,17 +1638,9 @@ pub extern "C" fn sengoo_udp_connect(handle: u64, host: *const u8, port: u16) ->
         Ok(addr) => addr,
         Err(code) => return fail_bool(code),
     };
-    let Ok(mut table) = udp_sockets().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(socket) = table.get_mut(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    if socket.connect(addr).is_ok() {
-        1
-    } else {
-        fail_bool(NetErrorCode::ConnectFailed)
-    }
+    net_runtime()
+        .udp_connect(handle, &addr)
+        .unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1375,17 +1651,10 @@ pub unsafe extern "C" fn sengoo_udp_send(handle: u64, data: *const u8, len: usiz
     if data.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
     }
-    let Ok(mut table) = udp_sockets().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(socket) = table.get_mut(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
     let payload = unsafe { std::slice::from_raw_parts(data, len) };
-    match socket.send(payload) {
-        Ok(n) => n as i64,
-        Err(err) => fail_i64(classify_io_error(&err)),
-    }
+    net_runtime()
+        .udp_send(handle, payload)
+        .unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
@@ -1401,44 +1670,21 @@ pub unsafe extern "C" fn sengoo_udp_recv(
     if buffer.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
     }
-    let Ok(mut table) = udp_sockets().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(socket) = table.get_mut(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
-    if timeout_ms != 0 {
-        if let Err(err) = socket.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64))) {
-            return fail_i64(classify_io_error(&err));
-        }
-    }
-
     let target = unsafe { std::slice::from_raw_parts_mut(buffer, capacity) };
-    match socket.recv(target) {
-        Ok(n) => n as i64,
-        Err(err) if err.kind() == ErrorKind::WouldBlock => {
+    match net_runtime().udp_recv(handle, target, timeout_ms) {
+        Ok(RecvOutcome::Bytes(n)) => n,
+        Ok(RecvOutcome::Timeout) => {
             set_last_error(NetErrorCode::Timeout);
             0
         }
-        Err(err) if err.kind() == ErrorKind::TimedOut => {
-            set_last_error(NetErrorCode::Timeout);
-            0
-        }
-        Err(err) => fail_i64(classify_io_error(&err)),
+        Err(code) => fail_i64(code),
     }
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_udp_close(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(mut table) = udp_sockets().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    if table.remove(&handle).is_some() {
-        1
-    } else {
-        fail_bool(NetErrorCode::HandleNotFound)
-    }
+    net_runtime().udp_close(handle).unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1452,13 +1698,9 @@ pub extern "C" fn sengoo_http_get(url: *const u8, timeout_ms: u32) -> u64 {
         Ok(response) => response,
         Err(code) => return fail_handle(code),
     };
-    let handle = next_handle();
-    if let Ok(mut table) = http_responses().lock() {
-        table.insert(handle, response);
-        handle
-    } else {
-        fail_handle(NetErrorCode::InternalError)
-    }
+    net_runtime()
+        .http_store(response)
+        .unwrap_or_else(fail_handle)
 }
 
 #[no_mangle]
@@ -1487,37 +1729,21 @@ pub unsafe extern "C" fn sengoo_http_post(
         Ok(response) => response,
         Err(code) => return fail_handle(code),
     };
-    let handle = next_handle();
-    if let Ok(mut table) = http_responses().lock() {
-        table.insert(handle, response);
-        handle
-    } else {
-        fail_handle(NetErrorCode::InternalError)
-    }
+    net_runtime()
+        .http_store(response)
+        .unwrap_or_else(fail_handle)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_http_status(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(table) = http_responses().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    match table.get(&handle) {
-        Some(resp) => resp.status_code,
-        None => fail_i64(NetErrorCode::HandleNotFound),
-    }
+    net_runtime().http_status(handle).unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_http_body_len(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(table) = http_responses().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    match table.get(&handle) {
-        Some(resp) => resp.body.len() as i64,
-        None => fail_i64(NetErrorCode::HandleNotFound),
-    }
+    net_runtime().http_body_len(handle).unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
@@ -1526,26 +1752,15 @@ pub extern "C" fn sengoo_http_body_copy(handle: u64, buffer: *mut u8, capacity: 
     if buffer.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
     }
-    let Ok(table) = http_responses().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(response) = table.get(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
-    copy_bytes_to_buffer(&response.body, buffer, capacity)
+    net_runtime()
+        .http_body_copy(handle, buffer, capacity)
+        .unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_http_close(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(mut table) = http_responses().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    if table.remove(&handle).is_some() {
-        1
-    } else {
-        fail_bool(NetErrorCode::HandleNotFound)
-    }
+    net_runtime().http_close(handle).unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1559,13 +1774,7 @@ pub extern "C" fn sengoo_ws_connect(url: *const u8, timeout_ms: u32) -> u64 {
         Ok(stream) => stream,
         Err(code) => return fail_handle(code),
     };
-    let handle = next_handle();
-    if let Ok(mut table) = ws_streams().lock() {
-        table.insert(handle, stream);
-        handle
-    } else {
-        fail_handle(NetErrorCode::InternalError)
-    }
+    net_runtime().ws_store(stream).unwrap_or_else(fail_handle)
 }
 
 #[no_mangle]
@@ -1577,16 +1786,9 @@ pub unsafe extern "C" fn sengoo_ws_send_text(handle: u64, data: *const u8, len: 
         return fail_i64(NetErrorCode::InvalidArgument);
     }
     let payload = unsafe { std::slice::from_raw_parts(data, len) };
-    let Ok(mut table) = ws_streams().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(stream) = table.get_mut(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
-    match ws_write_frame(stream, 0x1, payload, true) {
-        Ok(_) => len as i64,
-        Err(err) => fail_i64(classify_io_error(&err)),
-    }
+    net_runtime()
+        .ws_send_text(handle, payload)
+        .unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
@@ -1600,53 +1802,15 @@ pub extern "C" fn sengoo_ws_recv_text(
     if buffer.is_null() {
         return fail_i64(NetErrorCode::InvalidArgument);
     }
-    let Ok(mut table) = ws_streams().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(stream) = table.get_mut(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
-    if timeout_ms != 0 {
-        if let Err(err) = stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64))) {
-            return fail_i64(classify_io_error(&err));
-        }
-    }
-
-    loop {
-        let Some((opcode, payload)) = ws_read_frame(stream) else {
-            return fail_i64(NetErrorCode::WebSocketProtocolError);
-        };
-        match opcode {
-            0x1 => return copy_bytes_to_buffer(&payload, buffer, capacity),
-            0x9 => {
-                // Ping -> pong
-                if let Err(err) = ws_write_frame(stream, 0xA, &payload, true) {
-                    return fail_i64(classify_io_error(&err));
-                }
-            }
-            0x8 => {
-                set_last_error(NetErrorCode::RemoteClosed);
-                return 0;
-            }
-            0xA => {}
-            _ => return fail_i64(NetErrorCode::WebSocketProtocolError),
-        }
-    }
+    net_runtime()
+        .ws_recv_text(handle, buffer, capacity, timeout_ms)
+        .unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_ws_close(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(mut table) = ws_streams().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(mut stream) = table.remove(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    if let Err(err) = ws_write_frame(&mut stream, 0x8, &[], true) {
-        return fail_bool(classify_io_error(&err));
-    }
-    1
+    net_runtime().ws_close(handle).unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1669,7 +1833,6 @@ pub extern "C" fn sengoo_http_server_bind(host: *const u8, port: u16) -> u64 {
         return fail_handle(classify_io_error(&err));
     }
 
-    let handle = next_handle();
     let state = HttpServerState {
         listener,
         routes: Vec::new(),
@@ -1677,28 +1840,17 @@ pub extern "C" fn sengoo_http_server_bind(host: *const u8, port: u16) -> u64 {
         max_header_bytes: 16 * 1024,
         max_body_bytes: 1024 * 1024,
     };
-    match http_servers().lock() {
-        Ok(mut table) => {
-            table.insert(handle, state);
-            handle
-        }
-        Err(_) => fail_handle(NetErrorCode::InternalError),
-    }
+    net_runtime()
+        .http_server_store(state)
+        .unwrap_or_else(fail_handle)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_http_server_local_port(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(table) = http_servers().lock() else {
-        return fail_i64(NetErrorCode::InternalError);
-    };
-    let Some(state) = table.get(&handle) else {
-        return fail_i64(NetErrorCode::HandleNotFound);
-    };
-    match state.listener.local_addr() {
-        Ok(addr) => addr.port() as i64,
-        Err(err) => fail_i64(classify_io_error(&err)),
-    }
+    net_runtime()
+        .http_server_local_port(handle)
+        .unwrap_or_else(fail_i64)
 }
 
 #[no_mangle]
@@ -1711,15 +1863,9 @@ pub extern "C" fn sengoo_http_server_set_limits(
     if max_header_bytes == 0 || max_body_bytes == 0 {
         return fail_bool(NetErrorCode::InvalidArgument);
     }
-    let Ok(mut table) = http_servers().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(state) = table.get_mut(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    state.max_header_bytes = max_header_bytes as usize;
-    state.max_body_bytes = max_body_bytes as usize;
-    1
+    net_runtime()
+        .http_server_set_limits(handle, max_header_bytes as usize, max_body_bytes as usize)
+        .unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1749,18 +1895,14 @@ pub extern "C" fn sengoo_http_server_add_route(
         Err(code) => return fail_bool(code),
     };
 
-    let Ok(mut table) = http_servers().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(state) = table.get_mut(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    state.routes.push(HttpServerRoute {
+    let route = HttpServerRoute {
         method,
         path_pattern,
         kind: HttpServerRouteKind::StaticResponse { status, body },
-    });
-    1
+    };
+    net_runtime()
+        .http_server_add_route(handle, route)
+        .unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1774,18 +1916,14 @@ pub extern "C" fn sengoo_http_server_add_ws_echo_route(
         Ok(_) => return fail_bool(NetErrorCode::InvalidArgument),
         Err(code) => return fail_bool(code),
     };
-    let Ok(mut table) = http_servers().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(state) = table.get_mut(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    state.routes.push(HttpServerRoute {
+    let route = HttpServerRoute {
         method: "GET".to_string(),
         path_pattern,
         kind: HttpServerRouteKind::WebSocketEcho,
-    });
-    1
+    };
+    net_runtime()
+        .http_server_add_route(handle, route)
+        .unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
@@ -1815,45 +1953,27 @@ pub extern "C" fn sengoo_http_server_add_middleware_require_header(
         Err(code) => return fail_bool(code),
     };
 
-    let Ok(mut table) = http_servers().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    let Some(state) = table.get_mut(&handle) else {
-        return fail_bool(NetErrorCode::HandleNotFound);
-    };
-    state.middlewares.push(HttpServerMiddleware {
+    let middleware = HttpServerMiddleware {
         kind: HttpServerMiddlewareKind::RequireHeader {
             name,
             value: expected_value,
             reject_status,
             reject_body,
         },
-    });
-    1
+    };
+    net_runtime()
+        .http_server_add_middleware(handle, middleware)
+        .unwrap_or_else(fail_bool)
 }
 
 #[no_mangle]
 pub extern "C" fn sengoo_http_server_serve_once(handle: u64, timeout_ms: u32) -> i64 {
     reset_last_error();
-    let (listener, routes, middlewares, max_header_bytes, max_body_bytes) = {
-        let Ok(table) = http_servers().lock() else {
-            return fail_i64(NetErrorCode::InternalError);
+    let (listener, routes, middlewares, max_header_bytes, max_body_bytes) =
+        match net_runtime().http_server_snapshot(handle) {
+            Ok(snapshot) => snapshot,
+            Err(code) => return fail_i64(code),
         };
-        let Some(state) = table.get(&handle) else {
-            return fail_i64(NetErrorCode::HandleNotFound);
-        };
-        let listener = match state.listener.try_clone() {
-            Ok(listener) => listener,
-            Err(err) => return fail_i64(classify_io_error(&err)),
-        };
-        (
-            listener,
-            state.routes.clone(),
-            state.middlewares.clone(),
-            state.max_header_bytes,
-            state.max_body_bytes,
-        )
-    };
 
     let Some(mut stream) = (match accept_with_timeout(&listener, timeout_ms) {
         Ok(stream) => stream,
@@ -1885,14 +2005,9 @@ pub extern "C" fn sengoo_http_server_serve_once(handle: u64, timeout_ms: u32) ->
 #[no_mangle]
 pub extern "C" fn sengoo_http_server_close(handle: u64) -> i64 {
     reset_last_error();
-    let Ok(mut table) = http_servers().lock() else {
-        return fail_bool(NetErrorCode::InternalError);
-    };
-    if table.remove(&handle).is_some() {
-        1
-    } else {
-        fail_bool(NetErrorCode::HandleNotFound)
-    }
+    net_runtime()
+        .http_server_close(handle)
+        .unwrap_or_else(fail_bool)
 }
 
 #[cfg(test)]
@@ -1980,11 +2095,11 @@ mod tests {
             .tcp_recv(handle, &mut out, 2_000)
             .expect("tcp recv should succeed")
         {
-            TcpRecvOutcome::Bytes(received) => {
+            RecvOutcome::Bytes(received) => {
                 assert_eq!(received, msg.len() as i64);
                 assert_eq!(&out[..received as usize], msg);
             }
-            TcpRecvOutcome::Timeout => panic!("tcp recv should not time out"),
+            RecvOutcome::Timeout => panic!("tcp recv should not time out"),
         }
         assert_eq!(rt.tcp_close(handle).expect("tcp close should succeed"), 1);
 
@@ -2012,6 +2127,224 @@ mod tests {
         assert_eq!(rt1.tcp_close(handle).expect("rt1 owns handle"), 1);
 
         server.join().expect("server join");
+    }
+
+    #[test]
+    fn udp_instance_runtime_roundtrip_smoke() {
+        let server = UdpSocket::bind("127.0.0.1:0").expect("bind udp server");
+        server
+            .set_read_timeout(Some(Duration::from_millis(2_000)))
+            .expect("server timeout");
+        let server_addr = server.local_addr().expect("server addr");
+        let worker = thread::spawn(move || {
+            let mut buf = [0u8; 64];
+            let (n, peer) = server.recv_from(&mut buf).expect("server recv");
+            server.send_to(&buf[..n], peer).expect("server send");
+        });
+
+        let rt = NetRuntime::new();
+        let handle = rt
+            .udp_bind("127.0.0.1", 0)
+            .expect("udp bind should create handle");
+        let addr = format!("127.0.0.1:{}", server_addr.port());
+        assert_eq!(
+            rt.udp_connect(handle, &addr)
+                .expect("udp connect should succeed"),
+            1
+        );
+
+        let msg = b"pong";
+        let sent = rt
+            .udp_send(handle, msg)
+            .expect("udp send should send payload");
+        assert_eq!(sent, msg.len() as i64);
+
+        let mut out = [0u8; 16];
+        match rt
+            .udp_recv(handle, &mut out, 2_000)
+            .expect("udp recv should succeed")
+        {
+            RecvOutcome::Bytes(received) => {
+                assert_eq!(received, msg.len() as i64);
+                assert_eq!(&out[..received as usize], msg);
+            }
+            RecvOutcome::Timeout => panic!("udp recv should not time out"),
+        }
+        assert_eq!(rt.udp_close(handle).expect("udp close should succeed"), 1);
+
+        worker.join().expect("udp worker join");
+    }
+
+    #[test]
+    fn http_response_instance_lifecycle() {
+        let rt = NetRuntime::new();
+        let handle = rt
+            .http_store(HttpResponseEntry {
+                status_code: 202,
+                body: b"accepted".to_vec(),
+            })
+            .expect("http response should store");
+
+        assert_eq!(rt.http_status(handle).expect("status"), 202);
+        assert_eq!(rt.http_body_len(handle).expect("body len"), 8);
+
+        let mut out = [0u8; 16];
+        let copied = rt
+            .http_body_copy(handle, out.as_mut_ptr(), out.len())
+            .expect("body copy");
+        assert_eq!(copied, 8);
+        assert_eq!(&out[..copied as usize], b"accepted");
+
+        let rt2 = NetRuntime::new();
+        assert!(matches!(
+            rt2.http_status(handle),
+            Err(NetErrorCode::HandleNotFound)
+        ));
+        assert_eq!(rt.http_close(handle).expect("http close"), 1);
+        assert!(matches!(
+            rt.http_body_len(handle),
+            Err(NetErrorCode::HandleNotFound)
+        ));
+    }
+
+    #[test]
+    fn websocket_instance_runtime_echo_roundtrip_smoke() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ws listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept ws");
+            let (opcode, payload) = ws_read_frame(&mut stream).expect("read ws frame");
+            assert_eq!(opcode, 0x1);
+            assert_eq!(payload, b"ping");
+            ws_write_frame(&mut stream, 0x1, &payload, false).expect("echo frame");
+            let (close_opcode, _) = ws_read_frame(&mut stream).expect("read close frame");
+            assert_eq!(close_opcode, 0x8);
+        });
+
+        let client = TcpStream::connect(addr).expect("connect ws peer");
+        client
+            .set_read_timeout(Some(Duration::from_millis(2_000)))
+            .expect("client read timeout");
+        client
+            .set_write_timeout(Some(Duration::from_millis(2_000)))
+            .expect("client write timeout");
+
+        let rt = NetRuntime::new();
+        let handle = rt.ws_store(client).expect("ws stream should store");
+        let msg = b"ping";
+        assert_eq!(
+            rt.ws_send_text(handle, msg)
+                .expect("ws send should succeed"),
+            msg.len() as i64
+        );
+
+        let mut out = [0u8; 16];
+        let received = rt
+            .ws_recv_text(handle, out.as_mut_ptr(), out.len(), 2_000)
+            .expect("ws recv should succeed");
+        assert_eq!(received, msg.len() as i64);
+        assert_eq!(&out[..received as usize], msg);
+        assert_eq!(rt.ws_close(handle).expect("ws close should succeed"), 1);
+
+        worker.join().expect("ws worker join");
+    }
+
+    #[test]
+    fn http_server_instance_state_lifecycle() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind http server");
+        listener.set_nonblocking(true).expect("set nonblocking");
+        let rt = NetRuntime::new();
+        let handle = rt
+            .http_server_store(HttpServerState {
+                listener,
+                routes: Vec::new(),
+                middlewares: Vec::new(),
+                max_header_bytes: 16 * 1024,
+                max_body_bytes: 1024 * 1024,
+            })
+            .expect("server should store");
+
+        assert!(rt.http_server_local_port(handle).expect("local port") > 0);
+        assert_eq!(
+            rt.http_server_set_limits(handle, 128, 256)
+                .expect("set limits"),
+            1
+        );
+        assert_eq!(
+            rt.http_server_add_route(
+                handle,
+                HttpServerRoute {
+                    method: "GET".to_string(),
+                    path_pattern: "/hello/:name".to_string(),
+                    kind: HttpServerRouteKind::StaticResponse {
+                        status: 200,
+                        body: b"hello {name}".to_vec(),
+                    },
+                },
+            )
+            .expect("add route"),
+            1
+        );
+        assert_eq!(
+            rt.http_server_add_middleware(
+                handle,
+                HttpServerMiddleware {
+                    kind: HttpServerMiddlewareKind::RequireHeader {
+                        name: "x-auth".to_string(),
+                        value: "ok".to_string(),
+                        reject_status: 401,
+                        reject_body: b"unauthorized".to_vec(),
+                    },
+                },
+            )
+            .expect("add middleware"),
+            1
+        );
+
+        let (_listener, routes, middlewares, max_header_bytes, max_body_bytes) = rt
+            .http_server_snapshot(handle)
+            .expect("snapshot should exist");
+        assert_eq!(max_header_bytes, 128);
+        assert_eq!(max_body_bytes, 256);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].method, "GET");
+        assert_eq!(routes[0].path_pattern, "/hello/:name");
+        match &routes[0].kind {
+            HttpServerRouteKind::StaticResponse { status, body } => {
+                assert_eq!(*status, 200);
+                assert_eq!(body, b"hello {name}");
+            }
+            HttpServerRouteKind::WebSocketEcho => panic!("expected static response route"),
+        }
+        assert_eq!(middlewares.len(), 1);
+        match &middlewares[0].kind {
+            HttpServerMiddlewareKind::RequireHeader {
+                name,
+                value,
+                reject_status,
+                reject_body,
+            } => {
+                assert_eq!(name, "x-auth");
+                assert_eq!(value, "ok");
+                assert_eq!(*reject_status, 401);
+                assert_eq!(reject_body, b"unauthorized");
+            }
+        }
+
+        let rt2 = NetRuntime::new();
+        assert!(matches!(
+            rt2.http_server_close(handle),
+            Err(NetErrorCode::HandleNotFound)
+        ));
+        assert_eq!(
+            rt.http_server_close(handle)
+                .expect("server close should succeed"),
+            1
+        );
+        assert!(matches!(
+            rt.http_server_local_port(handle),
+            Err(NetErrorCode::HandleNotFound)
+        ));
     }
 
     #[test]
