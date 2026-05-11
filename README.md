@@ -439,6 +439,13 @@ Current focus:
 - Better interop and reflection ergonomics
 - Tooling and developer experience polish
 
+Recent engineering refactors (May 2026):
+
+- Runtime: `NetRuntime` instance now owns all TCP/UDP/HTTP/WS/HttpServer state; the extern C ABI in `runtime/src/net.rs` is now a thin shim and the old global accessors (`udp_sockets`, `http_responses`, `ws_streams`, `http_servers`, `next_handle`) are gone. Coverage: `cargo test -p sengoo-runtime --lib` passes 42/42, plus 19 `net::tests` and 6 instance-level smoke tests.
+- Runtime: Lua54 reflection tests are serialized with a test-only mutex guard so the shared `LUA54_LAST_ERROR` global cannot race when the dynamic library is available.
+- Typeck: `SymbolKind::Function` no longer duplicates `params`/`ret`; a new `env.declare_fn(name, params, ret)` helper folds the previous `fn_ty(...).clone()` + `insert_fn(...)` pair, removing the redundant params/ret clones at every function declaration site. `cargo test -p sengoo-compiler --lib` passes 539/539.
+- HIR: class inheritance resolution borrows AST string slices throughout the recursion guard, per-class lookup map, and local-seen set, cutting `.clone()` count in `compiler/src/hir/lower.rs` from 59 to 52 without behaviour change.
+
 Notes:
 
 - All benchmark numbers above are local-machine measurements and should be treated as trend indicators.
