@@ -84,9 +84,8 @@ impl TypeChecker {
         self.env.pop_scope();
 
         let (param_types, ret_ty, generic_meta) = signature?;
-        let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
-            .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
+            .declare_fn(fn_decl.name.name.clone(), param_types, ret_ty);
         self.set_generic_function_meta(fn_decl.name.name.clone(), generic_meta);
         Ok(())
     }
@@ -110,10 +109,8 @@ impl TypeChecker {
         self.validate_contracts_for_function(fn_decl, &ret_ty)?;
         self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
-        let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
-        self.env.insert_fn(
+        self.env.declare_fn(
             fn_decl.name.name.clone(),
-            fn_ty,
             param_types.clone(),
             ret_ty.clone(),
         );
@@ -143,9 +140,8 @@ impl TypeChecker {
 
         self.env.pop_scope();
 
-        let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
         self.env
-            .insert_fn(fn_decl.name.name.clone(), fn_ty, param_types, ret_ty);
+            .declare_fn(fn_decl.name.name.clone(), param_types, ret_ty);
         self.set_generic_function_meta(fn_decl.name.name.clone(), generic_meta);
 
         Ok(())

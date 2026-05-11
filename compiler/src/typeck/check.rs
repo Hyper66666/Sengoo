@@ -187,8 +187,7 @@ impl TypeChecker {
                     };
                     self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
-                    let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
-                    self.env.insert_fn(name.clone(), fn_ty, param_types, ret_ty);
+                    self.env.declare_fn(name.clone(), param_types, ret_ty);
                     self.set_generic_function_meta(name, Vec::new());
                     return Ok(());
                 }
@@ -222,8 +221,7 @@ impl TypeChecker {
                     self.env.pop_scope();
                     // If a generic signature cannot be resolved yet, register a unit fallback.
                     let unit = self.env.unit_ty();
-                    let ty = self.env.fn_ty(vec![], unit.clone());
-                    self.env.insert_fn(name.clone(), ty, vec![], unit);
+                    self.env.declare_fn(name.clone(), vec![], unit);
                     self.set_generic_function_meta(name, Vec::new());
                 } else {
                     let ret_ty = if let Some(ret) = &fn_decl.return_type {
@@ -233,8 +231,7 @@ impl TypeChecker {
                     };
                     self.env.pop_scope();
 
-                    let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
-                    self.env.insert_fn(name.clone(), fn_ty, param_types, ret_ty);
+                    self.env.declare_fn(name.clone(), param_types, ret_ty);
                     self.set_generic_function_meta(name, generic_meta);
                 }
             }
@@ -259,10 +256,8 @@ impl TypeChecker {
                                 fn_decl.is_unsafe,
                             )
                             .map_err(CompileError::from)?;
-                            let fn_ty = self.env.fn_ty(param_types.clone(), ret_ty.clone());
-                            self.env.insert_fn(
+                            self.env.declare_fn(
                                 fn_decl.name.name.clone(),
-                                fn_ty,
                                 param_types,
                                 ret_ty,
                             );
