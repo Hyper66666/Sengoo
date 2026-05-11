@@ -57,8 +57,8 @@ impl TypeInfer {
     /// 推断变量的类型
     pub fn instantiate_var(&mut self, name: &str) -> Result<Ty, TypeckError> {
         if let Some(symbol) = self.env.lookup(name) {
-            if let Some(ty) = symbol.get_ty() {
-                Ok(self.instantiate(ty.clone()))
+            if let Some(ty) = symbol.get_ty().cloned() {
+                Ok(self.instantiate(&ty))
             } else {
                 Err(TypeckError::UndefinedVariable {
                     name: name.to_string(),
@@ -72,13 +72,13 @@ impl TypeInfer {
     }
 
     /// 实例化类型（替换类型变量）
-    pub fn instantiate(&mut self, ty: Ty) -> Ty {
-        self.apply_subst(&ty)
+    pub fn instantiate(&mut self, ty: &Ty) -> Ty {
+        self.apply_subst(ty)
     }
 
     /// Instantiate a polymorphic type with fresh type variables so each
     /// use-site can infer independently.
-    pub fn instantiate_with_fresh_vars(&mut self, ty: Ty) -> Ty {
+    pub fn instantiate_with_fresh_vars(&mut self, ty: &Ty) -> Ty {
         self.instantiate_with_fresh_vars_and_map(ty).0
     }
 
@@ -86,10 +86,10 @@ impl TypeInfer {
     /// instantiated fresh type variable id.
     pub fn instantiate_with_fresh_vars_and_map(
         &mut self,
-        ty: Ty,
+        ty: &Ty,
     ) -> (Ty, HashMap<TyVarId, TyVarId>) {
         let mut var_map = HashMap::new();
-        let instantiated = self.instantiate_fresh_impl(&ty, &mut var_map);
+        let instantiated = self.instantiate_fresh_impl(ty, &mut var_map);
         let mut id_map = HashMap::new();
         for (old_id, mapped_ty) in var_map {
             if let TyKind::Var(new_id) = mapped_ty.kind {
@@ -231,86 +231,74 @@ impl TypeInfer {
 
     /// 统一两个类型
     pub fn unify(&mut self, ty1: &Ty, ty2: &Ty) -> Result<Subst, TypeckError> {
+        self.unify_in_place(ty1, ty2)?;
+        Ok(self.subst.clone())
+    }
+
+    fn unify_in_place(&mut self, ty1: &Ty, ty2: &Ty) -> Result<(), TypeckError> {
         let ty1 = self.apply_subst(ty1);
         let ty2 = self.apply_subst(ty2);
 
-        // 快速路径：相同类型
         if ty1 == ty2 {
-            return Ok(self.subst.clone());
+            return Ok(());
         }
 
         match (&ty1.kind, &ty2.kind) {
-            // 错误类型：直接返回，避免错误级联
-            (TyKind::Error, _) | (_, TyKind::Error) => Ok(self.subst.clone()),
+            (TyKind::Error, _) | (_, TyKind::Error) => Ok(()),
+            (TyKind::Never, _) | (_, TyKind::Never) => Ok(()),
 
-            // Never 类型（底类型）：与任何类型兼容
-            // Never 是所有类型的子类型，因此 unify(Never, T) 和 unify(T, Never) 都应成功
-            (TyKind::Never, _) | (_, TyKind::Never) => Ok(self.subst.clone()),
-
-            // 类型变量
             (TyKind::Var(id), _) => {
                 self.bind_var(*id, &ty2);
-                Ok(self.subst.clone())
+                Ok(())
             }
             (_, TyKind::Var(id)) => {
                 self.bind_var(*id, &ty1);
-                Ok(self.subst.clone())
+                Ok(())
             }
 
-            // 相同类型构造器
             (TyKind::Unit, TyKind::Unit)
             | (TyKind::Bool, TyKind::Bool)
             | (TyKind::Char, TyKind::Char)
             | (TyKind::Str, TyKind::Str)
             | (TyKind::Byte, TyKind::Byte)
-            | (TyKind::Bytes, TyKind::Bytes) => Ok(self.subst.clone()),
+            | (TyKind::Bytes, TyKind::Bytes) => Ok(()),
 
-            (TyKind::Int(i1), TyKind::Int(i2)) if i1 == i2 => Ok(self.subst.clone()),
-            (TyKind::Float(f1), TyKind::Float(f2)) if f1 == f2 => Ok(self.subst.clone()),
+            (TyKind::Int(i1), TyKind::Int(i2)) if i1 == i2 => Ok(()),
+            (TyKind::Float(f1), TyKind::Float(f2)) if f1 == f2 => Ok(()),
 
-            // 引用类型
-            (TyKind::Ref(m1, t1), TyKind::Ref(m2, t2)) if m1 == m2 => self.unify(t1, t2),
+            (TyKind::Ref(m1, t1), TyKind::Ref(m2, t2)) if m1 == m2 => self.unify_in_place(t1, t2),
             (TyKind::Ref(_, _), TyKind::Ref(_, _)) => Err(TypeckError::TypeMismatch {
                 expected: ty2.kind.clone(),
                 found: ty1.kind.clone(),
             }),
 
-            // 指针类型
-            (TyKind::Ptr(t1), TyKind::Ptr(t2)) => self.unify(t1, t2),
+            (TyKind::Ptr(t1), TyKind::Ptr(t2)) => self.unify_in_place(t1, t2),
 
-            // 元组类型
             (TyKind::Tuple(ts1), TyKind::Tuple(ts2)) if ts1.len() == ts2.len() => {
-                let mut subst = self.subst.clone();
                 for (t1, t2) in ts1.iter().zip(ts2.iter()) {
-                    let old_subst = self.subst.clone();
-                    self.subst = subst.clone();
-                    match self.unify(t1, t2) {
-                        Ok(s) => subst = subst.union(s),
-                        Err(e) => {
-                            self.subst = old_subst;
-                            return Err(e);
-                        }
+                    let checkpoint = self.subst.clone();
+                    if let Err(e) = self.unify_in_place(t1, t2) {
+                        self.subst = checkpoint;
+                        return Err(e);
                     }
                 }
-                self.subst = subst;
-                Ok(self.subst.clone())
+                Ok(())
             }
             (TyKind::Tuple(ts1), TyKind::Tuple(ts2)) => Err(TypeckError::TypeMismatch {
                 expected: TyKind::Tuple(ts2.clone()),
                 found: TyKind::Tuple(ts1.clone()),
             }),
 
-            // 数组类型
-            (TyKind::Array(e1, n1), TyKind::Array(e2, n2)) if n1 == n2 => self.unify(e1, e2),
+            (TyKind::Array(e1, n1), TyKind::Array(e2, n2)) if n1 == n2 => {
+                self.unify_in_place(e1, e2)
+            }
             (TyKind::Array(_, n1), TyKind::Array(_, n2)) => Err(TypeckError::TypeMismatch {
                 expected: TyKind::Array(Box::new(ty2.clone()), *n2),
                 found: TyKind::Array(Box::new(ty1.clone()), *n1),
             }),
 
-            // 切片类型
-            (TyKind::Slice(e1), TyKind::Slice(e2)) => self.unify(e1, e2),
+            (TyKind::Slice(e1), TyKind::Slice(e2)) => self.unify_in_place(e1, e2),
 
-            // 函数类型
             (
                 TyKind::Fn {
                     params: p1,
@@ -329,33 +317,21 @@ impl TypeInfer {
                         found: p2.len(),
                     });
                 }
-                let mut subst = self.subst.clone();
                 for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    let old_subst = self.subst.clone();
-                    self.subst = subst.clone();
-                    match self.unify(param1, param2) {
-                        Ok(s) => subst = subst.union(s),
-                        Err(e) => {
-                            self.subst = old_subst;
-                            return Err(e);
-                        }
-                    }
-                }
-                // 统一返回类型
-                let old_subst = self.subst.clone();
-                self.subst = subst.clone();
-                match self.unify(r1, r2) {
-                    Ok(s) => subst = subst.union(s),
-                    Err(e) => {
-                        self.subst = old_subst;
+                    let checkpoint = self.subst.clone();
+                    if let Err(e) = self.unify_in_place(param1, param2) {
+                        self.subst = checkpoint;
                         return Err(e);
                     }
                 }
-                self.subst = subst;
-                Ok(self.subst.clone())
+                let checkpoint = self.subst.clone();
+                if let Err(e) = self.unify_in_place(r1, r2) {
+                    self.subst = checkpoint;
+                    return Err(e);
+                }
+                Ok(())
             }
 
-            // ADT 类型（简化处理）
             (TyKind::Adt { name: n1, args: a1 }, TyKind::Adt { name: n2, args: a2 })
                 if n1 == n2 =>
             {
@@ -365,31 +341,22 @@ impl TypeInfer {
                         found: ty1.kind.clone(),
                     });
                 }
-                let mut subst = self.subst.clone();
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    let old_subst = self.subst.clone();
-                    self.subst = subst.clone();
-                    match self.unify(arg1, arg2) {
-                        Ok(s) => subst = subst.union(s),
-                        Err(e) => {
-                            self.subst = old_subst;
-                            return Err(e);
-                        }
+                    let checkpoint = self.subst.clone();
+                    if let Err(e) = self.unify_in_place(arg1, arg2) {
+                        self.subst = checkpoint;
+                        return Err(e);
                     }
                 }
-                self.subst = subst;
-                Ok(self.subst.clone())
+                Ok(())
             }
 
-            // 其他情况：类型不匹配
             _ => Err(TypeckError::TypeMismatch {
                 expected: ty2.kind.clone(),
                 found: ty1.kind.clone(),
             }),
         }
     }
-
-    /// 绑定类型变量
     fn bind_var(&mut self, var_id: TyVarId, ty: &Ty) {
         // 检查是否会出现循环
         if ty.contains_var(var_id) {
@@ -449,5 +416,61 @@ impl ContainsVar for Ty {
             TyKind::Adt { args, .. } => args.iter().any(|t| t.contains_var(var_id)),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::typeck::ty::IntKind;
+
+    fn ty(kind: TyKind) -> Ty {
+        Ty::new(0, kind)
+    }
+
+    fn var(id: TyVarId) -> Ty {
+        ty(TyKind::Var(id))
+    }
+
+    fn i32_ty() -> Ty {
+        ty(TyKind::Int(IntKind::I32))
+    }
+
+    fn bool_ty() -> Ty {
+        ty(TyKind::Bool)
+    }
+
+    #[test]
+    fn failed_tuple_unify_preserves_prior_child_bindings() {
+        let mut infer = TypeInfer::new();
+        let var = var(0);
+        let left = ty(TyKind::Tuple(vec![var.clone(), var]));
+        let right = ty(TyKind::Tuple(vec![i32_ty(), bool_ty()]));
+
+        let result = infer.unify(&left, &right);
+
+        assert!(matches!(result, Err(TypeckError::TypeMismatch { .. })));
+        assert_eq!(infer.subst().get(0), Some(&i32_ty()));
+    }
+
+    #[test]
+    fn failed_fn_unify_preserves_prior_param_bindings() {
+        let mut infer = TypeInfer::new();
+        let var = var(0);
+        let left = ty(TyKind::Fn {
+            params: vec![var.clone(), var.clone()],
+            ret: Box::new(var),
+            is_variadic: false,
+        });
+        let right = ty(TyKind::Fn {
+            params: vec![i32_ty(), bool_ty()],
+            ret: Box::new(i32_ty()),
+            is_variadic: false,
+        });
+
+        let result = infer.unify(&left, &right);
+
+        assert!(matches!(result, Err(TypeckError::TypeMismatch { .. })));
+        assert_eq!(infer.subst().get(0), Some(&i32_ty()));
     }
 }
