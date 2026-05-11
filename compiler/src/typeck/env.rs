@@ -18,7 +18,7 @@ pub enum SymbolKind {
     /// 变量
     Var(Ty),
     /// 函数
-    Function { ty: Ty, params: Vec<Ty>, ret: Ty },
+    Function { ty: Ty },
     /// 类型（结构体、枚举等）
     Type { ty: Ty },
     /// Trait
@@ -43,10 +43,10 @@ impl Symbol {
         }
     }
 
-    pub fn function(name: String, ty: Ty, params: Vec<Ty>, ret: Ty) -> Self {
+    pub fn function(name: String, ty: Ty) -> Self {
         Self {
             name,
-            kind: SymbolKind::Function { ty, params, ret },
+            kind: SymbolKind::Function { ty },
         }
     }
 
@@ -60,7 +60,7 @@ impl Symbol {
     pub fn get_ty(&self) -> Option<&Ty> {
         match &self.kind {
             SymbolKind::Var(ty) => Some(ty),
-            SymbolKind::Function { ty, .. } => Some(ty),
+            SymbolKind::Function { ty } => Some(ty),
             SymbolKind::Type { ty } => Some(ty),
             SymbolKind::Const { ty } => Some(ty),
             SymbolKind::Static { ty, .. } => Some(ty),
@@ -232,13 +232,7 @@ impl TypeEnv {
 
         // print函数：打印字符串
         // print(s: &str) -> ()
-        let print_fn_str = self.fn_ty(vec![str_ref.clone()], unit.clone());
-        self.insert_fn(
-            "print".to_string(),
-            print_fn_str,
-            vec![str_ref],
-            unit.clone(),
-        );
+        self.declare_fn("print".to_string(), vec![str_ref], unit.clone());
 
         // print函数的整数版本：print(n: i64) -> ()
         let _print_fn_i64 = self.fn_ty(vec![i64.clone()], unit.clone());
@@ -285,9 +279,17 @@ impl TypeEnv {
     }
 
     /// 插入函数
-    pub fn insert_fn(&mut self, name: String, ty: Ty, params: Vec<Ty>, ret: Ty) {
-        let symbol = Symbol::function(name.clone(), ty, params, ret);
+    pub fn insert_fn(&mut self, name: String, ty: Ty) {
+        let symbol = Symbol::function(name.clone(), ty);
         self.insert(name, symbol);
+    }
+
+    /// Build the function type from `params`/`ret` and insert it as a Function
+    /// symbol in one step, avoiding the redundant clones that result from
+    /// calling `fn_ty` and `insert_fn` separately at the call site.
+    pub fn declare_fn(&mut self, name: String, params: Vec<Ty>, ret: Ty) {
+        let ty = self.fn_ty(params, ret);
+        self.insert_fn(name, ty);
     }
 
     /// 插入类型
