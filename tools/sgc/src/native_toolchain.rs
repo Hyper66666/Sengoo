@@ -105,7 +105,11 @@ fn compiled_workspace_root() -> PathBuf {
 fn looks_like_workspace_root(candidate: &Path) -> bool {
     candidate.join("Cargo.toml").is_file()
         && candidate.join("runtime").join("Cargo.toml").is_file()
-        && candidate.join("tools").join("sgc").join("Cargo.toml").is_file()
+        && candidate
+            .join("tools")
+            .join("sgc")
+            .join("Cargo.toml")
+            .is_file()
 }
 
 fn discover_workspace_root_from(start: &Path) -> Option<PathBuf> {
@@ -143,7 +147,11 @@ fn workspace_root() -> PathBuf {
     let current_exe = std::env::current_exe().ok();
     let current_dir = std::env::current_dir().ok();
     let compiled_root = compiled_workspace_root();
-    resolve_workspace_root(current_exe.as_deref(), current_dir.as_deref(), &compiled_root)
+    resolve_workspace_root(
+        current_exe.as_deref(),
+        current_dir.as_deref(),
+        &compiled_root,
+    )
 }
 
 fn async_runtime_profile(opt_level: u8) -> &'static str {
@@ -277,7 +285,11 @@ fn find_msvc_tool_root() -> Option<PathBuf> {
 #[cfg(windows)]
 fn find_msvc_link_exe() -> Option<PathBuf> {
     let tool_root = find_msvc_tool_root()?;
-    let candidate = tool_root.join("bin").join("Hostx64").join("x64").join("link.exe");
+    let candidate = tool_root
+        .join("bin")
+        .join("Hostx64")
+        .join("x64")
+        .join("link.exe");
     candidate.exists().then_some(candidate)
 }
 
@@ -330,8 +342,9 @@ fn run_windows_link_command(
     object_paths: &[PathBuf],
     executable_path: &Path,
 ) -> Result<std::process::ExitStatus> {
-    let link_exe = find_msvc_link_exe()
-        .ok_or_else(|| miette::miette!("failed to locate MSVC link.exe for native async linking"))?;
+    let link_exe = find_msvc_link_exe().ok_or_else(|| {
+        miette::miette!("failed to locate MSVC link.exe for native async linking")
+    })?;
     let mut link_cmd = Command::new(link_exe);
     link_cmd.arg("/NOLOGO");
     for lib_path in windows_link_lib_paths() {
@@ -618,7 +631,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("sengoo-sgc-{label}-{}-{unique}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "sengoo-sgc-{label}-{}-{unique}",
+            std::process::id()
+        ))
     }
 
     fn write_marker(path: &Path) {

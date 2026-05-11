@@ -53,7 +53,11 @@ fn execute_constant_with_cranelift(value: i64) -> Result<i64> {
     jit_builder.hotswap(false);
     let mut module = JITModule::new(jit_builder);
     let mut context = Context::new();
-    context.func.signature.returns.push(AbiParam::new(types::I64));
+    context
+        .func
+        .signature
+        .returns
+        .push(AbiParam::new(types::I64));
 
     let mut builder_ctx = FunctionBuilderContext::new();
     {
@@ -135,9 +139,10 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, i64>) -> Result<EvalFlow> {
             let ident = path
                 .as_simple()
                 .ok_or_else(|| miette::miette!("fast-jit supports only simple paths"))?;
-            env.get(&ident.name).copied().map(EvalFlow::Value).ok_or_else(|| {
-                miette::miette!("unknown path `{}` in fast-jit mode", ident.name)
-            })
+            env.get(&ident.name)
+                .copied()
+                .map(EvalFlow::Value)
+                .ok_or_else(|| miette::miette!("unknown path `{}` in fast-jit mode", ident.name))
         }
         ExprKind::Paren(inner) => eval_expr(inner, env),
         ExprKind::Unary { op, operand } => {

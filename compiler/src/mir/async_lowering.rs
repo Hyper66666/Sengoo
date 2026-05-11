@@ -1,11 +1,21 @@
-﻿//! Async lowering: synthesize frame-backed __start/__poll/__result helpers
+//! Async lowering: synthesize frame-backed __start/__poll/__result helpers
 //!
 //! For each `async def foo(params...) -> T`, we generate three helper functions:
 //!   - `foo__start(params...) -> i64`  鈥?allocates a frame, stores params, sets state=0, returns handle
 //!   - `foo__poll(handle: i64) -> i64`  鈥?runs until next suspend or completion, returns 0=pending, 1=ready
 //!   - `foo__result(handle: i64) -> T`  鈥?reads the result from the frame, frees it, returns T
 
+#[cfg(test)]
+use super::async_cfg_helpers::AsyncCfgPlan;
+use super::async_cfg_helpers::{
+    build_async_cfg_plan, collect_spill_user_locals, collect_user_locals,
+    compute_live_in_user_locals,
+};
 use super::async_dispatch_helpers::build_async_dispatch_registry;
+#[cfg(test)]
+use super::async_dispatch_synthesis_helpers::{
+    select_result_dispatch_name, select_runtime_declaration, select_runtime_function_name,
+};
 use super::async_dispatch_synthesis_helpers::{
     select_result_runtime_suffix, synthesize_result_dispatch, synthesize_spawn_cancel_dispatch,
     synthesize_spawn_drop_dispatch, synthesize_spawn_poll_dispatch,
@@ -13,13 +23,8 @@ use super::async_dispatch_synthesis_helpers::{
 use super::async_entry_helpers::{
     count_await_points, synthesize_async_main_wrapper, synthesize_result, synthesize_start,
 };
-use super::async_cfg_helpers::{
-    build_async_cfg_plan, collect_spill_user_locals, collect_user_locals,
-    compute_live_in_user_locals,
-};
 use super::async_frame_helpers::{
-    build_async_frame_layout, push_frame_load_into_typed, push_frame_store_typed,
-    AsyncFrameLayout,
+    build_async_frame_layout, push_frame_load_into_typed, push_frame_store_typed, AsyncFrameLayout,
 };
 use super::async_poll_helpers::synthesize_cfg_poll;
 use crate::mir::{
@@ -29,12 +34,6 @@ use crate::mir::{
 use crate::CompileError;
 use std::collections::BTreeMap;
 #[cfg(test)]
-use super::async_cfg_helpers::AsyncCfgPlan;
-#[cfg(test)]
-use super::async_dispatch_synthesis_helpers::{
-    select_result_dispatch_name, select_runtime_declaration, select_runtime_function_name,
-};
-#[cfg(test)]
 use std::collections::HashSet;
 
 /// Given a list of MIR functions, expand each async function into its original body
@@ -42,7 +41,9 @@ use std::collections::HashSet;
 ///
 /// For async `main`, the original body is renamed to `main__body` and a new
 /// `main` wrapper is generated that drives the async helpers.
-pub fn expand_async_functions(mir_fns: &mut [MirFunction]) -> Result<Vec<MirFunction>, CompileError> {
+pub fn expand_async_functions(
+    mir_fns: &mut [MirFunction],
+) -> Result<Vec<MirFunction>, CompileError> {
     let async_fn_names: Vec<String> = mir_fns
         .iter()
         .filter(|f| f.is_async)
@@ -291,10 +292,8 @@ mod tests {
 
     #[test]
     fn async_dispatch_registry_assigns_reserved_builtin_ordinals_then_sorted_async_functions() {
-        let registry = build_async_dispatch_registry([
-            "worker_b".to_string(),
-            "worker_a".to_string(),
-        ]);
+        let registry =
+            build_async_dispatch_registry(["worker_b".to_string(), "worker_a".to_string()]);
 
         assert_eq!(registry.kind_id("sengoo_async_sleep"), Some(1));
         assert_eq!(registry.kind_id("sengoo_async_timeout_bool"), Some(2));
@@ -304,26 +303,34 @@ mod tests {
 
     #[test]
     fn spawn_poll_dispatch_switch_targets_use_registry_ordinals() {
-        let registry = build_async_dispatch_registry([
-            "worker_b".to_string(),
-            "worker_a".to_string(),
-        ]);
+        let registry =
+            build_async_dispatch_registry(["worker_b".to_string(), "worker_a".to_string()]);
         let dispatch = synthesize_spawn_poll_dispatch(
             &registry,
             &[("worker_b".to_string(), "worker_b__poll".to_string())],
         )
         .expect("spawn dispatch should synthesize with stable ordinals");
 
-        let Some(Terminator::Switch { targets, .. }) =
-            dispatch.basic_blocks[dispatch.start_block].terminator.as_ref()
+        let Some(Terminator::Switch { targets, .. }) = dispatch.basic_blocks[dispatch.start_block]
+            .terminator
+            .as_ref()
         else {
             panic!("spawn poll dispatch should start with a switch terminator");
         };
 
         let seen: HashSet<u32> = targets.iter().map(|(kind, _)| *kind).collect();
-        assert!(seen.contains(&1), "sleep builtin ordinal should be reserved");
-        assert!(seen.contains(&2), "timeout builtin ordinal should be reserved");
-        assert!(seen.contains(&4), "worker_b should receive stable sorted ordinal");
+        assert!(
+            seen.contains(&1),
+            "sleep builtin ordinal should be reserved"
+        );
+        assert!(
+            seen.contains(&2),
+            "timeout builtin ordinal should be reserved"
+        );
+        assert!(
+            seen.contains(&4),
+            "worker_b should receive stable sorted ordinal"
+        );
     }
 
     #[test]
@@ -738,7 +745,8 @@ mod tests {
         let err = compute_live_in_user_locals(&mir_fn, &plan)
             .expect_err("unsupported liveness terminator should return an error");
         assert!(
-            err.to_string().contains("unsupported terminator in async liveness"),
+            err.to_string()
+                .contains("unsupported terminator in async liveness"),
             "unexpected liveness diagnostic: {err}"
         );
     }

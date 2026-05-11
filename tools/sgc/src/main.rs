@@ -2,6 +2,8 @@
 
 use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
+use sengoo_compiler::error::{ParseError, TypeError};
+use sengoo_compiler::{compile_to_ir, CompileError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,15 +13,13 @@ use std::sync::atomic::{AtomicI8, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter};
-use sengoo_compiler::error::{ParseError, TypeError};
-use sengoo_compiler::{compile_to_ir, CompileError};
 
 mod bench;
 mod cache;
 mod cli;
+mod commands;
 #[cfg_attr(not(test), allow(dead_code))]
 mod cranelift_fast_jit;
-mod commands;
 mod daemon;
 mod fingerprint;
 mod frontend_helpers;
@@ -91,10 +91,10 @@ pub(crate) use interface::{
 };
 pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use native_toolchain::{
-    append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object, compile_native_binary,
-    default_build_output_path_for_case, ensure_runtime_object, link_native_binary_from_objects,
-    linker_mode_from_env, recover_native_output_from_cached_artifacts, run_native_binary,
-    run_with_lli,
+    append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object,
+    compile_native_binary, default_build_output_path_for_case, ensure_runtime_object,
+    link_native_binary_from_objects, linker_mode_from_env,
+    recover_native_output_from_cached_artifacts, run_native_binary, run_with_lli,
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
@@ -278,9 +278,9 @@ fn source_span_from_parse_error(error: &ParseError) -> Option<&miette::SourceSpa
         | ParseError::InvalidStructField { span, .. }
         | ParseError::InvalidStructFieldShorthand { span }
         | ParseError::InvalidPatternAt { span, .. } => Some(span),
-        ParseError::InvalidPattern(_) | ParseError::DuplicateParam(_) | ParseError::UnexpectedEof => {
-            None
-        }
+        ParseError::InvalidPattern(_)
+        | ParseError::DuplicateParam(_)
+        | ParseError::UnexpectedEof => None,
     }
 }
 
@@ -341,7 +341,10 @@ fn location_from_source_span(source: &str, span: &miette::SourceSpan) -> Compile
     }
 }
 
-fn location_from_compile_error(source: &str, error: &CompileError) -> Option<CompilerErrorLocationJson> {
+fn location_from_compile_error(
+    source: &str,
+    error: &CompileError,
+) -> Option<CompilerErrorLocationJson> {
     source_span_from_compile_error(error).map(|span| location_from_source_span(source, span))
 }
 
@@ -815,9 +818,13 @@ async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
     let signatures = function_signatures_for_module(&module_id, &source);
 
     let out_dir = Path::new(out_dir);
-    fs::create_dir_all(out_dir)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to create doc output directory {}: {}", out_dir.display(), e))?;
+    fs::create_dir_all(out_dir).into_diagnostic().map_err(|e| {
+        miette::miette!(
+            "failed to create doc output directory {}: {}",
+            out_dir.display(),
+            e
+        )
+    })?;
 
     let module_stem = input_path
         .file_stem()
@@ -843,7 +850,9 @@ async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
     let index_html = render_doc_index(&module_id, &module_page_name, signatures.len());
     fs::write(&index_path, index_html)
         .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to write doc index {}: {}", index_path.display(), e))?;
+        .map_err(|e| {
+            miette::miette!("failed to write doc index {}: {}", index_path.display(), e)
+        })?;
 
     let search_payload = serde_json::json!({
         "schema_version": 1,
@@ -869,11 +878,12 @@ async fn cmd_doc(input: &str, out_dir: &str) -> Result<()> {
         })?;
 
     println!("API docs index: {}", index_path.to_string_lossy());
-    println!("API docs module page: {}", module_page_path.to_string_lossy());
+    println!(
+        "API docs module page: {}",
+        module_page_path.to_string_lossy()
+    );
     Ok(())
 }
 
 #[cfg(test)]
 mod tests;
-
-

@@ -1,15 +1,15 @@
 //! Coroutine-compatible async runtime scheduling primitives.
 
-use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
 #[cfg(feature = "native-bridge")]
 use std::cell::Cell;
+use std::collections::{HashMap, VecDeque};
 #[cfg(feature = "native-bridge")]
 use std::ptr::NonNull;
 #[cfg(feature = "native-bridge")]
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "native-bridge")]
 use std::time::Duration;
+use std::time::Instant;
 
 pub type TaskId = u64;
 
@@ -149,10 +149,7 @@ impl CoroutineScheduler {
                 break;
             };
 
-            if entry
-                .next_wakeup
-                .is_some_and(|deadline| deadline > now)
-            {
+            if entry.next_wakeup.is_some_and(|deadline| deadline > now) {
                 self.queue.push_back(entry);
                 continue;
             }
@@ -397,7 +394,10 @@ struct RootAsyncMainI64Task {
 #[cfg(feature = "native-bridge")]
 impl RootAsyncMainI64Task {
     fn new(result: Arc<Mutex<Option<i64>>>) -> Self {
-        Self { handle: None, result }
+        Self {
+            handle: None,
+            result,
+        }
     }
 }
 
@@ -410,7 +410,10 @@ impl CoroutineTask for RootAsyncMainI64Task {
         }
 
         let result = unsafe { main__result(handle) };
-        *self.result.lock().expect("async main result mutex poisoned") = Some(result);
+        *self
+            .result
+            .lock()
+            .expect("async main result mutex poisoned") = Some(result);
         TaskState::Complete
     }
 
@@ -602,9 +605,7 @@ pub extern "C" fn sengoo_async_scheduler_new() -> *mut CoroutineScheduler {
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
-pub unsafe extern "C" fn sengoo_async_scheduler_free(
-    scheduler: *mut CoroutineScheduler,
-) {
+pub unsafe extern "C" fn sengoo_async_scheduler_free(scheduler: *mut CoroutineScheduler) {
     let Some(scheduler) = scheduler_nonnull(scheduler) else {
         return;
     };
@@ -739,22 +740,46 @@ pub extern "C" fn sengoo_async_select_winner(
 define_async_select!(sengoo_async_select_i8, sengoo_async_result_dispatch_i8, i8);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_i16, sengoo_async_result_dispatch_i16, i16);
+define_async_select!(
+    sengoo_async_select_i16,
+    sengoo_async_result_dispatch_i16,
+    i16
+);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_i32, sengoo_async_result_dispatch_i32, i32);
+define_async_select!(
+    sengoo_async_select_i32,
+    sengoo_async_result_dispatch_i32,
+    i32
+);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_i64, sengoo_async_result_dispatch_i64, i64);
+define_async_select!(
+    sengoo_async_select_i64,
+    sengoo_async_result_dispatch_i64,
+    i64
+);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_bool, sengoo_async_result_dispatch_bool, bool);
+define_async_select!(
+    sengoo_async_select_bool,
+    sengoo_async_result_dispatch_bool,
+    bool
+);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_f32, sengoo_async_result_dispatch_f32, f32);
+define_async_select!(
+    sengoo_async_select_f32,
+    sengoo_async_result_dispatch_f32,
+    f32
+);
 
 #[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_f64, sengoo_async_result_dispatch_f64, f64);
+define_async_select!(
+    sengoo_async_select_f64,
+    sengoo_async_result_dispatch_f64,
+    f64
+);
 
 #[cfg(feature = "native-bridge")]
 #[no_mangle]
@@ -860,7 +885,11 @@ mod tests {
         let polls = TEST_POLLS.fetch_add(1, Ordering::SeqCst);
         match MAIN_MODE.load(Ordering::SeqCst) {
             0 => {
-                if polls >= 2 { 1 } else { 0 }
+                if polls >= 2 {
+                    1
+                } else {
+                    0
+                }
             }
             1 => {
                 let deadline = main_deadline();
@@ -1036,12 +1065,24 @@ mod tests {
             .spawn(CountDownTask(3));
         let task = task as i64;
 
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(std::ptr::null_mut(), task) }, 0);
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(std::ptr::null_mut(), task) },
+            0
+        );
         assert!(!unsafe { sengoo_async_scheduler_cancel(std::ptr::null_mut(), task) });
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(scheduler, task) },
+            1
+        );
         assert!(unsafe { sengoo_async_scheduler_cancel(scheduler, task) });
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task) }, 3);
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, task + 999) }, 0);
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(scheduler, task) },
+            3
+        );
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(scheduler, task + 999) },
+            0
+        );
 
         unsafe { sengoo_async_scheduler_free(scheduler) };
     }
@@ -1084,9 +1125,15 @@ mod tests {
             });
         let foreign_task = foreign_task as i64;
 
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) },
+            1
+        );
         assert!(unsafe { sengoo_async_scheduler_cancel(scheduler, foreign_task) });
-        assert_eq!(unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) }, 3);
+        assert_eq!(
+            unsafe { sengoo_async_scheduler_task_status(scheduler, foreign_task) },
+            3
+        );
         assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
 
         unsafe { sengoo_async_scheduler_free(scheduler) };
@@ -1123,9 +1170,15 @@ mod tests {
         let child_handle = sengoo_async_sleep__start(20);
         let timeout_handle =
             sengoo_async_timeout_bool__start(async_spawn_kind_id_for_tests(), child_handle, 1);
-        assert_eq!(unsafe { sengoo_async_timeout_bool__poll(timeout_handle) }, 0);
+        assert_eq!(
+            unsafe { sengoo_async_timeout_bool__poll(timeout_handle) },
+            0
+        );
         std::thread::sleep(Duration::from_millis(5));
-        assert_eq!(unsafe { sengoo_async_timeout_bool__poll(timeout_handle) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_timeout_bool__poll(timeout_handle) },
+            1
+        );
         assert!(!unsafe { sengoo_async_timeout_bool__result(timeout_handle) });
         unsafe { sengoo_async_sleep__result(child_handle) };
     }

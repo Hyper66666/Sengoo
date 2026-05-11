@@ -7,68 +7,50 @@ use crate::mir::async_dispatch_synthesis_helpers::{
 impl Codegen {
     /// Declare external runtime functions used by generated LLVM IR.
     pub(super) fn declare_runtime_functions(&mut self) {
-
         self.declarations
-
             .push_str("; External C library functions\n");
 
         self.declarations.push_str("declare i32 @puts(i8*)\n");
 
         self.declarations
-
             .push_str("declare i32 @printf(i8*, ...)\n");
 
         self.declarations.push('\n');
 
-
-
         // Sengoo runtime print functions
 
         self.declarations
-
             .push_str("; Sengoo runtime print functions\n");
 
         self.declarations
-
             .push_str("declare void @sengoo_print_i64(i64)\n");
 
         self.declarations
-
             .push_str("declare void @sengoo_print_bool(i64)\n");
 
         self.declarations
-
             .push_str("declare void @sengoo_print_f64(double)\n");
 
         self.declarations
-
             .push_str("declare void @sengoo_print_str(i8*)\n");
 
         self.declarations.push('\n');
 
-
-
         // Sengoo runtime string functions
 
         self.declarations
-
             .push_str("; Sengoo runtime string functions\n");
 
         self.declarations
-
             .push_str("declare i64 @sengoo_str_len(i8*)\n");
 
         self.declarations
-
             .push_str("declare i8* @sengoo_str_concat(i8*, i8*)\n");
 
         self.declarations
-
             .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
 
         self.declarations.push('\n');
-
-
 
         self.declarations
             .push_str("; Sengoo async runtime functions\n");
@@ -85,82 +67,48 @@ impl Codegen {
         self.declarations.push('\n');
 
         self.declare_user_extern_functions();
-
     }
 
-
-
     fn declare_user_extern_functions(&mut self) {
-
         if self.ffi.extern_decls.is_empty() {
-
             return;
-
         }
 
-
-
         self.declarations
-
             .push_str("; User-declared extern FFI functions\n");
 
         let mut seen = HashSet::new();
 
         let extern_decls = self.ffi.extern_decls.clone();
 
-
-
         for decl in extern_decls {
-
             if !seen.insert(decl.name.clone()) {
-
                 continue;
-
             }
 
-
-
             if let Some(link_name) = &decl.link_name {
-
                 self.declarations
-
                     .push_str(&format!("; link(name = \"{}\")\n", link_name));
-
             }
 
             self.declarations
-
                 .push_str(&format!("; ABI: {}\n", decl.abi.as_str()));
-
-
 
             let ret = self.mir_type_to_llvm_cached(&decl.ret);
 
             let params = decl
-
                 .params
-
                 .iter()
-
                 .map(|p| self.mir_type_to_llvm_cached(p))
-
                 .collect::<Vec<_>>()
-
                 .join(", ");
 
             self.declarations
-
                 .push_str(&format!("declare {} @{}({})\n", ret, decl.name, params));
-
         }
 
-
-
         self.declarations.push('\n');
-
     }
-
-
 
     /// Declare the async spawn runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_spawn_runtime_function(&mut self, mir_fns: &[MirFunction]) {
@@ -186,11 +134,13 @@ impl Codegen {
     pub(super) fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
         let winner_decl = select_winner_runtime_declaration();
         let needs_winner = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| matches!(
-                inst,
-                mir::Instruction::Call { func, .. }
-                    if func == select_winner_runtime_function_name()
-            ))
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. }
+                        if func == select_winner_runtime_function_name()
+                )
+            })
         });
         if needs_winner && !self.declarations.contains(winner_decl) {
             self.declarations.push_str(winner_decl);
@@ -202,7 +152,12 @@ impl Codegen {
                 if let mir::Instruction::Call { func, .. } = inst {
                     if func
                         .strip_prefix("sengoo_async_select_")
-                        .is_some_and(|suffix| matches!(suffix, "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64"))
+                        .is_some_and(|suffix| {
+                            matches!(
+                                suffix,
+                                "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64"
+                            )
+                        })
                     {
                         needed.insert(func.clone());
                     }
@@ -350,8 +305,8 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::mir::{MIR_BOOL, MIR_UNIT};
     use super::*;
+    use crate::mir::{MIR_BOOL, MIR_UNIT};
 
     #[test]
     fn maybe_declare_select_runtime_function_adds_bool_decl_once() {

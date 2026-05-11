@@ -46,13 +46,20 @@ fn collect_concrete_named_types_from_items_includes_function_impl_and_struct_fie
     let vec_i64 = HIRType::named("Vec".to_string(), vec![HIRType::int(IntKind::I64)]);
     let map_point_i64 = HIRType::named(
         "Map".to_string(),
-        vec![HIRType::named("Point".to_string(), vec![]), HIRType::int(IntKind::I64)],
+        vec![
+            HIRType::named("Point".to_string(), vec![]),
+            HIRType::int(IntKind::I64),
+        ],
     );
 
     let function = HIRItem::Function(HIRFunction {
         name: "main".to_string(),
         type_params: vec![],
-        params: vec![HIRParam::new("arg".to_string(), SymbolId::new(2), vec_i64.clone())],
+        params: vec![HIRParam::new(
+            "arg".to_string(),
+            SymbolId::new(2),
+            vec_i64.clone(),
+        )],
         return_type: map_point_i64.clone(),
         precondition: None,
         postcondition: None,
@@ -109,7 +116,11 @@ fn collect_concrete_named_types_with_impl_variants_reaches_fixed_point() {
     let seed_function = HIRItem::Function(HIRFunction {
         name: "seed".to_string(),
         type_params: vec![],
-        params: vec![HIRParam::new("value".to_string(), SymbolId::new(3), vec_i64.clone())],
+        params: vec![HIRParam::new(
+            "value".to_string(),
+            SymbolId::new(3),
+            vec_i64.clone(),
+        )],
         return_type: HIRType::unit(),
         precondition: None,
         postcondition: None,

@@ -165,7 +165,8 @@ def main() -> i64 {
         err_msg.contains("nonexistent"),
         "Error message should mention the method name 'nonexistent', got: {}",
         err_msg
-    );}
+    );
+}
 
 #[test]
 fn test_ambiguous_trait_method_call_reports_error() {
@@ -277,7 +278,9 @@ def main() -> i64 {
     );
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("参数数量错误") || err.contains("ArgumentCountMismatch") || err.contains("期望 1 个, 找到 0 个"),
+        err.contains("参数数量错误")
+            || err.contains("ArgumentCountMismatch")
+            || err.contains("期望 1 个, 找到 0 个"),
         "error should report argument count mismatch, got: {}",
         err
     );
@@ -576,5 +579,3 @@ def main() -> i64 {
         result.unwrap_err()
     );
 }
-
-

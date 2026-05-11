@@ -35,8 +35,7 @@ pub(super) fn lower_assign_expr(
                 }
             };
 
-            let addr_local =
-                ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(elem_ty)));
+            let addr_local = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(elem_ty)));
             ctx.push_inst(Instruction::IndexAddr {
                 destination: addr_local,
                 base: base_local,
@@ -48,8 +47,7 @@ pub(super) fn lower_assign_expr(
             });
         }
         _ => {
-            ctx.errors
-                .push("unsupported assignment target".to_string());
+            ctx.errors.push("unsupported assignment target".to_string());
         }
     }
 
@@ -147,7 +145,7 @@ mod tests {
         usize,
         HashSet<String>,
         HashMap<String, FunctionSig>,
-        HashMap<String, & 'static hir::HIRStruct>,
+        HashMap<String, &'static hir::HIRStruct>,
         Vec<InherentMethodTemplate>,
         Vec<TraitMethodTemplate>,
     );
@@ -166,7 +164,15 @@ mod tests {
 
     #[test]
     fn lower_assign_expr_skips_self_assignment_store() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
 
         let mut ctx = LoweringContext::new(
@@ -186,8 +192,14 @@ mod tests {
         ctx.local_names.insert("x".to_string(), x);
         ctx.bind_local_symbol(SymbolId::new(1), x);
 
-        let target = HIRExpr::Var { name: "x".to_string(), symbol: SymbolId::new(1) };
-        let value = HIRExpr::Var { name: "x".to_string(), symbol: SymbolId::new(1) };
+        let target = HIRExpr::Var {
+            name: "x".to_string(),
+            symbol: SymbolId::new(1),
+        };
+        let value = HIRExpr::Var {
+            name: "x".to_string(),
+            symbol: SymbolId::new(1),
+        };
         let result = lower_assign_expr(&mut ctx, &target, &value);
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
@@ -196,7 +208,15 @@ mod tests {
 
     #[test]
     fn lower_assign_op_expr_emits_binary_then_store_for_var_target() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
 
         let mut ctx = LoweringContext::new(
@@ -216,12 +236,23 @@ mod tests {
         ctx.local_names.insert("x".to_string(), x);
         ctx.bind_local_symbol(SymbolId::new(1), x);
 
-        let target = HIRExpr::Var { name: "x".to_string(), symbol: SymbolId::new(1) };
+        let target = HIRExpr::Var {
+            name: "x".to_string(),
+            symbol: SymbolId::new(1),
+        };
         let value = HIRExpr::Lit(HIRLiteral::Int(1));
         let result = lower_assign_op_expr(&mut ctx, &target, &hir::HIRBinaryOp::Add, &value);
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
-        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Binary { op: MirBinOp::Add, .. })));
-        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Store { destination, .. } if *destination == x)));
+        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
+            inst,
+            Instruction::Binary {
+                op: MirBinOp::Add,
+                ..
+            }
+        )));
+        assert!(ctx.mir_fn.instructions.iter().any(
+            |inst| matches!(inst, Instruction::Store { destination, .. } if *destination == x)
+        ));
     }
 }

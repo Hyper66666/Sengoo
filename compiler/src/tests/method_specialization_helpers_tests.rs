@@ -1,12 +1,11 @@
 use crate::hir::{HIRFunction, HIRParam, HIRStruct, HIRType, HIRTypeParam, IntKind};
+use crate::method_resolution::MethodCandidate;
 use crate::mir::method_specialization_helpers::{
     bind_method_specialization_subst, build_trait_method_candidate,
-    collect_trait_method_candidates, prepare_method_specialization,
-    realize_method_specialization, resolve_trait_method_candidate,
-    resolve_trait_method_specialization,
+    collect_trait_method_candidates, prepare_method_specialization, realize_method_specialization,
+    resolve_trait_method_candidate, resolve_trait_method_specialization,
 };
-use crate::method_resolution::MethodCandidate;
-use crate::mir::{ConcreteTypeRegistry, MIRType, MIR_I64, TraitMethodTemplate};
+use crate::mir::{ConcreteTypeRegistry, MIRType, TraitMethodTemplate, MIR_I64};
 use crate::symbol::SymbolId;
 use std::collections::HashMap;
 
@@ -35,7 +34,10 @@ fn generic_push_method() -> HIRFunction {
             HIRParam::new(
                 "self".to_string(),
                 SymbolId::new(1),
-                HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+                HIRType::named(
+                    "Vec".to_string(),
+                    vec![HIRType::named("T".to_string(), vec![])],
+                ),
             ),
             HIRParam::new(
                 "value".to_string(),
@@ -58,7 +60,10 @@ fn generic_push_method() -> HIRFunction {
 
 fn generic_trait_template() -> TraitMethodTemplate {
     TraitMethodTemplate {
-        target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+        target_type: HIRType::named(
+            "Vec".to_string(),
+            vec![HIRType::named("T".to_string(), vec![])],
+        ),
         trait_name: "Iterable".to_string(),
         method: HIRFunction {
             name: "next".to_string(),
@@ -70,7 +75,10 @@ fn generic_trait_template() -> TraitMethodTemplate {
             params: vec![HIRParam::new(
                 "self".to_string(),
                 SymbolId::new(1),
-                HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+                HIRType::named(
+                    "Vec".to_string(),
+                    vec![HIRType::named("T".to_string(), vec![])],
+                ),
             )],
             return_type: HIRType::named("T".to_string(), vec![]),
             precondition: None,
@@ -116,9 +124,15 @@ fn nongeneric_trait_template() -> TraitMethodTemplate {
 fn bind_method_specialization_subst_infers_from_args() {
     let vec_def = generic_vec_struct();
     let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
 
     let subst = bind_method_specialization_subst(
         &target_type,
@@ -136,9 +150,15 @@ fn bind_method_specialization_subst_infers_from_args() {
 fn bind_method_specialization_subst_rejects_wrong_arity() {
     let vec_def = generic_vec_struct();
     let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
 
     let subst =
         bind_method_specialization_subst(&target_type, &method, &receiver_ty, &[], &struct_defs);
@@ -148,9 +168,15 @@ fn bind_method_specialization_subst_rejects_wrong_arity() {
 
 #[test]
 fn realize_method_specialization_registers_concrete_receiver_instance() {
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
     let mir_subst = HashMap::from([("T".to_string(), MIR_I64)]);
     let mut registry = ConcreteTypeRegistry::default();
 
@@ -167,15 +193,24 @@ fn realize_method_specialization_registers_concrete_receiver_instance() {
     assert_eq!(hir_subst.get("T"), Some(&HIRType::int(IntKind::I64)));
     assert_eq!(
         registry.hir_type_for_mir(&receiver_ty),
-        Some(HIRType::named("Vec".to_string(), vec![HIRType::int(IntKind::I64)]))
+        Some(HIRType::named(
+            "Vec".to_string(),
+            vec![HIRType::int(IntKind::I64)]
+        ))
     );
 }
 
 #[test]
 fn realize_method_specialization_rejects_receiver_prefix_mismatch() {
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_bool".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_bool".to_string(),
+        fields: vec![],
+    };
     let mir_subst = HashMap::from([("T".to_string(), MIR_I64)]);
     let mut registry = ConcreteTypeRegistry::default();
 
@@ -194,9 +229,15 @@ fn realize_method_specialization_rejects_receiver_prefix_mismatch() {
 fn prepare_method_specialization_combines_binding_and_realization() {
     let vec_def = generic_vec_struct();
     let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
     let mut registry = ConcreteTypeRegistry::default();
 
     let (hir_subst, concrete_prefix) = prepare_method_specialization(
@@ -217,9 +258,15 @@ fn prepare_method_specialization_combines_binding_and_realization() {
 fn prepare_method_specialization_rejects_arity_mismatch_before_realization() {
     let vec_def = generic_vec_struct();
     let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
-    let target_type = HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let target_type = HIRType::named(
+        "Vec".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let method = generic_push_method();
-    let receiver_ty = MIRType::Struct { name: "Vec_i64".to_string(), fields: vec![] };
+    let receiver_ty = MIRType::Struct {
+        name: "Vec_i64".to_string(),
+        fields: vec![],
+    };
     let mut registry = ConcreteTypeRegistry::default();
 
     let prepared = prepare_method_specialization(

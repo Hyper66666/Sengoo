@@ -1,9 +1,8 @@
 use crate::hir::{HIRBody, HIRFunction, HIRImpl, HIRParam, HIRType, IntKind};
 use crate::mir::impl_specialization_helpers::{
     build_inherent_specialized_method, collect_matching_inherent_method_templates,
-    expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
-    specialize_matching_inherent_method,
-    match_generic_impl_target,
+    expand_impl_variants, impl_type_prefix, match_generic_impl_target,
+    resolve_inherent_method_specialization, specialize_matching_inherent_method,
 };
 use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType, MIR_I64};
 use crate::symbol::SymbolId;
@@ -88,7 +87,10 @@ fn match_generic_impl_target_binds_placeholder_names_consistently() {
 fn expand_impl_variants_instantiates_methods_for_concrete_named_targets() {
     let vec_i64 = HIRType::named("Vec".to_string(), vec![HIRType::int(IntKind::I64)]);
     let known_named_types = HashSet::from(["Vec".to_string()]);
-    let concrete_named_types = HashMap::from([(crate::type_naming::hir_type_instance_name(&vec_i64), vec_i64.clone())]);
+    let concrete_named_types = HashMap::from([(
+        crate::type_naming::hir_type_instance_name(&vec_i64),
+        vec_i64.clone(),
+    )]);
     let impl_item = HIRImpl {
         target_type: HIRType::named(
             "Vec".to_string(),
@@ -101,7 +103,9 @@ fn expand_impl_variants_instantiates_methods_for_concrete_named_targets() {
     let variants = expand_impl_variants(&impl_item, &concrete_named_types, &known_named_types);
     assert_eq!(variants.len(), 1);
     assert_eq!(variants[0].target_type, vec_i64);
-    assert!(variants[0].items[0].name.starts_with(&impl_type_prefix(&variants[0].target_type)));
+    assert!(variants[0].items[0]
+        .name
+        .starts_with(&impl_type_prefix(&variants[0].target_type)));
 }
 
 #[test]
@@ -109,8 +113,7 @@ fn build_inherent_specialized_method_appends_generic_suffixes() {
     let method = generic_method("Vec_push");
     let subst = HashMap::from([("T".to_string(), HIRType::int(IntKind::I64))]);
 
-    let specialized =
-        build_inherent_specialized_method(&method, "Vec", "Vec_i64", &subst);
+    let specialized = build_inherent_specialized_method(&method, "Vec", "Vec_i64", &subst);
 
     assert_eq!(specialized.name, "Vec_i64_push_i64");
     assert!(specialized.type_params.is_empty());
@@ -120,8 +123,7 @@ fn build_inherent_specialized_method_appends_generic_suffixes() {
 #[test]
 fn build_inherent_specialized_method_keeps_nongeneric_name_without_suffixes() {
     let method = method("Vec_len");
-    let specialized =
-        build_inherent_specialized_method(&method, "Vec", "Vec_i64", &HashMap::new());
+    let specialized = build_inherent_specialized_method(&method, "Vec", "Vec_i64", &HashMap::new());
 
     assert_eq!(specialized.name, "Vec_i64_len");
     assert!(specialized.type_params.is_empty());
@@ -204,11 +206,17 @@ fn resolve_inherent_method_specialization_skips_unrealizable_match_and_uses_next
     let mut registry = ConcreteTypeRegistry::default();
     let templates = vec![
         InherentMethodTemplate {
-            target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+            target_type: HIRType::named(
+                "Vec".to_string(),
+                vec![HIRType::named("T".to_string(), vec![])],
+            ),
             method: generic_method("Vec_push"),
         },
         InherentMethodTemplate {
-            target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+            target_type: HIRType::named(
+                "Vec".to_string(),
+                vec![HIRType::named("T".to_string(), vec![])],
+            ),
             method: {
                 let mut method = generic_method("Vec_push");
                 method.params[1].ty = HIRType::bool();
@@ -242,7 +250,10 @@ fn resolve_inherent_method_specialization_returns_none_when_no_match_specializes
     };
     let mut registry = ConcreteTypeRegistry::default();
     let templates = vec![InherentMethodTemplate {
-        target_type: HIRType::named("Vec".to_string(), vec![HIRType::named("T".to_string(), vec![])]),
+        target_type: HIRType::named(
+            "Vec".to_string(),
+            vec![HIRType::named("T".to_string(), vec![])],
+        ),
         method: {
             let mut method = generic_method("Vec_push");
             method.params[1].ty = HIRType::bool();

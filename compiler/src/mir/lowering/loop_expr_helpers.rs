@@ -56,7 +56,15 @@ mod tests {
 
     #[test]
     fn lower_loop_expr_empty_body_loops_back_to_loop_block() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -78,6 +86,8 @@ mod tests {
             Some(Terminator::Goto(target)) => target,
             other => panic!("expected entry goto loop block, got {:?}", other),
         };
-        assert!(matches!(ctx.mir_fn.basic_blocks[loop_block].terminator, Some(Terminator::Goto(target)) if target == loop_block));
+        assert!(
+            matches!(ctx.mir_fn.basic_blocks[loop_block].terminator, Some(Terminator::Goto(target)) if target == loop_block)
+        );
     }
 }

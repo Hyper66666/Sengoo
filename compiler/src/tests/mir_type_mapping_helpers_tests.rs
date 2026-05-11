@@ -70,7 +70,10 @@ struct Box<T> { value: T }
         .map(|(name, def)| (name.clone(), def))
         .collect::<HashMap<_, _>>();
 
-    let template = HIRType::named("Box".to_string(), vec![HIRType::named("T".to_string(), vec![])]);
+    let template = HIRType::named(
+        "Box".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
     let actual = MIRType::Struct {
         name: "Box_i64".to_string(),
         fields: vec![("value".to_string(), MIR_I64)],

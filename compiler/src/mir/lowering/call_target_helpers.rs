@@ -150,10 +150,12 @@ mod tests {
         match resolution {
             CallTargetResolution::Builtin(result_local) => {
                 assert_eq!(ctx.get_local_type(result_local), &MIR_I64);
-                let has_task_status_call = ctx.mir_fn.instructions.iter().any(|inst| matches!(
-                    inst,
-                    Instruction::Call { func, .. } if func == "sengoo_async_task_status"
-                ));
+                let has_task_status_call = ctx.mir_fn.instructions.iter().any(|inst| {
+                    matches!(
+                        inst,
+                        Instruction::Call { func, .. } if func == "sengoo_async_task_status"
+                    )
+                });
                 assert!(has_task_status_call);
             }
             CallTargetResolution::Planned(_) => panic!("expected builtin resolution"),

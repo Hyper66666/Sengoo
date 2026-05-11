@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 fn is_string_ptr(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))

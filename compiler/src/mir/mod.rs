@@ -8,39 +8,39 @@
 //! - **显式控制流**：使用基本块（Basic Block）和终止符（Terminator）
 //! - **接近机器码**：易于映射到目标架构
 
-mod bb;
+pub(crate) mod async_cfg_helpers;
 pub(crate) mod async_dispatch_helpers;
 pub(crate) mod async_dispatch_synthesis_helpers;
-pub(crate) mod async_cfg_helpers;
 pub(crate) mod async_frame_helpers;
+pub mod async_lowering;
 pub(crate) mod async_origin_helpers;
+mod bb;
+pub(crate) mod concrete_type_helpers;
 pub(crate) mod direct_call_helpers;
 pub(crate) mod function_sig_helpers;
-pub(crate) mod concrete_type_helpers;
 mod generic_methods;
 pub(crate) mod hir_specialization_helpers;
 pub(crate) mod impl_specialization_helpers;
 mod inst;
 pub(crate) mod local_type_helpers;
+mod lowering;
 pub(crate) mod lowering_helpers;
 pub(crate) mod method_dispatch_helpers;
 pub(crate) mod method_specialization_helpers;
-pub(crate) mod pattern_helpers;
-pub(crate) mod trait_dispatch_helpers;
-pub(crate) mod type_mapping_helpers;
-pub(crate) mod type_helpers;
-mod lowering;
 mod op;
 pub mod opt;
-pub mod async_lowering;
+pub(crate) mod pattern_helpers;
+pub(crate) mod trait_dispatch_helpers;
+pub(crate) mod type_helpers;
+pub(crate) mod type_mapping_helpers;
 
 pub use bb::{BasicBlock, CallArg, Terminator};
-pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
-pub use lowering::{lower_hir, lower_hir_with_options, MirLowerOptions};
-pub use op::{MirBinOp, MirConstant, MirUnOp};
 pub(crate) use generic_methods::ConcreteTypeRegistry;
 pub(crate) use generic_methods::InherentMethodTemplate;
 pub(crate) use generic_methods::TraitMethodTemplate;
+pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
+pub use lowering::{lower_hir, lower_hir_with_options, MirLowerOptions};
+pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;
 

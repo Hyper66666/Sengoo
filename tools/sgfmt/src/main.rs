@@ -8,7 +8,11 @@ use std::path::{Path, PathBuf};
 
 use sengoo_compiler::ast::pattern::{Pattern, PatternKind, RangeEnd};
 use sengoo_compiler::ast::{
-    Block, Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, Expr, ExprKind, ExternBlock, ExternFunction, ExternItem, ExternStatic, FieldName, FieldValue, Function, Impl, Import, ImportKind, MatchArm, Module, Param, Path as AstPath, Program, SelfParam, Static, Stmt, StmtKind, Struct, StructField, Trait, TraitBound, TraitItem, Type, TypeAlias, TypeKind, TypeParam, VariantField, Visibility,
+    Block, Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, Expr, ExprKind,
+    ExternBlock, ExternFunction, ExternItem, ExternStatic, FieldName, FieldValue, Function, Impl,
+    Import, ImportKind, MatchArm, Module, Param, Path as AstPath, Program, SelfParam, Static, Stmt,
+    StmtKind, Struct, StructField, Trait, TraitBound, TraitItem, Type, TypeAlias, TypeKind,
+    TypeParam, VariantField, Visibility,
 };
 use sengoo_compiler::{Literal, Parser as SgParser};
 
@@ -38,7 +42,10 @@ struct FormatOptions {
 
 impl Default for FormatOptions {
     fn default() -> Self {
-        Self { max_width: 100, indent_width: 4 }
+        Self {
+            max_width: 100,
+            indent_width: 4,
+        }
     }
 }
 
@@ -58,7 +65,12 @@ impl Formatter {
     }
 
     fn format_program(&self, program: &Program) -> String {
-        program.decls.iter().map(|d| self.format_decl(d, 0)).collect::<Vec<_>>().join("\n\n")
+        program
+            .decls
+            .iter()
+            .map(|d| self.format_decl(d, 0))
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     fn format_decl(&self, decl: &Decl, indent: usize) -> String {
@@ -80,15 +92,25 @@ impl Formatter {
 
     fn format_function(&self, func: &Function, indent: usize) -> String {
         let mut lines = Vec::new();
-        if func.no_mangle { lines.push(format!("{}#[no_mangle]", self.pad(indent))); }
+        if func.no_mangle {
+            lines.push(format!("{}#[no_mangle]", self.pad(indent)));
+        }
         if let Some(export_name) = &func.export_name {
-            lines.push(format!("{}#[export_name = \"{}\"]", self.pad(indent), escape_string(export_name)));
+            lines.push(format!(
+                "{}#[export_name = \"{}\"]",
+                self.pad(indent),
+                escape_string(export_name)
+            ));
         }
 
         let mut head = String::new();
         head.push_str(Self::visibility_prefix(func.vis));
-        if func.is_async { head.push_str("async "); }
-        if func.is_unsafe { head.push_str("unsafe "); }
+        if func.is_async {
+            head.push_str("async ");
+        }
+        if func.is_unsafe {
+            head.push_str("unsafe ");
+        }
         if let Some(abi) = &func.abi {
             head.push_str("extern \"");
             head.push_str(&escape_string(abi));
@@ -99,55 +121,123 @@ impl Formatter {
         head.push_str(&self.format_type_params(&func.type_params));
         head.push('(');
         let mut params = Vec::new();
-        if let Some(self_param) = func.self_param { params.push(Self::format_self_param(self_param).to_string()); }
+        if let Some(self_param) = func.self_param {
+            params.push(Self::format_self_param(self_param).to_string());
+        }
         params.extend(func.params.iter().map(|p| self.format_param(p)));
         head.push_str(&params.join(", "));
         head.push(')');
-        if let Some(ret) = &func.return_type { head.push_str(" -> "); head.push_str(&self.format_type(ret)); }
-        if let Some(pre) = &func.precondition { head.push_str(" requires "); head.push_str(&self.format_expr(pre)); }
-        if let Some(post) = &func.postcondition { head.push_str(" ensures "); head.push_str(&self.format_expr(post)); }
+        if let Some(ret) = &func.return_type {
+            head.push_str(" -> ");
+            head.push_str(&self.format_type(ret));
+        }
+        if let Some(pre) = &func.precondition {
+            head.push_str(" requires ");
+            head.push_str(&self.format_expr(pre));
+        }
+        if let Some(post) = &func.postcondition {
+            head.push_str(" ensures ");
+            head.push_str(&self.format_expr(post));
+        }
 
-        lines.push(format!("{}{} {}", self.pad(indent), head, self.format_block(&func.body, indent)));
+        lines.push(format!(
+            "{}{} {}",
+            self.pad(indent),
+            head,
+            self.format_block(&func.body, indent)
+        ));
         lines.join("\n")
     }
 
     fn format_struct_decl(&self, s: &Struct, indent: usize) -> String {
-        let head = format!("{}{}struct {}{}", self.pad(indent), Self::visibility_prefix(s.vis), s.name.name, self.format_type_params(&s.type_params));
-        if s.fields.is_empty() { return format!("{};", head); }
+        let head = format!(
+            "{}{}struct {}{}",
+            self.pad(indent),
+            Self::visibility_prefix(s.vis),
+            s.name.name,
+            self.format_type_params(&s.type_params)
+        );
+        if s.fields.is_empty() {
+            return format!("{};", head);
+        }
         let all_named = s.fields.iter().all(|f| f.name.is_some());
         if all_named {
             let mut lines = vec![format!("{} {{", head)];
             for field in &s.fields {
-                lines.push(format!("{}{},", self.pad(indent + 1), self.format_struct_field(field)));
+                lines.push(format!(
+                    "{}{},",
+                    self.pad(indent + 1),
+                    self.format_struct_field(field)
+                ));
             }
             lines.push(format!("{}}}", self.pad(indent)));
             return lines.join("\n");
         }
-        let fields = s.fields.iter().map(|f| self.format_struct_field(f)).collect::<Vec<_>>().join(", ");
+        let fields = s
+            .fields
+            .iter()
+            .map(|f| self.format_struct_field(f))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("{}({});", head, fields)
     }
 
     fn format_enum_decl(&self, e: &Enum, indent: usize) -> String {
-        let mut lines = vec![format!("{}{}enum {}{} {{", self.pad(indent), Self::visibility_prefix(e.vis), e.name.name, self.format_type_params(&e.type_params))];
+        let mut lines = vec![format!(
+            "{}{}enum {}{} {{",
+            self.pad(indent),
+            Self::visibility_prefix(e.vis),
+            e.name.name,
+            self.format_type_params(&e.type_params)
+        )];
         for v in &e.variants {
-            lines.push(format!("{}{}", self.pad(indent + 1), self.format_enum_variant(v)));
+            lines.push(format!(
+                "{}{}",
+                self.pad(indent + 1),
+                self.format_enum_variant(v)
+            ));
         }
         lines.push(format!("{}}}", self.pad(indent)));
         lines.join("\n")
     }
 
     fn format_type_alias_decl(&self, t: &TypeAlias, indent: usize) -> String {
-        format!("{}{}type {}{} = {};", self.pad(indent), Self::visibility_prefix(t.vis), t.name.name, self.format_type_params(&t.type_params), self.format_type(&t.ty))
+        format!(
+            "{}{}type {}{} = {};",
+            self.pad(indent),
+            Self::visibility_prefix(t.vis),
+            t.name.name,
+            self.format_type_params(&t.type_params),
+            self.format_type(&t.ty)
+        )
     }
 
     fn format_const_decl(&self, c: &Const, indent: usize) -> String {
-        format!("{}{}const {}: {} == {};", self.pad(indent), Self::visibility_prefix(c.vis), c.name.name, self.format_type(&c.ty), self.format_expr(&c.value))
+        format!(
+            "{}{}const {}: {} == {};",
+            self.pad(indent),
+            Self::visibility_prefix(c.vis),
+            c.name.name,
+            self.format_type(&c.ty),
+            self.format_expr(&c.value)
+        )
     }
 
     fn format_static_decl(&self, s: &Static, indent: usize) -> String {
-        let mut out = format!("{}{}static ", self.pad(indent), Self::visibility_prefix(s.vis));
-        if s.is_mut { out.push_str("mut "); }
-        out.push_str(&format!("{}: {} == {};", s.name.name, self.format_type(&s.ty), self.format_expr(&s.value)));
+        let mut out = format!(
+            "{}{}static ",
+            self.pad(indent),
+            Self::visibility_prefix(s.vis)
+        );
+        if s.is_mut {
+            out.push_str("mut ");
+        }
+        out.push_str(&format!(
+            "{}: {} == {};",
+            s.name.name,
+            self.format_type(&s.ty),
+            self.format_expr(&s.value)
+        ));
         out
     }
 
@@ -155,10 +245,22 @@ impl Formatter {
         let path = self.format_path(&i.path);
         match &i.kind {
             ImportKind::Simple => {
-                if let Some(alias) = &i.alias { format!("{}import {} as {};", self.pad(indent), path, alias.name) }
-                else { format!("{}import {};", self.pad(indent), path) }
+                if let Some(alias) = &i.alias {
+                    format!("{}import {} as {};", self.pad(indent), path, alias.name)
+                } else {
+                    format!("{}import {};", self.pad(indent), path)
+                }
             }
-            ImportKind::Selective(items) => format!("{}import {} {{ {} }};", self.pad(indent), path, items.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", ")),
+            ImportKind::Selective(items) => format!(
+                "{}import {} {{ {} }};",
+                self.pad(indent),
+                path,
+                items
+                    .iter()
+                    .map(|x| x.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ImportKind::Wildcard => format!("{}import {} * from;", self.pad(indent), path),
         }
     }
@@ -361,14 +463,23 @@ impl Formatter {
     }
     fn format_block(&self, block: &Block, indent: usize) -> String {
         let mut lines = vec!["{".to_string()];
-        for stmt in &block.stmts { lines.push(self.format_stmt(stmt, indent + 1)); }
+        for stmt in &block.stmts {
+            lines.push(self.format_stmt(stmt, indent + 1));
+        }
         lines.push(format!("{}}}", self.pad(indent)));
         lines.join("\n")
     }
 
     fn format_block_inline(&self, block: &Block) -> String {
-        if block.stmts.is_empty() { return "{}".to_string(); }
-        let body = block.stmts.iter().map(|s| self.format_stmt_inline(s)).collect::<Vec<_>>().join(" ");
+        if block.stmts.is_empty() {
+            return "{}".to_string();
+        }
+        let body = block
+            .stmts
+            .iter()
+            .map(|s| self.format_stmt_inline(s))
+            .collect::<Vec<_>>()
+            .join(" ");
         format!("{{ {} }}", body)
     }
 
@@ -376,12 +487,24 @@ impl Formatter {
         match &stmt.kind {
             StmtKind::Let { name, ty, value } => {
                 let mut s = format!("{}let {}", self.pad(indent), name.name);
-                if let Some(ty) = ty { s.push_str(": "); s.push_str(&self.format_type(ty)); }
-                if let Some(value) = value { s.push_str(" = "); s.push_str(&self.format_expr(value)); }
+                if let Some(ty) = ty {
+                    s.push_str(": ");
+                    s.push_str(&self.format_type(ty));
+                }
+                if let Some(value) = value {
+                    s.push_str(" = ");
+                    s.push_str(&self.format_expr(value));
+                }
                 s.push(';');
                 s
             }
-            StmtKind::Const { name, ty, value } => format!("{}const {}: {} = {};", self.pad(indent), name.name, self.format_type(ty), self.format_expr(value)),
+            StmtKind::Const { name, ty, value } => format!(
+                "{}const {}: {} = {};",
+                self.pad(indent),
+                name.name,
+                self.format_type(ty),
+                self.format_expr(value)
+            ),
             StmtKind::Expr(expr) => format!("{}{};", self.pad(indent), self.format_expr(expr)),
             StmtKind::Item(item) => self.format_decl(item, indent),
         }
@@ -391,12 +514,23 @@ impl Formatter {
         match &stmt.kind {
             StmtKind::Let { name, ty, value } => {
                 let mut s = format!("let {}", name.name);
-                if let Some(ty) = ty { s.push_str(": "); s.push_str(&self.format_type(ty)); }
-                if let Some(value) = value { s.push_str(" = "); s.push_str(&self.format_expr(value)); }
+                if let Some(ty) = ty {
+                    s.push_str(": ");
+                    s.push_str(&self.format_type(ty));
+                }
+                if let Some(value) = value {
+                    s.push_str(" = ");
+                    s.push_str(&self.format_expr(value));
+                }
                 s.push(';');
                 s
             }
-            StmtKind::Const { name, ty, value } => format!("const {}: {} = {};", name.name, self.format_type(ty), self.format_expr(value)),
+            StmtKind::Const { name, ty, value } => format!(
+                "const {}: {} = {};",
+                name.name,
+                self.format_type(ty),
+                self.format_expr(value)
+            ),
             StmtKind::Expr(expr) => format!("{};", self.format_expr(expr)),
             StmtKind::Item(_) => "/* item */".to_string(),
         }
@@ -407,7 +541,12 @@ impl Formatter {
             ExprKind::Literal(lit) => self.format_literal(lit),
             ExprKind::Ident(ident) => ident.name.clone(),
             ExprKind::Path(path) => self.format_path(path),
-            ExprKind::Binary { op, left, right } => format!("{} {} {}", self.format_expr(left), op, self.format_expr(right)),
+            ExprKind::Binary { op, left, right } => format!(
+                "{} {} {}",
+                self.format_expr(left),
+                op,
+                self.format_expr(right)
+            ),
             ExprKind::Unary { op, operand } => {
                 let op = op.to_string();
                 if op.chars().all(|c| c.is_alphabetic()) || op.ends_with("mut") {
@@ -416,41 +555,124 @@ impl Formatter {
                     format!("{}{}", op, self.format_expr(operand))
                 }
             }
-            ExprKind::Call { func, args } => format!("{}({})", self.format_expr(func), args.iter().map(|a| self.format_expr(a)).collect::<Vec<_>>().join(", ")),
-            ExprKind::MethodCall { receiver, method, args } => format!("{}.{}({})", self.format_expr(receiver), method.name, args.iter().map(|a| self.format_expr(a)).collect::<Vec<_>>().join(", ")),
+            ExprKind::Call { func, args } => format!(
+                "{}({})",
+                self.format_expr(func),
+                args.iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => format!(
+                "{}.{}({})",
+                self.format_expr(receiver),
+                method.name,
+                args.iter()
+                    .map(|a| self.format_expr(a))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ExprKind::Block(block) => self.format_block_inline(block),
-            ExprKind::If { cond, then_branch, else_branch } => {
-                let mut s = format!("if {} {}", self.format_expr(cond), self.format_block_inline(then_branch));
-                if let Some(else_branch) = else_branch { s.push_str(" else "); s.push_str(&self.format_expr(else_branch)); }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let mut s = format!(
+                    "if {} {}",
+                    self.format_expr(cond),
+                    self.format_block_inline(then_branch)
+                );
+                if let Some(else_branch) = else_branch {
+                    s.push_str(" else ");
+                    s.push_str(&self.format_expr(else_branch));
+                }
                 s
             }
-            ExprKind::While { cond, body } => format!("while {} {}", self.format_expr(cond), self.format_block_inline(body)),
-            ExprKind::For { pattern, iter, body } => format!("for {} in {} {}", self.format_pattern(pattern), self.format_expr(iter), self.format_block_inline(body)),
+            ExprKind::While { cond, body } => format!(
+                "while {} {}",
+                self.format_expr(cond),
+                self.format_block_inline(body)
+            ),
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+            } => format!(
+                "for {} in {} {}",
+                self.format_pattern(pattern),
+                self.format_expr(iter),
+                self.format_block_inline(body)
+            ),
             ExprKind::Loop(body) => format!("loop {}", self.format_block_inline(body)),
             ExprKind::Match { scrutinee, arms } => {
-                let arms = arms.iter().map(|arm| self.format_match_arm(arm)).collect::<Vec<_>>();
+                let arms = arms
+                    .iter()
+                    .map(|arm| self.format_match_arm(arm))
+                    .collect::<Vec<_>>();
                 if arms.is_empty() {
                     format!("match {} {{}}", self.format_expr(scrutinee))
                 } else {
-                    format!("match {} {{ {} }}", self.format_expr(scrutinee), arms.join(", "))
+                    format!(
+                        "match {} {{ {} }}",
+                        self.format_expr(scrutinee),
+                        arms.join(", ")
+                    )
                 }
             }
-            ExprKind::Return(value) => value.as_ref().map(|v| format!("return {}", self.format_expr(v))).unwrap_or_else(|| "return".to_string()),
-            ExprKind::Break(value) => value.as_ref().map(|v| format!("break {}", self.format_expr(v))).unwrap_or_else(|| "break".to_string()),
+            ExprKind::Return(value) => value
+                .as_ref()
+                .map(|v| format!("return {}", self.format_expr(v)))
+                .unwrap_or_else(|| "return".to_string()),
+            ExprKind::Break(value) => value
+                .as_ref()
+                .map(|v| format!("break {}", self.format_expr(v)))
+                .unwrap_or_else(|| "break".to_string()),
             ExprKind::Continue => "continue".to_string(),
-            ExprKind::Yield(value) => value.as_ref().map(|v| format!("yield {}", self.format_expr(v))).unwrap_or_else(|| "yield".to_string()),
+            ExprKind::Yield(value) => value
+                .as_ref()
+                .map(|v| format!("yield {}", self.format_expr(v)))
+                .unwrap_or_else(|| "yield".to_string()),
             ExprKind::Await(base) => format!("await {}", self.format_expr(base)),
             ExprKind::AsyncBlock(block) => format!("async {}", self.format_block_inline(block)),
-            ExprKind::ParallelBlock(block) => format!("parallel {}", self.format_block_inline(block)),
-            ExprKind::Index { base, index } => format!("{}[{}]", self.format_expr(base), self.format_expr(index)),
+            ExprKind::ParallelBlock(block) => {
+                format!("parallel {}", self.format_block_inline(block))
+            }
+            ExprKind::Index { base, index } => {
+                format!("{}[{}]", self.format_expr(base), self.format_expr(index))
+            }
             ExprKind::Field { base, field } => format!("{}.{}", self.format_expr(base), field.name),
-            ExprKind::Array(items) => format!("[{}]", items.iter().map(|i| self.format_expr(i)).collect::<Vec<_>>().join(", ")),
+            ExprKind::Array(items) => format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(|i| self.format_expr(i))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             ExprKind::Tuple(items) => {
-                let rendered = items.iter().map(|i| self.format_expr(i)).collect::<Vec<_>>().join(", ");
-                if items.is_empty() { "()".to_string() } else if items.len() == 1 { format!("({},)", rendered) } else { format!("({})", rendered) }
+                let rendered = items
+                    .iter()
+                    .map(|i| self.format_expr(i))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if items.is_empty() {
+                    "()".to_string()
+                } else if items.len() == 1 {
+                    format!("({},)", rendered)
+                } else {
+                    format!("({})", rendered)
+                }
             }
             ExprKind::Struct { path, fields, base } => {
-                let mut items = fields.iter().map(|field| self.format_field_value(field)).collect::<Vec<_>>();
+                let mut items = fields
+                    .iter()
+                    .map(|field| self.format_field_value(field))
+                    .collect::<Vec<_>>();
                 if let Some(base) = base {
                     items.push(format!("..{}", self.format_expr(base)));
                 }
@@ -460,20 +682,49 @@ impl Formatter {
                     format!("{} {{ {} }}", self.format_path(path), items.join(", "))
                 }
             }
-            ExprKind::Assign { target, value } => format!("{} = {}", self.format_expr(target), self.format_expr(value)),
-            ExprKind::AssignOp { op, target, value } => format!("{} {} {}", self.format_expr(target), op.as_str(), self.format_expr(value)),
-            ExprKind::Range { start, end, inclusive } => {
-                let s = start.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
-                let e = end.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
-                if *inclusive { format!("{}..={}", s, e) } else { format!("{}..{}", s, e) }
+            ExprKind::Assign { target, value } => {
+                format!("{} = {}", self.format_expr(target), self.format_expr(value))
+            }
+            ExprKind::AssignOp { op, target, value } => format!(
+                "{} {} {}",
+                self.format_expr(target),
+                op.as_str(),
+                self.format_expr(value)
+            ),
+            ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } => {
+                let s = start
+                    .as_ref()
+                    .map(|v| self.format_expr(v))
+                    .unwrap_or_default();
+                let e = end
+                    .as_ref()
+                    .map(|v| self.format_expr(v))
+                    .unwrap_or_default();
+                if *inclusive {
+                    format!("{}..={}", s, e)
+                } else {
+                    format!("{}..{}", s, e)
+                }
             }
             ExprKind::Lambda { params, body } => {
-                let params = params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>().join(", ");
+                let params = params
+                    .iter()
+                    .map(|param| param.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!("|{}| {}", params, self.format_expr(body))
             }
             ExprKind::Try(base) => format!("{}?", self.format_expr(base)),
-            ExprKind::Cast { expr, ty } => format!("{} as {}", self.format_expr(expr), self.format_type(ty)),
-            ExprKind::Is { expr, ty } => format!("{} is {}", self.format_expr(expr), self.format_type(ty)),
+            ExprKind::Cast { expr, ty } => {
+                format!("{} as {}", self.format_expr(expr), self.format_type(ty))
+            }
+            ExprKind::Is { expr, ty } => {
+                format!("{} is {}", self.format_expr(expr), self.format_type(ty))
+            }
             ExprKind::Paren(inner) => format!("({})", self.format_expr(inner)),
         }
     }
@@ -491,7 +742,11 @@ impl Formatter {
                         if field.shorthand {
                             field.name.name.clone()
                         } else {
-                            format!("{}: {}", field.name.name, self.format_pattern(&field.pattern))
+                            format!(
+                                "{}: {}",
+                                field.name.name,
+                                self.format_pattern(&field.pattern)
+                            )
                         }
                     })
                     .collect::<Vec<_>>();
@@ -507,10 +762,18 @@ impl Formatter {
             PatternKind::TupleStruct { path, patterns } => format!(
                 "{}({})",
                 self.format_path(path),
-                patterns.iter().map(|pattern| self.format_pattern(pattern)).collect::<Vec<_>>().join(", ")
+                patterns
+                    .iter()
+                    .map(|pattern| self.format_pattern(pattern))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             PatternKind::Tuple(patterns) => {
-                let rendered = patterns.iter().map(|pattern| self.format_pattern(pattern)).collect::<Vec<_>>().join(", ");
+                let rendered = patterns
+                    .iter()
+                    .map(|pattern| self.format_pattern(pattern))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 if patterns.is_empty() {
                     "()".to_string()
                 } else if patterns.len() == 1 {
@@ -520,7 +783,10 @@ impl Formatter {
                 }
             }
             PatternKind::Slice(patterns, rest) => {
-                let mut items = patterns.iter().map(|pattern| self.format_pattern(pattern)).collect::<Vec<_>>();
+                let mut items = patterns
+                    .iter()
+                    .map(|pattern| self.format_pattern(pattern))
+                    .collect::<Vec<_>>();
                 if let Some(rest) = rest {
                     items.push(format!("..{}", self.format_pattern(rest)));
                 }
@@ -545,7 +811,11 @@ impl Formatter {
                 if patterns.is_empty() {
                     "_".to_string()
                 } else {
-                    patterns.iter().map(|pattern| self.format_pattern(pattern)).collect::<Vec<_>>().join(" | ")
+                    patterns
+                        .iter()
+                        .map(|pattern| self.format_pattern(pattern))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
                 }
             }
         }
@@ -555,7 +825,11 @@ impl Formatter {
         let patterns = if arm.patterns.is_empty() {
             "_".to_string()
         } else {
-            arm.patterns.iter().map(|pattern| self.format_pattern(pattern)).collect::<Vec<_>>().join(" | ")
+            arm.patterns
+                .iter()
+                .map(|pattern| self.format_pattern(pattern))
+                .collect::<Vec<_>>()
+                .join(" | ")
         };
 
         let mut rendered = patterns;
@@ -575,7 +849,11 @@ impl Formatter {
             }
         }
 
-        format!("{}: {}", self.format_field_name(&field.name), self.format_expr(&field.value))
+        format!(
+            "{}: {}",
+            self.format_field_name(&field.name),
+            self.format_expr(&field.value)
+        )
     }
 
     fn format_field_name(&self, name: &FieldName) -> String {
@@ -590,7 +868,9 @@ impl Formatter {
             Literal::Int(v) => v.to_string(),
             Literal::Float(v) => {
                 let mut s = v.to_string();
-                if !s.contains('.') && !s.contains('e') && !s.contains('E') { s.push_str(".0"); }
+                if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+                    s.push_str(".0");
+                }
                 s
             }
             Literal::String(v) => format!("\"{}\"", escape_string(v)),
@@ -605,20 +885,68 @@ impl Formatter {
     fn format_type(&self, ty: &Type) -> String {
         match &ty.kind {
             TypeKind::Path(path) => self.format_path(path),
-            TypeKind::PathWithArgs { path, args } => format!("{}<{}>", self.format_path(path), args.iter().map(|a| self.format_type(a)).collect::<Vec<_>>().join(", ")),
-            TypeKind::Tuple(types) => format!("({})", types.iter().map(|t| self.format_type(t)).collect::<Vec<_>>().join(", ")),
+            TypeKind::PathWithArgs { path, args } => format!(
+                "{}<{}>",
+                self.format_path(path),
+                args.iter()
+                    .map(|a| self.format_type(a))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            TypeKind::Tuple(types) => format!(
+                "({})",
+                types
+                    .iter()
+                    .map(|t| self.format_type(t))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             TypeKind::Array(elem, len) => format!("[{}; {}]", self.format_type(elem), len),
             TypeKind::Slice(elem) => format!("[{}]", self.format_type(elem)),
-            TypeKind::Ptr { base, is_mut } => if *is_mut { format!("*mut {}", self.format_type(base)) } else { format!("*const {}", self.format_type(base)) },
-            TypeKind::Ref { base, is_mut } => if *is_mut { format!("&mut {}", self.format_type(base)) } else { format!("&{}", self.format_type(base)) },
+            TypeKind::Ptr { base, is_mut } => {
+                if *is_mut {
+                    format!("*mut {}", self.format_type(base))
+                } else {
+                    format!("*const {}", self.format_type(base))
+                }
+            }
+            TypeKind::Ref { base, is_mut } => {
+                if *is_mut {
+                    format!("&mut {}", self.format_type(base))
+                } else {
+                    format!("&{}", self.format_type(base))
+                }
+            }
             TypeKind::Fn { params, ret } => {
-                let p = params.iter().map(|t| self.format_type(t)).collect::<Vec<_>>().join(", ");
-                if let Some(ret) = ret { format!("fn({}) -> {}", p, self.format_type(ret)) } else { format!("fn({})", p) }
+                let p = params
+                    .iter()
+                    .map(|t| self.format_type(t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if let Some(ret) = ret {
+                    format!("fn({}) -> {}", p, self.format_type(ret))
+                } else {
+                    format!("fn({})", p)
+                }
             }
             TypeKind::Never => "!".to_string(),
             TypeKind::Infer => "_".to_string(),
-            TypeKind::Dyn(bounds) => format!("dyn {}", bounds.iter().map(|b| self.format_trait_bound(b)).collect::<Vec<_>>().join(" + ")),
-            TypeKind::ImplTrait(bounds) => format!("impl {}", bounds.iter().map(|b| self.format_trait_bound(b)).collect::<Vec<_>>().join(" + ")),
+            TypeKind::Dyn(bounds) => format!(
+                "dyn {}",
+                bounds
+                    .iter()
+                    .map(|b| self.format_trait_bound(b))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
+            TypeKind::ImplTrait(bounds) => format!(
+                "impl {}",
+                bounds
+                    .iter()
+                    .map(|b| self.format_trait_bound(b))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            ),
         }
     }
 
@@ -626,19 +954,39 @@ impl Formatter {
         if bound.params.is_empty() {
             self.format_path(&bound.path)
         } else {
-            format!("{}<{}>", self.format_path(&bound.path), bound.params.iter().map(|p| self.format_type(p)).collect::<Vec<_>>().join(", "))
+            format!(
+                "{}<{}>",
+                self.format_path(&bound.path),
+                bound
+                    .params
+                    .iter()
+                    .map(|p| self.format_type(p))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
     }
 
     fn format_path(&self, path: &AstPath) -> String {
-        path.segments.iter().map(|seg| seg.name.as_str()).collect::<Vec<_>>().join("::")
+        path.segments
+            .iter()
+            .map(|seg| seg.name.as_str())
+            .collect::<Vec<_>>()
+            .join("::")
     }
 
     fn format_type_params(&self, params: &[TypeParam]) -> String {
         if params.is_empty() {
             String::new()
         } else {
-            format!("<{}>", params.iter().map(|p| self.format_type_param(p)).collect::<Vec<_>>().join(", "))
+            format!(
+                "<{}>",
+                params
+                    .iter()
+                    .map(|p| self.format_type_param(p))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
     }
 
@@ -646,7 +994,14 @@ impl Formatter {
         let mut s = param.name.name.clone();
         if !param.bounds.is_empty() {
             s.push_str(": ");
-            s.push_str(&param.bounds.iter().map(|b| self.format_trait_bound(b)).collect::<Vec<_>>().join(" + "));
+            s.push_str(
+                &param
+                    .bounds
+                    .iter()
+                    .map(|b| self.format_trait_bound(b))
+                    .collect::<Vec<_>>()
+                    .join(" + "),
+            );
         }
         if let Some(default) = &param.default {
             s.push_str(" = ");
@@ -656,31 +1011,60 @@ impl Formatter {
     }
 
     fn format_param(&self, param: &Param) -> String {
-        if param.is_mut { format!("mut {}: {}", param.name.name, self.format_type(&param.ty)) }
-        else { format!("{}: {}", param.name.name, self.format_type(&param.ty)) }
+        if param.is_mut {
+            format!("mut {}: {}", param.name.name, self.format_type(&param.ty))
+        } else {
+            format!("{}: {}", param.name.name, self.format_type(&param.ty))
+        }
     }
 
     fn format_struct_field(&self, field: &StructField) -> String {
         match &field.name {
-            Some(name) => format!("{}{}: {}", Self::visibility_prefix(field.vis), name.name, self.format_type(&field.ty)),
-            None => format!("{}{}", Self::visibility_prefix(field.vis), self.format_type(&field.ty)),
+            Some(name) => format!(
+                "{}{}: {}",
+                Self::visibility_prefix(field.vis),
+                name.name,
+                self.format_type(&field.ty)
+            ),
+            None => format!(
+                "{}{}",
+                Self::visibility_prefix(field.vis),
+                self.format_type(&field.ty)
+            ),
         }
     }
 
     fn format_enum_variant(&self, variant: &EnumVariant) -> String {
         let mut s = variant.name.name.clone();
         if !variant.fields.is_empty() {
-            let all_named = variant.fields.iter().all(|f| matches!(f, VariantField::Named(_, _)));
+            let all_named = variant
+                .fields
+                .iter()
+                .all(|f| matches!(f, VariantField::Named(_, _)));
             if all_named {
-                let fields = variant.fields.iter().map(|f| match f {
-                    VariantField::Named(name, ty) => format!("{}: {}", name.name, self.format_type(ty)),
-                    VariantField::Unnamed(_) => unreachable!(),
-                }).collect::<Vec<_>>().join(", ");
+                let fields = variant
+                    .fields
+                    .iter()
+                    .map(|f| match f {
+                        VariantField::Named(name, ty) => {
+                            format!("{}: {}", name.name, self.format_type(ty))
+                        }
+                        VariantField::Unnamed(_) => unreachable!(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 s.push_str(&format!(" {{ {} }}", fields));
             } else {
-                let fields = variant.fields.iter().map(|f| match f {
-                    VariantField::Named(_, ty) | VariantField::Unnamed(ty) => self.format_type(ty),
-                }).collect::<Vec<_>>().join(", ");
+                let fields = variant
+                    .fields
+                    .iter()
+                    .map(|f| match f {
+                        VariantField::Named(_, ty) | VariantField::Unnamed(ty) => {
+                            self.format_type(ty)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 s.push_str(&format!("({})", fields));
             }
         }
@@ -701,7 +1085,11 @@ impl Formatter {
     }
 
     fn visibility_prefix(vis: Visibility) -> &'static str {
-        if vis.is_public() { "pub " } else { "" }
+        if vis.is_public() {
+            "pub "
+        } else {
+            ""
+        }
     }
 
     fn pad(&self, indent: usize) -> String {
@@ -737,22 +1125,33 @@ fn escape_char(value: char) -> String {
 
 fn find_config_path(source_file: &Path, explicit: Option<&PathBuf>) -> Result<Option<PathBuf>> {
     if let Some(path) = explicit {
-        if path.exists() { return Ok(Some(path.clone())); }
+        if path.exists() {
+            return Ok(Some(path.clone()));
+        }
         miette::bail!("config file not found: {}", path.display());
     }
 
-    let mut cursor = source_file.parent().map(Path::to_path_buf).or_else(|| std::env::current_dir().ok());
+    let mut cursor = source_file
+        .parent()
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok());
     while let Some(dir) = cursor {
         let candidate = dir.join("sgfmt.toml");
-        if candidate.exists() { return Ok(Some(candidate)); }
+        if candidate.exists() {
+            return Ok(Some(candidate));
+        }
         cursor = dir.parent().map(Path::to_path_buf);
     }
     Ok(None)
 }
 
 fn load_format_config(path: &Path) -> Result<FormatConfig> {
-    let raw = fs::read_to_string(path).into_diagnostic().with_context(|| format!("failed to read config {}", path.display()))?;
-    toml::from_str(&raw).into_diagnostic().with_context(|| format!("failed to parse config {}", path.display()))
+    let raw = fs::read_to_string(path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read config {}", path.display()))?;
+    toml::from_str(&raw)
+        .into_diagnostic()
+        .with_context(|| format!("failed to parse config {}", path.display()))
 }
 
 fn resolve_options(args: &Args) -> Result<FormatOptions> {
@@ -760,15 +1159,27 @@ fn resolve_options(args: &Args) -> Result<FormatOptions> {
 
     if let Some(path) = find_config_path(&args.file, args.config_path.as_ref())? {
         let config = load_format_config(&path)?;
-        if let Some(max_width) = config.max_width { options.max_width = max_width; }
-        if let Some(indent_width) = config.indent_width { options.indent_width = indent_width; }
+        if let Some(max_width) = config.max_width {
+            options.max_width = max_width;
+        }
+        if let Some(indent_width) = config.indent_width {
+            options.indent_width = indent_width;
+        }
     }
 
-    if let Some(max_width) = args.max_width { options.max_width = max_width; }
-    if let Some(indent_width) = args.indent_width { options.indent_width = indent_width; }
+    if let Some(max_width) = args.max_width {
+        options.max_width = max_width;
+    }
+    if let Some(indent_width) = args.indent_width {
+        options.indent_width = indent_width;
+    }
 
-    if options.max_width == 0 { miette::bail!("max_width must be greater than 0"); }
-    if options.indent_width == 0 { miette::bail!("indent_width must be greater than 0"); }
+    if options.max_width == 0 {
+        miette::bail!("max_width must be greater than 0");
+    }
+    if options.indent_width == 0 {
+        miette::bail!("indent_width must be greater than 0");
+    }
 
     Ok(options)
 }
@@ -791,7 +1202,9 @@ fn main() -> Result<()> {
 
     if args.check {
         let original = fs::read_to_string(&args.file).into_diagnostic()?;
-        if original != formatted { miette::bail!("{} is not formatted", args.file.display()); }
+        if original != formatted {
+            miette::bail!("{} is not formatted", args.file.display());
+        }
         return Ok(());
     }
 
@@ -914,11 +1327,8 @@ mod tests {
         fs::create_dir_all(&dir).expect("create temp dir");
         let source = dir.join("main.sg");
         fs::write(&source, "def main() -> i64 { 0 }").expect("write source");
-        fs::write(
-            dir.join("sgfmt.toml"),
-            "max_width = 88\nindent_width = 2\n",
-        )
-        .expect("write config");
+        fs::write(dir.join("sgfmt.toml"), "max_width = 88\nindent_width = 2\n")
+            .expect("write config");
 
         let args = Args {
             file: source,
@@ -936,17 +1346,3 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-

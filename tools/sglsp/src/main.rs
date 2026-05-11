@@ -1,4 +1,4 @@
-﻿//! sglsp - Sengoo language server.
+//! sglsp - Sengoo language server.
 
 use miette::Result;
 use sengoo_compiler::ast::{Decl, DeclKind, Function, SelfParam, Type};
@@ -396,8 +396,16 @@ fn collect_function_signatures_from_decl(
             }
         }
         DeclKind::Impl(impl_decl) => {
-            let target = span_text(content, impl_decl.target_type.span.lo, impl_decl.target_type.span.hi);
-            let target = if target.is_empty() { "_".to_string() } else { target };
+            let target = span_text(
+                content,
+                impl_decl.target_type.span.lo,
+                impl_decl.target_type.span.hi,
+            );
+            let target = if target.is_empty() {
+                "_".to_string()
+            } else {
+                target
+            };
             for method in &impl_decl.items {
                 let (base_label, params) = function_signature_label(content, method);
                 out.push(FunctionSignatureInfo {
@@ -1094,7 +1102,10 @@ fn range_from_byte_span(content: &str, lo: u32, hi: u32) -> Range {
     span_to_range(content, lo, hi)
 }
 
-fn diagnostic_range_from_location(content: &str, location: &SgcErrorLocationPayload) -> Option<Range> {
+fn diagnostic_range_from_location(
+    content: &str,
+    location: &SgcErrorLocationPayload,
+) -> Option<Range> {
     if let Some(span) = &location.span {
         return Some(range_from_byte_span(content, span.lo, span.hi));
     }
@@ -1149,7 +1160,9 @@ fn diagnostic_range_from_parse_error(content: &str, error: &ParseError) -> Optio
         | ParseError::InvalidStructField { span, .. }
         | ParseError::InvalidStructFieldShorthand { span }
         | ParseError::InvalidPatternAt { span, .. } => source_span_to_range(content, span),
-        ParseError::InvalidPattern(_) | ParseError::DuplicateParam(_) | ParseError::UnexpectedEof => None,
+        ParseError::InvalidPattern(_)
+        | ParseError::DuplicateParam(_)
+        | ParseError::UnexpectedEof => None,
     }
 }
 
@@ -1505,7 +1518,8 @@ impl LanguageServer for SengooLanguageServer {
             let symbols = collect_ast_symbols(&doc_content);
             if let Some(found) = symbols.iter().find(|item| item.name == symbol.name) {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location::new(
-                    doc_uri, found.range,
+                    doc_uri,
+                    found.range,
                 ))));
             }
             if let Some(range) = find_definition_in_text(&doc_content, &symbol.name) {
@@ -2060,24 +2074,25 @@ def main() -> i64 { 0 }
     }
     #[test]
     fn folding_ranges_include_regions_and_comment_blocks() {
-        let src = "// one\n// two\ndef main() -> i64 {\n    if true {\n        1\n    }\n    0\n}\n";
+        let src =
+            "// one\n// two\ndef main() -> i64 {\n    if true {\n        1\n    }\n    0\n}\n";
         let ranges = folding_ranges_for(src);
 
-        assert!(ranges.iter().any(|range|
-            range.kind == Some(FoldingRangeKind::Comment)
+        assert!(ranges
+            .iter()
+            .any(|range| range.kind == Some(FoldingRangeKind::Comment)
                 && range.start_line == 0
-                && range.end_line == 1
-        ));
-        assert!(ranges.iter().any(|range|
-            range.kind == Some(FoldingRangeKind::Region)
+                && range.end_line == 1));
+        assert!(ranges
+            .iter()
+            .any(|range| range.kind == Some(FoldingRangeKind::Region)
                 && range.start_line == 2
-                && range.end_line == 7
-        ));
-        assert!(ranges.iter().any(|range|
-            range.kind == Some(FoldingRangeKind::Region)
+                && range.end_line == 7));
+        assert!(ranges
+            .iter()
+            .any(|range| range.kind == Some(FoldingRangeKind::Region)
                 && range.start_line == 3
-                && range.end_line == 5
-        ));
+                && range.end_line == 5));
     }
 
     #[test]
@@ -2090,20 +2105,6 @@ def add(a: i64, b: i64) -> i64 {
 
         let signatures = collect_function_signatures(src);
         assert!(signatures.iter().any(|sig| sig.name == "add"));
-        assert!(signatures
-            .iter()
-            .any(|sig| sig.label.contains("def add(")));
+        assert!(signatures.iter().any(|sig| sig.label.contains("def add(")));
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-

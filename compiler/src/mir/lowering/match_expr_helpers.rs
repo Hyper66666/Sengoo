@@ -1,5 +1,5 @@
-use crate::hir::HIRMatchArm;
 use super::*;
+use crate::hir::HIRMatchArm;
 
 pub(super) fn lower_match_expr(
     ctx: &mut LoweringContext<'_>,
@@ -193,7 +193,10 @@ mod tests {
         ctx.local_names.insert("value".to_string(), scrutinee);
         ctx.bind_local_symbol(SymbolId::new(9), scrutinee);
         let arms = vec![
-            HIRMatchArm::new(HIRPattern::Lit(HIRLiteral::Int(0)), HIRExpr::Lit(HIRLiteral::Int(10))),
+            HIRMatchArm::new(
+                HIRPattern::Lit(HIRLiteral::Int(0)),
+                HIRExpr::Lit(HIRLiteral::Int(10)),
+            ),
             HIRMatchArm::new(HIRPattern::Wild, HIRExpr::Lit(HIRLiteral::Int(20))),
         ];
 
@@ -240,7 +243,10 @@ mod tests {
 
         let scrutinee = ctx.add_local(None, LocalKind::User, MIR_I64);
         let arms = vec![
-            HIRMatchArm::new(HIRPattern::Lit(HIRLiteral::Int(0)), HIRExpr::Lit(HIRLiteral::Int(10))),
+            HIRMatchArm::new(
+                HIRPattern::Lit(HIRLiteral::Int(0)),
+                HIRExpr::Lit(HIRLiteral::Int(10)),
+            ),
             HIRMatchArm::new(HIRPattern::Wild, HIRExpr::Lit(HIRLiteral::Int(20))),
         ];
 
@@ -292,7 +298,10 @@ mod tests {
             },
         );
         let arms = vec![
-            HIRMatchArm::new(HIRPattern::Lit(HIRLiteral::Int(0)), HIRExpr::Lit(HIRLiteral::Int(10))),
+            HIRMatchArm::new(
+                HIRPattern::Lit(HIRLiteral::Int(0)),
+                HIRExpr::Lit(HIRLiteral::Int(10)),
+            ),
             HIRMatchArm::new(HIRPattern::Wild, HIRExpr::Lit(HIRLiteral::Int(20))),
         ];
 
@@ -303,6 +312,9 @@ mod tests {
             inst,
             Instruction::Phi { destination, incoming } if *destination == result && incoming.len() == 2
         )));
-        assert!(matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Switch { .. })));
+        assert!(matches!(
+            ctx.mir_fn.basic_blocks[start_block].terminator,
+            Some(Terminator::Switch { .. })
+        ));
     }
 }

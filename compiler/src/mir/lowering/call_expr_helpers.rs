@@ -60,7 +60,13 @@ mod tests {
         };
         let result = lower_call_expr(&mut ctx, &func, &[]);
 
-        assert_eq!(ctx.get_local_type(result), &MIRType::Future(Box::new(MIR_BOOL)));
-        assert_eq!(ctx.future_origins.get(&result).map(String::as_str), Some("worker"));
+        assert_eq!(
+            ctx.get_local_type(result),
+            &MIRType::Future(Box::new(MIR_BOOL))
+        );
+        assert_eq!(
+            ctx.future_origins.get(&result).map(String::as_str),
+            Some("worker")
+        );
     }
 }

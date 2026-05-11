@@ -107,43 +107,43 @@ impl Node for Type {
 /// 类型种类枚举
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    /// 简单路径类型，如  或 
+    /// 简单路径类型，如  或
     Path(Path),
 
-    /// 带泛型参数的路径类型，如 
+    /// 带泛型参数的路径类型，如
     PathWithArgs { path: Path, args: Vec<Type> },
 
-    /// 元组类型，如 
+    /// 元组类型，如
     Tuple(Vec<Type>),
 
-    /// 数组类型，如 
+    /// 数组类型，如
     Array(Box<Type>, u64),
 
-    /// 切片类型，如 
+    /// 切片类型，如
     Slice(Box<Type>),
 
-    /// 裸指针类型，如  或 
+    /// 裸指针类型，如  或
     Ptr { base: Box<Type>, is_mut: bool },
 
-    /// 引用类型，如  或 
+    /// 引用类型，如  或
     Ref { base: Box<Type>, is_mut: bool },
 
-    /// 函数类型，如 
+    /// 函数类型，如
     Fn {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
     },
 
-    /// Never 类型 
+    /// Never 类型
     Never,
 
-    /// 类型推断占位符 
+    /// 类型推断占位符
     Infer,
 
-    /// 动态分发类型，如 
+    /// 动态分发类型，如
     Dyn(Vec<TraitBound>),
 
-    /// Impl Trait 类型，如 
+    /// Impl Trait 类型，如
     ImplTrait(Vec<TraitBound>),
 }
 

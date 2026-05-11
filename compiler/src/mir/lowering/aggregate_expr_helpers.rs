@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(super) fn lower_array_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr]) -> Local {
     let elem_locals: Vec<Local> = elems.iter().map(|e| ctx.lower_expr(e)).collect();
@@ -110,9 +110,7 @@ pub(super) fn lower_struct_expr(
             name: name.to_string(),
             fields: lowered_fields
                 .iter()
-                .map(|(field_name, local)| {
-                    (field_name.clone(), ctx.get_local_type(*local).clone())
-                })
+                .map(|(field_name, local)| (field_name.clone(), ctx.get_local_type(*local).clone()))
                 .collect(),
         });
 
@@ -142,7 +140,6 @@ pub(super) fn lower_struct_expr(
     struct_local
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,7 +149,7 @@ mod tests {
         usize,
         HashSet<String>,
         HashMap<String, FunctionSig>,
-        HashMap<String, & 'static hir::HIRStruct>,
+        HashMap<String, &'static hir::HIRStruct>,
         Vec<InherentMethodTemplate>,
         Vec<TraitMethodTemplate>,
     );
@@ -171,7 +168,15 @@ mod tests {
 
     #[test]
     fn lower_array_expr_emits_aggregate_with_element_locals() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -186,7 +191,10 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let elems = vec![HIRExpr::Lit(HIRLiteral::Int(1)), HIRExpr::Lit(HIRLiteral::Int(2))];
+        let elems = vec![
+            HIRExpr::Lit(HIRLiteral::Int(1)),
+            HIRExpr::Lit(HIRLiteral::Int(2)),
+        ];
         let result = lower_array_expr(&mut ctx, &elems);
 
         assert!(matches!(ctx.get_local_type(result), MIRType::Array(_, 2)));
@@ -195,7 +203,15 @@ mod tests {
 
     #[test]
     fn lower_index_expr_emits_index_addr_and_load() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,
@@ -214,18 +230,35 @@ mod tests {
         ctx.local_names.insert("arr".to_string(), arr);
         ctx.bind_local_symbol(SymbolId::new(1), arr);
 
-        let base = HIRExpr::Var { name: "arr".to_string(), symbol: SymbolId::new(1) };
+        let base = HIRExpr::Var {
+            name: "arr".to_string(),
+            symbol: SymbolId::new(1),
+        };
         let index = HIRExpr::Lit(HIRLiteral::Int(0));
         let result = lower_index_expr(&mut ctx, &base, &index);
 
         assert_eq!(ctx.get_local_type(result), &MIR_I64);
-        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::IndexAddr { .. })));
-        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Load { destination, .. } if *destination == result)));
+        assert!(ctx
+            .mir_fn
+            .instructions
+            .iter()
+            .any(|inst| matches!(inst, Instruction::IndexAddr { .. })));
+        assert!(ctx.mir_fn.instructions.iter().any(
+            |inst| matches!(inst, Instruction::Load { destination, .. } if *destination == result)
+        ));
     }
 
     #[test]
     fn lower_struct_expr_records_struct_type_name_on_result() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
 
         let mut ctx = LoweringContext::new(
@@ -247,13 +280,26 @@ mod tests {
         ];
         let result = lower_struct_expr(&mut ctx, "Pair", &fields);
 
-        assert_eq!(ctx.type_names.get(&result).map(String::as_str), Some("Pair"));
-        assert!(matches!(ctx.get_local_type(result), MIRType::Struct { name, .. } if name == "Pair"));
+        assert_eq!(
+            ctx.type_names.get(&result).map(String::as_str),
+            Some("Pair")
+        );
+        assert!(
+            matches!(ctx.get_local_type(result), MIRType::Struct { name, .. } if name == "Pair")
+        );
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Aggregate { destination, fields, .. } if *destination == result && fields.len() == 2)));
     }
     #[test]
     fn lower_field_expr_extracts_struct_field_by_name() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(
             &mut mir_fn,

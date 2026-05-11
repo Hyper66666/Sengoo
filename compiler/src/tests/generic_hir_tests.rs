@@ -121,7 +121,6 @@ trait Mapper {
     assert_eq!(method.type_params[0].name, "T");
 }
 
-
 #[test]
 fn lower_ast_infers_string_let_as_ref_str() {
     let source = r#"

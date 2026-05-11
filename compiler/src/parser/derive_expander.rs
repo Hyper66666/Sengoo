@@ -266,7 +266,9 @@ fn validate_expanded_source(source: &str) -> Result<()> {
     let mut parser = Parser::new(source);
     parser.parse_program()?;
     if parser.has_errors() {
-        return Err(parse_error("post-expansion validation failed for derive output"));
+        return Err(parse_error(
+            "post-expansion validation failed for derive output",
+        ));
     }
     Ok(())
 }
@@ -521,6 +523,8 @@ const FLAG: i64 = 1;
 "#;
 
         let err = expand_derive_macros(source).expect_err("derive on const should fail");
-        assert!(err.to_string().contains("derive attribute is only supported"));
+        assert!(err
+            .to_string()
+            .contains("derive attribute is only supported"));
     }
 }

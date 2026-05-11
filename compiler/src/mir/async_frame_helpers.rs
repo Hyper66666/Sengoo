@@ -1,6 +1,5 @@
 use crate::mir::{
-    Instruction, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64,
-    MIR_UNIT,
+    Instruction, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64, MIR_UNIT,
 };
 use crate::CompileError;
 
@@ -378,7 +377,10 @@ pub(crate) fn push_frame_load_into_typed(
 ) -> Result<(), CompileError> {
     let storage_ty = frame_storage_ty(ty);
     match &storage_ty {
-        MIRType::Tuple(_) | MIRType::Array(_, _) | MIRType::Struct { .. } | MIRType::Enum { .. } => {
+        MIRType::Tuple(_)
+        | MIRType::Array(_, _)
+        | MIRType::Struct { .. }
+        | MIRType::Enum { .. } => {
             let loaded = push_frame_load_typed(f, block, handle, offset, storage_ty.clone())?;
             let store = f.alloc_inst(Instruction::Store {
                 destination,
@@ -478,7 +480,8 @@ pub(crate) fn push_frame_load_typed(
             let mut fields = Vec::with_capacity(*len as usize);
             let mut next_offset = offset;
             for _ in 0..(*len as usize) {
-                let loaded = push_frame_load_typed(f, block, handle, next_offset, (**elem).clone())?;
+                let loaded =
+                    push_frame_load_typed(f, block, handle, next_offset, (**elem).clone())?;
                 fields.push(loaded);
                 next_offset += async_frame_slot_count(elem)? as i64;
             }
@@ -488,7 +491,8 @@ pub(crate) fn push_frame_load_typed(
             let mut values = Vec::with_capacity(fields.len());
             let mut next_offset = offset;
             for (_, field_ty) in fields {
-                let loaded = push_frame_load_typed(f, block, handle, next_offset, field_ty.clone())?;
+                let loaded =
+                    push_frame_load_typed(f, block, handle, next_offset, field_ty.clone())?;
                 values.push(loaded);
                 next_offset += async_frame_slot_count(field_ty)? as i64;
             }

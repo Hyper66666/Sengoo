@@ -1,8 +1,8 @@
 use miette::{IntoDiagnostic, Result};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::io;
 use std::hash::{Hash, Hasher};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -29,7 +29,10 @@ fn frontend_session_store_fallback_path(path: &Path) -> PathBuf {
     let mut hasher = DefaultHasher::new();
     path.to_string_lossy().hash(&mut hasher);
     let key = hasher.finish();
-    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("frontend-session");
+    let file_stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("frontend-session");
     std::env::temp_dir()
         .join("sengoo")
         .join("frontend-session-cache")
@@ -161,7 +164,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("sengoo-cache-{label}-{}-{unique}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "sengoo-cache-{label}-{}-{unique}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -192,14 +198,25 @@ mod tests {
     #[test]
     fn load_frontend_session_store_prefers_newer_fallback_file() {
         let root = temp_test_dir("frontend-fallback-load");
-        let primary = root.join("build").join("workset").join("sample.frontend-session-v4.json");
+        let primary = root
+            .join("build")
+            .join("workset")
+            .join("sample.frontend-session-v4.json");
         let fallback = frontend_session_store_fallback_path(&primary);
 
         fs::create_dir_all(primary.parent().unwrap()).unwrap();
         fs::create_dir_all(fallback.parent().unwrap()).unwrap();
-        fs::write(&primary, br#"{"compiler_version":"primary","root_module":"m"}"#).unwrap();
+        fs::write(
+            &primary,
+            br#"{"compiler_version":"primary","root_module":"m"}"#,
+        )
+        .unwrap();
         std::thread::sleep(Duration::from_millis(20));
-        fs::write(&fallback, br#"{"compiler_version":"fallback","root_module":"m"}"#).unwrap();
+        fs::write(
+            &fallback,
+            br#"{"compiler_version":"fallback","root_module":"m"}"#,
+        )
+        .unwrap();
 
         let loaded = load_frontend_session_store(&primary).unwrap();
         assert_eq!(loaded.compiler_version, "fallback");
@@ -212,7 +229,9 @@ mod tests {
     fn save_frontend_session_store_uses_temp_fallback_when_primary_path_is_unwritable() {
         let root = temp_test_dir("frontend-fallback-save");
         let blocked_parent = root.join("blocked");
-        let primary = blocked_parent.join("child").join("sample.frontend-session-v4.json");
+        let primary = blocked_parent
+            .join("child")
+            .join("sample.frontend-session-v4.json");
         let fallback = frontend_session_store_fallback_path(&primary);
         let metadata = FrontendSessionStoreV4 {
             schema_version: 4,

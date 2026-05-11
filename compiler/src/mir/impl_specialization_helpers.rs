@@ -1,9 +1,9 @@
 use crate::hir::{self, HIRType, HIRTypeKind};
-use crate::mir::method_specialization_helpers::prepare_method_specialization;
-use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType};
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
 };
+use crate::mir::method_specialization_helpers::prepare_method_specialization;
+use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType};
 use crate::type_naming::{hir_type_instance_name, hir_type_prefix};
 use std::collections::{HashMap, HashSet};
 
@@ -44,10 +44,9 @@ pub(crate) fn match_generic_impl_target(
             }
             (HIRTypeKind::Tuple(lhs), HIRTypeKind::Tuple(rhs)) => {
                 lhs.len() == rhs.len()
-                    && lhs
-                        .iter()
-                        .zip(rhs.iter())
-                        .all(|(lhs, rhs)| match_generic_impl_target(lhs, rhs, known_named_types, subst))
+                    && lhs.iter().zip(rhs.iter()).all(|(lhs, rhs)| {
+                        match_generic_impl_target(lhs, rhs, known_named_types, subst)
+                    })
             }
             (
                 HIRTypeKind::Fn {
@@ -60,10 +59,9 @@ pub(crate) fn match_generic_impl_target(
                 },
             ) => {
                 lhs_params.len() == rhs_params.len()
-                    && lhs_params
-                        .iter()
-                        .zip(rhs_params.iter())
-                        .all(|(lhs, rhs)| match_generic_impl_target(lhs, rhs, known_named_types, subst))
+                    && lhs_params.iter().zip(rhs_params.iter()).all(|(lhs, rhs)| {
+                        match_generic_impl_target(lhs, rhs, known_named_types, subst)
+                    })
                     && match_generic_impl_target(lhs_ret, rhs_ret, known_named_types, subst)
             }
             (
@@ -78,10 +76,9 @@ pub(crate) fn match_generic_impl_target(
             ) => {
                 lhs_name == rhs_name
                     && lhs_args.len() == rhs_args.len()
-                    && lhs_args
-                        .iter()
-                        .zip(rhs_args.iter())
-                        .all(|(lhs, rhs)| match_generic_impl_target(lhs, rhs, known_named_types, subst))
+                    && lhs_args.iter().zip(rhs_args.iter()).all(|(lhs, rhs)| {
+                        match_generic_impl_target(lhs, rhs, known_named_types, subst)
+                    })
             }
             _ => false,
         }
@@ -184,7 +181,8 @@ pub(crate) fn resolve_inherent_method_specialization(
     struct_defs: &HashMap<String, &hir::HIRStruct>,
     concrete_type_registry: &mut ConcreteTypeRegistry,
 ) -> Option<hir::HIRFunction> {
-    for (template, legacy_prefix) in collect_matching_inherent_method_templates(templates, method_name)
+    for (template, legacy_prefix) in
+        collect_matching_inherent_method_templates(templates, method_name)
     {
         if let Some(specialized) = specialize_matching_inherent_method(
             template,
@@ -216,7 +214,12 @@ pub(crate) fn expand_impl_variants(
                 .items
                 .iter()
                 .map(|method| {
-                    instantiate_impl_method(method, &legacy_prefix, &concrete_prefix, &HashMap::new())
+                    instantiate_impl_method(
+                        method,
+                        &legacy_prefix,
+                        &concrete_prefix,
+                        &HashMap::new(),
+                    )
                 })
                 .collect(),
         }];
@@ -241,7 +244,12 @@ pub(crate) fn expand_impl_variants(
                         .items
                         .iter()
                         .map(|method| {
-                            instantiate_impl_method(method, &legacy_prefix, &concrete_prefix, &subst)
+                            instantiate_impl_method(
+                                method,
+                                &legacy_prefix,
+                                &concrete_prefix,
+                                &subst,
+                            )
                         })
                         .collect(),
                 });

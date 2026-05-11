@@ -117,7 +117,10 @@ pub fn synthesize_spawn_poll_dispatch(
         targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
-    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_sleep")
+    {
         let case_block = f.add_block();
         let result_local = f.add_local(LocalKind::Temp, MIR_I64);
         let call_inst = f.alloc_inst(Instruction::Call {
@@ -127,7 +130,10 @@ pub fn synthesize_spawn_poll_dispatch(
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_sleep")?,
+            case_block,
+        ));
     }
 
     if !entries
@@ -201,7 +207,10 @@ pub fn synthesize_spawn_cancel_dispatch(
         targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
-    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_sleep")
+    {
         let case_block = f.add_block();
         let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
         let call_inst = f.alloc_inst(Instruction::Call {
@@ -211,7 +220,10 @@ pub fn synthesize_spawn_cancel_dispatch(
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
-        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_sleep")?,
+            case_block,
+        ));
     }
 
     if !entries
@@ -279,7 +291,10 @@ pub fn synthesize_spawn_drop_dispatch(
         targets.push((dispatch_switch_key(registry, base_name)?, case_block));
     }
 
-    if !entries.iter().any(|(base_name, _)| base_name == "sengoo_async_sleep") {
+    if !entries
+        .iter()
+        .any(|(base_name, _)| base_name == "sengoo_async_sleep")
+    {
         let case_block = f.add_block();
         let unit_local = f.add_local(LocalKind::Temp, MIR_UNIT);
         let call_inst = f.alloc_inst(Instruction::Call {
@@ -289,7 +304,10 @@ pub fn synthesize_spawn_drop_dispatch(
         });
         f.basic_blocks[case_block].push(call_inst);
         f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
-        targets.push((dispatch_switch_key(registry, "sengoo_async_sleep")?, case_block));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_sleep")?,
+            case_block,
+        ));
     }
 
     if !entries

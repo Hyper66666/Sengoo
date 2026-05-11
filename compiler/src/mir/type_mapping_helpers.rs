@@ -1,6 +1,6 @@
 use crate::hir::{self, HIRType, HIRTypeKind};
-use crate::mir::MIRType;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
+use crate::mir::MIRType;
 use crate::type_naming::mir_type_instance_name;
 use std::collections::HashMap;
 
@@ -68,11 +68,17 @@ pub(crate) fn hir_type_to_mir_with_structs_and_subst(
         HIRTypeKind::Ref(_, inner) => MIRType::Ref(Box::new(
             hir_type_to_mir_with_structs_and_subst(inner, struct_defs, subst),
         )),
-        HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new(
-            hir_type_to_mir_with_structs_and_subst(inner, struct_defs, subst),
-        )),
+        HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new(hir_type_to_mir_with_structs_and_subst(
+            inner,
+            struct_defs,
+            subst,
+        ))),
         HIRTypeKind::Array(elem, len) => MIRType::Array(
-            Box::new(hir_type_to_mir_with_structs_and_subst(elem, struct_defs, subst)),
+            Box::new(hir_type_to_mir_with_structs_and_subst(
+                elem,
+                struct_defs,
+                subst,
+            )),
             *len as u64,
         ),
         HIRTypeKind::Tuple(types) => MIRType::Tuple(
@@ -86,7 +92,11 @@ pub(crate) fn hir_type_to_mir_with_structs_and_subst(
                 .iter()
                 .map(|item| hir_type_to_mir_with_structs_and_subst(item, struct_defs, subst))
                 .collect(),
-            ret: Box::new(hir_type_to_mir_with_structs_and_subst(ret, struct_defs, subst)),
+            ret: Box::new(hir_type_to_mir_with_structs_and_subst(
+                ret,
+                struct_defs,
+                subst,
+            )),
         },
         _ => ty.clone().into(),
     }
@@ -122,8 +132,9 @@ pub(crate) fn bind_mir_subst_from_hir_type(
                     field_subst.insert(type_param.name.clone(), arg.clone());
                 }
                 for field in &def.fields {
-                    if let Some((_, actual_field_ty)) =
-                        fields.iter().find(|(field_name, _)| field_name == &field.name)
+                    if let Some((_, actual_field_ty)) = fields
+                        .iter()
+                        .find(|(field_name, _)| field_name == &field.name)
                     {
                         let template_field_ty = substitute_hir_type(&field.ty, &field_subst);
                         bind_mir_subst_from_hir_type(

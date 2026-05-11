@@ -1,9 +1,6 @@
 use super::*;
 
-pub(super) fn lower_break_expr(
-    ctx: &mut LoweringContext<'_>,
-    value: Option<&HIRExpr>,
-) -> Local {
+pub(super) fn lower_break_expr(ctx: &mut LoweringContext<'_>, value: Option<&HIRExpr>) -> Local {
     if let Some(target) = ctx.get_break_target() {
         if let Some(v) = value {
             ctx.lower_expr(v);
@@ -36,7 +33,7 @@ mod tests {
         usize,
         HashSet<String>,
         HashMap<String, FunctionSig>,
-        HashMap<String, & 'static hir::HIRStruct>,
+        HashMap<String, &'static hir::HIRStruct>,
         Vec<InherentMethodTemplate>,
         Vec<TraitMethodTemplate>,
     );
@@ -55,7 +52,15 @@ mod tests {
 
     #[test]
     fn lower_break_expr_sets_break_terminator_inside_loop() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let break_block = mir_fn.add_block();
         let continue_block = mir_fn.add_block();
@@ -77,12 +82,22 @@ mod tests {
         let result = lower_break_expr(&mut ctx, None);
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
-        assert!(matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Break { target }) if target == break_block));
+        assert!(
+            matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Break { target }) if target == break_block)
+        );
     }
 
     #[test]
     fn lower_break_expr_records_error_outside_loop() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
 
         let mut ctx = LoweringContext::new(
@@ -106,7 +121,15 @@ mod tests {
 
     #[test]
     fn lower_continue_expr_sets_continue_terminator_inside_loop() {
-        let (mut mir_fn, mut lambda_counter, known_functions, function_sigs, struct_defs, inherent_templates, trait_templates) = make_ctx();
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
         let start_block = mir_fn.start_block;
         let break_block = mir_fn.add_block();
         let continue_block = mir_fn.add_block();
@@ -128,6 +151,8 @@ mod tests {
         let result = lower_continue_expr(&mut ctx);
 
         assert_eq!(ctx.get_local_type(result), &MIR_UNIT);
-        assert!(matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Continue { target }) if target == continue_block));
+        assert!(
+            matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Continue { target }) if target == continue_block)
+        );
     }
 }

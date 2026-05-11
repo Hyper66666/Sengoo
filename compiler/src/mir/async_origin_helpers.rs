@@ -16,7 +16,11 @@ where
 
     let mut instructions = instructions.into_iter();
     while let Some(instruction) = instructions.next_back() {
-        if let Instruction::Load { destination, source } = instruction {
+        if let Instruction::Load {
+            destination,
+            source,
+        } = instruction
+        {
             if *destination == handle {
                 if let Some(name) = future_origins.get(source) {
                     return Some(name.clone());

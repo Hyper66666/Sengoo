@@ -196,9 +196,13 @@ mod tests {
         let future_local = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_I64)));
         ctx.local_names.insert("f".to_string(), future_local);
         ctx.bind_local_symbol(SymbolId::new(1), future_local);
-        ctx.future_origins.insert(future_local, "worker".to_string());
+        ctx.future_origins
+            .insert(future_local, "worker".to_string());
 
-        let value_expr = HIRExpr::Var { name: "f".to_string(), symbol: SymbolId::new(1) };
+        let value_expr = HIRExpr::Var {
+            name: "f".to_string(),
+            symbol: SymbolId::new(1),
+        };
         lower_let_stmt(
             &mut ctx,
             "bound",
@@ -208,8 +212,14 @@ mod tests {
             false,
         );
 
-        let bound_local = *ctx.local_symbols.get(&SymbolId::new(2)).expect("bound symbol should exist");
-        assert_eq!(ctx.future_origins.get(&bound_local).map(String::as_str), Some("worker"));
+        let bound_local = *ctx
+            .local_symbols
+            .get(&SymbolId::new(2))
+            .expect("bound symbol should exist");
+        assert_eq!(
+            ctx.future_origins.get(&bound_local).map(String::as_str),
+            Some("worker")
+        );
     }
 
     #[test]
@@ -237,11 +247,15 @@ mod tests {
         );
         ctx.set_current_block(start_block);
 
-        let array_local = ctx.add_local(None, LocalKind::User, MIRType::Array(Box::new(MIR_I64), 2));
+        let array_local =
+            ctx.add_local(None, LocalKind::User, MIRType::Array(Box::new(MIR_I64), 2));
         ctx.local_names.insert("arr".to_string(), array_local);
         ctx.bind_local_symbol(SymbolId::new(1), array_local);
 
-        let value_expr = HIRExpr::Var { name: "arr".to_string(), symbol: SymbolId::new(1) };
+        let value_expr = HIRExpr::Var {
+            name: "arr".to_string(),
+            symbol: SymbolId::new(1),
+        };
         lower_let_stmt(
             &mut ctx,
             "arr2",
@@ -293,7 +307,8 @@ mod tests {
         );
         ctx.local_names.insert("lam".to_string(), lambda_local);
         ctx.bind_local_symbol(SymbolId::new(1), lambda_local);
-        ctx.lambda_names.insert(lambda_local, "lambda$0".to_string());
+        ctx.lambda_names
+            .insert(lambda_local, "lambda$0".to_string());
         ctx.lambda_environments.insert(
             "lambda$0".to_string(),
             LambdaEnv {
@@ -303,18 +318,34 @@ mod tests {
             },
         );
 
-        let value_expr = HIRExpr::Var { name: "lam".to_string(), symbol: SymbolId::new(1) };
+        let value_expr = HIRExpr::Var {
+            name: "lam".to_string(),
+            symbol: SymbolId::new(1),
+        };
         lower_let_stmt(
             &mut ctx,
             "bound_lambda",
             SymbolId::new(2),
-            &HIRType::function(vec![HIRType::int(IntKind::I64)], Box::new(HIRType::int(IntKind::I64))),
+            &HIRType::function(
+                vec![HIRType::int(IntKind::I64)],
+                Box::new(HIRType::int(IntKind::I64)),
+            ),
             Some(&value_expr),
             false,
         );
 
-        let bound_local = *ctx.local_symbols.get(&SymbolId::new(2)).expect("bound lambda symbol should exist");
-        assert_eq!(ctx.lambda_names.get(&bound_local).map(String::as_str), Some("lambda$0"));
-        assert!(ctx.lambda_environments.get("lambda$0").and_then(|env| env.env_ptr_local).is_some());
+        let bound_local = *ctx
+            .local_symbols
+            .get(&SymbolId::new(2))
+            .expect("bound lambda symbol should exist");
+        assert_eq!(
+            ctx.lambda_names.get(&bound_local).map(String::as_str),
+            Some("lambda$0")
+        );
+        assert!(ctx
+            .lambda_environments
+            .get("lambda$0")
+            .and_then(|env| env.env_ptr_local)
+            .is_some());
     }
 }

@@ -110,8 +110,8 @@ def main() -> i64 {
     p.x
 }
 "#;
-    let err = compile_to_ir(source)
-        .expect_err("struct field completeness issues should be aggregated");
+    let err =
+        compile_to_ir(source).expect_err("struct field completeness issues should be aggregated");
     let message = err.to_string();
 
     assert!(

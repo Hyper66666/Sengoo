@@ -205,7 +205,12 @@ fn reachable_ast_function_names(program: &AstProgram) -> Option<HashSet<String>>
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
-    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+    for root_async_helper in [
+        "main__async_body",
+        "main__start",
+        "main__poll",
+        "main__result",
+    ] {
         if let Some(&idx) = index_by_name.get(root_async_helper) {
             stack.push(idx);
         }
@@ -412,8 +417,9 @@ fn compile_frontend_to_mir_with_phase_timings(
 
         // Expand async functions into frame-backed __start/__poll/__result helpers
         if !async_functions.is_empty() {
-            let async_helpers = sengoo_compiler::mir::async_lowering::expand_async_functions(&mut mir_fns)
-                .map_err(|e| miette::miette!("{}", e))?;
+            let async_helpers =
+                sengoo_compiler::mir::async_lowering::expand_async_functions(&mut mir_fns)
+                    .map_err(|e| miette::miette!("{}", e))?;
             mir_fns.extend(async_helpers);
         }
         drop(hir_module);
@@ -504,7 +510,12 @@ fn prune_unreachable_ast_functions(program: &mut AstProgram) -> usize {
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
-    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+    for root_async_helper in [
+        "main__async_body",
+        "main__start",
+        "main__poll",
+        "main__result",
+    ] {
         if let Some(&idx) = index_by_name.get(root_async_helper) {
             stack.push(idx);
         }
@@ -811,7 +822,12 @@ fn prune_unreachable_hir_functions(items: &mut Vec<HIRItem>) -> usize {
 
     let mut reachable = vec![false; functions.len()];
     let mut stack = vec![main_index];
-    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+    for root_async_helper in [
+        "main__async_body",
+        "main__start",
+        "main__poll",
+        "main__result",
+    ] {
         if let Some(&idx) = index_by_name.get(root_async_helper) {
             stack.push(idx);
         }
@@ -1199,7 +1215,12 @@ fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) -> usize {
 
     let mut reachable = vec![false; mir_fns.len()];
     let mut stack = vec![main_index];
-    for root_async_helper in ["main__async_body", "main__start", "main__poll", "main__result"] {
+    for root_async_helper in [
+        "main__async_body",
+        "main__start",
+        "main__poll",
+        "main__result",
+    ] {
         if let Some(&idx) = index_by_name.get(root_async_helper) {
             stack.push(idx);
         }
@@ -1421,4 +1442,3 @@ def b(x: i64) -> i64 {
         assert_eq!(after, before);
     }
 }
-

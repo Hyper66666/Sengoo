@@ -1,4 +1,6 @@
-﻿use super::async_cfg_helpers::{collect_live_user_slots, compute_live_in_user_locals, AsyncCfgPlan, LiveUserSlot};
+use super::async_cfg_helpers::{
+    collect_live_user_slots, compute_live_in_user_locals, AsyncCfgPlan, LiveUserSlot,
+};
 use super::async_frame_helpers::{
     frame_await_slot, frame_user_slot, push_frame_load_into, push_frame_load_into_typed,
     push_frame_load_typed, push_frame_store, push_frame_store_typed, push_i64_const,
@@ -52,7 +54,10 @@ fn remap_instruction(
             left: remap_local(*left, local_map)?,
             right: remap_local(*right, local_map)?,
         },
-        Instruction::Load { destination, source } => Instruction::Load {
+        Instruction::Load {
+            destination,
+            source,
+        } => Instruction::Load {
             destination: remap_local(*destination, local_map)?,
             source: remap_local(*source, local_map)?,
         },
@@ -60,7 +65,10 @@ fn remap_instruction(
             destination: remap_local(*destination, local_map)?,
             value: remap_local(*value, local_map)?,
         },
-        Instruction::AddrOf { destination, source } => Instruction::AddrOf {
+        Instruction::AddrOf {
+            destination,
+            source,
+        } => Instruction::AddrOf {
             destination: remap_local(*destination, local_map)?,
             source: remap_local(*source, local_map)?,
         },
@@ -149,14 +157,19 @@ fn remap_instruction(
             intrinsic,
             args,
         } => Instruction::Intrinsic {
-            destination: destination.map(|local| remap_local(local, local_map)).transpose()?,
+            destination: destination
+                .map(|local| remap_local(local, local_map))
+                .transpose()?,
             intrinsic: intrinsic.clone(),
             args: args
                 .iter()
                 .map(|local| remap_local(*local, local_map))
                 .collect::<Result<Vec<_>, _>>()?,
         },
-        Instruction::Discriminant { destination, source } => Instruction::Discriminant {
+        Instruction::Discriminant {
+            destination,
+            source,
+        } => Instruction::Discriminant {
             destination: remap_local(*destination, local_map)?,
             source: remap_local(*source, local_map)?,
         },
@@ -168,10 +181,15 @@ fn remap_instruction(
         } => Instruction::EnumConstruct {
             destination: remap_local(*destination, local_map)?,
             discriminant: *discriminant,
-            payload: payload.map(|local| remap_local(local, local_map)).transpose()?,
+            payload: payload
+                .map(|local| remap_local(local, local_map))
+                .transpose()?,
             enum_type: enum_type.clone(),
         },
-        Instruction::ExtractPayload { destination, source } => Instruction::ExtractPayload {
+        Instruction::ExtractPayload {
+            destination,
+            source,
+        } => Instruction::ExtractPayload {
             destination: remap_local(*destination, local_map)?,
             source: remap_local(*source, local_map)?,
         },
@@ -349,7 +367,8 @@ pub(crate) fn synthesize_cfg_poll(
         let translated = translated_blocks[block];
         let original_block = &mir_fn.basic_blocks[*block];
         for inst_id in &original_block.instructions {
-            let cloned = remap_instruction(mir_fn.instruction(*inst_id), &local_map, &translated_blocks)?;
+            let cloned =
+                remap_instruction(mir_fn.instruction(*inst_id), &local_map, &translated_blocks)?;
             let new_id = f.alloc_inst(cloned);
             f.basic_blocks[translated].push(new_id);
         }
@@ -371,16 +390,14 @@ pub(crate) fn synthesize_cfg_poll(
                         &layout.result_storage_ty,
                     )?;
                 }
-                let completed_state = push_i64_const(
-                    &mut f,
-                    translated,
-                    (plan.suspend_points.len() + 1) as i64,
-                );
+                let completed_state =
+                    push_i64_const(&mut f, translated, (plan.suspend_points.len() + 1) as i64);
                 push_frame_store(&mut f, translated, handle, 0, completed_state);
                 emit_ready_return(&mut f, translated);
             }
             Terminator::Goto(target) => {
-                f.basic_blocks[translated].set_terminator(Terminator::Goto(translated_blocks[target]));
+                f.basic_blocks[translated]
+                    .set_terminator(Terminator::Goto(translated_blocks[target]));
             }
             Terminator::If {
                 cond,
@@ -435,7 +452,10 @@ pub(crate) fn synthesize_cfg_poll(
                     pending_blocks[block],
                     point.state_index,
                     point.state_index - 1,
-                    live_user_slots.get(block).map(|slots| slots.as_slice()).unwrap_or(&[]),
+                    live_user_slots
+                        .get(block)
+                        .map(|slots| slots.as_slice())
+                        .unwrap_or(&[]),
                     &local_map,
                 )?;
             }

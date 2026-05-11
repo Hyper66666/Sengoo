@@ -16,7 +16,10 @@ pub(crate) fn find_runtime_c() -> Option<String> {
     }
 
     if let Some(workspace_root) = workspace_root_from_manifest_dir() {
-        let candidate = workspace_root.join("tools").join("stdlib").join("runtime.c");
+        let candidate = workspace_root
+            .join("tools")
+            .join("stdlib")
+            .join("runtime.c");
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }

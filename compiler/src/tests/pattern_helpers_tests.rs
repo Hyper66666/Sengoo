@@ -63,7 +63,10 @@ fn pattern_binding_plan_extracts_simple_var_and_tuple_bindings() {
                 mutability: false,
             },
         ])),
-        PatternBindingPlan::BindTupleFields(vec![(0, "left".to_string()), (2, "right".to_string())])
+        PatternBindingPlan::BindTupleFields(vec![
+            (0, "left".to_string()),
+            (2, "right".to_string())
+        ])
     );
 }
 
@@ -85,8 +88,14 @@ fn pattern_binding_plan_ignores_non_var_tuple_members_and_other_patterns() {
 #[test]
 fn build_match_switch_plan_routes_literal_arms_and_last_fallback() {
     let arms = vec![
-        HIRMatchArm::new(HIRPattern::Lit(HIRLiteral::Int(1)), crate::hir::HIRExpr::Lit(HIRLiteral::Int(1))),
-        HIRMatchArm::new(HIRPattern::Wild, crate::hir::HIRExpr::Lit(HIRLiteral::Int(0))),
+        HIRMatchArm::new(
+            HIRPattern::Lit(HIRLiteral::Int(1)),
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(1)),
+        ),
+        HIRMatchArm::new(
+            HIRPattern::Wild,
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(0)),
+        ),
         HIRMatchArm::new(
             HIRPattern::Var {
                 name: "fallback".to_string(),
@@ -113,7 +122,10 @@ fn pattern_match_plan_distinguishes_literal_and_always_true_patterns() {
         pattern_match_plan(&HIRPattern::Lit(HIRLiteral::Int(9))),
         PatternMatchPlan::EqLiteral(HIRLiteral::Int(9))
     );
-    assert_eq!(pattern_match_plan(&HIRPattern::Wild), PatternMatchPlan::AlwaysTrue);
+    assert_eq!(
+        pattern_match_plan(&HIRPattern::Wild),
+        PatternMatchPlan::AlwaysTrue
+    );
     assert_eq!(
         pattern_match_plan(&HIRPattern::Var {
             name: "bound".to_string(),

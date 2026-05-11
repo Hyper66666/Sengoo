@@ -50,19 +50,21 @@ fn collect_direct_calls_in_expr_finds_nested_direct_calls_only() {
                 func: Box::new(var("guard_fn", 2)),
                 args: vec![],
             })),
-            body: Box::new(HIRExpr::AsyncBlock(Box::new(HIRBody::with_expr(HIRExpr::Call {
-                func: Box::new(var("body_fn", 3)),
-                args: vec![
-                    HIRExpr::Call {
-                        func: Box::new(HIRExpr::Field {
-                            base: Box::new(var("obj", 4)),
-                            field: "method".to_string(),
-                        }),
-                        args: vec![],
-                    },
-                    var("plain_arg", 5),
-                ],
-            })))),
+            body: Box::new(HIRExpr::AsyncBlock(Box::new(HIRBody::with_expr(
+                HIRExpr::Call {
+                    func: Box::new(var("body_fn", 3)),
+                    args: vec![
+                        HIRExpr::Call {
+                            func: Box::new(HIRExpr::Field {
+                                base: Box::new(var("obj", 4)),
+                                field: "method".to_string(),
+                            }),
+                            args: vec![],
+                        },
+                        var("plain_arg", 5),
+                    ],
+                },
+            )))),
         }],
     };
 

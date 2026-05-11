@@ -765,7 +765,12 @@ pub(crate) async fn cmd_build(
     }
 
     let mut object_paths = vec![object_path.clone()];
-    append_native_runtime_inputs(&clang_exe, &mut object_paths, runtime_c.as_deref(), opt_level)?;
+    append_native_runtime_inputs(
+        &clang_exe,
+        &mut object_paths,
+        runtime_c.as_deref(),
+        opt_level,
+    )?;
     link_native_binary_from_objects(&clang_exe, &object_paths, output_path)?;
     maybe_emit_reflection_sidecar(
         Path::new(&output_file),
@@ -1314,7 +1319,12 @@ pub(crate) async fn cmd_run(
             }
 
             let mut object_paths = vec![object_path.clone()];
-            append_native_runtime_inputs(clang, &mut object_paths, runtime_c.as_deref(), opt_level)?;
+            append_native_runtime_inputs(
+                clang,
+                &mut object_paths,
+                runtime_c.as_deref(),
+                opt_level,
+            )?;
             link_native_binary_from_objects(clang, &object_paths, &executable_path)?;
             run_native_binary(&executable_path)?;
         }

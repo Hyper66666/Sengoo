@@ -359,7 +359,7 @@ impl<'source> Parser<'source> {
                     if let Some(token) = self.current() {
                         match &token.kind {
                             TokenKind::LBrace => {
-                            // 检查是否为结构体初始化表达式。
+                                // 检查是否为结构体初始化表达式。
                                 if !self.in_condition_context {
                                     return self.parse_struct_expr(path);
                                 }
@@ -560,7 +560,7 @@ impl<'source> Parser<'source> {
             TokenKind::Dot => {
                 let field = self.expect_ident()?;
 
-            // 检查是否为方法调用（后跟括号）。
+                // 检查是否为方法调用（后跟括号）。
                 if self.check(TokenKind::LParen) {
                     self.expect(TokenKind::LParen)?;
                     let mut args = Vec::new();
@@ -579,7 +579,7 @@ impl<'source> Parser<'source> {
                         args,
                     }
                 } else {
-                // 否则解析为字段访问表达式。
+                    // 否则解析为字段访问表达式。
                     ExprKind::Field {
                         base: Box::new(left),
                         field,
@@ -741,15 +741,15 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-    // 解析match arm中可能包含多个用|分隔的模式。
+            // 解析match arm中可能包含多个用|分隔的模式。
             let mut patterns = vec![self.parse_pattern()?];
 
-    // 解析额外的模式（用|连接）。
+            // 解析额外的模式（用|连接）。
             while self.consume(TokenKind::BitOr).is_some() {
                 patterns.push(self.parse_pattern()?);
             }
 
-    // 解析可选的if守卫条件。
+            // 解析可选的if守卫条件。
             let guard = if self.consume(TokenKind::IfKw).is_some() {
                 Some(Box::new(self.parse_expr()?))
             } else {
@@ -782,7 +782,7 @@ impl<'source> Parser<'source> {
     fn parse_lambda_expr(&mut self) -> Result<Expr> {
         let lo = self.current_span().lo;
 
-    // 解析lambda参数列表。
+        // 解析lambda参数列表。
         let mut params = Vec::new();
         self.expect(TokenKind::BitOr)?;
 
@@ -864,7 +864,7 @@ impl<'source> Parser<'source> {
                 break;
             }
 
-    // 解析结构体更新语法（..base）。
+            // 解析结构体更新语法（..base）。
             if self.consume(TokenKind::DotDot).is_some() {
                 base = Some(Box::new(self.parse_expr()?));
                 self.consume(TokenKind::RBrace);
@@ -899,7 +899,7 @@ impl<'source> Parser<'source> {
                 let value = self.parse_expr()?;
                 fields.push(FieldValue::new(name, value, self.current_span()));
             } else {
-            // 允许字段名为标识符或整数（元组结构体）。
+                // 允许字段名为标识符或整数（元组结构体）。
                 if let FieldName::Ident(ref ident) = name {
                     fields.push(FieldValue::shorthand(ident.clone(), self.current_span()));
                 } else {

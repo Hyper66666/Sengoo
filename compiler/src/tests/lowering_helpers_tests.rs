@@ -33,7 +33,10 @@ fn collect_named_symbols_finds_result_in_nested_control_flow() {
     let mut out = Vec::new();
     collect_named_symbols(&expr, "result", &mut out);
 
-    assert_eq!(out, vec![SymbolId::new(2), SymbolId::new(3), SymbolId::new(6)]);
+    assert_eq!(
+        out,
+        vec![SymbolId::new(2), SymbolId::new(3), SymbolId::new(6)]
+    );
 }
 
 #[test]
@@ -77,7 +80,10 @@ fn collect_free_vars_excludes_params_and_deduplicates_outer_locals() {
     local_names.insert("outer".to_string(), Local::new(2, LocalKind::User));
 
     let free_vars = collect_free_vars(&expr, &["param".to_string()], &local_names);
-    assert_eq!(free_vars, vec![("outer".to_string(), Local::new(2, LocalKind::User))]);
+    assert_eq!(
+        free_vars,
+        vec![("outer".to_string(), Local::new(2, LocalKind::User))]
+    );
 }
 
 #[test]

@@ -32,26 +32,33 @@ fn async_dispatch_synthesis_helpers_map_scalar_types_to_expected_symbols() {
 
 #[test]
 fn async_dispatch_synthesis_helpers_use_registry_ordinals_for_switch_targets() {
-    let registry = build_async_dispatch_registry([
-        "worker_b".to_string(),
-        "worker_a".to_string(),
-    ]);
+    let registry = build_async_dispatch_registry(["worker_b".to_string(), "worker_a".to_string()]);
     let dispatch = synthesize_spawn_poll_dispatch(
         &registry,
         &[("worker_b".to_string(), "worker_b__poll".to_string())],
     )
     .expect("spawn dispatch should synthesize with stable ordinals");
 
-    let Some(Terminator::Switch { targets, .. }) =
-        dispatch.basic_blocks[dispatch.start_block].terminator.as_ref()
+    let Some(Terminator::Switch { targets, .. }) = dispatch.basic_blocks[dispatch.start_block]
+        .terminator
+        .as_ref()
     else {
         panic!("spawn poll dispatch should start with a switch terminator");
     };
 
     let seen = targets.iter().map(|(kind, _)| *kind).collect::<Vec<_>>();
-    assert!(seen.contains(&1), "sleep builtin ordinal should be reserved");
-    assert!(seen.contains(&2), "timeout builtin ordinal should be reserved");
-    assert!(seen.contains(&4), "worker_b should receive stable sorted ordinal");
+    assert!(
+        seen.contains(&1),
+        "sleep builtin ordinal should be reserved"
+    );
+    assert!(
+        seen.contains(&2),
+        "timeout builtin ordinal should be reserved"
+    );
+    assert!(
+        seen.contains(&4),
+        "worker_b should receive stable sorted ordinal"
+    );
 }
 
 #[test]

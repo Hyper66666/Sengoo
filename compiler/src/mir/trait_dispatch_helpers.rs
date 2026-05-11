@@ -49,9 +49,10 @@ where
         excluded_name,
         expected_param_count,
     ) {
-        MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => {
-            Err(format!("method '{}' not found for type '{}'", method, type_display))
-        }
+        MethodCandidateMatch::None | MethodCandidateMatch::WrongArity { .. } => Err(format!(
+            "method '{}' not found for type '{}'",
+            method, type_display
+        )),
         MethodCandidateMatch::One(name) => Ok(name),
         MethodCandidateMatch::Ambiguous { labels } => {
             Err(ambiguous_method_error(method, type_display, &labels))

@@ -20,14 +20,14 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
 
-mod stmt_helpers;
-mod expr_helpers;
-mod decl_helpers;
-mod trait_impl_helpers;
 mod call_helpers;
 mod class_hierarchy_helpers;
 mod contract_helpers;
+mod decl_helpers;
+mod expr_helpers;
 mod generic_meta_helpers;
+mod stmt_helpers;
+mod trait_impl_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -297,8 +297,10 @@ impl TypeChecker {
                     .collect::<Vec<_>>();
                 self.struct_field_defs
                     .insert(struct_decl.name.name.clone(), fields);
-                self.struct_type_params
-                    .insert(struct_decl.name.name.clone(), struct_decl.type_params.clone());
+                self.struct_type_params.insert(
+                    struct_decl.name.name.clone(),
+                    struct_decl.type_params.clone(),
+                );
             }
             DeclKind::Enum(enum_decl) => {
                 let name = enum_decl.name.name.clone();
@@ -361,8 +363,6 @@ impl TypeChecker {
         }
         Ok(())
     }
-
-
 
     /// Convert an AST path into the lookup key used by type checking.
     fn path_name(&self, path: &Path) -> TyResult<String> {
@@ -565,7 +565,6 @@ impl TypeChecker {
             _ => pattern.kind == concrete.kind,
         }
     }
-
 
     fn resolve_generic_type_args(
         &self,
@@ -775,7 +774,11 @@ impl TypeChecker {
                     .get(&name)
                     .cloned()
                     .ok_or_else(|| TypeckError::UndefinedType { name: name.clone() })?;
-                let type_params = self.struct_type_params.get(&name).cloned().unwrap_or_default();
+                let type_params = self
+                    .struct_type_params
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_default();
 
                 if !type_params.is_empty() {
                     self.env.push_scope();
@@ -967,8 +970,6 @@ impl TypeChecker {
             _ => false,
         }
     }
-
-
 }
 
 impl Default for TypeChecker {
@@ -988,21 +989,30 @@ mod tests {
 
     #[test]
     fn ty_contains_future_escape_rejects_ref_wrapped_future() {
-        let future = mk(1, TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))));
+        let future = mk(
+            1,
+            TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))),
+        );
         let wrapped = mk(3, TyKind::Ref(false, Box::new(future)));
         assert!(TypeChecker::ty_contains_future_escape(&wrapped));
     }
 
     #[test]
     fn ty_contains_future_escape_rejects_ptr_wrapped_future() {
-        let future = mk(1, TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))));
+        let future = mk(
+            1,
+            TyKind::Future(Box::new(mk(2, TyKind::Int(IntKind::I64)))),
+        );
         let wrapped = mk(3, TyKind::Ptr(Box::new(future)));
         assert!(TypeChecker::ty_contains_future_escape(&wrapped));
     }
 
     #[test]
     fn ty_contains_future_escape_rejects_fn_returning_future() {
-        let future = mk(3, TyKind::Future(Box::new(mk(4, TyKind::Int(IntKind::I64)))));
+        let future = mk(
+            3,
+            TyKind::Future(Box::new(mk(4, TyKind::Int(IntKind::I64)))),
+        );
         let fn_ty = mk(
             1,
             TyKind::Fn {
@@ -1014,5 +1024,3 @@ mod tests {
         assert!(TypeChecker::ty_contains_future_escape(&fn_ty));
     }
 }
-
-

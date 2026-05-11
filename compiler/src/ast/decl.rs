@@ -437,10 +437,7 @@ impl EnumVariant {
     pub fn tuple(name: Ident, types: Vec<Type>, span: Span) -> Self {
         Self {
             name,
-            fields: types
-                .into_iter()
-                .map(VariantField::Unnamed)
-                .collect(),
+            fields: types.into_iter().map(VariantField::Unnamed).collect(),
             discriminant: None,
             span,
         }
