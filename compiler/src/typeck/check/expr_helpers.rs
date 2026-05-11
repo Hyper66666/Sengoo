@@ -30,10 +30,10 @@ impl TypeChecker {
         };
 
         match &symbol.kind {
-            SymbolKind::Function { ty, .. } => Ok(self.infer.instantiate_with_fresh_vars(ty.clone())),
+            SymbolKind::Function { ty, .. } => Ok(self.infer.instantiate_with_fresh_vars(ty)),
             _ => {
                 if let Some(ty) = symbol.get_ty() {
-                    Ok(self.infer.instantiate(ty.clone()))
+                    Ok(self.infer.instantiate(ty))
                 } else {
                     Err(TypeckError::UndefinedVariable {
                         name: ident.name.clone(),
@@ -164,7 +164,12 @@ impl TypeChecker {
         Ok(self.env.unit_ty())
     }
 
-    pub(super) fn check_assign_op(&mut self, _op: &AssignOp, target: &Expr, value: &Expr) -> TyResult<Ty> {
+    pub(super) fn check_assign_op(
+        &mut self,
+        _op: &AssignOp,
+        target: &Expr,
+        value: &Expr,
+    ) -> TyResult<Ty> {
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
         self.infer.unify(&target_ty, &value_ty)?;
@@ -195,7 +200,8 @@ impl TypeChecker {
 
         match &base_ty.kind {
             TyKind::Adt {
-                name: type_name, args
+                name: type_name,
+                args,
             } => {
                 let field_defs =
                     self.struct_field_defs
@@ -244,7 +250,10 @@ impl TypeChecker {
             .iter()
             .map(|e| self.check_expr(e))
             .collect::<TyResult<Vec<_>>>()?;
-        if elem_types.iter().any(|ty| self.contains_future_escape_ty(ty)) {
+        if elem_types
+            .iter()
+            .any(|ty| self.contains_future_escape_ty(ty))
+        {
             return Err(Self::future_escape_error());
         }
         Ok(self.env.tuple_ty(elem_types))
@@ -292,7 +301,9 @@ mod tests {
     #[test]
     fn check_ident_reports_undefined_variable() {
         let mut checker = TypeChecker::new();
-        let err = checker.check_ident(&Ident::new("missing", Span::new(0, 0))).unwrap_err();
+        let err = checker
+            .check_ident(&Ident::new("missing", Span::new(0, 0)))
+            .unwrap_err();
         assert!(matches!(err, TypeckError::UndefinedVariable { name } if name == "missing"));
     }
 
@@ -324,6 +335,8 @@ mod tests {
 
         let expr = Expr::array(vec![Expr::ident("f", Span::new(0, 0))], Span::new(0, 0));
         let err = checker.check_expr(&expr).unwrap_err();
-        assert!(matches!(err, TypeckError::Other(msg) if msg.contains("future values cannot escape")));
+        assert!(
+            matches!(err, TypeckError::Other(msg) if msg.contains("future values cannot escape"))
+        );
     }
 }

@@ -59,8 +59,8 @@ pub(super) fn lower_field_expr(
     base_local: Local,
     field: &str,
 ) -> Local {
-    let base_ty = ctx.get_local_type(base_local).clone();
-    let field_index = match &base_ty {
+    let base_ty = ctx.get_local_type(base_local);
+    let field_index = match base_ty {
         MIRType::Struct { fields, .. } => fields
             .iter()
             .position(|(name, _)| name == field)
@@ -73,7 +73,7 @@ pub(super) fn lower_field_expr(
             _ => 0,
         },
     };
-    let elem_ty = match &base_ty {
+    let elem_ty = match base_ty {
         MIRType::Tuple(tys) if field_index < tys.len() => tys[field_index].clone(),
         MIRType::Struct { fields, .. } if field_index < fields.len() => {
             fields[field_index].1.clone()
@@ -124,15 +124,19 @@ pub(super) fn lower_struct_expr(
         _ => lowered_fields.iter().map(|(_, local)| *local).collect(),
     };
 
+    let struct_type_name = match &struct_ty {
+        MIRType::Struct { name, .. } => Some(name.clone()),
+        _ => None,
+    };
     let struct_local = ctx.add_local(None, LocalKind::Temp, struct_ty.clone());
     ctx.push_inst(Instruction::Aggregate {
         destination: struct_local,
         fields: ordered_field_locals,
-        ty: struct_ty.clone(),
+        ty: struct_ty,
     });
 
-    if let MIRType::Struct { name, .. } = &struct_ty {
-        ctx.type_names.insert(struct_local, name.clone());
+    if let Some(name) = struct_type_name {
+        ctx.type_names.insert(struct_local, name);
     }
 
     struct_local

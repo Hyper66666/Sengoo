@@ -100,7 +100,9 @@ impl TypeChecker {
     pub(super) fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
         let builtin_name = match &func.kind {
             ExprKind::Ident(ident) => Some(ident.name.as_str()),
-            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.as_str()),
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                Some(path.segments[0].name.as_str())
+            }
             _ => None,
         };
 
@@ -332,11 +334,11 @@ impl TypeChecker {
                 }) => {
                     if let Some(meta) = self.generic_function_metas.get(&name).cloned() {
                         let (instantiated, var_map) =
-                            self.infer.instantiate_with_fresh_vars_and_map(ty);
+                            self.infer.instantiate_with_fresh_vars_and_map(&ty);
                         generic_ctx = Some((name, meta, var_map));
                         instantiated
                     } else {
-                        self.infer.instantiate_with_fresh_vars(ty)
+                        self.infer.instantiate_with_fresh_vars(&ty)
                     }
                 }
                 _ => self.check_expr(func)?,
@@ -447,7 +449,7 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// 濠电姷鏁告慨鐑姐€傞挊澹╋綁宕ㄩ弶鎴狅紱闂侀€炲苯澧撮柡灞剧〒閳ь剨缍嗛崑鍛暦瀹€鍕厸鐎光偓鐎ｎ剛锛熸繛瀵稿婵″洭骞忛悩璇茬闁圭儤鍩堝銉╂⒒閸屾瑧顦﹂柟纰卞亰閹绺界粙璺ㄧ崶闁瑰吋鐣崝宀勬偂濠靛鐓涢柛鎰╁妿婢ф洟鏌涘Δ浣糕枙闁哄被鍔岄埥澶娢熸笟顖欑棯婵＄偑鍊栭弻銊х矓閻熼偊娼栭柛婵嗗▕閾忓湱纾兼俊顖濄€€閺嬪繘姊绘担鍛婂暈闁哄被鍔庨幑銏犖熺拋宕囩畾闂佸湱铏庨崰鏍矆閸愵喗鐓冮柛婵嗗閳ь剝宕电划鏃堝醇閺囩啿鎷洪柣鐘叉礌閳ь剙纾埀顒€顭烽弻娑樷槈閸楃偟浼囬梺琛″亾闁靛ň鏅滈埛鎺懨归敐鍥ㄥ殌妞ゆ洘绮庣槐鎺斺偓锝庡亜閻忔挳鏌熼姘拱闁瑰嘲鎳橀幃婊兾熼崫鍕搸濠电姷顣藉Σ鍛村垂娴兼潙瑙﹂悗锝庡枛绾剧粯鎱ㄥ璇蹭壕闂佽鍠楅敃銏ゅ箖濞嗘挻顥堟繛鎴烆殔椤ユ岸姊绘担铏瑰笡闁圭顭烽幃鐑芥晜閻愵剙搴婂┑鐐村灦閻熴儳娆㈤悙鐑樺€甸柨婵嗛娴滅偞銇勯敂璇叉珝闁诡喛娉涢～婵嬵敇閻樺啿娅氶梻浣告惈閻妲愰弴銏犵劦妞ゆ帒锕︾粔鐢告煕鐎ｎ亜顏柟渚垮姂瀹曞爼顢楁担鍝勫箥闂備胶鍋撻懝楣冨磹缁嬭法鏆ら柛鈩冪憿閸嬫挾鎲撮崟顒傗敍缂傚倸绉崇粈渚€鎮鹃悜钘夌闁瑰瓨姊归～宥呪攽閻愬弶顥為柛鏃撶畵瀹曨垶鍩€椤掑倻纾介柛灞捐壘閳ь剟顥撳▎銏ゆ晸閻樿尙锛涙繝銏ｅ煐閸旓箓寮€ｎ剚鍠愰柡鍐ㄧ墕缁犳牗淇婇妶鍌氫壕闂佷紮缍囩换婵嬬嵁韫囨稑绫嶉柍褜鍓熼幆鍕敍閻愬弶妲梺閫炲苯澧柕鍥у楠炴帡骞嬪┑鎰偅闂備浇妫勯崯浼村窗閺嶎厼钃熼柡鍥╁枎缁剁偞绻涢幋鐐跺闁活厽绻堝?
+    /// Type check a method call by resolving candidates against the receiver type.
     pub(super) fn check_method_call(
         &mut self,
         receiver: &Expr,
