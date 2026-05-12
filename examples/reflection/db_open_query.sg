@@ -1,0 +1,12 @@
+// Requires stdlib modules: option.sg, result.sg, db.sg.
+// Uses the raw-pointer error path so it is safe without a live database string buffer.
+def main() -> i64 {
+    let opened = db_open_raw(0);
+    if opened.is_err() {
+        0
+    } else {
+        let db = opened.unwrap_or(Db { handle: 0 });
+        db.close();
+        0
+    }
+}

@@ -2,10 +2,17 @@ use super::MIRType;
 use crate::hir::{self, HIRItem, HIRParam, HIRTrait, HIRTraitItem, HIRType};
 use crate::method_resolution::explicit_hir_method_param_count;
 use crate::symbol::SymbolId;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ConcreteTypeRegistry {
+    inner: Rc<RefCell<ConcreteTypeRegistryInner>>,
+}
+
+#[derive(Debug, Default)]
+struct ConcreteTypeRegistryInner {
     hir_by_instance_name: HashMap<String, HIRType>,
 }
 
@@ -14,7 +21,7 @@ impl ConcreteTypeRegistry {
         struct_defs: &HashMap<String, &hir::HIRStruct>,
         concrete_named_types: &HashMap<String, HIRType>,
     ) -> Self {
-        let mut registry = Self::default();
+        let registry = Self::default();
         for (name, def) in struct_defs {
             if def.type_params.is_empty() {
                 registry.register_instance(name.clone(), HIRType::named(name.clone(), Vec::new()));
@@ -26,8 +33,11 @@ impl ConcreteTypeRegistry {
         registry
     }
 
-    pub(crate) fn register_instance(&mut self, instance_name: String, ty: HIRType) {
-        self.hir_by_instance_name.insert(instance_name, ty);
+    pub(crate) fn register_instance(&self, instance_name: String, ty: HIRType) {
+        self.inner
+            .borrow_mut()
+            .hir_by_instance_name
+            .insert(instance_name, ty);
     }
 
     pub(crate) fn hir_type_for_mir(&self, ty: &MIRType) -> Option<HIRType> {
@@ -66,7 +76,9 @@ impl ConcreteTypeRegistry {
                 }
                 Some(HIRType::tuple(hir_items))
             }
-            MIRType::Struct { name, .. } => self.hir_by_instance_name.get(name).cloned(),
+            MIRType::Struct { name, .. } => {
+                self.inner.borrow().hir_by_instance_name.get(name).cloned()
+            }
             _ => None,
         }
     }
@@ -365,6 +377,27 @@ mod tests {
         assert_eq!(collected.templates[0].method.name, "wrap");
         assert_eq!(collected.templates[1].method.name, "mix");
         assert_eq!(collected.templates[1].method.params[0].name, "self");
+    }
+
+    #[test]
+    fn concrete_type_registry_clone_shares_registered_instances() {
+        let registry = ConcreteTypeRegistry::default();
+        let cloned = registry.clone();
+
+        cloned.register_instance(
+            "Box_i64".to_string(),
+            HIRType::named("Box".to_string(), vec![i64_ty()]),
+        );
+
+        let resolved = registry.hir_type_for_mir(&MIRType::Struct {
+            name: "Box_i64".to_string(),
+            fields: vec![("value".to_string(), MIRType::Int(64))],
+        });
+
+        assert_eq!(
+            resolved,
+            Some(HIRType::named("Box".to_string(), vec![i64_ty()]))
+        );
     }
 
     #[test]

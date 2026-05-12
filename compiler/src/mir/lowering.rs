@@ -1,5 +1,9 @@
 //! HIR到MIR的降级器，将高级中间表示转换为低级中间表示。
 
+//!
+//! Lowering is single-threaded. Shared mutable lowering state uses
+//! `Rc<RefCell<_>>` so nested lowering contexts clone cheap handles instead
+//! of deep-copying async function sets or concrete type registries.
 use super::generic_methods::{
     collect_inherent_method_templates, collect_trait_method_templates_for_impl,
     ConcreteTypeRegistry, InherentMethodTemplate, TraitMethodTemplate,
@@ -37,7 +41,9 @@ use crate::mir::{
 };
 use crate::symbol::SymbolId;
 use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 mod aggregate_expr_helpers;
 mod assignment_helpers;
@@ -87,11 +93,11 @@ use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::while_expr_helpers::lower_while_expr;
 
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct MirLowerOptions {
     pub runtime_contract_checks: bool,
     pub lazy_generic_mono: bool,
-    pub async_functions: HashSet<String>,
+    pub async_functions: Rc<RefCell<HashSet<String>>>,
 }
 
 impl Default for MirLowerOptions {
@@ -99,8 +105,27 @@ impl Default for MirLowerOptions {
         Self {
             runtime_contract_checks: false,
             lazy_generic_mono: true,
-            async_functions: HashSet::new(),
+            async_functions: Rc::new(RefCell::new(HashSet::new())),
         }
+    }
+}
+
+impl MirLowerOptions {
+    pub fn new(
+        runtime_contract_checks: bool,
+        lazy_generic_mono: bool,
+        async_functions: HashSet<String>,
+    ) -> Self {
+        Self {
+            runtime_contract_checks,
+            lazy_generic_mono,
+            async_functions: Rc::new(RefCell::new(async_functions)),
+        }
+    }
+
+    pub fn with_async_functions(mut self, async_functions: HashSet<String>) -> Self {
+        self.async_functions = Rc::new(RefCell::new(async_functions));
+        self
     }
 }
 
@@ -481,8 +506,13 @@ impl<'a> LoweringContext<'a> {
         inherent_method_templates: &'a [InherentMethodTemplate],
         trait_method_templates: &'a [TraitMethodTemplate],
     ) -> Self {
-        let async_dispatch_registry =
-            build_async_dispatch_registry(options.async_functions.iter().cloned());
+        let async_names = options
+            .async_functions
+            .borrow()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let async_dispatch_registry = build_async_dispatch_registry(async_names);
         Self {
             mir_fn,
             local_names: HashMap::new(),
@@ -786,6 +816,7 @@ impl<'a> LoweringContext<'a> {
         self.known_functions.insert(async_block_name.clone());
         self.options
             .async_functions
+            .borrow_mut()
             .insert(async_block_name.clone());
         self.function_sigs.insert(
             async_block_name.clone(),
@@ -1477,6 +1508,25 @@ impl<'a> LoweringContext<'a> {
 mod tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn mir_lower_options_clone_shares_async_function_set() {
+        let options = MirLowerOptions::default();
+        let cloned = options.clone();
+
+        options
+            .async_functions
+            .borrow_mut()
+            .insert("outer".to_string());
+        cloned
+            .async_functions
+            .borrow_mut()
+            .insert("inner".to_string());
+
+        let async_functions = options.async_functions.borrow();
+        assert!(async_functions.contains("outer"));
+        assert!(async_functions.contains("inner"));
+    }
 
     #[test]
     fn set_terminator_without_current_block_records_error_instead_of_panicking() {

@@ -237,6 +237,10 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<lat
 
 最新一轮 runtime 演进增加了可复用的 FFI 包装层和集成工具：
 
+- Sengoo 源码侧包装位于 `tools/stdlib/`
+  - `db.sg`、`ffi.sg`、`lua54.sg`、`proto.sg` 和 `net.sg`
+  - 在 typed FFI pointer/string 支持落地前，原始指针参数暂用 `i64` 表示
+  - 示例程序位于 `examples/reflection/`
 - 数据库 runtime MVP（`runtime/src/reflect/runtime_db.rs`）
   - 生命周期：`open` / `close` / `ping`
   - 查询路径：`exec` / `query`，支持结果句柄
@@ -297,6 +301,29 @@ sgc build <file.sg> -O 2 --force-rebuild
 # 可选 daemon 模式
 sgc daemon --addr 127.0.0.1:48765
 ```
+
+## 包管理器（sgpm）
+
+`sgpm` 是当前离线优先的 Sengoo 包管理器 MVP，用于项目级工作流。它支持
+`Sengoo.toml`、本地 path 依赖、按拓扑顺序执行 `build`/`check`，以及
+`run`、`test`、`fmt`、`tree`、`clean`。
+
+```bash
+sgpm new hello
+cd hello
+sgpm check
+sgpm build
+sgpm run
+```
+
+Registry 依赖、lockfile、workspace 和 publish 流程已明确延后。当前 manifest
+格式和命令说明见 `docs/sgpm-quickstart.md`。
+
+## 标准库
+
+源码侧标准库位于 `tools/stdlib/`，并按能力面拆分为 `option.sg`、
+`result.sg`、`collections.sg`、`string.sg`、`math.sg` 和 `error.sg`。
+模块说明和当前延期项见 `tools/stdlib/README.md`。
 
 ## 异步执行
 

@@ -109,11 +109,11 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     // 4. MIR lowering.
     let mut mir_fns = lower_hir_with_options(
         &hir_module.items,
-        MirLowerOptions {
-            runtime_contract_checks: options.runtime_contract_checks,
-            lazy_generic_mono: true,
-            async_functions: async_functions.clone(),
-        },
+        MirLowerOptions::new(
+            options.runtime_contract_checks,
+            true,
+            async_functions.clone(),
+        ),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);
@@ -157,11 +157,7 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     // 4. MIR lowering.
     let mut mir_fns = lower_hir_with_options(
         &hir_module.items,
-        mir::MirLowerOptions {
-            runtime_contract_checks: false,
-            lazy_generic_mono: true,
-            async_functions: async_functions.clone(),
-        },
+        mir::MirLowerOptions::new(false, true, async_functions.clone()),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);

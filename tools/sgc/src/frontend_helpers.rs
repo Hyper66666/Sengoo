@@ -28,11 +28,7 @@ pub(crate) fn frontend_probe_module_full(
     drop(type_env);
     let _ = lower_hir_with_options(
         &hir.items,
-        MirLowerOptions {
-            runtime_contract_checks: false,
-            lazy_generic_mono: true,
-            async_functions,
-        },
+        MirLowerOptions::new(false, true, async_functions),
     )
     .map_err(|e| format!("lower failed: {}", e))?;
 

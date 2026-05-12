@@ -3,13 +3,10 @@ use super::call_invocation_helpers::build_call_invocation_plan;
 use super::*;
 
 pub(super) fn lower_non_named_call(ctx: &mut LoweringContext<'_>, arg_locals: &[Local]) -> Local {
-    let plan = build_call_invocation_plan(
-        "",
-        &MIR_UNIT,
-        None,
-        arg_locals,
-        &ctx.options.async_functions,
-    );
+    let plan = {
+        let async_functions = ctx.options.async_functions.borrow();
+        build_call_invocation_plan("", &MIR_UNIT, None, arg_locals, &async_functions)
+    };
     emit_call_from_plan(ctx, plan)
 }
 

@@ -1,0 +1,179 @@
+id: mir-bitcast-instruction
+title: Add MIR Bitcast Instruction for Float Support
+status: completed
+priority: high
+created: 2026-03-11
+updated: 2026-03-12
+
+summary: |
+  Add Bitcast instruction to MIR to enable bit-preserving type conversions,
+  primarily to support Float types crossing async await points.
+
+motivation: |
+  Currently, Float types (f32/f64) cannot cross async await points because
+  the async frame storage system requires converting values to/from i64 slots
+  while preserving their bit patterns.
+
+  The existing Cast instruction performs value conversion (e.g., 3.14 → 3),
+  but we need bit-pattern preservation (e.g., f64 bits → i64 bits unchanged).
+
+  This is blocking:
+  - Float locals crossing await points
+  - Potential future use cases requiring bit-level type reinterpretation
+
+problem: |
+  Current limitations:
+
+  1. **No Bitcast in MIR**: MIR only has Cast instruction which changes values
+  2. **Float Async Rejection**: f32/f64 locals cannot survive across await
+  3. **Error Message**: "float types require bitcast support which is not yet implemented"
+  4. **Workaround Required**: Users must avoid float locals in async functions
+
+goals:
+  - Add Bitcast instruction to MIR instruction set
+  - Implement Bitcast → LLVM bitcast codegen
+  - Enable Float types in async frame encoding/decoding
+  - Add comprehensive tests for float async operations
+  - Maintain backward compatibility with existing code
+
+non_goals:
+  - Supporting arbitrary bitcast operations (only specific safe patterns)
+  - Optimizing bitcast away (that's for optimization passes)
+  - Supporting bitcast in user-facing language syntax (internal only)
+
+design:
+  approach: |
+    **Phase 1: Add MIR Bitcast Instruction**
+    - Add Bitcast variant to Instruction enum
+    - Update instruction visitor/transformer code
+    - Add validation for safe bitcast patterns
+
+    **Phase 2: Implement Codegen**
+    - LLVM backend: emit LLVM bitcast instruction
+    - JIT backend: emit LLVM bitcast instruction
+    - Validate size compatibility (f32 ↔ i32, f64 ↔ i64)
+
+    **Phase 3: Integrate with Async**
+    - Update AsyncFrameValueKind to include Float
+    - Implement float encoding (f32/f64 → i64 via bitcast)
+    - Implement float decoding (i64 → f32/f64 via bitcast)
+
+    **Phase 4: Testing**
+    - Unit tests for Bitcast instruction
+    - Codegen tests for LLVM bitcast emission
+    - Async tests for float locals crossing await
+    - Integration tests for end-to-end float async
+
+  components:
+    - compiler/src/mir/inst.rs: Add Bitcast instruction
+    - compiler/src/codegen/mod.rs: LLVM bitcast codegen
+    - compiler/src/codegen/jit.rs: JIT bitcast codegen
+    - compiler/src/mir/async_lowering.rs: Float async support
+    - compiler/src/tests/: New bitcast and float async tests
+
+  instruction_design: |
+    ```rust
+    pub enum Instruction {
+        // ... existing instructions ...
+
+        /// Bitcast - reinterpret bits without conversion
+        /// Used for bit-preserving type changes (e.g., f64 ↔ i64)
+        Bitcast {
+            destination: Local,
+            value: Local,
+            to: MIRType,
+        },
+    }
+    ```
+
+  safety_constraints: |
+    Only allow bitcast between types of same size:
+    - f32 ↔ i32 (both 32 bits)
+    - f64 ↔ i64 (both 64 bits)
+    - ptr ↔ i64 (on 64-bit platforms)
+
+    Reject invalid bitcasts at MIR validation stage.
+
+tasks:
+  - id: add-bitcast-instruction
+    title: Add Bitcast to MIR instruction enum
+    description: |
+      Add Bitcast variant to Instruction enum:
+      - Update inst.rs with Bitcast definition
+      - Update destination() method
+      - Update instruction display/debug
+      - Add size validation helper
+    estimate: 1 hour
+
+  - id: implement-llvm-codegen
+    title: Implement LLVM backend bitcast codegen
+    description: |
+      Generate LLVM bitcast instruction:
+      - Handle Bitcast in codegen/mod.rs
+      - Emit LLVM bitcast instruction
+      - Validate type size compatibility
+      - Add codegen tests
+    estimate: 2 hours
+
+  - id: implement-jit-codegen
+    title: Implement JIT backend bitcast codegen
+    description: |
+      Generate LLVM bitcast in JIT mode:
+      - Handle Bitcast in codegen/jit.rs
+      - Emit LLVM bitcast instruction
+      - Ensure consistency with LLVM backend
+    estimate: 1 hour
+
+  - id: add-float-async-support
+    title: Add Float to AsyncFrameValueKind
+    description: |
+      Enable float types in async frames:
+      - Add Float variant to AsyncFrameValueKind
+      - Update classify_async_frame_type for f32/f64
+      - Implement encode_async_frame_value with bitcast
+      - Implement push_frame_load_into_typed with bitcast
+    estimate: 2 hours
+
+  - id: add-float-async-tests
+    title: Add comprehensive float async tests
+    description: |
+      Test float locals crossing await:
+      - async_f32_local_survives_await
+      - async_f64_local_survives_await
+      - async_mixed_float_int_locals
+      - Verify bitcast in generated IR
+    estimate: 1 hour
+
+  - id: update-error-messages
+    title: Remove float limitation error messages
+    description: |
+      Update error handling:
+      - Remove "bitcast not implemented" error
+      - Update documentation
+      - Update test expectations
+    estimate: 0.5 hours
+
+acceptance_criteria:
+  - Bitcast instruction exists in MIR with proper validation
+  - LLVM backend generates correct bitcast instructions
+  - JIT backend generates correct bitcast instructions
+  - f32 and f64 locals can cross await points
+  - All float async tests pass
+  - Generated IR contains bitcast for float ↔ i64 conversions
+  - No regression in existing 322 compiler tests
+  - Size-incompatible bitcasts are rejected with clear errors
+
+risks:
+  - Bitcast semantics may be platform-dependent (endianness)
+  - May need to handle NaN/infinity bit patterns carefully
+  - Could expose undefined behavior if misused
+
+dependencies:
+  - Depends on: verify-mixed-width-type-correctness (should complete first)
+  - Blocks: async-phase-2-features (needs float support)
+
+references:
+  - compiler/src/mir/inst.rs:53 (Instruction enum)
+  - compiler/src/mir/async_lowering.rs:251 (AsyncFrameValueKind)
+  - compiler/src/tests/async_tests.rs:580 (async_f64_local_across_await_rejected)
+  - LLVM bitcast documentation: https://llvm.org/docs/LangRef.html#bitcast-to-instruction

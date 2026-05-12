@@ -1,0 +1,161 @@
+extern "C" {
+    fn sengoo_ffi_last_error_code() -> i64;
+    fn sengoo_ffi_last_error_len() -> i64;
+    fn sengoo_ffi_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_ffi_last_error_clear() -> i64;
+    fn sengoo_ffi_c_open(path: i64) -> i64;
+    fn sengoo_ffi_c_close(handle: i64) -> i64;
+    fn sengoo_ffi_c_call_i64(handle: i64, symbol: i64, argc: i64, argv: i64, out_value: i64) -> i64;
+    fn sengoo_ffi_object_create(lib_handle: i64, constructor_symbol: i64, argc: i64, argv: i64, destructor_symbol: i64) -> i64;
+    fn sengoo_ffi_object_raw_ptr(object_handle: i64) -> i64;
+    fn sengoo_ffi_object_call_i64(object_handle: i64, method_symbol: i64, argc: i64, argv: i64, out_value: i64) -> i64;
+    fn sengoo_ffi_object_destroy(object_handle: i64) -> i64;
+    fn sengoo_ffi_callback_bind_i64(lib_handle: i64, symbol: i64, arity: i64) -> i64;
+    fn sengoo_ffi_callback_dispatch_i64(callback_id: i64, a0: i64, a1: i64, a2: i64, a3: i64, a4: i64, a5: i64) -> i64;
+    fn sengoo_ffi_callback_unbind(callback_id: i64) -> i64;
+    fn sengoo_ffi_buffer_new(capacity: i64) -> i64;
+    fn sengoo_ffi_buffer_from_bytes(data: i64, len: i64) -> i64;
+    fn sengoo_ffi_buffer_len(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_ptr(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_copy_out(buffer_handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_ffi_buffer_copy_in(buffer_handle: i64, src_ptr: i64, src_len: i64) -> i64;
+    fn sengoo_ffi_buffer_free(buffer_handle: i64) -> i64;
+}
+
+struct CLib {
+    handle: i64,
+}
+
+struct CppObject {
+    handle: i64,
+}
+
+struct CallbackToken {
+    handle: i64,
+}
+
+struct Buffer {
+    handle: i64,
+}
+
+def ffi_last_error_code() -> i64 {
+    sengoo_ffi_last_error_code()
+}
+
+def ffi_open_raw(path_ptr: i64) -> Result<CLib, i64> {
+    let handle = sengoo_ffi_c_open(path_ptr);
+    if handle != 0 {
+        Result { is_ok: true, value: CLib { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: CLib { handle: 0 }, error: sengoo_ffi_last_error_code() }
+    }
+}
+
+def ffi_last_error_len() -> i64 {
+    sengoo_ffi_last_error_len()
+}
+
+def ffi_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> i64 {
+    sengoo_ffi_last_error_copy(buffer_ptr, capacity)
+}
+
+def ffi_last_error_clear() -> bool {
+    sengoo_ffi_last_error_clear() == 0
+}
+
+impl CLib {
+    def close(self) -> bool {
+        sengoo_ffi_c_close(self.handle) == 0
+    }
+
+    def call_i64_raw(self, symbol_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
+        let status = sengoo_ffi_c_call_i64(self.handle, symbol_ptr, argc, argv_ptr, out_value_ptr);
+        if status == 0 {
+            Result { is_ok: true, value: status, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: status }
+        }
+    }
+
+    def bind_callback_i64_raw(self, symbol_ptr: i64, arity: i64) -> Result<CallbackToken, i64> {
+        let handle = sengoo_ffi_callback_bind_i64(self.handle, symbol_ptr, arity);
+        if handle != 0 {
+            Result { is_ok: true, value: CallbackToken { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: CallbackToken { handle: 0 }, error: sengoo_ffi_last_error_code() }
+        }
+    }
+
+    def object_create_raw(self, constructor_symbol_ptr: i64, argc: i64, argv_ptr: i64, destructor_symbol_ptr: i64) -> Result<CppObject, i64> {
+        let handle = sengoo_ffi_object_create(self.handle, constructor_symbol_ptr, argc, argv_ptr, destructor_symbol_ptr);
+        if handle != 0 {
+            Result { is_ok: true, value: CppObject { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: CppObject { handle: 0 }, error: sengoo_ffi_last_error_code() }
+        }
+    }
+}
+
+impl CppObject {
+    def raw_ptr(self) -> i64 {
+        sengoo_ffi_object_raw_ptr(self.handle)
+    }
+
+    def call_i64_raw(self, method_symbol_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
+        let status = sengoo_ffi_object_call_i64(self.handle, method_symbol_ptr, argc, argv_ptr, out_value_ptr);
+        if status == 0 {
+            Result { is_ok: true, value: status, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: status }
+        }
+    }
+
+    def destroy(self) -> bool {
+        sengoo_ffi_object_destroy(self.handle) == 0
+    }
+}
+
+impl CallbackToken {
+    def dispatch_i64(self, a0: i64, a1: i64, a2: i64, a3: i64, a4: i64, a5: i64) -> i64 {
+        sengoo_ffi_callback_dispatch_i64(self.handle, a0, a1, a2, a3, a4, a5)
+    }
+
+    def unbind(self) -> bool {
+        sengoo_ffi_callback_unbind(self.handle) == 0
+    }
+}
+
+def ffi_buffer_from_bytes_raw(data_ptr: i64, len: i64) -> Buffer {
+    Buffer { handle: sengoo_ffi_buffer_from_bytes(data_ptr, len) }
+}
+
+def ffi_buffer_new(capacity: i64) -> Result<Buffer, i64> {
+    let handle = sengoo_ffi_buffer_new(capacity);
+    if handle != 0 {
+        Result { is_ok: true, value: Buffer { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: Buffer { handle: 0 }, error: sengoo_ffi_last_error_code() }
+    }
+}
+
+impl Buffer {
+    def len(self) -> i64 {
+        sengoo_ffi_buffer_len(self.handle)
+    }
+
+    def ptr(self) -> i64 {
+        sengoo_ffi_buffer_ptr(self.handle)
+    }
+
+    def copy_out_raw(self, out_buffer_ptr: i64, out_capacity: i64) -> i64 {
+        sengoo_ffi_buffer_copy_out(self.handle, out_buffer_ptr, out_capacity)
+    }
+
+    def copy_in_raw(self, src_ptr: i64, src_len: i64) -> bool {
+        sengoo_ffi_buffer_copy_in(self.handle, src_ptr, src_len) == 0
+    }
+
+    def free(self) -> bool {
+        sengoo_ffi_buffer_free(self.handle) == 0
+    }
+}

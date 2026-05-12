@@ -1,0 +1,11 @@
+// Requires stdlib modules: option.sg, result.sg, proto.sg.
+// Null buffers intentionally exercise the safe error path.
+def main() -> i64 {
+    let event = ProtoUserEvent { id: 7, name_ptr: 0, ts: 42 };
+    let encoded = proto_user_event_encode_raw(event, 0, 0);
+    if encoded.is_err() {
+        0
+    } else {
+        encoded.unwrap_or(0)
+    }
+}

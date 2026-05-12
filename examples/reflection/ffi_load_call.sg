@@ -1,0 +1,12 @@
+// Requires stdlib modules: option.sg, result.sg, ffi.sg.
+// Null library path exercises the safe error path.
+def main() -> i64 {
+    let lib = ffi_open_raw(0);
+    if lib.is_err() {
+        0
+    } else {
+        let loaded = lib.unwrap_or(CLib { handle: 0 });
+        loaded.close();
+        0
+    }
+}

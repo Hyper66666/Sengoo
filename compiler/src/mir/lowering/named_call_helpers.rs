@@ -8,13 +8,16 @@ pub(super) fn lower_named_call(
     match ctx.resolve_named_call_target(name, arg_locals) {
         CallTargetResolution::Builtin(local) => local,
         CallTargetResolution::Planned(plan) => {
-            let invocation = build_call_invocation_plan(
-                &plan.func_name,
-                &plan.ret_type,
-                plan.env_ptr_local,
-                arg_locals,
-                &ctx.options.async_functions,
-            );
+            let invocation = {
+                let async_functions = ctx.options.async_functions.borrow();
+                build_call_invocation_plan(
+                    &plan.func_name,
+                    &plan.ret_type,
+                    plan.env_ptr_local,
+                    arg_locals,
+                    &async_functions,
+                )
+            };
             emit_call_from_plan(ctx, invocation)
         }
     }
@@ -74,10 +77,8 @@ mod tests {
         let struct_defs = HashMap::new();
         let inherent_templates = Vec::new();
         let trait_templates = Vec::new();
-        let options = MirLowerOptions {
-            async_functions: ["worker".to_string()].into_iter().collect(),
-            ..MirLowerOptions::default()
-        };
+        let options = MirLowerOptions::default()
+            .with_async_functions(["worker".to_string()].into_iter().collect());
 
         let start_block = mir_fn.start_block;
         let mut ctx = LoweringContext::new(

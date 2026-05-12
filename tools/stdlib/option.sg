@@ -1,0 +1,81 @@
+extern "C" {
+    fn sengoo_panic_option_unwrap_i64() -> i64;
+}
+
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+def option_some_i64(value: i64) -> Option<i64> {
+    Option { is_some: true, value: value }
+}
+
+def option_none_i64() -> Option<i64> {
+    Option { is_some: false, value: 0 }
+}
+
+impl<T> Option<T> {
+    def is_some(self) -> bool {
+        self.is_some
+    }
+
+    def is_none(self) -> bool {
+        if self.is_some {
+            false
+        } else {
+            true
+        }
+    }
+
+    def unwrap_or(self, fallback: T) -> T {
+        if self.is_some {
+            self.value
+        } else {
+            fallback
+        }
+    }
+
+    def ok_or<E>(self, error: E) -> Result<T, E> {
+        if self.is_some {
+            Result { is_ok: true, value: self.value, error: error }
+        } else {
+            Result { is_ok: false, value: self.value, error: error }
+        }
+    }
+}
+
+impl Option<i64> {
+    def expect(self, msg: &str) -> i64 {
+        if self.is_some {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_option_unwrap_i64()
+        }
+    }
+
+    def unwrap(self) -> i64 {
+        if self.is_some {
+            self.value
+        } else {
+            sengoo_panic_option_unwrap_i64()
+        }
+    }
+
+    def map_add(self, delta: i64) -> Option<i64> {
+        if self.is_some {
+            option_some_i64(self.value + delta)
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def and_then_mul(self, factor: i64) -> Option<i64> {
+        if self.is_some {
+            option_some_i64(self.value * factor)
+        } else {
+            option_none_i64()
+        }
+    }
+}

@@ -1,0 +1,36 @@
+extern "C" {
+    fn sengoo_proto_last_error_code() -> i64;
+    fn sengoo_proto_last_error_len() -> i64;
+    fn sengoo_proto_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_proto_last_error_clear() -> i64;
+    fn sengoo_proto_user_event_encode(id: i64, name: i64, ts: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_proto_user_event_decode(input_ptr: i64, input_len: i64, out_id: i64, out_name_buffer: i64, out_name_capacity: i64, out_ts: i64) -> i64;
+}
+
+struct ProtoUserEvent {
+    id: i64,
+    name_ptr: i64,
+    ts: i64,
+}
+
+def proto_last_error_code() -> i64 {
+    sengoo_proto_last_error_code()
+}
+
+def proto_user_event_encode_raw(event: ProtoUserEvent, out_buffer: i64, out_capacity: i64) -> Result<i64, i64> {
+    let written = sengoo_proto_user_event_encode(event.id, event.name_ptr, event.ts, out_buffer, out_capacity);
+    if written >= 0 {
+        Result { is_ok: true, value: written, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: written }
+    }
+}
+
+def proto_user_event_decode_raw(input_ptr: i64, input_len: i64, out_id: i64, out_name_buffer: i64, out_name_capacity: i64, out_ts: i64) -> Result<i64, i64> {
+    let copied = sengoo_proto_user_event_decode(input_ptr, input_len, out_id, out_name_buffer, out_name_capacity, out_ts);
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: copied }
+    }
+}

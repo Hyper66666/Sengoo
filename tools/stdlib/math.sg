@@ -1,0 +1,33 @@
+def abs_i64(value: i64) -> i64 {
+    if value < 0 {
+        0 - value
+    } else {
+        value
+    }
+}
+
+def min_i64(lhs: i64, rhs: i64) -> i64 {
+    if lhs < rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def max_i64(lhs: i64, rhs: i64) -> i64 {
+    if lhs > rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def pow_i64(base: i64, exp: i64) -> i64 {
+    let result = 1;
+    let remaining = exp;
+    while remaining > 0 {
+        result = result * base;
+        remaining = remaining - 1;
+    }
+    result
+}
