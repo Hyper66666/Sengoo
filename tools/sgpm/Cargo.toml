@@ -8,32 +8,19 @@ name = "sgpm"
 path = "src/main.rs"
 
 [dependencies]
-# CLI
 clap = { version = "4.5", features = ["derive"] }
-
-# HTTP
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1.40", features = ["full"] }
-
-# 序列化
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-
-# 错误处理
+semver = "1.0"
 thiserror = { workspace = true }
 miette = { workspace = true }
-
-# 文件系统
 walkdir = "2.5"
 which = "7.0"
 
-# 压缩
+# Reserved for the follow-up registry/publish implementation.
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1.40", features = ["full"] }
 flate2 = "1.0"
 tar = "0.4"
-
-# SHA256
 sha2 = "0.10"
-
-# 语义版本
-semver = "1.0"

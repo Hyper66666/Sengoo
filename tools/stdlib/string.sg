@@ -1,0 +1,11 @@
+def str_len(value: &str) -> i64 {
+    value.len()
+}
+
+def str_eq(lhs: &str, rhs: &str) -> bool {
+    lhs == rhs
+}
+
+def str_concat(lhs: &str, rhs: &str) -> &str {
+    lhs + rhs
+}

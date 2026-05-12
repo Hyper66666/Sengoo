@@ -2,32 +2,122 @@ use crate::compile_to_ir;
 use std::fs;
 use std::path::Path;
 
-fn load_stdlib_surface() -> String {
+fn load_stdlib_surface(modules: &[&str]) -> String {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap_or(manifest_dir);
-    let stdlib_path = workspace_root
-        .join("tools")
-        .join("stdlib")
-        .join("collections.sg");
-    fs::read_to_string(&stdlib_path).unwrap_or_else(|err| {
-        panic!(
-            "failed to read stdlib surface {}: {err}",
-            stdlib_path.display()
-        )
-    })
+    let stdlib_root = workspace_root.join("tools").join("stdlib");
+    modules
+        .iter()
+        .map(|module| {
+            let stdlib_path = stdlib_root.join(module);
+            fs::read_to_string(&stdlib_path).unwrap_or_else(|err| {
+                panic!(
+                    "failed to read stdlib surface {}: {err}",
+                    stdlib_path.display()
+                )
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn compile_with_stdlib(program: &str) -> String {
-    let source = format!("{}\n\n{}", load_stdlib_surface(), program);
+    compile_with_stdlib_modules(&["option.sg", "result.sg", "collections.sg"], program)
+}
+
+fn compile_with_stdlib_modules(modules: &[&str], program: &str) -> String {
+    let source = format!("{}\n\n{}", load_stdlib_surface(modules), program);
     compile_to_ir(&source)
         .unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
 }
 
 fn compile_with_stdlib_error(program: &str) -> String {
-    let source = format!("{}\n\n{}", load_stdlib_surface(), program);
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib_surface(&["option.sg", "result.sg", "collections.sg"]),
+        program
+    );
     compile_to_ir(&source)
         .expect_err("stdlib surface program should fail")
         .to_string()
+}
+
+#[test]
+fn option_module_imports_and_unwraps() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg"],
+        r#"
+def main() -> i64 {
+    option_some_i64(41).map_add(1).unwrap_or(0)
+}
+"#,
+    );
+
+    assert!(ir.contains("option_some_i64"));
+    assert!(ir.contains("Option_i64_map_add"));
+}
+
+#[test]
+fn result_module_imports_and_chains() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg"],
+        r#"
+def main() -> i64 {
+    result_ok_i64(20).map_add(1).and_then_mul(2).unwrap_or(0)
+}
+"#,
+    );
+
+    assert!(ir.contains("result_ok_i64"));
+    assert!(ir.contains("Result_i64_i64_and_then_mul"));
+}
+
+#[test]
+fn string_module_imports_and_runs_str_len() {
+    let ir = compile_with_stdlib_modules(
+        &["string.sg"],
+        r#"
+def main() -> i64 {
+    str_len("hello")
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_len"));
+}
+
+#[test]
+fn math_module_imports_and_runs_abs_i64() {
+    let ir = compile_with_stdlib_modules(
+        &["math.sg"],
+        r#"
+def main() -> i64 {
+    abs_i64(0 - 7) + min_i64(4, 9) + max_i64(4, 9) + pow_i64(2, 3)
+}
+"#,
+    );
+
+    assert!(ir.contains("abs_i64"));
+    assert!(ir.contains("pow_i64"));
+}
+
+#[test]
+fn error_module_imports_and_asserts_true() {
+    let ir = compile_with_stdlib_modules(
+        &["error.sg"],
+        r#"
+def main() -> i64 {
+    if assert_eq_i64(4, 4) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("assert_eq_i64"));
+    assert!(ir.contains("sengoo_panic_option_unwrap_i64"));
 }
 
 #[test]

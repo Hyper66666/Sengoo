@@ -1,0 +1,12 @@
+// Requires stdlib modules: option.sg, result.sg, lua54.sg.
+// Passing a null path exercises the feature-gated loader diagnostic path.
+def main() -> i64 {
+    let opened = lua54_open_raw(0);
+    if opened.is_err() {
+        0
+    } else {
+        let lua = opened.unwrap_or(Lua54 { handle: 0 });
+        lua.close();
+        0
+    }
+}

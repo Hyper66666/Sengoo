@@ -1,0 +1,10 @@
+[package]
+name = "a"
+version = "0.1.0"
+edition = "2026"
+
+[bin]
+path = "src/main.sg"
+
+[dependencies]
+b = { path = "../b" }

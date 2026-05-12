@@ -1,0 +1,252 @@
+extern "C" {
+    fn sengoo_net_last_error() -> i64;
+    fn sengoo_net_clear_error();
+    fn sengoo_net_error_name_copy(code: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_tcp_connect(host: i64, port: i64, timeout_ms: i64) -> i64;
+    fn sengoo_tcp_send(handle: i64, data: i64, len: i64) -> i64;
+    fn sengoo_tcp_recv(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
+    fn sengoo_tcp_close(handle: i64) -> i64;
+    fn sengoo_udp_bind(host: i64, port: i64) -> i64;
+    fn sengoo_udp_connect(handle: i64, host: i64, port: i64) -> i64;
+    fn sengoo_udp_send(handle: i64, data: i64, len: i64) -> i64;
+    fn sengoo_udp_recv(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
+    fn sengoo_udp_close(handle: i64) -> i64;
+    fn sengoo_http_get(url: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_post(url: i64, body: i64, len: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_status(handle: i64) -> i64;
+    fn sengoo_http_body_len(handle: i64) -> i64;
+    fn sengoo_http_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_close(handle: i64) -> i64;
+    fn sengoo_ws_connect(url: i64, timeout_ms: i64) -> i64;
+    fn sengoo_ws_send_text(handle: i64, data: i64, len: i64) -> i64;
+    fn sengoo_ws_recv_text(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
+    fn sengoo_ws_close(handle: i64) -> i64;
+    fn sengoo_net_bench_last_error_code() -> i64;
+    fn sengoo_net_bench_last_error_len() -> i64;
+    fn sengoo_net_bench_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_net_bench_last_error_clear() -> i64;
+    fn sengoo_net_bench_run(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report_buffer: i64, report_capacity: i64) -> i64;
+}
+
+struct TcpStream {
+    handle: i64,
+}
+
+struct UdpSocket {
+    handle: i64,
+}
+
+struct HttpClient {
+    handle: i64,
+}
+
+struct WsClient {
+    handle: i64,
+}
+
+def net_last_error() -> i64 {
+    sengoo_net_last_error()
+}
+
+def net_clear_error() -> bool {
+    sengoo_net_clear_error();
+    true
+}
+
+def net_error_name_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    let copied = sengoo_net_error_name_copy(code, buffer_ptr, capacity);
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+    }
+}
+
+def net_tcp_connect_raw(host_ptr: i64, port: i64, timeout_ms: i64) -> Result<TcpStream, i64> {
+    let handle = sengoo_tcp_connect(host_ptr, port, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: TcpStream { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: TcpStream { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+impl TcpStream {
+    def close(self) -> bool {
+        sengoo_tcp_close(self.handle) != 0
+    }
+
+    def send_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
+        let sent = sengoo_tcp_send(self.handle, data_ptr, len);
+        if sent >= 0 {
+            Result { is_ok: true, value: sent, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
+        let received = sengoo_tcp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
+        if received >= 0 {
+            Result { is_ok: true, value: received, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+}
+
+def udp_bind_raw(host_ptr: i64, port: i64) -> Result<UdpSocket, i64> {
+    let handle = sengoo_udp_bind(host_ptr, port);
+    if handle != 0 {
+        Result { is_ok: true, value: UdpSocket { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: UdpSocket { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+impl UdpSocket {
+    def connect_raw(self, host_ptr: i64, port: i64) -> Result<bool, i64> {
+        let status = sengoo_udp_connect(self.handle, host_ptr, port);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def send_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
+        let sent = sengoo_udp_send(self.handle, data_ptr, len);
+        if sent >= 0 {
+            Result { is_ok: true, value: sent, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
+        let received = sengoo_udp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
+        if received >= 0 {
+            Result { is_ok: true, value: received, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_udp_close(self.handle) != 0
+    }
+}
+
+def http_get_raw(url_ptr: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
+    let handle = sengoo_http_get(url_ptr, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpClient { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+def http_post_raw(url_ptr: i64, body_ptr: i64, len: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
+    let handle = sengoo_http_post(url_ptr, body_ptr, len, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpClient { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+impl HttpClient {
+    def status(self) -> Result<i64, i64> {
+        let status = sengoo_http_status(self.handle);
+        if status >= 0 {
+            Result { is_ok: true, value: status, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def body_len(self) -> Result<i64, i64> {
+        let len = sengoo_http_body_len(self.handle);
+        if len >= 0 {
+            Result { is_ok: true, value: len, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def body_copy_raw(self, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+        let copied = sengoo_http_body_copy(self.handle, buffer_ptr, capacity);
+        if copied >= 0 {
+            Result { is_ok: true, value: copied, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_http_close(self.handle) != 0
+    }
+}
+
+def ws_connect_raw(url_ptr: i64, timeout_ms: i64) -> Result<WsClient, i64> {
+    let handle = sengoo_ws_connect(url_ptr, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: WsClient { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: WsClient { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+impl WsClient {
+    def send_text_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
+        let sent = sengoo_ws_send_text(self.handle, data_ptr, len);
+        if sent >= 0 {
+            Result { is_ok: true, value: sent, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def recv_text_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
+        let received = sengoo_ws_recv_text(self.handle, buffer_ptr, capacity, timeout_ms);
+        if received >= 0 {
+            Result { is_ok: true, value: received, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_ws_close(self.handle) != 0
+    }
+}
+
+def net_bench_last_error_code() -> i64 {
+    sengoo_net_bench_last_error_code()
+}
+
+def net_bench_last_error_len() -> i64 {
+    sengoo_net_bench_last_error_len()
+}
+
+def net_bench_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    let copied = sengoo_net_bench_last_error_copy(buffer_ptr, capacity);
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_net_bench_last_error_code() }
+    }
+}
+
+def net_bench_last_error_clear() -> bool {
+    sengoo_net_bench_last_error_clear() == 0
+}
+
+def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report_buffer: i64, report_capacity: i64) -> Result<i64, i64> {
+    let copied = sengoo_net_bench_run(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report_buffer, report_capacity);
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_net_bench_last_error_code() }
+    }
+}

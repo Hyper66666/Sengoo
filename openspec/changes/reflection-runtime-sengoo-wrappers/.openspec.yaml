@@ -1,0 +1,261 @@
+id: reflection-runtime-sengoo-wrappers
+title: Add Sengoo-Side Wrappers for runtime/src/reflect Drivers
+status: proposed
+priority: P1
+created: 2026-05-12
+updated: 2026-05-12
+
+summary: |
+  Provide pure-Sengoo wrapper modules for the five reflection-runtime
+  drivers (`runtime_db`, `runtime_ffi`, `runtime_lua54`, `runtime_proto`,
+  `runtime_net_bench`) so users can `import std::db` / `std::ffi` /
+  `std::lua54` / `std::proto` / `std::net` instead of writing
+  `extern "C" { ... }` blocks containing dozens of functions by hand.
+
+motivation: |
+  The runtime drivers in `runtime/src/reflect/` are mature and stable:
+
+  - `runtime_db.rs` (~30 KB, ~30 extern symbols)
+  - `runtime_ffi.rs` (~45 KB, ~50 extern symbols)
+  - `runtime_lua54.rs` (~19 KB, ~20 extern symbols)
+  - `runtime_proto.rs` (~11 KB, ~15 extern symbols)
+  - `runtime_net_bench.rs` (~14 KB, ~15 extern symbols)
+
+  But there is no Sengoo-side surface for any of them. Anyone wanting to
+  use the database runtime from Sengoo today has to:
+
+  1. Read `runtime/src/reflect/runtime_db.rs` to learn the symbol names
+  2. Hand-write a 30-line `extern "C" { ... }` block
+  3. Build their own struct + impl wrapper around opaque `i64` handles
+  4. Repeat for every project
+
+  This duplicates effort, gets the function signatures wrong frequently
+  (because there is no compile-time check from the Rust side that the
+  Sengoo-side declaration matches), and creates a stark contradiction
+  between the README's "5) Runtime Integration Stack" claim and the
+  actual user experience.
+
+  Wrapping these in `tools/stdlib/*.sg` modules costs one Sengoo file per
+  driver, exposes the surface as ergonomic structs with methods, and
+  makes the runtime story honest.
+
+problem: |
+  Specific friction today:
+
+  - Examples directory has no demo for any reflection runtime feature
+    despite README highlighting them.
+  - Users encountering `runtime_db` for the first time see Rust source
+    code, not a Sengoo API.
+  - Symbol names use prefixes like `sengoo_db_open` / `sengoo_lua54_open`
+    that leak runtime implementation detail into Sengoo source.
+  - Each driver returns opaque `i64` handles and uses status-code-based
+    error reporting; without Sengoo wrappers, every user reinvents the
+    same `match status { 0 => ... }` boilerplate.
+  - Migration to a future generic-error model is impossible because
+    there is no central wrapper layer to update.
+
+goals:
+  - One `.sg` module per driver:
+    - `tools/stdlib/db.sg` for `runtime_db`
+    - `tools/stdlib/ffi.sg` for `runtime_ffi`
+    - `tools/stdlib/lua54.sg` for `runtime_lua54`
+    - `tools/stdlib/proto.sg` for `runtime_proto`
+    - `tools/stdlib/net.sg` for `runtime_net_bench` (and any HTTP/TCP/UDP
+      surface from `runtime/src/net.rs` reachable through the existing
+      `NetRuntime` ABI)
+  - Each module exposes:
+    - One `struct` per logical resource (e.g. `Db`, `Lua54`, `TcpStream`)
+      that wraps the opaque `i64` handle
+    - Method-style API (`db.exec(sql)`, `lua.do_string(src)`)
+    - Status codes mapped to `Result<T, E>` from `tools/stdlib/result.sg`
+  - At least one runnable example per wrapper under `examples/reflection/`
+  - Documentation index at `tools/stdlib/README.md` cross-references each
+    wrapper to its underlying `runtime/src/reflect/*.rs` driver
+  - No new runtime symbols are added; this is purely a Sengoo-side surface
+    over the existing C ABI
+
+non_goals:
+  - Generic error types or unified error enum across all drivers (each
+    driver keeps its own status code namespace; wrappers convert per
+    driver)
+  - Replacing the `i64`-handle ABI with anything else
+  - Async wrappers; if a driver is synchronous in C, the wrapper is
+    synchronous in Sengoo
+  - Adding new driver functionality (no new SQL features, Lua bindings,
+    or protobuf message types)
+  - Localized error messages
+  - Driver-specific test suites beyond the smoke example
+
+design:
+  approach: |
+    **Phase 1: Audit each driver**
+    For each of the five drivers, list the exact extern symbol set and
+    the resource lifecycle (open/use/close pattern). Capture this in a
+    short `runtime/src/reflect/<driver>.md` note that the wrapper file
+    can reference.
+
+    **Phase 2: Build one wrapper at a time**
+    Order: `db` first (simplest lifecycle), then `lua54`, `proto`,
+    `net`, `ffi` last (most surface). Each wrapper:
+    - Declares the `extern "C" { ... }` block at top
+    - Defines one or more `struct` with `handle: i64`
+    - Implements methods that call into externs
+    - Maps status codes to `Result<T, E>`
+
+    **Phase 3: One example per wrapper**
+    Add `examples/reflection/` subdirectory with:
+    - `db_open_query.sg`
+    - `lua54_eval.sg`
+    - `proto_encode_decode.sg`
+    - `net_tcp_echo.sg`
+    - `ffi_load_call.sg`
+    Each example is `<= 60` lines, uses the wrapper module, and is
+    smoke-tested by CI through `cargo test -p sgc examples_smoke_`.
+
+    **Phase 4: Document the layer**
+    `tools/stdlib/README.md` (introduced by `stdlib-module-decomposition`)
+    gains an "Reflection Wrappers" section listing each wrapper and its
+    driver. The main `README.md` "Runtime Integration Stack" bullet
+    list links here.
+
+  components:
+    - tools/stdlib/db.sg: Sengoo wrapper for runtime_db
+    - tools/stdlib/ffi.sg: Sengoo wrapper for runtime_ffi
+    - tools/stdlib/lua54.sg: Sengoo wrapper for runtime_lua54
+    - tools/stdlib/proto.sg: Sengoo wrapper for runtime_proto
+    - tools/stdlib/net.sg: Sengoo wrapper for runtime_net_bench / net.rs
+    - examples/reflection/: one demo per wrapper
+    - tools/stdlib/README.md: extended index
+    - runtime/src/reflect/<driver>.md: short ABI capture per driver
+
+  sample_wrapper: |
+    ```sengoo
+    // tools/stdlib/db.sg
+    import "result";
+
+    extern "C" {
+        fn sengoo_db_open(path: str) -> i64;
+        fn sengoo_db_close(handle: i64) -> i64;
+        fn sengoo_db_ping(handle: i64) -> i64;
+        fn sengoo_db_exec(handle: i64, sql: str) -> i64;
+    }
+
+    struct Db { handle: i64 }
+
+    impl Db {
+        def open(path: str) -> Result<Db, i64> {
+            let h = sengoo_db_open(path);
+            if h <= 0 {
+                result_err_i64(h)
+            } else {
+                result_ok_i64(Db { handle: h })
+            }
+        }
+
+        def close(self) -> bool {
+            sengoo_db_close(self.handle) == 0
+        }
+
+        def ping(self) -> bool {
+            sengoo_db_ping(self.handle) == 0
+        }
+
+        def exec(self, sql: str) -> i64 {
+            sengoo_db_exec(self.handle, sql)
+        }
+    }
+    ```
+
+tasks:
+  - id: audit-driver-abi
+    title: Capture ABI surface of each reflect driver
+    description: |
+      For each of the five drivers, produce a short `<driver>.md` note
+      listing extern symbol set, signature, ownership semantics, and
+      status code namespace. These become the source of truth that the
+      wrapper files cite.
+    estimate: 4 hours
+
+  - id: wrap-runtime-db
+    title: Implement tools/stdlib/db.sg
+    description: |
+      Smallest driver, simplest lifecycle. Provides Db struct with open,
+      close, ping, exec, query methods. Maps status codes to
+      Result<T, i64>.
+    estimate: 4 hours
+
+  - id: wrap-runtime-lua54
+    title: Implement tools/stdlib/lua54.sg
+    description: |
+      Wrap Lua 5.4 dynamic library bridge: open, close, do_string,
+      do_file, get/set globals, push/pop helpers. Mark as feature-gated
+      on the `runtime_lua54` Cargo feature being enabled.
+    estimate: 6 hours
+
+  - id: wrap-runtime-proto
+    title: Implement tools/stdlib/proto.sg
+    description: |
+      Wrap protobuf wire encode/decode helpers. Surface only the
+      already-implemented message types; do not invent new ones.
+    estimate: 4 hours
+
+  - id: wrap-runtime-net
+    title: Implement tools/stdlib/net.sg
+    description: |
+      Wrap NetRuntime-backed TCP / UDP / HTTP / WS API from
+      `runtime/src/net.rs`. Surfaces TcpStream, UdpSocket, HttpClient,
+      WsClient as structs with methods. Includes the bench helpers from
+      `runtime_net_bench` only if they are reachable through the public
+      ABI.
+    estimate: 8 hours
+
+  - id: wrap-runtime-ffi
+    title: Implement tools/stdlib/ffi.sg
+    description: |
+      Wrap C library load/call/close, C++ object lifecycle, callback
+      bridge, and binary buffer helpers. This is the largest wrapper
+      and the one most likely to need iteration; ship a v0 and accept
+      follow-up bug fixes are expected.
+    estimate: 10 hours
+
+  - id: add-reflection-examples
+    title: Add examples/reflection/* demos
+    description: |
+      One example per wrapper. Each <= 60 lines, runs end-to-end via
+      `sgc run`, exercised by a CI smoke test.
+    estimate: 6 hours
+
+  - id: update-stdlib-readme
+    title: Add Reflection Wrappers section to tools/stdlib/README.md
+    description: |
+      Cross-reference each wrapper file to its driver and example,
+      plus a one-paragraph description of the resource lifecycle.
+    estimate: 2 hours
+
+acceptance_criteria:
+  - "Each of the five wrapper modules compiles with `sgc check`"
+  - "Each `examples/reflection/*.sg` runs successfully with `sgc run`"
+  - "CI smoke tests under `cargo test -p sgc examples_smoke_` cover all five examples"
+  - "`tools/stdlib/README.md` lists every wrapper with its driver, example, and lifecycle summary"
+  - "`runtime/src/reflect/*.md` ABI notes exist for all five drivers"
+  - "No new symbols are exported from `runtime/src/reflect/` Rust source"
+  - "Existing `cargo test -p sengoo-runtime --lib` stays at 42/42"
+
+risks:
+  - "Lua54 wrapper depends on optional Cargo feature; smoke example needs to be conditionally compiled or skipped when the feature is off"
+  - "FFI wrapper has the largest surface area; v0 may have signature mistakes that survive review. Mitigation: smoke examples exercise each wrapper symbol path"
+  - "Net wrapper interaction with the recent NetRuntime instance migration could surface lifetime issues that did not exist when net was global; mitigation is to test against the same fixtures used in `runtime/src/net.rs::tests`"
+  - "Some drivers may use UTF-8 string handling that interacts with Sengoo's `str` type in ways not yet tested; mitigation is to keep wrapper APIs `i64` / `bool` / `str` only and defer Vec<u8>-style payloads to follow-up"
+
+dependencies:
+  - Depends on: stdlib-module-decomposition (provides option/result modules and the README index this change extends)
+  - Related: examples-coverage-expansion (the examples/reflection/* demos satisfy that change too)
+
+references:
+  - runtime/src/reflect/runtime_db.rs
+  - runtime/src/reflect/runtime_ffi.rs
+  - runtime/src/reflect/runtime_lua54.rs
+  - runtime/src/reflect/runtime_proto.rs
+  - runtime/src/reflect/runtime_net_bench.rs
+  - runtime/src/net.rs
+  - tools/stdlib/collections.sg

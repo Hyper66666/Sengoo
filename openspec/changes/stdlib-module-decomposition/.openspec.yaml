@@ -1,0 +1,197 @@
+id: stdlib-module-decomposition
+title: Split tools/stdlib into Focused Per-Topic Modules
+status: proposed
+priority: P1
+created: 2026-05-12
+updated: 2026-05-12
+
+summary: |
+  Decompose the single 490-line `tools/stdlib/collections.sg` file into
+  focused per-topic modules: `option.sg`, `result.sg`, `collections.sg`,
+  `string.sg`, `math.sg`, `error.sg`. Move existing types into their
+  topical homes, add minimal new APIs that already have backing runtime
+  helpers, and wire each module into existing `stdlib_surface_tests`
+  coverage without changing any runtime ABI.
+
+motivation: |
+  `tools/stdlib/collections.sg` currently contains:
+
+  - `Option<T>` and helpers
+  - `Result<T, E>` and helpers
+  - `Vec<T>` / `VecIter<T>` and `i64`-specialized helpers
+  - `HashMap<K, V>` / `HashMapIter<V>` and `i64`-specialized helpers
+  - `Iterator` trait
+  - panic helpers
+
+  This is fine for a single-file proof of concept but makes the stdlib
+  hard to navigate, hard to extend, and creates artificial coupling
+  between unrelated APIs in compiler-side surface tests. The
+  `reflection-runtime-sengoo-wrappers` change wants to add `db.sg`,
+  `ffi.sg`, `lua54.sg`, `proto.sg`, `net.sg`; without a clean per-topic
+  layout each new wrapper has to either piggyback on `collections.sg` or
+  invent its own folder convention.
+
+  This change establishes the convention before that pressure arrives.
+
+problem: |
+  Specific friction today:
+
+  - Compiler surface tests in `stdlib_surface_tests.rs` currently
+    `import` only `collections`, so any new module forces a test-side
+    import path change.
+  - Future wrappers (db, ffi, lua54, proto, net) have no precedent to
+    follow for naming or file layout.
+  - The `Iterator` trait is intermingled with `Vec<T>` definition,
+    making it hard to see what is the iteration protocol vs what is the
+    `Vec`-specific implementation.
+  - `Option<T>` and `Result<T, E>` API ergonomics are hard to extend
+    without scrolling past the entire collections module.
+  - `string.sg`, `math.sg`, and `error.sg` are referenced casually in
+    docs but do not exist yet.
+
+goals:
+  - Move `Option<T>` and its helpers into `tools/stdlib/option.sg`
+  - Move `Result<T, E>` and its helpers into `tools/stdlib/result.sg`
+  - Keep `Vec<T>`, `HashMap<K, V>`, `Iterator`, and their `_i64`
+    specializations in `tools/stdlib/collections.sg`
+  - Add `tools/stdlib/string.sg` with str_len / str_eq / str_concat
+    that route to existing runtime helpers
+  - Add `tools/stdlib/math.sg` with abs_i64 / min_i64 / max_i64 / pow_i64
+    written in pure Sengoo (no runtime ABI change)
+  - Add `tools/stdlib/error.sg` with assert / assert_eq wrappers around
+    the existing panic helpers
+  - Update `compiler/src/tests/stdlib_surface_tests.rs` to exercise the
+    new module surface in addition to the existing collections cases
+  - Keep all runtime ABI exactly as it is today; this is purely a
+    source-level reorganization
+
+non_goals:
+  - Replacing the current `_i64`-specialized runtime helpers with truly
+    generic versions (that is `stdlib-generic-support` Layer B)
+  - Adding any new runtime extern function
+  - Changing the tagged-struct layout of `Option<T>` or `Result<T, E>`
+  - Implementing string operations beyond what the runtime already
+    provides
+  - Adding floating-point math (`f32`/`f64`) helpers; they require new
+    runtime extern functions and belong in a separate change
+  - Localized error messages or structured error chaining
+
+design:
+  approach: |
+    **Phase 1: Move types to topical files**
+    - Cut `Option<T>` declarations and helpers out of `collections.sg`
+      and paste into `option.sg` with the same module-level visibility.
+    - Same for `Result<T, E>` to `result.sg`.
+    - Keep the `extern "C" { ... }` block in `collections.sg` because
+      the helpers it declares (`sengoo_panic_*`) are referenced by
+      multiple modules.
+
+    **Phase 2: Add new modules**
+    - `string.sg`: declare extern `sengoo_str_len`, `sengoo_str_eq`,
+      `sengoo_str_concat` (all already exist in `runtime/src/reflect.rs`
+      or are trivial pass-throughs). Provide `def str_len(s: str) -> i64`
+      etc. as the user-facing surface.
+    - `math.sg`: pure Sengoo helpers, no externs. `def abs_i64(x: i64)
+      -> i64 { if x < 0 { -x } else { x } }` style.
+    - `error.sg`: pure Sengoo wrappers around the existing
+      `sengoo_panic_option_unwrap_i64` / `sengoo_panic_result_unwrap_i64`.
+
+    **Phase 3: Update tests**
+    - `stdlib_surface_tests.rs` keeps existing `import "collections"`
+      tests, plus adds `import "option"`, `import "result"`,
+      `import "string"`, `import "math"`, `import "error"` smoke tests
+      that prove each module is parseable and one trivial method
+      compiles.
+
+    **Phase 4: Documentation**
+    - Add a `tools/stdlib/README.md` that lists all modules and their
+      surfaces. This becomes the discovery point for users and for the
+      reflection wrapper change to follow.
+
+  components:
+    - tools/stdlib/option.sg: new file, lifted from collections.sg
+    - tools/stdlib/result.sg: new file, lifted from collections.sg
+    - tools/stdlib/collections.sg: reduced to Vec/HashMap/Iterator
+    - tools/stdlib/string.sg: new file, str_len/str_eq/str_concat
+    - tools/stdlib/math.sg: new file, abs/min/max/pow for i64
+    - tools/stdlib/error.sg: new file, assert/assert_eq + panic wrappers
+    - tools/stdlib/README.md: module index and discovery doc
+    - compiler/src/tests/stdlib_surface_tests.rs: extended coverage
+
+tasks:
+  - id: extract-option-module
+    title: Move Option<T> to tools/stdlib/option.sg
+    description: |
+      Cut the `struct Option<T>`, `option_some_*`, `option_none_*`,
+      `unwrap_or` definitions out of `collections.sg`. Paste into a
+      new `tools/stdlib/option.sg` with identical signatures. Re-export
+      via `import` if any other stdlib module references them.
+    estimate: 1 hour
+
+  - id: extract-result-module
+    title: Move Result<T, E> to tools/stdlib/result.sg
+    description: |
+      Cut `struct Result<T, E>`, `result_ok_*`, `result_err_*`, and any
+      method impls into `tools/stdlib/result.sg`.
+    estimate: 1 hour
+
+  - id: add-string-module
+    title: Add tools/stdlib/string.sg with basic operations
+    description: |
+      Declare extern `sengoo_str_len`, `sengoo_str_eq`,
+      `sengoo_str_concat` and provide `str_len`, `str_eq`, `str_concat`
+      Sengoo-side wrappers. Confirm runtime symbols exist in
+      `runtime/src/reflect.rs` before writing the extern block.
+    estimate: 2 hours
+
+  - id: add-math-module
+    title: Add tools/stdlib/math.sg with i64 helpers
+    description: |
+      Pure Sengoo: `abs_i64`, `min_i64`, `max_i64`, `pow_i64`. No new
+      runtime externs. `pow_i64` does the obvious loop-based exponent.
+    estimate: 1 hour
+
+  - id: add-error-module
+    title: Add tools/stdlib/error.sg with assert helpers
+    description: |
+      Wrap `sengoo_panic_option_unwrap_i64` /
+      `sengoo_panic_result_unwrap_i64` and provide `assert(cond: bool)`
+      and `assert_eq_i64(a: i64, b: i64)` helpers that abort via the
+      existing panic path on failure.
+    estimate: 1 hour
+
+  - id: extend-surface-tests
+    title: Extend stdlib_surface_tests with per-module imports
+    description: |
+      Add one minimal compile-and-run test per new module. Existing
+      `collections` tests stay green by design because we only move
+      definitions, never delete them.
+    estimate: 2 hours
+
+  - id: add-stdlib-readme
+    title: Add tools/stdlib/README.md module index
+    description: |
+      List every module file with a one-paragraph description of its
+      surface. Becomes the canonical discovery doc for users.
+    estimate: 1 hour
+
+acceptance_criteria:
+  - "`cargo test -p sengoo-compiler stdlib_surface_` passes both the existing collections cases and the new per-module smoke cases"
+  - "`cargo test -p sgc stdlib_surface_runtime_` stays green with no test-side changes required"
+  - "Each new module file is independently parseable by `sgc check`"
+  - "`tools/stdlib/README.md` lists option, result, collections, string, math, error with a one-paragraph description each"
+  - "No new runtime extern symbols are added beyond what already exists in `runtime/src/reflect.rs`"
+  - "No tagged-struct layout regression for `Option<T>` or `Result<T, E>`"
+
+risks:
+  - "Module import order may surface a parser bug if any module accidentally references a symbol from another module without declaring it; mitigation is to add the per-module smoke test before the cleanup task"
+  - "`tools/stdlib/README.md` is easy to let drift; mitigation is to document the discovery doc as the authoritative module list and make future stdlib changes update it"
+
+dependencies:
+  - Related: stdlib-generic-support (Layer A baseline this builds on)
+  - Blocks: reflection-runtime-sengoo-wrappers (those wrappers will follow this layout)
+
+references:
+  - tools/stdlib/collections.sg
+  - compiler/src/tests/stdlib_surface_tests.rs
+  - openspec/changes/stdlib-generic-support/proposal.md

@@ -1,0 +1,85 @@
+extern "C" {
+    fn sengoo_db_last_error_code() -> i64;
+    fn sengoo_db_last_error_len() -> i64;
+    fn sengoo_db_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_db_last_error_clear() -> i64;
+    fn sengoo_db_open(conn_str: i64) -> i64;
+    fn sengoo_db_close(handle: i64) -> i64;
+    fn sengoo_db_ping(handle: i64) -> i64;
+    fn sengoo_db_exec(handle: i64, sql: i64, params_json: i64) -> i64;
+    fn sengoo_db_query(handle: i64, sql: i64, params_json: i64) -> i64;
+    fn sengoo_db_result_close(result_handle: i64) -> i64;
+    fn sengoo_db_result_row_count(result_handle: i64) -> i64;
+    fn sengoo_db_result_col_count(result_handle: i64) -> i64;
+    fn sengoo_db_result_col_name_len(result_handle: i64, col_idx: i64) -> i64;
+    fn sengoo_db_result_col_name_copy(result_handle: i64, col_idx: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_db_result_cell_len(result_handle: i64, row_idx: i64, col_idx: i64) -> i64;
+    fn sengoo_db_result_cell_copy(result_handle: i64, row_idx: i64, col_idx: i64, buffer: i64, capacity: i64) -> i64;
+}
+
+struct Db {
+    handle: i64,
+}
+
+struct DbResult {
+    handle: i64,
+}
+
+def db_last_error_code() -> i64 {
+    sengoo_db_last_error_code()
+}
+
+def db_last_error_clear() -> bool {
+    sengoo_db_last_error_clear() == 0
+}
+
+def db_open_raw(path_ptr: i64) -> Result<Db, i64> {
+    let handle = sengoo_db_open(path_ptr);
+    if handle != 0 {
+        Result { is_ok: true, value: Db { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: Db { handle: 0 }, error: sengoo_db_last_error_code() }
+    }
+}
+
+impl Db {
+    def close(self) -> bool {
+        sengoo_db_close(self.handle) == 0
+    }
+
+    def ping(self) -> bool {
+        sengoo_db_ping(self.handle) == 0
+    }
+
+    def exec_raw(self, sql_ptr: i64, params_json_ptr: i64) -> Result<i64, i64> {
+        let affected = sengoo_db_exec(self.handle, sql_ptr, params_json_ptr);
+        if affected >= 0 {
+            Result { is_ok: true, value: affected, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: affected }
+        }
+    }
+
+    def query_raw(self, sql_ptr: i64, params_json_ptr: i64) -> Result<DbResult, i64> {
+        let result = sengoo_db_query(self.handle, sql_ptr, params_json_ptr);
+        if result != 0 {
+            Result { is_ok: true, value: DbResult { handle: result }, error: 0 }
+        } else {
+            Result { is_ok: false, value: DbResult { handle: 0 }, error: sengoo_db_last_error_code() }
+        }
+    }
+}
+
+impl DbResult {
+    def close(self) -> bool {
+        sengoo_db_result_close(self.handle) == 0
+    }
+
+    def row_count(self) -> i64 {
+        sengoo_db_result_row_count(self.handle)
+    }
+
+    def col_count(self) -> i64 {
+        sengoo_db_result_col_count(self.handle)
+    }
+}

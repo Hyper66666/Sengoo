@@ -237,6 +237,10 @@ Current gate defaults:
 
 The latest runtime track adds a reusable FFI wrapper layer and integration utilities:
 
+- Sengoo source wrappers in `tools/stdlib/`
+  - `db.sg`, `ffi.sg`, `lua54.sg`, `proto.sg`, and `net.sg`
+  - Raw pointer parameters are currently represented as `i64` until typed FFI pointer/string support lands
+  - Example programs live under `examples/reflection/`
 - Database runtime MVP (`runtime/src/reflect/runtime_db.rs`)
   - Lifecycle: `open` / `close` / `ping`
   - Query path: `exec` / `query` with result handles
@@ -297,6 +301,31 @@ sgc build <file.sg> -O 2 --force-rebuild
 # optional daemon mode
 sgc daemon --addr 127.0.0.1:48765
 ```
+
+## Package Manager (sgpm)
+
+`sgpm` is the offline package-manager MVP for project-level Sengoo workflows.
+It supports `Sengoo.toml`, path-only dependencies, topological `build`/`check`,
+`run`, `test`, `fmt`, `tree`, and `clean`.
+
+```bash
+sgpm new hello
+cd hello
+sgpm check
+sgpm build
+sgpm run
+```
+
+Registry dependencies, lockfiles, workspaces, and publish flows are intentionally
+deferred. See `docs/sgpm-quickstart.md` for the current manifest and command
+surface.
+
+## Standard Library
+
+The source-side standard library lives under `tools/stdlib/` and is split by
+surface area: `option.sg`, `result.sg`, `collections.sg`, `string.sg`,
+`math.sg`, and `error.sg`. See `tools/stdlib/README.md` for module summaries
+and current deferrals.
 
 ## Async Execution
 

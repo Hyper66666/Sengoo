@@ -1,0 +1,16 @@
+extern "C" {
+    fn sengoo_panic_option_unwrap_i64() -> i64;
+}
+
+def assert(cond: bool) -> bool {
+    if cond {
+        true
+    } else {
+        sengoo_panic_option_unwrap_i64();
+        false
+    }
+}
+
+def assert_eq_i64(lhs: i64, rhs: i64) -> bool {
+    assert(lhs == rhs)
+}

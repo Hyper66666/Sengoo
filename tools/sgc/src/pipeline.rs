@@ -407,11 +407,7 @@ fn compile_frontend_to_mir_with_phase_timings(
         }
         let mut mir_fns = lower_hir_with_options(
             &hir_module.items,
-            MirLowerOptions {
-                runtime_contract_checks,
-                lazy_generic_mono: true,
-                async_functions: async_functions.clone(),
-            },
+            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone()),
         )
         .map_err(|e| miette::miette!("{}", e))?;
 

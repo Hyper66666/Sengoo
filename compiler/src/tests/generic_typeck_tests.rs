@@ -217,11 +217,7 @@ def main() -> i64 {
 
     let mir = lower_hir_with_options(
         &hir.items,
-        MirLowerOptions {
-            runtime_contract_checks: false,
-            lazy_generic_mono: true,
-            async_functions: std::collections::HashSet::new(),
-        },
+        MirLowerOptions::new(false, true, std::collections::HashSet::new()),
     )
     .expect("MIR lowering should succeed");
 
@@ -255,11 +251,7 @@ def main() -> i64 {
 
     let mir = lower_hir_with_options(
         &hir.items,
-        MirLowerOptions {
-            runtime_contract_checks: false,
-            lazy_generic_mono: true,
-            async_functions: std::collections::HashSet::new(),
-        },
+        MirLowerOptions::new(false, true, std::collections::HashSet::new()),
     )
     .expect("MIR lowering should succeed");
 

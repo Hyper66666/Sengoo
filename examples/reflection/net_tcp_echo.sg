@@ -1,0 +1,12 @@
+// Requires stdlib modules: option.sg, result.sg, net.sg.
+// Null host exercises the argument-validation path without requiring a live server.
+def main() -> i64 {
+    let stream = net_tcp_connect_raw(0, 0, 1);
+    if stream.is_err() {
+        0
+    } else {
+        let connected = stream.unwrap_or(TcpStream { handle: 0 });
+        connected.close();
+        1
+    }
+}

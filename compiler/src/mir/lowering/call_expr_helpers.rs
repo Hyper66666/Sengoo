@@ -35,10 +35,8 @@ mod tests {
         let struct_defs = HashMap::new();
         let inherent_templates = Vec::new();
         let trait_templates = Vec::new();
-        let options = MirLowerOptions {
-            async_functions: ["worker".to_string()].into_iter().collect(),
-            ..MirLowerOptions::default()
-        };
+        let options = MirLowerOptions::default()
+            .with_async_functions(["worker".to_string()].into_iter().collect());
         let start_block = mir_fn.start_block;
 
         let mut ctx = LoweringContext::new(

@@ -1,0 +1,46 @@
+extern "C" {
+    fn sengoo_lua54_last_error_code() -> i64;
+    fn sengoo_lua54_last_error_len() -> i64;
+    fn sengoo_lua54_last_error_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_lua54_last_error_clear() -> i64;
+    fn sengoo_lua54_open(path: i64) -> i64;
+    fn sengoo_lua54_close(handle: i64) -> i64;
+    fn sengoo_lua54_exec(handle: i64, chunk: i64) -> i64;
+    fn sengoo_lua54_call_i64(handle: i64, func_name: i64, argc: i64, argv: i64, out_value: i64) -> i64;
+}
+
+struct Lua54 {
+    handle: i64,
+}
+
+def lua54_last_error_code() -> i64 {
+    sengoo_lua54_last_error_code()
+}
+
+def lua54_open_raw(path_ptr: i64) -> Result<Lua54, i64> {
+    let handle = sengoo_lua54_open(path_ptr);
+    if handle != 0 {
+        Result { is_ok: true, value: Lua54 { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: Lua54 { handle: 0 }, error: sengoo_lua54_last_error_code() }
+    }
+}
+
+impl Lua54 {
+    def close(self) -> bool {
+        sengoo_lua54_close(self.handle) == 0
+    }
+
+    def exec_raw(self, chunk_ptr: i64) -> bool {
+        sengoo_lua54_exec(self.handle, chunk_ptr) == 0
+    }
+
+    def call_i64_raw(self, func_name_ptr: i64, argc: i64, argv_ptr: i64, out_value_ptr: i64) -> Result<i64, i64> {
+        let status = sengoo_lua54_call_i64(self.handle, func_name_ptr, argc, argv_ptr, out_value_ptr);
+        if status == 0 {
+            Result { is_ok: true, value: status, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: status }
+        }
+    }
+}

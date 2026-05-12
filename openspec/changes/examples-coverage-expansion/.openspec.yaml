@@ -1,0 +1,242 @@
+id: examples-coverage-expansion
+title: Expand examples/ Beyond Basic Syntax to Async, Generics, Traits, FFI, Reflection
+status: proposed
+priority: P2
+created: 2026-05-12
+updated: 2026-05-12
+
+summary: |
+  Grow `examples/` from the current 9 sub-200-byte syntax demos into a
+  curated set of runnable programs that show off async, generics,
+  traits, FFI, and reflection. Each new example is small (≤ 60 lines),
+  documented, and gated by a CI smoke test so future refactors cannot
+  silently break the demos that ship with the README.
+
+motivation: |
+  The current `examples/` directory has nine files, each ≤ 200 bytes,
+  covering only basic syntax (hello, arithmetic, variables, array,
+  loop, lambda, if, struct, method call). The README and OpenSpec docs
+  describe substantial async, generic, trait, FFI, and reflection
+  surfaces, but a new user landing on the repo today cannot find a
+  single demo of any of those features.
+
+  This is a documentation-by-example gap. The compiler tests prove
+  that those features work, but tests are not user-facing entry
+  points. Examples are the primary discovery channel after a user
+  reads the README.
+
+  The reflection-runtime-sengoo-wrappers change adds five
+  examples/reflection demos as part of its scope. This change adds
+  the rest (async, generics, traits, FFI) and establishes the CI
+  smoke pattern that all five categories share.
+
+problem: |
+  Specific gaps:
+
+  - No async demo at all. Users see `async def main()` in the README
+    but no runnable example.
+  - No generic-function or generic-struct demo, despite the stdlib
+    surface tests proving those work.
+  - No trait demo despite traits being a documented feature with
+    specialization support.
+  - `examples/ffi/` has only `sengoo_calls_c.sg` and
+    `sengoo_exports.sg`; both are tiny and neither documents how to
+    build the C side.
+  - No CI gate ensures examples keep working. The current
+    `cargo test -p sgc` covers some of `examples/01_hello.sg` style
+    sanity but does not iterate over the directory.
+
+goals:
+  - Add runnable examples for:
+    - async (3 demos: sleep+spawn, select two, spawn_task lifecycle)
+    - generics (3 demos: Vec<i64>, Option unwrap, Result chain)
+    - traits (2 demos: Iterator basics, method specialization)
+    - ffi (1 demo: C library call with Makefile)
+  - Ensure each example is ≤ 60 lines, opens with a comment block
+    explaining intent and how to run, and prints a verifiable result
+  - Add a CI smoke test that iterates over `examples/**/*.sg` and runs
+    `sgc run` against each, asserting expected exit codes
+  - Add a per-category `README.md` linking to each demo and its
+    expected output
+  - Cross-link from main `README.md` and `README.zh-CN.md` to the
+    examples index
+
+non_goals:
+  - Reflection demos (covered by `reflection-runtime-sengoo-wrappers`)
+  - Production-grade demo applications (each example stays focused on
+    one feature)
+  - Performance benchmarks (those live in `bench/`)
+  - Tutorials beyond what fits in the file's leading comment block
+  - Cross-platform FFI demos requiring complex build systems beyond a
+    single Makefile
+
+design:
+  approach: |
+    **Phase 1: examples/ layout**
+    Standardize on per-feature subdirectories so the smoke test can
+    iterate predictably:
+    ```
+    examples/
+    ├─ async/
+    │   ├─ 01_sleep_spawn.sg
+    │   ├─ 02_select_two.sg
+    │   └─ 03_spawn_task_lifecycle.sg
+    ├─ generics/
+    │   ├─ 01_vec_i64.sg
+    │   ├─ 02_option_unwrap.sg
+    │   └─ 03_result_chain.sg
+    ├─ traits/
+    │   ├─ 01_iterator_basic.sg
+    │   └─ 02_method_specialization.sg
+    └─ ffi/
+        ├─ sengoo_calls_c.sg          (existing)
+        ├─ sengoo_exports.sg           (existing)
+        ├─ Makefile                    (new, builds C side)
+        └─ README.md                   (new, build + run instructions)
+    ```
+
+    The existing top-level `01_hello.sg` through `09_*.sg` files stay
+    where they are; this change only adds new content.
+
+    **Phase 2: Per-category README.md**
+    Each subdirectory gets a `README.md` listing demos with one-line
+    descriptions and expected stdout. The category README is the
+    second-tier discovery point after the top-level
+    `examples/README.md`.
+
+    **Phase 3: CI smoke test**
+    Add `tests/examples_smoke_*` test cases under `tools/sgc/src/tests.rs`
+    that:
+    - locate the workspace `examples/` root
+    - walk the per-category directories
+    - for each `.sg` file, run `sgc run` and assert exit code 0
+    - capture stdout for spot-check assertions on representative demos
+
+    **Phase 4: README cross-link**
+    Add an "Examples" section to both READMEs pointing at
+    `examples/README.md`; update the main top-level
+    `examples/README.md` to list all categories.
+
+  components:
+    - examples/async/: 3 new files
+    - examples/generics/: 3 new files
+    - examples/traits/: 2 new files
+    - examples/ffi/Makefile, examples/ffi/README.md
+    - examples/{async,generics,traits,ffi}/README.md (4 category indexes)
+    - examples/README.md: top-level index update
+    - tools/sgc/src/tests.rs: examples_smoke_* tests
+    - README.md, README.zh-CN.md: Examples section
+
+  example_template: |
+    Every example file follows this structure:
+
+    ```sengoo
+    // examples/<category>/NN_short_name.sg
+    //
+    // Demonstrates: <one sentence>
+    //
+    // Run: sgc run examples/<category>/NN_short_name.sg
+    // Expected output: <verbatim line>
+
+    <minimal feature exercise>
+
+    def main() -> i64 {
+        <demo body>
+        <print or return verifiable value>
+    }
+    ```
+
+  smoke_test_pattern: |
+    ```rust
+    #[test]
+    fn examples_smoke_async_01_sleep_spawn() {
+        let example = workspace_root().join("examples/async/01_sleep_spawn.sg");
+        let output = run_sgc(&example).expect("sgc run failed");
+        assert!(output.status.success(), "stderr: {}", output.stderr);
+    }
+    ```
+
+    A macro or helper iterates all `.sg` files; representative cases
+    additionally assert on stdout contents.
+
+tasks:
+  - id: scaffold-async-examples
+    title: Add examples/async/ demos
+    description: |
+      Three demos: 01_sleep_spawn (await spawn(sleep)), 02_select_two
+      (select between two add1 futures), 03_spawn_task_lifecycle
+      (spawn_task + task_status assertions). Each ≤ 60 lines.
+    estimate: 3 hours
+
+  - id: scaffold-generic-examples
+    title: Add examples/generics/ demos
+    description: |
+      Three demos: 01_vec_i64 (push/pop/iter), 02_option_unwrap
+      (Some/None pattern), 03_result_chain (Ok/Err propagation).
+    estimate: 3 hours
+
+  - id: scaffold-trait-examples
+    title: Add examples/traits/ demos
+    description: |
+      Two demos: 01_iterator_basic (custom Iterator impl returning
+      Option<i64>), 02_method_specialization (generic method
+      specialized for two concrete types).
+    estimate: 3 hours
+
+  - id: harden-ffi-examples
+    title: Add Makefile and README for examples/ffi
+    description: |
+      Add Makefile that builds the C side referenced by sengoo_calls_c.sg.
+      Add README documenting `make && sgc run sengoo_calls_c.sg`. No
+      change to existing .sg files.
+    estimate: 2 hours
+
+  - id: add-category-readmes
+    title: Add per-category README.md indexes
+    description: |
+      examples/{async,generics,traits,ffi}/README.md each list demos
+      with one-line description and expected stdout.
+    estimate: 2 hours
+
+  - id: add-examples-smoke-tests
+    title: Add CI smoke tests for every example
+    description: |
+      tools/sgc/src/tests.rs grows examples_smoke_<category>_<name>
+      cases. A helper iterates the directory in build.rs or manually
+      enumerates; either is acceptable. Skip ffi tests if Makefile
+      target hasn't been built (gracefully).
+    estimate: 4 hours
+
+  - id: cross-link-readmes
+    title: Add Examples section to main READMEs
+    description: |
+      Both README.md and README.zh-CN.md gain an "Examples" section
+      pointing at examples/README.md. examples/README.md grows a
+      category list.
+    estimate: 1 hour
+
+acceptance_criteria:
+  - "Every new `.sg` example runs successfully under `sgc run` and prints the documented expected output"
+  - "`cargo test -p sgc examples_smoke_*` passes for all new categories"
+  - "Each new category has a README.md listing every demo"
+  - "Top-level `examples/README.md` indexes all categories"
+  - "Both `README.md` and `README.zh-CN.md` link to the examples index"
+  - "ffi category has a working Makefile and updated README"
+  - "No example exceeds 60 lines"
+
+risks:
+  - "Async examples may be flaky on slow CI runners due to sleep/timeout granularity; mitigation is to use sleep durations large enough to be robust (>= 10ms) and add `--release` builds to CI matrix"
+  - "FFI example Makefile may fail on Windows runners; mitigation is to skip FFI smoke tests on Windows initially and document the gap"
+  - "Examples drift from compiler behavior over time; mitigation is the smoke-test gate added in this change"
+  - "Using `sgc run` directly in tests creates a build-product dependency; mitigation is to run cargo build --release once per test session and reuse"
+
+dependencies:
+  - Related: reflection-runtime-sengoo-wrappers (adds examples/reflection/* under the same smoke pattern)
+  - Related: stdlib-module-decomposition (generics/traits demos reference the new module layout)
+
+references:
+  - examples/README.md
+  - examples/01_hello.sg (existing baseline)
+  - examples/ffi/sengoo_calls_c.sg (existing FFI baseline)
+  - tools/sgc/src/tests.rs (where smoke tests will live)
+  - bench/tests/ (precedent for runnable .sg fixtures)

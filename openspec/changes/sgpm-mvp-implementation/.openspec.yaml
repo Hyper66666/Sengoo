@@ -1,0 +1,235 @@
+id: sgpm-mvp-implementation
+title: Implement sgpm Package Manager MVP
+status: proposed
+priority: P0
+created: 2026-05-12
+updated: 2026-05-12
+
+summary: |
+  Replace the empty `tools/sgpm/src/` shell with a working MVP of the Sengoo
+  package manager: `Sengoo.toml` parsing, path-based dependency resolution,
+  topological build ordering, and command forwarding to `sgc`.
+
+motivation: |
+  The OpenSpec roadmap `toolchain-language-runtime-roadmap` records tasks 1.8,
+  1.9, and 1.10 (sgpy → sgpm migration, manifest parsing, conflict diagnostics)
+  as `[x]` completed. The repository state contradicts that record: the crate
+  `tools/sgpm` only has a `Cargo.toml` with full dependency declarations
+  (clap, serde, toml, semver, sha2, tar, reqwest, tokio, walkdir, which) and
+  an empty `src/` directory. There is no binary, no manifest schema, and no
+  CLI surface.
+
+  This is a credibility gap for any user trying to use Sengoo as a real
+  language. The compiler core (`sgc`) already supports `build`, `run`, `check`,
+  `fmt` flows, but there is no project-level orchestration on top of it.
+
+  This change closes the gap by shipping a minimal but real `sgpm` binary
+  that handles project-scoped builds with path dependencies. It deliberately
+  scopes out remote registries, lockfile resolution, and workspace semantics
+  so the first iteration can land without committing to network protocols or
+  multi-version SAT solving.
+
+problem: |
+  Current state of `tools/sgpm`:
+
+  - `Cargo.toml` declares full dependency stack (clap, reqwest, tokio,
+    serde/serde_json/toml, thiserror/miette, walkdir, which, flate2, tar,
+    sha2, semver) but the crate has no source files.
+  - The workspace `Cargo.toml` references `tools/sgpm` as a member, so
+    `cargo check --workspace` will start failing the moment any other crate
+    imports from `sgpm`.
+  - `Sengoo.toml` is mentioned in roadmap docs and the README but has no
+    parser, no schema, and no examples.
+  - Users who want to ship a multi-file Sengoo project today must either
+    invoke `sgc` per file or write their own glue script.
+
+goals:
+  - Land a working `sgpm` binary with a stable subcommand surface
+  - Define and parse `Sengoo.toml` with a documented schema
+  - Resolve path-based dependencies in topological order with cycle detection
+  - Forward `build`, `check`, `run`, `test`, `fmt`, `new` to existing tooling
+    (`sgc`, `sgfmt`) with project-aware argument injection
+  - Add integration tests that exercise the manifest + resolver + runner path
+  - Update the OpenSpec `toolchain-language-runtime-roadmap` so tasks 1.8
+    through 1.10 reflect actual code state
+
+non_goals:
+  - Remote package registry, upload, download, or authentication
+  - Lockfile generation or multi-version semver SAT solving
+  - Workspace semantics (`[workspace]`, multiple member packages)
+  - Build-script execution (`build.rs` equivalents)
+  - Patch / override / replace dependency rewrite tables
+  - Binary distribution, code signing, or yank workflows
+  - `sgpm publish` or any network-write subcommand
+
+design:
+  approach: |
+    **Phase 1: Manifest schema and parser**
+    - Define `Sengoo.toml` v1 schema covering `[package]`, `[dependencies]`,
+      `[bin]`, `[lib]`, `[targets]`.
+    - Implement `manifest::Manifest` with `serde::Deserialize` over `toml`.
+    - Validate semver strings using the `semver` crate; reject malformed
+      manifests with `miette` diagnostics.
+
+    **Phase 2: Dependency resolver (path-only)**
+    - Walk `[dependencies]` entries and resolve `path = "..."` relative to
+      the manifest directory.
+    - Build a directed graph; reject cycles with a clear error.
+    - Topologically order packages so leaf dependencies build first.
+    - Reject any non-path dependency with a clear "registry support not yet
+      implemented" error.
+
+    **Phase 3: Command forwarding**
+    - `sgpm new <name>` — scaffold a project layout (`Sengoo.toml`,
+      `src/main.sg`, `.gitignore`).
+    - `sgpm build [--release]` — resolve deps, then call `sgc build` per
+      package in topo order, wiring dep outputs into `--include` paths.
+    - `sgpm check` — same as build but route to `sgc check`.
+    - `sgpm run [-- args...]` — build then exec the resulting binary.
+    - `sgpm test` — discover `tests/*.sg`, compile and run each.
+    - `sgpm fmt` — discover `src/**/*.sg` and route to `sgfmt`.
+
+    **Phase 4: Integration tests**
+    - Fixture project tree under `tools/sgpm/tests/fixtures/`.
+    - Tests cover manifest parsing, resolver topology, cycle rejection,
+      and end-to-end `sgpm build` of a multi-package fixture.
+
+    **Phase 5: Documentation**
+    - `docs/sgpm-quickstart.md` covering project init, manifest, path deps.
+    - README sections in both English and Chinese pointing to the new doc.
+    - Update `toolchain-language-runtime-roadmap` task ledger to match
+      actual code state.
+
+  components:
+    - tools/sgpm/src/main.rs: clap CLI entry
+    - tools/sgpm/src/manifest.rs: Sengoo.toml schema and parser
+    - tools/sgpm/src/resolver.rs: path-dependency graph resolver
+    - tools/sgpm/src/runner.rs: sgc/sgfmt command forwarding
+    - tools/sgpm/src/scaffold.rs: project scaffolding for `sgpm new`
+    - tools/sgpm/tests/integration.rs: end-to-end fixture tests
+    - tools/sgpm/tests/fixtures/: fixture project trees
+    - docs/sgpm-quickstart.md: user-facing quickstart
+    - README.md, README.zh-CN.md: link to quickstart
+
+  manifest_schema: |
+    ```toml
+    [package]
+    name = "my-app"
+    version = "0.1.0"
+    authors = ["..."]
+    description = "..."
+    edition = "2026"
+
+    [bin]
+    path = "src/main.sg"
+    name = "my-app"
+
+    [lib]
+    path = "src/lib.sg"
+
+    [dependencies]
+    my-shared = { path = "../shared" }
+    collections = { path = "../../tools/stdlib" }
+    ```
+
+    v1 explicitly does not honor a `version = "x.y.z"` value on dependencies
+    — it parses semver to ensure forward compatibility but rejects anything
+    other than `path`-only deps with a "registry not implemented" error.
+
+  cli_surface: |
+    ```
+    sgpm new <name>            # scaffold project
+    sgpm build [--release]     # build current package + deps
+    sgpm check                 # type-check current package + deps
+    sgpm run [-- args...]      # build + exec
+    sgpm test                  # build tests/, run each
+    sgpm fmt                   # route to sgfmt
+    sgpm tree                  # print resolved dependency graph
+    ```
+
+tasks:
+  - id: define-manifest-schema
+    title: Define Sengoo.toml v1 schema and serde model
+    description: |
+      Add `manifest.rs` with `Manifest`, `PackageMeta`, `BinTarget`,
+      `LibTarget`, `Dependency` structs. Parse with `toml::from_str`.
+      Validate semver fields. Reject unknown top-level keys with a
+      `Diagnostic` from `miette`.
+    estimate: 4 hours
+
+  - id: implement-path-resolver
+    title: Implement path-only dependency resolver
+    description: |
+      Build directed graph of path deps from a root manifest. Detect
+      cycles and report them with a path trace. Topologically sort.
+      Reject non-path deps with a clear forward-looking error.
+    estimate: 3 hours
+
+  - id: implement-command-runner
+    title: Implement sgc/sgfmt command forwarding
+    description: |
+      `sgpm build/check/run/test/fmt` resolve to running the workspace
+      binaries. Use `which::which` to locate them, fall back to looking
+      under `target/{debug,release}/`. Forward stdout/stderr so user sees
+      real diagnostics.
+    estimate: 4 hours
+
+  - id: implement-scaffold
+    title: Implement sgpm new project scaffolding
+    description: |
+      `sgpm new my-app` creates `my-app/Sengoo.toml`, `my-app/src/main.sg`
+      with a hello-world body, `my-app/.gitignore` excluding target/.
+    estimate: 2 hours
+
+  - id: implement-clap-cli
+    title: Wire clap CLI subcommand surface in main.rs
+    description: |
+      Expose `new`, `build`, `check`, `run`, `test`, `fmt`, `tree`. Pass
+      common flags (`--manifest-path`, `--release`, `-v`/`--verbose`)
+      through to runner. Use `clap::Parser` derive macro.
+    estimate: 2 hours
+
+  - id: add-integration-tests
+    title: Add fixture-based integration tests
+    description: |
+      `tools/sgpm/tests/integration.rs` with at least:
+      - parse_minimal_manifest
+      - reject_cyclic_path_deps
+      - reject_remote_dep_without_registry
+      - resolve_topological_order_three_packages
+      - sgpm_build_invokes_sgc_in_topo_order (mock or real)
+    estimate: 4 hours
+
+  - id: update-readmes-and-docs
+    title: Document sgpm quickstart in English and Chinese
+    description: |
+      `docs/sgpm-quickstart.md` covering manifest fields, path deps,
+      project layout. Link from README.md and README.zh-CN.md. Update
+      `toolchain-language-runtime-roadmap/tasks.md` so 1.8/1.9/1.10
+      reflect the now-shipped reality.
+    estimate: 2 hours
+
+acceptance_criteria:
+  - "`tools/sgpm/src/main.rs` exists and `cargo build -p sgpm` produces a binary"
+  - "`sgpm new demo && cd demo && sgpm build` succeeds against a hello-world fixture"
+  - "`sgpm tree` prints a topo-sorted dependency graph for a 3-package fixture"
+  - "Cyclic path dependencies are rejected with a path trace error"
+  - "Remote dependencies (any non-path entry) are rejected with a clear forward-looking error"
+  - "`cargo test -p sgpm` integration tests are all green"
+  - "`docs/sgpm-quickstart.md` exists and is linked from both READMEs"
+  - "`openspec/changes/toolchain-language-runtime-roadmap/tasks.md` reflects the actual shipped vs unshipped state"
+
+risks:
+  - "Path resolution semantics on Windows (case sensitivity, backslashes) could trip integration tests; use `std::path::Path` everywhere and run tests on Windows in CI"
+  - "`sgc`/`sgfmt` binary discovery may fail on systems without `cargo install`; fall back to looking under workspace `target/`"
+  - "Updating roadmap tasks.md may surface other unshipped items; keep that update tightly scoped to 1.8/1.9/1.10"
+
+dependencies:
+  - Related: toolchain-language-runtime-roadmap
+  - Blocks: stdlib-module-decomposition (cleaner module layout requires sgpm-aware project structure)
+
+references:
+  - tools/sgpm/Cargo.toml
+  - openspec/changes/toolchain-language-runtime-roadmap/tasks.md
+  - tools/sgc/src/main.rs
+  - tools/sgfmt/src/main.rs

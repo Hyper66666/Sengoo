@@ -1,0 +1,251 @@
+id: mir-async-functions-shared-state
+title: Share MirLowerOptions::async_functions Across Lowering Contexts
+status: implemented
+priority: P1
+created: 2026-05-12
+updated: 2026-05-12
+
+summary: |
+  Convert `MirLowerOptions::async_functions` and `concrete_type_registry`
+  from value-cloned per-context fields into shared `Rc<RefCell<...>>`
+  state so `LoweringContext::new` no longer pays a full `HashSet<String>`
+  and registry HashMap clone for every nested lowering. This is the
+  prototype work that proves shared mutable state is viable inside the
+  lowering context, before the larger P2 `Ty` interning change.
+
+motivation: |
+  `compiler/src/mir/lowering.rs` currently has two clone hotspots that
+  fire once per lowered function (and once per spawned async block):
+
+  - `MirLowerOptions::async_functions` is cloned by value into every
+    new `LoweringContext`; the set is mutated when an async block is
+    lowered (line ~787) so subsequent block lowerings see a superset.
+  - `ConcreteTypeRegistry` is cloned by value at every call to
+    `lower_function` (six call sites in `lowering.rs` and helper
+    files) even when the registry is only mutated through specialization
+    paths.
+
+  Together these account for six `concrete_type_registry.clone()`
+  calls plus the per-context `MirLowerOptions::clone()` invocation. For
+  large async-heavy projects with many specialized methods, both clones
+  scale with the workload size and the cost compounds.
+
+  The deeper motivation is that the eventual `Ty` interning work (P2
+  baseline) needs shared mutable arena state inside the lowering
+  pipeline. This change exercises that pattern on a smaller, lower-risk
+  surface so the interning work can build on a proven shape rather
+  than being the first attempt at shared lowering state.
+
+problem: |
+  Specific friction:
+
+  - `LoweringContext::new(... options: MirLowerOptions, ...)` takes
+    options by value, forcing every caller to clone before passing in.
+  - `lower_function(..., concrete_type_registry: ConcreteTypeRegistry,
+    ...)` takes the registry by value for the same reason.
+  - The mutation pattern is "copy-on-write at scope boundary then
+    mutate locally", which means each child lowering sees a snapshot of
+    the parent's state at the time of the clone but additions on the
+    child don't propagate back. For `async_functions`, that's actually
+    the intended semantics (each async block adds its own name and
+    children inherit). For `concrete_type_registry`, it's harder to
+    reason about: specialization happens through `&mut` borrows of the
+    registry, so the per-call clone is always paid even when no
+    mutation occurs.
+
+goals:
+  - Wrap `MirLowerOptions::async_functions` in `Rc<RefCell<HashSet<String>>>`
+  - Wrap `ConcreteTypeRegistry` similarly so the registry handle becomes
+    `Rc<RefCell<...>>` and the per-call clone becomes a refcount bump
+  - Update all six call sites in `compiler/src/mir/lowering.rs` and the
+    one in `compiler/src/mir/lowering/lambda_expr_helpers.rs`
+  - Reduce `compiler/src/mir/lowering.rs` `.clone()` count from current
+    50 to ≤ 35
+  - Keep all 539 compiler-lib tests green
+  - Document the shared-state pattern in `compiler/src/mir/lowering.rs`
+    module docs so future lowering refactors follow it
+
+non_goals:
+  - Introducing thread-safe state (no `Arc`/`Mutex`); the lowering pass
+    is single-threaded and stays that way
+  - Changing the public signature of `lower_hir` or `lower_hir_with_options`
+  - Reorganizing the `MirLowerOptions` struct beyond wrapping the one
+    field
+  - `Ty` interning; this is the prototype, not the rollout
+  - Eliminating every `.clone()` in `mir/lowering.rs`; the goal is the
+    six high-impact ones, not the trivial `name.clone()` on String
+    fields used for HashMap keys
+
+design:
+  approach: |
+    **Phase 1: Wrap async_functions**
+    - Change `MirLowerOptions::async_functions` from `HashSet<String>`
+      to `Rc<RefCell<HashSet<String>>>`.
+    - Update `Default` impl to construct `Rc::new(RefCell::new(HashSet::new()))`.
+    - Update the public constructor `MirLowerOptions::new(...)` (if it
+      exists; otherwise add one) to take a `HashSet<String>` and wrap.
+    - Rewrite the mutation site at the async-block lowering path
+      (`lower_async_block`) to use `borrow_mut().insert(...)`.
+    - Rewrite the read sites in `build_async_dispatch_registry(...)`
+      and the `non_named_call_helpers` / `named_call_helpers` modules
+      to borrow.
+
+    **Phase 2: Wrap concrete_type_registry**
+    - Change `ConcreteTypeRegistry` from a plain struct to a thin
+      newtype around `Rc<RefCell<ConcreteTypeRegistryInner>>`.
+    - All six call-site clones become `Rc::clone(&...)` (which
+      preserves source-visible `.clone()` calls but turns them into
+      ref-count bumps; the .clone() count metric still drops because
+      most call sites are passing the registry into nested function
+      calls and the nested signature changes from owned to ref).
+    - Update `LoweringContext` field type and `lower_function`
+      signature.
+
+    **Phase 3: Validate**
+    - Run `cargo test -p sengoo-compiler --lib` and require 539/539.
+    - Run `cargo test -p sgc` and `cargo test -p sengoo-runtime --lib`
+      to confirm no downstream regression.
+    - Capture `.clone()` count for `compiler/src/mir/lowering.rs`
+      before and after; commit message records the delta.
+
+  components:
+    - compiler/src/mir/lowering.rs: MirLowerOptions field + LoweringContext
+    - compiler/src/mir/generic_methods.rs: ConcreteTypeRegistry definition
+    - compiler/src/mir/method_specialization_helpers.rs: registry consumers
+    - compiler/src/mir/impl_specialization_helpers.rs: registry consumers
+    - compiler/src/mir/lowering/lambda_expr_helpers.rs: nested lowering
+    - compiler/src/mir/lowering/non_named_call_helpers.rs: async_functions reader
+    - compiler/src/mir/lowering/named_call_helpers.rs: async_functions reader
+
+  field_type_change: |
+    Before:
+    ```rust
+    pub struct MirLowerOptions {
+        pub runtime_contract_checks: bool,
+        pub lazy_generic_mono: bool,
+        pub async_functions: HashSet<String>,
+    }
+    ```
+
+    After:
+    ```rust
+    pub struct MirLowerOptions {
+        pub runtime_contract_checks: bool,
+        pub lazy_generic_mono: bool,
+        pub async_functions: Rc<RefCell<HashSet<String>>>,
+    }
+    ```
+
+    `ConcreteTypeRegistry` similarly becomes a newtype:
+    ```rust
+    #[derive(Clone)]
+    pub(crate) struct ConcreteTypeRegistry {
+        inner: Rc<RefCell<ConcreteTypeRegistryInner>>,
+    }
+    ```
+
+  safety_notes: |
+    - All borrow / borrow_mut calls are scoped to the smallest possible
+      block to avoid `RefCell` panics.
+    - Reentrant access (e.g. lowering one function during specialization
+      of another) is reviewed for borrow conflicts; the existing flow
+      already serializes these because lowering is single-threaded and
+      sequential per HIR item.
+    - No `Cell` or unsafe code is introduced.
+
+tasks:
+  - id: wrap-async-functions-field
+    title: Wrap MirLowerOptions::async_functions in Rc<RefCell>
+    status: done
+    description: |
+      Change the field type, update Default, update build_async_dispatch_registry
+      and the two call_helpers readers, update the lower_async_block writer.
+      Verify single-pass with `cargo check -p sengoo-compiler`.
+    estimate: 3 hours
+
+  - id: wrap-concrete-type-registry
+    title: Wrap ConcreteTypeRegistry as Rc<RefCell> newtype
+    status: done
+    description: |
+      Convert the struct to an inner-struct + outer-newtype shape. All
+      mutators acquire `borrow_mut()`; readers `borrow()`. Update
+      method_specialization_helpers and impl_specialization_helpers.
+    estimate: 4 hours
+
+  - id: update-lower-function-signature
+    title: Update lower_function to take registry by value (Rc share)
+    status: done
+    description: |
+      Function signature stays `concrete_type_registry: ConcreteTypeRegistry`
+      but now that's a cheap clone. All six call sites in lowering.rs
+      and lambda_expr_helpers.rs continue to compile without further
+      changes; the clone-cost claim relies on the underlying Rc bump.
+    estimate: 2 hours
+
+  - id: full-test-suite
+    title: Run compiler + sgc + runtime tests
+    status: done
+    description: |
+      cargo test -p sengoo-compiler --lib  → 539/539
+      cargo test -p sgc                    → green
+      cargo test -p sengoo-runtime --lib   → 42/42
+      Record clone() count delta in commit message.
+    estimate: 1 hour
+
+  - id: document-pattern
+    title: Document shared-state pattern in lowering module docs
+    status: done
+    description: |
+      Add a short comment block at the top of `mir/lowering.rs`
+      explaining the Rc<RefCell> pattern, when to use it, and pointing
+      readers at this OpenSpec change for context.
+    estimate: 1 hour
+
+implementation_notes: |
+  Implemented on 2026-05-12.
+
+  Evidence:
+  - `MirLowerOptions::async_functions` is now `Rc<RefCell<HashSet<String>>>`.
+  - `ConcreteTypeRegistry` is now a cloneable shared handle over
+    `Rc<RefCell<ConcreteTypeRegistryInner>>`.
+  - Regression tests prove both cloned handles share newly inserted state.
+  - `cargo check -p sgc` passes.
+  - `cargo test -p sengoo-compiler --lib` passes: 546/546.
+  - `cargo test -p sgc` passes: 206/206.
+  - `cargo test -p sengoo-runtime --lib` passes: 42/42.
+
+  Clone-count note:
+  `compiler/src/mir/lowering.rs` still reports 51 textual `.clone()`
+  occurrences after adding the regression test. The high-impact clones named
+  by this change no longer deep-copy `HashSet` / `HashMap` state; reducing the
+  textual count further would require a separate cleanup pass and should not be
+  faked by mechanical `.to_owned()` rewrites.
+
+acceptance_criteria:
+  - "`compiler/src/mir/lowering.rs` clone count drops from 50 to ≤ 35"
+  - "`MirLowerOptions::async_functions` is `Rc<RefCell<HashSet<String>>>` and all readers / writers use `borrow()` / `borrow_mut()`"
+  - "`ConcreteTypeRegistry` is a newtype around `Rc<RefCell<ConcreteTypeRegistryInner>>` with no public field exposure of the inner state"
+  - "`cargo test -p sengoo-compiler --lib` is 539/539"
+  - "`cargo test -p sgc` is green"
+  - "`cargo test -p sengoo-runtime --lib` stays at 42/42"
+  - "No new `unsafe` blocks anywhere in the diff"
+  - "Module-level doc comment in `mir/lowering.rs` explains the shared-state pattern"
+
+risks:
+  - "RefCell borrow panics if reentrant access pattern emerges; mitigation is to scope borrows tightly and add `RefCell::try_borrow` on any path where reentrance is plausible"
+  - "Hidden mutation through `Rc::clone` could surprise reviewers; mitigation is the documented pattern + tightly scoped mutator names"
+  - "Async block specialization across nested lambdas may need extra borrow-mut guards; mitigation is to add a regression test that mirrors the deepest-nesting case in `compiler/src/tests/async_tests.rs`"
+  - "The clone-count metric is approximate (it counts source `.clone()` occurrences, not runtime cost); acceptance criteria states a metric value but the real benefit is reduced O(N) per-context HashSet copies"
+
+dependencies:
+  - Related: stdlib-generic-support (Layer B follow-up will benefit from same shared-state pattern)
+  - Blocks: ty-interning (P2 baseline, future change) — this prototype is its prerequisite
+
+references:
+  - compiler/src/mir/lowering.rs
+  - compiler/src/mir/generic_methods.rs
+  - compiler/src/mir/method_specialization_helpers.rs
+  - compiler/src/mir/impl_specialization_helpers.rs
+  - compiler/src/mir/lowering/lambda_expr_helpers.rs
+  - compiler/src/mir/lowering/non_named_call_helpers.rs
+  - compiler/src/mir/lowering/named_call_helpers.rs

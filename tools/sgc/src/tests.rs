@@ -3148,13 +3148,24 @@ fn stdlib_runtime_c_is_compilable(clang: &str, runtime_c: &Path) -> bool {
 }
 
 fn load_stdlib_surface_source() -> String {
+    load_stdlib_modules(&["option.sg", "result.sg", "collections.sg"])
+}
+
+fn load_stdlib_modules(modules: &[&str]) -> String {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
         .and_then(|p| p.parent())
         .unwrap_or(manifest_dir);
-    fs::read_to_string(workspace_root.join("tools/stdlib/collections.sg"))
-        .expect("stdlib surface should exist")
+    let stdlib_root = workspace_root.join("tools/stdlib");
+    modules
+        .iter()
+        .map(|module| {
+            fs::read_to_string(stdlib_root.join(module))
+                .unwrap_or_else(|err| panic!("stdlib module {} should exist: {err}", module))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::process::Output> {
@@ -3205,6 +3216,65 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
     let _ = fs::remove_file(&runtime_obj);
     let _ = fs::remove_file(&exe_path);
     Some(output)
+}
+
+fn compile_reflection_example_with_modules(modules: &[&str], example: &str) -> String {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let example_source = fs::read_to_string(workspace_root.join(example))
+        .unwrap_or_else(|err| panic!("reflection example {example} should exist: {err}"));
+    let mut module_list = vec!["option.sg", "result.sg"];
+    module_list.extend_from_slice(modules);
+    let combined = format!(
+        "{}\n\n{}",
+        load_stdlib_modules(&module_list),
+        example_source
+    );
+    compile_compiler_ir(&combined).unwrap_or_else(|err| {
+        panic!("reflection example {example} should compile with stdlib wrappers: {err}")
+    })
+}
+
+#[test]
+fn examples_smoke_reflection_db_open_query() {
+    let ir =
+        compile_reflection_example_with_modules(&["db.sg"], "examples/reflection/db_open_query.sg");
+    assert!(ir.contains("sengoo_db_open"));
+}
+
+#[test]
+fn examples_smoke_reflection_lua54_eval() {
+    let ir =
+        compile_reflection_example_with_modules(&["lua54.sg"], "examples/reflection/lua54_eval.sg");
+    assert!(ir.contains("sengoo_lua54_open"));
+}
+
+#[test]
+fn examples_smoke_reflection_proto_encode_decode() {
+    let ir = compile_reflection_example_with_modules(
+        &["proto.sg"],
+        "examples/reflection/proto_encode_decode.sg",
+    );
+    assert!(ir.contains("sengoo_proto_user_event_encode"));
+}
+
+#[test]
+fn examples_smoke_reflection_net_tcp_echo() {
+    let ir =
+        compile_reflection_example_with_modules(&["net.sg"], "examples/reflection/net_tcp_echo.sg");
+    assert!(ir.contains("sengoo_tcp_connect"));
+}
+
+#[test]
+fn examples_smoke_reflection_ffi_load_call() {
+    let ir = compile_reflection_example_with_modules(
+        &["ffi.sg"],
+        "examples/reflection/ffi_load_call.sg",
+    );
+    assert!(ir.contains("sengoo_ffi_c_open"));
 }
 
 macro_rules! require_stdlib_runtime_output {
