@@ -302,6 +302,19 @@ sgc build <file.sg> -O 2 --force-rebuild
 sgc daemon --addr 127.0.0.1:48765
 ```
 
+## 示例
+
+精选的可运行示例位于 [`examples/`](examples/README.md)，覆盖基础语法、异步、泛型、trait、FFI 与 reflection wrapper。
+
+推荐入口：
+
+- [`examples/async/`](examples/async/)：`sleep`、`spawn`、`select` 和任务生命周期 API
+- [`examples/generics/`](examples/generics/)：`Vec<i64>`、`Option<T>` 和 `Result<T, E>` 模式
+- [`examples/traits/`](examples/traits/)：trait 分发与泛型 trait 方法实例化
+- [`examples/ffi/`](examples/ffi/)：Sengoo <-> C 双向调用
+
+Smoke 覆盖：`cargo test -p sgc examples_smoke_`。
+
 ## 包管理器（sgpm）
 
 `sgpm` 是当前离线优先的 Sengoo 包管理器 MVP，用于项目级工作流。它支持

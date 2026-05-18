@@ -1,58 +1,33 @@
-# FFI Examples (M3 MVP)
+# FFI Examples
 
-This folder demonstrates both directions of C FFI:
+This folder demonstrates both directions of the C FFI boundary:
 
-- Sengoo -> C (`sengoo_calls_c.sg` + `c_add.c`)
-- C -> Sengoo export (`sengoo_exports.sg` + `c_calls_sengoo.c`)
+- Sengoo -> C: [`sengoo_calls_c.sg`](sengoo_calls_c.sg) calls `c_add`
+  from [`c_add.c`](c_add.c).
+- C -> Sengoo: [`c_calls_sengoo.c`](c_calls_sengoo.c) calls the exported
+  `sengoo_add_export` symbol from [`sengoo_exports.sg`](sengoo_exports.sg).
 
-## 1. Sengoo Calls C
+## Requirements
 
-Build LLVM IR from Sengoo source:
+- `cargo`
+- `clang`
+- `make`
 
-```bash
-cargo run -q -p sengoo-compiler --bin emit_ir -- examples/ffi/sengoo_calls_c.sg examples/build/ffi_sengoo_calls_c.ll
-```
-
-Link Sengoo IR with C implementation:
-
-```bash
-clang -Wno-override-module examples/build/ffi_sengoo_calls_c.ll examples/ffi/c_add.c tools/stdlib/runtime.c -o examples/build/ffi_sengoo_calls_c.exe
-```
-
-Run:
+## Build And Run
 
 ```bash
-examples/build/ffi_sengoo_calls_c.exe
+make -C examples/ffi call-c
+make -C examples/ffi c-calls-sengoo
 ```
 
-Expected output:
+Expected output for both targets:
 
 ```text
 42
 ```
 
-## 2. C Calls Sengoo Export
-
-Build LLVM IR for exported Sengoo symbol:
+Clean generated files:
 
 ```bash
-cargo run -q -p sengoo-compiler --bin emit_ir -- examples/ffi/sengoo_exports.sg examples/build/ffi_sengoo_exports.ll
-```
-
-Link C main with Sengoo IR:
-
-```bash
-clang -Wno-override-module examples/ffi/c_calls_sengoo.c examples/build/ffi_sengoo_exports.ll -o examples/build/ffi_c_calls_sengoo.exe
-```
-
-Run:
-
-```bash
-examples/build/ffi_c_calls_sengoo.exe
-```
-
-Expected output:
-
-```text
-42
+make -C examples/ffi clean
 ```

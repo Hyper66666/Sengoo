@@ -18,6 +18,7 @@ desktop.ini
 # Project build output
 /build/
 /examples/build/
+/examples/**/build/
 /.tmp-target-verify/
 
 # Temporary or scratch files

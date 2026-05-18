@@ -1,0 +1,25 @@
+// examples/async/03_spawn_task_lifecycle.sg
+//
+// Demonstrates: spawn_task plus task_status for pending/completed states.
+//
+// Run: sgc run examples/async/03_spawn_task_lifecycle.sg
+// Expected output: 42
+
+async def child() -> i64 {
+    await sleep(5);
+    7
+}
+
+async def main() -> i64 {
+    let task = spawn_task(child());
+    let before = task_status(task);
+    await sleep(15);
+    let after = task_status(task);
+    let value = if before == 1 {
+        if after == 2 { 42 } else { 0 }
+    } else {
+        0
+    };
+    print(value);
+    0
+}

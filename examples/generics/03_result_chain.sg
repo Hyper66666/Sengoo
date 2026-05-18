@@ -1,0 +1,40 @@
+// examples/generics/03_result_chain.sg
+//
+// Demonstrates: chaining Result<i64, i64> helper methods.
+//
+// Run: sgc run examples/generics/03_result_chain.sg
+// Expected output: 18
+
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+def ok_i64(value: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: value, error: 0 }
+}
+
+def err_i64(error: i64) -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: error }
+}
+
+impl Result<i64, i64> {
+    def unwrap_or(self, fallback: i64) -> i64 {
+        if self.is_ok { self.value } else { fallback }
+    }
+
+    def map_add(self, delta: i64) -> Result<i64, i64> {
+        if self.is_ok { ok_i64(self.value + delta) } else { err_i64(self.error) }
+    }
+
+    def and_then_mul(self, factor: i64) -> Result<i64, i64> {
+        if self.is_ok { ok_i64(self.value * factor) } else { err_i64(self.error) }
+    }
+}
+
+def main() -> i64 {
+    let value = ok_i64(5).map_add(1).and_then_mul(3).unwrap_or(0);
+    print(value);
+    0
+}

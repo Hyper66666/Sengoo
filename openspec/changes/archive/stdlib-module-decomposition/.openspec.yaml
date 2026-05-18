@@ -1,6 +1,6 @@
 id: stdlib-module-decomposition
 title: Split tools/stdlib into Focused Per-Topic Modules
-status: proposed
+status: archived
 priority: P1
 created: 2026-05-12
 updated: 2026-05-12

@@ -1,0 +1,37 @@
+// examples/generics/02_option_unwrap.sg
+//
+// Demonstrates: Option<T> with unwrap_or on Some and None values.
+//
+// Run: sgc run examples/generics/02_option_unwrap.sg
+// Expected output: 9
+
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+def some_i64(value: i64) -> Option<i64> {
+    Option { is_some: true, value: value }
+}
+
+def none_i64() -> Option<i64> {
+    Option { is_some: false, value: 0 }
+}
+
+impl<T> Option<T> {
+    def unwrap_or(self, fallback: T) -> T {
+        if self.is_some {
+            self.value
+        } else {
+            fallback
+        }
+    }
+}
+
+def main() -> i64 {
+    let present = some_i64(9);
+    let missing = none_i64();
+    let value = present.unwrap_or(0) + missing.unwrap_or(0);
+    print(value);
+    0
+}

@@ -1,6 +1,6 @@
 id: reflection-runtime-sengoo-wrappers
 title: Add Sengoo-Side Wrappers for runtime/src/reflect Drivers
-status: proposed
+status: archived
 priority: P1
 created: 2026-05-12
 updated: 2026-05-12

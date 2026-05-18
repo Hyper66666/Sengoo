@@ -1,0 +1,19 @@
+// examples/async/01_sleep_spawn.sg
+//
+// Demonstrates: spawn a sleeping async child, then await its result.
+//
+// Run: sgc run examples/async/01_sleep_spawn.sg
+// Expected output: 42
+
+async def child() -> i64 {
+    await sleep(5);
+    42
+}
+
+async def main() -> i64 {
+    let task = spawn(child());
+    await sleep(1);
+    let value = await task;
+    print(value);
+    0
+}

@@ -1,3 +1,10 @@
+// examples/ffi/sengoo_calls_c.sg
+//
+// Demonstrates: declare a C function and call it from Sengoo.
+//
+// Run: make -C examples/ffi call-c
+// Expected output: 42
+
 extern "C" {
     pub fn c_add(a: i64, b: i64) -> i64;
 }

@@ -1,6 +1,6 @@
 id: async-runtime-hardening-and-lowering-split
 title: Harden Async Semantics and Split Lowering Hotspots
-status: proposed
+status: archived
 priority: high
 created: 2026-03-23
 updated: 2026-03-23

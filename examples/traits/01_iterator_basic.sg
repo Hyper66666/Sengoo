@@ -1,0 +1,29 @@
+// examples/traits/01_iterator_basic.sg
+//
+// Demonstrates: a trait method implemented for a concrete iterator-like type.
+//
+// Run: sgc run examples/traits/01_iterator_basic.sg
+// Expected output: 6
+
+struct Counter {
+    start: i64,
+}
+
+trait Iterator {
+    def sum3(self) -> i64 {
+        0
+    }
+}
+
+impl Iterator for Counter {
+    def sum3(self) -> i64 {
+        self.start + (self.start + 1) + (self.start + 2)
+    }
+}
+
+def main() -> i64 {
+    let counter = Counter { start: 1 };
+    let value = counter.sum3();
+    print(value);
+    0
+}

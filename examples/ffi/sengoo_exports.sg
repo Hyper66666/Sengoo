@@ -1,3 +1,10 @@
+// examples/ffi/sengoo_exports.sg
+//
+// Demonstrates: export a Sengoo function for a C caller.
+//
+// Run: make -C examples/ffi c-calls-sengoo
+// Expected output: 42
+
 #[export_name = "sengoo_add_export"]
 pub extern "C" fn sengoo_add(a: i64, b: i64) -> i64 {
     a + b

@@ -1,0 +1,31 @@
+// examples/traits/02_method_specialization.sg
+//
+// Demonstrates: one generic trait method instantiated for bool and i64.
+//
+// Run: sgc run examples/traits/02_method_specialization.sg
+// Expected output: 42
+
+struct Wrap<T> {
+    value: T,
+}
+
+trait WrapValue {
+    def wrap<T>(self, value: T) -> Wrap<T> {
+        Wrap { value: value }
+    }
+}
+
+impl WrapValue for i64 {
+}
+
+def main() -> i64 {
+    let wrapped_bool = 1.wrap(true);
+    let wrapped_i64 = 1.wrap(41);
+    let value = if wrapped_bool.value {
+        wrapped_i64.value + 1
+    } else {
+        0
+    };
+    print(value);
+    0
+}
