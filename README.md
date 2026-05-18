@@ -302,6 +302,19 @@ sgc build <file.sg> -O 2 --force-rebuild
 sgc daemon --addr 127.0.0.1:48765
 ```
 
+## Examples
+
+Curated runnable examples live in [`examples/`](examples/README.md). They cover basic syntax plus async, generics, traits, FFI, and reflection wrappers.
+
+Useful entry points:
+
+- [`examples/async/`](examples/async/) for `sleep`, `spawn`, `select`, and task lifecycle APIs
+- [`examples/generics/`](examples/generics/) for `Vec<i64>`, `Option<T>`, and `Result<T, E>` patterns
+- [`examples/traits/`](examples/traits/) for trait dispatch and generic trait method instantiation
+- [`examples/ffi/`](examples/ffi/) for Sengoo <-> C calls
+
+Smoke coverage: `cargo test -p sgc examples_smoke_`.
+
 ## Package Manager (sgpm)
 
 `sgpm` is the offline package-manager MVP for project-level Sengoo workflows.

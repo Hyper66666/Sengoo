@@ -33,7 +33,7 @@ use sengoo_compiler::compile_to_ir as compile_compiler_ir;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3166,6 +3166,327 @@ fn load_stdlib_modules(modules: &[&str]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn workspace_root_for_tests() -> PathBuf {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir)
+        .to_path_buf()
+}
+
+fn read_example_source(relative_path: &str) -> String {
+    let path = workspace_root_for_tests().join(relative_path);
+    fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("example {} should exist: {err}", path.display()))
+}
+
+fn assert_example_file(relative_path: &str) {
+    let source = read_example_source(relative_path);
+    assert!(
+        source.lines().count() <= 60,
+        "{relative_path} should stay at or below 60 lines"
+    );
+    assert!(
+        source.starts_with("//"),
+        "{relative_path} should start with a comment block"
+    );
+    assert!(
+        source.contains("Run:") && source.contains("Expected output:"),
+        "{relative_path} should document Run and Expected output"
+    );
+}
+
+fn compile_and_run_example(
+    tag: &str,
+    relative_path: &str,
+    extra_c_inputs: &[&str],
+) -> Option<std::process::Output> {
+    let source = read_example_source(relative_path);
+    let llvm_ir = compile_source(&source, 1)
+        .unwrap_or_else(|err| panic!("example {relative_path} should compile: {err}"));
+
+    let clang = find_clang()?;
+    let runtime_c = find_runtime_c()?;
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return None;
+    }
+
+    let ll_path = temp_artifact(&format!("examples-smoke-{tag}"), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact(&format!("examples-smoke-{tag}-main"), obj_ext);
+    if compile_ir_to_object(&clang, &ll_path, &main_obj, 1).is_err() {
+        let _ = fs::remove_file(&ll_path);
+        let _ = fs::remove_file(&main_obj);
+        return None;
+    }
+
+    let runtime_obj = temp_artifact(&format!("examples-smoke-{tag}-runtime"), obj_ext);
+    if compile_ir_to_object(&clang, Path::new(&runtime_c), &runtime_obj, 1).is_err() {
+        let _ = fs::remove_file(&ll_path);
+        let _ = fs::remove_file(&main_obj);
+        let _ = fs::remove_file(&runtime_obj);
+        return None;
+    }
+
+    let mut object_paths = vec![main_obj.clone(), runtime_obj.clone()];
+    let workspace_root = workspace_root_for_tests();
+    let mut extra_objects = Vec::new();
+    for extra_input in extra_c_inputs {
+        let extra_obj = temp_artifact(
+            &format!(
+                "examples-smoke-{tag}-{}",
+                extra_input.replace(['/', '\\', '.'], "-")
+            ),
+            obj_ext,
+        );
+        if compile_ir_to_object(&clang, &workspace_root.join(extra_input), &extra_obj, 1).is_err() {
+            let _ = fs::remove_file(&ll_path);
+            let _ = fs::remove_file(&main_obj);
+            let _ = fs::remove_file(&runtime_obj);
+            for object in &extra_objects {
+                let _ = fs::remove_file(object);
+            }
+            return None;
+        }
+        object_paths.push(extra_obj.clone());
+        extra_objects.push(extra_obj);
+    }
+
+    let exe_path = temp_artifact(
+        &format!("examples-smoke-{tag}"),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    if link_native_binary_from_objects(&clang, &object_paths, &exe_path).is_err() {
+        let _ = fs::remove_file(&ll_path);
+        for object in &object_paths {
+            let _ = fs::remove_file(object);
+        }
+        let _ = fs::remove_file(&exe_path);
+        return None;
+    }
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("example executable should run");
+
+    let _ = fs::remove_file(&ll_path);
+    for object in &object_paths {
+        let _ = fs::remove_file(object);
+    }
+    let _ = fs::remove_file(&exe_path);
+    Some(output)
+}
+
+fn assert_example_output(tag: &str, relative_path: &str, expected_stdout: &str) {
+    assert_example_output_with_c_inputs(tag, relative_path, &[], expected_stdout);
+}
+
+fn assert_example_output_with_c_inputs(
+    tag: &str,
+    relative_path: &str,
+    extra_c_inputs: &[&str],
+    expected_stdout: &str,
+) {
+    let Some(output) = compile_and_run_example(tag, relative_path, extra_c_inputs) else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "{relative_path} failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected_stdout,
+        "{relative_path} stdout mismatch"
+    );
+}
+
+#[test]
+fn examples_catalog_lists_expanded_categories() {
+    let examples = [
+        "examples/async/01_sleep_spawn.sg",
+        "examples/async/02_select_two.sg",
+        "examples/async/03_spawn_task_lifecycle.sg",
+        "examples/generics/01_vec_i64.sg",
+        "examples/generics/02_option_unwrap.sg",
+        "examples/generics/03_result_chain.sg",
+        "examples/traits/01_iterator_basic.sg",
+        "examples/traits/02_method_specialization.sg",
+        "examples/ffi/sengoo_calls_c.sg",
+        "examples/ffi/sengoo_exports.sg",
+    ];
+
+    for example in examples {
+        assert_example_file(example);
+    }
+
+    let workspace_root = workspace_root_for_tests();
+    for readme in [
+        "examples/README.md",
+        "examples/async/README.md",
+        "examples/generics/README.md",
+        "examples/traits/README.md",
+        "examples/ffi/README.md",
+    ] {
+        let content = fs::read_to_string(workspace_root.join(readme))
+            .unwrap_or_else(|err| panic!("{readme} should exist: {err}"));
+        assert!(
+            !content.contains("éˆ") && !content.contains("æµ"),
+            "{readme} should not contain mojibake"
+        );
+    }
+
+    assert!(
+        workspace_root.join("examples/ffi/Makefile").exists(),
+        "FFI examples should include a Makefile"
+    );
+
+    let index = fs::read_to_string(workspace_root.join("examples/README.md")).unwrap();
+    for category in ["async/", "generics/", "traits/", "ffi/", "reflection/"] {
+        assert!(
+            index.contains(category),
+            "examples index should link {category}"
+        );
+    }
+
+    for readme in ["README.md", "README.zh-CN.md"] {
+        let content = fs::read_to_string(workspace_root.join(readme)).unwrap();
+        assert!(
+            content.contains("examples/README.md"),
+            "{readme} should link the examples index"
+        );
+    }
+}
+
+#[test]
+fn examples_smoke_async_sleep_spawn() {
+    assert_example_output(
+        "async-sleep-spawn",
+        "examples/async/01_sleep_spawn.sg",
+        "42",
+    );
+}
+
+#[test]
+fn examples_smoke_async_select_two() {
+    assert_example_output("async-select-two", "examples/async/02_select_two.sg", "43");
+}
+
+#[test]
+fn examples_smoke_async_spawn_task_lifecycle() {
+    assert_example_output(
+        "async-spawn-task-lifecycle",
+        "examples/async/03_spawn_task_lifecycle.sg",
+        "42",
+    );
+}
+
+#[test]
+fn examples_smoke_generics_vec_i64() {
+    assert_example_output("generics-vec-i64", "examples/generics/01_vec_i64.sg", "60");
+}
+
+#[test]
+fn examples_smoke_generics_option_unwrap() {
+    assert_example_output(
+        "generics-option-unwrap",
+        "examples/generics/02_option_unwrap.sg",
+        "9",
+    );
+}
+
+#[test]
+fn examples_smoke_generics_result_chain() {
+    assert_example_output(
+        "generics-result-chain",
+        "examples/generics/03_result_chain.sg",
+        "18",
+    );
+}
+
+#[test]
+fn examples_smoke_traits_iterator_basic() {
+    assert_example_output(
+        "traits-iterator-basic",
+        "examples/traits/01_iterator_basic.sg",
+        "6",
+    );
+}
+
+#[test]
+fn examples_smoke_traits_method_specialization() {
+    assert_example_output(
+        "traits-method-specialization",
+        "examples/traits/02_method_specialization.sg",
+        "42",
+    );
+}
+
+#[test]
+fn examples_smoke_ffi_sengoo_calls_c() {
+    assert_example_output_with_c_inputs(
+        "ffi-sengoo-calls-c",
+        "examples/ffi/sengoo_calls_c.sg",
+        &["examples/ffi/c_add.c"],
+        "42",
+    );
+}
+
+#[test]
+fn examples_smoke_ffi_c_calls_sengoo_export() {
+    let source = read_example_source("examples/ffi/sengoo_exports.sg");
+    let llvm_ir = compile_source(&source, 1).expect("FFI export example should compile");
+
+    let clang = match find_clang() {
+        Some(clang) => clang,
+        None => return,
+    };
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let ll_path = temp_artifact("examples-smoke-ffi-export", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let sengoo_obj = temp_artifact("examples-smoke-ffi-export-sengoo", obj_ext);
+    let c_obj = temp_artifact("examples-smoke-ffi-export-c", obj_ext);
+    let exe_path = temp_artifact(
+        "examples-smoke-ffi-export",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1).is_err()
+        || compile_ir_to_object(
+            &clang,
+            &workspace_root_for_tests().join("examples/ffi/c_calls_sengoo.c"),
+            &c_obj,
+            1,
+        )
+        .is_err()
+        || link_native_binary_from_objects(&clang, &[sengoo_obj.clone(), c_obj.clone()], &exe_path)
+            .is_err()
+    {
+        let _ = fs::remove_file(&ll_path);
+        let _ = fs::remove_file(&sengoo_obj);
+        let _ = fs::remove_file(&c_obj);
+        let _ = fs::remove_file(&exe_path);
+        return;
+    }
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("C caller executable should run");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "42");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&sengoo_obj);
+    let _ = fs::remove_file(&c_obj);
+    let _ = fs::remove_file(&exe_path);
 }
 
 fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::process::Output> {

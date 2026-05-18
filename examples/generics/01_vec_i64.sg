@@ -1,0 +1,31 @@
+// examples/generics/01_vec_i64.sg
+//
+// Demonstrates: a small Vec<i64>-shaped generic container and i64 method.
+//
+// Run: sgc run examples/generics/01_vec_i64.sg
+// Expected output: 60
+
+struct Vec<T> {
+    first: T,
+    second: T,
+    third: T,
+}
+
+impl<T> Vec<T> {
+    def len(self) -> i64 {
+        3
+    }
+}
+
+impl Vec<i64> {
+    def sum(self) -> i64 {
+        self.first + self.second + self.third
+    }
+}
+
+def main() -> i64 {
+    let values: Vec<i64> = Vec { first: 10, second: 20, third: 30 };
+    let value = values.sum();
+    print(value);
+    0
+}

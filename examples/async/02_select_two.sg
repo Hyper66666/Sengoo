@@ -1,0 +1,27 @@
+// examples/async/02_select_two.sg
+//
+// Demonstrates: select returns the first completed value from two futures.
+//
+// Run: sgc run examples/async/02_select_two.sg
+// Expected output: 43
+
+async def fast() -> i64 {
+    43
+}
+
+async def slow_step() -> i64 {
+    0
+}
+
+async def slow() -> i64 {
+    let waited = await slow_step();
+    7
+}
+
+async def main() -> i64 {
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let value = select(first, second);
+    print(value);
+    0
+}
