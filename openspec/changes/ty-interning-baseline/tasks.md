@@ -23,9 +23,9 @@
 
 ## 4. MIR and Downstream Boundaries
 
-- [ ] 4.1 Update MIR lowering adapters that consume type-checker types so they can read interned type information where needed.
-- [ ] 4.2 Keep owned compatibility conversion available for lowering paths that are not migrated in this baseline.
-- [ ] 4.3 Verify FFI validation paths still report and compare type information correctly.
+- [x] 4.1 Update MIR lowering adapters that consume type-checker types so they can read interned type information where needed. (Slice G audit, 2026-05-20: `compiler/src/mir/` has its own type system — `HIRType` / `HIRTypeKind` / `MIRType` — and does not import `crate::typeck::ty` directly (`grep -r "typeck::ty" compiler/src/mir/` returns no matches). The HIR → MIR lowering boundary already converts at lowering time and does not see typeck `Ty` representation. No adapter changes were required because Phase 1 baseline preserves the existing owned-`Ty` surface returned by all `TypeChecker` accessors.)
+- [x] 4.2 Keep owned compatibility conversion available for lowering paths that are not migrated in this baseline. (Slice G, 2026-05-20: `TyInterner::materialize(InternedTyId) -> Ty` and `Subst::get(var) -> Option<Ty>` both produce owned `Ty` trees suitable for any consumer that still expects them. Combined with `TypeEnv::intern_ty()` and `Symbol::get_ty()`, every consumer can choose between cheap `InternedTyId` handles and owned `Ty` snapshots without forcing a representation switch.)
+- [x] 4.3 Verify FFI validation paths still report and compare type information correctly. (Slice G, 2026-05-20: re-ran focused FFI suites after Slices A–F land. `cargo test -p sengoo-compiler --lib ffi` → 11/11 passed (covers `ffi_rejects_non_ffi_safe_types`, `ffi_rejects_unsupported_abi`, `ffi_requires_unsafe_boundary_for_raw_pointer_signatures`, `extern_block_lowers_into_hir`, `extern_call_codegen_emits_declaration`, `export_name_attribute_changes_emitted_symbol`, plus 5 spec/impl helpers). `cargo test -p sgc ffi` → 3/3 passed (covers `examples_smoke_reflection_ffi_load_call`, `examples_smoke_ffi_sengoo_calls_c`, `examples_smoke_ffi_c_calls_sengoo_export`). `compiler/src/typeck/ffi.rs` does not reference `Subst` / `TyInterner` / `InternedTyId`, so the FFI validation logic is structurally unaffected by the interning baseline.)
 
 ## 5. Verification and Measurements
 
