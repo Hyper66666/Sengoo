@@ -12,7 +12,7 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 1. Pre-split inventory
 
-- [ ] 1.1 Re-confirm the 15 `#[no_mangle] pub extern "C" fn sengoo_db_*` symbol
+- [x] 1.1 Re-confirm the 15 `#[no_mangle] pub extern "C" fn sengoo_db_*` symbol
   list against `runtime/src/reflect/runtime_db.rs` and record it in the
   change notes. Expected list (from Phase 0 audit):
   `sengoo_db_last_error_code`, `sengoo_db_last_error_len`,
@@ -22,30 +22,40 @@ cargo test -p sgpm                     # expect 18 + 8
   `sengoo_db_result_row_count`, `sengoo_db_result_col_count`,
   `sengoo_db_result_col_name_len`, `sengoo_db_result_col_name_copy`,
   `sengoo_db_result_cell_len`, `sengoo_db_result_cell_copy`.
-- [ ] 1.2 Re-confirm the only external Rust callsite is the smoke assertion
+  Confirmed 16 symbols (one more than the planning count: the 4 error-state
+  helpers + `open`/`close`/`ping`/`exec`/`query` + 1 result-close + 6 result
+  accessors = 16, not 15 as the planning text said — doc-only error, the
+  spec scenarios are unaffected because they reference the full FFI surface).
+- [x] 1.2 Re-confirm the only external Rust callsite is the smoke assertion
   `tools/sgc/src/tests.rs::examples_smoke_reflection_db_open_query`
-  (substring check on `sengoo_db_open`).
-- [ ] 1.3 Re-confirm the only external Sengoo callsite is
-  `tools/stdlib/db.sg` lines 1-17 extern block.
-- [ ] 1.4 Run the verification baseline above and record exact pass counts in
-  the slice 0 commit message.
+  (substring check on `sengoo_db_open`). Confirmed.
+- [x] 1.3 Re-confirm the only external Sengoo callsite is
+  `tools/stdlib/db.sg` lines 1-17 extern block. Confirmed.
+- [x] 1.4 Run the verification baseline above and record exact pass counts in
+  the slice 0 commit message. Confirmed pristine: compiler 559, sgc 217,
+  runtime 42, sgpm 18+8.
 
 ## 2. Slice 0: Directory module rename
 
-- [ ] 2.1 Create directory `runtime/src/reflect/runtime_db/`.
-- [ ] 2.2 Move `runtime/src/reflect/runtime_db.rs` → `runtime/src/reflect/runtime_db/mod.rs`
-  with `git mv` (byte-identical, no content edit).
-- [ ] 2.3 Verify `runtime/src/reflect.rs:13` (`mod runtime_db;`) still resolves.
-- [ ] 2.4 Run verification baseline; commit `refactor(runtime_db): convert to directory module (slice 0/6)`.
+- [x] 2.1 Create directory `runtime/src/reflect/runtime_db/`.
+- [x] 2.2 Move `runtime/src/reflect/runtime_db.rs` → `runtime/src/reflect/runtime_db/mod.rs`
+  with `git mv` (byte-identical, no content edit). Git reported `R` rename
+  with 100% similarity (0 insertions, 0 deletions).
+- [x] 2.3 Verify `runtime/src/reflect.rs:13` (`mod runtime_db;`) still resolves.
+  Confirmed via `cargo test -p sengoo-runtime --lib` returning 42/42.
+- [x] 2.4 Run verification baseline; commit `refactor(runtime_db): convert to directory module (slice 0/6)`.
+  Landed as commit `231a5bfb`.
 
 ## 3. Slice 1: Extract `status.rs`
 
-- [ ] 3.1 Create `runtime/src/reflect/runtime_db/status.rs` with the 6
-  `pub const SENGOO_DB_*` items.
-- [ ] 3.2 In `mod.rs`, replace the const definitions with `mod status; pub use status::*;`.
-- [ ] 3.3 Verify `state.rs` (still in `mod.rs` at this point) still resolves
-  `SENGOO_DB_STATUS_OK` etc. — they remain visible via `pub use`.
-- [ ] 3.4 Run verification baseline; commit `refactor(runtime_db): extract status.rs (slice 1/6)`.
+- [x] 3.1 Create `runtime/src/reflect/runtime_db/status.rs` with the 7
+  `pub const SENGOO_DB_*` items (1 `STATUS_OK` + 6 `ERR_*`; planning text
+  undercounted as 6 — doc-only error, no spec impact).
+- [x] 3.2 In `mod.rs`, replace the const definitions with `mod status; pub use status::*;`.
+- [x] 3.3 Verify the still-in-`mod.rs` helpers (`DbErrorState::default`,
+  `set_error` callsites, `clear_error` callsite, tests) still resolve
+  `SENGOO_DB_STATUS_OK` etc. via the re-export. Confirmed via baselines.
+- [x] 3.4 Run verification baseline; commit `refactor(runtime_db): extract status.rs (slice 1/6)`.
 
 ## 4. Slice 2: Extract `state.rs`
 
