@@ -15,7 +15,7 @@
 
 ## 3. Type Checker Integration
 
-- [ ] 3.1 Wire the interner into `TypeEnv`, `TypeInfer`, and `TypeChecker` construction without changing public Sengoo language behavior.
+- [x] 3.1 Wire the interner into `TypeEnv`, `TypeInfer`, and `TypeChecker` construction without changing public Sengoo language behavior. (Slice C, 2026-05-20: `TypeEnv` gains a `Rc<RefCell<TyInterner>>` field initialized in `new()`; `TypeInfer` / `TypeChecker` / `BorrowChecker` inherit it automatically through their existing `env: TypeEnv` clones, because `Rc::clone` is shallow. Discovery: design.md Decision 5's `Rc<RefCell<...>>` fallback was actually required here, not optional — `TypeChecker` constructs both `self.env = TypeEnv::new()` and `self.infer = TypeInfer::with_env(env.clone())`, plus `mod::borrow_check` calls `BorrowChecker::new(env.clone())`, so an owned `TyInterner` would have produced 2-3 independent arenas per type-check session. 2 new tests in `env.rs::tests` verify (a) fresh env arena is empty and (b) cloned envs see each other's interner mutations.)
 - [ ] 3.2 Migrate primitive and common composite type constructors in `TypeEnv` to allocate through the interner.
 - [ ] 3.3 Migrate `Subst` and inference checkpoint storage toward `TyId` or an interner-backed cheap handle.
 - [ ] 3.4 Migrate symbol/type storage in `compiler/src/typeck/env.rs` where repeated owned `Ty` clones are currently stored.
