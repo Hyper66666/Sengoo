@@ -1,12 +1,47 @@
-# Sengoo Next Priorities (updated 2026-05-19)
+# Sengoo Next Priorities (updated 2026-05-20)
 
 ## Current State
 
-All earlier roadmap OpenSpec changes are shipped and archived. The active
-change is now `openspec/changes/ty-interning-baseline/`, covering the P0
-compiler type interning baseline.
+All earlier roadmap OpenSpec changes are shipped and archived, including the
+most recent `ty-interning-baseline` (Phase 1 compiler type interning) which
+landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived to
+`openspec/changes/archive/2026-05-19-ty-interning-baseline/`. A new
+capability spec at `openspec/specs/interned-types/spec.md` is the first entry
+in the previously empty `openspec/specs/` directory.
 
-The previous P0 item, `examples-coverage-expansion`, is complete:
+The active P0 is now `P1-A: Large File Splits` (promoted below). No
+OpenSpec change is currently open; the next change should be drafted for the
+largest target file (`compiler/src/codegen/jit.rs`).
+
+The `ty-interning-baseline` deliverables:
+
+- `compiler/src/typeck/interner.rs`: `InternedTyId(u32)` newtype, mirror
+  `InternedTyKind` enum, `TyInterner` session arena with structural dedup, plus
+  `intern` / `intern_ty` / `lookup` / `try_lookup` / `materialize` /
+  `ty_eq` / `id_eq_ty` API.
+- `compiler/src/typeck/env.rs`: `TypeEnv` carries a shared
+  `Rc<RefCell<TyInterner>>` field; all builtin and composite ctors funnel
+  through `new_ty` which interns; `intern_ty(&Ty)` and `symbol_ty_id(&str)`
+  passthroughs.
+- `compiler/src/typeck/ty.rs`: `Subst.map` migrated to
+  `HashMap<TyVarId, InternedTyId>`; checkpoint clones now duplicate `Copy`
+  handles instead of deep-cloning Ty subtrees; `TypeckError` documented as
+  intentionally retaining owned `TyKind` snapshots for diagnostic stability.
+- 10 new typeck unit tests covering canonical reuse, structural distinction,
+  invalid IDs, ty_eq, id_eq_ty, builtin pre-interning, shared-arena across
+  env clones, symbol_ty_id hits, and the `subst_clone_is_cheap_via_shared_interner_and_id_handles`
+  structural evidence test.
+
+Phase 2 follow-ups carried forward from the archive’s tasks.md catalog:
+
+- Migrate `SymbolKind::{Var, Function, Type, Const, Static}` storage to
+  `InternedTyId` (touches 6 call sites listed in 6.1).
+- Migrate `FunctionTy` / `MethodSig` / `ImplInfo` storage in `trait.rs` to
+  `InternedTyId`.
+- Restore `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` from
+  `-> Buffer` to `-> Result<Buffer, i64>` (Slice I gate now met).
+
+The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 
 - `examples/async/` contains sleep/spawn, select, and task lifecycle demos.
 - `examples/generics/` contains Vec-like, Option, and Result demos.
@@ -33,39 +68,16 @@ The previous P0 item, `examples-coverage-expansion`, is complete:
 | stdlib-generic-support | Option/Result/Vec/HashMap generic surface consolidation |
 | stdlib-module-decomposition | Split collections.sg into per-topic modules |
 | toolchain-language-runtime-roadmap | sglsp, sgfmt, sgpm, generics, macros, docs |
+| ty-interning-baseline | TyInterner + InternedTyId + Subst cheap-clone migration; FunctionTy/MethodSig/Symbol storage migration deferred to Phase 2 |
 | verify-mixed-width-type-correctness | Mixed-width integer type pipeline verification |
 
 ## Active Backlog
 
-### P0: Ty Interning / Compiler Performance Baseline
-
-Introduce `TyInterner` plus a compact `TyId` representation to reduce clone
-pressure in the type checker and MIR lowering.
-
-Initial target surface:
-
-- `compiler/src/typeck/ty.rs`: define the interner shape and stable ID API.
-- `compiler/src/typeck/infer.rs`: reduce cloning in unify, substitution, and
-  fresh-variable paths.
-- `compiler/src/typeck/check.rs`: route high-volume type construction through
-  the interner without changing diagnostics.
-- `compiler/src/mir/lowering.rs`: avoid deep type clones during generic and
-  async frame instantiation where possible.
-
-Constraints:
-
-- Preserve existing public compiler APIs unless a narrower migration plan is
-  written first.
-- Adopt a two-phase migration: introduce `TyId` alongside the existing `Ty`
-  type without removing `Ty`, then sweep call sites in subsequent passes.
-- Keep diagnostics stable.
-- Add regression tests for type equality, fresh variables, and substituted
-  generic method calls before replacing clone-heavy paths.
-
-### P1-A: Large File Splits
+### P0: Large File Splits (promoted from P1-A on 2026-05-20)
 
 Split the largest non-test files while preserving behavior. Do this in small
-reviewable moves, not broad rewrites.
+reviewable moves, not broad rewrites. Suggested first OpenSpec change:
+`compiler/src/codegen/jit.rs` (highest measured size, most cross-concern).
 
 Target files:
 
@@ -79,6 +91,21 @@ Target files:
 Goal: no single non-test source file over 25 KB unless there is a documented
 reason to keep it whole.
 
+### P1-A: Phase 2 Ty Interning Storage Sweep
+
+New P1-A (split out of the archived `ty-interning-baseline` Phase 2
+follow-ups). Coordinated rewrite of the owned-`Ty` storage boundaries
+that Phase 1 intentionally left, per
+`openspec/changes/archive/2026-05-19-ty-interning-baseline/tasks.md` §6.1:
+
+- Migrate `SymbolKind::{Var, Function, Type, Const, Static}` in
+  `compiler/src/typeck/env.rs` to store `InternedTyId` instead of owned `Ty`.
+  Touches 6 known cloners (catalogued at archive 6.1).
+- Migrate `FunctionTy` / `MethodSig` / `ImplInfo` in
+  `compiler/src/typeck/trait.rs` to `InternedTyId`-based fields.
+- Consider folding `Ty.id` (per-instance origin tag) if no consumer reads it
+  for non-debug purposes.
+
 ### P1-B: Runtime Module Splits
 
 Reduce runtime module coupling without changing the extern C ABI.
@@ -89,9 +116,10 @@ Target files:
   surfaces.
 - `runtime/src/reflect/runtime_ffi.rs`: split C libraries, objects, buffers,
   and callbacks.
-- Restore `ffi_buffer_from_bytes_raw` (a stdlib `.sg` wrapper, not an
-  extern C symbol) to `Result<Buffer, i64>` after Ty interning makes the
-  type path cheaper and easier to reason about.
+- Restore `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` (a stdlib `.sg`
+  wrapper, not an extern C symbol) from `-> Buffer` to `-> Result<Buffer, i64>`.
+  **Gate now met** (2026-05-20): `ty-interning-baseline` shipped with all
+  verification green, satisfying the archive 6.2 prerequisite.
 
 ### P2: Cyclic Async CFG
 
