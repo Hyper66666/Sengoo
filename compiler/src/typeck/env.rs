@@ -137,74 +137,36 @@ impl TypeEnv {
 
     /// 插入内置类型
     fn insert_builtin_types(&mut self) {
-        let unit = Ty::new(self.fresh_ty_id(), TyKind::Unit);
-        let never = Ty::new(self.fresh_ty_id(), TyKind::Never);
-        let bool_ = Ty::new(self.fresh_ty_id(), TyKind::Bool);
-        let char_ = Ty::new(self.fresh_ty_id(), TyKind::Char);
-        let str_ = Ty::new(self.fresh_ty_id(), TyKind::Str);
-        let byte = Ty::new(self.fresh_ty_id(), TyKind::Byte);
-        let bytes = Ty::new(self.fresh_ty_id(), TyKind::Bytes);
+        // 全部走 `new_ty` 入口，以便同时 intern 进共享 arena。
+        let unit = self.new_ty(TyKind::Unit);
+        let never = self.new_ty(TyKind::Never);
+        let bool_ = self.new_ty(TyKind::Bool);
+        let char_ = self.new_ty(TyKind::Char);
+        let str_ = self.new_ty(TyKind::Str);
+        let byte = self.new_ty(TyKind::Byte);
+        let bytes = self.new_ty(TyKind::Bytes);
+
+        use crate::typeck::ty::{FloatKind, IntKind};
 
         // 整数类型
-        let i8 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::I8),
-        );
-        let i16 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::I16),
-        );
-        let i32 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::I32),
-        );
-        let i64 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::I64),
-        );
-        let i128 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::I128),
-        );
-        let isize = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::ISize),
-        );
+        let i8 = self.new_ty(TyKind::Int(IntKind::I8));
+        let i16 = self.new_ty(TyKind::Int(IntKind::I16));
+        let i32 = self.new_ty(TyKind::Int(IntKind::I32));
+        let i64 = self.new_ty(TyKind::Int(IntKind::I64));
+        let i128 = self.new_ty(TyKind::Int(IntKind::I128));
+        let isize = self.new_ty(TyKind::Int(IntKind::ISize));
 
-        let _u8 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::U8),
-        );
-        let u16 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::U16),
-        );
-        let u32 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::U32),
-        );
-        let u64 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::U64),
-        );
-        let u128 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::U128),
-        );
-        let usize = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Int(crate::typeck::ty::IntKind::USize),
-        );
+        // U8 仍插入 arena（后续有机会被使用），但语言中 "u8" 名字映射到 TyKind::Byte。
+        let _u8 = self.new_ty(TyKind::Int(IntKind::U8));
+        let u16 = self.new_ty(TyKind::Int(IntKind::U16));
+        let u32 = self.new_ty(TyKind::Int(IntKind::U32));
+        let u64 = self.new_ty(TyKind::Int(IntKind::U64));
+        let u128 = self.new_ty(TyKind::Int(IntKind::U128));
+        let usize = self.new_ty(TyKind::Int(IntKind::USize));
 
         // 浮点类型
-        let f32 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Float(crate::typeck::ty::FloatKind::F32),
-        );
-        let f64 = Ty::new(
-            self.fresh_ty_id(),
-            TyKind::Float(crate::typeck::ty::FloatKind::F64),
-        );
+        let f32 = self.new_ty(TyKind::Float(FloatKind::F32));
+        let f64 = self.new_ty(TyKind::Float(FloatKind::F64));
 
         // 插入类型符号
         for (name, ty) in [
@@ -353,19 +315,32 @@ impl TypeEnv {
     }
 
     /// 创建新的类型
+    ///
+    /// 会同时 intern 进共享 [`TyInterner`]；builtin / composite / new\_ty 类 helper
+    /// 都以此为唯一入口，从而保证 arena 在 `TypeEnv::new` 后便包含全部 primitive shape。
     pub fn new_ty(&mut self, kind: TyKind) -> Ty {
-        Ty::new(self.fresh_ty_id(), kind)
+        let id = self.fresh_ty_id();
+        let ty = Ty::new(id, kind);
+        // RefCell::borrow_mut 仅需 &self.interner，与上述 fresh_ty_id 调用已释放的 &mut self 不冲突。
+        self.interner.borrow_mut().intern_ty(&ty);
+        ty
     }
 
     /// 创建新的类型变量
+    ///
+    /// 每个 fresh var 都占一个独立 [`crate::typeck::interner::InternedTyId`]，
+    /// 因为 `TyKind::Var(id)` 的结构性相等以 `id` 为锰。
     pub fn new_ty_var(&mut self) -> Ty {
-        let id = self.fresh_ty_var_id();
-        Ty::new(self.fresh_ty_id(), TyKind::Var(id))
+        let var_id = self.fresh_ty_var_id();
+        self.new_ty(TyKind::Var(var_id))
     }
 
     /// 创建错误类型
+    ///
+    /// `TyKind::Error` 仅有一种结构形状，多次调用会被 interner 去重为同一 id，
+        /// 但 origin tag 仍递增以保留现有的 per-instance 诊断语义。
     pub fn error_ty(&mut self) -> Ty {
-        Ty::new(self.fresh_ty_id(), TyKind::Error)
+        self.new_ty(TyKind::Error)
     }
 
     /// 创建单元类型
@@ -503,12 +478,35 @@ mod tests {
     use crate::typeck::interner::InternedTyKind;
     use crate::typeck::ty::IntKind;
 
-    /// Slice C baseline 不应自动 intern 任何 builtin；arena 起始为空。
-    /// 当 slice D 把 builtin 构造路径接入 interner 时，本断言需要相应更新。
+    /// Slice D 之后，`TypeEnv::new` 会预 intern 全部 primitive shape。
+    /// 重复 intern 同样的 kind 不应增长 arena。
     #[test]
-    fn fresh_type_env_starts_with_empty_interner() {
+    fn type_env_init_interns_primitive_builtins() {
         let env = TypeEnv::new();
-        assert!(env.interner().borrow().is_empty());
+
+        let initial_len = env.interner().borrow().len();
+        // 7 个非整数/浮点 primitive（Unit/Never/Bool/Char/Str/Byte/Bytes）+ 12 个 Int variant + 2 个 Float variant
+        // + insert_builtin_functions 里额外产生的 Ref(false, Str) / Fn(...) 等。这里只断言下界以便后续
+        // 引入 fresh primitive 时不必同步调整该数字。
+        assert!(
+            initial_len >= 20,
+            "expected primitive builtins to be pre-interned, got len = {}",
+            initial_len
+        );
+
+        // Re-intern known primitives: 必复用现有 id，arena 不增长。
+        let interner_rc = env.interner();
+        let mut interner = interner_rc.borrow_mut();
+        interner.intern(InternedTyKind::Bool);
+        interner.intern(InternedTyKind::Int(IntKind::I32));
+        interner.intern(InternedTyKind::Unit);
+        interner.intern(InternedTyKind::Never);
+        interner.intern(InternedTyKind::Float(crate::typeck::ty::FloatKind::F64));
+        assert_eq!(
+            interner.len(),
+            initial_len,
+            "primitive kinds should already be present after TypeEnv::new"
+        );
     }
 
     /// 验证 `Rc<RefCell<TyInterner>>` 在 env clone 后共享同一 arena —— 这正是
@@ -519,27 +517,39 @@ mod tests {
         let env1 = TypeEnv::new();
         let env2 = env1.clone();
 
-        // 通过 env1 写入。
-        let id_bool = env1.interner().borrow_mut().intern(InternedTyKind::Bool);
-
-        // env2 立即看到同样的 arena 长度和同样的 InternedTyId。
-        assert_eq!(env2.interner().borrow().len(), 1);
+        let initial_len = env1.interner().borrow().len();
         assert_eq!(
-            env2.interner().borrow().try_lookup(id_bool),
-            Some(&InternedTyKind::Bool)
+            initial_len,
+            env2.interner().borrow().len(),
+            "fresh + cloned env should both observe the same arena length"
         );
 
+        // 选用一个不会与 builtin 冲突的 ADT 名作为「新」 shape。
+        let novel_kind_a = InternedTyKind::Adt {
+            name: "_SliceCSharedArenaTestAdt_alpha".to_string(),
+            args: vec![],
+        };
+        let novel_kind_b = InternedTyKind::Adt {
+            name: "_SliceCSharedArenaTestAdt_beta".to_string(),
+            args: vec![],
+        };
+
+        // 通过 env1 写入一个新 shape。
+        let id_a = env1.interner().borrow_mut().intern(novel_kind_a.clone());
+        assert_eq!(env1.interner().borrow().len(), initial_len + 1);
+
+        // env2 立即看到。
+        assert_eq!(env2.interner().borrow().len(), initial_len + 1);
+        assert_eq!(env2.interner().borrow().try_lookup(id_a), Some(&novel_kind_a));
+
         // 反向：通过 env2 写入，env1 立刻可见，且 id 不重复。
-        let id_i32 = env2
-            .interner()
-            .borrow_mut()
-            .intern(InternedTyKind::Int(IntKind::I32));
-        assert_eq!(env1.interner().borrow().len(), 2);
-        assert_ne!(id_bool, id_i32);
+        let id_b = env2.interner().borrow_mut().intern(novel_kind_b);
+        assert_eq!(env1.interner().borrow().len(), initial_len + 2);
+        assert_ne!(id_a, id_b);
 
         // 幂等：重复 intern 同样 kind 返回旧 id 且 arena 不增长。
-        let id_bool_again = env1.interner().borrow_mut().intern(InternedTyKind::Bool);
-        assert_eq!(id_bool, id_bool_again);
-        assert_eq!(env2.interner().borrow().len(), 2);
+        let id_a_again = env1.interner().borrow_mut().intern(novel_kind_a);
+        assert_eq!(id_a, id_a_again);
+        assert_eq!(env2.interner().borrow().len(), initial_len + 2);
     }
 }
