@@ -1,78 +1,10 @@
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+mod state;
 mod status;
 pub use status::*;
-
-#[derive(Clone, Debug, Default)]
-struct DbConnection {
-    tables: HashMap<String, DbTable>,
-}
-
-#[derive(Clone, Debug)]
-struct DbTable {
-    columns: Vec<String>,
-    rows: Vec<Vec<Value>>,
-}
-
-#[derive(Clone, Debug, Default)]
-struct DbQueryResult {
-    columns: Vec<String>,
-    rows: Vec<Vec<Value>>,
-}
-
-#[derive(Clone, Debug)]
-struct DbErrorState {
-    code: i32,
-    message: String,
-}
-
-impl Default for DbErrorState {
-    fn default() -> Self {
-        Self {
-            code: SENGOO_DB_STATUS_OK,
-            message: String::new(),
-        }
-    }
-}
-
-static NEXT_DB_HANDLE: AtomicU64 = AtomicU64::new(1);
-static DB_CONNECTIONS: OnceLock<Mutex<HashMap<u64, DbConnection>>> = OnceLock::new();
-static DB_RESULTS: OnceLock<Mutex<HashMap<u64, DbQueryResult>>> = OnceLock::new();
-static DB_LAST_ERROR: OnceLock<Mutex<DbErrorState>> = OnceLock::new();
-
-fn db_connections() -> &'static Mutex<HashMap<u64, DbConnection>> {
-    DB_CONNECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn db_results() -> &'static Mutex<HashMap<u64, DbQueryResult>> {
-    DB_RESULTS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn db_last_error() -> &'static Mutex<DbErrorState> {
-    DB_LAST_ERROR.get_or_init(|| Mutex::new(DbErrorState::default()))
-}
-
-fn next_handle() -> u64 {
-    NEXT_DB_HANDLE.fetch_add(1, Ordering::Relaxed)
-}
-
-fn clear_error() {
-    if let Ok(mut state) = db_last_error().lock() {
-        state.code = SENGOO_DB_STATUS_OK;
-        state.message.clear();
-    }
-}
-
-fn set_error(code: i32, message: impl Into<String>) -> i32 {
-    if let Ok(mut state) = db_last_error().lock() {
-        state.code = code;
-        state.message = message.into();
-    }
-    code
-}
+use state::*;
 
 fn parse_c_string(ptr: *const u8) -> Result<String, i32> {
     if ptr.is_null() {
