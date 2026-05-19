@@ -415,6 +415,81 @@ mod tests {
         assert!(!interner.id_eq_ty(id, &different));
     }
 
+    /// Task 5.5: 结构性证据 — Subst 通过 InternedTyId 实现廉价 clone。
+    ///
+    /// 验证三件事：
+    /// 1. 多个 Subst 共享同一个 `Rc<RefCell<TyInterner>>`，clone Subst 不会复制 arena；
+    /// 2. Subst clone 只复制 `HashMap<TyVarId, InternedTyId>` 键值对（`Copy` 类型），
+    ///    不论 bound Ty 的结构多深；
+    /// 3. 对比 pre-Slice E 行为：之前的 `HashMap<TyVarId, Ty>` clone 会递归 clone 每个嵌套 Ty 子树。
+    ///
+    /// 本测试是 design.md 中 "checkpoint clones compact type handles instead of recursively
+    /// cloning all nested type structure" 的结构性验证。
+    #[test]
+    fn subst_clone_is_cheap_via_shared_interner_and_id_handles() {
+        use crate::typeck::ty::Subst;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        // 1) 建立会话级 interner 和一个绑定了「深嵌套」类型的 Subst。
+        let interner_rc = Rc::new(RefCell::new(TyInterner::new()));
+        let mut subst = Subst::new(Rc::clone(&interner_rc));
+
+        // 构造一个深嵌套绑定：Vec<Tuple<i32, Future<Ref<bool>>>>。
+        let deeply_nested = ty(TyKind::Adt {
+            name: "Vec".to_string(),
+            args: vec![ty(TyKind::Tuple(vec![
+                ty(TyKind::Int(IntKind::I32)),
+                ty(TyKind::Future(Box::new(ty(TyKind::Ref(
+                    false,
+                    Box::new(ty(TyKind::Bool)),
+                ))))),
+            ]))],
+        });
+        subst.insert(0, deeply_nested.clone());
+
+        let arena_len_before_clone = interner_rc.borrow().len();
+        let rc_count_before_clone = Rc::strong_count(&interner_rc);
+
+        // 2) Clone Subst 多次 —— 模拟 unify checkpoint 的 4x 反复 clone。
+        let checkpoints: Vec<Subst> = (0..4).map(|_| subst.clone()).collect();
+        assert_eq!(checkpoints.len(), 4);
+
+        // 3a) Arena 不应因 clone 而增长（不重新 intern 任何 Ty）。
+        assert_eq!(
+            interner_rc.borrow().len(),
+            arena_len_before_clone,
+            "Subst::clone must not grow the arena"
+        );
+
+        // 3b) Rc::strong_count 应每 clone 一次增 1（Subst 内部持有 Rc<RefCell<TyInterner>>）。
+        // 初始 1 (interner_rc) + 1 (subst 内部) = 2；clone 4 次后再 +4 = 6。
+        let rc_count_after_clone = Rc::strong_count(&interner_rc);
+        assert_eq!(
+            rc_count_after_clone,
+            rc_count_before_clone + 4,
+            "each Subst clone should bump Rc strong_count by exactly 1 (Rc::clone, not deep copy)"
+        );
+
+        // 3c) 所有 checkpoint 都通过 get 拿到与原始结构相等的 Ty（materialize 路径正确）。
+        for ckpt in &checkpoints {
+            let materialized = ckpt.get(0).expect("binding should be present in each clone");
+            assert_eq!(
+                format!("{}", materialized),
+                format!("{}", deeply_nested),
+                "checkpoint clones must materialize back to the same structural shape"
+            );
+        }
+
+        // 3d) drop checkpoints 后 refcount 回到 clone 前。
+        drop(checkpoints);
+        assert_eq!(
+            Rc::strong_count(&interner_rc),
+            rc_count_before_clone,
+            "dropping checkpoints should release Rc refs"
+        );
+    }
+
     /// 深度嵌套的函数类型 round-trip：fn(i32, [bool; 3]) -> &mut Future<()>。
     #[test]
     fn deeply_nested_fn_intern_and_materialize() {
