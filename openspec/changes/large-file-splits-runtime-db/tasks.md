@@ -102,16 +102,35 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 7. Slice 5: Extract `exec.rs`
 
-- [ ] 7.1 Create `runtime/src/reflect/runtime_db/exec.rs` with
+- [x] 7.1 Create `runtime/src/reflect/runtime_db/exec.rs` with
   `exec_create_table`, `resolve_insert_columns`, `exec_insert`,
   `build_select_result`, `run_select`, `exec_delete`,
   `execute_statement` (all `pub(super)`).
-- [ ] 7.2 Add `use super::{state::*, sql::*, status::*};` and
-  `use serde_json::Value;` to `exec.rs`.
-- [ ] 7.3 In `mod.rs`, add `mod exec;` and `use exec::*;`. After this, the
-  module root contains only: `mod` declarations + `pub use status::*;` + the
-  15 `#[no_mangle]` extern C exports + the `#[cfg(test)] mod tests`.
-- [ ] 7.4 Run verification baseline; commit `refactor(runtime_db): extract exec.rs (slice 5/6)`.
+- [x] 7.2 Add `use super::sql::*;`, `use super::state::*;`,
+  `use super::status::*;`, and `use serde_json::Value;` to `exec.rs`.
+- [x] 7.3 In `mod.rs`, add `mod exec;` and `use exec::*;`. After this, the
+  module root contains only: 5 `mod` declarations + `pub use status::*;` +
+  4 `use submodule::*;` lines + the 16 `#[no_mangle]` extern C exports +
+  the `#[cfg(test)] mod tests`. Also pruned the now-orphan
+  `use serde_json::Value;` from the top (the type name is never written in
+  the extern C bodies — only the local variable name `value` appears) and
+  relocated `use std::sync::{Mutex, OnceLock};` from the module root into
+  the `tests` submodule (their only consumers are `TEST_LOCK` and
+  `test_lock()`). Net effect: mod.rs preamble is now 100% module wiring
+  with zero external `use` lines at the top level.
+- [x] 7.4 Run verification baseline; commit `refactor(runtime_db): extract exec.rs (slice 5/6)`.
+  Final post-Slice-5 file sizes (LoC):
+  - `mod.rs` 431  ← largest, 44% of original 978
+  - `exec.rs` 327
+  - `sql.rs` 107
+  - `state.rs` 74
+  - `ffi_utils.rs` 56
+  - `status.rs` 7   ← smallest, satisfies Requirement 3 scenario
+    "at least one resulting file MUST be ≤ 50% of the original size"
+    with massive margin (7 / 489 = 1.4%).
+  Total: 1002 LoC vs original 978 LoC (+24 LoC for module declarations,
+  pub(super) markers, and per-file preambles — within ±2.5% of original
+  exactly as design.md projected).
 
 ## 8. Slice 6: Doc sidecar + SOP capture
 
