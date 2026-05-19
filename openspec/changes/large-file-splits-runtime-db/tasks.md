@@ -87,14 +87,18 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 6. Slice 4: Extract `sql.rs`
 
-- [ ] 6.1 Create `runtime/src/reflect/runtime_db/sql.rs` with
+- [x] 6.1 Create `runtime/src/reflect/runtime_db/sql.rs` with
   `normalize_identifier`, `find_keyword_case_insensitive`, `parse_literal`,
   `resolve_param_token`, `parse_where_clause`, and `value_to_string`
   (all `pub(super)`).
-- [ ] 6.2 Add `use super::{state::set_error, status::*};` to `sql.rs` and
-  `use serde_json::Value;`.
-- [ ] 6.3 In `mod.rs`, add `mod sql;` and `use sql::*;`.
-- [ ] 6.4 Run verification baseline; commit `refactor(runtime_db): extract sql.rs (slice 4/6)`.
+- [x] 6.2 Add `use super::state::set_error;`, `use super::status::*;`, and
+  `use serde_json::Value;` to `sql.rs`.
+- [x] 6.3 In `mod.rs`, add `mod sql;` and `use sql::*;`. Verified that the
+  `sql: &str` parameter name in `exec_create_table` / `exec_insert` /
+  `exec_delete` / `run_select` / `execute_statement` shadows the module
+  name `sql` locally — harmless because callers use the items unqualified
+  via `use sql::*;`.
+- [x] 6.4 Run verification baseline; commit `refactor(runtime_db): extract sql.rs (slice 4/6)`.
 
 ## 7. Slice 5: Extract `exec.rs`
 
