@@ -319,6 +319,17 @@ impl FloatKind {
 }
 
 /// 类型错误
+///
+/// **Phase 1 baseline stance** (Task 2.4, design.md Open Question 1):
+/// 这些变体故意继续持有 owned `TyKind` 快照（如 `TypeMismatch { expected, found }`），
+/// 而非 [`crate::typeck::interner::InternedTyId`]。理由：
+/// 1. 诊断消息在错误发生时即被构造、消息文本在错误传播链中可读，不依赖 interner 是否还活着；
+/// 2. `TyKind` 的 `fmt::Display` 已经覆盖全部变体，无需新建 interner-aware formatter；
+/// 3. 错误路径本身就是「冷路径」，clone 一份 owned `TyKind` 的开销可忽略；
+/// 4. 改为存 `InternedTyId` 需要 formatter 持有 interner 引用，复杂度远超收益。
+///
+/// 后续 phase 若决定迁移到 id 表示，应同时为 `TypeckError` 引入 interner 感知的 formatter
+/// 并审查全部 `TypeMismatch::expected/found.kind.clone()` 构造点；当前 Phase 1 不做此改动。
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeckError {
     /// 类型不匹配

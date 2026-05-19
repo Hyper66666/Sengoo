@@ -205,6 +205,28 @@ impl TyInterner {
         Ty::new(origin, kind)
     }
 
+    // ---------------- 结构性相等比较 helpers (Task 2.3) ----------------
+
+    /// 两个 `Ty` 是否结构性相等（忽略 per-instance origin tag）。
+    ///
+    /// Phase 1 之前，`Ty` derive 的 `PartialEq` 会包含 `id` 字段，导致两个
+    /// kind 相同但 origin 不同的 `Ty` 被认为不等。本 helper 提供纯结构性比较：
+    /// 两者都 intern 后看 id 是否一致。需要 `&mut self` 是因为 intern 可能增长 arena。
+    pub fn ty_eq(&mut self, a: &Ty, b: &Ty) -> bool {
+        let id_a = self.intern_ty(a);
+        let id_b = self.intern_ty(b);
+        id_a == id_b
+    }
+
+    /// 某个 [`InternedTyId`] 是否代表给定 `Ty` 的结构。
+    ///
+    /// 使用场景：调用方手头有一个预 intern 的 id（如从 [`crate::typeck::env::TypeEnv::symbol_ty_id`]
+    /// 拿到），需要检查某个 owned `Ty` 是否结构上与之一致。
+    pub fn id_eq_ty(&mut self, id: InternedTyId, ty: &Ty) -> bool {
+        let ty_id = self.intern_ty(ty);
+        ty_id == id
+    }
+
     fn materialize_kind(&self, id: InternedTyId) -> TyKind {
         match self.lookup(id) {
             InternedTyKind::Error => TyKind::Error,
@@ -348,6 +370,49 @@ mod tests {
         let id_b = interner.intern_ty(&b);
         assert_eq!(id_a, id_b);
         assert_eq!(interner.len(), 1);
+    }
+
+    /// Task 2.3: 两个 kind 相同但 origin tag 不同的 `Ty`、`Ty::eq` 认为不等，
+    /// 但 `ty_eq` 应认为结构上相等。
+    #[test]
+    fn ty_eq_compares_structurally_ignoring_origin_tag() {
+        let mut interner = TyInterner::new();
+        let a = Ty::new(7, TyKind::Int(IntKind::I32));
+        let b = Ty::new(42, TyKind::Int(IntKind::I32));
+        // Ty derive 的 PartialEq 包含 id，二者不等。
+        assert_ne!(a, b);
+        // 结构性相等。
+        assert!(interner.ty_eq(&a, &b));
+
+        // 不同 kind 返回 false。
+        let c = Ty::new(0, TyKind::Bool);
+        assert!(!interner.ty_eq(&a, &c));
+    }
+
+    /// Task 2.3: `id_eq_ty` 反向验证。intern 一个 `Ty` 拿到 id，再查某个 kind 相同但
+    /// origin 不同的 `Ty` 是否匹配该 id。
+    #[test]
+    fn id_eq_ty_matches_structurally_equivalent_owned_ty() {
+        let mut interner = TyInterner::new();
+        let original = Ty::new(11, TyKind::Tuple(vec![
+            Ty::new(12, TyKind::Bool),
+            Ty::new(13, TyKind::Int(IntKind::I64)),
+        ]));
+        let id = interner.intern_ty(&original);
+
+        // 同形状、不同 origin 的 Ty 应匹配同一 id。
+        let equivalent = Ty::new(99, TyKind::Tuple(vec![
+            Ty::new(98, TyKind::Bool),
+            Ty::new(97, TyKind::Int(IntKind::I64)),
+        ]));
+        assert!(interner.id_eq_ty(id, &equivalent));
+
+        // 不同结构不匹配。
+        let different = Ty::new(0, TyKind::Tuple(vec![
+            Ty::new(0, TyKind::Bool),
+            Ty::new(0, TyKind::Int(IntKind::I32)), // 不同整数宽度
+        ]));
+        assert!(!interner.id_eq_ty(id, &different));
     }
 
     /// 深度嵌套的函数类型 round-trip：fn(i32, [bool; 3]) -> &mut Future<()>。
