@@ -9,11 +9,13 @@ landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived 
 capability spec at `openspec/specs/interned-types/spec.md` is the first entry
 in the previously empty `openspec/specs/` directory.
 
-The active P0 is now `Large File Splits` (promoted below). One OpenSpec
-change is currently open: `large-file-splits-runtime-db` (active 2026-05-20).
-It is the first slice of the track and intentionally targets the smallest
-large file (`runtime/src/reflect/runtime_db.rs`, 978 LoC) to establish a
-reusable Split SOP before tackling the 1300-2700 LoC giants documented below.
+The active P0 is now `Large File Splits` (promoted below). The first slice
+of the track, `large-file-splits-runtime-db`, completed on 2026-05-20: it
+split `runtime/src/reflect/runtime_db.rs` (978 LoC) into a 6-file directory
+module with the largest resulting file at 431 LoC (44% of original), all
+verification green, and produced the reusable Split SOP captured in its
+`tasks.md` §9. Awaiting archival; the next change should target
+`compiler/src/codegen/jit.rs` (1363 LoC) per the recommended order below.
 
 The `ty-interning-baseline` deliverables:
 
@@ -95,10 +97,13 @@ Full non-test LoC leaderboard (measured 2026-05-20):
 | 1348 | `tools/sgfmt/src/main.rs`                     |
 | 1332 | `compiler/src/parser/decl.rs`                 |
 | 1390 | `tools/sgc/src/commands.rs`                   |
-|  978 | `runtime/src/reflect/runtime_db.rs` (← starter, in progress) |
+|  978 | `runtime/src/reflect/runtime_db/` (← starter, COMPLETE 2026-05-20: largest file now 431 LoC) |
 
-Active OpenSpec change: `large-file-splits-runtime-db` (978 LoC starter,
-establishes reusable Split SOP — see its `tasks.md` §9).
+Active OpenSpec change: `large-file-splits-runtime-db` (978 LoC starter)
+**complete, pending archival**. Established the reusable Split SOP — see
+its `tasks.md` §9. Final result: largest file 431 LoC (mod.rs, 44% of
+original), all 4 verification baselines green, FFI smoke
+(`examples_smoke_reflection_db_open_query`) green.
 
 Recommended next-after-starter order, smallest-clear-seam first to grow the
 SOP coverage:
