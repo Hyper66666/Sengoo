@@ -1,6 +1,6 @@
 # runtime_db ABI Note
 
-Driver: `runtime/src/reflect/runtime_db.rs`
+Driver: `runtime/src/reflect/runtime_db/` (directory module since 2026-05-20)
 
 Status codes:
 
@@ -40,3 +40,14 @@ Ownership:
 Sengoo wrapper note:
 
 The current source-level wrapper uses raw `i64` pointer values for borrowed C string and buffer pointers because Sengoo FFI currently rejects reference types such as `&str` as not FFI-safe.
+
+Module layout (2026-05-20, post-split):
+
+- `runtime_db/mod.rs` (431 LoC): the 16 `#[no_mangle] pub extern "C" fn sengoo_db_*` symbols listed above, plus the integration test module. No business logic.
+- `runtime_db/status.rs` (7 LoC): the 7 `pub const SENGOO_DB_*` status codes listed above. Re-exported at the module root via `pub use status::*;` so consumer paths are unchanged.
+- `runtime_db/state.rs` (74 LoC): private storage types (`DbConnection`, `DbTable`, `DbQueryResult`, `DbErrorState`), four `OnceLock` statics holding the global tables, plus `pub(super)` helpers `db_connections`, `db_results`, `db_last_error`, `next_handle`, `clear_error`, `set_error`. All scoped to the directory module — nothing leaks to outer `reflect` or to other crates.
+- `runtime_db/ffi_utils.rs` (56 LoC): C-pointer helpers `parse_c_string`, `parse_optional_json`, `copy_bytes_to_buffer`.
+- `runtime_db/sql.rs` (107 LoC): SQL fragment parsers `normalize_identifier`, `find_keyword_case_insensitive`, `parse_literal`, `resolve_param_token`, `parse_where_clause`, plus the `value_to_string` formatter used by the result-cell extern C exports.
+- `runtime_db/exec.rs` (327 LoC): statement execution helpers `exec_create_table`, `resolve_insert_columns`, `exec_insert`, `build_select_result`, `run_select`, `exec_delete`, `execute_statement`.
+
+The split preserves byte-for-byte the extern C symbol surface, the three integration tests, and every emitted error message string. See `openspec/changes/archive/2026-05-XX-large-file-splits-runtime-db/` for the full change record and the reusable Split SOP captured in `tasks.md` §9.

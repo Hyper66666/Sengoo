@@ -134,21 +134,25 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 8. Slice 6: Doc sidecar + SOP capture
 
-- [ ] 8.1 Append a "Module layout (2026-05-20)" section to
+- [x] 8.1 Append a "Module layout (2026-05-20)" section to
   `runtime/src/reflect/runtime_db.md` describing the new directory module
-  layout from §2-7 above.
-- [ ] 8.2 Verify the line-count target was met: `mod.rs` ≤ 500 LoC, every
-  submodule ≤ 350 LoC, largest file is strictly smaller than the original 978.
-- [ ] 8.3 Verify `tools/stdlib/db.sg` and
+  layout from §2-7 above. Also updated the `Driver:` line at the top to
+  point at the directory module instead of the now-renamed `.rs` file.
+- [x] 8.2 Verify the line-count target was met: `mod.rs` ≤ 500 LoC (actual
+  431), every submodule ≤ 350 LoC (largest exec.rs at 327), largest file
+  strictly smaller than the original 978 (actual 431 = 44% of original).
+- [x] 8.3 Verify `tools/stdlib/db.sg` and
   `tools/sgc/src/tests.rs::examples_smoke_reflection_db_open_query` still
-  compile and pass unchanged.
-- [ ] 8.4 Run verification baseline plus
+  compile and pass unchanged. Both confirmed green; neither needed any edit.
+- [x] 8.4 Run verification baseline plus
   `cargo test -p sgc examples_smoke_reflection_ -- --nocapture` to exercise
-  the FFI surface end-to-end.
-- [ ] 8.5 Update `docs/plans/2026-05-18-next-priorities.md`: mark
-  `large-file-splits-runtime-db` as the in-progress P0 slice and note that
-  the SOP from §9 is now ready for re-use.
-- [ ] 8.6 Commit `docs(runtime_db): update layout sidecar + SOP capture (slice 6/6)`.
+  the FFI surface end-to-end. Result: `examples_smoke_reflection_db_open_query`
+  passed (5/5 in filter, 212 filtered out).
+- [x] 8.5 Update `docs/plans/2026-05-18-next-priorities.md`: mark
+  `large-file-splits-runtime-db` as complete and pending archival; note that
+  the SOP from §9 is now ready for re-use; recommend `compiler/src/codegen/jit.rs`
+  (1363 LoC) as the next P0 starter per the post-starter order.
+- [x] 8.6 Commit `docs(runtime_db): update layout sidecar + SOP capture (slice 6/6)`.
 
 ## 9. Reusable Split SOP (apply verbatim to follow-up large-file changes)
 
