@@ -7,6 +7,7 @@ mod check;
 mod env;
 mod ffi;
 mod infer;
+pub mod interner;
 pub mod r#trait;
 pub mod ty;
 
@@ -14,6 +15,7 @@ pub use borrow::{BorrowChecker, BorrowError};
 pub use check::TypeChecker;
 pub use env::TypeEnv;
 pub use infer::TypeInfer;
+pub use interner::{InternedTyId, InternedTyKind, TyInterner};
 pub use r#trait::{
     type_key, FunctionTy, ImplInfo, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
 };
