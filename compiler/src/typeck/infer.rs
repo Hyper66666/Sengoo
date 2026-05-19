@@ -19,17 +19,20 @@ pub struct TypeInfer {
 
 impl TypeInfer {
     pub fn new() -> Self {
+        let env = TypeEnv::new();
+        let subst = Subst::new(env.interner());
         Self {
-            env: TypeEnv::new(),
-            subst: Subst::new(),
+            env,
+            subst,
             errors: Vec::new(),
         }
     }
 
     pub fn with_env(env: TypeEnv) -> Self {
+        let subst = Subst::new(env.interner());
         Self {
             env,
-            subst: Subst::new(),
+            subst,
             errors: Vec::new(),
         }
     }
@@ -108,9 +111,10 @@ impl TypeInfer {
     fn subst_apply(&self, subst: &Subst, ty: &Ty) -> Ty {
         match &ty.kind {
             TyKind::Var(id) => {
+                // Slice E 后返回 owned `Ty`（materialize 自 InternedTyId），
+                // 递归调用需要取其引用。
                 if let Some(replacement) = subst.get(*id) {
-                    // 递归应用替换
-                    self.subst_apply(subst, replacement)
+                    self.subst_apply(subst, &replacement)
                 } else {
                     ty.clone()
                 }
@@ -386,7 +390,7 @@ impl TypeInfer {
 
     /// 重置替换
     pub fn reset_subst(&mut self) {
-        self.subst = Subst::new();
+        self.subst = Subst::new(self.env.interner());
     }
 }
 
@@ -450,7 +454,9 @@ mod tests {
         let result = infer.unify(&left, &right);
 
         assert!(matches!(result, Err(TypeckError::TypeMismatch { .. })));
-        assert_eq!(infer.subst().get(0), Some(&i32_ty()));
+        // Slice E: subst.get 返回 owned `Ty`。materialize 后 origin tag = 0，
+        // 与 helper `i32_ty()` 构造的 `Ty::new(0, ...)` 一致。
+        assert_eq!(infer.subst().get(0), Some(i32_ty()));
     }
 
     #[test]
@@ -471,6 +477,6 @@ mod tests {
         let result = infer.unify(&left, &right);
 
         assert!(matches!(result, Err(TypeckError::TypeMismatch { .. })));
-        assert_eq!(infer.subst().get(0), Some(&i32_ty()));
+        assert_eq!(infer.subst().get(0), Some(i32_ty()));
     }
 }

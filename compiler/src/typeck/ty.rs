@@ -2,8 +2,11 @@
 //!
 //! 定义类型检查过程中使用的类型系统
 
+use crate::typeck::interner::{InternedTyId, TyInterner};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::rc::Rc;
 
 /// 类型 ID
 pub type TyId = usize;
@@ -402,24 +405,54 @@ impl fmt::Display for TypeckError {
 impl std::error::Error for TypeckError {}
 
 /// 类型替换（用于类型变量实例化）
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Slice E / Task 3.3 迁移：存储从 `HashMap<TyVarId, Ty>` 改为
+/// `HashMap<TyVarId, InternedTyId>`。原创意是让 unify checkpoint 中高频发生的
+/// `self.subst.clone()`（见 `infer.rs::unify_in_place` 中多处）仅复制
+/// `(usize, u32)` 键值对，避免之前递归 clone 全部嵌套 `Ty` 子树。
+///
+/// API 变动：`get` 回会从 `Option<&Ty>` 变为 `Option<Ty>`（materialize
+/// 必需返回 owned 值）。仅需身份比较的调用方可改用 [`Self::get_id`]。
+#[derive(Debug, Clone)]
 pub struct Subst {
-    map: HashMap<TyVarId, Ty>,
+    map: HashMap<TyVarId, InternedTyId>,
+    /// 会话级共享 interner；insert 时 intern owned `Ty`、get 时 materialize 回 owned `Ty`。
+    interner: Rc<RefCell<TyInterner>>,
 }
 
 impl Subst {
-    pub fn new() -> Self {
+    /// 创建与指定 session interner 绑定的空替换。
+    ///
+    /// 一般从 [`crate::typeck::env::TypeEnv::interner`] 获取同一 [`Rc`] 句柄，
+    /// 以保证同一 type-check session 内 substitution 与 env / TypeInfer 共享同一 arena。
+    pub fn new(interner: Rc<RefCell<TyInterner>>) -> Self {
         Self {
             map: HashMap::new(),
+            interner,
         }
     }
 
+    /// 绑定 `var` 到 `ty`。内部会 intern `ty` 并仅存储返回的 [`InternedTyId`]。
     pub fn insert(&mut self, var: TyVarId, ty: Ty) {
-        self.map.insert(var, ty);
+        let id = self.interner.borrow_mut().intern_ty(&ty);
+        self.map.insert(var, id);
     }
 
-    pub fn get(&self, var: TyVarId) -> Option<&Ty> {
-        self.map.get(&var)
+    /// 返回 `var` 绑定的类型；未绑定返回 `None`。
+    ///
+    /// **API 变动**：Phase 1 之前返回 `Option<&Ty>`；Slice E 后存储为
+    /// [`InternedTyId`]，需要 materialize 回 owned tree。同位置不需拥有权的
+    /// 调用方可改用 [`Self::get_id`]。materialize 后的 `Ty` origin tag 为 `0`
+    /// 哨兵值（存储阶段不保留 per-instance origin）。
+    pub fn get(&self, var: TyVarId) -> Option<Ty> {
+        self.map
+            .get(&var)
+            .map(|id| self.interner.borrow().materialize(*id))
+    }
+
+    /// 返回 `var` 绑定的结构性 id；不做 materialize。
+    pub fn get_id(&self, var: TyVarId) -> Option<InternedTyId> {
+        self.map.get(&var).copied()
     }
 
     pub fn contains_key(&self, var: TyVarId) -> bool {
@@ -434,17 +467,19 @@ impl Subst {
         self.map.len()
     }
 
-    /// 合并两个替换
+    /// 合并两个替换；冲突时保留 `self` 中已有的绑定。
     pub fn union(mut self, other: Subst) -> Self {
-        for (var, ty) in other.map {
-            self.map.entry(var).or_insert(ty);
+        for (var, id) in other.map {
+            self.map.entry(var).or_insert(id);
         }
         self
     }
 }
 
 impl Default for Subst {
+    /// 作为澜中 substitution 创建：使用一个独立的空 interner，不与任何 session 共享。
+    /// 生产代码请始终从 env 获取 [`Rc`] 句柄传入 [`Self::new`]。
     fn default() -> Self {
-        Self::new()
+        Self::new(Rc::new(RefCell::new(TyInterner::new())))
     }
 }
