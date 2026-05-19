@@ -9,9 +9,11 @@ landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived 
 capability spec at `openspec/specs/interned-types/spec.md` is the first entry
 in the previously empty `openspec/specs/` directory.
 
-The active P0 is now `P1-A: Large File Splits` (promoted below). No
-OpenSpec change is currently open; the next change should be drafted for the
-largest target file (`compiler/src/codegen/jit.rs`).
+The active P0 is now `Large File Splits` (promoted below). One OpenSpec
+change is currently open: `large-file-splits-runtime-db` (active 2026-05-20).
+It is the first slice of the track and intentionally targets the smallest
+large file (`runtime/src/reflect/runtime_db.rs`, 978 LoC) to establish a
+reusable Split SOP before tackling the 1300-2700 LoC giants documented below.
 
 The `ty-interning-baseline` deliverables:
 
@@ -76,20 +78,42 @@ The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 ### P0: Large File Splits (promoted from P1-A on 2026-05-20)
 
 Split the largest non-test files while preserving behavior. Do this in small
-reviewable moves, not broad rewrites. Suggested first OpenSpec change:
-`compiler/src/codegen/jit.rs` (highest measured size, most cross-concern).
+reviewable moves, not broad rewrites.
 
-Target files:
+Full non-test LoC leaderboard (measured 2026-05-20):
 
-- `compiler/src/codegen/jit.rs`: split instruction emission, block emission,
-  frame helpers, and runtime bridge helpers.
-- `compiler/src/mir/lowering.rs`: split coercion, async-frame glue, and generic
-  instantiation helpers.
-- `tools/sgc/src/interface.rs` and `tools/sgc/src/commands.rs`: split by
-  subcommand or interface concern.
+| LoC  | File                                          |
+|-----:|-----------------------------------------------|
+| 2729 | `runtime/src/net.rs`                          |
+| 2274 | `tools/sgc/src/interface.rs`                  |
+| 2110 | `tools/sglsp/src/main.rs`                     |
+| 1519 | `runtime/src/reflect/runtime_ffi.rs`          |
+| 1501 | `compiler/src/mir/lowering.rs`                |
+| 1440 | `tools/sgc/src/pipeline.rs`                   |
+| 1363 | `compiler/src/codegen/jit.rs`                 |
+| 1349 | `runtime/src/async_runtime.rs`                |
+| 1348 | `tools/sgfmt/src/main.rs`                     |
+| 1332 | `compiler/src/parser/decl.rs`                 |
+| 1390 | `tools/sgc/src/commands.rs`                   |
+|  978 | `runtime/src/reflect/runtime_db.rs` (← starter, in progress) |
 
-Goal: no single non-test source file over 25 KB unless there is a documented
-reason to keep it whole.
+Active OpenSpec change: `large-file-splits-runtime-db` (978 LoC starter,
+establishes reusable Split SOP — see its `tasks.md` §9).
+
+Recommended next-after-starter order, smallest-clear-seam first to grow the
+SOP coverage:
+
+1. `compiler/src/codegen/jit.rs` (1363 LoC) — compiler-side, well-bounded.
+2. `compiler/src/mir/lowering.rs` (1501 LoC).
+3. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
+   subcommand or interface concern).
+4. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
+   (1348 LoC) — both currently monolithic `main.rs` files.
+5. `runtime/src/net.rs` (2729 LoC) — largest, defer until SOP is well-proven
+   because of extern C ABI surface.
+
+Goal: no single non-test source file over 25 KB (~1000 LoC) unless there is
+a documented reason to keep it whole.
 
 ### P1-A: Phase 2 Ty Interning Storage Sweep
 
