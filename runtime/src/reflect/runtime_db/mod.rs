@@ -3,13 +3,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-pub const SENGOO_DB_STATUS_OK: i32 = 0;
-pub const SENGOO_DB_ERR_INVALID_ARGUMENT: i32 = -1001;
-pub const SENGOO_DB_ERR_INVALID_HANDLE: i32 = -1002;
-pub const SENGOO_DB_ERR_PARSE: i32 = -1003;
-pub const SENGOO_DB_ERR_NOT_FOUND: i32 = -1004;
-pub const SENGOO_DB_ERR_EXECUTION: i32 = -1005;
-pub const SENGOO_DB_ERR_INTERNAL: i32 = -1099;
+mod status;
+pub use status::*;
 
 #[derive(Clone, Debug, Default)]
 struct DbConnection {
