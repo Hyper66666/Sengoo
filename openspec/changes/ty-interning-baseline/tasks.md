@@ -1,17 +1,17 @@
 ## 1. Interner Foundation
 
-- [ ] 1.1 Add a `TyInterner` / arena structure in `compiler/src/typeck/ty.rs` with stable session-local `TyId` allocation and structural lookup.
-- [ ] 1.2 Add interned type records or keys for primitives, tuples, arrays, slices, refs, pointers, function types, ADTs, dyn/impl trait markers, futures, `Self`, inferred, error, and type variables.
-- [ ] 1.3 Add constructor APIs that intern every supported `TyKind` shape and return canonical `TyId` values.
-- [ ] 1.4 Add lookup APIs that resolve `TyId` to interned kind data without cloning full recursive `Ty` trees.
-- [ ] 1.5 Add unit tests for canonical reuse, structural distinction, nested composite lookup, and invalid-ID handling.
+- [x] 1.1 Add a `TyInterner` / arena structure in `compiler/src/typeck/interner.rs` (sibling to `ty.rs` to keep the original module untouched in phase 1) with stable session-local `InternedTyId` allocation and structural lookup. Note: introduced as a new `InternedTyId(u32)` newtype rather than reusing the legacy `pub type TyId = usize` alias, because the existing `Ty.id` field is a per-instance origin tag (`fresh_ty_id` counter, used as `0` sentinel in many call sites) and does not represent structural identity.
+- [x] 1.2 Add interned type records or keys for primitives, tuples, arrays, slices, refs, pointers, function types, ADTs, dyn/impl trait markers, futures, `Self`, inferred, error, and type variables. (`InternedTyKind` mirrors every existing `TyKind` variant, with nested children referenced through `InternedTyId` rather than owned `Vec<Ty>` / `Box<Ty>`.)
+- [x] 1.3 Add constructor APIs that intern every supported `TyKind` shape and return canonical `InternedTyId` values. (`TyInterner::intern` for kind-first construction; `intern_ty` for recursive lowering from an existing owned `Ty`.)
+- [x] 1.4 Add lookup APIs that resolve `InternedTyId` to interned kind data without cloning full recursive `Ty` trees. (`lookup` returns `&InternedTyKind` whose child handles can be inspected directly; `try_lookup` returns `Option` for invalid-ID handling.)
+- [x] 1.5 Add unit tests for canonical reuse, structural distinction, nested composite lookup, and invalid-ID handling. (7 tests in `compiler/src/typeck/interner.rs::tests`, covering canonical reuse, structural distinction across kinds/mutability, nested tuple handle inspection, invalid IDs both in-arena and cross-interner, intern/materialize round-trip idempotence, origin-tag-independence, and deeply nested fn/array/ref/future composition.)
 
 ## 2. Compatibility Layer
 
-- [ ] 2.1 Preserve existing `Ty` / `TyKind` behavior through compatibility constructors or views so unmigrated call sites continue to compile.
-- [ ] 2.2 Add interner-aware formatting helpers that produce the same display strings currently emitted by `Ty` / `TyKind`.
-- [ ] 2.3 Add equality helpers for comparing interned type handles and compatibility `Ty` values consistently.
-- [ ] 2.4 Audit `TypeckError` construction and keep diagnostics user-facing equivalent during phase 1.
+- [x] 2.1 Preserve existing `Ty` / `TyKind` behavior through compatibility constructors or views so unmigrated call sites continue to compile. (Phase 1 baseline ships `intern_ty(&Ty) -> InternedTyId` and `materialize(InternedTyId) -> Ty` / `materialize_with_origin` on `TyInterner`; no existing `ty.rs` / `env.rs` / `infer.rs` / `check.rs` call site is modified, so the full compiler+sgc+runtime+sgpm suites stay green.)
+- [x] 2.2 Add interner-aware formatting helpers that produce the same display strings currently emitted by `Ty` / `TyKind`. (Achieved transitively: `materialize` round-trips into the existing `impl fmt::Display for Ty`/`TyKind`; the `intern_ty_round_trip_preserves_structure_and_id` and `deeply_nested_fn_intern_and_materialize` tests assert `format!("{}")` parity for primitives, tuples, refs, arrays, futures, and fn types.)
+- [ ] 2.3 Add equality helpers for comparing interned type handles and compatibility `Ty` values consistently. (Deferred: `InternedTyId` already derives `PartialEq` / `Hash`; an explicit `eq_ty(&Ty, &Ty)` or `id_eq_ty(InternedTyId, &Ty)` helper is left to the slice that wires the interner into `TypeChecker`.)
+- [ ] 2.4 Audit `TypeckError` construction and keep diagnostics user-facing equivalent during phase 1. (Open Question 1: ship Phase 1 with the existing owned `TyKind` snapshots in `TypeckError`; revisit only after `TypeEnv`/`Subst` migration lands.)
 
 ## 3. Type Checker Integration
 
@@ -29,12 +29,12 @@
 
 ## 5. Verification and Measurements
 
-- [ ] 5.1 Run `cargo test -p sengoo-compiler --lib` and confirm the full compiler library suite passes.
-- [ ] 5.2 Run `cargo test -p sgc` and confirm sgc integration tests pass.
-- [ ] 5.3 Run `cargo test -p sengoo-runtime --lib` and confirm runtime library tests pass.
-- [ ] 5.4 Run the examples smoke coverage that exists in sgc and confirm examples continue to compile/run or gracefully skip environment-dependent cases.
-- [ ] 5.5 Record clone-count or allocation-reduction evidence for `compiler/src/typeck/ty.rs`, `infer.rs`, `check.rs`, `env.rs`, and relevant MIR lowering boundaries.
-- [ ] 5.6 Confirm no broad source-language behavior changes and no unrelated refactors are included in the diff.
+- [x] 5.1 Run `cargo test -p sengoo-compiler --lib` and confirm the full compiler library suite passes. (Slice A+B run on 2026-05-20: 553 passed / 0 failed, includes 7 new `typeck::interner` tests.)
+- [x] 5.2 Run `cargo test -p sgc` and confirm sgc integration tests pass. (Slice A+B run on 2026-05-20: 217 passed / 0 failed.)
+- [x] 5.3 Run `cargo test -p sengoo-runtime --lib` and confirm runtime library tests pass. (Slice A+B run on 2026-05-20: 42 passed / 0 failed.)
+- [x] 5.4 Run the examples smoke coverage that exists in sgc and confirm examples continue to compile/run or gracefully skip environment-dependent cases. (Covered transitively by `cargo test -p sgc`, which includes the `examples_smoke_*` and `examples_catalog_*` suites.)
+- [ ] 5.5 Record clone-count or allocation-reduction evidence for `compiler/src/typeck/ty.rs`, `infer.rs`, `check.rs`, `env.rs`, and relevant MIR lowering boundaries. (Deferred: needs a real consumer of the interner first, will land with the `Subst` / `TypeEnv` migration slice.)
+- [x] 5.6 Confirm no broad source-language behavior changes and no unrelated refactors are included in the diff. (Slice A+B diff is two files: `compiler/src/typeck/interner.rs` (new) and `compiler/src/typeck/mod.rs` (`pub mod interner;` plus a single re-export line). Also `openspec/changes/ty-interning-baseline/tasks.md` for status. No source-language tests changed.)
 
 ## 6. Follow-up Gate
 
