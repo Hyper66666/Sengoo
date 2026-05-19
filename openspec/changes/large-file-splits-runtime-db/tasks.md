@@ -76,12 +76,14 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 5. Slice 3: Extract `ffi_utils.rs`
 
-- [ ] 5.1 Create `runtime/src/reflect/runtime_db/ffi_utils.rs` with
+- [x] 5.1 Create `runtime/src/reflect/runtime_db/ffi_utils.rs` with
   `parse_c_string`, `parse_optional_json`, `copy_bytes_to_buffer` (all
   `pub(super)`).
-- [ ] 5.2 Add `use super::{state::set_error, status::*};` to `ffi_utils.rs`.
-- [ ] 5.3 In `mod.rs`, add `mod ffi_utils;` and `use ffi_utils::*;`.
-- [ ] 5.4 Run verification baseline; commit `refactor(runtime_db): extract ffi_utils.rs (slice 3/6)`.
+- [x] 5.2 Add `use super::state::set_error;` and `use super::status::*;` to
+  `ffi_utils.rs`. (Split into two `use` statements rather than the planned
+  combined `use super::{state::set_error, status::*};` for readability.)
+- [x] 5.3 In `mod.rs`, add `mod ffi_utils;` and `use ffi_utils::*;`.
+- [x] 5.4 Run verification baseline; commit `refactor(runtime_db): extract ffi_utils.rs (slice 3/6)`.
 
 ## 6. Slice 4: Extract `sql.rs`
 
