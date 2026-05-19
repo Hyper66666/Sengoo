@@ -2,8 +2,11 @@
 //!
 //! 管理符号表和作用域。
 
+use crate::typeck::interner::TyInterner;
 use crate::typeck::ty::{Ty, TyKind};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// 符号
 #[derive(Debug, Clone)]
@@ -106,6 +109,12 @@ pub struct TypeEnv {
     next_ty_id: usize,
     /// 下一个类型变量 ID
     next_ty_var_id: usize,
+    /// 会话级共享类型 interner。
+    ///
+    /// 用 `Rc<RefCell<_>>` 包装：Clone 此 env 时（`TypeChecker::new` 把 env clone
+    /// 进 `TypeInfer`、`borrow_check` 把 env clone 进 `BorrowChecker` 等场景）
+    /// 通过 `Rc` 浅复制共享同一 arena 和同一套 [`crate::typeck::interner::InternedTyId`] 编号。
+    interner: Rc<RefCell<TyInterner>>,
 }
 
 impl TypeEnv {
@@ -115,6 +124,7 @@ impl TypeEnv {
             current: 0,
             next_ty_id: 0,
             next_ty_var_id: 0,
+            interner: Rc::new(RefCell::new(TyInterner::new())),
         };
         // 创建全局作用域
         env.push_scope();
@@ -470,10 +480,66 @@ impl TypeEnv {
     pub fn current_scope(&self) -> usize {
         self.current
     }
+
+    /// 返回共享的类型 interner 句柄。
+    ///
+    /// Phase 1 baseline：返回 [`Rc`] clone，让调用方可独立持有；通过 `.borrow()` /
+    /// `.borrow_mut()` 借用底层 [`TyInterner`]。后续 slice 会在 `TypeEnv` 内部直接
+    /// 用 interner 重写 builtin 构造路径。
+    pub fn interner(&self) -> Rc<RefCell<TyInterner>> {
+        Rc::clone(&self.interner)
+    }
 }
 
 impl Default for TypeEnv {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::typeck::interner::InternedTyKind;
+    use crate::typeck::ty::IntKind;
+
+    /// Slice C baseline 不应自动 intern 任何 builtin；arena 起始为空。
+    /// 当 slice D 把 builtin 构造路径接入 interner 时，本断言需要相应更新。
+    #[test]
+    fn fresh_type_env_starts_with_empty_interner() {
+        let env = TypeEnv::new();
+        assert!(env.interner().borrow().is_empty());
+    }
+
+    /// 验证 `Rc<RefCell<TyInterner>>` 在 env clone 后共享同一 arena —— 这正是
+    /// Slice C 选用此包装的核心动机：避免 `TypeChecker.env` / `TypeChecker.infer.env` /
+    /// `BorrowChecker._env` 三处 clone 各持独立 arena 的回归。
+    #[test]
+    fn cloned_type_envs_share_one_interner_arena() {
+        let env1 = TypeEnv::new();
+        let env2 = env1.clone();
+
+        // 通过 env1 写入。
+        let id_bool = env1.interner().borrow_mut().intern(InternedTyKind::Bool);
+
+        // env2 立即看到同样的 arena 长度和同样的 InternedTyId。
+        assert_eq!(env2.interner().borrow().len(), 1);
+        assert_eq!(
+            env2.interner().borrow().try_lookup(id_bool),
+            Some(&InternedTyKind::Bool)
+        );
+
+        // 反向：通过 env2 写入，env1 立刻可见，且 id 不重复。
+        let id_i32 = env2
+            .interner()
+            .borrow_mut()
+            .intern(InternedTyKind::Int(IntKind::I32));
+        assert_eq!(env1.interner().borrow().len(), 2);
+        assert_ne!(id_bool, id_i32);
+
+        // 幂等：重复 intern 同样 kind 返回旧 id 且 arena 不增长。
+        let id_bool_again = env1.interner().borrow_mut().intern(InternedTyKind::Bool);
+        assert_eq!(id_bool, id_bool_again);
+        assert_eq!(env2.interner().borrow().len(), 2);
     }
 }
