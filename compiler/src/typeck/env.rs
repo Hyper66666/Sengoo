@@ -458,11 +458,31 @@ impl TypeEnv {
 
     /// 返回共享的类型 interner 句柄。
     ///
-    /// Phase 1 baseline：返回 [`Rc`] clone，让调用方可独立持有；通过 `.borrow()` /
-    /// `.borrow_mut()` 借用底层 [`TyInterner`]。后续 slice 会在 `TypeEnv` 内部直接
-    /// 用 interner 重写 builtin 构造路径。
+    /// 返回 [`Rc`] clone，让调用方可独立持有；通过 `.borrow()` /
+    /// `.borrow_mut()` 借用底层 [`TyInterner`]。
     pub fn interner(&self) -> Rc<RefCell<TyInterner>> {
         Rc::clone(&self.interner)
+    }
+
+    /// 把 owned `Ty` intern 进会话 arena 并返回结构性 id。
+    ///
+    /// Slice F: 这是 `env.interner().borrow_mut().intern_ty(ty)` 的便捷封装；
+    /// 对所有通过 [`Self::new_ty`] 构造出的 `Ty`，这次调用是 HashMap 命中，
+    /// 不会增长 arena。
+    pub fn intern_ty(&self, ty: &crate::typeck::ty::Ty) -> crate::typeck::interner::InternedTyId {
+        self.interner.borrow_mut().intern_ty(ty)
+    }
+
+    /// 复合查找：返回符号 `name` 对应类型的结构性 id（如果存在且符号有类型）。
+    ///
+    /// Slice F (Task 3.4)：Phase 1 baseline 保留 [`Symbol`] 存储为 owned `Ty`
+    /// 以避免修改 ~6 处 `symbol.get_ty()` / `match &symbol.kind` 调用点；本 helper
+    /// 让需要做结构性比较的新代码可以 O(1) 拿到 id（因为 builtin 已在
+    /// `TypeEnv::new` 时预 intern；用户类型也通过 `new_ty` 路径预 intern）。
+    pub fn symbol_ty_id(&self, name: &str) -> Option<crate::typeck::interner::InternedTyId> {
+        let symbol = self.lookup(name)?;
+        let ty = symbol.get_ty()?;
+        Some(self.intern_ty(ty))
     }
 }
 
@@ -477,6 +497,32 @@ mod tests {
     use super::*;
     use crate::typeck::interner::InternedTyKind;
     use crate::typeck::ty::IntKind;
+
+    /// Slice F: `env.symbol_ty_id` 应该对所有 builtin primitive name 返回 Some，
+    /// 且重复查询同名 symbol 不应增长 arena（命中已 intern 的 id）。
+    #[test]
+    fn symbol_ty_id_returns_pre_interned_id_for_builtin_primitives() {
+        let env = TypeEnv::new();
+        let initial_len = env.interner().borrow().len();
+
+        // 一组覆盖性 builtin：unit / bool / i32 / f64 / str。
+        let probed: Vec<(&str, Option<crate::typeck::interner::InternedTyId>)> = vec![
+            ("()", env.symbol_ty_id("()")),
+            ("bool", env.symbol_ty_id("bool")),
+            ("i32", env.symbol_ty_id("i32")),
+            ("f64", env.symbol_ty_id("f64")),
+            ("str", env.symbol_ty_id("str")),
+        ];
+        for (name, id) in &probed {
+            assert!(id.is_some(), "expected symbol_ty_id({:?}) to be Some", name);
+        }
+        // arena 不应因为查询而增长。
+        assert_eq!(env.interner().borrow().len(), initial_len);
+
+        // 未注册的符号返回 None。
+        assert!(env.symbol_ty_id("_NonExistentSymbol_xyz").is_none());
+        assert_eq!(env.interner().borrow().len(), initial_len);
+    }
 
     /// Slice D 之后，`TypeEnv::new` 会预 intern 全部 primitive shape。
     /// 重复 intern 同样的 kind 不应增长 arena。
