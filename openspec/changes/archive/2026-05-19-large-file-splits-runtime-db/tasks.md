@@ -193,12 +193,17 @@ rules.
 
 ## 10. Archival prerequisites
 
-- [ ] 10.1 All 30+ tasks above checked.
-- [ ] 10.2 `openspec validate large-file-splits-runtime-db --strict` reports no errors.
-- [ ] 10.3 `openspec list` shows the change as ready to archive.
-- [ ] 10.4 Archive to `openspec/changes/archive/2026-05-XX-large-file-splits-runtime-db/`
-  and promote the new `large-file-splits` capability spec into
-  `openspec/specs/large-file-splits/spec.md`.
-- [ ] 10.5 Update roadmap to point at the next split target
-  (recommended: `compiler/src/codegen/jit.rs` per the original P0 plan,
-  now that the SOP exists).
+- [x] 10.1 All 34 of 39 tasks above checked at archive time (§10 itself
+  was the only block remaining; archive proceeded with `--yes`).
+- [x] 10.2 `openspec validate large-file-splits-runtime-db --strict`
+  reported `Change is valid`.
+- [x] 10.3 `openspec list` showed the change as ready to archive.
+- [x] 10.4 Archived to
+  `openspec/changes/archive/2026-05-19-large-file-splits-runtime-db/` via
+  `openspec archive --yes`. The new `large-file-splits` capability spec
+  was promoted into `openspec/specs/large-file-splits/spec.md` with all
+  6 ADDED requirements; the auto-generated `Purpose: TBD` was hand-edited
+  to a real description referencing this archive.
+- [x] 10.5 `docs/plans/2026-05-18-next-priorities.md` updated in Slice 6:
+  starter marked complete, next P0 starter set to
+  `compiler/src/codegen/jit.rs` (1363 LoC).
