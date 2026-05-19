@@ -59,16 +59,20 @@ cargo test -p sgpm                     # expect 18 + 8
 
 ## 4. Slice 2: Extract `state.rs`
 
-- [ ] 4.1 Create `runtime/src/reflect/runtime_db/state.rs` containing:
+- [x] 4.1 Create `runtime/src/reflect/runtime_db/state.rs` containing:
   private types `DbConnection`, `DbTable`, `DbQueryResult`, `DbErrorState`
-  (promoted to `pub(super)`); the four `OnceLock` statics; their accessor
-  fns `db_connections`, `db_results`, `db_last_error` (all `pub(super)`);
+  (promoted to `pub(super)`, including their fields since Slice 5's exec
+  helpers need direct field access for `conn.tables`, `table.columns`,
+  `table.rows`); the four `OnceLock` statics; their accessor fns
+  `db_connections`, `db_results`, `db_last_error` (all `pub(super)`);
   `next_handle` (`pub(super)`); `clear_error` and `set_error` (`pub(super)`).
-- [ ] 4.2 Add `use super::status::*;` to `state.rs` for the default error code
+- [x] 4.2 Add `use super::status::*;` to `state.rs` for the default error code
   in `DbErrorState::default`.
-- [ ] 4.3 In `mod.rs`, add `mod state;` and `use state::*;` for the
-  symbols the remaining helpers need.
-- [ ] 4.4 Run verification baseline; commit `refactor(runtime_db): extract state.rs (slice 2/6)`.
+- [x] 4.3 In `mod.rs`, add `mod state;` and `use state::*;` for the
+  symbols the remaining helpers need. Also pruned now-unused
+  `use std::collections::HashMap;` and `use std::sync::atomic::*;` from
+  `mod.rs` (HashMap field access only needs methods, not the type in scope).
+- [x] 4.4 Run verification baseline; commit `refactor(runtime_db): extract state.rs (slice 2/6)`.
 
 ## 5. Slice 3: Extract `ffi_utils.rs`
 
