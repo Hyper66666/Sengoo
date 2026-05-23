@@ -72,13 +72,13 @@
 
 ## 8. Slice 6: Extract print, pattern, literal, and operator helpers
 
-- [ ] 8.1 Create `compiler/src/mir/lowering/print_methods.rs` and move `emit_runtime_print_call`, `emit_print_str_literal`, and `emit_print_value` into it.
-- [ ] 8.2 Create `compiler/src/mir/lowering/pattern_methods.rs` and move `matches_pattern` and `lower_pattern_bindings` into it.
-- [ ] 8.3 Create `compiler/src/mir/lowering/literal_op_methods.rs` and move `lower_literal`, `lower_un_op`, and `lower_bin_op` into it.
-- [ ] 8.4 Move `mir_local_name` into the smallest module that still satisfies its callers, or keep it in `mod.rs` if it remains root-local.
-- [ ] 8.5 Promote moved methods to `pub(super)` only where child or sibling modules call them.
-- [ ] 8.6 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 8.7 Commit `refactor(mir): extract lowering leaf helpers (slice 6/N)`.
+- [x] 8.1 Create `compiler/src/mir/lowering/print_methods.rs` and move `emit_runtime_print_call`, `emit_print_str_literal`, and `emit_print_value` into it.
+- [x] 8.2 Create `compiler/src/mir/lowering/pattern_methods.rs` and move `matches_pattern` and `lower_pattern_bindings` into it.
+- [x] 8.3 Create `compiler/src/mir/lowering/literal_op_methods.rs` and move `lower_literal`, `lower_un_op`, and `lower_bin_op` into it.
+- [x] 8.4 Move `mir_local_name` into the smallest module that still satisfies its callers, or keep it in `mod.rs` if it remains root-local.
+- [x] 8.5 Promote moved methods to `pub(super)` only where child or sibling modules call them.
+- [x] 8.6 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 8.7 Commit `refactor(mir): extract lowering leaf helpers (slice 6/N)`.
 
 ## 9. Slice 7: Import pruning, file-size evidence, and documentation
 
@@ -122,3 +122,5 @@
 - 6.7 Slice 4 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 7.1-7.5 Slice 5 created `async_methods.rs`, `contract_methods.rs`, and `body_dispatch_methods.rs`. Async block lowering/origin resolution, contract pre/postcondition lowering, and body/statement/expression dispatch moved out of `mod.rs`. Cross-file methods use `pub(super)` where required by sibling helpers and `function_lowering.rs`; internal helpers such as `collect_async_block_free_vars`, `infer_poll_func_from_last_call`, `lower_contract_condition`, and `lower_stmt` remain private.
 - 7.6 Slice 5 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 8.1-8.5 Slice 6 created `print_methods.rs`, `pattern_methods.rs`, and `literal_op_methods.rs`. Print, pattern, literal, and operator helpers moved out of `mod.rs`; `mir_local_name` moved into `call_target_helpers.rs`, its only caller module. Cross-file helper methods use `pub(super)` only where sibling helpers call them; private leaf helpers remain private.
+- 8.6 Slice 6 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.

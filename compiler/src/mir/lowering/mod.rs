@@ -63,6 +63,7 @@ mod function_lowering;
 mod if_expr_helpers;
 mod lambda_expr_helpers;
 mod let_stmt_helpers;
+mod literal_op_methods;
 mod loop_control_helpers;
 mod loop_expr_helpers;
 mod match_expr_helpers;
@@ -73,7 +74,9 @@ mod named_call_helpers;
 mod non_named_call_helpers;
 mod op_expr_helpers;
 mod options;
+mod pattern_methods;
 mod pointer_expr_helpers;
+mod print_methods;
 mod while_expr_helpers;
 pub use entry::{lower_hir, lower_hir_with_options};
 pub use options::MirLowerOptions;
@@ -100,15 +103,6 @@ use self::op_expr_helpers::{
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::while_expr_helpers::lower_while_expr;
-
-fn mir_local_name(local: Local) -> String {
-    match local.kind {
-        LocalKind::Param => format!("%l_{}", local.id),
-        LocalKind::Temp => format!("%t_{}", local.id),
-        LocalKind::User => format!("%u_{}", local.id),
-        LocalKind::Return => format!("%ret_{}", local.id),
-    }
-}
 
 /// 循环上下文，记录 `break/continue` 目标基本块。
 #[derive(Debug, Clone, Copy)]
@@ -190,170 +184,5 @@ impl<'a> LoweringContext<'a> {
         collect_free_vars(body, params, &self.local_names)
     }
 
-    /// 生成运行时打印调用的指令（用于调试输出）。
-    fn emit_runtime_print_call(&mut self, func: &str, arg_local: Local) {
-        let call_local = self.add_local(None, LocalKind::Temp, MIR_UNIT);
-        self.push_inst(Instruction::Call {
-            destination: call_local,
-            func: func.to_string(),
-            args: vec![arg_local],
-        });
-    }
-
-    fn emit_print_str_literal(&mut self, text: &str) {
-        let str_local = self.lower_literal(&HIRLiteral::String(text.to_string()));
-        self.emit_runtime_print_call("sengoo_print_str", str_local);
-    }
-
-    fn emit_print_value(&mut self, value_local: Local, value_ty: &MIRType) {
-        match value_ty {
-            MIRType::Struct { name, fields } => {
-                self.emit_print_str_literal(&format!("{} {{ ", name));
-
-                for (index, (field_name, field_ty)) in fields.iter().enumerate() {
-                    if index > 0 {
-                        self.emit_print_str_literal(", ");
-                    }
-                    self.emit_print_str_literal(&format!("{}: ", field_name));
-
-                    let field_local = self.add_local(None, LocalKind::Temp, field_ty.clone());
-                    self.push_inst(Instruction::Extract {
-                        destination: field_local,
-                        value: value_local,
-                        index: index as u32,
-                    });
-
-                    self.emit_print_value(field_local, field_ty);
-                }
-
-                self.emit_print_str_literal(" }");
-            }
-            MIRType::Int(_) => self.emit_runtime_print_call("sengoo_print_i64", value_local),
-            MIRType::Bool => self.emit_runtime_print_call("sengoo_print_bool", value_local),
-            MIRType::Float(_) => self.emit_runtime_print_call("sengoo_print_f64", value_local),
-            MIRType::Ptr(_) | MIRType::Ref(_) => {
-                self.emit_runtime_print_call("sengoo_print_str", value_local)
-            }
-            _ => {
-                self.errors.push(format!(
-                    "print: unsupported MIR type for lowering: {:?}",
-                    value_ty
-                ));
-            }
-        }
-    }
-
-    /// 从枚举模式中提取判别值（discriminant）并生成匹配判断逻辑。
-    /// 判断给定值是否匹配 HIR 模式，用于运行时合约检查。
-    fn matches_pattern(&mut self, pat: &crate::hir::HIRPattern, value: Local) -> Local {
-        let result = self.add_local(None, LocalKind::Temp, MIR_BOOL);
-
-        match pattern_match_plan(pat) {
-            PatternMatchPlan::AlwaysTrue => {
-                self.push_inst(Instruction::Assign {
-                    destination: result,
-                    value: MirConstant::Bool(true),
-                });
-                result
-            }
-            PatternMatchPlan::EqLiteral(lit) => {
-                let lit_local = self.lower_literal(&lit);
-                self.push_inst(Instruction::Binary {
-                    destination: result,
-                    op: MirBinOp::Eq,
-                    left: value,
-                    right: lit_local,
-                });
-                result
-            }
-        }
-    }
-
-    /// 将HIR模式绑定降级为MIR，生成对应的局部变量绑定指令。
-    /// 将模式绑定降级到MIR，生成模式匹配的局部变量绑定指令。
-    fn lower_pattern_bindings(&mut self, pat: &crate::hir::HIRPattern, enum_value: Local) {
-        match pattern_binding_plan(pat) {
-            PatternBindingPlan::Ignore => {}
-            PatternBindingPlan::BindWhole(name) => {
-                let _ = self.add_local(Some(name), LocalKind::User, MIR_I64);
-            }
-            PatternBindingPlan::BindTupleFields(fields) => {
-                let payload_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                self.push_inst(Instruction::ExtractPayload {
-                    destination: payload_local,
-                    source: enum_value,
-                });
-                for (index, name) in fields {
-                    let field_local = self.add_local(None, LocalKind::Temp, MIR_I64);
-                    self.push_inst(Instruction::Extract {
-                        destination: field_local,
-                        value: payload_local,
-                        index,
-                    });
-                    let bound_local = self.add_local(Some(name), LocalKind::User, MIR_I64);
-                    self.push_inst(Instruction::Store {
-                        destination: bound_local,
-                        value: field_local,
-                    });
-                }
-            }
-        }
-    }
-
-    /// 将HIR字面量降级为MIR常量指令。
-    fn lower_literal(&mut self, lit: &HIRLiteral) -> Local {
-        let constant = match lit {
-            HIRLiteral::Int(n) => MirConstant::Int(*n),
-            HIRLiteral::Float(f) => MirConstant::Float(*f),
-            HIRLiteral::String(s) => MirConstant::String(s.clone()),
-            HIRLiteral::Bool(b) => MirConstant::Bool(*b),
-            HIRLiteral::Char(c) => MirConstant::Char(*c),
-            HIRLiteral::Null => MirConstant::Unit,
-            HIRLiteral::Bytes(b) => MirConstant::Bytes(b.clone()),
-            HIRLiteral::Uint(u) => MirConstant::Uint(*u),
-        };
-        let ty = constant.ty();
-        let local = self.add_local(None, LocalKind::Temp, ty);
-        self.push_inst(Instruction::Assign {
-            destination: local,
-            value: constant,
-        });
-        local
-    }
-
-    /// 将HIR一元运算符转换为MIR一元运算符。
-    fn lower_un_op(&self, op: &hir::HIRUnaryOp) -> MirUnOp {
-        match op {
-            hir::HIRUnaryOp::Neg => MirUnOp::Neg,
-            hir::HIRUnaryOp::Not => MirUnOp::Not,
-            hir::HIRUnaryOp::BitNot => MirUnOp::BitNot,
-            hir::HIRUnaryOp::Ref | hir::HIRUnaryOp::RefMut | hir::HIRUnaryOp::Deref => MirUnOp::Neg,
-        }
-    }
-
-    /// 将HIR二元运算符转换为MIR二元运算符。
-    fn lower_bin_op(&self, op: &hir::HIRBinaryOp) -> MirBinOp {
-        match op {
-            hir::HIRBinaryOp::Add => MirBinOp::Add,
-            hir::HIRBinaryOp::Sub => MirBinOp::Sub,
-            hir::HIRBinaryOp::Mul => MirBinOp::Mul,
-            hir::HIRBinaryOp::Div => MirBinOp::Div,
-            hir::HIRBinaryOp::Mod => MirBinOp::Rem,
-            hir::HIRBinaryOp::BitAnd => MirBinOp::BitAnd,
-            hir::HIRBinaryOp::BitOr => MirBinOp::BitOr,
-            hir::HIRBinaryOp::BitXor => MirBinOp::BitXor,
-            hir::HIRBinaryOp::Shl => MirBinOp::Shl,
-            hir::HIRBinaryOp::Shr => MirBinOp::Shr,
-            hir::HIRBinaryOp::LogAnd => MirBinOp::LogAnd,
-            hir::HIRBinaryOp::LogOr => MirBinOp::LogOr,
-            hir::HIRBinaryOp::Eq => MirBinOp::Eq,
-            hir::HIRBinaryOp::NotEq => MirBinOp::Ne,
-            hir::HIRBinaryOp::Lt => MirBinOp::Lt,
-            hir::HIRBinaryOp::Gt => MirBinOp::Gt,
-            hir::HIRBinaryOp::Le => MirBinOp::Le,
-            hir::HIRBinaryOp::Ge => MirBinOp::Ge,
-            hir::HIRBinaryOp::Assign => MirBinOp::Add,
-        }
-    }
 }
 
