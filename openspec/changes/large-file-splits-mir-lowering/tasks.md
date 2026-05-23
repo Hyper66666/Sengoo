@@ -82,14 +82,14 @@
 
 ## 9. Slice 7: Import pruning, file-size evidence, and documentation
 
-- [ ] 9.1 Prune unused imports from `compiler/src/mir/lowering/mod.rs` and all new sibling files.
-- [ ] 9.2 Run rustfmt check on touched lowering files; if `cargo fmt --all -- --check` is blocked by unrelated formatting drift, record the blocker and the narrower touched-file rustfmt command that passed.
-- [ ] 9.3 Compute final line counts for `compiler/src/mir/lowering/mod.rs` and every file under `compiler/src/mir/lowering/`.
-- [ ] 9.4 Verify size targets: `mod.rs` below ~500 LoC, every resulting file below the original root size, and every resulting non-test file below the roadmap ~1000 LoC target.
-- [ ] 9.5 Update `docs/plans/2026-05-18-next-priorities.md` with the implementation status and next Large File Splits candidate.
-- [ ] 9.6 Update this `tasks.md` with actual final file sizes, visibility promotions, formatting evidence, and verification evidence.
-- [ ] 9.7 Run final targeted MIR-lowering smoke and full verification baseline.
-- [ ] 9.8 Commit `docs(mir): update lowering split status and roadmap (slice 7/N)`.
+- [x] 9.1 Prune unused imports from `compiler/src/mir/lowering/mod.rs` and all new sibling files.
+- [x] 9.2 Run rustfmt check on touched lowering files; if `cargo fmt --all -- --check` is blocked by unrelated formatting drift, record the blocker and the narrower touched-file rustfmt command that passed.
+- [x] 9.3 Compute final line counts for `compiler/src/mir/lowering/mod.rs` and every file under `compiler/src/mir/lowering/`.
+- [x] 9.4 Verify size targets: `mod.rs` below ~500 LoC, every resulting file below the original root size, and every resulting non-test file below the roadmap ~1000 LoC target.
+- [x] 9.5 Update `docs/plans/2026-05-18-next-priorities.md` with the implementation status and next Large File Splits candidate.
+- [x] 9.6 Update this `tasks.md` with actual final file sizes, visibility promotions, formatting evidence, and verification evidence.
+- [x] 9.7 Run final targeted MIR-lowering smoke and full verification baseline.
+- [x] 9.8 Commit `docs(mir): update lowering split status and roadmap (slice 7/N)`.
 
 ## 10. Archival prerequisites
 
@@ -124,3 +124,8 @@
 - 7.6 Slice 5 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 8.1-8.5 Slice 6 created `print_methods.rs`, `pattern_methods.rs`, and `literal_op_methods.rs`. Print, pattern, literal, and operator helpers moved out of `mod.rs`; `mir_local_name` moved into `call_target_helpers.rs`, its only caller module. Cross-file helper methods use `pub(super)` only where sibling helpers call them; private leaf helpers remain private.
 - 8.6 Slice 6 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 9.1-9.2 Slice 7 import/formatting cleanup completed. `cargo fmt --all -- --check` is blocked by unrelated pre-existing formatting drift in `compiler/src/typeck/check.rs`, `compiler/src/typeck/env.rs`, `compiler/src/typeck/interner.rs`, and `runtime/src/reflect/runtime_db/*`; the narrower touched-file check passed: `rustfmt --edition 2021 --check compiler/src/mir/lowering/mod.rs compiler/src/mir/lowering/options.rs compiler/src/mir/lowering/entry.rs compiler/src/mir/lowering/function_lowering.rs compiler/src/mir/lowering/context_methods.rs compiler/src/mir/lowering/block_state_methods.rs compiler/src/mir/lowering/async_methods.rs compiler/src/mir/lowering/contract_methods.rs compiler/src/mir/lowering/body_dispatch_methods.rs compiler/src/mir/lowering/call_target_helpers.rs compiler/src/mir/lowering/print_methods.rs compiler/src/mir/lowering/pattern_methods.rs compiler/src/mir/lowering/literal_op_methods.rs`. `git diff --check` passed.
+- 9.3 Final `compiler/src/mir/lowering/*.rs` line counts: `mod.rs` 162; `aggregate_expr_helpers.rs` 333; `assignment_helpers.rs` 258; `async_methods.rs` 128; `block_async_expr_helpers.rs` 157; `block_state_methods.rs` 266; `body_dispatch_methods.rs` 137; `body_lowering_helpers.rs` 68; `builtin_helpers.rs` 580; `call_emission_helpers.rs` 119; `call_expr_helpers.rs` 70; `call_invocation_helpers.rs` 93; `call_target_helpers.rs` 173; `context_methods.rs` 229; `contract_methods.rs` 115; `entry.rs` 210; `for_expr_helpers.rs` 400; `function_lowering.rs` 74; `if_expr_helpers.rs` 126; `lambda_expr_helpers.rs` 196; `let_stmt_helpers.rs` 351; `literal_op_methods.rs` 56; `loop_control_helpers.rs` 158; `loop_expr_helpers.rs` 93; `match_expr_helpers.rs` 320; `method_builtin_helpers.rs` 70; `method_call_helpers.rs` 395; `method_expr_helpers.rs` 63; `named_call_helpers.rs` 112; `non_named_call_helpers.rs` 50; `op_expr_helpers.rs` 477; `options.rs` 63; `pattern_methods.rs` 60; `pointer_expr_helpers.rs` 146; `print_methods.rs` 55; `while_expr_helpers.rs` 121.
+- 9.4 Size targets met: `mod.rs` is 162 LoC (<500), every resulting file is below the original 1501 LoC root size, and every non-test lowering file is below the roadmap ~1000 LoC target. Largest resulting lowering file is `builtin_helpers.rs` at 580 LoC.
+- 9.5-9.6 Roadmap updated with `large-file-splits-mir-lowering` completion status and next recommended Large File Splits target: `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
+- 9.7 Final targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Final full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
