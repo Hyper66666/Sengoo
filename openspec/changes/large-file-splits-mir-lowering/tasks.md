@@ -20,16 +20,16 @@
 
 ## 3. Slice 1: Extract public options and entry API
 
-- [ ] 3.1 Create `compiler/src/mir/lowering/options.rs`.
-- [ ] 3.2 Move `MirLowerOptions`, `impl Default for MirLowerOptions`, `MirLowerOptions::new`, and `MirLowerOptions::with_async_functions` into `options.rs` without changing signatures or public fields.
-- [ ] 3.3 Re-export `MirLowerOptions` from `mod.rs` so existing parent-module re-exports remain unchanged.
-- [ ] 3.4 Move the `mir_lower_options_clone_shares_async_function_set` test with the options implementation or keep an equivalent root test without changing assertions.
-- [ ] 3.5 Create `compiler/src/mir/lowering/entry.rs`.
-- [ ] 3.6 Move `lower_hir` and `lower_hir_with_options` into `entry.rs` without changing signatures, error aggregation, item iteration order, lazy generic mono behavior, async function sharing, or eager trait function ordering.
-- [ ] 3.7 Re-export `lower_hir` and `lower_hir_with_options` from `mod.rs` so `compiler/src/mir/mod.rs` can remain unchanged.
-- [ ] 3.8 Promote only the helpers required by `entry.rs` to `pub(super)`; do not expose them beyond the `lowering` module.
-- [ ] 3.9 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 3.10 Commit `refactor(mir): extract lowering entry API (slice 1/N)`.
+- [x] 3.1 Create `compiler/src/mir/lowering/options.rs`.
+- [x] 3.2 Move `MirLowerOptions`, `impl Default for MirLowerOptions`, `MirLowerOptions::new`, and `MirLowerOptions::with_async_functions` into `options.rs` without changing signatures or public fields.
+- [x] 3.3 Re-export `MirLowerOptions` from `mod.rs` so existing parent-module re-exports remain unchanged.
+- [x] 3.4 Move the `mir_lower_options_clone_shares_async_function_set` test with the options implementation or keep an equivalent root test without changing assertions.
+- [x] 3.5 Create `compiler/src/mir/lowering/entry.rs`.
+- [x] 3.6 Move `lower_hir` and `lower_hir_with_options` into `entry.rs` without changing signatures, error aggregation, item iteration order, lazy generic mono behavior, async function sharing, or eager trait function ordering.
+- [x] 3.7 Re-export `lower_hir` and `lower_hir_with_options` from `mod.rs` so `compiler/src/mir/mod.rs` can remain unchanged.
+- [x] 3.8 Promote only the helpers required by `entry.rs` to `pub(super)`; do not expose them beyond the `lowering` module.
+- [x] 3.9 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 3.10 Commit `refactor(mir): extract lowering entry API (slice 1/N)`.
 
 ## 4. Slice 2: Extract function lowering orchestration
 
@@ -112,3 +112,5 @@
 - 1.8 Targeted MIR-lowering smoke before Slice 0 passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed.
 - 2.1-2.4 Slice 0 was a byte-identical `R100` rename from `compiler/src/mir/lowering.rs` to `compiler/src/mir/lowering/mod.rs`; `compiler/src/mir/lowering/` contains `mod.rs` plus the same 24 existing helper files; `compiler/src/mir/mod.rs` and `compiler/src/lib.rs` public re-exports remained unchanged.
 - 2.5 Slice 0 full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 3.1-3.8 Slice 1 created `options.rs` and `entry.rs`. `MirLowerOptions` and its clone-sharing test moved to `options.rs`; `lower_hir` and `lower_hir_with_options` moved to `entry.rs`; `mod.rs` re-exports `MirLowerOptions`, `lower_hir`, and `lower_hir_with_options`. No helper visibility promotion was required in this slice because `entry.rs` uses `use super::*` and root-private helpers remain accessible within the child module.
+- 3.9 Slice 1 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
