@@ -62,13 +62,13 @@
 
 ## 7. Slice 5: Extract async, contract, and body dispatch helpers
 
-- [ ] 7.1 Create `compiler/src/mir/lowering/async_methods.rs` and move `collect_async_block_free_vars`, `lower_async_block`, `infer_poll_func_from_last_call`, and `resolve_async_base_name` into it.
-- [ ] 7.2 Create `compiler/src/mir/lowering/contract_methods.rs` and move `inject_precondition_check`, `inject_postcondition_checks`, and `lower_contract_condition` into it.
-- [ ] 7.3 Create `compiler/src/mir/lowering/body_dispatch_methods.rs` and move `lower_body_to_block`, `lower_body_to_block_val`, `lower_body_to_block_with_return`, `lower_stmt`, and `lower_expr` into it.
-- [ ] 7.4 Keep body/expression dispatch arms byte-for-byte equivalent except for import/path adjustments.
-- [ ] 7.5 Promote moved methods to `pub(super)` only where child or sibling modules call them.
-- [ ] 7.6 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 7.7 Commit `refactor(mir): extract lowering async contract and dispatch helpers (slice 5/N)`.
+- [x] 7.1 Create `compiler/src/mir/lowering/async_methods.rs` and move `collect_async_block_free_vars`, `lower_async_block`, `infer_poll_func_from_last_call`, and `resolve_async_base_name` into it.
+- [x] 7.2 Create `compiler/src/mir/lowering/contract_methods.rs` and move `inject_precondition_check`, `inject_postcondition_checks`, and `lower_contract_condition` into it.
+- [x] 7.3 Create `compiler/src/mir/lowering/body_dispatch_methods.rs` and move `lower_body_to_block`, `lower_body_to_block_val`, `lower_body_to_block_with_return`, `lower_stmt`, and `lower_expr` into it.
+- [x] 7.4 Keep body/expression dispatch arms byte-for-byte equivalent except for import/path adjustments.
+- [x] 7.5 Promote moved methods to `pub(super)` only where child or sibling modules call them.
+- [x] 7.6 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 7.7 Commit `refactor(mir): extract lowering async contract and dispatch helpers (slice 5/N)`.
 
 ## 8. Slice 6: Extract print, pattern, literal, and operator helpers
 
@@ -120,3 +120,5 @@
 - 5.5 Slice 3 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 6.1-6.6 Slice 4 created `block_state_methods.rs` and moved loop-stack, local/block, future-origin, cast, instruction, and terminator helpers. The `set_terminator_without_current_block_records_error_instead_of_panicking` test moved next to `set_terminator` without assertion changes. Cross-file helper methods use `pub(super)`; `current_block_or_error` and `insert_cast` remain private within `block_state_methods.rs`.
 - 6.7 Slice 4 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 7.1-7.5 Slice 5 created `async_methods.rs`, `contract_methods.rs`, and `body_dispatch_methods.rs`. Async block lowering/origin resolution, contract pre/postcondition lowering, and body/statement/expression dispatch moved out of `mod.rs`. Cross-file methods use `pub(super)` where required by sibling helpers and `function_lowering.rs`; internal helpers such as `collect_async_block_free_vars`, `infer_poll_func_from_last_call`, `lower_contract_condition`, and `lower_stmt` remain private.
+- 7.6 Slice 5 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
