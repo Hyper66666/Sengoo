@@ -25,7 +25,12 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 添加一个新的局部变量并返回其Local句柄。
-    pub(super) fn add_local(&mut self, name: Option<String>, kind: LocalKind, ty: MIRType) -> Local {
+    pub(super) fn add_local(
+        &mut self,
+        name: Option<String>,
+        kind: LocalKind,
+        ty: MIRType,
+    ) -> Local {
         let local = self.mir_fn.add_local(kind, ty);
         if let Some(name) = name {
             self.local_names.insert(name, local);
@@ -124,7 +129,11 @@ impl<'a> LoweringContext<'a> {
     /// try to insert Cast instructions to reconcile them.  Returns the
     /// (possibly cast) left and right locals whose types now match, or pushes
     /// an error and returns the originals unchanged.
-    pub(super) fn reconcile_binary_operand_types(&mut self, left: Local, right: Local) -> (Local, Local) {
+    pub(super) fn reconcile_binary_operand_types(
+        &mut self,
+        left: Local,
+        right: Local,
+    ) -> (Local, Local) {
         let left_ty = self.get_local_type(left).clone();
         let right_ty = self.get_local_type(right).clone();
 

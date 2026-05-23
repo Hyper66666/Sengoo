@@ -48,15 +48,15 @@ mod assignment_helpers;
 mod async_methods;
 mod block_async_expr_helpers;
 mod block_state_methods;
-mod body_lowering_helpers;
 mod body_dispatch_methods;
+mod body_lowering_helpers;
 mod builtin_helpers;
 mod call_emission_helpers;
 mod call_expr_helpers;
 mod call_invocation_helpers;
 mod call_target_helpers;
-mod contract_methods;
 mod context_methods;
+mod contract_methods;
 mod entry;
 mod for_expr_helpers;
 mod function_lowering;
@@ -78,8 +78,6 @@ mod pattern_methods;
 mod pointer_expr_helpers;
 mod print_methods;
 mod while_expr_helpers;
-pub use entry::{lower_hir, lower_hir_with_options};
-pub use options::MirLowerOptions;
 use self::aggregate_expr_helpers::{
     lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr,
 };
@@ -103,6 +101,8 @@ use self::op_expr_helpers::{
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::while_expr_helpers::lower_while_expr;
+pub use entry::{lower_hir, lower_hir_with_options};
+pub use options::MirLowerOptions;
 
 /// 循环上下文，记录 `break/continue` 目标基本块。
 #[derive(Debug, Clone, Copy)]
@@ -183,6 +183,4 @@ impl<'a> LoweringContext<'a> {
     ) -> Vec<(String, Local)> {
         collect_free_vars(body, params, &self.local_names)
     }
-
 }
-

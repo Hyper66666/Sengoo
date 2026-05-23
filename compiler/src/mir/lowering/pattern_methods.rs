@@ -29,7 +29,11 @@ impl<'a> LoweringContext<'a> {
 
     /// 将HIR模式绑定降级为MIR，生成对应的局部变量绑定指令。
     /// 将模式绑定降级到MIR，生成模式匹配的局部变量绑定指令。
-    pub(super) fn lower_pattern_bindings(&mut self, pat: &crate::hir::HIRPattern, enum_value: Local) {
+    pub(super) fn lower_pattern_bindings(
+        &mut self,
+        pat: &crate::hir::HIRPattern,
+        enum_value: Local,
+    ) {
         match pattern_binding_plan(pat) {
             PatternBindingPlan::Ignore => {}
             PatternBindingPlan::BindWhole(name) => {

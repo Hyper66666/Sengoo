@@ -9,7 +9,7 @@ landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived 
 capability spec at `openspec/specs/interned-types/spec.md` is the first entry
 in the previously empty `openspec/specs/` directory.
 
-The P0 `Large File Splits` track has now shipped two starter slices.
+The P0 `Large File Splits` track has now shipped three starter slices.
 `large-file-splits-runtime-db` is archived at
 `openspec/changes/archive/2026-05-19-large-file-splits-runtime-db/`; it
 split `runtime/src/reflect/runtime_db.rs` (978 LoC) into a 6-file directory
@@ -19,8 +19,11 @@ completed on 2026-05-23 and is archived at
 split `compiler/src/codegen/jit.rs` (1363 LoC) into a directory module where
 `mod.rs` is 127 LoC and the largest resulting file, `instructions.rs`, is
 857 LoC. Standard verification and the cast-semantics smoke stayed green.
-The next recommended Large File Splits target is
-`compiler/src/mir/lowering.rs` (1501 LoC).
+`large-file-splits-mir-lowering` completed on 2026-05-23; it split
+`compiler/src/mir/lowering.rs` (1501 LoC) into the existing helper directory,
+leaving `mod.rs` at 162 LoC and the largest resulting file,
+`builtin_helpers.rs`, at 580 LoC. The next recommended Large File Splits
+target is `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
 
 The `ty-interning-baseline` deliverables:
 
@@ -72,6 +75,7 @@ The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 | examples-coverage-expansion | Async/generics/traits/ffi examples plus smoke coverage |
 | large-file-splits-runtime-db | First Large File Splits starter; runtime_db directory module, largest file 431 LoC |
 | large-file-splits-jit-codegen | JIT impl-block split; mod.rs 127 LoC, largest file instructions.rs 857 LoC |
+| large-file-splits-mir-lowering | MIR lowering root split; mod.rs 162 LoC, largest file builtin_helpers.rs 580 LoC |
 | mir-async-functions-shared-state | Rc<RefCell> for async_functions plus ConcreteTypeRegistry |
 | mir-bitcast-instruction | MIR Bitcast for float async frame support |
 | reflection-runtime-sengoo-wrappers | Sengoo-side wrappers for db/ffi/lua54/proto/net |
@@ -97,7 +101,7 @@ Full non-test LoC leaderboard (measured 2026-05-20):
 | 2274 | `tools/sgc/src/interface.rs`                  |
 | 2110 | `tools/sglsp/src/main.rs`                     |
 | 1519 | `runtime/src/reflect/runtime_ffi.rs`          |
-| 1501 | `compiler/src/mir/lowering.rs`                |
+| 1501 | `compiler/src/mir/lowering/` (split from lowering.rs, COMPLETE 2026-05-23; mod.rs 162 LoC, largest file 580 LoC) |
 | 1440 | `tools/sgc/src/pipeline.rs`                   |
 | 1363 | `compiler/src/codegen/jit/` (split from jit.rs, COMPLETE 2026-05-23; largest file 857 LoC) |
 | 1349 | `runtime/src/async_runtime.rs`                |
@@ -115,15 +119,20 @@ Completed Large File Splits slices:
   `compiler/src/codegen/jit.rs` into an 8-file directory module; `mod.rs` is
   127 LoC and largest resulting file `instructions.rs` is 857 LoC. This also
   extended the SOP to sibling inherent `impl JITCodegen` blocks.
+- `large-file-splits-mir-lowering` (completed 2026-05-23): split
+  `compiler/src/mir/lowering.rs` into the existing `lowering/` helper
+  directory; `mod.rs` is 162 LoC and largest resulting file
+  `builtin_helpers.rs` is 580 LoC. This extended the SOP to roots that already
+  own child helper directories while keeping `LoweringContext` fields private
+  in `mod.rs`.
 
 Recommended next order, smallest-clear-seam first to keep growing SOP coverage:
 
-1. `compiler/src/mir/lowering.rs` (1501 LoC).
-2. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
+1. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
    subcommand or interface concern).
-3. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
+2. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
    (1348 LoC) - both currently monolithic `main.rs` files.
-4. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
+3. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
    because of extern C ABI surface.
 
 Goal: no single non-test source file over 25 KB (~1000 LoC) unless there is
