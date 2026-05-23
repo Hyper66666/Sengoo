@@ -51,14 +51,14 @@
 
 ## 6. Slice 4: Extract block, local, loop, and cast state helpers
 
-- [ ] 6.1 Create `compiler/src/mir/lowering/block_state_methods.rs`.
-- [ ] 6.2 Move loop-stack helpers `push_loop`, `pop_loop`, `get_break_target`, and `get_continue_target` into `block_state_methods.rs`.
-- [ ] 6.3 Move local/block helpers `add_local`, `bind_local_symbol`, `get_local_type`, `resolve_local`, `new_block`, `set_current_block`, `current_block_or_error`, `current_block`, `push_inst`, and `set_terminator` into `block_state_methods.rs`.
-- [ ] 6.4 Move future-origin and cast helpers `propagate_future_origin_through_phi`, `reconcile_binary_operand_types`, and `insert_cast` into `block_state_methods.rs`.
-- [ ] 6.5 Move or keep `set_terminator_without_current_block_records_error_instead_of_panicking` next to `set_terminator` without changing assertions.
-- [ ] 6.6 Promote moved methods to `pub(super)` only where child or sibling modules call them.
-- [ ] 6.7 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 6.8 Commit `refactor(mir): extract lowering block state helpers (slice 4/N)`.
+- [x] 6.1 Create `compiler/src/mir/lowering/block_state_methods.rs`.
+- [x] 6.2 Move loop-stack helpers `push_loop`, `pop_loop`, `get_break_target`, and `get_continue_target` into `block_state_methods.rs`.
+- [x] 6.3 Move local/block helpers `add_local`, `bind_local_symbol`, `get_local_type`, `resolve_local`, `new_block`, `set_current_block`, `current_block_or_error`, `current_block`, `push_inst`, and `set_terminator` into `block_state_methods.rs`.
+- [x] 6.4 Move future-origin and cast helpers `propagate_future_origin_through_phi`, `reconcile_binary_operand_types`, and `insert_cast` into `block_state_methods.rs`.
+- [x] 6.5 Move or keep `set_terminator_without_current_block_records_error_instead_of_panicking` next to `set_terminator` without changing assertions.
+- [x] 6.6 Promote moved methods to `pub(super)` only where child or sibling modules call them.
+- [x] 6.7 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 6.8 Commit `refactor(mir): extract lowering block state helpers (slice 4/N)`.
 
 ## 7. Slice 5: Extract async, contract, and body dispatch helpers
 
@@ -118,3 +118,5 @@
 - 4.5 Slice 2 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 5.1-5.4 Slice 3 created `context_methods.rs` and moved `LoweringContext::new`, `async_dispatch_kind_id`, `lower_materialized_method`, `try_materialize_inherent_method`, `try_materialize_trait_method`, `infer_struct_literal_type`, `lambda_name`, and `async_block_name`. `LoweringContext` fields remained in `mod.rs`; no fields were promoted. Moved methods used from sibling/root modules use `pub(super)`; `lower_materialized_method` remains private because it is only called inside `context_methods.rs`.
 - 5.5 Slice 3 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 6.1-6.6 Slice 4 created `block_state_methods.rs` and moved loop-stack, local/block, future-origin, cast, instruction, and terminator helpers. The `set_terminator_without_current_block_records_error_instead_of_panicking` test moved next to `set_terminator` without assertion changes. Cross-file helper methods use `pub(super)`; `current_block_or_error` and `insert_cast` remain private within `block_state_methods.rs`.
+- 6.7 Slice 4 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
