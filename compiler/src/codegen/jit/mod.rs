@@ -3,10 +3,11 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
-use crate::mir::{self, Local, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
+use crate::mir::{self, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
 
 mod declaration_helpers;
+mod utils;
 
 /// LLVM JIT 浠ｇ爜鐢熸垚鍣?
 pub struct JITCodegen {
@@ -1301,53 +1302,6 @@ impl JITCodegen {
         self.ir.push_str("ret i32 0\n");
         self.indent -= 1;
         self.ir.push_str("}\n\n");
-    }
-
-    /// 鑾峰彇灞€閮ㄥ彉閲忕被鍨?
-    fn get_local_type(&self, mir_fn: &MirFunction, local: Local) -> MIRType {
-        mir_fn
-            .locals
-            .iter()
-            .find(|(l, _)| l.id == local.id)
-            .map(|(_, ty)| ty.clone())
-            .unwrap_or(MIRType::Int(64))
-    }
-
-    /// 鑾峰彇绫诲瀷鐨勫ぇ灏忥紙瀛楄妭锛?
-    fn get_type_size(&self, ty: &MIRType) -> u64 {
-        match ty {
-            MIRType::Bool => 1,
-            MIRType::Int(n) => (*n as u64) / 8,
-            MIRType::Float(n) => (*n as u64) / 8,
-            MIRType::Ptr(_) | MIRType::Ref(_) => 8, // 鎸囬拡澶у皬
-            MIRType::Array(elem, len) => self.get_type_size(elem) * len,
-            _ => 8, // 默认大小
-        }
-    }
-
-    /// 灞€閮ㄥ彉閲忓悕绉帮紙鐢ㄤ簬瀛樺偍锛?
-    fn local_name(&self, local: Local) -> String {
-        format!("%local_{}", local.id)
-    }
-
-    /// 灞€閮ㄥ彉閲忓悕绉帮紙鐢ㄤ簬鍔犺浇锛?
-    fn local_reg(&self, local: Local) -> String {
-        format!("%local_{}", local.id)
-    }
-
-    /// MIR 类型转 LLVM 类型字符串 — delegates to shared utility
-    fn mir_type_to_llvm_str(&self, ty: &MIRType) -> String {
-        common::mir_type_to_llvm_str(ty)
-    }
-
-    /// 甯搁噺杞?LLVM 鍊煎瓧绗︿覆 鈥?delegates to shared utility
-    fn mir_constant_to_llvm_str(&self, constant: &MirConstant) -> String {
-        common::mir_constant_to_llvm_str(constant)
-    }
-
-    /// 鍙戝皠缂╄繘 鈥?delegates to shared utility
-    fn emit_indent(&mut self) {
-        common::emit_indent(&mut self.ir, self.indent);
     }
 
     /// 鑾峰彇鐢熸垚鐨?LLVM IR
