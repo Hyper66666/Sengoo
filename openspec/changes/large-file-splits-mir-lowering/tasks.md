@@ -33,12 +33,12 @@
 
 ## 4. Slice 2: Extract function lowering orchestration
 
-- [ ] 4.1 Create `compiler/src/mir/lowering/function_lowering.rs`.
-- [ ] 4.2 Move `lower_function` into `function_lowering.rs` without changing parameter binding, contract pre/postcondition injection, error formatting, lambda function extraction, or return ordering.
-- [ ] 4.3 Keep `FunctionSig` accessible to existing helpers and tests; preserve its `pub(crate)` fields and derive attributes.
-- [ ] 4.4 Add minimal imports to `function_lowering.rs`; avoid wildcard imports unless matching existing module style is the least-risk path.
-- [ ] 4.5 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 4.6 Commit `refactor(mir): extract function lowering orchestration (slice 2/N)`.
+- [x] 4.1 Create `compiler/src/mir/lowering/function_lowering.rs`.
+- [x] 4.2 Move `lower_function` into `function_lowering.rs` without changing parameter binding, contract pre/postcondition injection, error formatting, lambda function extraction, or return ordering.
+- [x] 4.3 Keep `FunctionSig` accessible to existing helpers and tests; preserve its `pub(crate)` fields and derive attributes.
+- [x] 4.4 Add minimal imports to `function_lowering.rs`; avoid wildcard imports unless matching existing module style is the least-risk path.
+- [x] 4.5 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 4.6 Commit `refactor(mir): extract function lowering orchestration (slice 2/N)`.
 
 ## 5. Slice 3: Extract context construction and materialization helpers
 
@@ -114,3 +114,5 @@
 - 2.5 Slice 0 full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 3.1-3.8 Slice 1 created `options.rs` and `entry.rs`. `MirLowerOptions` and its clone-sharing test moved to `options.rs`; `lower_hir` and `lower_hir_with_options` moved to `entry.rs`; `mod.rs` re-exports `MirLowerOptions`, `lower_hir`, and `lower_hir_with_options`. No helper visibility promotion was required in this slice because `entry.rs` uses `use super::*` and root-private helpers remain accessible within the child module.
 - 3.9 Slice 1 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 4.1-4.4 Slice 2 created `function_lowering.rs` and moved `lower_function` intact except visibility changed to `pub(super)` because `entry.rs` calls it. `FunctionSig` stayed in `mod.rs` with its existing `pub(crate)` fields and derives.
+- 4.5 Slice 2 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
