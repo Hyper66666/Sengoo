@@ -3,10 +3,11 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
-use crate::mir::{self, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp};
+use crate::mir::{self, MIRType, MirConstant, MirFunction, MirUnOp};
 use std::collections::HashMap;
 
 mod declaration_helpers;
+mod ops;
 mod utils;
 
 /// LLVM JIT 浠ｇ爜鐢熸垚鍣?
@@ -1201,14 +1202,6 @@ impl JITCodegen {
             }
         }
         Ok(())
-    }
-
-    /// 浜屽厓鎿嶄綔杞?LLVM 鎸囦护 鈥?uses shared utility for opcode mapping
-    fn binary_op_to_llvm(&self, op: MirBinOp, ty: &MIRType, left: &str, right: &str) -> String {
-        let llvm_ty = self.mir_type_to_llvm_str(ty);
-        let res = "%result";
-        let opcode = common::binary_op_to_llvm(op, ty);
-        format!("{} = {} {} {}, {}", res, opcode, llvm_ty, left, right)
     }
 
     fn emit_cast_value(
