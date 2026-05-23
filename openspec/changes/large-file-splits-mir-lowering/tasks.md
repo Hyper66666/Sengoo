@@ -42,12 +42,12 @@
 
 ## 5. Slice 3: Extract context construction and materialization helpers
 
-- [ ] 5.1 Create `compiler/src/mir/lowering/context_methods.rs`.
-- [ ] 5.2 Move `LoweringContext::new`, `async_dispatch_kind_id`, `lower_materialized_method`, `try_materialize_inherent_method`, `try_materialize_trait_method`, `infer_struct_literal_type`, `lambda_name`, and `async_block_name` into `context_methods.rs` as an `impl<'a> LoweringContext<'a>` block.
-- [ ] 5.3 Keep `LoweringContext` struct fields in `mod.rs` for this change; do not promote fields unless a compiler error proves it is required.
-- [ ] 5.4 Promote moved methods to `pub(super)` only if sibling modules call them.
-- [ ] 5.5 Run targeted MIR-lowering smoke and the full verification baseline.
-- [ ] 5.6 Commit `refactor(mir): extract lowering context helpers (slice 3/N)`.
+- [x] 5.1 Create `compiler/src/mir/lowering/context_methods.rs`.
+- [x] 5.2 Move `LoweringContext::new`, `async_dispatch_kind_id`, `lower_materialized_method`, `try_materialize_inherent_method`, `try_materialize_trait_method`, `infer_struct_literal_type`, `lambda_name`, and `async_block_name` into `context_methods.rs` as an `impl<'a> LoweringContext<'a>` block.
+- [x] 5.3 Keep `LoweringContext` struct fields in `mod.rs` for this change; do not promote fields unless a compiler error proves it is required.
+- [x] 5.4 Promote moved methods to `pub(super)` only if sibling modules call them.
+- [x] 5.5 Run targeted MIR-lowering smoke and the full verification baseline.
+- [x] 5.6 Commit `refactor(mir): extract lowering context helpers (slice 3/N)`.
 
 ## 6. Slice 4: Extract block, local, loop, and cast state helpers
 
@@ -116,3 +116,5 @@
 - 3.9 Slice 1 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 4.1-4.4 Slice 2 created `function_lowering.rs` and moved `lower_function` intact except visibility changed to `pub(super)` because `entry.rs` calls it. `FunctionSig` stayed in `mod.rs` with its existing `pub(crate)` fields and derives.
 - 4.5 Slice 2 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 5.1-5.4 Slice 3 created `context_methods.rs` and moved `LoweringContext::new`, `async_dispatch_kind_id`, `lower_materialized_method`, `try_materialize_inherent_method`, `try_materialize_trait_method`, `infer_struct_literal_type`, `lambda_name`, and `async_block_name`. `LoweringContext` fields remained in `mod.rs`; no fields were promoted. Moved methods used from sibling/root modules use `pub(super)`; `lower_materialized_method` remains private because it is only called inside `context_methods.rs`.
+- 5.5 Slice 3 targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
