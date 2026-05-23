@@ -1,0 +1,886 @@
+use super::{common, JITCodegen};
+use crate::mir::{self, MIRType, MirConstant, MirFunction, MirUnOp};
+
+impl JITCodegen {
+    /// 鐢熸垚鎸囦护
+    pub(super) fn codegen_instruction(
+        &mut self,
+        inst: &mir::Instruction,
+        mir_fn: &MirFunction,
+    ) -> Result<(), String> {
+        match inst {
+            mir::Instruction::Assign { destination, value } => {
+                self.emit_indent();
+                let dest = self.local_name(*destination);
+                let ty = self.get_local_type(mir_fn, *destination);
+                let llvm_ty = self.mir_type_to_llvm_str(&ty);
+
+                match value {
+                    MirConstant::String(s) => {
+                        // 创建字符串常量
+                        let str_ref = self.add_string(s);
+                        let string_ty = format!("[{} x i8]", s.len() + 1);
+                        self.ir.push_str(&format!(
+                            "{} = bitcast {} {} to i8*\n",
+                            dest, string_ty, str_ref
+                        ));
+                    }
+                    _ => {
+                        // 甯搁噺璧嬪€?
+                        self.ir.push_str(&format!(
+                            "store {} {}, {}* %local_{}\n",
+                            llvm_ty,
+                            self.mir_constant_to_llvm_str(value),
+                            llvm_ty,
+                            destination.id
+                        ));
+                    }
+                }
+            }
+            mir::Instruction::AddrOf {
+                destination,
+                source,
+            } => {
+                self.emit_indent();
+                let dest = self.local_name(*destination);
+                let src = self.local_reg(*source);
+                let src_ty = self.get_local_type(mir_fn, *source);
+                let llvm_ty = self.mir_type_to_llvm_str(&src_ty);
+
+                // AddrOf 鑾峰彇鍙橀噺鐨勫湴鍧€
+                // 1. 浣跨敤 getelementptr 鑾峰彇鍦板潃
+                let temp = format!("{}.addr", dest);
+                self.ir.push_str(&format!(
+                    "{} = getelementptr {}, {}* {}, i64 0\n",
+                    temp, llvm_ty, llvm_ty, src
+                ));
+
+                // 2. 灏嗗湴鍧€瀛樺偍鍒?destination
+                self.emit_indent();
+                let dest_ty = self.get_local_type(mir_fn, *destination);
+                let dest_llvm_ty = self.mir_type_to_llvm_str(&dest_ty);
+                // store 鎸囦护鏍煎紡: store <type> <value>, <type>* <pointer>
+                // alloca 杩斿洖鐨勭被鍨嬫槸 <type>*锛屾墍浠ヨ繖閲岄渶瑕?<type>**
+                let dest_ptr_ty = format!("{}*", dest_llvm_ty);
+                self.ir.push_str(&format!(
+                    "store {} {}, {} {}\n",
+                    dest_llvm_ty, temp, dest_ptr_ty, dest
+                ));
+            }
+            mir::Instruction::Load {
+                destination,
+                source,
+            } => {
+                // Load 鎸囦护锛氫粠 source 鍔犺浇鍊煎埌 destination
+                let dest = self.local_name(*destination);
+                let dest_ty = self.get_local_type(mir_fn, *destination);
+                let src = self.local_reg(*source);
+                let src_ty = self.get_local_type(mir_fn, *source);
+
+                // 鍔犺浇鐨勫€肩被鍨嬪簲璇ヤ娇鐢?destination 鐨勭被鍨?
+                let llvm_value_ty = self.mir_type_to_llvm_str(&dest_ty);
+
+                // 瀵逛簬 Ptr 绫诲瀷鐨?source锛岄渶瑕佸弻閲嶅姞杞?
+                match &src_ty {
+                    MIRType::Ptr(inner) => {
+                        // source 是 Ptr(T)，在 LLVM 中会：
+                        // - alloca 杩斿洖 T**
+                        // - 第一次加载得到 T*
+                        // - 第二次加载得到 T
+                        let inner_ty = self.mir_type_to_llvm_str(inner);
+                        let ptr_ty = format!("{}*", inner_ty);
+                        let ptr_ptr_ty = format!("{}*", ptr_ty);
+
+                        // 第一次加载：从 alloca 加载指针值
+                        self.emit_indent();
+                        let temp_ptr = format!("{}.ptr", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            temp_ptr, ptr_ty, ptr_ptr_ty, src
+                        ));
+
+                        // 第二次加载：从指针加载实际值
+                        self.emit_indent();
+                        let temp_val = format!("{}.val", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            temp_val, llvm_value_ty, inner_ty, temp_ptr
+                        ));
+
+                        // 灏嗗€煎瓨鍌ㄥ埌 destination锛坅lloca锛?
+                        self.emit_indent();
+                        let dest_ptr_ty = format!("{}*", llvm_value_ty);
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            llvm_value_ty, temp_val, dest_ptr_ty, dest
+                        ));
+                    }
+                    MIRType::Ref(inner) => {
+                        // Ref 类型的处理类似 Ptr
+                        let inner_ty = self.mir_type_to_llvm_str(inner);
+                        let ptr_ty = format!("{}*", inner_ty);
+                        let ptr_ptr_ty = format!("{}*", ptr_ty);
+
+                        self.emit_indent();
+                        let temp_ptr = format!("{}.ptr", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            temp_ptr, ptr_ty, ptr_ptr_ty, src
+                        ));
+
+                        self.emit_indent();
+                        let temp_val = format!("{}.val", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            temp_val, llvm_value_ty, inner_ty, temp_ptr
+                        ));
+
+                        self.emit_indent();
+                        let dest_ptr_ty = format!("{}*", llvm_value_ty);
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            llvm_value_ty, temp_val, dest_ptr_ty, dest
+                        ));
+                    }
+                    _ => {
+                        // 普通类型，需要额外的指针层级（alloca 返回指针）
+                        let llvm_ptr_ty = self.mir_type_to_llvm_str(&src_ty);
+                        let llvm_src_ptr_ty = format!("{}*", llvm_ptr_ty);
+
+                        // 鍔犺浇鍊煎埌涓存椂鍙橀噺
+                        self.emit_indent();
+                        let temp_val = format!("{}.val", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            temp_val, llvm_value_ty, llvm_src_ptr_ty, src
+                        ));
+
+                        // 灏嗗€煎瓨鍌ㄥ埌 destination锛坅lloca锛?
+                        self.emit_indent();
+                        let dest_ptr_ty = format!("{}*", llvm_value_ty);
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            llvm_value_ty, temp_val, dest_ptr_ty, dest
+                        ));
+                    }
+                }
+            }
+            mir::Instruction::Unary {
+                destination,
+                op,
+                operand,
+            } => {
+                self.emit_indent();
+                let _operand_name = self.local_name(*operand);
+                let dest = self.local_name(*destination);
+                let ty = self.get_local_type(mir_fn, *destination);
+                let llvm_ty = self.mir_type_to_llvm_str(&ty);
+
+                // 鍔犺浇鎿嶄綔鏁?
+                let temp = format!("{}.temp", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    temp,
+                    llvm_ty,
+                    llvm_ty,
+                    self.local_reg(*operand)
+                ));
+
+                // 执行一元操作
+                let op_inst = match op {
+                    MirUnOp::Neg => {
+                        if matches!(ty, MIRType::Float(_)) {
+                            format!("{}.neg = fneg float {}", dest, temp)
+                        } else {
+                            format!("{}.neg = sub {} 0, {}", dest, llvm_ty, temp)
+                        }
+                    }
+                    MirUnOp::Not => {
+                        format!(
+                            "{}.not = xor {} {}, {}",
+                            dest,
+                            llvm_ty,
+                            temp,
+                            self.mir_constant_to_llvm_str(&MirConstant::Bool(true))
+                        )
+                    }
+                    MirUnOp::BitNot => {
+                        format!(
+                            "{}.bitnot = xor {} {}, {}",
+                            dest,
+                            llvm_ty,
+                            temp,
+                            self.mir_constant_to_llvm_str(&MirConstant::Int(-1))
+                        )
+                    }
+                };
+                self.ir.push_str(&format!("{}\n", op_inst));
+
+                // 瀛樺偍缁撴灉
+                self.emit_indent();
+                let result_reg = format!("{dest}.res");
+                self.ir.push_str(&format!(
+                    "store {} {}, {}* {}\n",
+                    llvm_ty,
+                    result_reg,
+                    llvm_ty,
+                    self.local_reg(*destination)
+                ));
+            }
+            mir::Instruction::Cast {
+                destination,
+                value,
+                to,
+            } => {
+                let dest = self.local_name(*destination);
+                let src_ty = self.get_local_type(mir_fn, *value);
+                let src_llvm = self.mir_type_to_llvm_str(&src_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(to);
+                let src_reg = self.local_reg(*value);
+
+                self.emit_indent();
+                let src_temp = format!("{}.cast.in", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    src_temp, src_llvm, src_llvm, src_reg
+                ));
+
+                if src_ty == *to {
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        dst_llvm, src_temp, dst_llvm, dest
+                    ));
+                } else {
+                    self.emit_indent();
+                    let casted = format!("{}.cast.out", dest);
+                    self.emit_cast_value(&casted, &src_temp, &src_ty, to);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        dst_llvm, casted, dst_llvm, dest
+                    ));
+                }
+            }
+            mir::Instruction::Bitcast {
+                destination,
+                value,
+                to,
+            } => {
+                let dest = self.local_name(*destination);
+                let src_ty = self.get_local_type(mir_fn, *value);
+                let src_llvm = self.mir_type_to_llvm_str(&src_ty);
+                let dst_llvm = self.mir_type_to_llvm_str(to);
+                let src_reg = self.local_reg(*value);
+
+                if !common::supports_mir_bitcast(&src_ty, to) {
+                    return Err(format!(
+                        "invalid MIR bitcast from {} to {}",
+                        src_llvm, dst_llvm
+                    ));
+                }
+
+                self.emit_indent();
+                let src_temp = format!("{}.bitcast.in", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    src_temp, src_llvm, src_llvm, src_reg
+                ));
+
+                self.emit_indent();
+                let casted = format!("{}.bitcast.out", dest);
+                self.ir.push_str(&format!(
+                    "{} = bitcast {} {} to {}\n",
+                    casted, src_llvm, src_temp, dst_llvm
+                ));
+
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {} {}, {}* {}\n",
+                    dst_llvm, casted, dst_llvm, dest
+                ));
+            }
+            mir::Instruction::Binary {
+                destination,
+                op,
+                left,
+                right,
+            } => {
+                self.emit_indent();
+                let left_reg = self.local_reg(*left);
+                let right_reg = self.local_reg(*right);
+                let dest = self.local_name(*destination);
+                let ty = self.get_local_type(mir_fn, *left);
+                let llvm_ty = self.mir_type_to_llvm_str(&ty);
+
+                // 鍔犺浇鎿嶄綔鏁?
+                let left_temp = format!("{}.l", dest);
+                let right_temp = format!("{}.r", dest);
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    left_temp, llvm_ty, llvm_ty, left_reg
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    right_temp, llvm_ty, llvm_ty, right_reg
+                ));
+
+                // 执行二元操作
+                let op_inst = self.binary_op_to_llvm(*op, &ty, &left_temp, &right_temp);
+                self.ir.push_str(&format!("{}\n", op_inst));
+
+                // 瀛樺偍缁撴灉 - 姣旇緝鎿嶄綔杩斿洖 i1锛屽叾浠栨搷浣滆繑鍥炴搷浣滄暟绫诲瀷
+                self.emit_indent();
+                let dest_ty = self.get_local_type(mir_fn, *destination);
+                let llvm_dest_ty = self.mir_type_to_llvm_str(&dest_ty);
+                self.ir.push_str(&format!(
+                    "store {} %result, {}* {}\n",
+                    llvm_dest_ty,
+                    llvm_dest_ty,
+                    self.local_reg(*destination)
+                ));
+            }
+            mir::Instruction::Store { destination, value } => {
+                // 瀛樺偍 local 鍒?local (let 璧嬪€?
+                let dest_ty = self.get_local_type(mir_fn, *destination);
+                let src_ty = self.get_local_type(mir_fn, *value);
+                let llvm_dest_ty = self.mir_type_to_llvm_str(&dest_ty);
+                let llvm_src_ty = self.mir_type_to_llvm_str(&src_ty);
+                let src_reg = self.local_reg(*value);
+                let dest_reg = self.local_reg(*destination);
+
+                match &dest_ty {
+                    MIRType::Ptr(inner) => {
+                        // destination 是 Ptr(T)，表示我们想存储到指针指向的位置
+                        let inner_ty = self.mir_type_to_llvm_str(inner);
+
+                        // 1. 浠?destination alloca 鍔犺浇鎸囬拡鍊?
+                        self.emit_indent();
+                        let ptr_temp = format!("{}.destptr", dest_reg);
+                        let ptr_ptr_ty = format!("{inner_ty}**");
+                        let ptr_ty = format!("{}*", inner_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            ptr_temp, ptr_ty, ptr_ptr_ty, dest_reg
+                        ));
+
+                        // 2. 鍔犺浇婧愬€?
+                        self.emit_indent();
+                        let val_temp = format!("{}.srcval", dest_reg);
+                        let src_ptr_ty = format!("{}*", llvm_src_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            val_temp, llvm_src_ty, src_ptr_ty, src_reg
+                        ));
+
+                        // 3. 瀛樺偍鍒版寚閽堟寚鍚戠殑浣嶇疆
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "store {} {}, {}* {}\n",
+                            llvm_src_ty, val_temp, inner_ty, ptr_temp
+                        ));
+                    }
+                    MIRType::Ref(inner) => {
+                        // Ref 类型的处理类似 Ptr
+                        let inner_ty = self.mir_type_to_llvm_str(inner);
+
+                        self.emit_indent();
+                        let ptr_temp = format!("{}.destptr", dest_reg);
+                        let ptr_ptr_ty = format!("{inner_ty}**");
+                        let ptr_ty = format!("{}*", inner_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            ptr_temp, ptr_ty, ptr_ptr_ty, dest_reg
+                        ));
+
+                        self.emit_indent();
+                        let val_temp = format!("{}.srcval", dest_reg);
+                        let src_ptr_ty = format!("{}*", llvm_src_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            val_temp, llvm_src_ty, src_ptr_ty, src_reg
+                        ));
+
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "store {} {}, {}* {}\n",
+                            llvm_src_ty, val_temp, inner_ty, ptr_temp
+                        ));
+                    }
+                    MIRType::Tuple(_) => {
+                        // 结构体类型：使用逐字段复制
+                        if let MIRType::Tuple(field_tys) = &dest_ty {
+                            for (i, field_ty) in field_tys.iter().enumerate() {
+                                let llvm_field_ty = self.mir_type_to_llvm_str(field_ty);
+
+                                // 鑾峰彇婧愬瓧娈靛湴鍧€
+                                self.emit_indent();
+                                let src_gep = format!("%.src_gep.{}.{}", destination.id, i);
+                                self.ir.push_str(&format!(
+                                    "{} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+                                    src_gep, llvm_src_ty, llvm_src_ty, src_reg, i
+                                ));
+
+                                // 鍔犺浇婧愬瓧娈?
+                                self.emit_indent();
+                                let src_field = format!("%.src_field.{}.{}", destination.id, i);
+                                self.ir.push_str(&format!(
+                                    "{} = load {}, {}* {}\n",
+                                    src_field, llvm_field_ty, llvm_field_ty, src_gep
+                                ));
+
+                                // 获取目标字段地址
+                                self.emit_indent();
+                                let dest_gep = format!("%.dest_gep.{}.{}", destination.id, i);
+                                self.ir.push_str(&format!(
+                                    "{} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+                                    dest_gep, llvm_dest_ty, llvm_dest_ty, dest_reg, i
+                                ));
+
+                                // 瀛樺偍鍒扮洰鏍囧瓧娈?
+                                self.emit_indent();
+                                self.ir.push_str(&format!(
+                                    "store {} {}, {}* {}\n",
+                                    llvm_field_ty, src_field, llvm_field_ty, dest_gep
+                                ));
+                            }
+                        }
+                    }
+                    MIRType::Array(elem_ty, len) => {
+                        // 鏁扮粍绫诲瀷锛氫娇鐢?memcpy
+                        let _llvm_elem_ty = self.mir_type_to_llvm_str(elem_ty);
+                        let size = self.get_type_size(elem_ty) * len;
+
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "call void @llvm.memcpy.p0i8.p0i8.i64(i8* bitcast {}* {} to i8*), i8* bitcast {}* {} to i8*, i64 {}, i32 8, i1 false)\n",
+                            llvm_dest_ty, dest_reg, llvm_src_ty, src_reg, size
+                        ));
+                    }
+                    _ => {
+                        // 鏍囬噺绫诲瀷锛氱洿鎺ュ姞杞藉拰瀛樺偍
+                        self.emit_indent();
+                        let src_temp = format!("%.src.{}", destination.id);
+                        // 娉ㄦ剰锛歴rc_reg 鏄?alloca 杩斿洖鐨勬寚閽堬紝闇€瑕佸姞 *
+                        let src_ptr_ty = format!("{}*", llvm_src_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {} {}\n",
+                            src_temp, llvm_src_ty, src_ptr_ty, src_reg
+                        ));
+
+                        self.emit_indent();
+                        // dest_reg 涔熸槸鎸囬拡绫诲瀷锛岄渶瑕佸姞 *
+                        let dest_ptr_ty = format!("{}*", llvm_dest_ty);
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            llvm_dest_ty, src_temp, dest_ptr_ty, dest_reg
+                        ));
+                    }
+                }
+            }
+            mir::Instruction::FieldAddr {
+                destination,
+                base,
+                field,
+            } => {
+                // 结构体字段地址计算: ptr = &base.field（字段索引是常量）
+                let base_ty = self.get_local_type(mir_fn, *base);
+                let llvm_base_ty = self.mir_type_to_llvm_str(&base_ty);
+                let dest = self.local_name(*destination);
+                let base_reg = self.local_reg(*base);
+
+                // 使用 getelementptr 获取字段地址
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+                    dest, llvm_base_ty, llvm_base_ty, base_reg, field
+                ));
+            }
+            mir::Instruction::IndexAddr {
+                destination,
+                base,
+                index,
+            } => {
+                // 鏁扮粍绱㈠紩鍦板潃璁＄畻: ptr = &base[index]
+                let base_ty = self.get_local_type(mir_fn, *base);
+                let elem_ty = match &base_ty {
+                    MIRType::Array(elem, _) => (*elem).clone(),
+                    MIRType::Ptr(inner) | MIRType::Ref(inner) => (*inner).clone(),
+                    _ => Box::new(MIRType::Int(64)),
+                };
+
+                let llvm_elem_ty = self.mir_type_to_llvm_str(&elem_ty);
+                let llvm_base_ty = self.mir_type_to_llvm_str(&base_ty);
+                let dest = self.local_name(*destination);
+                let base_reg = self.local_reg(*base);
+                let index_reg = self.local_reg(*index);
+
+                // 鍔犺浇绱㈠紩鍊?
+                self.emit_indent();
+                let index_temp = format!("{}.idx", dest);
+                self.ir
+                    .push_str(&format!("{} = load i64, i64* {}\n", index_temp, index_reg));
+
+                // 澶勭悊鍩哄潃
+                match &base_ty {
+                    MIRType::Array(_, _) => {
+                        // 数组类型：首先将数组退化为指向首元素的指针（C 语言行为）
+                        // base_ptr = &base[0]
+                        self.emit_indent();
+                        let base_ptr = format!("{}.decay", dest);
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i64 0, i64 0\n",
+                            base_ptr, llvm_base_ty, llvm_elem_ty, base_reg
+                        ));
+
+                        // 鐒跺悗璁＄畻鍏冪礌鍦板潃: ptr = &base_ptr[index]
+                        self.emit_indent();
+                        let addr_temp = format!("{}.addr", dest);
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i64 {}\n",
+                            addr_temp, llvm_elem_ty, llvm_elem_ty, base_ptr, index_temp
+                        ));
+
+                        // 将地址存储到 destination local（destination 是指针类型）
+                        // destination 是 Ptr(T)，在 LLVM 中是 T**
+                        // addr_temp 鏄?T*锛岄渶瑕佸瓨鍌ㄥ埌 T**
+                        self.emit_indent();
+                        let dest_ptr_ptr_ty = format!("{llvm_elem_ty}**");
+                        let addr_ptr_ty = format!("{}*", llvm_elem_ty); // addr_temp 鐨勭被鍨嬫槸 T*
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            addr_ptr_ty, addr_temp, dest_ptr_ptr_ty, dest
+                        ));
+                    }
+                    MIRType::Ptr(_) | MIRType::Ref(_) => {
+                        // 鎸囬拡/寮曠敤绫诲瀷锛氱洿鎺ュ姞杞芥寚閽堬紝鐒跺悗璁＄畻鍏冪礌鍦板潃
+                        self.emit_indent();
+                        let loaded_ptr = format!("{}.ptr", dest);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            loaded_ptr, llvm_base_ty, llvm_elem_ty, base_reg
+                        ));
+
+                        // 璁＄畻鍏冪礌鍦板潃
+                        self.emit_indent();
+                        let addr_temp = format!("{}.addr", dest);
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i64 {}\n",
+                            addr_temp, llvm_elem_ty, llvm_elem_ty, loaded_ptr, index_temp
+                        ));
+
+                        // 将地址存储到 destination local（destination 是指针类型）
+                        // destination 是 Ptr(T)，在 LLVM 中是 T**
+                        // addr_temp 鏄?T*锛岄渶瑕佸瓨鍌ㄥ埌 T**
+                        self.emit_indent();
+                        let dest_ptr_ptr_ty = format!("{llvm_elem_ty}**");
+                        let addr_ptr_ty = format!("{}*", llvm_elem_ty); // addr_temp 鐨勭被鍨嬫槸 T*
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            addr_ptr_ty, addr_temp, dest_ptr_ptr_ty, dest
+                        ));
+                    }
+                    MIRType::Tuple(field_tys) => {
+                        // 元组/结构体类型：使用 getelementptr 访问字段
+                        // 字段索引是常量，不需要动态索引
+                        let struct_fields: Vec<String> = field_tys
+                            .iter()
+                            .map(|ty| self.mir_type_to_llvm_str(ty))
+                            .collect();
+                        let llvm_struct_ty = format!("{{{}}}", struct_fields.join(", "));
+
+                        // 直接使用 getelementptr 获取字段地址
+                        // 娉ㄦ剰锛氱储寮曞€煎簲璇ユ槸缂栬瘧鏃跺父閲?
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+                            dest, llvm_struct_ty, llvm_elem_ty, base_reg, index_temp
+                        ));
+                    }
+                    _ => {
+                        // 其他类型：错误处理
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "; IndexAddr: unsupported base type {:?}\n",
+                            base_ty
+                        ));
+                    }
+                }
+            }
+            mir::Instruction::Call {
+                destination,
+                func,
+                args,
+            } => {
+                self.emit_indent();
+
+                // 鐗规畩澶勭悊鍐呯疆鍑芥暟
+                if func == "print" || func == "println" {
+                    // print 鍑芥暟
+                    let arg = args.first();
+                    if let Some(arg_local) = arg {
+                        let arg_ty = self.get_local_type(mir_fn, *arg_local);
+                        let arg_val = self.local_reg(*arg_local);
+
+                        match &arg_ty {
+                            MIRType::Int(_) => {
+                                self.ir.push_str(&format!(
+                                    "call void @puts(i8* bitcast i64* inttoptr i64 {} to i8*)\n",
+                                    arg_val
+                                ));
+                            }
+                            MIRType::Ptr(inner) | MIRType::Ref(inner) => {
+                                if matches!(inner.as_ref(), MIRType::Int(8)) {
+                                    // 字符串指针
+                                    self.ir
+                                        .push_str(&format!("call void @puts(i8* {})\n", arg_val));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    // 普通函数调用
+                    // 获取目标函数的签名（如果存在）
+                    let target_param_tys = self
+                        .function_signatures
+                        .get(func)
+                        .map(|(params, _)| params.clone())
+                        .unwrap_or_default();
+
+                    let mut args_codegen = Vec::new();
+
+                    for (i, local) in args.iter().enumerate() {
+                        let ty = self.get_local_type(mir_fn, *local);
+                        let llvm_ty = self.mir_type_to_llvm_str(&ty);
+                        let reg = self.local_reg(*local);
+
+                        // 鍔犺浇鍙傛暟鍊?
+                        let arg_temp = format!("%.arg.{}.{}", func, i);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            arg_temp, llvm_ty, llvm_ty, reg
+                        ));
+
+                        // 如果目标函数参数类型与当前类型不同，进行转换
+                        let final_arg = if let Some(target_ty) = target_param_tys.get(i) {
+                            let llvm_target_ty = self.mir_type_to_llvm_str(target_ty);
+                            if llvm_ty != llvm_target_ty {
+                                let converted = format!("%.arg.{}.{}.conv", func, i);
+                                self.emit_indent();
+                                self.emit_cast_value(&converted, &arg_temp, &ty, target_ty);
+                                format!("{} {}", llvm_target_ty, converted)
+                            } else {
+                                format!("{} {}", llvm_ty, arg_temp)
+                            }
+                        } else {
+                            format!("{} {}", llvm_ty, arg_temp)
+                        };
+
+                        args_codegen.push(final_arg);
+                    }
+
+                    let dest = self.local_name(*destination);
+                    // 获取被调用函数的返回类型
+                    let return_ty = self
+                        .function_signatures
+                        .get(func)
+                        .map(|(_, ret)| self.mir_type_to_llvm_str(ret))
+                        .unwrap_or_else(|| self.mir_type_to_llvm_str(&mir_fn.return_type));
+
+                    self.emit_indent();
+                    if return_ty != "void" {
+                        // 浣跨敤涓存椂鍚嶇О浣滀负 call 鐨勭粨鏋滐紝鐒跺悗瀛樺偍鍒?destination
+                        let call_result = format!("{}.call", dest);
+                        self.ir.push_str(&format!(
+                            "{} = call {} @{}({})\n",
+                            call_result,
+                            return_ty,
+                            func,
+                            args_codegen.join(", ")
+                        ));
+
+                        // 灏嗙粨鏋滃瓨鍌ㄥ埌 destination锛坅lloca锛?
+                        self.emit_indent();
+                        let dest_ptr_ty = format!("{}*", return_ty);
+                        self.ir.push_str(&format!(
+                            "store {} {}, {} {}\n",
+                            return_ty, call_result, dest_ptr_ty, dest
+                        ));
+                    } else {
+                        self.ir.push_str(&format!(
+                            "call void @{}({})\n",
+                            func,
+                            args_codegen.join(", ")
+                        ));
+                    }
+                }
+            }
+            mir::Instruction::Nop => {}
+            mir::Instruction::Aggregate {
+                destination,
+                fields,
+                ty,
+            } => {
+                // 鑱氬悎鍊煎垵濮嬪寲锛堟暟缁勫瓧闈㈤噺銆佺粨鏋勪綋瀛楅潰閲忥級
+                match ty {
+                    MIRType::Array(elem_ty, len) => {
+                        // 数组初始化
+                        let llvm_elem_ty = self.mir_type_to_llvm_str(elem_ty);
+                        let llvm_array_ty = format!("[{} x {}]", len, llvm_elem_ty);
+                        let dest = self.local_name(*destination);
+
+                        // 首先为每个元素加载值
+                        let mut elem_values = Vec::new();
+                        for (i, field_local) in fields.iter().enumerate() {
+                            let field_ty = self.get_local_type(mir_fn, *field_local);
+                            let llvm_field_ty = self.mir_type_to_llvm_str(&field_ty);
+                            let reg = self.local_reg(*field_local);
+                            let loaded = format!("%.elem.{}.{}", destination.id, i);
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{} = load {}, {}* {}\n",
+                                loaded, llvm_field_ty, llvm_field_ty, reg
+                            ));
+                            elem_values.push((loaded, llvm_field_ty));
+                        }
+
+                        // 使用 alloca 初始化数组
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("{} = alloca {}\n", dest, llvm_array_ty));
+
+                        // 瀛樺偍姣忎釜鍏冪礌
+                        for (i, (value, _)) in elem_values.iter().enumerate() {
+                            self.emit_indent();
+                            // 鑾峰彇鍏冪礌鎸囬拡
+                            let gep = format!("%.ptr.{}.{}", destination.id, i);
+                            self.ir.push_str(&format!(
+                                "{} = getelementptr {}, {}* {}, i64 0, i64 {}\n",
+                                gep, llvm_array_ty, llvm_elem_ty, dest, i
+                            ));
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_elem_ty, value, llvm_elem_ty, gep
+                            ));
+                        }
+                    }
+                    MIRType::Tuple(_field_tys) => {
+                        // 鍏冪粍/缁撴瀯浣撳垵濮嬪寲
+                        let dest = self.local_name(*destination);
+
+                        // 首先为每个字段加载值
+                        let mut field_values = Vec::new();
+                        for (i, field_local) in fields.iter().enumerate() {
+                            let field_ty = self.get_local_type(mir_fn, *field_local);
+                            let llvm_field_ty = self.mir_type_to_llvm_str(&field_ty);
+                            let reg = self.local_reg(*field_local);
+                            let loaded = format!("%.elem.{}.{}", destination.id, i);
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{} = load {}, {}* {}\n",
+                                loaded, llvm_field_ty, llvm_field_ty, reg
+                            ));
+                            field_values.push((loaded, llvm_field_ty));
+                        }
+
+                        // 涓哄厓缁勫垎閰嶇┖闂达紙浣跨敤 LLVM 缁撴瀯浣擄級
+                        let struct_fields: Vec<&str> =
+                            field_values.iter().map(|(_, ty)| ty.as_str()).collect();
+                        let llvm_struct_ty = format!("{{{}}}", struct_fields.join(", "));
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("{} = alloca {}\n", dest, llvm_struct_ty));
+
+                        // 存储每个字段
+                        for (i, (value, llvm_field_ty)) in field_values.iter().enumerate() {
+                            self.emit_indent();
+                            // 获取字段指针
+                            let gep = format!("%.ptr.{}.{}", destination.id, i);
+                            self.ir.push_str(&format!(
+                                "{} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+                                gep, llvm_struct_ty, llvm_field_ty, dest, i
+                            ));
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_field_ty, value, llvm_field_ty, gep
+                            ));
+                        }
+                    }
+                    MIRType::Enum { .. } => {
+                        let llvm_enum_ty = self.mir_type_to_llvm_str(ty);
+                        let dest = self.local_name(*destination);
+
+                        let discr_reg = fields
+                            .first()
+                            .map(|local| self.local_reg(*local))
+                            .ok_or_else(|| {
+                                "enum aggregate missing discriminant field".to_string()
+                            })?;
+                        let discr_loaded = format!("%.enum.discr.{}", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = load i64, i64* {}\n",
+                            discr_loaded, discr_reg
+                        ));
+
+                        let payload_loaded = if let Some(payload_local) = fields.get(1) {
+                            let payload_reg = self.local_reg(*payload_local);
+                            let payload_loaded = format!("%.enum.payload.{}", destination.id);
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{} = load i64, i64* {}\n",
+                                payload_loaded, payload_reg
+                            ));
+                            payload_loaded
+                        } else {
+                            "0".to_string()
+                        };
+
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("{} = alloca {}\n", dest, llvm_enum_ty));
+
+                        let discr_ptr = format!("%.ptr.{}.0", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                            discr_ptr, llvm_enum_ty, llvm_enum_ty, dest
+                        ));
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("store i64 {}, i64* {}\n", discr_loaded, discr_ptr));
+
+                        let payload_ptr = format!("%.ptr.{}.1", destination.id);
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                            payload_ptr, llvm_enum_ty, llvm_enum_ty, dest
+                        ));
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "store i64 {}, i64* {}\n",
+                            payload_loaded, payload_ptr
+                        ));
+                    }
+                    _ => {
+                        // 鍏朵粬鑱氬悎绫诲瀷锛堢粨鏋勪綋绛夛級
+                        let _dest = self.local_name(*destination);
+                        self.emit_indent();
+                        self.ir.push_str(&format!("; aggregate: {:?}\n", ty));
+                    }
+                }
+            }
+            _ => {
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("; unhandled instruction: {:?}\n", inst));
+            }
+        }
+        Ok(())
+    }
+}
