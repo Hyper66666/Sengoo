@@ -1,5 +1,14 @@
 use super::*;
 
+fn mir_local_name(local: Local) -> String {
+    match local.kind {
+        LocalKind::Param => format!("%l_{}", local.id),
+        LocalKind::Temp => format!("%t_{}", local.id),
+        LocalKind::User => format!("%u_{}", local.id),
+        LocalKind::Return => format!("%ret_{}", local.id),
+    }
+}
+
 pub(super) struct CallTargetPlan {
     pub(super) func_name: String,
     pub(super) ret_type: MIRType,
