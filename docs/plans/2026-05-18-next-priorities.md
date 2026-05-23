@@ -1,4 +1,4 @@
-# Sengoo Next Priorities (updated 2026-05-20)
+# Sengoo Next Priorities (updated 2026-05-23)
 
 ## Current State
 
@@ -9,13 +9,18 @@ landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived 
 capability spec at `openspec/specs/interned-types/spec.md` is the first entry
 in the previously empty `openspec/specs/` directory.
 
-The active P0 is now `Large File Splits` (promoted below). The first slice
-of the track, `large-file-splits-runtime-db`, completed on 2026-05-20: it
+The P0 `Large File Splits` track has now shipped two starter slices.
+`large-file-splits-runtime-db` is archived at
+`openspec/changes/archive/2026-05-19-large-file-splits-runtime-db/`; it
 split `runtime/src/reflect/runtime_db.rs` (978 LoC) into a 6-file directory
-module with the largest resulting file at 431 LoC (44% of original), all
-verification green, and produced the reusable Split SOP captured in its
-`tasks.md` §9. Awaiting archival; the next change should target
-`compiler/src/codegen/jit.rs` (1363 LoC) per the recommended order below.
+module with the largest resulting file at 431 LoC. `large-file-splits-jit-codegen`
+completed on 2026-05-23 and is archived at
+`openspec/changes/archive/2026-05-23-large-file-splits-jit-codegen/`; it
+split `compiler/src/codegen/jit.rs` (1363 LoC) into a directory module where
+`mod.rs` is 127 LoC and the largest resulting file, `instructions.rs`, is
+857 LoC. Standard verification and the cast-semantics smoke stayed green.
+The next recommended Large File Splits target is
+`compiler/src/mir/lowering.rs` (1501 LoC).
 
 The `ty-interning-baseline` deliverables:
 
@@ -65,6 +70,8 @@ The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 | async-runtime-hardening-and-lowering-split | Future-escape checks, dispatch IDs, lowering split |
 | enforce-struct-field-completeness | Struct literal missing/duplicate/unknown field validation |
 | examples-coverage-expansion | Async/generics/traits/ffi examples plus smoke coverage |
+| large-file-splits-runtime-db | First Large File Splits starter; runtime_db directory module, largest file 431 LoC |
+| large-file-splits-jit-codegen | JIT impl-block split; mod.rs 127 LoC, largest file instructions.rs 857 LoC |
 | mir-async-functions-shared-state | Rc<RefCell> for async_functions plus ConcreteTypeRegistry |
 | mir-bitcast-instruction | MIR Bitcast for float async frame support |
 | reflection-runtime-sengoo-wrappers | Sengoo-side wrappers for db/ffi/lua54/proto/net |
@@ -92,29 +99,31 @@ Full non-test LoC leaderboard (measured 2026-05-20):
 | 1519 | `runtime/src/reflect/runtime_ffi.rs`          |
 | 1501 | `compiler/src/mir/lowering.rs`                |
 | 1440 | `tools/sgc/src/pipeline.rs`                   |
-| 1363 | `compiler/src/codegen/jit.rs`                 |
+| 1363 | `compiler/src/codegen/jit/` (split from jit.rs, COMPLETE 2026-05-23; largest file 857 LoC) |
 | 1349 | `runtime/src/async_runtime.rs`                |
 | 1348 | `tools/sgfmt/src/main.rs`                     |
 | 1332 | `compiler/src/parser/decl.rs`                 |
 | 1390 | `tools/sgc/src/commands.rs`                   |
 |  978 | `runtime/src/reflect/runtime_db/` (← starter, COMPLETE 2026-05-20: largest file now 431 LoC) |
 
-Active OpenSpec change: `large-file-splits-runtime-db` (978 LoC starter)
-**complete, pending archival**. Established the reusable Split SOP — see
-its `tasks.md` §9. Final result: largest file 431 LoC (mod.rs, 44% of
-original), all 4 verification baselines green, FFI smoke
-(`examples_smoke_reflection_db_open_query`) green.
+Completed Large File Splits slices:
 
-Recommended next-after-starter order, smallest-clear-seam first to grow the
-SOP coverage:
+- `large-file-splits-runtime-db` (archived 2026-05-19): split
+  `runtime/src/reflect/runtime_db.rs` into a 6-file directory module; largest
+  resulting file is 431 LoC.
+- `large-file-splits-jit-codegen` (archived 2026-05-23): split
+  `compiler/src/codegen/jit.rs` into an 8-file directory module; `mod.rs` is
+  127 LoC and largest resulting file `instructions.rs` is 857 LoC. This also
+  extended the SOP to sibling inherent `impl JITCodegen` blocks.
 
-1. `compiler/src/codegen/jit.rs` (1363 LoC) — compiler-side, well-bounded.
-2. `compiler/src/mir/lowering.rs` (1501 LoC).
-3. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
+Recommended next order, smallest-clear-seam first to keep growing SOP coverage:
+
+1. `compiler/src/mir/lowering.rs` (1501 LoC).
+2. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
    subcommand or interface concern).
-4. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
-   (1348 LoC) — both currently monolithic `main.rs` files.
-5. `runtime/src/net.rs` (2729 LoC) — largest, defer until SOP is well-proven
+3. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
+   (1348 LoC) - both currently monolithic `main.rs` files.
+4. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
    because of extern C ABI surface.
 
 Goal: no single non-test source file over 25 KB (~1000 LoC) unless there is
