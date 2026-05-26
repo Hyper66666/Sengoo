@@ -19,11 +19,12 @@ completed on 2026-05-23 and is archived at
 split `compiler/src/codegen/jit.rs` (1363 LoC) into a directory module where
 `mod.rs` is 127 LoC and the largest resulting file, `instructions.rs`, is
 857 LoC. Standard verification and the cast-semantics smoke stayed green.
-`large-file-splits-mir-lowering` completed on 2026-05-23; it split
-`compiler/src/mir/lowering.rs` (1501 LoC) into the existing helper directory,
-leaving `mod.rs` at 162 LoC and the largest resulting file,
-`builtin_helpers.rs`, at 580 LoC. The next recommended Large File Splits
-target is `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
+`large-file-splits-mir-lowering` completed on 2026-05-23 and is archived at
+`openspec/changes/archive/2026-05-26-large-file-splits-mir-lowering/`; it
+split `compiler/src/mir/lowering.rs` (1501 LoC) into the existing helper
+directory, leaving `mod.rs` at 162 LoC and the largest resulting file,
+`builtin_helpers.rs`, at 580 LoC. The next recommended Large File Splits target
+is `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
 
 The `ty-interning-baseline` deliverables:
 
@@ -119,7 +120,7 @@ Completed Large File Splits slices:
   `compiler/src/codegen/jit.rs` into an 8-file directory module; `mod.rs` is
   127 LoC and largest resulting file `instructions.rs` is 857 LoC. This also
   extended the SOP to sibling inherent `impl JITCodegen` blocks.
-- `large-file-splits-mir-lowering` (completed 2026-05-23): split
+- `large-file-splits-mir-lowering` (archived 2026-05-26): split
   `compiler/src/mir/lowering.rs` into the existing `lowering/` helper
   directory; `mod.rs` is 162 LoC and largest resulting file
   `builtin_helpers.rs` is 580 LoC. This extended the SOP to roots that already
