@@ -93,12 +93,12 @@
 
 ## 10. Archival prerequisites
 
-- [ ] 10.1 All implementation tasks above are checked and completion notes are recorded.
-- [ ] 10.2 `openspec.cmd validate large-file-splits-mir-lowering --strict` reports no errors.
-- [ ] 10.3 `openspec.cmd list` shows the change ready to archive.
-- [ ] 10.4 Archive to `openspec/changes/archive/YYYY-MM-DD-large-file-splits-mir-lowering/`.
-- [ ] 10.5 Promote the updated `large-file-splits` capability spec into `openspec/specs/large-file-splits/spec.md`.
-- [ ] 10.6 Update persistent roadmap notes so the next split can reuse the existing-child-directory root split SOP.
+- [x] 10.1 All implementation tasks above are checked and completion notes are recorded.
+- [x] 10.2 `openspec.cmd validate large-file-splits-mir-lowering --strict` reports no errors.
+- [x] 10.3 `openspec.cmd list` shows the change ready to archive.
+- [x] 10.4 Archive to `openspec/changes/archive/YYYY-MM-DD-large-file-splits-mir-lowering/`.
+- [x] 10.5 Promote the updated `large-file-splits` capability spec into `openspec/specs/large-file-splits/spec.md`.
+- [x] 10.6 Update persistent roadmap notes so the next split can reuse the existing-child-directory root split SOP.
 
 ## 11. Inventory notes
 
@@ -129,3 +129,9 @@
 - 9.4 Size targets met: `mod.rs` is 162 LoC (<500), every resulting file is below the original 1501 LoC root size, and every non-test lowering file is below the roadmap ~1000 LoC target. Largest resulting lowering file is `builtin_helpers.rs` at 580 LoC.
 - 9.5-9.6 Roadmap updated with `large-file-splits-mir-lowering` completion status and next recommended Large File Splits target: `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
 - 9.7 Final targeted smoke passed: `cargo test -p sengoo-compiler lowering --lib` 87 passed; `cargo test -p sengoo-compiler generic_typeck --lib` 12 passed. Final full baseline passed: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 10.1 All implementation tasks in sections 1-9 are complete with evidence notes recorded.
+- 10.2 OpenSpec validation passed: `openspec.cmd validate large-file-splits-mir-lowering --strict`; promoted main spec validation also passed with `openspec.cmd validate large-file-splits --strict`.
+- 10.3 `openspec.cmd list` showed the change active with only archival prerequisites remaining before final checkoff; after final checkoff the change is ready to archive.
+- 10.4 Archive target: `openspec/changes/archive/2026-05-26-large-file-splits-mir-lowering/`.
+- 10.5 Promoted the delta `Existing child directory root splitting` requirement into `openspec/specs/large-file-splits/spec.md`.
+- 10.6 Roadmap notes now record the existing-child-directory root split SOP extension and the next recommended Large File Splits target.
