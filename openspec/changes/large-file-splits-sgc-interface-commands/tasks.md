@@ -47,12 +47,12 @@
 
 ## 6. Slice 4: Mechanical `commands.rs` directory-module rename
 
-- [ ] 6.1 Move `tools/sgc/src/commands.rs` to `tools/sgc/src/commands/mod.rs` with no content edits.
-- [ ] 6.2 Verify `tools/sgc/src/main.rs` module declaration continues to resolve `mod commands;` unchanged.
-- [ ] 6.3 Confirm git reports an `R100` rename for the moved file.
-- [ ] 6.4 Run targeted `cargo test -p sgc workset` and `cargo test -p sgc cache` smoke tests.
-- [ ] 6.5 Run full baseline and record pass counts.
-- [ ] 6.6 Commit `refactor(sgc): convert commands to directory module (slice 4/N)`.
+- [x] 6.1 Move `tools/sgc/src/commands.rs` to `tools/sgc/src/commands/mod.rs` with no content edits.
+- [x] 6.2 Verify `tools/sgc/src/main.rs` module declaration continues to resolve `mod commands;` unchanged.
+- [x] 6.3 Confirm git reports an `R100` rename for the moved file.
+- [x] 6.4 Run targeted `cargo test -p sgc workset` and `cargo test -p sgc cache` smoke tests.
+- [x] 6.5 Run full baseline and record pass counts.
+- [x] 6.6 Commit `refactor(sgc): convert commands to directory module (slice 4/N)`.
 
 ## 7. Slice 5: Extract command shared state and workset helpers
 
@@ -130,3 +130,8 @@
 - 5.3 Root compatibility is preserved via `pub(crate) use self::generic_instances::{generic_fingerprints_for_module, generic_fingerprints_for_program};`.
 - 5.4 Shared visibility stayed constrained: `GenericCallableMeta`, `GenericMethodTemplate`, their fields, `collect_impl_method_templates_from_decl`, and `collect_generic_item_fingerprints_from_decl` are `pub(super)` for sibling access; type rendering helpers remain in `signature.rs` with prior `pub(super)` visibility.
 - 5.5 Slice 3 verification: `cargo test -p sgc generic_fingerprint` 7 passed; `cargo test -p sgc generic_instance` 9 passed; `cargo test -p sgc` 217 passed. Final interface split sizes after slice 3: `mod.rs` 24, `signature.rs` 456, `function_fingerprints.rs` 274, `function_signatures.rs` 80, `generic_items.rs` 440, `generic_instances.rs` 959.
+- 6.1 Mechanical rename moved `tools/sgc/src/commands.rs` to `tools/sgc/src/commands/mod.rs`; no content edits were made in the moved Rust file.
+- 6.2 `tools/sgc/src/main.rs` still declares `mod commands;` unchanged, and `cargo test -p sgc workset` compiled through the directory module path.
+- 6.3 Git rename evidence recorded after staging: `tools/sgc/src/{commands.rs => commands/mod.rs} (100%)`.
+- 6.4 Slice 4 targeted tests: `cargo test -p sgc workset` 11 passed; `cargo test -p sgc cache` 18 passed.
+- 6.5 Slice 4 full affected baseline: `cargo test -p sgc` 217 passed; 0 failed.
