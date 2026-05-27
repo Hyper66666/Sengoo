@@ -29,12 +29,12 @@
 
 ## 4. Slice 2: Extract function fingerprint and signature helpers
 
-- [ ] 4.1 Create `tools/sgc/src/interface/function_fingerprints.rs` for function fingerprint collection.
-- [ ] 4.2 Move `function_fingerprints_for_module` and `function_fingerprints_for_program` with their private call/import collection helpers.
-- [ ] 4.3 Create `tools/sgc/src/interface/function_signatures.rs` for `function_signatures_for_module` and related signature-info helpers if it is separable without churn.
-- [ ] 4.4 Preserve all `main.rs` re-exports and test imports unchanged.
-- [ ] 4.5 Run targeted function fingerprint/signature tests and full baseline; record pass counts.
-- [ ] 4.6 Commit `refactor(sgc): extract interface function fingerprints (slice 2/N)`.
+- [x] 4.1 Create `tools/sgc/src/interface/function_fingerprints.rs` for function fingerprint collection.
+- [x] 4.2 Move `function_fingerprints_for_module` and `function_fingerprints_for_program` with their private call/import collection helpers.
+- [x] 4.3 Create `tools/sgc/src/interface/function_signatures.rs` for `function_signatures_for_module` and related signature-info helpers if it is separable without churn.
+- [x] 4.4 Preserve all `main.rs` re-exports and test imports unchanged.
+- [x] 4.5 Run targeted function fingerprint/signature tests and full baseline; record pass counts.
+- [x] 4.6 Commit `refactor(sgc): extract interface function fingerprints (slice 2/N)`.
 
 ## 5. Slice 3: Extract generic fingerprint helpers
 
@@ -120,3 +120,8 @@
 - 3.3 Cross-module helper promotions were limited to `pub(super)` for `ast_path_signature`, `trait_bound_signature`, `type_signature`, and `function_signature`; signature-only helpers such as `visibility_label`, `param_signature`, and `variant_field_signature` remain private.
 - 3.4 `interface/mod.rs` imports were pruned to the remaining fingerprint/generic dependencies after extraction; touched files were formatted with `rustfmt --edition 2021 tools\sgc\src\interface\mod.rs tools\sgc\src\interface\signature.rs`.
 - 3.5 Slice 1 verification: `cargo test -p sgc interface_fingerprint` 2 passed; `cargo test -p sgc` 217 passed.
+- 4.1 Slice 2 created `tools/sgc/src/interface/function_fingerprints.rs` for call collection and function fingerprint entry points; post-format size 274 lines.
+- 4.2 `function_fingerprints_for_module` and `function_fingerprints_for_program` moved behind root re-exports. `source_span_slice` and `function_symbol` remain in `interface/mod.rs` because generic fingerprinting also depends on them.
+- 4.3 Slice 2 created `tools/sgc/src/interface/function_signatures.rs` for `function_signatures_for_module`; post-format size 80 lines.
+- 4.4 Root compatibility is preserved via `pub(crate) use self::function_fingerprints::{function_fingerprints_for_module, function_fingerprints_for_program};` and `pub(crate) use self::function_signatures::function_signatures_for_module;`; `main.rs` imports were unchanged.
+- 4.5 Shared helper visibility promotions were limited to `pub(super)` for `call_target_signature` and `collect_calls_in_stmt`, because generic instance collection reuses those helpers. Slice 2 verification: `cargo test -p sgc function_fingerprint` 3 passed; `cargo test -p sgc function_signature` 1 passed; `cargo test -p sgc` 217 passed.
