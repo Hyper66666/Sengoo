@@ -56,12 +56,12 @@
 
 ## 7. Slice 5: Extract command shared state and workset helpers
 
-- [ ] 7.1 Create `tools/sgc/src/commands/shared.rs` for override guards, contract check resolution, and large-project mode helpers.
-- [ ] 7.2 Create `tools/sgc/src/commands/workset_optimizations.rs` for reachability, generic symbol, and cache/workset skip helpers.
-- [ ] 7.3 Preserve `can_reuse_artifacts_for_unreachable_impl_only_changes` and `can_skip_codegen_via_generic_cache` through the same crate-visible root path used by tests.
-- [ ] 7.4 Prune imports and restrict visibility to `pub(super)` or `pub(crate)` only where already required by tests.
-- [ ] 7.5 Run targeted `cargo test -p sgc workset` and full baseline; record pass counts.
-- [ ] 7.6 Commit `refactor(sgc): extract command shared workset helpers (slice 5/N)`.
+- [x] 7.1 Create `tools/sgc/src/commands/shared.rs` for override guards, contract check resolution, and large-project mode helpers.
+- [x] 7.2 Create `tools/sgc/src/commands/workset_optimizations.rs` for reachability, generic symbol, and cache/workset skip helpers.
+- [x] 7.3 Preserve `can_reuse_artifacts_for_unreachable_impl_only_changes` and `can_skip_codegen_via_generic_cache` through the same crate-visible root path used by tests.
+- [x] 7.4 Prune imports and restrict visibility to `pub(super)` or `pub(crate)` only where already required by tests.
+- [x] 7.5 Run targeted `cargo test -p sgc workset` and full baseline; record pass counts.
+- [x] 7.6 Commit `refactor(sgc): extract command shared workset helpers (slice 5/N)`.
 
 ## 8. Slice 6: Extract build command orchestration
 
@@ -135,3 +135,9 @@
 - 6.3 Git rename evidence recorded after staging: `tools/sgc/src/{commands.rs => commands/mod.rs} (100%)`.
 - 6.4 Slice 4 targeted tests: `cargo test -p sgc workset` 11 passed; `cargo test -p sgc cache` 18 passed.
 - 6.5 Slice 4 full affected baseline: `cargo test -p sgc` 217 passed; 0 failed.
+- 7.1 Slice 5 created `tools/sgc/src/commands/shared.rs` for large-project and contract-check override guards, contract check mode labeling/resolution, and large-project/env threshold helpers; post-format size 70 lines.
+- 7.2 Slice 5 created `tools/sgc/src/commands/workset_optimizations.rs` for generic symbol, reachability, unreachable impl-only artifact reuse, and generic-cache codegen skip helpers; post-format size 126 lines.
+- 7.3 Test-facing compatibility is preserved via `pub(crate) use self::workset_optimizations::{can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache};` from `commands/mod.rs`.
+- 7.4 Visibility stayed constrained: shared guards and helper functions are `pub(super)` for sibling command modules, workset skip helpers remain `pub(crate)` because existing tests import them through the crate command root, and internal reachability/generic-symbol helpers remain private.
+- 7.5 Slice 5 verification: `rustfmt --edition 2021 tools\sgc\src\commands\mod.rs tools\sgc\src\commands\shared.rs tools\sgc\src\commands\workset_optimizations.rs`; `cargo test -p sgc workset` 11 passed; `cargo test -p sgc cache` 18 passed; `cargo test -p sgc` 217 passed.
+- 7.6 Slice 5 file sizes after extraction: `commands/mod.rs` 1152 lines, `commands/shared.rs` 70 lines, `commands/workset_optimizations.rs` 126 lines.
