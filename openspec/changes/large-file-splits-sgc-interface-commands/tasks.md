@@ -38,12 +38,12 @@
 
 ## 5. Slice 3: Extract generic fingerprint helpers
 
-- [ ] 5.1 Create `tools/sgc/src/interface/generic_items.rs` for generic item fingerprint extraction.
-- [ ] 5.2 Create `tools/sgc/src/interface/generic_instances.rs` for generic instance extraction and callable metadata helpers.
-- [ ] 5.3 Move `generic_fingerprints_for_module` and `generic_fingerprints_for_program` while preserving root re-exports.
-- [ ] 5.4 Keep shared type rendering helpers private or `pub(super)` only where cross-file calls require it.
-- [ ] 5.5 Run targeted `cargo test -p sgc generic_fingerprint` and `cargo test -p sgc generic_instance` smoke tests plus full baseline; record pass counts.
-- [ ] 5.6 Commit `refactor(sgc): extract interface generic fingerprints (slice 3/N)`.
+- [x] 5.1 Create `tools/sgc/src/interface/generic_items.rs` for generic item fingerprint extraction.
+- [x] 5.2 Create `tools/sgc/src/interface/generic_instances.rs` for generic instance extraction and callable metadata helpers.
+- [x] 5.3 Move `generic_fingerprints_for_module` and `generic_fingerprints_for_program` while preserving root re-exports.
+- [x] 5.4 Keep shared type rendering helpers private or `pub(super)` only where cross-file calls require it.
+- [x] 5.5 Run targeted `cargo test -p sgc generic_fingerprint` and `cargo test -p sgc generic_instance` smoke tests plus full baseline; record pass counts.
+- [x] 5.6 Commit `refactor(sgc): extract interface generic fingerprints (slice 3/N)`.
 
 ## 6. Slice 4: Mechanical `commands.rs` directory-module rename
 
@@ -125,3 +125,8 @@
 - 4.3 Slice 2 created `tools/sgc/src/interface/function_signatures.rs` for `function_signatures_for_module`; post-format size 80 lines.
 - 4.4 Root compatibility is preserved via `pub(crate) use self::function_fingerprints::{function_fingerprints_for_module, function_fingerprints_for_program};` and `pub(crate) use self::function_signatures::function_signatures_for_module;`; `main.rs` imports were unchanged.
 - 4.5 Shared helper visibility promotions were limited to `pub(super)` for `call_target_signature` and `collect_calls_in_stmt`, because generic instance collection reuses those helpers. Slice 2 verification: `cargo test -p sgc function_fingerprint` 3 passed; `cargo test -p sgc function_signature` 1 passed; `cargo test -p sgc` 217 passed.
+- 5.1 Slice 3 created `tools/sgc/src/interface/generic_items.rs` for generic item fingerprint extraction, callable metadata structs, and impl method templates; post-format size 440 lines.
+- 5.2 Slice 3 created `tools/sgc/src/interface/generic_instances.rs` for type inference/substitution, generic instance extraction, and `generic_fingerprints_*` orchestration; post-format size 959 lines.
+- 5.3 Root compatibility is preserved via `pub(crate) use self::generic_instances::{generic_fingerprints_for_module, generic_fingerprints_for_program};`.
+- 5.4 Shared visibility stayed constrained: `GenericCallableMeta`, `GenericMethodTemplate`, their fields, `collect_impl_method_templates_from_decl`, and `collect_generic_item_fingerprints_from_decl` are `pub(super)` for sibling access; type rendering helpers remain in `signature.rs` with prior `pub(super)` visibility.
+- 5.5 Slice 3 verification: `cargo test -p sgc generic_fingerprint` 7 passed; `cargo test -p sgc generic_instance` 9 passed; `cargo test -p sgc` 217 passed. Final interface split sizes after slice 3: `mod.rs` 24, `signature.rs` 456, `function_fingerprints.rs` 274, `function_signatures.rs` 80, `generic_items.rs` 440, `generic_instances.rs` 959.
