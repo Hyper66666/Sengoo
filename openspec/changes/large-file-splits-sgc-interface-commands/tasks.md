@@ -20,12 +20,12 @@
 
 ## 3. Slice 1: Extract interface signature rendering
 
-- [ ] 3.1 Create `tools/sgc/src/interface/signature.rs` for AST path/type/decl/interface signature rendering helpers.
-- [ ] 3.2 Move `interface_fingerprint_from_program` and `ast_interface_signature` into `signature.rs` while preserving root re-exports.
-- [ ] 3.3 Promote helpers only to `pub(super)` where sibling modules require them; keep private helpers private when possible.
-- [ ] 3.4 Prune imports in `interface/mod.rs` and `signature.rs`.
-- [ ] 3.5 Run targeted `cargo test -p sgc interface_fingerprint` and full baseline; record pass counts.
-- [ ] 3.6 Commit `refactor(sgc): extract interface signature helpers (slice 1/N)`.
+- [x] 3.1 Create `tools/sgc/src/interface/signature.rs` for AST path/type/decl/interface signature rendering helpers.
+- [x] 3.2 Move `interface_fingerprint_from_program` and `ast_interface_signature` into `signature.rs` while preserving root re-exports.
+- [x] 3.3 Promote helpers only to `pub(super)` where sibling modules require them; keep private helpers private when possible.
+- [x] 3.4 Prune imports in `interface/mod.rs` and `signature.rs`.
+- [x] 3.5 Run targeted `cargo test -p sgc interface_fingerprint` and full baseline; record pass counts.
+- [x] 3.6 Commit `refactor(sgc): extract interface signature helpers (slice 1/N)`.
 
 ## 4. Slice 2: Extract function fingerprint and signature helpers
 
@@ -115,3 +115,8 @@
 - 2.3 Git rename evidence recorded after staging: `tools/sgc/src/{interface.rs => interface/mod.rs} (100%)`.
 - 2.4 Slice 0 targeted tests: `cargo test -p sgc interface_fingerprint` 2 passed; `cargo test -p sgc generic_fingerprint` 7 passed.
 - 2.5 Slice 0 full affected baseline: `cargo test -p sgc` 217 passed; 0 failed.
+- 3.1 Slice 1 created `tools/sgc/src/interface/signature.rs` for AST path/type/decl/interface signature rendering; post-format sizes: `interface/mod.rs` 1750 lines, `interface/signature.rs` 456 lines.
+- 3.2 Root compatibility is preserved via `pub(crate) use self::signature::{ast_interface_signature, interface_fingerprint_from_program};`.
+- 3.3 Cross-module helper promotions were limited to `pub(super)` for `ast_path_signature`, `trait_bound_signature`, `type_signature`, and `function_signature`; signature-only helpers such as `visibility_label`, `param_signature`, and `variant_field_signature` remain private.
+- 3.4 `interface/mod.rs` imports were pruned to the remaining fingerprint/generic dependencies after extraction; touched files were formatted with `rustfmt --edition 2021 tools\sgc\src\interface\mod.rs tools\sgc\src\interface\signature.rs`.
+- 3.5 Slice 1 verification: `cargo test -p sgc interface_fingerprint` 2 passed; `cargo test -p sgc` 217 passed.
