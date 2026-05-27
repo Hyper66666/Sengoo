@@ -97,7 +97,7 @@
 - [x] 11.2 `openspec.cmd validate large-file-splits-sgc-interface-commands --strict` reports no errors.
 - [x] 11.3 `openspec.cmd list` shows the change ready to archive.
 - [x] 11.4 Promote the updated `large-file-splits` capability spec into `openspec/specs/large-file-splits/spec.md` if the CLI/tooling split requirement remains applicable after implementation.
-- [ ] 11.5 Archive to `openspec/changes/archive/YYYY-MM-DD-large-file-splits-sgc-interface-commands/`.
+- [x] 11.5 Archive to `openspec/changes/archive/YYYY-MM-DD-large-file-splits-sgc-interface-commands/`.
 - [x] 11.6 Update persistent roadmap notes so the next split can reuse the tooling/CLI split SOP.
 
 ## 12. Evidence notes
@@ -164,4 +164,5 @@
 - 11.2 OpenSpec validation: `cmd /c openspec validate large-file-splits-sgc-interface-commands --strict` reported `Change 'large-file-splits-sgc-interface-commands' is valid`.
 - 11.3 OpenSpec list evidence before archive: `cmd /c openspec list` showed active change `large-file-splits-sgc-interface-commands` at `68/69 tasks`; the only unchecked task is the archive move itself.
 - 11.4 The tooling command module split requirement was promoted into `openspec/specs/large-file-splits/spec.md`.
+- 11.5 Archive evidence: `cmd /c openspec archive large-file-splits-sgc-interface-commands --yes --skip-specs` archived the change as `openspec/changes/archive/2026-05-27-large-file-splits-sgc-interface-commands/`; spec updates were skipped because the requirement had already been promoted manually.
 - 11.6 Roadmap notes were updated so the next split can reuse the tooling/CLI split SOP and next-candidate ordering.
