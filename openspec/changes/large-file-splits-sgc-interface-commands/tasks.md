@@ -65,11 +65,11 @@
 
 ## 8. Slice 6: Extract build command orchestration
 
-- [ ] 8.1 Create `tools/sgc/src/commands/build.rs`.
-- [ ] 8.2 Move `cmd_build` intact, preserving signature, asyncness, logging order, cache behavior, reflection sidecar behavior, and artifact paths.
-- [ ] 8.3 Promote only required shared helpers from `commands/shared.rs` or `commands/workset_optimizations.rs`.
-- [ ] 8.4 Run targeted build/cache/reflection smoke tests and full baseline; record pass counts.
-- [ ] 8.5 Commit `refactor(sgc): extract build command orchestration (slice 6/N)`.
+- [x] 8.1 Create `tools/sgc/src/commands/build.rs`.
+- [x] 8.2 Move `cmd_build` intact, preserving signature, asyncness, logging order, cache behavior, reflection sidecar behavior, and artifact paths.
+- [x] 8.3 Promote only required shared helpers from `commands/shared.rs` or `commands/workset_optimizations.rs`.
+- [x] 8.4 Run targeted build/cache/reflection smoke tests and full baseline; record pass counts.
+- [x] 8.5 Commit `refactor(sgc): extract build command orchestration (slice 6/N)`.
 
 ## 9. Slice 7: Extract run command orchestration
 
@@ -141,3 +141,8 @@
 - 7.4 Visibility stayed constrained: shared guards and helper functions are `pub(super)` for sibling command modules, workset skip helpers remain `pub(crate)` because existing tests import them through the crate command root, and internal reachability/generic-symbol helpers remain private.
 - 7.5 Slice 5 verification: `rustfmt --edition 2021 tools\sgc\src\commands\mod.rs tools\sgc\src\commands\shared.rs tools\sgc\src\commands\workset_optimizations.rs`; `cargo test -p sgc workset` 11 passed; `cargo test -p sgc cache` 18 passed; `cargo test -p sgc` 217 passed.
 - 7.6 Slice 5 file sizes after extraction: `commands/mod.rs` 1152 lines, `commands/shared.rs` 70 lines, `commands/workset_optimizations.rs` 126 lines.
+- 8.1 Slice 6 created `tools/sgc/src/commands/build.rs`; post-format size 582 lines.
+- 8.2 `cmd_build` was moved as an intact async command body behind `pub(crate) use self::build::cmd_build;`; `main.rs` and test imports remain unchanged.
+- 8.3 No new helper promotions were required for build extraction. `build.rs` imports shared guards/mode helpers through `super::shared` and workset/cache skip helpers through `super::workset_optimizations`.
+- 8.4 Slice 6 verification: `rustfmt --edition 2021 tools\sgc\src\commands\mod.rs tools\sgc\src\commands\build.rs`; `cargo test -p sgc build` 27 passed; `cargo test -p sgc cache` 18 passed; `cargo test -p sgc reflection` 18 passed; `cargo test -p sgc` 217 passed.
+- 8.5 Slice 6 file sizes after extraction: `commands/mod.rs` 583 lines, `commands/build.rs` 582 lines, `commands/shared.rs` 70 lines, `commands/workset_optimizations.rs` 126 lines.
