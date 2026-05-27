@@ -11,12 +11,12 @@
 
 ## 2. Slice 0: Mechanical `interface.rs` directory-module rename
 
-- [ ] 2.1 Move `tools/sgc/src/interface.rs` to `tools/sgc/src/interface/mod.rs` with no content edits.
-- [ ] 2.2 Verify `tools/sgc/src/main.rs` module declaration continues to resolve `mod interface;` unchanged.
-- [ ] 2.3 Confirm git reports an `R100` rename for the moved file.
-- [ ] 2.4 Run targeted `cargo test -p sgc interface_fingerprint` and `cargo test -p sgc generic_fingerprint` smoke tests.
-- [ ] 2.5 Run full baseline and record pass counts.
-- [ ] 2.6 Commit `refactor(sgc): convert interface to directory module (slice 0/N)`.
+- [x] 2.1 Move `tools/sgc/src/interface.rs` to `tools/sgc/src/interface/mod.rs` with no content edits.
+- [x] 2.2 Verify `tools/sgc/src/main.rs` module declaration continues to resolve `mod interface;` unchanged.
+- [x] 2.3 Confirm git reports an `R100` rename for the moved file.
+- [x] 2.4 Run targeted `cargo test -p sgc interface_fingerprint` and `cargo test -p sgc generic_fingerprint` smoke tests.
+- [x] 2.5 Run full baseline and record pass counts.
+- [x] 2.6 Commit `refactor(sgc): convert interface to directory module (slice 0/N)`.
 
 ## 3. Slice 1: Extract interface signature rendering
 
@@ -110,3 +110,8 @@
 - 1.6 Baseline `cargo test -p sgc`: 217 passed; 0 failed.
 - 1.7 Full baseline: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
 - 1.8 Planning validation evidence: `cmd /c openspec validate large-file-splits-sgc-interface-commands --strict` passed before the planning/inventory commit.
+- 2.1 Mechanical rename moved `tools/sgc/src/interface.rs` to `tools/sgc/src/interface/mod.rs`; no content edits were made in the moved Rust file.
+- 2.2 `tools/sgc/src/main.rs` still declares `mod interface;` unchanged, and `cargo test -p sgc interface_fingerprint` compiled through the directory module path.
+- 2.3 Git rename evidence recorded after staging: `tools/sgc/src/{interface.rs => interface/mod.rs} (100%)`.
+- 2.4 Slice 0 targeted tests: `cargo test -p sgc interface_fingerprint` 2 passed; `cargo test -p sgc generic_fingerprint` 7 passed.
+- 2.5 Slice 0 full affected baseline: `cargo test -p sgc` 217 passed; 0 failed.
