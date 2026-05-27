@@ -81,24 +81,24 @@
 
 ## 10. Slice 8: Import pruning, file-size evidence, and documentation
 
-- [ ] 10.1 Prune unused imports from all touched `interface/` and `commands/` files.
-- [ ] 10.2 Run rustfmt check on touched files; if `cargo fmt --all -- --check` is blocked by unrelated formatting drift, record the blocker and the narrower touched-file command that passed.
-- [ ] 10.3 Run `git diff --check` and record the result.
-- [ ] 10.4 Compute final line counts for every file under `tools/sgc/src/interface/` and `tools/sgc/src/commands/`.
-- [ ] 10.5 Verify size targets: both `mod.rs` roots below ~500 LoC if practical, every resulting file below its original root size, and every non-test file below the roadmap ~1000 LoC target or document any justified exception.
-- [ ] 10.6 Update `docs/plans/2026-05-18-next-priorities.md` with implementation status and next Large File Splits candidate.
-- [ ] 10.7 Update this `tasks.md` with final sizes, visibility promotions, formatting evidence, and final verification evidence.
-- [ ] 10.8 Run final targeted `sgc` smoke tests and full verification baseline.
-- [ ] 10.9 Commit `docs(sgc): update interface commands split status (slice 8/N)`.
+- [x] 10.1 Prune unused imports from all touched `interface/` and `commands/` files.
+- [x] 10.2 Run rustfmt check on touched files; if `cargo fmt --all -- --check` is blocked by unrelated formatting drift, record the blocker and the narrower touched-file command that passed.
+- [x] 10.3 Run `git diff --check` and record the result.
+- [x] 10.4 Compute final line counts for every file under `tools/sgc/src/interface/` and `tools/sgc/src/commands/`.
+- [x] 10.5 Verify size targets: both `mod.rs` roots below ~500 LoC if practical, every resulting file below its original root size, and every non-test file below the roadmap ~1000 LoC target or document any justified exception.
+- [x] 10.6 Update `docs/plans/2026-05-18-next-priorities.md` with implementation status and next Large File Splits candidate.
+- [x] 10.7 Update this `tasks.md` with final sizes, visibility promotions, formatting evidence, and final verification evidence.
+- [x] 10.8 Run final targeted `sgc` smoke tests and full verification baseline.
+- [x] 10.9 Commit `docs(sgc): update interface commands split status (slice 8/N)`.
 
 ## 11. Archival prerequisites
 
-- [ ] 11.1 All implementation tasks above are checked and completion notes are recorded.
-- [ ] 11.2 `openspec.cmd validate large-file-splits-sgc-interface-commands --strict` reports no errors.
-- [ ] 11.3 `openspec.cmd list` shows the change ready to archive.
-- [ ] 11.4 Promote the updated `large-file-splits` capability spec into `openspec/specs/large-file-splits/spec.md` if the CLI/tooling split requirement remains applicable after implementation.
+- [x] 11.1 All implementation tasks above are checked and completion notes are recorded.
+- [x] 11.2 `openspec.cmd validate large-file-splits-sgc-interface-commands --strict` reports no errors.
+- [x] 11.3 `openspec.cmd list` shows the change ready to archive.
+- [x] 11.4 Promote the updated `large-file-splits` capability spec into `openspec/specs/large-file-splits/spec.md` if the CLI/tooling split requirement remains applicable after implementation.
 - [ ] 11.5 Archive to `openspec/changes/archive/YYYY-MM-DD-large-file-splits-sgc-interface-commands/`.
-- [ ] 11.6 Update persistent roadmap notes so the next split can reuse the tooling/CLI split SOP.
+- [x] 11.6 Update persistent roadmap notes so the next split can reuse the tooling/CLI split SOP.
 
 ## 12. Evidence notes
 
@@ -151,3 +151,17 @@
 - 9.3 No new helper promotions were required for run extraction. `run.rs` imports shared guards/mode helpers through `super::shared` and workset/cache skip helpers through `super::workset_optimizations`.
 - 9.4 Slice 7 verification: `rustfmt --edition 2021 tools\sgc\src\commands\mod.rs tools\sgc\src\commands\run.rs tools\sgc\src\commands\build.rs tools\sgc\src\commands\shared.rs tools\sgc\src\commands\workset_optimizations.rs`; `cargo test -p sgc run` 76 passed; `cargo test -p sgc cache` 18 passed; `cargo test -p sgc engine` 4 passed; `cargo test -p sgc` 217 passed.
 - 9.5 Slice 7 file sizes after extraction: `commands/mod.rs` 9 lines, `commands/build.rs` 582 lines, `commands/run.rs` 579 lines, `commands/shared.rs` 70 lines, `commands/workset_optimizations.rs` 126 lines.
+- 10.1 Final touched Rust import pruning was completed during the extraction slices; root command and interface modules now only contain module declarations/re-exports plus required helper imports in sibling files.
+- 10.2 `cargo fmt --all -- --check` is currently blocked by unrelated pre-existing formatting drift in `compiler/src/typeck/{check.rs,env.rs,interner.rs}` and `runtime/src/reflect/runtime_db/{exec.rs,mod.rs,sql.rs}`. Narrow touched-file formatting check passed with `rustfmt --edition 2021 --check` over all files under `tools/sgc/src/interface/` and `tools/sgc/src/commands/`.
+- 10.3 `git diff --check` passed; the only output was Git's CRLF conversion warning for edited markdown/spec files.
+- 10.4 Final interface file sizes: `interface/mod.rs` 24, `interface/signature.rs` 456, `interface/function_fingerprints.rs` 274, `interface/function_signatures.rs` 80, `interface/generic_items.rs` 440, `interface/generic_instances.rs` 959.
+- 10.4 Final commands file sizes: `commands/mod.rs` 9, `commands/build.rs` 582, `commands/run.rs` 579, `commands/shared.rs` 70, `commands/workset_optimizations.rs` 126.
+- 10.5 Size targets passed: both roots are below 500 LoC, every resulting file is smaller than its original root (`interface.rs` 2274, `commands.rs` 1390), and the largest resulting non-test file is `interface/generic_instances.rs` at 959 LoC, below the roadmap ~1000 LoC target.
+- 10.6 Roadmap updated in `docs/plans/2026-05-18-next-priorities.md` with completed `large-file-splits-sgc-interface-commands` status and next candidates `tools/sglsp/src/main.rs` plus `tools/sgfmt/src/main.rs`.
+- 10.7 Final task notes now record file sizes, visibility promotions, formatting evidence, and verification evidence.
+- 10.8 Final targeted smokes: `cargo test -p sgc interface_fingerprint` 2 passed; `cargo test -p sgc generic_fingerprint` 7 passed; `cargo test -p sgc workset` 11 passed; `cargo test -p sgc build` 27 passed; `cargo test -p sgc run` 76 passed.
+- 10.8 Final full baseline: `cargo test -p sengoo-compiler --lib` 559 passed; `cargo test -p sgc` 217 passed; `cargo test -p sengoo-runtime --lib` 42 passed; `cargo test -p sgpm` 18 unit + 8 integration passed.
+- 11.2 OpenSpec validation: `cmd /c openspec validate large-file-splits-sgc-interface-commands --strict` reported `Change 'large-file-splits-sgc-interface-commands' is valid`.
+- 11.3 OpenSpec list evidence before archive: `cmd /c openspec list` showed active change `large-file-splits-sgc-interface-commands` at `68/69 tasks`; the only unchecked task is the archive move itself.
+- 11.4 The tooling command module split requirement was promoted into `openspec/specs/large-file-splits/spec.md`.
+- 11.6 Roadmap notes were updated so the next split can reuse the tooling/CLI split SOP and next-candidate ordering.

@@ -1,4 +1,4 @@
-# Sengoo Next Priorities (updated 2026-05-23)
+# Sengoo Next Priorities (updated 2026-05-27)
 
 ## Current State
 
@@ -9,7 +9,7 @@ landed 9 slices A–I across commits `7c39031c` → `1f7dedf3` and was archived 
 capability spec at `openspec/specs/interned-types/spec.md` is the first entry
 in the previously empty `openspec/specs/` directory.
 
-The P0 `Large File Splits` track has now shipped three starter slices.
+The P0 `Large File Splits` track has now shipped four starter slices.
 `large-file-splits-runtime-db` is archived at
 `openspec/changes/archive/2026-05-19-large-file-splits-runtime-db/`; it
 split `runtime/src/reflect/runtime_db.rs` (978 LoC) into a 6-file directory
@@ -23,8 +23,15 @@ split `compiler/src/codegen/jit.rs` (1363 LoC) into a directory module where
 `openspec/changes/archive/2026-05-26-large-file-splits-mir-lowering/`; it
 split `compiler/src/mir/lowering.rs` (1501 LoC) into the existing helper
 directory, leaving `mod.rs` at 162 LoC and the largest resulting file,
-`builtin_helpers.rs`, at 580 LoC. The next recommended Large File Splits target
-is `tools/sgc/src/interface.rs` plus `tools/sgc/src/commands.rs`.
+`builtin_helpers.rs`, at 580 LoC. `large-file-splits-sgc-interface-commands`
+completed on 2026-05-27 and is archived at
+`openspec/changes/archive/2026-05-27-large-file-splits-sgc-interface-commands/`;
+it split `tools/sgc/src/interface.rs` (2274 LoC) into a directory module where
+`mod.rs` is 24 LoC and the largest resulting file, `generic_instances.rs`, is
+959 LoC, and split `tools/sgc/src/commands.rs` (1390 LoC) into a directory
+module where `mod.rs` is 9 LoC and the largest resulting file, `build.rs`, is
+582 LoC. The next recommended Large File Splits target is
+`tools/sglsp/src/main.rs` plus `tools/sgfmt/src/main.rs`.
 
 The `ty-interning-baseline` deliverables:
 
@@ -78,6 +85,7 @@ The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 | large-file-splits-jit-codegen | JIT impl-block split; mod.rs 127 LoC, largest file instructions.rs 857 LoC |
 | large-file-splits-mir-lowering | MIR lowering root split; mod.rs 162 LoC, largest file builtin_helpers.rs 580 LoC |
 | mir-async-functions-shared-state | Rc<RefCell> for async_functions plus ConcreteTypeRegistry |
+| large-file-splits-sgc-interface-commands | sgc interface and command directory modules; interface mod.rs 24 LoC, commands mod.rs 9 LoC, largest file generic_instances.rs 959 LoC |
 | mir-bitcast-instruction | MIR Bitcast for float async frame support |
 | reflection-runtime-sengoo-wrappers | Sengoo-side wrappers for db/ffi/lua54/proto/net |
 | sgpm-mvp-implementation | sgpm package manager MVP with path deps |
@@ -99,7 +107,7 @@ Full non-test LoC leaderboard (measured 2026-05-20):
 | LoC  | File                                          |
 |-----:|-----------------------------------------------|
 | 2729 | `runtime/src/net.rs`                          |
-| 2274 | `tools/sgc/src/interface.rs`                  |
+| 2274 | `tools/sgc/src/interface/` (split from interface.rs, COMPLETE 2026-05-27; mod.rs 24 LoC, largest file 959 LoC) |
 | 2110 | `tools/sglsp/src/main.rs`                     |
 | 1519 | `runtime/src/reflect/runtime_ffi.rs`          |
 | 1501 | `compiler/src/mir/lowering/` (split from lowering.rs, COMPLETE 2026-05-23; mod.rs 162 LoC, largest file 580 LoC) |
@@ -108,7 +116,7 @@ Full non-test LoC leaderboard (measured 2026-05-20):
 | 1349 | `runtime/src/async_runtime.rs`                |
 | 1348 | `tools/sgfmt/src/main.rs`                     |
 | 1332 | `compiler/src/parser/decl.rs`                 |
-| 1390 | `tools/sgc/src/commands.rs`                   |
+| 1390 | `tools/sgc/src/commands/` (split from commands.rs, COMPLETE 2026-05-27; mod.rs 9 LoC, largest file 582 LoC) |
 |  978 | `runtime/src/reflect/runtime_db/` (← starter, COMPLETE 2026-05-20: largest file now 431 LoC) |
 
 Completed Large File Splits slices:
@@ -126,15 +134,21 @@ Completed Large File Splits slices:
   `builtin_helpers.rs` is 580 LoC. This extended the SOP to roots that already
   own child helper directories while keeping `LoweringContext` fields private
   in `mod.rs`.
+- `large-file-splits-sgc-interface-commands` (archived 2026-05-27): split
+  `tools/sgc/src/interface.rs` and `tools/sgc/src/commands.rs` into directory
+  modules; `interface/mod.rs` is 24 LoC, `commands/mod.rs` is 9 LoC, and the
+  largest resulting files are `interface/generic_instances.rs` at 959 LoC and
+  `commands/build.rs` at 582 LoC. This extended the SOP to tooling command
+  modules with stable CLI behavior and test-only re-export paths.
 
 Recommended next order, smallest-clear-seam first to keep growing SOP coverage:
 
-1. `tools/sgc/src/interface.rs` + `tools/sgc/src/commands.rs` (split by
-   subcommand or interface concern).
-2. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
+1. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
    (1348 LoC) - both currently monolithic `main.rs` files.
-3. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
+2. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
    because of extern C ABI surface.
+3. `runtime/src/reflect/runtime_ffi.rs` (1519 LoC) - next reflect runtime
+   boundary after the earlier `runtime_db` split.
 
 Goal: no single non-test source file over 25 KB (~1000 LoC) unless there is
 a documented reason to keep it whole.
