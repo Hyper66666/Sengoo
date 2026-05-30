@@ -37,8 +37,10 @@ text patches, and folding ranges have also moved into `text_editing.rs`,
 leaving the production protocol root at 489 LoC and `text_editing.rs` at 187
 LoC.
 `tools/sgfmt/src/main.rs` has also completed its follow-up split: CLI config
-and expression formatting now live in sibling modules, leaving the root at
-781 LoC. `runtime/src/net.rs` has now been split by protocol family, leaving
+and expression formatting now live in sibling modules. A 2026-05-31 pass moved
+the reusable formatter API into `tools/sgfmt/src/lib.rs`, leaving the CLI root
+at 65 LoC and allowing `sglsp` document formatting to share `sgfmt` behavior
+for parseable buffers. `runtime/src/net.rs` has now been split by protocol family, leaving
 the root at 992 LoC and the largest sibling at 733 LoC.
 `runtime/src/reflect/runtime_ffi.rs` has now been split by handle family and
 compatibility bridge, leaving the root at 750 LoC and the largest sibling,
@@ -163,7 +165,7 @@ Selected non-test LoC leaderboard (remeasured 2026-05-30):
 |  672 | `tools/sgc/src/main.rs` (follow-up split complete 2026-05-30; root 672 LoC, error_reporting.rs 182 LoC, doc_rendering.rs 125 LoC) |
 | 1363 | `compiler/src/codegen/jit/` (split from jit.rs, COMPLETE 2026-05-23; follow-up aggregate and complex memory emission splits 2026-05-30; largest file instructions.rs 498 LoC, memory_instructions.rs 260 LoC) |
 |  363 | `runtime/src/async_runtime/` (split from async_runtime.rs, COMPLETE 2026-05-30; production root 363 LoC with embedded native-bridge tests, largest sibling bridge.rs 223 LoC) |
-|  781 | `tools/sgfmt/src/main.rs` (follow-up split complete: config 93, expressions 397) |
+|  740 | `tools/sgfmt/src/lib.rs` (follow-up split complete: CLI root 65 LoC, config 81, expressions 397; shared formatter API feeds sgfmt and sglsp) |
 |  476 | `compiler/src/parser/decl/` (split from decl.rs, COMPLETE 2026-05-30; root 476 LoC, object_declarations.rs 398 LoC, ffi.rs 269 LoC, data_declarations.rs 178 LoC) |
 |  819 | `runtime/src/reflect/` (split from reflect.rs, COMPLETE 2026-05-30; root 819 LoC, native.rs 223 LoC) |
 |  667 | `compiler/src/hir/lower/` (split from lower.rs, COMPLETE 2026-05-30; root 667 LoC, largest file expressions.rs 406 LoC) |
@@ -202,9 +204,11 @@ Completed Large File Splits slices:
   `text_editing.rs`, leaving the production protocol orchestration root at 489
   LoC and the text-editing sibling at 187 LoC. Embedded tests remain in
   `main.rs`.
-- `tools/sgfmt/src/main.rs` follow-up split (completed 2026-05-30): extracted
-  CLI config and expression formatting into sibling modules, leaving the
-  formatting root at 781 LoC.
+- `tools/sgfmt/src/main.rs` follow-up split (completed 2026-05-30, updated
+  2026-05-31): extracted CLI config and expression formatting into sibling
+  modules, then moved the reusable formatter implementation into
+  `tools/sgfmt/src/lib.rs`. The CLI root is now 65 LoC; the shared formatter
+  library is 740 LoC, `config.rs` is 81 LoC, and `expressions.rs` is 397 LoC.
 - `runtime/src/net.rs` follow-up split (completed 2026-05-30): extracted TCP,
   UDP, HTTP client, HTTP server, and WebSocket protocol modules, preserving
   the extern C ABI while leaving the shared runtime root at 992 LoC and the
@@ -408,6 +412,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` signature help now also searches workspace documents and imported
   stdlib modules, while signature labels render AST types directly instead of
   relying on token spans that can include trailing punctuation (2026-05-31).
+- `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
+  for parseable buffers, while retaining trailing-whitespace cleanup as the
+  fallback for incomplete in-editor source (2026-05-31).
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).

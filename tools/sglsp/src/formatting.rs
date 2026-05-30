@@ -1,3 +1,4 @@
+use sgfmt::{format_source, FormatOptions};
 use tower_lsp::lsp_types::{Position, Range};
 
 pub(crate) fn full_document_range(content: &str) -> Range {
@@ -22,6 +23,11 @@ pub(crate) fn full_document_range(content: &str) -> Range {
 }
 
 pub(crate) fn normalized_format(content: &str) -> String {
+    format_source(content, &FormatOptions::default())
+        .unwrap_or_else(|_| trim_trailing_whitespace(content))
+}
+
+fn trim_trailing_whitespace(content: &str) -> String {
     let mut out = String::new();
     for (idx, line) in content.lines().enumerate() {
         if idx > 0 {
