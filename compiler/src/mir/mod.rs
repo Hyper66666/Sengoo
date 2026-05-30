@@ -16,6 +16,7 @@ pub mod async_lowering;
 pub(crate) mod async_origin_helpers;
 mod bb;
 pub(crate) mod concrete_type_helpers;
+#[cfg(test)]
 pub(crate) mod direct_call_helpers;
 pub(crate) mod function_sig_helpers;
 mod generic_methods;

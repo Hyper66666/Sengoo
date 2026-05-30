@@ -12,6 +12,7 @@ mod diagnostics;
 mod formatting;
 mod semantic;
 mod signatures;
+mod stdlib;
 mod symbols;
 mod text_editing;
 mod workspace;
@@ -21,6 +22,7 @@ use formatting::{full_document_range, normalized_format};
 use semantic::SemanticKind;
 use semantic::{semantic_legend, semantic_tokens_for};
 use signatures::{active_call_site, collect_function_signatures, FunctionSignatureInfo};
+use stdlib::{stdlib_symbol_detail_for_content, stdlib_symbols_for_content};
 #[cfg(test)]
 use symbols::find_symbol_occurrences;
 use symbols::{
@@ -29,6 +31,7 @@ use symbols::{
 };
 use text_editing::{apply_content_changes, folding_ranges_for, position_to_byte_index};
 use workspace::{
+    completion_symbols_for_documents, find_symbol_detail_in_documents,
     goto_definition_in_documents, references_in_documents, rename_in_documents,
     workspace_documents_for_roots_and_open_documents, workspace_roots_from_initialize,
     workspace_symbols_for_documents,
@@ -191,7 +194,8 @@ impl LanguageServer for SengooLanguageServer {
     async fn completion(&self, params: CompletionParams) -> LspResult<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let content = self.document_text(&uri).await.unwrap_or_default();
-        let ast_symbols = collect_ast_symbols(&content);
+        let documents = self.workspace_documents().await;
+        let ast_symbols = completion_symbols_for_documents(&uri, &documents);
 
         let mut items = vec![
             CompletionItem::new_simple("fn".to_string(), "Define a function".to_string()),
@@ -202,7 +206,10 @@ impl LanguageServer for SengooLanguageServer {
         ];
 
         let mut seen = std::collections::HashSet::new();
-        for symbol in ast_symbols {
+        for symbol in ast_symbols
+            .into_iter()
+            .chain(stdlib_symbols_for_content(&content))
+        {
             if seen.insert(symbol.name.clone()) {
                 items.push(CompletionItem {
                     label: symbol.name,
@@ -256,20 +263,22 @@ impl LanguageServer for SengooLanguageServer {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let Some(content) = self.document_text(&uri).await else {
+        let documents = self.workspace_documents().await;
+        let Some(content) = documents.get(&uri).cloned() else {
             return Ok(None);
         };
         let Some(symbol) = extract_identifier_at(&content, position) else {
             return Ok(None);
         };
-        let ast_symbols = collect_ast_symbols(&content);
-        if let Some(item) = ast_symbols.iter().find(|item| item.name == symbol.name) {
+        if let Some(item) = find_symbol_detail_in_documents(&uri, &symbol.name, &documents)
+            .or_else(|| stdlib_symbol_detail_for_content(&content, &symbol.name))
+        {
             return Ok(Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
                     value: format!("`{}` ({})", item.name, item.detail),
                 }),
-                range: Some(item.range),
+                range: Some(symbol.range),
             }));
         }
 
@@ -580,6 +589,50 @@ def main() -> i64 { 0 }
         assert_eq!(symbols[0].name, "Point");
         assert_eq!(symbols[0].location.uri, points_uri);
         assert_eq!(symbols[0].kind, SymbolKind::STRUCT);
+    }
+
+    #[test]
+    fn completion_symbols_include_workspace_documents_current_first() {
+        let current_uri = Url::parse("file:///workspace/main.sg").unwrap();
+        let shared_uri = Url::parse("file:///workspace/shared.sg").unwrap();
+        let mut documents = HashMap::new();
+        documents.insert(
+            current_uri.clone(),
+            "struct LocalThing { value: i64 }\n".to_string(),
+        );
+        documents.insert(
+            shared_uri,
+            "struct SharedThing { value: i64 }\ndef helper() -> i64 { 1 }\n".to_string(),
+        );
+
+        let symbols = completion_symbols_for_documents(&current_uri, &documents);
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["LocalThing", "SharedThing", "helper"]);
+    }
+
+    #[test]
+    fn hover_detail_searches_workspace_documents() {
+        let current_uri = Url::parse("file:///workspace/main.sg").unwrap();
+        let shared_uri = Url::parse("file:///workspace/shared.sg").unwrap();
+        let mut documents = HashMap::new();
+        documents.insert(
+            current_uri.clone(),
+            "def main() -> i64 {\n    SharedThing\n}\n".to_string(),
+        );
+        documents.insert(
+            shared_uri,
+            "struct SharedThing { value: i64 }\n".to_string(),
+        );
+
+        let symbol = find_symbol_detail_in_documents(&current_uri, "SharedThing", &documents)
+            .expect("workspace symbol should be found");
+
+        assert_eq!(symbol.name, "SharedThing");
+        assert_eq!(symbol.detail, "struct");
     }
 
     #[test]

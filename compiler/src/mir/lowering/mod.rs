@@ -16,7 +16,6 @@ use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
-use crate::mir::direct_call_helpers::collect_direct_call_names;
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
@@ -86,7 +85,7 @@ use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, l
 use self::call_emission_helpers::emit_call_from_plan;
 use self::call_expr_helpers::lower_call_expr;
 use self::call_invocation_helpers::build_call_invocation_plan;
-use self::call_target_helpers::CallTargetResolution;
+use self::call_target_helpers::{CallTargetPlan, CallTargetResolution};
 use self::for_expr_helpers::lower_for_expr;
 use self::function_lowering::lower_function;
 use self::if_expr_helpers::lower_if_expr;

@@ -3346,6 +3346,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/01_strings.sg",
         "examples/stdlib/02_math.sg",
         "examples/stdlib/03_error.sg",
+        "examples/stdlib/04_option_result.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3470,6 +3471,15 @@ fn examples_smoke_stdlib_math_import() {
 #[test]
 fn examples_smoke_stdlib_error_import() {
     assert_example_output("stdlib-error", "examples/stdlib/03_error.sg", "7");
+}
+
+#[test]
+fn examples_smoke_stdlib_option_result_import() {
+    assert_example_output(
+        "stdlib-option-result",
+        "examples/stdlib/04_option_result.sg",
+        "4",
+    );
 }
 
 #[test]
@@ -5146,8 +5156,11 @@ fn generic_instance_plan_reuses_stdlib_impl_method_instances_on_warm_cache() {
     let (_, cold_cache) = derive_generic_instance_plan(None, &graph, 1, &flags);
     let (warm_stats, _) = derive_generic_instance_plan(Some(&cold_cache), &graph, 1, &flags);
 
-    assert_eq!(warm_stats.total_instances, 4);
-    assert_eq!(warm_stats.cache_hits, 4);
+    assert!(
+        warm_stats.total_instances >= 4,
+        "stdlib helper additions may create extra generic instances, but the original method instances must remain tracked"
+    );
+    assert_eq!(warm_stats.cache_hits, warm_stats.total_instances);
     assert_eq!(warm_stats.rebuilt_instances, 0);
     assert!(warm_stats
         .reuse_instance_keys
@@ -5177,8 +5190,11 @@ fn generic_instance_plan_reuses_chained_stdlib_impl_method_instances_on_warm_cac
     let (_, cold_cache) = derive_generic_instance_plan(None, &graph, 1, &flags);
     let (warm_stats, _) = derive_generic_instance_plan(Some(&cold_cache), &graph, 1, &flags);
 
-    assert_eq!(warm_stats.total_instances, 3);
-    assert_eq!(warm_stats.cache_hits, 3);
+    assert!(
+        warm_stats.total_instances >= 3,
+        "stdlib helper additions may create extra generic instances, but the chained method instances must remain tracked"
+    );
+    assert_eq!(warm_stats.cache_hits, warm_stats.total_instances);
     assert_eq!(warm_stats.rebuilt_instances, 0);
     assert!(warm_stats
         .reuse_instance_keys

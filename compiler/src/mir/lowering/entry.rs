@@ -11,11 +11,16 @@ pub fn lower_hir_with_options(
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut lambda_counter = 0;
-    let direct_calls = if options.lazy_generic_mono {
-        collect_direct_call_names(items)
-    } else {
-        HashSet::new()
-    };
+    let generic_function_templates = items
+        .iter()
+        .filter_map(|item| match item {
+            HIRItem::Function(fn_item) if !fn_item.type_params.is_empty() => {
+                Some((fn_item.name.clone(), fn_item.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let options = options.with_generic_function_templates(generic_function_templates);
 
     let mut trait_defs: HashMap<String, &HIRTrait> = HashMap::new();
     let mut struct_defs: HashMap<String, &hir::HIRStruct> = HashMap::new();
@@ -123,10 +128,7 @@ pub fn lower_hir_with_options(
     for item in items {
         match item {
             HIRItem::Function(fn_item) => {
-                if options.lazy_generic_mono
-                    && !fn_item.type_params.is_empty()
-                    && !direct_calls.contains(&fn_item.name)
-                {
+                if !fn_item.type_params.is_empty() {
                     continue;
                 }
                 match lower_function(

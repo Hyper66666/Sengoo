@@ -72,6 +72,10 @@ impl<'a> LoweringContext<'a> {
             return CallTargetResolution::Builtin(builtin_local);
         }
 
+        if let Some(plan) = self.try_materialize_generic_function(name, arg_locals) {
+            return CallTargetResolution::Planned(plan);
+        }
+
         CallTargetResolution::Planned(self.fallback_named_call_target(name))
     }
 }
