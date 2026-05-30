@@ -408,6 +408,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` signature help now also searches workspace documents and imported
   stdlib modules, while signature labels render AST types directly instead of
   relying on token spans that can include trailing punctuation (2026-05-31).
+- `sgpm doc` now exposes package-level API documentation generation through
+  `sgc doc`, including workspace/package selection, lockfile checking, and
+  `[lib]`-first entry selection for reusable packages (2026-05-31).
 - `sgpm test` now forwards profile optimization flags explicitly:
   debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
   (2026-05-29).

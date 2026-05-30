@@ -12,7 +12,8 @@ package into a configured local file registry, and `sgpm publish` can upload to
 `--package`, run supported package graph commands across all members with
 `--workspace`, inherit workspace-level registries, and write one root
 workspace lockfile for all members. Local publish dry-runs can also create
-package artifacts for inspection.
+package artifacts for inspection. `sgpm doc` generates package API docs through
+`sgc doc`, preferring `[lib]` entries when present.
 
 ## Create a Package
 
@@ -284,6 +285,9 @@ sgpm fmt
 # Check formatting without writing.
 sgpm fmt --check
 
+# Generate API docs under target/doc.
+sgpm doc
+
 # Remove the selected package target/ directory.
 sgpm clean
 
@@ -300,14 +304,20 @@ All package graph commands accept:
 - `--package NAME`: workspace member package to operate on when
   `--manifest-path` points at a workspace root.
 - `--workspace`: operate on every workspace member for `build`, `check`, `test`,
-  `fmt`, `tree`, `metadata`, `clean`, and `update`. It cannot be combined with
+  `fmt`, `doc`, `tree`, `metadata`, `clean`, and `update`. It cannot be combined with
   `--package`.
 - `-v` / `--verbose`: print delegated `sgc` / `sgfmt` commands.
 - `--release`: for `build`, `run`, `check`, and `test` command groups where
   applicable.
-- `--locked`: for `build`, `check`, `run`, `test`, `fmt`, `tree`, and
+- `--locked`: for `build`, `check`, `run`, `test`, `fmt`, `doc`, `tree`, and
   `publish`; fail before invoking delegated `sgc` / `sgfmt` tools or packaging if
   `Sengoo.lock` is missing or stale.
+
+`sgpm doc` runs `sgc doc` for each package in the selected graph. The default
+output is `target/doc` for a single selected package, or package-named
+subdirectories when dependencies are documented alongside the root package.
+Pass `--output DIR` to choose a different output directory for a single
+package selection.
 
 `sgpm test` uses the debug profile by default (`sgc run -O 0`) and the release
 profile with `--release` (`sgc run -O 2`). Source discovery errors fail

@@ -325,7 +325,7 @@ Smoke 覆盖：`cargo test -p sgc examples_smoke_`。
 `sgpm` 是当前 Sengoo 包管理器 MVP，用于项目级工作流。它支持
 `Sengoo.toml`、本地 path 依赖、通过根包缓存解析的 git 依赖、带 semver
 约束的本地文件 registry 依赖、`new`/`init` 项目脚手架、按拓扑顺序执行 `build`/`check`，以及 `run`、
-区分 debug/release profile 的 `test`、`fmt`、`tree`、`update` lockfile
+区分 debug/release profile 的 `test`、`fmt`、`doc`、`tree`、`update` lockfile
 生成、`update --check` lockfile 新鲜度检查、`update --refresh` git cache
 刷新、`cache list`、`cache clean --git`、`--locked` 命令执行、`clean`、
 publish dry-run、本地 registry 发布、向已配置 registry URL 上传远程 package，
@@ -351,8 +351,10 @@ commit 以及本地或远程 registry 选中的版本；`sgpm update --workspace
 `sgpm publish --registry <name>` 可将 package
 发布到已配置的本地文件 registry。`sgpm publish` 会上传到
 `[registries.default].url`；当命名 registry 配置了 `url` 时，
-`sgpm publish --registry <name>` 也会走远程上传。workspace 根可以声明
-`[workspace].members`、继承 workspace 级 registry，并通过 `--package <name>` 运行 package
+`sgpm publish --registry <name>` 也会走远程上传。`sgpm doc` 会通过
+`sgc doc` 生成 package API 文档；package 声明 `[lib]` 时会优先为库入口
+生成文档。workspace 根可以声明 `[workspace].members`、继承 workspace 级
+registry，并通过 `--package <name>` 运行 package
 graph 命令，或用 `--workspace` 对支持的 package graph 命令执行全成员运行。
 `sgpm update --refresh` 会重新克隆已缓存的 git 依赖并写入新的 lockfile；
 `sgpm cache list`、`sgpm cache clean --git` 和

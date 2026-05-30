@@ -326,7 +326,7 @@ Smoke coverage: `cargo test -p sgc examples_smoke_`.
 supports `Sengoo.toml`, local path dependencies, git dependencies resolved
 through a root-package cache, local file registry dependencies with semver
 constraints, `new`/`init` project scaffolding, topological `build`/`check`, `run`, profile-aware `test`, `fmt`,
-`tree`, `update` lockfile generation, `update --check` lockfile freshness
+`doc`, `tree`, `update` lockfile generation, `update --check` lockfile freshness
 checks, `update --refresh` git cache refreshes, `cache list`,
 `cache clean --git`, `--locked` command execution, `clean`, publish dry-runs,
 local registry publishing, remote package upload to configured registry URLs,
@@ -353,6 +353,8 @@ package archives and checksums, and
 `sgpm publish --registry <name>` can publish a package into a configured local
 file registry. `sgpm publish` uploads to `[registries.default].url` and
 `sgpm publish --registry <name>` uploads when the named registry has `url`.
+`sgpm doc` generates package API docs through `sgc doc`, preferring `[lib]`
+entries when a package exposes one.
 Workspace roots can declare `[workspace].members`, inherit workspace-level
 registries, and run package graph commands with
 `--package <name>` or supported all-member package graph commands with
