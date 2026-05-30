@@ -420,6 +420,10 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` signature help now also searches workspace documents and imported
   stdlib modules, while signature labels render AST types directly instead of
   relying on token spans that can include trailing punctuation (2026-05-31).
+- `sglsp` stdlib completion/signature dependencies now mirror `sgc` stdlib
+  preloading for reflection modules: importing `std::ffi`, `std::db`,
+  `std::lua54`, `std::net`, or `std::proto` also exposes the `Option`/`Result`
+  family needed by those wrappers (2026-05-31).
 - `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
   for parseable buffers, while retaining trailing-whitespace cleanup as the
   fallback for incomplete in-editor source (2026-05-31).

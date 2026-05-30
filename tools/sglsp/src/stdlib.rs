@@ -27,6 +27,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "collections" => &["option"],
         "option" => &["result"],
         "result" => &["option"],
+        "ffi" => &["option", "result"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -159,6 +160,28 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"def option_some<T>(value: T) -> Option<T>"));
+        assert!(labels
+            .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_ffi_result_family_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::net;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"TcpStream"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+        assert!(names.contains(&"result_ok_with"));
+
+        let signatures = stdlib_signatures_for_content("import std::ffi;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
         assert!(labels
             .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
     }
