@@ -412,6 +412,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   `Result<bool, i64>`. Bool `Vec`/`HashMap` helpers reuse these constructors
   instead of hand-writing tagged `Option<bool>` literals, with compiler
   surface and `sgc` runtime smoke coverage (2026-05-31).
+- `Option<bool>` and `Result<bool, i64>` now provide `unwrap` and `expect`
+  specializations alongside the existing `unwrap_or`, matching the i64
+  convenience surface for common success-path use (2026-05-31).
 - `sglsp` completion and hover now use the same workspace document set as
   definition, references, rename, and workspace-symbol queries. Imported
   `std::*` modules are also indexed from embedded stdlib sources so standard

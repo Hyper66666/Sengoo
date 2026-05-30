@@ -112,3 +112,22 @@ impl Result<i64, i64> {
         }
     }
 }
+
+impl Result<bool, i64> {
+    def expect(self, msg: &str) -> bool {
+        if self.is_ok {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_result_unwrap_i64() != 0
+        }
+    }
+
+    def unwrap(self) -> bool {
+        if self.is_ok {
+            self.value
+        } else {
+            sengoo_panic_result_unwrap_i64() != 0
+        }
+    }
+}

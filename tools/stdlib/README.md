@@ -4,10 +4,11 @@ The MVP standard library is split into small source modules so compiler tests,
 runtime wrappers, and examples can depend on only the surfaces they need.
 
 - `option.sg`: generic `Option<T>`, generic constructors (`option_some`,
-  `option_none_with`), i64/bool convenience constructors, and unwrap/map helpers.
+  `option_none_with`), i64/bool convenience constructors, bool/i64 unwrap and
+  expect helpers, and i64 map helpers.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
-  map/projection helpers.
+  bool/i64 unwrap, map, and projection helpers.
 - `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, and i64/bool collection mutators.
 - `string.sg`: Sengoo-side wrappers over built-in string lowering: `str_len`, `str_eq`, `str_ne`, empty checks, append, and repeat.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
