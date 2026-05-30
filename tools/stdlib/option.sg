@@ -23,6 +23,14 @@ def option_none_i64() -> Option<i64> {
     option_none_with(0)
 }
 
+def option_some_bool(value: bool) -> Option<bool> {
+    option_some(value)
+}
+
+def option_none_bool() -> Option<bool> {
+    option_none_with(false)
+}
+
 impl<T> Option<T> {
     def is_some(self) -> bool {
         self.is_some

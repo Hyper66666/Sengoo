@@ -3478,7 +3478,7 @@ fn examples_smoke_stdlib_option_result_import() {
     assert_example_output(
         "stdlib-option-result",
         "examples/stdlib/04_option_result.sg",
-        "4",
+        "7",
     );
 }
 
@@ -6603,6 +6603,31 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(25));
+}
+
+#[test]
+fn stdlib_surface_runtime_bool_option_result_constructors_work() {
+    let output = require_stdlib_runtime_output!(
+        "bool-option-result-constructors",
+        r#"
+def main() -> i64 {
+    let some_flag = option_some_bool(true);
+    let none_flag = option_none_bool();
+    let ok_flag = result_ok_bool(true);
+    let err_flag = result_err_bool(7);
+
+    if some_flag.unwrap_or(false)
+        && none_flag.is_none()
+        && ok_flag.ok().unwrap_or(false) {
+        err_flag.err().unwrap_or(0)
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(7));
 }
 
 #[test]
