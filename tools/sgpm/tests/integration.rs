@@ -1416,6 +1416,49 @@ fn sgpm_build_checks_library_dependency_before_building_app() {
 }
 
 #[test]
+fn sgpm_doc_invokes_sgc_doc_for_library_entry() {
+    let dir = temp_dir("doc_library_entry");
+    let app = dir.join("app");
+    write_bin_and_lib_pkg(&app, "app");
+
+    let record = dir.join("record.txt");
+    let fake = fake_sgc(&dir);
+    let output = Command::new(sgpm())
+        .args([
+            "doc",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm doc");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    assert!(log.contains("/app :: doc"), "doc log:\n{log}");
+    assert!(
+        log.contains("/src/lib.sg --output"),
+        "doc should prefer the package library entry:\n{log}"
+    );
+    assert!(log.contains("/target/doc"), "doc output log:\n{log}");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+    assert!(
+        stdout.contains("documented app ->") && stdout.contains("/target/doc"),
+        "stdout:\n{stdout}"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sgpm_check_exposes_dependency_library_module_map() {
     let dir = temp_dir("check_module_map");
     let dep = dir.join("dep");

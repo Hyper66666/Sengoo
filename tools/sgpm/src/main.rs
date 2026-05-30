@@ -71,6 +71,9 @@ enum Commands {
     /// Format package graph sources with sgfmt.
     Fmt(FmtArgs),
 
+    /// Generate API documentation for the package graph.
+    Doc(DocArgs),
+
     /// Print the resolved package dependency tree.
     Tree(TreeArgs),
 
@@ -276,6 +279,33 @@ struct FmtArgs {
 }
 
 #[derive(Parser, Debug, Clone)]
+struct DocArgs {
+    /// Path to Sengoo.toml, or a package directory containing it.
+    #[arg(long, default_value = "Sengoo.toml")]
+    manifest_path: PathBuf,
+
+    /// Workspace member package to operate on when manifest-path points at a workspace root.
+    #[arg(long)]
+    package: Option<String>,
+
+    /// Operate on every member when manifest-path points at a workspace root.
+    #[arg(long)]
+    workspace: bool,
+
+    /// Documentation output directory. Defaults to target/doc for the selected package.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Print delegated sgc commands.
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Require Sengoo.lock to be current before generating docs.
+    #[arg(long)]
+    locked: bool,
+}
+
+#[derive(Parser, Debug, Clone)]
 struct PublishArgs {
     /// Path to Sengoo.toml, or a package directory containing it.
     #[arg(long, default_value = "Sengoo.toml")]
@@ -399,6 +429,22 @@ fn main() -> Result<()> {
             let toolchain = Toolchain::discover()?;
             for graph in &graphs {
                 toolchain.fmt(graph, args.check, args.verbose)?;
+            }
+            Ok(())
+        }
+        Commands::Doc(args) => {
+            if args.workspace && args.output.is_some() {
+                miette::bail!("--output cannot be combined with --workspace");
+            }
+            let graphs = load_graphs(
+                &args.manifest_path,
+                args.locked,
+                args.package.as_deref(),
+                args.workspace,
+            )?;
+            let toolchain = Toolchain::discover()?;
+            for graph in &graphs {
+                toolchain.doc(graph, args.output.as_deref(), args.verbose)?;
             }
             Ok(())
         }

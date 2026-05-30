@@ -215,6 +215,42 @@ impl Toolchain {
         );
         Ok(())
     }
+
+    pub fn doc(&self, graph: &Graph, output: Option<&Path>, verbose: bool) -> Result<()> {
+        let root = graph
+            .root_package()
+            .ok_or_else(|| miette::miette!("dependency graph has no root package"))?;
+        let base_output = output
+            .map(PathBuf::from)
+            .unwrap_or_else(|| root.root_dir.join("target/doc"));
+        let use_package_subdirs = graph.nodes.len() > 1;
+
+        for node in &graph.nodes {
+            let input = package_doc_entry_path(node);
+            let output_dir = if use_package_subdirs {
+                base_output.join(&node.name)
+            } else {
+                base_output.clone()
+            };
+            let mut command = Command::new(&self.sgc);
+            command
+                .current_dir(&node.root_dir)
+                .arg("doc")
+                .arg(&input)
+                .arg("--output")
+                .arg(&output_dir);
+            configure_module_map(&mut command, graph, node, false)?;
+
+            if verbose {
+                eprintln!("sgpm: {}", render_command(&command));
+            }
+
+            run_command(command, &format!("doc failed for package '{}'", node.name))?;
+            println!("documented {} -> {}", node.name, output_dir.display());
+        }
+
+        Ok(())
+    }
 }
 
 pub fn print_tree(graph: &Graph) {
@@ -253,6 +289,13 @@ fn package_output_path(node: &PackageNode, profile: BuildProfile) -> Result<Path
         output.set_extension(std::env::consts::EXE_EXTENSION);
     }
     Ok(output)
+}
+
+fn package_doc_entry_path(node: &PackageNode) -> PathBuf {
+    if let Some(lib) = &node.manifest.lib {
+        return node.root_dir.join(&lib.path);
+    }
+    node.entry_path.clone()
 }
 
 fn ensure_parent(path: &Path) -> Result<()> {
