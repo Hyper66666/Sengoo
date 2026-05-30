@@ -1,0 +1,24 @@
+// examples/stdlib/01_strings.sg
+//
+// Demonstrates: importing std::string helper functions.
+//
+// Run: sgc run examples/stdlib/01_strings.sg
+// Expected output: 8
+
+import std::string;
+
+def main() -> i64 {
+    let word = str_append("sen", "goo");
+    let repeated = str_repeat("ha", 2);
+    let score = if str_eq(word, "sengoo")
+        && str_ne(word, repeated)
+        && str_is_empty("")
+        && str_is_not_empty(repeated) {
+        str_len(word) + str_len(repeated) - 2
+    } else {
+        0
+    };
+
+    print(score);
+    0
+}

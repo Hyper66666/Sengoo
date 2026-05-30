@@ -1,0 +1,22 @@
+import std::net;
+
+// Registers the HTTP server baseline without waiting for an external client.
+def main() -> i64 {
+    let opened = http_server_bind("127.0.0.1", 0);
+    if opened.is_err() {
+        1
+    } else {
+        let server = opened.unwrap_or(HttpServer { handle: 0 });
+        let port = server.local_port().unwrap_or(0);
+        let routed = server.add_route("GET", "/hello/:name", 200, "hello {name}").unwrap_or(false);
+        let guarded = server.require_header("x-token", "secret", 401, "denied").unwrap_or(false);
+        let websocket = server.add_ws_echo_route("/ws").unwrap_or(false);
+        let served = server.serve_once(1).unwrap_or(false);
+        server.close();
+        if port > 0 && routed && guarded && websocket && !served {
+            0
+        } else {
+            1
+        }
+    }
+}

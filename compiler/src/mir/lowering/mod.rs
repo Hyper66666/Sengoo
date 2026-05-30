@@ -90,7 +90,7 @@ use self::call_target_helpers::CallTargetResolution;
 use self::for_expr_helpers::lower_for_expr;
 use self::function_lowering::lower_function;
 use self::if_expr_helpers::lower_if_expr;
-use self::lambda_expr_helpers::lower_lambda_expr;
+use self::lambda_expr_helpers::{lower_lambda_expr, lower_lambda_expr_with_expected};
 use self::let_stmt_helpers::lower_let_stmt;
 use self::loop_control_helpers::{lower_break_expr, lower_continue_expr};
 use self::loop_expr_helpers::lower_loop_expr;

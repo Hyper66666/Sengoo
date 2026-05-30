@@ -1,9 +1,22 @@
-// Requires stdlib modules: option.sg, result.sg, db.sg.
-// Uses the raw-pointer error path so it is safe without a live database string buffer.
+import std::db;
+
+// Opens an in-memory database through the safe string wrapper.
 def main() -> i64 {
-    let opened = db_open_raw(0);
+    let opened = db_open("sqlite::memory:");
     if opened.is_err() {
-        0
+        let out = ffi_buffer_new(64);
+        if out.is_err() {
+            1
+        } else {
+            let buffer = out.unwrap_or(Buffer { handle: 0 });
+            let copied = db_last_error_copy(buffer);
+            buffer.free();
+            if copied.is_err() {
+                1
+            } else {
+                0
+            }
+        }
     } else {
         let db = opened.unwrap_or(Db { handle: 0 });
         db.close();

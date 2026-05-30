@@ -29,6 +29,9 @@ _tmp_*
 # Generated / vendored
 node_modules/
 agent-team-workspace/
+/vscode-sengoo/dist/
+/vscode-sengoo/.vsix-build/
+/vscode-sengoo/*.vsix
 
 # Local project duplicates (must NEVER be committed)
 _main_submit/

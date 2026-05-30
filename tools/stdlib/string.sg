@@ -9,3 +9,29 @@ def str_eq(lhs: &str, rhs: &str) -> bool {
 def str_concat(lhs: &str, rhs: &str) -> &str {
     lhs + rhs
 }
+
+def str_ne(lhs: &str, rhs: &str) -> bool {
+    !str_eq(lhs, rhs)
+}
+
+def str_is_empty(value: &str) -> bool {
+    str_len(value) == 0
+}
+
+def str_is_not_empty(value: &str) -> bool {
+    !str_is_empty(value)
+}
+
+def str_append(lhs: &str, rhs: &str) -> &str {
+    str_concat(lhs, rhs)
+}
+
+def str_repeat(value: &str, count: i64) -> &str {
+    let out = "";
+    let remaining = count;
+    while remaining > 0 {
+        out = str_concat(out, value);
+        remaining = remaining - 1;
+    }
+    out
+}

@@ -1,11 +1,21 @@
-// Requires stdlib modules: option.sg, result.sg, proto.sg.
-// Null buffers intentionally exercise the safe error path.
+import std::proto;
+
 def main() -> i64 {
-    let event = ProtoUserEvent { id: 7, name_ptr: 0, ts: 42 };
-    let encoded = proto_user_event_encode_raw(event, 0, 0);
-    if encoded.is_err() {
-        0
+    let event = proto_user_event(7, "alice", 42);
+    let out = ffi_buffer_new(128);
+    if out.is_err() {
+        1
     } else {
-        encoded.unwrap_or(0)
+        let buffer = out.unwrap_or(Buffer { handle: 0 });
+        let encoded = proto_user_event_encode(event, buffer);
+        let name = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+        let decoded = proto_user_event_decode(buffer, encoded.unwrap_or(0));
+        let decoded_event = decoded.unwrap_or(ProtoDecodedUserEvent { handle: 0 });
+        let name_len = decoded_event.name_copy(name).unwrap_or(0);
+        let result = decoded_event.id() + decoded_event.ts() + name_len;
+        decoded_event.close();
+        name.free();
+        buffer.free();
+        result
     }
 }

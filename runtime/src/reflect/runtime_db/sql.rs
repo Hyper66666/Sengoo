@@ -78,7 +78,10 @@ pub(super) fn resolve_param_token(token: &str, params: &Value) -> Result<Value, 
     }
 }
 
-pub(super) fn parse_where_clause(where_clause: &str, params: &Value) -> Result<(String, Value), i32> {
+pub(super) fn parse_where_clause(
+    where_clause: &str,
+    params: &Value,
+) -> Result<(String, Value), i32> {
     let Some((lhs, rhs)) = where_clause.split_once('=') else {
         return Err(set_error(
             SENGOO_DB_ERR_PARSE,

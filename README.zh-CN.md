@@ -239,7 +239,7 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<lat
 
 - Sengoo 源码侧包装位于 `tools/stdlib/`
   - `db.sg`、`ffi.sg`、`lua54.sg`、`proto.sg` 和 `net.sg`
-  - 在 typed FFI pointer/string 支持落地前，原始指针参数暂用 `i64` 表示
+  - 常见 C 字符串输入已提供 `&str` helper；显式 buffer/output 指针仍用 `i64` 表示
   - 示例程序位于 `examples/reflection/`
 - 数据库 runtime MVP（`runtime/src/reflect/runtime_db.rs`）
   - 生命周期：`open` / `close` / `ping`
@@ -248,11 +248,13 @@ python ./scripts/reflection-perf-gate.py --mode soft --sample bench/results/<lat
 - 完整的 C / C++ 包装路径（`runtime/src/reflect/runtime_ffi.rs`）
   - C 库 open / call / close
   - C++ 对象生命周期包装：create / call / destroy
+  - 无需调用方管理指针槽的定长 `i64` value 调用
   - 回调桥：bind / dispatch / unbind
   - 二进制负载桥：托管 buffer handle（`new/from/len/ptr/copy_in/copy_out/free`）
 - Lua 桥
   - 轻量运行时子集（`sengoo_lua_*`）
   - 原生 Lua 5.4 动态库桥接 PoC（`sengoo_lua54_*`）
+  - 无需调用方管理指针槽的定长 Lua54 `i64` value 调用
 - 集成验证通道
   - Protobuf wire encode/decode FFI 路径（`runtime_proto`）
   - 带 p50/p95/p99 指标的网络 bench runtime 路径（`runtime_net_bench`）
@@ -295,6 +297,9 @@ sgc run <file.sg> -O 1 --contract-checks auto
 # 构建原生二进制
 sgc build <file.sg> -O 2
 
+# 生成 rustdoc 风格 API 文档
+sgc doc <file.sg> --output target/doc
+
 # 强制全量重建
 sgc build <file.sg> -O 2 --force-rebuild
 
@@ -309,7 +314,7 @@ sgc daemon --addr 127.0.0.1:48765
 推荐入口：
 
 - [`examples/async/`](examples/async/)：`sleep`、`spawn`、`select` 和任务生命周期 API
-- [`examples/generics/`](examples/generics/)：`Vec<i64>`、`Option<T>` 和 `Result<T, E>` 模式
+- [`examples/generics/`](examples/generics/)：`Vec<i64>`、`Option<T>`、`Result<T, E>` 和 `std::collections` import 模式；stdlib smoke 测试也覆盖 runtime-backed `Vec<bool>` 和 `HashMap` mutators
 - [`examples/traits/`](examples/traits/)：trait 分发与泛型 trait 方法实例化
 - [`examples/ffi/`](examples/ffi/)：Sengoo <-> C 双向调用
 
@@ -317,9 +322,15 @@ Smoke 覆盖：`cargo test -p sgc examples_smoke_`。
 
 ## 包管理器（sgpm）
 
-`sgpm` 是当前离线优先的 Sengoo 包管理器 MVP，用于项目级工作流。它支持
-`Sengoo.toml`、本地 path 依赖、按拓扑顺序执行 `build`/`check`，以及
-`run`、`test`、`fmt`、`tree`、`clean`。
+`sgpm` 是当前 Sengoo 包管理器 MVP，用于项目级工作流。它支持
+`Sengoo.toml`、本地 path 依赖、通过根包缓存解析的 git 依赖、带 semver
+约束的本地文件 registry 依赖、`new`/`init` 项目脚手架、按拓扑顺序执行 `build`/`check`，以及 `run`、
+区分 debug/release profile 的 `test`、`fmt`、`tree`、`update` lockfile
+生成、`update --check` lockfile 新鲜度检查、`update --refresh` git cache
+刷新、`cache list`、`cache clean --git`、`--locked` 命令执行、`clean`、
+publish dry-run、本地 registry 发布、向已配置 registry URL 上传远程 package，
+以及通过 `--package` 选择 workspace 成员，并可用 `--workspace` 对支持的
+package graph 命令执行全成员运行。
 
 ```bash
 sgpm new hello
@@ -329,14 +340,56 @@ sgpm build
 sgpm run
 ```
 
-Registry 依赖、lockfile、workspace 和 publish 流程已明确延后。当前 manifest
-格式和命令说明见 `docs/sgpm-quickstart.md`。
+在已有目录中运行 `sgpm init`，可以保留无关文件并创建缺少的 Sengoo package
+脚手架。
+使用 `sgpm new math_utils --lib` 或 `sgpm init --lib`，可以创建带
+`src/lib.sg` 的可复用库 package。
+
+本地 `sgpm update` 已能写出 `Sengoo.lock`，并会为 git 依赖记录解析后的
+commit 以及本地或远程 registry 选中的版本；`sgpm update --workspace` 会为
+所有成员写出一个 workspace 根 lockfile。publish dry-run 已能生成 package archive 和 checksum，
+`sgpm publish --registry <name>` 可将 package
+发布到已配置的本地文件 registry。`sgpm publish` 会上传到
+`[registries.default].url`；当命名 registry 配置了 `url` 时，
+`sgpm publish --registry <name>` 也会走远程上传。workspace 根可以声明
+`[workspace].members`、继承 workspace 级 registry，并通过 `--package <name>` 运行 package
+graph 命令，或用 `--workspace` 对支持的 package graph 命令执行全成员运行。
+`sgpm update --refresh` 会重新克隆已缓存的 git 依赖并写入新的 lockfile；
+`sgpm cache list`、`sgpm cache clean --git` 和
+`sgpm cache clean --registry` 可查看并清理根包依赖缓存。
+`sgpm update --check` 可在 CI 中只验证 lockfile 是否过期而
+不重写文件；`--locked` 会让 package graph 命令在 lockfile 过期时先失败，
+不再调用外部工具。当前 manifest 格式和命令说明见 `docs/sgpm-quickstart.md`。
+声明 `[lib]` 的 path、git 和 registry package 现在可以在应用源码中按依赖名
+导入；构建 dependent binary 前，纯库依赖会先完成类型检查。依赖键目前必须与
+目标 package 的 `[package].name` 一致，暂不支持重命名 alias。
 
 ## 标准库
 
 源码侧标准库位于 `tools/stdlib/`，并按能力面拆分为 `option.sg`、
-`result.sg`、`collections.sg`、`string.sg`、`math.sg` 和 `error.sg`。
+`result.sg`、`collections.sg`、`string.sg`、`math.sg`、`error.sg`，以及
+`ffi.sg`、`db.sg`、`lua54.sg`、`net.sg`、`proto.sg` 等反射 wrapper。
 模块说明和当前延期项见 `tools/stdlib/README.md`。
+
+可以直接在 Sengoo 源码里导入标准库模块：
+
+```sg
+import std::collections;
+
+def main() -> i64 {
+    let values = vec_new_i64();
+    values.push(41);
+    values.get(0).unwrap_or(0) + 1
+}
+```
+
+`sgc check`、`sgc build` 和 `sgc run` 会在编译前预加载被请求的 stdlib
+源码模块及其当前需要的传递依赖。
+例如 `std::db`、`std::lua54`、`std::net`、`std::proto` 等反射 wrapper
+会同时预加载托管 FFI `Buffer` helper，供诊断和输出拷贝 wrapper 直接写入
+`Buffer`。
+整理过的标准库示例位于 `examples/stdlib/`，其中包含可直接运行的
+`std::string` 导入 smoke 路径。
 
 ## 异步执行
 
@@ -449,6 +502,7 @@ python ./bench/bootstrap_generality_bench.py
 
 ## 文档
 
+- API 文档生成器：`sgc doc <file.sg> --output target/doc`
 - 教程：`docs/sengoo-tutorial.html`
 - 语言特性：`docs/language-features.md`
 - 开发指南：`docs/DEVELOPMENT_GUIDE.md`

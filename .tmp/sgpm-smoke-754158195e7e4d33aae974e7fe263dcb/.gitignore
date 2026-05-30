@@ -1,0 +1,11 @@
+# Sengoo build output
+target/
+build/
+*.ll
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

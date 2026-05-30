@@ -18,7 +18,7 @@ miette = { workspace = true }
 walkdir = "2.5"
 which = "7.0"
 
-# Reserved for the follow-up registry/publish implementation.
+# Used by local package artifacts and registry publish uploads.
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1.40", features = ["full"] }
 flate2 = "1.0"

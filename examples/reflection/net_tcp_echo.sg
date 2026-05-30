@@ -1,9 +1,22 @@
-// Requires stdlib modules: option.sg, result.sg, net.sg.
-// Null host exercises the argument-validation path without requiring a live server.
+import std::net;
+
+// Localhost with a closed high port exercises the safe string wrapper error path.
 def main() -> i64 {
-    let stream = net_tcp_connect_raw(0, 0, 1);
+    let stream = net_tcp_connect("127.0.0.1", 65535, 1);
     if stream.is_err() {
-        0
+        let out = ffi_buffer_new(64);
+        if out.is_err() {
+            1
+        } else {
+            let buffer = out.unwrap_or(Buffer { handle: 0 });
+            let copied = net_error_name_copy(net_last_error(), buffer);
+            buffer.free();
+            if copied.is_err() {
+                1
+            } else {
+                0
+            }
+        }
     } else {
         let connected = stream.unwrap_or(TcpStream { handle: 0 });
         connected.close();

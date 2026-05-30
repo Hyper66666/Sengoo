@@ -29,6 +29,7 @@ Extern symbols:
 - `sengoo_lua54_close(handle: u64) -> i32`
 - `sengoo_lua54_exec(handle: u64, chunk: *const u8) -> i32`
 - `sengoo_lua54_call_i64(handle: u64, func_name: *const u8, argc: usize, argv: *const i64, out_value: *mut i64) -> i32`
+- `sengoo_lua54_call_i64_value(handle: u64, func_name: *const u8, argc: usize, a0: i64, a1: i64, a2: i64, a3: i64) -> i64`
 
 Ownership:
 
@@ -37,4 +38,8 @@ Ownership:
 
 Sengoo wrapper note:
 
-The MVP wrapper exposes raw pointer parameters as `i64` and keeps the dynamic-library path explicit.
+The Sengoo wrapper exposes `&str` helpers for the dynamic-library path, chunks,
+and function names. Lua54 error diagnostics can be copied into a managed
+`Buffer`. `Lua54.call_i64_0` through `call_i64_4` cover common fixed-arity
+calls without raw argument/result pointers; the raw helper remains for dynamic
+arity.

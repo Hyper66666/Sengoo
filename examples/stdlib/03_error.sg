@@ -1,0 +1,28 @@
+// examples/stdlib/03_error.sg
+//
+// Demonstrates: importing std::error assertion helper functions.
+//
+// Run: sgc run examples/stdlib/03_error.sg
+// Expected output: 7
+
+import std::error;
+
+def main() -> i64 {
+    let ok = assert_true(true)
+        && assert_false(false)
+        && assert_eq_i64(7, 7)
+        && assert_ne_i64(7, 8)
+        && assert_eq_bool(true, true)
+        && assert_ne_bool(true, false)
+        && assert_eq_str("sengoo", "sengoo")
+        && assert_ne_str("sen", "goo")
+        && assert_eq_f64(1.5, 1.5)
+        && assert_ne_f64(1.5, 2.5);
+
+    if ok {
+        print(7);
+    } else {
+        print(0);
+    }
+    0
+}

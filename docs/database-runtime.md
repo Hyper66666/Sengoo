@@ -44,6 +44,30 @@ This document describes the runtime database MVP added in branch `feat/db-ffi-a`
 - `i64 sengoo_db_result_cell_len(u64 result_handle, usize row_idx, usize col_idx)`
 - `i64 sengoo_db_result_cell_copy(u64 result_handle, usize row_idx, usize col_idx, u8* buffer, usize capacity)`
 
+## Sengoo stdlib wrapper
+
+`import std::db` preloads the database wrapper and its `std::ffi` dependency, so
+error and result-copy helpers can write into managed `Buffer` handles:
+
+```sg
+import std::db;
+
+def main() -> i64 {
+    let out = ffi_buffer_new(256);
+    if out.is_err() {
+        0
+    } else {
+        let buffer = out.unwrap_or(Buffer { handle: 0 });
+        let copied = db_last_error_copy(buffer);
+        buffer.free();
+        copied.unwrap_or(0)
+    }
+}
+```
+
+`DbResult.col_name_copy` and `DbResult.cell_copy` use the same `Buffer` pattern;
+the `_raw` variants remain available for explicit pointer/capacity handoff.
+
 ## Status codes
 
 - `0`: success
@@ -62,4 +86,3 @@ Key DB error codes:
 
 - This MVP is an in-process memory table engine to unblock runtime integration.
 - The API shape is stable enough for later external-driver replacement.
-

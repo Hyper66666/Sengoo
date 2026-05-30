@@ -5,11 +5,25 @@ pub(super) fn lower_lambda_expr(
     params: &[String],
     body: &HIRExpr,
 ) -> Local {
+    lower_lambda_expr_with_expected(ctx, params, body, None)
+}
+
+pub(super) fn lower_lambda_expr_with_expected(
+    ctx: &mut LoweringContext<'_>,
+    params: &[String],
+    body: &HIRExpr,
+    expected_ty: Option<MIRType>,
+) -> Local {
     let lambda_name = ctx.lambda_name();
     let free_vars = ctx.collect_free_vars(params, body);
 
-    let mut param_types: Vec<MIRType> = (0..params.len()).map(|_| MIR_I64).collect();
-    let ret_type = MIR_I64;
+    let (mut param_types, ret_type) = match expected_ty {
+        Some(MIRType::Fn {
+            params: expected_params,
+            ret,
+        }) if expected_params.len() == params.len() => (expected_params, *ret),
+        _ => ((0..params.len()).map(|_| MIR_I64).collect(), MIR_I64),
+    };
 
     let env_param_offset = if free_vars.is_empty() {
         0

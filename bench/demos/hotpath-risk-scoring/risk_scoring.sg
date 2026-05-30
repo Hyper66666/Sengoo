@@ -1,0 +1,69 @@
+// Practical demo: transaction risk pre-filter hot path.
+// Focus: numeric-heavy rule evaluation in large batches.
+
+def next_seed(seed: i64) -> i64 {
+    let m = 2147483647;
+    let x = seed * 1103515245 + 12345;
+    x - (x / m) * m
+}
+
+def score_transaction(amount: i64, velocity: i64, account_age_days: i64, country_risk: i64) -> i64 {
+    let score = 0;
+
+    if amount > 12000 {
+        score = score + 25;
+    }
+    if amount > 26000 {
+        score = score + 20;
+    }
+
+    if velocity > 6 {
+        score = score + velocity * 2;
+    }
+    if velocity > 12 {
+        score = score + 10;
+    }
+
+    if account_age_days < 60 {
+        score = score + 20;
+    }
+
+    if country_risk > 70 {
+        score = score + 18;
+    }
+    if country_risk > 90 {
+        score = score + 12;
+    }
+
+    score
+}
+
+def main() -> i64 {
+    let records = 3000000;
+    let seed = 20260216;
+    let i = 0;
+    let score_sum = 0;
+    let flagged = 0;
+
+    while i < records {
+        seed = next_seed(seed);
+
+        let amount = seed - (seed / 50000) * 50000;
+        let velocity = (seed / 17) - ((seed / 17) / 20) * 20;
+        let account_age_days = (seed / 29) - ((seed / 29) / 3650) * 3650;
+        let country_risk = (seed / 37) - ((seed / 37) / 100) * 100;
+
+        let score = score_transaction(amount, velocity, account_age_days, country_risk);
+        score_sum = score_sum + score;
+        if score > 75 {
+            flagged = flagged + 1;
+        }
+
+        i = i + 1;
+    }
+
+    // Print only numbers so benchmark harness can parse quickly.
+    print(score_sum);
+    print(flagged);
+    0
+}

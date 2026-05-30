@@ -1,0 +1,4 @@
+// Marker module used to trigger Sengoo auto-reflection mode via `import reflect;`.
+def marker() -> i64 {
+    1
+}

@@ -61,9 +61,10 @@ pub(crate) async fn cmd_run(
         load_generic_instance_cache(&generic_cache_path)
     };
 
-    let source = fs::read_to_string(input)
+    let root_source = fs::read_to_string(input)
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
+    let source = expand_imports_for_source(input_path, &root_source)?;
     if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
         println!("{}", hint);
     }
@@ -104,7 +105,7 @@ pub(crate) async fn cmd_run(
     }
     let graph_snapshot = collect_module_graph_snapshot(
         input_path,
-        &source,
+        &root_source,
         previous_run_metadata_seed
             .as_ref()
             .and_then(|metadata| metadata.build_graph_v2.as_ref()),
@@ -115,10 +116,7 @@ pub(crate) async fn cmd_run(
         collect_symbol_fingerprints,
     );
     let (root_interface_hash, root_implementation_hash) = resolve_root_hashes_for_request(
-        input_path,
         &source,
-        &graph_snapshot,
-        force_rebuild,
         previous_run_metadata_seed
             .as_ref()
             .map(|metadata| metadata.root_implementation_hash),

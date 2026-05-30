@@ -8,6 +8,47 @@ fn workspace_root_from_manifest_dir() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+pub(crate) fn find_stdlib_root() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("SENGOO_STDLIB") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Some(workspace_root) = workspace_root_from_manifest_dir() {
+        let candidate = workspace_root.join("tools").join("stdlib");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_dir = exe.parent().unwrap_or(Path::new("."));
+
+        let candidate = exe_dir.join("stdlib");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+
+        if let Some(parent) = exe_dir.parent() {
+            if let Some(grandparent) = parent.parent() {
+                let candidate = grandparent.join("tools").join("stdlib");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    let candidate = Path::new("tools/stdlib");
+    if candidate.exists() {
+        return Some(candidate.to_path_buf());
+    }
+
+    None
+}
+
 pub(crate) fn find_runtime_c() -> Option<String> {
     if let Ok(path) = std::env::var("SENGOO_RUNTIME") {
         if Path::new(&path).exists() {
@@ -15,11 +56,8 @@ pub(crate) fn find_runtime_c() -> Option<String> {
         }
     }
 
-    if let Some(workspace_root) = workspace_root_from_manifest_dir() {
-        let candidate = workspace_root
-            .join("tools")
-            .join("stdlib")
-            .join("runtime.c");
+    if let Some(stdlib_root) = find_stdlib_root() {
+        let candidate = stdlib_root.join("runtime.c");
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }

@@ -36,6 +36,17 @@ HTTP / WebSocket:
 - `sengoo_ws_recv_text(handle: u64, buffer: *mut u8, capacity: usize, timeout_ms: u32) -> i64`
 - `sengoo_ws_close(handle: u64) -> i64`
 
+HTTP server:
+
+- `sengoo_http_server_bind(host: *const u8, port: u16) -> u64`
+- `sengoo_http_server_local_port(handle: u64) -> i64`
+- `sengoo_http_server_set_limits(handle: u64, max_header_bytes: u32, max_body_bytes: u32) -> i64`
+- `sengoo_http_server_add_route(handle: u64, method: *const u8, path_pattern: *const u8, status: i32, body: *const u8, body_len: usize) -> i64`
+- `sengoo_http_server_add_middleware_require_header(handle: u64, name: *const u8, expected_value: *const u8, reject_status: i32, reject_body: *const u8, reject_body_len: usize) -> i64`
+- `sengoo_http_server_add_ws_echo_route(handle: u64, path_pattern: *const u8) -> i64`
+- `sengoo_http_server_serve_once(handle: u64, timeout_ms: u32) -> i64`
+- `sengoo_http_server_close(handle: u64) -> i64`
+
 Network bench:
 
 - `sengoo_net_bench_last_error_code() -> i32`
@@ -51,4 +62,7 @@ Ownership:
 
 Sengoo wrapper note:
 
-The MVP wrapper exposes raw pointer inputs as `i64` while preserving runtime ownership rules.
+The Sengoo wrapper exposes `&str` helpers for host/URL/text input, HTTP server
+routes, and required-header middleware, plus managed `Buffer` helpers for
+receive/body/error/bench output. Raw pointer/capacity variants remain available
+as `_raw` functions for explicit handoff.

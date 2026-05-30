@@ -256,11 +256,8 @@ impl TypeChecker {
                                 fn_decl.is_unsafe,
                             )
                             .map_err(CompileError::from)?;
-                            self.env.declare_fn(
-                                fn_decl.name.name.clone(),
-                                param_types,
-                                ret_ty,
-                            );
+                            self.env
+                                .declare_fn(fn_decl.name.name.clone(), param_types, ret_ty);
                         }
                         ExternItem::Static(static_decl) => {
                             let ty = self.check_type(&static_decl.ty)?;
@@ -793,7 +790,8 @@ impl TypeChecker {
                         for param in &generic_meta {
                             let placeholder = Ty::new(0, TyKind::Var(param.var_id));
                             let mut concrete_ty = self.infer.apply_subst(&placeholder);
-                            if matches!(concrete_ty.kind, TyKind::Var(_)) {
+                            if matches!(concrete_ty.kind, TyKind::Var(var_id) if var_id == param.var_id)
+                            {
                                 if let Some(default_ty) = &param.default {
                                     concrete_ty =
                                         self.substitute_ty_vars(default_ty, &HashMap::new());

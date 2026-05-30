@@ -13,7 +13,16 @@ pub(super) fn lower_let_stmt(
     let mir_ty = ty.clone().into();
 
     if let Some(value_expr) = value {
-        let value_local = ctx.lower_expr(value_expr);
+        let value_local = if let HIRExpr::Lambda { params, body } = value_expr {
+            lower_lambda_expr_with_expected(
+                ctx,
+                params,
+                body,
+                Some(hir_type_to_mir_with_structs(ty, ctx.struct_defs)),
+            )
+        } else {
+            ctx.lower_expr(value_expr)
+        };
         let lambda_name = ctx.lambda_names.get(&value_local).cloned();
 
         if let Some(ln) = lambda_name {

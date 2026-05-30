@@ -43,7 +43,11 @@ pub(super) fn lower_unary_expr(
         _ => {
             let operand_local = ctx.lower_expr(operand);
             let mir_op = ctx.lower_un_op(op);
-            let local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            let result_ty = match op {
+                hir::HIRUnaryOp::Not => MIR_BOOL,
+                _ => MIR_I64,
+            };
+            let local = ctx.add_local(None, LocalKind::Temp, result_ty);
             ctx.push_inst(Instruction::Unary {
                 destination: local,
                 op: mir_op,
@@ -284,6 +288,48 @@ mod tests {
             Instruction::Unary {
                 destination,
                 op: MirUnOp::Neg,
+                ..
+            } if *destination == result
+        )));
+    }
+
+    #[test]
+    fn lower_unary_expr_preserves_bool_type_for_not() {
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
+        let start_block = mir_fn.start_block;
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let result = lower_unary_expr(
+            &mut ctx,
+            &hir::HIRUnaryOp::Not,
+            &HIRExpr::Lit(HIRLiteral::Bool(true)),
+        );
+
+        assert_eq!(ctx.get_local_type(result), &MIR_BOOL);
+        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
+            inst,
+            Instruction::Unary {
+                destination,
+                op: MirUnOp::Not,
                 ..
             } if *destination == result
         )));

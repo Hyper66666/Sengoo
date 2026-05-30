@@ -321,3 +321,33 @@ def main() -> i64 {
         ir
     );
 }
+
+#[test]
+fn generic_function_can_return_struct_literal_parameterized_by_function_type() {
+    let source = r#"
+struct Box<T> {
+    value: T,
+}
+
+def make_box<T>(value: T) -> Box<T> {
+    Box { value: value }
+}
+
+def main() -> i64 {
+    let boxed = make_box(true);
+    if boxed.value {
+        1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic function should construct a generic struct literal from its parameter");
+    assert!(
+        ir.contains("; Function: make_box_bool"),
+        "expected bool-specialized make_box\n{}",
+        ir
+    );
+}
