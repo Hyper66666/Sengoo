@@ -25,7 +25,8 @@ use semantic::{semantic_legend, semantic_tokens_for};
 use signatures::collect_function_signatures;
 use signatures::{active_call_site, FunctionSignatureInfo};
 use stdlib::{
-    stdlib_signatures_for_content, stdlib_symbol_detail_for_content, stdlib_symbols_for_content,
+    stdlib_definition_for_content, stdlib_signatures_for_content, stdlib_symbol_detail_for_content,
+    stdlib_symbols_for_content,
 };
 #[cfg(test)]
 use symbols::find_symbol_occurrences;
@@ -107,6 +108,25 @@ impl SengooLanguageServer {
         let open_documents = self.all_documents().await;
         workspace_documents_for_roots_and_open_documents(&roots, &open_documents)
     }
+}
+
+fn stdlib_definition_for_cursor_fallback(
+    uri: &Url,
+    content: &str,
+    symbol_name: &str,
+    symbol_range: Range,
+    definition: &Option<GotoDefinitionResponse>,
+) -> Option<GotoDefinitionResponse> {
+    let definition_points_at_cursor = matches!(
+        definition,
+        Some(GotoDefinitionResponse::Scalar(location))
+            if location.uri == *uri && location.range == symbol_range
+    );
+    if definition.is_some() && !definition_points_at_cursor {
+        return None;
+    }
+
+    stdlib_definition_for_content(content, symbol_name).map(GotoDefinitionResponse::Scalar)
 }
 
 #[tower_lsp::async_trait]
@@ -249,7 +269,25 @@ impl LanguageServer for SengooLanguageServer {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let documents = self.workspace_documents().await;
-        Ok(goto_definition_in_documents(&uri, position, &documents))
+        let content = documents.get(&uri).cloned();
+        let symbol = content
+            .as_deref()
+            .and_then(|content| extract_identifier_at(content, position));
+        let definition = goto_definition_in_documents(&uri, position, &documents);
+
+        if let (Some(content), Some(symbol)) = (content.as_deref(), symbol.as_ref()) {
+            if let Some(stdlib_definition) = stdlib_definition_for_cursor_fallback(
+                &uri,
+                content,
+                &symbol.name,
+                symbol.range,
+                &definition,
+            ) {
+                return Ok(Some(stdlib_definition));
+            }
+        }
+
+        Ok(definition)
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
@@ -796,6 +834,42 @@ def main() -> i64 { 0 }
         }
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn goto_definition_replaces_cursor_fallback_with_stdlib_definition() {
+        let uri = Url::parse("file:///workspace/main.sg").unwrap();
+        let content =
+            "import std::option;\ndef main() -> i64 {\n    option_some_i64(1).unwrap()\n}\n";
+        let symbol = extract_identifier_at(
+            content,
+            Position {
+                line: 2,
+                character: 25,
+            },
+        )
+        .expect("unwrap symbol should be found");
+        let cursor_fallback = Some(GotoDefinitionResponse::Scalar(Location::new(
+            uri.clone(),
+            symbol.range,
+        )));
+
+        let definition = stdlib_definition_for_cursor_fallback(
+            &uri,
+            content,
+            &symbol.name,
+            symbol.range,
+            &cursor_fallback,
+        )
+        .expect("stdlib definition should replace cursor fallback");
+
+        match definition {
+            GotoDefinitionResponse::Scalar(location) => {
+                assert_eq!(location.uri.scheme(), "sengoo-stdlib");
+                assert!(location.uri.as_str().ends_with("/option.sg"));
+            }
+            other => panic!("expected scalar stdlib definition, got {other:?}"),
+        }
     }
 
     #[test]

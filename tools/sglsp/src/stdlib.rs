@@ -1,6 +1,7 @@
 use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 use super::symbols::{collect_ast_symbols, AstSymbol};
 use std::collections::HashSet;
+use tower_lsp::lsp_types::{Location, Url};
 
 const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("collections", include_str!("../../stdlib/collections.sg")),
@@ -95,6 +96,37 @@ fn add_stdlib_module_signatures(
     }
 }
 
+fn stdlib_module_uri(module: &str) -> Option<Url> {
+    Url::parse(&format!("sengoo-stdlib:/{module}.sg")).ok()
+}
+
+fn stdlib_definition_in_module(
+    module: &str,
+    symbol: &str,
+    seen_modules: &mut HashSet<String>,
+) -> Option<Location> {
+    if !seen_modules.insert(module.to_string()) {
+        return None;
+    }
+
+    if let Some(source) = stdlib_source(module) {
+        if let Some(found) = collect_ast_symbols(source)
+            .into_iter()
+            .find(|item| item.name == symbol)
+        {
+            return Some(Location::new(stdlib_module_uri(module)?, found.range));
+        }
+    }
+
+    for dependency in stdlib_dependencies(module) {
+        if let Some(location) = stdlib_definition_in_module(dependency, symbol, seen_modules) {
+            return Some(location);
+        }
+    }
+
+    None
+}
+
 pub(super) fn stdlib_symbols_for_content(content: &str) -> Vec<AstSymbol> {
     let mut seen_modules = HashSet::new();
     let mut seen_symbols = HashSet::new();
@@ -111,6 +143,18 @@ pub(super) fn stdlib_symbol_detail_for_content(content: &str, symbol: &str) -> O
     stdlib_symbols_for_content(content)
         .into_iter()
         .find(|item| item.name == symbol)
+}
+
+pub(super) fn stdlib_definition_for_content(content: &str, symbol: &str) -> Option<Location> {
+    let mut seen_modules = HashSet::new();
+
+    for module in imported_stdlib_modules(content) {
+        if let Some(location) = stdlib_definition_in_module(&module, symbol, &mut seen_modules) {
+            return Some(location);
+        }
+    }
+
+    None
 }
 
 pub(super) fn stdlib_signatures_for_content(content: &str) -> Vec<FunctionSignatureInfo> {
@@ -171,6 +215,16 @@ mod tests {
 
         assert_eq!(symbol.name, "option_some");
         assert_eq!(symbol.detail, "function");
+    }
+
+    #[test]
+    fn stdlib_definition_resolves_imported_methods() {
+        let location = stdlib_definition_for_content("import std::option;\n", "unwrap")
+            .expect("imported stdlib method definition should resolve");
+
+        assert_eq!(location.uri.scheme(), "sengoo-stdlib");
+        assert!(location.uri.as_str().ends_with("/option.sg"));
+        assert!(location.range.start.line > 0);
     }
 
     #[test]
