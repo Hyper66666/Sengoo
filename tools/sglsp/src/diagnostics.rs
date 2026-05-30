@@ -320,6 +320,38 @@ fn fallback_diagnostic_range_from_compiler(content: &str) -> Option<Range> {
         .and_then(|error| diagnostic_range_from_compile_error(content, &error))
 }
 
+fn compile_error_stage(error: &CompileError) -> &'static str {
+    match error {
+        CompileError::LexError(_) => "lex",
+        CompileError::ParseError(_) => "parse",
+        CompileError::TypeError(_) | CompileError::TypeckError(_) => "typecheck",
+        CompileError::IoError(_) => "io",
+        CompileError::HirLower(_) => "hir_lower",
+        CompileError::MirLower(_) => "mir_lower",
+        CompileError::Codegen(_) => "codegen",
+        CompileError::AsyncUnsupportedType { .. } => "mir_lower",
+    }
+}
+
+fn embedded_compiler_diagnostics(content: &str) -> Vec<Diagnostic> {
+    let Err(error) = compile_to_ir(content) else {
+        return Vec::new();
+    };
+    let range = diagnostic_range_from_compile_error(content, &error)
+        .unwrap_or_else(|| full_document_range(content));
+
+    vec![Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String(
+            compile_error_stage(&error).to_string(),
+        )),
+        source: Some("sengoo-compiler".to_string()),
+        message: error.to_string(),
+        ..Default::default()
+    }]
+}
+
 fn temporary_source_path(uri: &Url) -> PathBuf {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -335,12 +367,16 @@ fn temporary_source_path(uri: &Url) -> PathBuf {
 }
 
 pub(crate) fn compiler_diagnostics_from_sgc_json(uri: &Url, content: &str) -> Vec<Diagnostic> {
+    compiler_diagnostics_from_sgc_tool("sgc", uri, content)
+}
+
+fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> Vec<Diagnostic> {
     let scratch = temporary_source_path(uri);
     if fs::write(&scratch, content).is_err() {
-        return Vec::new();
+        return embedded_compiler_diagnostics(content);
     }
 
-    let output = Command::new("sgc")
+    let output = Command::new(tool)
         .arg("--error-format")
         .arg("json")
         .arg("check")
@@ -350,7 +386,7 @@ pub(crate) fn compiler_diagnostics_from_sgc_json(uri: &Url, content: &str) -> Ve
     let _ = fs::remove_file(&scratch);
 
     let Ok(output) = output else {
-        return Vec::new();
+        return embedded_compiler_diagnostics(content);
     };
     if output.status.success() {
         return Vec::new();
@@ -643,5 +679,25 @@ mod tests {
             diagnostic_range_from_compile_error(src, &err).expect("range should be extracted");
         assert_eq!(range.start.line, 1);
         assert_eq!(range.start.character, 8);
+    }
+
+    #[test]
+    fn compiler_diagnostics_fall_back_to_embedded_compiler_when_sgc_is_missing() {
+        let src = "def main() -> i64 {\n    let = 1;\n}\n";
+        let diagnostics = compiler_diagnostics_from_sgc_tool(
+            "sglsp-definitely-missing-sgc-for-test",
+            &Url::parse("file:///workspace/main.sg").unwrap(),
+            src,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sengoo-compiler"));
+        assert_eq!(diagnostics[0].range.start.line, 1);
+        assert_eq!(diagnostics[0].range.start.character, 8);
+        assert!(
+            diagnostics[0].message.contains("expected identifier"),
+            "message should include embedded compiler error: {}",
+            diagnostics[0].message
+        );
     }
 }

@@ -421,6 +421,10 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` range formatting now returns edits limited to the requested line
   span instead of replacing the entire document, using `sgfmt` output when line
   mapping is stable and a whitespace-only fallback otherwise (2026-05-31).
+- `sglsp` compiler diagnostics now fall back to the embedded
+  `sengoo-compiler` pipeline when `sgc --error-format json` cannot be started,
+  so editors still receive parse/type errors even when `sgc` is missing from
+  PATH (2026-05-31).
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).
