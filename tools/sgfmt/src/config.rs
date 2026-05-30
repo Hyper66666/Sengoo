@@ -1,6 +1,7 @@
 use clap::Parser;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
+use sgfmt::FormatOptions;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,21 +21,6 @@ pub(super) struct Args {
     pub(super) max_width: Option<usize>,
     #[arg(short, long)]
     pub(super) indent_width: Option<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FormatOptions {
-    pub(super) max_width: usize,
-    pub(super) indent_width: usize,
-}
-
-impl Default for FormatOptions {
-    fn default() -> Self {
-        Self {
-            max_width: 100,
-            indent_width: 4,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Default)]
