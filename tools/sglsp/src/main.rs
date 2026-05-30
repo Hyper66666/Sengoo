@@ -17,7 +17,7 @@ mod symbols;
 mod text_editing;
 mod workspace;
 use diagnostics::{build_diagnostics, compiler_diagnostics_from_sgc_json, quick_fix_actions};
-use formatting::{full_document_range, normalized_format};
+use formatting::{full_document_range, normalized_format, range_format_edit};
 #[cfg(test)]
 use semantic::SemanticKind;
 use semantic::{semantic_legend, semantic_tokens_for};
@@ -475,15 +475,12 @@ impl LanguageServer for SengooLanguageServer {
         let Some(content) = self.document_text(&uri).await else {
             return Ok(None);
         };
-        let formatted = normalized_format(&content);
-        if formatted == content {
-            return Ok(Some(Vec::new()));
-        }
 
-        Ok(Some(vec![TextEdit {
-            range: full_document_range(&content),
-            new_text: formatted,
-        }]))
+        Ok(Some(
+            range_format_edit(&content, params.range)
+                .into_iter()
+                .collect(),
+        ))
     }
 
     async fn rename(&self, params: RenameParams) -> LspResult<Option<WorkspaceEdit>> {
