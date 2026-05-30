@@ -1,10 +1,13 @@
 use crate::resolver::{render_tree, Graph, PackageNode};
 use miette::{Context, IntoDiagnostic, Result};
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
+
+const MODULE_MAP_ENV: &str = "SENGOO_MODULE_MAP";
 
 #[derive(Debug, Clone, Copy)]
 pub enum BuildProfile {
@@ -44,6 +47,26 @@ impl Toolchain {
 
     pub fn build(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         for node in &graph.nodes {
+            if node.manifest.lib.is_some() && node.manifest.bin.is_none() {
+                let mut command = Command::new(&self.sgc);
+                command
+                    .current_dir(&node.root_dir)
+                    .arg("check")
+                    .arg(&node.entry_path);
+                configure_module_map(&mut command, graph, node, false)?;
+
+                if verbose {
+                    eprintln!("sgpm: {}", render_command(&command));
+                }
+
+                run_command(
+                    command,
+                    &format!("check failed for library package '{}'", node.name),
+                )?;
+                println!("checked library {}", node.name);
+                continue;
+            }
+
             let output = package_output_path(node, profile)?;
             ensure_parent(&output)?;
 
@@ -56,6 +79,7 @@ impl Toolchain {
                 .arg(&output)
                 .arg("-O")
                 .arg(profile.opt_level());
+            configure_module_map(&mut command, graph, node, false)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -78,6 +102,7 @@ impl Toolchain {
                 .current_dir(&node.root_dir)
                 .arg("check")
                 .arg(&node.entry_path);
+            configure_module_map(&mut command, graph, node, false)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -100,11 +125,18 @@ impl Toolchain {
         args: &[String],
         verbose: bool,
     ) -> Result<()> {
-        self.build(graph, profile, verbose)?;
-
         let root = graph
             .root_package()
             .ok_or_else(|| miette::miette!("dependency graph has no root package"))?;
+        if root.manifest.bin.is_none() {
+            miette::bail!(
+                "cannot run library package '{}'; add [bin] to Sengoo.toml",
+                root.name
+            );
+        }
+
+        self.build(graph, profile, verbose)?;
+
         let output = package_output_path(root, profile)?;
 
         let mut command = Command::new(&output);
@@ -118,13 +150,19 @@ impl Toolchain {
         run_command(command, &format!("run failed for package '{}'", root.name))
     }
 
-    pub fn test(&self, graph: &Graph, verbose: bool) -> Result<()> {
+    pub fn test(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         let mut ran = 0usize;
         for node in &graph.nodes {
-            let tests = discover_tests(&node.root_dir);
+            let tests = discover_tests(&node.root_dir)?;
             for test in tests {
                 let mut command = Command::new(&self.sgc);
-                command.current_dir(&node.root_dir).arg("run").arg(&test);
+                command
+                    .current_dir(&node.root_dir)
+                    .arg("run")
+                    .arg(&test)
+                    .arg("-O")
+                    .arg(profile.opt_level());
+                configure_module_map(&mut command, graph, node, true)?;
 
                 if verbose {
                     eprintln!("sgpm: {}", render_command(&command));
@@ -152,7 +190,7 @@ impl Toolchain {
 
         let mut formatted = 0usize;
         for node in &graph.nodes {
-            for file in discover_source_files(&node.root_dir) {
+            for file in discover_source_files(&node.root_dir)? {
                 let mut command = Command::new(sgfmt);
                 command.current_dir(&node.root_dir).arg(&file);
                 if check {
@@ -226,31 +264,82 @@ fn ensure_parent(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn discover_tests(root: &Path) -> Vec<PathBuf> {
+fn configure_module_map(
+    command: &mut Command,
+    graph: &Graph,
+    node: &PackageNode,
+    include_current: bool,
+) -> Result<()> {
+    command.env_remove(MODULE_MAP_ENV);
+    if let Some(module_map) = module_map_value(graph, node, include_current)? {
+        command.env(MODULE_MAP_ENV, module_map);
+    }
+    Ok(())
+}
+
+fn module_map_value(
+    graph: &Graph,
+    node: &PackageNode,
+    include_current: bool,
+) -> Result<Option<OsString>> {
+    let entries = graph
+        .nodes
+        .iter()
+        .take_while(|candidate| candidate.manifest_path != node.manifest_path)
+        .chain(include_current.then_some(node))
+        .filter_map(|candidate| {
+            let lib = candidate.manifest.lib.as_ref()?;
+            PathBuf::from(format!(
+                "{}={}",
+                candidate.name,
+                portable_path(&candidate.root_dir.join(&lib.path))
+            ))
+            .into()
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Ok(None);
+    }
+    env::join_paths(entries)
+        .map(Some)
+        .into_diagnostic()
+        .context("failed to encode dependency library module map")
+}
+
+fn portable_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .to_string()
+}
+
+fn discover_tests(root: &Path) -> Result<Vec<PathBuf>> {
     let tests_dir = root.join("tests");
     if !tests_dir.exists() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     collect_sg_files(&tests_dir)
 }
 
-fn discover_source_files(root: &Path) -> Vec<PathBuf> {
+fn discover_source_files(root: &Path) -> Result<Vec<PathBuf>> {
     let src_dir = root.join("src");
     if !src_dir.exists() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     collect_sg_files(&src_dir)
 }
 
-fn collect_sg_files(root: &Path) -> Vec<PathBuf> {
+fn collect_sg_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = WalkDir::new(root)
         .into_iter()
-        .filter_map(Result::ok)
+        .map(|entry| entry.into_diagnostic())
+        .collect::<Result<Vec<_>>>()
+        .with_context(|| format!("failed to enumerate Sengoo files under {}", root.display()))?
+        .into_iter()
         .map(|entry| entry.into_path())
         .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("sg"))
         .collect::<Vec<_>>();
     files.sort();
-    files
+    Ok(files)
 }
 
 fn run_command(mut command: Command, context: &str) -> Result<()> {
@@ -344,7 +433,7 @@ mod tests {
         fs::write(dir.join("src/a.txt"), "").unwrap();
         fs::write(dir.join("src/nested/a.sg"), "").unwrap();
 
-        let files = collect_sg_files(&dir.join("src"));
+        let files = collect_sg_files(&dir.join("src")).unwrap();
         let names = files
             .iter()
             .map(|path| {
@@ -355,6 +444,14 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["src/b.sg", "src/nested/a.sg"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn collect_sg_files_rejects_missing_root() {
+        let dir = temp_dir("collect_missing");
+        let err = collect_sg_files(&dir.join("missing")).unwrap_err();
+        assert!(err.to_string().contains("failed to enumerate Sengoo files"));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -378,6 +475,7 @@ mod tests {
                 "[package]\nname = 'demo'\nversion = '0.1.0'\n",
             )
             .unwrap(),
+            source: crate::resolver::PackageSource::Path,
         };
         let output = package_output_path(&node, BuildProfile::Release).unwrap();
         assert!(output.to_string_lossy().contains("target"));

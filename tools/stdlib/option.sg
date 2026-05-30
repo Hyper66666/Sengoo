@@ -7,12 +7,20 @@ struct Option<T> {
     value: T,
 }
 
-def option_some_i64(value: i64) -> Option<i64> {
+def option_some<T>(value: T) -> Option<T> {
     Option { is_some: true, value: value }
 }
 
+def option_none_with<T>(placeholder: T) -> Option<T> {
+    Option { is_some: false, value: placeholder }
+}
+
+def option_some_i64(value: i64) -> Option<i64> {
+    option_some(value)
+}
+
 def option_none_i64() -> Option<i64> {
-    Option { is_some: false, value: 0 }
+    option_none_with(0)
 }
 
 impl<T> Option<T> {

@@ -46,8 +46,9 @@ pub fn validate_ffi_type(ty: &Ty) -> Result<(), TypeckError> {
         | TyKind::Int(_)
         | TyKind::Float(_) => Ok(()),
         TyKind::Ptr(inner) => validate_ffi_type(inner),
+        TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str) => Ok(()),
         TyKind::Ref(_, _) => Err(TypeckError::Other(format!(
-            "FFI type is not supported: references are not FFI-safe (`{}`)",
+            "FFI type is not supported: only immutable &str references are FFI-safe (`{}`)",
             ty
         ))),
         _ => Err(TypeckError::Other(format!(

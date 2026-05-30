@@ -39,7 +39,10 @@ Ownership:
 
 Sengoo wrapper note:
 
-The current source-level wrapper uses raw `i64` pointer values for borrowed C string and buffer pointers because Sengoo FFI currently rejects reference types such as `&str` as not FFI-safe.
+The Sengoo wrapper exposes `&str` helpers for connection strings, SQL, and
+params JSON. Error, column-name, and cell copy helpers accept managed `Buffer`
+handles, with `_raw` variants left available for explicit pointer/capacity
+handoff.
 
 Module layout (2026-05-20, post-split):
 

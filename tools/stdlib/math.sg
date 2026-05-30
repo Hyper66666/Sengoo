@@ -22,6 +22,47 @@ def max_i64(lhs: i64, rhs: i64) -> i64 {
     }
 }
 
+def sign_i64(value: i64) -> i64 {
+    if value < 0 {
+        0 - 1
+    } else if value > 0 {
+        1
+    } else {
+        0
+    }
+}
+
+def clamp_i64(value: i64, lower: i64, upper: i64) -> i64 {
+    let min_bound = min_i64(lower, upper);
+    let max_bound = max_i64(lower, upper);
+    if value < min_bound {
+        min_bound
+    } else if value > max_bound {
+        max_bound
+    } else {
+        value
+    }
+}
+
+def gcd_i64(lhs: i64, rhs: i64) -> i64 {
+    let a = abs_i64(lhs);
+    let b = abs_i64(rhs);
+    while b != 0 {
+        let next = a % b;
+        a = b;
+        b = next;
+    }
+    a
+}
+
+def lcm_i64(lhs: i64, rhs: i64) -> i64 {
+    if lhs == 0 || rhs == 0 {
+        0
+    } else {
+        abs_i64((lhs / gcd_i64(lhs, rhs)) * rhs)
+    }
+}
+
 def pow_i64(base: i64, exp: i64) -> i64 {
     let result = 1;
     let remaining = exp;

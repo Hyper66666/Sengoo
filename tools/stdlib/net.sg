@@ -1,4 +1,5 @@
 extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_net_last_error() -> i64;
     fn sengoo_net_clear_error();
     fn sengoo_net_error_name_copy(code: i64, buffer: i64, capacity: i64) -> i64;
@@ -17,6 +18,14 @@ extern "C" {
     fn sengoo_http_body_len(handle: i64) -> i64;
     fn sengoo_http_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_http_close(handle: i64) -> i64;
+    fn sengoo_http_server_bind(host: i64, port: i64) -> i64;
+    fn sengoo_http_server_local_port(handle: i64) -> i64;
+    fn sengoo_http_server_set_limits(handle: i64, max_header_bytes: i64, max_body_bytes: i64) -> i64;
+    fn sengoo_http_server_add_route(handle: i64, method: i64, path_pattern: i64, status: i64, body: i64, body_len: i64) -> i64;
+    fn sengoo_http_server_add_middleware_require_header(handle: i64, name: i64, expected_value: i64, reject_status: i64, reject_body: i64, reject_body_len: i64) -> i64;
+    fn sengoo_http_server_add_ws_echo_route(handle: i64, path_pattern: i64) -> i64;
+    fn sengoo_http_server_serve_once(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_server_close(handle: i64) -> i64;
     fn sengoo_ws_connect(url: i64, timeout_ms: i64) -> i64;
     fn sengoo_ws_send_text(handle: i64, data: i64, len: i64) -> i64;
     fn sengoo_ws_recv_text(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
@@ -37,6 +46,10 @@ struct UdpSocket {
 }
 
 struct HttpClient {
+    handle: i64,
+}
+
+struct HttpServer {
     handle: i64,
 }
 
@@ -62,6 +75,10 @@ def net_error_name_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result
     }
 }
 
+def net_error_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64> {
+    net_error_name_copy_raw(code, buffer.ptr(), buffer.len())
+}
+
 def net_tcp_connect_raw(host_ptr: i64, port: i64, timeout_ms: i64) -> Result<TcpStream, i64> {
     let handle = sengoo_tcp_connect(host_ptr, port, timeout_ms);
     if handle != 0 {
@@ -69,6 +86,10 @@ def net_tcp_connect_raw(host_ptr: i64, port: i64, timeout_ms: i64) -> Result<Tcp
     } else {
         Result { is_ok: false, value: TcpStream { handle: 0 }, error: sengoo_net_last_error() }
     }
+}
+
+def net_tcp_connect(host: &str, port: i64, timeout_ms: i64) -> Result<TcpStream, i64> {
+    net_tcp_connect_raw(sengoo_stdlib_str_ptr(host), port, timeout_ms)
 }
 
 impl TcpStream {
@@ -85,6 +106,10 @@ impl TcpStream {
         }
     }
 
+    def send(self, data: &str) -> Result<i64, i64> {
+        self.send_raw(sengoo_stdlib_str_ptr(data), data.len())
+    }
+
     def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_tcp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
@@ -92,6 +117,10 @@ impl TcpStream {
         } else {
             Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
         }
+    }
+
+    def recv(self, buffer: Buffer, timeout_ms: i64) -> Result<i64, i64> {
+        self.recv_raw(buffer.ptr(), buffer.len(), timeout_ms)
     }
 }
 
@@ -104,6 +133,10 @@ def udp_bind_raw(host_ptr: i64, port: i64) -> Result<UdpSocket, i64> {
     }
 }
 
+def udp_bind(host: &str, port: i64) -> Result<UdpSocket, i64> {
+    udp_bind_raw(sengoo_stdlib_str_ptr(host), port)
+}
+
 impl UdpSocket {
     def connect_raw(self, host_ptr: i64, port: i64) -> Result<bool, i64> {
         let status = sengoo_udp_connect(self.handle, host_ptr, port);
@@ -112,6 +145,10 @@ impl UdpSocket {
         } else {
             Result { is_ok: false, value: false, error: sengoo_net_last_error() }
         }
+    }
+
+    def connect(self, host: &str, port: i64) -> Result<bool, i64> {
+        self.connect_raw(sengoo_stdlib_str_ptr(host), port)
     }
 
     def send_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
@@ -123,6 +160,10 @@ impl UdpSocket {
         }
     }
 
+    def send(self, data: &str) -> Result<i64, i64> {
+        self.send_raw(sengoo_stdlib_str_ptr(data), data.len())
+    }
+
     def recv_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_udp_recv(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
@@ -130,6 +171,10 @@ impl UdpSocket {
         } else {
             Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
         }
+    }
+
+    def recv(self, buffer: Buffer, timeout_ms: i64) -> Result<i64, i64> {
+        self.recv_raw(buffer.ptr(), buffer.len(), timeout_ms)
     }
 
     def close(self) -> bool {
@@ -146,6 +191,10 @@ def http_get_raw(url_ptr: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
     }
 }
 
+def http_get(url: &str, timeout_ms: i64) -> Result<HttpClient, i64> {
+    http_get_raw(sengoo_stdlib_str_ptr(url), timeout_ms)
+}
+
 def http_post_raw(url_ptr: i64, body_ptr: i64, len: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
     let handle = sengoo_http_post(url_ptr, body_ptr, len, timeout_ms);
     if handle != 0 {
@@ -153,6 +202,10 @@ def http_post_raw(url_ptr: i64, body_ptr: i64, len: i64, timeout_ms: i64) -> Res
     } else {
         Result { is_ok: false, value: HttpClient { handle: 0 }, error: sengoo_net_last_error() }
     }
+}
+
+def http_post(url: &str, body: &str, timeout_ms: i64) -> Result<HttpClient, i64> {
+    http_post_raw(sengoo_stdlib_str_ptr(url), sengoo_stdlib_str_ptr(body), body.len(), timeout_ms)
 }
 
 impl HttpClient {
@@ -183,8 +236,99 @@ impl HttpClient {
         }
     }
 
+    def body_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        self.body_copy_raw(buffer.ptr(), buffer.len())
+    }
+
     def close(self) -> bool {
         sengoo_http_close(self.handle) != 0
+    }
+}
+
+def http_server_bind_raw(host_ptr: i64, port: i64) -> Result<HttpServer, i64> {
+    let handle = sengoo_http_server_bind(host_ptr, port);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpServer { handle: 0 }, error: sengoo_net_last_error() }
+    }
+}
+
+def http_server_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
+    http_server_bind_raw(sengoo_stdlib_str_ptr(host), port)
+}
+
+impl HttpServer {
+    def local_port(self) -> Result<i64, i64> {
+        let port = sengoo_http_server_local_port(self.handle);
+        if port >= 0 {
+            Result { is_ok: true, value: port, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        }
+    }
+
+    def set_limits(self, max_header_bytes: i64, max_body_bytes: i64) -> Result<bool, i64> {
+        let status = sengoo_http_server_set_limits(self.handle, max_header_bytes, max_body_bytes);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def add_route_raw(self, method_ptr: i64, path_pattern_ptr: i64, status: i64, body_ptr: i64, body_len: i64) -> Result<bool, i64> {
+        let added = sengoo_http_server_add_route(self.handle, method_ptr, path_pattern_ptr, status, body_ptr, body_len);
+        if added != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def add_route(self, method: &str, path_pattern: &str, status: i64, body: &str) -> Result<bool, i64> {
+        self.add_route_raw(sengoo_stdlib_str_ptr(method), sengoo_stdlib_str_ptr(path_pattern), status, sengoo_stdlib_str_ptr(body), body.len())
+    }
+
+    def require_header_raw(self, name_ptr: i64, expected_value_ptr: i64, reject_status: i64, reject_body_ptr: i64, reject_body_len: i64) -> Result<bool, i64> {
+        let added = sengoo_http_server_add_middleware_require_header(self.handle, name_ptr, expected_value_ptr, reject_status, reject_body_ptr, reject_body_len);
+        if added != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def require_header(self, name: &str, expected_value: &str, reject_status: i64, reject_body: &str) -> Result<bool, i64> {
+        self.require_header_raw(sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(expected_value), reject_status, sengoo_stdlib_str_ptr(reject_body), reject_body.len())
+    }
+
+    def add_ws_echo_route_raw(self, path_pattern_ptr: i64) -> Result<bool, i64> {
+        let added = sengoo_http_server_add_ws_echo_route(self.handle, path_pattern_ptr);
+        if added != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def add_ws_echo_route(self, path_pattern: &str) -> Result<bool, i64> {
+        self.add_ws_echo_route_raw(sengoo_stdlib_str_ptr(path_pattern))
+    }
+
+    def serve_once(self, timeout_ms: i64) -> Result<bool, i64> {
+        let served = sengoo_http_server_serve_once(self.handle, timeout_ms);
+        if served > 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else if served == 0 {
+            Result { is_ok: true, value: false, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_http_server_close(self.handle) != 0
     }
 }
 
@@ -197,6 +341,10 @@ def ws_connect_raw(url_ptr: i64, timeout_ms: i64) -> Result<WsClient, i64> {
     }
 }
 
+def ws_connect(url: &str, timeout_ms: i64) -> Result<WsClient, i64> {
+    ws_connect_raw(sengoo_stdlib_str_ptr(url), timeout_ms)
+}
+
 impl WsClient {
     def send_text_raw(self, data_ptr: i64, len: i64) -> Result<i64, i64> {
         let sent = sengoo_ws_send_text(self.handle, data_ptr, len);
@@ -207,6 +355,10 @@ impl WsClient {
         }
     }
 
+    def send_text(self, data: &str) -> Result<i64, i64> {
+        self.send_text_raw(sengoo_stdlib_str_ptr(data), data.len())
+    }
+
     def recv_text_raw(self, buffer_ptr: i64, capacity: i64, timeout_ms: i64) -> Result<i64, i64> {
         let received = sengoo_ws_recv_text(self.handle, buffer_ptr, capacity, timeout_ms);
         if received >= 0 {
@@ -214,6 +366,10 @@ impl WsClient {
         } else {
             Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
         }
+    }
+
+    def recv_text(self, buffer: Buffer, timeout_ms: i64) -> Result<i64, i64> {
+        self.recv_text_raw(buffer.ptr(), buffer.len(), timeout_ms)
     }
 
     def close(self) -> bool {
@@ -238,6 +394,10 @@ def net_bench_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64,
     }
 }
 
+def net_bench_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
+    net_bench_last_error_copy_raw(buffer.ptr(), buffer.len())
+}
+
 def net_bench_last_error_clear() -> bool {
     sengoo_net_bench_last_error_clear() == 0
 }
@@ -249,4 +409,8 @@ def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadc
     } else {
         Result { is_ok: false, value: 0, error: sengoo_net_bench_last_error_code() }
     }
+}
+
+def net_bench_run(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report: Buffer) -> Result<i64, i64> {
+    net_bench_run_raw(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report.ptr(), report.len())
 }

@@ -13,6 +13,7 @@ Sengoo is a compiled language focused on practical engineering workflows:
 |---|---|---|
 | Core syntax (`def`, `if`, `for`, `while`, `struct`, `impl`) | Available | Use `examples/*.sg` as validated learning surface. |
 | Static type-check pipeline | Available | Entry command: `sgc check <file.sg>`. |
+| API documentation generation | Available | `sgc doc <file.sg> --output target/doc`. |
 | Incremental compile pipeline | Available | Fingerprint + workset-based invalidation/rebuild strategy. |
 | Daemon compile service | Available | `sgc daemon --addr 127.0.0.1:48765`. |
 | Python interop runtime path | Available | Runtime integration in `runtime/src/python.rs`. |
@@ -102,6 +103,7 @@ Example:
 ```sg
 extern "C" {
     pub fn c_add(a: i64, b: i64) -> i64;
+    pub fn c_strlen(value: &str) -> i64;
 }
 
 #[export_name = "sengoo_add_export"]

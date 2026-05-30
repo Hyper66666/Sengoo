@@ -145,6 +145,19 @@ fn copy_bytes_to_buffer(bytes: &[u8], buffer: *mut u8, capacity: usize) -> i64 {
     copy_len as i64
 }
 
+fn direct_i64_args(argc: usize, args: &[i64]) -> Result<&[i64], i32> {
+    if argc > args.len() {
+        return Err(set_error(
+            SENGOO_LUA54_ERR_INVALID_ARGUMENT,
+            format!(
+                "direct i64 call argc {argc} exceeds supported arity {}",
+                args.len()
+            ),
+        ));
+    }
+    Ok(&args[..argc])
+}
+
 fn parse_c_string(ptr: *const u8) -> Result<String, i32> {
     if ptr.is_null() {
         return Err(set_error(
@@ -540,6 +553,30 @@ pub extern "C" fn sengoo_lua54_call_i64(
     })
 }
 
+#[no_mangle]
+pub extern "C" fn sengoo_lua54_call_i64_value(
+    handle: u64,
+    func_name: *const u8,
+    argc: usize,
+    a0: i64,
+    a1: i64,
+    a2: i64,
+    a3: i64,
+) -> i64 {
+    clear_error();
+    let full = [a0, a1, a2, a3];
+    let args = match direct_i64_args(argc, &full) {
+        Ok(args) => args,
+        Err(_) => return 0,
+    };
+    let mut out = 0_i64;
+    if sengoo_lua54_call_i64(handle, func_name, args.len(), args.as_ptr(), &mut out) == 0 {
+        out
+    } else {
+        0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,6 +638,28 @@ mod tests {
             SENGOO_LUA54_STATUS_OK
         );
         assert_eq!(out, 7);
+
+        assert_eq!(sengoo_lua54_close(handle), SENGOO_LUA54_STATUS_OK);
+    }
+
+    #[test]
+    fn lua54_value_call_avoids_pointer_slots_when_library_available() {
+        let _guard = lua54_test_guard();
+        let handle = sengoo_lua54_open(std::ptr::null());
+        if handle == 0 {
+            return;
+        }
+
+        let chunk = c_str("function add(a,b) return a + b end");
+        assert_eq!(
+            sengoo_lua54_exec(handle, chunk.as_ptr()),
+            SENGOO_LUA54_STATUS_OK
+        );
+
+        let name = c_str("add");
+        let value = sengoo_lua54_call_i64_value(handle, name.as_ptr(), 2, 2, 5, 0, 0);
+        assert_eq!(value, 7);
+        assert_eq!(sengoo_lua54_last_error_code(), SENGOO_LUA54_STATUS_OK);
 
         assert_eq!(sengoo_lua54_close(handle), SENGOO_LUA54_STATUS_OK);
     }

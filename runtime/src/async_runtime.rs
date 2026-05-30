@@ -5,11 +5,42 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 #[cfg(feature = "native-bridge")]
 use std::ptr::NonNull;
-#[cfg(feature = "native-bridge")]
+#[cfg(all(test, feature = "native-bridge"))]
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "native-bridge")]
+#[cfg(all(test, feature = "native-bridge"))]
 use std::time::Duration;
 use std::time::Instant;
+
+#[cfg(feature = "native-bridge")]
+mod bridge;
+#[cfg(feature = "native-bridge")]
+mod futures;
+#[cfg(feature = "native-bridge")]
+mod select;
+
+#[cfg(all(test, feature = "native-bridge"))]
+use bridge::{scheduler_mut, ForeignAsyncTask, CURRENT_SCHEDULER};
+#[cfg(feature = "native-bridge")]
+pub use bridge::{
+    sengoo_async_cancel_task, sengoo_async_run_main_i64, sengoo_async_scheduler_cancel,
+    sengoo_async_scheduler_free, sengoo_async_scheduler_new, sengoo_async_scheduler_run_until_idle,
+    sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_task_status,
+};
+#[cfg(all(test, feature = "native-bridge"))]
+use futures::SleepFutureState;
+#[cfg(feature = "native-bridge")]
+pub use futures::{
+    sengoo_async_sleep__cancel, sengoo_async_sleep__drop, sengoo_async_sleep__poll,
+    sengoo_async_sleep__result, sengoo_async_sleep__start, sengoo_async_timeout_bool__cancel,
+    sengoo_async_timeout_bool__drop, sengoo_async_timeout_bool__poll,
+    sengoo_async_timeout_bool__result, sengoo_async_timeout_bool__start,
+};
+#[cfg(feature = "native-bridge")]
+pub use select::{
+    sengoo_async_select_bool, sengoo_async_select_f32, sengoo_async_select_f64,
+    sengoo_async_select_i16, sengoo_async_select_i32, sengoo_async_select_i64,
+    sengoo_async_select_i8, sengoo_async_select_winner,
+};
 
 pub type TaskId = u64;
 
@@ -232,7 +263,6 @@ unsafe extern "C" {
 
 #[cfg(feature = "native-bridge")]
 thread_local! {
-    static CURRENT_SCHEDULER: Cell<*mut CoroutineScheduler> = const { Cell::new(std::ptr::null_mut()) };
     static POLL_WAKEUP_HINT: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
@@ -305,51 +335,6 @@ fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
 }
 
 #[cfg(feature = "native-bridge")]
-const SELECT_WINNER_FIRST: i64 = 0;
-
-#[cfg(feature = "native-bridge")]
-const SELECT_WINNER_SECOND: i64 = 1;
-
-#[cfg(feature = "native-bridge")]
-unsafe fn wait_for_first_ready_winner(
-    first_kind: i64,
-    first_handle: i64,
-    second_kind: i64,
-    second_handle: i64,
-) -> i64 {
-    loop {
-        clear_poll_wakeup_hint();
-        if sengoo_async_poll_dispatch(first_kind, first_handle) != 0 {
-            return SELECT_WINNER_FIRST;
-        }
-        let first_hint = take_poll_wakeup_hint();
-
-        clear_poll_wakeup_hint();
-        if sengoo_async_poll_dispatch(second_kind, second_handle) != 0 {
-            return SELECT_WINNER_SECOND;
-        }
-        let second_hint = take_poll_wakeup_hint();
-
-        wait_for_wakeup_hint_or_yield(merge_wakeup_hints(first_hint, second_hint));
-    }
-}
-
-#[cfg(feature = "native-bridge")]
-unsafe fn wait_for_first_ready<T>(
-    first_kind: i64,
-    first_handle: i64,
-    second_kind: i64,
-    second_handle: i64,
-    dispatch: unsafe extern "C" fn(i64, i64) -> T,
-) -> T {
-    match wait_for_first_ready_winner(first_kind, first_handle, second_kind, second_handle) {
-        SELECT_WINNER_FIRST => dispatch(first_kind, first_handle),
-        SELECT_WINNER_SECOND => dispatch(second_kind, second_handle),
-        winner => unreachable!("unexpected async select winner: {winner}"),
-    }
-}
-
-#[cfg(feature = "native-bridge")]
 /// Async runtime FFI contract:
 /// - handle values come only from the matching `__start`/constructor function
 /// - `0` is reserved as an invalid handle and must be treated as absent
@@ -373,434 +358,6 @@ unsafe fn handle_mut<'a, T>(handle: i64) -> Option<&'a mut T> {
 #[cfg(feature = "native-bridge")]
 unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
     handle_nonnull(handle).map(|ptr| Box::from_raw(ptr.as_ptr()))
-}
-
-#[cfg(feature = "native-bridge")]
-fn scheduler_nonnull(ptr: *mut CoroutineScheduler) -> Option<NonNull<CoroutineScheduler>> {
-    NonNull::new(ptr)
-}
-
-#[cfg(feature = "native-bridge")]
-unsafe fn scheduler_mut<'a>(ptr: *mut CoroutineScheduler) -> Option<&'a mut CoroutineScheduler> {
-    scheduler_nonnull(ptr).map(|mut ptr| ptr.as_mut())
-}
-
-#[cfg(feature = "native-bridge")]
-struct RootAsyncMainI64Task {
-    handle: Option<i64>,
-    result: Arc<Mutex<Option<i64>>>,
-}
-
-#[cfg(feature = "native-bridge")]
-impl RootAsyncMainI64Task {
-    fn new(result: Arc<Mutex<Option<i64>>>) -> Self {
-        Self {
-            handle: None,
-            result,
-        }
-    }
-}
-
-#[cfg(feature = "native-bridge")]
-impl CoroutineTask for RootAsyncMainI64Task {
-    fn poll(&mut self) -> TaskState {
-        let handle = *self.handle.get_or_insert_with(|| unsafe { main__start() });
-        if unsafe { main__poll(handle) } == 0 {
-            return TaskState::Pending;
-        }
-
-        let result = unsafe { main__result(handle) };
-        *self
-            .result
-            .lock()
-            .expect("async main result mutex poisoned") = Some(result);
-        TaskState::Complete
-    }
-
-    fn cancel(&mut self) -> bool {
-        false
-    }
-}
-
-#[cfg(feature = "native-bridge")]
-struct ForeignAsyncTask {
-    kind: i64,
-    handle: i64,
-}
-
-#[cfg(feature = "native-bridge")]
-impl CoroutineTask for ForeignAsyncTask {
-    fn poll(&mut self) -> TaskState {
-        if unsafe { sengoo_async_poll_dispatch(self.kind, self.handle) } == 0 {
-            TaskState::Pending
-        } else {
-            TaskState::Complete
-        }
-    }
-
-    fn cancel(&mut self) -> bool {
-        if self.handle == 0 {
-            return true;
-        }
-        let canceled = unsafe { sengoo_async_cancel_dispatch(self.kind, self.handle) };
-        if canceled {
-            self.handle = 0;
-        }
-        canceled
-    }
-
-    fn on_scheduler_drop(&mut self) {
-        if self.handle != 0 {
-            unsafe { sengoo_async_drop_dispatch(self.kind, self.handle) };
-            self.handle = 0;
-        }
-    }
-}
-
-#[cfg(feature = "native-bridge")]
-struct SleepFutureState {
-    deadline: Instant,
-}
-
-#[cfg(feature = "native-bridge")]
-struct TimeoutBoolFutureState {
-    child_kind: i64,
-    child_handle: i64,
-    deadline: Instant,
-    result: Option<bool>,
-}
-
-#[cfg(feature = "native-bridge")]
-fn sleep_duration(duration_ms: i64) -> Duration {
-    Duration::from_millis(duration_ms.max(0) as u64)
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_sleep__start(duration_ms: i64) -> i64 {
-    let state = SleepFutureState {
-        deadline: Instant::now() + sleep_duration(duration_ms),
-    };
-    Box::into_raw(Box::new(state)) as i64
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_sleep__poll(handle: i64) -> i64 {
-    let Some(state) = handle_ref::<SleepFutureState>(handle) else {
-        return 1;
-    };
-    if Instant::now() >= state.deadline {
-        1
-    } else {
-        record_poll_wakeup_hint(state.deadline);
-        0
-    }
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_sleep__result(handle: i64) {
-    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
-        return;
-    };
-    drop(state);
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_sleep__cancel(handle: i64) -> bool {
-    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
-        return false;
-    };
-    drop(state);
-    true
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_sleep__drop(handle: i64) {
-    let Some(state) = handle_take_box::<SleepFutureState>(handle) else {
-        return;
-    };
-    drop(state);
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_timeout_bool__start(
-    child_kind: i64,
-    child_handle: i64,
-    duration_ms: i64,
-) -> i64 {
-    let state = TimeoutBoolFutureState {
-        child_kind,
-        child_handle,
-        deadline: Instant::now() + sleep_duration(duration_ms),
-        result: None,
-    };
-    Box::into_raw(Box::new(state)) as i64
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_timeout_bool__poll(handle: i64) -> i64 {
-    let Some(state) = handle_mut::<TimeoutBoolFutureState>(handle) else {
-        return 1;
-    };
-    if state.result.is_some() {
-        return 1;
-    }
-
-    clear_poll_wakeup_hint();
-    if sengoo_async_poll_dispatch(state.child_kind, state.child_handle) != 0 {
-        state.result = Some(true);
-        return 1;
-    }
-    let child_hint = take_poll_wakeup_hint();
-
-    let now = Instant::now();
-    if now >= state.deadline {
-        state.result = Some(false);
-        return 1;
-    }
-
-    record_poll_wakeup_hint(merge_wakeup_hint_with_deadline(child_hint, state.deadline));
-    0
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_timeout_bool__result(handle: i64) -> bool {
-    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
-        return false;
-    };
-    state.result.unwrap_or(false)
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_timeout_bool__cancel(handle: i64) -> bool {
-    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
-        return false;
-    };
-    drop(state);
-    true
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_timeout_bool__drop(handle: i64) {
-    let Some(state) = handle_take_box::<TimeoutBoolFutureState>(handle) else {
-        return;
-    };
-    drop(state);
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_scheduler_new() -> *mut CoroutineScheduler {
-    Box::into_raw(Box::new(CoroutineScheduler::new()))
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_scheduler_free(scheduler: *mut CoroutineScheduler) {
-    let Some(scheduler) = scheduler_nonnull(scheduler) else {
-        return;
-    };
-    drop(Box::from_raw(scheduler.as_ptr()));
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_scheduler_run_until_idle(
-    scheduler: *mut CoroutineScheduler,
-    max_ticks: usize,
-) -> usize {
-    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
-        return 0;
-    };
-    CURRENT_SCHEDULER.with(|cell| {
-        let previous = cell.replace(scheduler);
-        let finished = scheduler_ref.run_until_idle(max_ticks).len();
-        cell.set(previous);
-        finished
-    })
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_scheduler_cancel(
-    scheduler: *mut CoroutineScheduler,
-    task_id: i64,
-) -> bool {
-    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
-        return false;
-    };
-    if task_id <= 0 {
-        return false;
-    }
-    scheduler_ref.cancel(task_id as TaskId)
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub unsafe extern "C" fn sengoo_async_scheduler_task_status(
-    scheduler: *mut CoroutineScheduler,
-    task_id: i64,
-) -> i64 {
-    let Some(scheduler_ref) = scheduler_mut(scheduler) else {
-        return TaskLifecycleStatus::Unknown as i64;
-    };
-    if task_id <= 0 {
-        return TaskLifecycleStatus::Unknown as i64;
-    }
-    scheduler_ref.task_status(task_id as TaskId) as i64
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_cancel_task(task_id: i64) -> bool {
-    CURRENT_SCHEDULER.with(|cell| {
-        let scheduler = cell.get();
-        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
-            return false;
-        };
-        if task_id <= 0 {
-            return false;
-        }
-        scheduler.cancel(task_id as TaskId)
-    })
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_task_status(task_id: i64) -> i64 {
-    CURRENT_SCHEDULER.with(|cell| {
-        let scheduler = cell.get();
-        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
-            return TaskLifecycleStatus::Unknown as i64;
-        };
-        if task_id <= 0 {
-            return TaskLifecycleStatus::Unknown as i64;
-        }
-        scheduler.task_status(task_id as TaskId) as i64
-    })
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
-    CURRENT_SCHEDULER.with(|cell| {
-        let scheduler = cell.get();
-        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
-            return 0;
-        };
-        scheduler.spawn(ForeignAsyncTask { kind, handle }) as i64
-    })
-}
-
-#[cfg(feature = "native-bridge")]
-macro_rules! define_async_select {
-    ($name:ident, $dispatch:path, $ret:ty) => {
-        #[cfg(feature = "native-bridge")]
-        #[no_mangle]
-        pub extern "C" fn $name(
-            first_kind: i64,
-            first_handle: i64,
-            second_kind: i64,
-            second_handle: i64,
-        ) -> $ret {
-            unsafe {
-                wait_for_first_ready(
-                    first_kind,
-                    first_handle,
-                    second_kind,
-                    second_handle,
-                    $dispatch,
-                )
-            }
-        }
-    };
-}
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_select_winner(
-    first_kind: i64,
-    first_handle: i64,
-    second_kind: i64,
-    second_handle: i64,
-) -> i64 {
-    unsafe { wait_for_first_ready_winner(first_kind, first_handle, second_kind, second_handle) }
-}
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(sengoo_async_select_i8, sengoo_async_result_dispatch_i8, i8);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_i16,
-    sengoo_async_result_dispatch_i16,
-    i16
-);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_i32,
-    sengoo_async_result_dispatch_i32,
-    i32
-);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_i64,
-    sengoo_async_result_dispatch_i64,
-    i64
-);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_bool,
-    sengoo_async_result_dispatch_bool,
-    bool
-);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_f32,
-    sengoo_async_result_dispatch_f32,
-    f32
-);
-
-#[cfg(feature = "native-bridge")]
-define_async_select!(
-    sengoo_async_select_f64,
-    sengoo_async_result_dispatch_f64,
-    f64
-);
-
-#[cfg(feature = "native-bridge")]
-#[no_mangle]
-pub extern "C" fn sengoo_async_run_main_i64() -> i64 {
-    let result = Arc::new(Mutex::new(None));
-    let mut scheduler = CoroutineScheduler::new();
-    scheduler.spawn(RootAsyncMainI64Task::new(result.clone()));
-
-    CURRENT_SCHEDULER.with(|cell| {
-        let previous = cell.replace(&mut scheduler);
-        while !scheduler.is_empty() {
-            let _ = scheduler.run_until_idle(1);
-        }
-        cell.set(previous);
-    });
-
-    let final_result = result
-        .lock()
-        .expect("async main result mutex poisoned")
-        .unwrap_or_default();
-    final_result
 }
 
 #[cfg(all(test, feature = "native-bridge"))]

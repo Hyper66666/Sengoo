@@ -1,12 +1,27 @@
-// Requires stdlib modules: option.sg, result.sg, lua54.sg.
-// Passing a null path exercises the feature-gated loader diagnostic path.
+import std::lua54;
+
+// An empty path exercises the feature-gated loader diagnostic path.
 def main() -> i64 {
-    let opened = lua54_open_raw(0);
+    let opened = lua54_open("");
     if opened.is_err() {
-        0
+        let out = ffi_buffer_new(128);
+        if out.is_err() {
+            1
+        } else {
+            let buffer = out.unwrap_or(Buffer { handle: 0 });
+            let copied = lua54_last_error_copy(buffer);
+            buffer.free();
+            if copied.is_err() {
+                1
+            } else {
+                0
+            }
+        }
     } else {
         let lua = opened.unwrap_or(Lua54 { handle: 0 });
+        lua.exec("function add(a,b) return a + b end");
+        let value = lua.call_i64_2("add", 2, 5);
         lua.close();
-        0
+        value.unwrap_or(0)
     }
 }

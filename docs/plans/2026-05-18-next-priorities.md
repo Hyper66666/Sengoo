@@ -1,4 +1,4 @@
-# Sengoo Next Priorities (updated 2026-05-27)
+# Sengoo Next Priorities (updated 2026-05-30)
 
 ## Current State
 
@@ -30,8 +30,48 @@ it split `tools/sgc/src/interface.rs` (2274 LoC) into a directory module where
 `mod.rs` is 24 LoC and the largest resulting file, `generic_instances.rs`, is
 959 LoC, and split `tools/sgc/src/commands.rs` (1390 LoC) into a directory
 module where `mod.rs` is 9 LoC and the largest resulting file, `build.rs`, is
-582 LoC. The next recommended Large File Splits target is
-`tools/sglsp/src/main.rs` plus `tools/sgfmt/src/main.rs`.
+582 LoC. `tools/sglsp/src/main.rs` has since completed its follow-up split:
+diagnostics, formatting, workspace, semantic token, symbol, and signature
+helpers now live in sibling modules. UTF-16 position conversion, incremental
+text patches, and folding ranges have also moved into `text_editing.rs`,
+leaving the production protocol root at 489 LoC and `text_editing.rs` at 187
+LoC.
+`tools/sgfmt/src/main.rs` has also completed its follow-up split: CLI config
+and expression formatting now live in sibling modules, leaving the root at
+781 LoC. `runtime/src/net.rs` has now been split by protocol family, leaving
+the root at 992 LoC and the largest sibling at 733 LoC.
+`runtime/src/reflect/runtime_ffi.rs` has now been split by handle family and
+compatibility bridge, leaving the root at 750 LoC and the largest sibling,
+`lua.rs`, at 372 LoC. `tools/sgc/src/pipeline.rs` has now been split by
+pruning domain, leaving the root at 591 LoC, `ast_pruning.rs` at 428 LoC, and
+`hir_pruning.rs` at 331 LoC. `runtime/src/async_runtime.rs` has now been split
+by native bridge concern, leaving a 363 LoC production root and the largest
+sibling, `bridge.rs`, at 223 LoC; embedded native-bridge tests remain in the
+root file. `compiler/src/parser/decl.rs` has now been split by
+declaration family, leaving the root at 476 LoC and the largest sibling,
+`object_declarations.rs`, at 398 LoC. `runtime/src/reflect.rs` has now been split by native
+loader concern, leaving the root at 819 LoC and the native loader sibling at
+223 LoC. `compiler/src/hir/lower.rs` has now been split by HIR type and
+expression lowering concern, leaving the root at 667 LoC and the largest
+sibling, `expressions.rs`, at 406 LoC. `tools/sgc/src/bench.rs` has now
+extracted the reflection and incremental benchmark flows, leaving the shared
+benchmark root at 579 LoC, `incremental.rs` at 250 LoC, and `reflection.rs` at
+223 LoC. `compiler/src/parser/expr.rs` has now
+been split by aggregate and control-flow expression family, leaving the Pratt
+root at 692 LoC, `control_flow.rs` at 207 LoC, and `aggregates.rs` at 126 LoC.
+`compiler/src/lexer/token.rs`
+has now extracted keyword metadata, leaving the token root at 762 LoC and
+`keyword.rs` at 190 LoC. `tools/sgc/src/interface/generic_instances.rs` has
+now extracted type-signature utilities and AST traversal, leaving the instance
+collector root at 376 LoC, `collector.rs` at 493 LoC, and
+`type_signatures.rs` at 157 LoC. The next recommended target is
+`compiler/src/codegen/jit/instructions.rs`. Its aggregate-emission and complex
+memory-emission branches have now moved into sibling helpers, leaving the
+instruction dispatch root at 498 LoC, `memory_instructions.rs` at 260 LoC, and
+`aggregate_instructions.rs` at 162 LoC. `tools/sgc/src/main.rs` has now
+extracted compile-error reporting and documentation rendering, leaving the CLI
+root at 672 LoC, `error_reporting.rs` at 182 LoC, and `doc_rendering.rs` at 125
+LoC. The next recommended target is text editing in `tools/sglsp/src/main.rs`.
 
 The `ty-interning-baseline` deliverables:
 
@@ -58,8 +98,16 @@ Phase 2 follow-ups carried forward from the archive’s tasks.md catalog:
   `InternedTyId` (touches 6 call sites listed in 6.1).
 - Migrate `FunctionTy` / `MethodSig` / `ImplInfo` storage in `trait.rs` to
   `InternedTyId`.
-- Restore `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` from
-  `-> Buffer` to `-> Result<Buffer, i64>` (Slice I gate now met).
+- `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` restored from
+  `-> Buffer` to `-> Result<Buffer, i64>` (2026-05-29). The change also fixed
+  typechecker generic-parameter freshening so `Result<Buffer, i64>` and other
+  `Result<struct, i64>` wrappers do not collide with expression-inference
+  variables.
+- `tools/stdlib/collections.sg` now exposes runtime-backed `Vec<bool>` and
+  bool/i64 `HashMap` mutators/query helpers on top of the existing i64 runtime
+  storage (2026-05-29). Compiler stdlib surface tests and sgc native runtime
+  smoke tests cover push/get/set/pop/contains/remove plus bool iterator
+  adapters.
 
 The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 
@@ -102,20 +150,27 @@ The even-earlier P0 item, `examples-coverage-expansion`, remains complete:
 Split the largest non-test files while preserving behavior. Do this in small
 reviewable moves, not broad rewrites.
 
-Full non-test LoC leaderboard (measured 2026-05-20):
+Selected non-test LoC leaderboard (remeasured 2026-05-30):
 
 | LoC  | File                                          |
 |-----:|-----------------------------------------------|
-| 2729 | `runtime/src/net.rs`                          |
+| 2480 | `runtime/src/net/` (split from net.rs, COMPLETE 2026-05-30; root 992 LoC, largest file http_server.rs 733 LoC) |
 | 2274 | `tools/sgc/src/interface/` (split from interface.rs, COMPLETE 2026-05-27; mod.rs 24 LoC, largest file 959 LoC) |
-| 2110 | `tools/sglsp/src/main.rs`                     |
-| 1519 | `runtime/src/reflect/runtime_ffi.rs`          |
+|  489 | `tools/sglsp/src/main.rs` (follow-up split complete: production root 489 LoC, embedded tests remain in main.rs; diagnostics 575, formatting 32, workspace 239, semantic 205, symbols 187, signatures 225, text_editing 187) |
+|  750 | `runtime/src/reflect/runtime_ffi/` (split from runtime_ffi.rs, COMPLETE 2026-05-30; root 750 LoC, largest file lua.rs 372 LoC) |
 | 1501 | `compiler/src/mir/lowering/` (split from lowering.rs, COMPLETE 2026-05-23; mod.rs 162 LoC, largest file 580 LoC) |
-| 1440 | `tools/sgc/src/pipeline.rs`                   |
-| 1363 | `compiler/src/codegen/jit/` (split from jit.rs, COMPLETE 2026-05-23; largest file 857 LoC) |
-| 1349 | `runtime/src/async_runtime.rs`                |
-| 1348 | `tools/sgfmt/src/main.rs`                     |
-| 1332 | `compiler/src/parser/decl.rs`                 |
+|  591 | `tools/sgc/src/pipeline/` (split from pipeline.rs, COMPLETE 2026-05-30; root 591 LoC, ast_pruning.rs 428 LoC, hir_pruning.rs 331 LoC) |
+|  672 | `tools/sgc/src/main.rs` (follow-up split complete 2026-05-30; root 672 LoC, error_reporting.rs 182 LoC, doc_rendering.rs 125 LoC) |
+| 1363 | `compiler/src/codegen/jit/` (split from jit.rs, COMPLETE 2026-05-23; follow-up aggregate and complex memory emission splits 2026-05-30; largest file instructions.rs 498 LoC, memory_instructions.rs 260 LoC) |
+|  363 | `runtime/src/async_runtime/` (split from async_runtime.rs, COMPLETE 2026-05-30; production root 363 LoC with embedded native-bridge tests, largest sibling bridge.rs 223 LoC) |
+|  781 | `tools/sgfmt/src/main.rs` (follow-up split complete: config 93, expressions 397) |
+|  476 | `compiler/src/parser/decl/` (split from decl.rs, COMPLETE 2026-05-30; root 476 LoC, object_declarations.rs 398 LoC, ffi.rs 269 LoC, data_declarations.rs 178 LoC) |
+|  819 | `runtime/src/reflect/` (split from reflect.rs, COMPLETE 2026-05-30; root 819 LoC, native.rs 223 LoC) |
+|  667 | `compiler/src/hir/lower/` (split from lower.rs, COMPLETE 2026-05-30; root 667 LoC, largest file expressions.rs 406 LoC) |
+|  579 | `tools/sgc/src/bench/` (split from bench.rs, COMPLETE 2026-05-30; root 579 LoC, incremental.rs 250 LoC, reflection.rs 223 LoC) |
+|  692 | `compiler/src/parser/expr/` (split from expr.rs, COMPLETE 2026-05-30; root 692 LoC, control_flow.rs 207 LoC, aggregates.rs 126 LoC) |
+|  762 | `compiler/src/lexer/token/` (split from token.rs, COMPLETE 2026-05-30; root 762 LoC, keyword.rs 190 LoC) |
+|  493 | `tools/sgc/src/interface/generic_instances/` (split from generic_instances.rs, COMPLETE 2026-05-30; root 376 LoC, collector.rs 493 LoC, type_signatures.rs 157 LoC) |
 | 1390 | `tools/sgc/src/commands/` (split from commands.rs, COMPLETE 2026-05-27; mod.rs 9 LoC, largest file 582 LoC) |
 |  978 | `runtime/src/reflect/runtime_db/` (← starter, COMPLETE 2026-05-20: largest file now 431 LoC) |
 
@@ -140,15 +195,91 @@ Completed Large File Splits slices:
   largest resulting files are `interface/generic_instances.rs` at 959 LoC and
   `commands/build.rs` at 582 LoC. This extended the SOP to tooling command
   modules with stable CLI behavior and test-only re-export paths.
+- `tools/sglsp/src/main.rs` follow-up split (completed 2026-05-30): extracted
+  diagnostics, formatting, workspace, semantic token, symbol, and signature
+  helpers into sibling modules. A second pass extracted UTF-16 position
+  conversion, incremental content changes, and folding ranges into
+  `text_editing.rs`, leaving the production protocol orchestration root at 489
+  LoC and the text-editing sibling at 187 LoC. Embedded tests remain in
+  `main.rs`.
+- `tools/sgfmt/src/main.rs` follow-up split (completed 2026-05-30): extracted
+  CLI config and expression formatting into sibling modules, leaving the
+  formatting root at 781 LoC.
+- `runtime/src/net.rs` follow-up split (completed 2026-05-30): extracted TCP,
+  UDP, HTTP client, HTTP server, and WebSocket protocol modules, preserving
+  the extern C ABI while leaving the shared runtime root at 992 LoC and the
+  largest sibling, `http_server.rs`, at 733 LoC.
+- `runtime/src/reflect/runtime_ffi.rs` follow-up split (completed 2026-05-30):
+  extracted buffer, callback, object, and Lua compatibility modules,
+  preserving the extern C ABI and pre-split Rust paths while leaving the
+  shared dynamic-library root at 750 LoC and the largest sibling, `lua.rs`,
+  at 372 LoC.
+- `tools/sgc/src/pipeline.rs` follow-up split (completed 2026-05-30): extracted
+  AST, HIR, and MIR reachability pruning into sibling modules, preserving
+  frontend phase ordering and phase timing keys while leaving the orchestration
+  root at 591 LoC, `ast_pruning.rs` at 428 LoC, and `hir_pruning.rs` at 331
+  LoC.
+- `runtime/src/async_runtime.rs` follow-up split (completed 2026-05-30):
+  extracted native scheduler bridge, sleep/timeout futures, and select
+  helpers, preserving the extern C ABI while leaving the shared scheduler
+  production root at 363 LoC and the largest sibling, `bridge.rs`, at 223 LoC.
+  Embedded native-bridge tests remain in the root file.
+- `compiler/src/parser/decl.rs` follow-up split (completed 2026-05-30):
+  extracted extern/FFI declarations, simple leaf declarations, struct/enum
+  data declarations, and class/trait/impl declarations. Top-level dispatch and
+  diagnostics remain stable while the shared declaration root is now 476 LoC
+  and the largest sibling, `object_declarations.rs`, is 398 LoC.
+- `runtime/src/reflect.rs` follow-up split (completed 2026-05-30): extracted
+  platform dynamic-library loading and i64 native binding adaptation,
+  preserving the shared loader path used by FFI and Lua bridges while leaving
+  the reflection root at 819 LoC and `native.rs` at 223 LoC.
+- `compiler/src/hir/lower.rs` follow-up split (completed 2026-05-30): extracted
+  HIR type inference and expression lowering helpers, preserving the existing
+  lambda parameter inference behavior while leaving the declaration lowering
+  root at 667 LoC and the largest sibling, `expressions.rs`, at 406 LoC.
+- `tools/sgc/src/bench.rs` follow-up split (completed 2026-05-30): extracted
+  the reflection and incremental benchmark flows, preserving CLI entrypoints
+  while leaving shared benchmark utilities and the remaining flows in a 579
+  LoC root. `incremental.rs` is 250 LoC and `reflection.rs` is 223 LoC.
+- `compiler/src/parser/expr.rs` follow-up split (completed 2026-05-30):
+  extracted array, path-call, and struct-literal parsing into an aggregate
+  expression sibling, then extracted block, control-flow, lambda, async, and
+  parallel parsing into a second sibling. Pratt parsing and diagnostics remain
+  stable while the shared expression root is now 692 LoC,
+  `control_flow.rs` is 207 LoC, and `aggregates.rs` is 126 LoC.
+- `compiler/src/lexer/token.rs` follow-up split (completed 2026-05-30):
+  extracted public keyword metadata and lookup formatting into a sibling
+  module, preserving the `lexer::Keyword` API while leaving the token root at
+  762 LoC and `keyword.rs` at 190 LoC.
+- `tools/sgc/src/interface/generic_instances.rs` follow-up split (completed
+  2026-05-30): extracted type-signature splitting, inference, substitution,
+  unification utilities, and AST traversal, preserving instance insertion
+  order and fingerprint sorting while leaving the root at 376 LoC,
+  `collector.rs` at 493 LoC, and `type_signatures.rs` at 157 LoC.
+- `compiler/src/codegen/jit/instructions.rs` follow-up split (completed
+  2026-05-30): extracted aggregate instruction emission for arrays, tuples,
+  and enums, preserving IR order and diagnostics while leaving the
+  instruction dispatch root at 737 LoC and `aggregate_instructions.rs` at 160
+  LoC.
+- `compiler/src/codegen/jit/instructions.rs` memory follow-up split (completed
+  2026-05-30): extracted the complex `Store` and `IndexAddr` instruction
+  emitters, preserving pointer, aggregate-copy, and index-address IR templates
+  while leaving the instruction dispatch root at 498 LoC and
+  `memory_instructions.rs` at 260 LoC.
+- `tools/sgc/src/main.rs` follow-up split (completed 2026-05-30): extracted
+  compile-error JSON/location rendering and documentation HTML rendering,
+  preserving CLI-facing error paths and `sgc doc` output while leaving the CLI
+  root at 672 LoC, `error_reporting.rs` at 182 LoC, and `doc_rendering.rs` at
+  125 LoC.
 
 Recommended next order, smallest-clear-seam first to keep growing SOP coverage:
 
-1. `tools/sglsp/src/main.rs` (2110 LoC) and `tools/sgfmt/src/main.rs`
-   (1348 LoC) - both currently monolithic `main.rs` files.
-2. `runtime/src/net.rs` (2729 LoC) - largest, defer until SOP is well-proven
-   because of extern C ABI surface.
-3. `runtime/src/reflect/runtime_ffi.rs` (1519 LoC) - next reflect runtime
-   boundary after the earlier `runtime_db` split.
+1. `compiler/src/typeck/check.rs` (973 production LoC, 37 KB) - split only
+   after the active semantic edits settle; keep this separate from behavior
+   changes.
+2. `compiler/src/codegen/instruction_helpers.rs` (996 production LoC, 36 KB) -
+   split only after the active codegen edits settle; preserve emitted IR
+   templates byte-for-byte.
 
 Goal: no single non-test source file over 25 KB (~1000 LoC) unless there is
 a documented reason to keep it whole.
@@ -175,13 +306,19 @@ Reduce runtime module coupling without changing the extern C ABI.
 Target files:
 
 - `runtime/src/net.rs`: split TCP, UDP, HTTP client, HTTP server, and WebSocket
-  surfaces.
-- `runtime/src/reflect/runtime_ffi.rs`: split C libraries, objects, buffers,
-  and callbacks.
-- Restore `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` (a stdlib `.sg`
-  wrapper, not an extern C symbol) from `-> Buffer` to `-> Result<Buffer, i64>`.
-  **Gate now met** (2026-05-20): `ty-interning-baseline` shipped with all
-  verification green, satisfying the archive 6.2 prerequisite.
+  surfaces (completed 2026-05-30).
+- `runtime/src/reflect/runtime_ffi.rs`: split buffers, callbacks, objects, and
+  the Lua compatibility bridge while leaving shared C-library invocation in
+  the root (completed 2026-05-30).
+- `runtime/src/async_runtime.rs`: split native scheduler bridge, future
+  implementations, and select helpers while leaving the reusable scheduler
+  core in the root (completed 2026-05-30).
+- `tools/stdlib/ffi.sg::ffi_buffer_from_bytes_raw` (a stdlib `.sg` wrapper, not
+  an extern C symbol) was restored from `-> Buffer` to
+  `-> Result<Buffer, i64>` on 2026-05-29. The restoration required unifying
+  generic type-parameter freshening through `TypeInfer` so stdlib
+  `Result<struct, i64>` wrappers remain type-safe after earlier expression
+  inference binds numeric locals.
 
 ### P2: Cyclic Async CFG
 
@@ -200,7 +337,118 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 
 - `sglsp` incremental responsiveness.
 - `sgfmt` idempotent fixture CI.
-- `sgpm` registry/git dependency sources, `cache`, `update`, and `publish`.
+- `sgc doc <file.sg> --output <dir>` now exposes the existing rustdoc-like API
+  documentation generator through the CLI (2026-05-30).
+- `std::math` and `std::error` now have curated runnable examples and `sgc`
+  smoke coverage alongside the existing `std::string` example (2026-05-30).
+- `sgpm init [name] [--path <dir>]` now initializes existing directories,
+  derives the package name from the directory by default, preserves unrelated
+  files, and refuses to overwrite scaffold files (2026-05-30).
+- `sgpm new --lib` and `sgpm init --lib` now scaffold reusable library packages
+  with `[lib] path = "src/lib.sg"` (2026-05-30).
+- `sgc` now expands relative source imports dependency-first, and `sgpm`
+  exposes resolved `[lib]` package entries as importable modules while
+  type-checking pure library nodes before dependent binary builds; `sgpm run`
+  now rejects pure library roots with an actionable `[bin]` hint (2026-05-30).
+- `sgc` now rejects unresolved ordinary and `std::*` imports instead of
+  silently ignoring them. Frontend graph probes expand each module's semantic
+  imports while retaining raw module fingerprints, so cross-module generic
+  stdlib types and mapped package reflection imports participate correctly in
+  incremental analysis. `sgpm` also rejects dependency keys that differ from
+  the target `[package].name` until renamed aliases are implemented
+  (2026-05-30).
+- `sgpm test` now exposes a library package's own `[lib]` entry to its
+  `tests/*.sg` files, so package tests can import the public module directly
+  (2026-05-30).
+- `sgpm` now rejects dependency graphs where one package name resolves to
+  multiple manifests, preventing silent `SENGOO_MODULE_MAP` overwrites until
+  renamed or multi-version dependencies are implemented (2026-05-30).
+- `sgpm` now maps dual-target package imports to `[lib].path` while retaining
+  `[bin].path` as the build and run entry, so packages can ship a CLI and a
+  reusable library together (2026-05-30).
+- `sgpm` now rejects missing, absolute, and package-root-escaping `[bin]` and
+  `[lib]` entries during dependency resolution, preventing unusable package
+  archives and inconsistent command behavior (2026-05-30).
+- `sgpm` now validates remote registry cache hits before reuse and downloads an
+  incomplete cached package again automatically (2026-05-30).
+- Remote registry downloads now unpack and validate in sibling staging
+  directories before replacing a cache version, so failed archive extraction
+  does not expose partial cache state (2026-05-30).
+- Git dependency clones and refreshes now complete in sibling staging paths,
+  incomplete checkout caches are rebuilt automatically before use, and broken
+  refreshed packages cannot replace a previously valid checkout (2026-05-30).
+- `sgpm cache list` now reports downloaded remote registry package versions,
+  and `sgpm cache clean --registry` removes that cache explicitly without
+  touching normal build artifacts (2026-05-30).
+- `sgpm` now applies the scaffold package-name grammar to hand-written
+  manifests, dependency keys, and optional binary names, preventing path-like
+  names from escaping output or local registry directories (2026-05-30).
+- Registry configuration keys and dependency selectors now require
+  alphanumeric boundaries with lowercase ASCII letters, digits, `_`, `-`, or
+  `.` internally, preventing ambiguous lockfile identifiers and remote-cache
+  path collisions (2026-05-30).
+- `sgpm` now rejects duplicate workspace member package names during member
+  loading, so all-member commands and workspace lockfiles retain unambiguous
+  roots (2026-05-30).
+- `std::net` now exposes the existing HTTP server runtime through `HttpServer`
+  wrappers for bind, limits, static routes, required-header middleware, WS
+  echo routes, serve-once timeout handling, and close (2026-05-30).
+- `sgpm test` now forwards profile optimization flags explicitly:
+  debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
+  (2026-05-29).
+- `sgpm publish --dry-run` now creates a root-package `.tar.gz` artifact and
+  `.sha256` checksum under `target/package/`, excluding build artifacts
+  (2026-05-29).
+- `sgpm update` now writes a generated `Sengoo.lock` snapshot for the resolved
+  package graph, including package versions, `path+...` sources,
+  `git+...#<commit>` sources, registry sources, manifest paths, and direct dependencies
+  (2026-05-29).
+- `sgpm update --check` now verifies `Sengoo.lock` freshness without rewriting
+  it, giving CI a lockfile drift check for local path and git dependency graphs
+  (2026-05-29).
+- `sgpm update` now stages generated lockfiles beside the final path before
+  replacement, preserving the previous snapshot when staging or replacement
+  fails (2026-05-30).
+- `sgpm <command> --locked` execution is now available on package graph commands
+  (`build`, `check`, `run`, `test`, `fmt`, `tree`, and `publish`) so stale
+  lockfiles fail before delegated `sgc`/`sgfmt` invocation or packaging
+  (2026-05-29).
+- `sgpm` now resolves git dependencies through a root-package
+  `target/sgpm/git` cache and records resolved git commits in `Sengoo.lock`
+  (2026-05-29).
+- `sgpm update --refresh` now reclones git dependency caches before writing
+  `Sengoo.lock`, giving branch/local-source dependency graphs an explicit
+  refresh control (2026-05-29).
+- `sgpm cache list` and `sgpm cache clean --git` now expose and prune the root
+  package git dependency cache under `target/sgpm/git` (2026-05-29).
+- `sgpm` now supports root-level local file registries via `[registries.<name>]`
+  with semver dependency constraints, highest matching version selection,
+  lockfile `registry+<registry>/<package>@<version>` sources, and actionable
+  same-package version-conflict diagnostics (2026-05-29).
+- `sgpm publish --registry <name>` now publishes the root package into a
+  configured local file registry, excludes `.git/`, `target/`, and registry
+  output directories, and refuses to overwrite an existing package version
+  (2026-05-29).
+- Local registry publish now stages source copies beside the final version
+  directory, renames only completed packages into place, and removes failed
+  staging directories so interrupted copies do not block retries (2026-05-30).
+- Package file enumeration now propagates traversal errors instead of silently
+  omitting unreadable paths from dry-run archives, local registry copies, or
+  remote upload artifacts (2026-05-30).
+- `sgpm test` and `sgpm fmt` source enumeration now propagates traversal errors
+  instead of silently skipping unreadable `.sg` files (2026-05-30).
+- `sgpm` now supports `[workspace].members`, direct-child `/*` member
+  expansion, workspace-level local registry inheritance, and `--package <name>`
+  member selection across package graph commands (2026-05-29).
+- `sgpm` now supports `--workspace` all-member execution for `build`, `check`,
+  `test`, `fmt`, `tree`, `clean`, and `update`; `update --workspace` writes one
+  root `Sengoo.lock` snapshot for all members (2026-05-30).
+- `sgpm` remote registries now support cached package fetches, optional bearer
+  auth via `token_env`, checksum verification, and package archive upload
+  (2026-05-30).
+- Further `sgpm` work should follow concrete registry protocol compatibility
+  and workflow feedback; the earlier remote-registry and aggregate-lockfile
+  placeholders are complete.
 
 ## Verification Baseline
 

@@ -166,16 +166,20 @@ impl Codegen {
                     }
 
                     mir::MirBinOp::Eq => {
+                        let left_ty = self.get_local_type(mir_fn, *left).clone();
+                        let cmp_ty = self.mir_type_to_llvm_cached(&left_ty);
                         self.ir.push_str(&format!(
-                            "{} = icmp eq i64 {}, {}\n",
-                            dest, left_val, right_val
+                            "{} = icmp eq {} {}, {}\n",
+                            dest, cmp_ty, left_val, right_val
                         ));
                     }
 
                     mir::MirBinOp::Ne => {
+                        let left_ty = self.get_local_type(mir_fn, *left).clone();
+                        let cmp_ty = self.mir_type_to_llvm_cached(&left_ty);
                         self.ir.push_str(&format!(
-                            "{} = icmp ne i64 {}, {}\n",
-                            dest, left_val, right_val
+                            "{} = icmp ne {} {}, {}\n",
+                            dest, cmp_ty, left_val, right_val
                         ));
                     }
 

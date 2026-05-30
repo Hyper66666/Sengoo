@@ -187,7 +187,7 @@ impl TypeChecker {
     ) -> Result<Vec<GenericTypeParamMeta>> {
         let mut metas = Vec::with_capacity(type_params.len());
         for type_param in type_params {
-            let fresh_var = self.env.new_ty_var();
+            let fresh_var = self.infer.fresh_ty_var();
             let var_id = match fresh_var.kind {
                 TyKind::Var(id) => id,
                 _ => {

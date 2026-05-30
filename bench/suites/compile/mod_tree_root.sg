@@ -1,0 +1,14 @@
+﻿def helper(x: i64) -> i64 {
+    x + 1
+}
+
+def main() -> i64 {
+    let i = 0
+    let sum = 0
+    while i < 10000 {
+        sum = sum + helper(i)
+        i = i + 1
+    }
+    print(sum)
+    0
+}

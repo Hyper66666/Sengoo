@@ -1,0 +1,49 @@
+// Sengoo level generator for the web mini game.
+// Output format:
+// line1: width
+// line2: rows
+// line3: start_col
+// line4..: obstacle column for each tick
+
+def next_seed(seed: i64) -> i64 {
+    let m = 2147483647;
+    let x = seed * 1103515245 + 12345;
+    x - (x / m) * m
+}
+
+def mod_i64(x: i64, m: i64) -> i64 {
+    x - (x / m) * m
+}
+
+def main() -> i64 {
+    let width = 9;
+    let rows = 240;
+    let start_col = width / 2;
+
+    let seed = 20260216;
+    let last_col = start_col;
+    let i = 0;
+
+    print(width);
+    print(rows);
+    print(start_col);
+
+    while i < rows {
+        seed = next_seed(seed);
+        let col = mod_i64(seed, width);
+        if col == last_col {
+            col = mod_i64(col + 2, width);
+        }
+
+        let burst = mod_i64(i, 19);
+        if burst == 0 {
+            col = mod_i64(col + 1, width);
+        }
+
+        print(col);
+        last_col = col;
+        i = i + 1;
+    }
+
+    0
+}

@@ -1,12 +1,13 @@
-// Requires stdlib modules: option.sg, result.sg, ffi.sg.
-// Null library path exercises the safe error path.
+import std::ffi;
+
 def main() -> i64 {
-    let lib = ffi_open_raw(0);
+    let lib = ffi_open("self://builtin");
     if lib.is_err() {
         0
     } else {
         let loaded = lib.unwrap_or(CLib { handle: 0 });
+        let value = loaded.call_i64_2("sengoo_ffi_builtin_add2", 10, 32);
         loaded.close();
-        0
+        value.unwrap_or(0)
     }
 }

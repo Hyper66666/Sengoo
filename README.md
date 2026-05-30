@@ -239,7 +239,7 @@ The latest runtime track adds a reusable FFI wrapper layer and integration utili
 
 - Sengoo source wrappers in `tools/stdlib/`
   - `db.sg`, `ffi.sg`, `lua54.sg`, `proto.sg`, and `net.sg`
-  - Raw pointer parameters are currently represented as `i64` until typed FFI pointer/string support lands
+  - Common C-string inputs now have `&str` helpers; explicit buffer/output pointers remain represented as `i64`
   - Example programs live under `examples/reflection/`
 - Database runtime MVP (`runtime/src/reflect/runtime_db.rs`)
   - Lifecycle: `open` / `close` / `ping`
@@ -248,11 +248,13 @@ The latest runtime track adds a reusable FFI wrapper layer and integration utili
 - Full C and C++ wrapper path (`runtime/src/reflect/runtime_ffi.rs`)
   - C library open / call / close
   - C++ object lifecycle wrappers: create / call / destroy
+  - Fixed-arity `i64` value calls without caller-managed pointer slots
   - Callback bridge: bind / dispatch / unbind
   - Binary payload bridge: managed buffer handles (`new/from/len/ptr/copy_in/copy_out/free`)
 - Lua bridge
   - Lightweight runtime subset (`sengoo_lua_*`)
   - Native Lua 5.4 dynamic-library bridge proof of concept (`sengoo_lua54_*`)
+  - Fixed-arity Lua54 `i64` value calls without caller-managed pointer slots
 - Integration validation lanes
   - Protobuf wire encode/decode FFI path (`runtime_proto`)
   - Network bench runtime path with p50/p95/p99 metrics (`runtime_net_bench`)
@@ -295,6 +297,9 @@ sgc run <file.sg> -O 1 --contract-checks auto
 # build native binary
 sgc build <file.sg> -O 2
 
+# generate rustdoc-like API docs
+sgc doc <file.sg> --output target/doc
+
 # force full rebuild
 sgc build <file.sg> -O 2 --force-rebuild
 
@@ -309,7 +314,7 @@ Curated runnable examples live in [`examples/`](examples/README.md). They cover 
 Useful entry points:
 
 - [`examples/async/`](examples/async/) for `sleep`, `spawn`, `select`, and task lifecycle APIs
-- [`examples/generics/`](examples/generics/) for `Vec<i64>`, `Option<T>`, and `Result<T, E>` patterns
+- [`examples/generics/`](examples/generics/) for `Vec<i64>`, `Option<T>`, `Result<T, E>`, and `std::collections` import patterns; stdlib smoke tests also cover runtime-backed `Vec<bool>` and `HashMap` mutators
 - [`examples/traits/`](examples/traits/) for trait dispatch and generic trait method instantiation
 - [`examples/ffi/`](examples/ffi/) for Sengoo <-> C calls
 
@@ -317,9 +322,16 @@ Smoke coverage: `cargo test -p sgc examples_smoke_`.
 
 ## Package Manager (sgpm)
 
-`sgpm` is the offline package-manager MVP for project-level Sengoo workflows.
-It supports `Sengoo.toml`, path-only dependencies, topological `build`/`check`,
-`run`, `test`, `fmt`, `tree`, and `clean`.
+`sgpm` is the package-manager MVP for project-level Sengoo workflows. It
+supports `Sengoo.toml`, local path dependencies, git dependencies resolved
+through a root-package cache, local file registry dependencies with semver
+constraints, `new`/`init` project scaffolding, topological `build`/`check`, `run`, profile-aware `test`, `fmt`,
+`tree`, `update` lockfile generation, `update --check` lockfile freshness
+checks, `update --refresh` git cache refreshes, `cache list`,
+`cache clean --git`, `--locked` command execution, `clean`, publish dry-runs,
+local registry publishing, remote package upload to configured registry URLs,
+workspace member selection with `--package`, and all-member workspace execution
+with `--workspace` for supported package graph commands.
 
 ```bash
 sgpm new hello
@@ -329,16 +341,61 @@ sgpm build
 sgpm run
 ```
 
-Registry dependencies, lockfiles, workspaces, and publish flows are intentionally
-deferred. See `docs/sgpm-quickstart.md` for the current manifest and command
-surface.
+Use `sgpm init` inside an existing directory to preserve unrelated files while
+creating the missing Sengoo package scaffold.
+Use `sgpm new math_utils --lib` or `sgpm init --lib` for a reusable library
+package with `src/lib.sg`.
+
+Local `sgpm update` writes `Sengoo.lock`, including resolved git commits and
+selected local or remote registry versions. `sgpm update --workspace` writes
+one root workspace lockfile for all members. Local publish dry-runs can create
+package archives and checksums, and
+`sgpm publish --registry <name>` can publish a package into a configured local
+file registry. `sgpm publish` uploads to `[registries.default].url` and
+`sgpm publish --registry <name>` uploads when the named registry has `url`.
+Workspace roots can declare `[workspace].members`, inherit workspace-level
+registries, and run package graph commands with
+`--package <name>` or supported all-member package graph commands with
+`--workspace`. `sgpm update --refresh` reclones cached git dependencies before
+writing the lockfile. `sgpm cache list`, `sgpm cache clean --git`, and
+`sgpm cache clean --registry` expose the root package dependency caches for
+inspection and pruning. `sgpm update --check` verifies the lockfile without
+rewriting it for CI-style workflows, and `--locked` makes package graph commands
+fail before invoking external tools when the lockfile is stale. See
+`docs/sgpm-quickstart.md` for the current manifest and command surface.
+Path, git, and registry packages that declare `[lib]` can now be imported by
+dependency name from application source; pure library dependencies are
+type-checked before dependent binaries are built. Dependency keys currently
+must match the target package's `[package].name`; renamed aliases are not
+supported yet.
 
 ## Standard Library
 
 The source-side standard library lives under `tools/stdlib/` and is split by
 surface area: `option.sg`, `result.sg`, `collections.sg`, `string.sg`,
-`math.sg`, and `error.sg`. See `tools/stdlib/README.md` for module summaries
-and current deferrals.
+`math.sg`, `error.sg`, and reflection wrappers such as `ffi.sg`, `db.sg`,
+`lua54.sg`, `net.sg`, and `proto.sg`. See `tools/stdlib/README.md` for module
+summaries and current deferrals.
+
+Use source modules directly from Sengoo code:
+
+```sg
+import std::collections;
+
+def main() -> i64 {
+    let values = vec_new_i64();
+    values.push(41);
+    values.get(0).unwrap_or(0) + 1
+}
+```
+
+`sgc check`, `sgc build`, and `sgc run` preload the requested stdlib source
+module plus its current transitive source dependencies before compiling.
+For example, reflection wrappers such as `std::db`, `std::lua54`, `std::net`,
+and `std::proto` also preload the managed FFI `Buffer` helper used by their
+diagnostic and output-copy wrappers.
+Curated stdlib examples live under `examples/stdlib/`, including a runnable
+`std::string` import smoke path.
 
 ## Async Execution
 
@@ -451,6 +508,7 @@ Fairness profile used in advanced pipeline comparison:
 
 ## Documentation
 
+- API docs generator: `sgc doc <file.sg> --output target/doc`
 - Tutorial: `docs/sengoo-tutorial.html`
 - Language features: `docs/language-features.md`
 - Development guide: `docs/DEVELOPMENT_GUIDE.md`

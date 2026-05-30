@@ -22,9 +22,12 @@ Extern symbols:
 - `sengoo_ffi_c_open(path: *const u8) -> u64`
 - `sengoo_ffi_c_close(handle: u64) -> i32`
 - `sengoo_ffi_c_call_i64(handle: u64, symbol: *const u8, argc: usize, argv: *const i64, out_value: *mut i64) -> i32`
+- `sengoo_ffi_c_call_i64_value(handle: u64, symbol: *const u8, argc: usize, a0: i64, a1: i64, a2: i64, a3: i64) -> i64`
 - `sengoo_ffi_object_create(lib_handle: u64, constructor_symbol: *const u8, argc: usize, argv: *const i64, destructor_symbol: *const u8) -> u64`
+- `sengoo_ffi_object_create_value(lib_handle: u64, constructor_symbol: *const u8, argc: usize, a0: i64, a1: i64, a2: i64, a3: i64, destructor_symbol: *const u8) -> u64`
 - `sengoo_ffi_object_raw_ptr(object_handle: u64) -> i64`
 - `sengoo_ffi_object_call_i64(object_handle: u64, method_symbol: *const u8, argc: usize, argv: *const i64, out_value: *mut i64) -> i32`
+- `sengoo_ffi_object_call_i64_value(object_handle: u64, method_symbol: *const u8, argc: usize, a0: i64, a1: i64, a2: i64) -> i64`
 - `sengoo_ffi_object_destroy(object_handle: u64) -> i32`
 - `sengoo_ffi_callback_bind_i64(lib_handle: u64, symbol: *const u8, arity: usize) -> u64`
 - `sengoo_ffi_callback_dispatch_i64(callback_id: u64, a0: i64, a1: i64, a2: i64, a3: i64, a4: i64, a5: i64) -> i64`
@@ -46,4 +49,9 @@ Ownership:
 
 Sengoo wrapper note:
 
-The MVP wrapper intentionally exposes raw pointer parameters as `i64` until source-level pointer/string FFI types are stabilized.
+The Sengoo wrapper exposes `&str` helpers for common symbol/path inputs and
+managed `Buffer` helpers for error copy and buffer-to-buffer payload copy.
+`CLib.call_i64_0` through `call_i64_4`, `CLib.object_create_0` through
+`object_create_4`, and `CppObject.call_i64_0` through `call_i64_3` cover common
+fixed-arity calls without raw argument/result pointers. Raw helpers remain for
+dynamic arity.

@@ -1,0 +1,32 @@
+import reflect;
+
+def rule_fast_track(amount: i64) -> i64 {
+    if amount < 1000 {
+        1
+    } else {
+        0
+    }
+}
+
+def rule_review(amount: i64) -> i64 {
+    if amount > 50000 {
+        1
+    } else {
+        0
+    }
+}
+
+def rule_block(amount: i64) -> i64 {
+    if amount > 200000 {
+        1
+    } else {
+        0
+    }
+}
+
+def main() -> i64 {
+    let a = rule_fast_track(0);
+    let b = rule_review(0);
+    let c = rule_block(0);
+    a + b + c
+}

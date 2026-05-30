@@ -394,24 +394,33 @@ mod tests {
     #[test]
     fn id_eq_ty_matches_structurally_equivalent_owned_ty() {
         let mut interner = TyInterner::new();
-        let original = Ty::new(11, TyKind::Tuple(vec![
-            Ty::new(12, TyKind::Bool),
-            Ty::new(13, TyKind::Int(IntKind::I64)),
-        ]));
+        let original = Ty::new(
+            11,
+            TyKind::Tuple(vec![
+                Ty::new(12, TyKind::Bool),
+                Ty::new(13, TyKind::Int(IntKind::I64)),
+            ]),
+        );
         let id = interner.intern_ty(&original);
 
         // 同形状、不同 origin 的 Ty 应匹配同一 id。
-        let equivalent = Ty::new(99, TyKind::Tuple(vec![
-            Ty::new(98, TyKind::Bool),
-            Ty::new(97, TyKind::Int(IntKind::I64)),
-        ]));
+        let equivalent = Ty::new(
+            99,
+            TyKind::Tuple(vec![
+                Ty::new(98, TyKind::Bool),
+                Ty::new(97, TyKind::Int(IntKind::I64)),
+            ]),
+        );
         assert!(interner.id_eq_ty(id, &equivalent));
 
         // 不同结构不匹配。
-        let different = Ty::new(0, TyKind::Tuple(vec![
-            Ty::new(0, TyKind::Bool),
-            Ty::new(0, TyKind::Int(IntKind::I32)), // 不同整数宽度
-        ]));
+        let different = Ty::new(
+            0,
+            TyKind::Tuple(vec![
+                Ty::new(0, TyKind::Bool),
+                Ty::new(0, TyKind::Int(IntKind::I32)), // 不同整数宽度
+            ]),
+        );
         assert!(!interner.id_eq_ty(id, &different));
     }
 
@@ -473,7 +482,9 @@ mod tests {
 
         // 3c) 所有 checkpoint 都通过 get 拿到与原始结构相等的 Ty（materialize 路径正确）。
         for ckpt in &checkpoints {
-            let materialized = ckpt.get(0).expect("binding should be present in each clone");
+            let materialized = ckpt
+                .get(0)
+                .expect("binding should be present in each clone");
             assert_eq!(
                 format!("{}", materialized),
                 format!("{}", deeply_nested),

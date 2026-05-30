@@ -8,22 +8,22 @@ use super::{
     compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
     derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
     derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_object, find_clang, find_runtime_c, format_edit_impact_lines,
-    generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
-    link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
-    module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
-    parse_frontend_jobs_arg, parse_linker_mode, reflection_options_from_cli,
-    reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
-    resolve_engine, select_reflection_i64_zero_arity_symbol, send_daemon_request,
-    signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
-    BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode,
-    DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
-    FrontendMemoryMode, FrontendModuleCacheEntryV4, FrontendProbeMode, FrontendSchedulerTelemetry,
-    FrontendSessionStoreV4, FunctionFingerprint, GenericInstanceCacheEntry,
+    edit_class_label, ensure_runtime_object, expand_stdlib_imports_for_source, find_clang,
+    find_runtime_c, format_edit_impact_lines, generic_fingerprints_for_module,
+    generic_instance_hit_ratio, handle_daemon_client, link_native_binary_from_objects,
+    maybe_emit_reflection_sidecar, metadata_matches, module_dependency_levels,
+    module_fingerprints_for_source, module_invalidation_stats, parse_frontend_jobs_arg,
+    parse_linker_mode, reflection_options_from_cli, reflection_sidecar_path_for_artifact,
+    resolve_bench_suite_path, resolve_daemon_addr, resolve_engine,
+    select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
+    validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
+    BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode, DaemonDispatchOutcome,
+    EditClass, EditImpact, FrontendFallbackScope, FrontendJobs, FrontendMemoryMode,
+    FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
-    GenericItemFingerprint, LinkerMode, ModuleFingerprint, ModuleGraphSnapshot, ReflectionMetadata,
-    ReflectionMode, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
-    DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
+    GenericItemFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata, ReflectionMode,
+    RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION,
+    DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
     FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
     LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
@@ -111,49 +111,6 @@ fn reflection_graph_for_module(path: &Path) -> BuildGraphV2 {
             generic_items: Vec::new(),
             generic_instances: Vec::new(),
         }],
-    }
-}
-
-fn snapshot_with_root_hashes(
-    input_path: &Path,
-    interface_hash: u64,
-    body_hash: u64,
-) -> ModuleGraphSnapshot {
-    let root_module = super::canonical_or_lossy(input_path);
-    ModuleGraphSnapshot {
-        module_fingerprints: Vec::new(),
-        module_function_fingerprints: BTreeMap::new(),
-        module_generic_items: BTreeMap::new(),
-        module_generic_instances: BTreeMap::new(),
-        dependency_edges: BTreeMap::new(),
-        reflection_import_modules: Vec::new(),
-        diagnostics: Vec::new(),
-        planner_trace: Vec::new(),
-        fallback_events: Vec::new(),
-        frontend_scheduler: FrontendSchedulerTelemetry::default(),
-        frontend_session_store: FrontendSessionStoreV4 {
-            schema_version: BUILD_GRAPH_SCHEMA_VERSION,
-            scheduler_schema_version: super::FRONTEND_SCHEDULER_SCHEMA_VERSION,
-            dependency_graph_digest: 0,
-            compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-            root_module: root_module.clone(),
-            modules: vec![FrontendModuleCacheEntryV4 {
-                module_id: root_module,
-                source_hash: body_hash,
-                parse_hash: body_hash,
-                interface_hash,
-                body_hash,
-                hir_hash: body_hash,
-                dependency_digest: 0,
-                scheduler_schema_version: super::FRONTEND_SCHEDULER_SCHEMA_VERSION,
-                depends_on: Vec::new(),
-                symbols: Vec::new(),
-                generic_items: Vec::new(),
-                generic_instances: Vec::new(),
-            }],
-        },
-        reused_modules: Vec::new(),
-        rebuilt_modules: Vec::new(),
     }
 }
 
@@ -547,6 +504,37 @@ fn check_subcommand_parses() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn check_command_compiles_relative_imported_module_symbols() {
+    let root = std::env::temp_dir().join(format!("sengoo-sgc-local-import-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("util.sg"),
+        "def imported_value() -> i64 {\n    42\n}\n",
+    )
+    .unwrap();
+    let input = root.join("main.sg");
+    fs::write(
+        &input,
+        "import util;\n\ndef main() -> i64 {\n    imported_value()\n}\n",
+    )
+    .unwrap();
+
+    let result = super::cmd_check(input.to_string_lossy().as_ref()).await;
+
+    let _ = fs::remove_dir_all(&root);
+    result.expect("relative imported module symbols should compile");
+}
+
+#[test]
+fn doc_subcommand_parses() {
+    assert!(
+        Cli::try_parse_from(["sgc", "doc", "tests/demo.sg", "--output", "target/api-docs",])
+            .is_ok()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn doc_command_generates_rustdoc_like_layout() {
     let root = std::env::temp_dir().join(format!("sengoo-sgc-doc-gen-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -579,6 +567,55 @@ async fn doc_command_generates_rustdoc_like_layout() {
     assert!(index_html.contains("Sengoo API Docs"));
     assert!(module_html.contains("main"));
     assert!(module_html.contains("helper"));
+}
+
+#[test]
+fn dump_ast_render_parses_source_file() {
+    let root = std::env::temp_dir().join(format!("sengoo-sgc-dump-ast-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let input = root.join("main.sg");
+    fs::write(&input, "def answer() -> i64 {\n    42\n}\n").unwrap();
+
+    let dump =
+        super::render_ast_dump(input.to_str().unwrap()).expect("dump_ast should parse source");
+    assert!(dump.contains("Program"), "{dump}");
+    assert!(dump.contains("answer"), "{dump}");
+    assert!(!dump.contains("not implemented"), "{dump}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn repl_session_checks_expressions_and_declarations() {
+    let transcript = super::render_repl_session(":help\n1 + 2\ndef answer() -> i64 { 42 }\nexit\n");
+
+    assert!(transcript.contains("Sengoo REPL"), "{transcript}");
+    assert!(transcript.contains("Commands:"), "{transcript}");
+    assert!(
+        transcript.contains("ok: expression compiled"),
+        "{transcript}"
+    );
+    assert!(
+        transcript.contains("ok: declaration compiled"),
+        "{transcript}"
+    );
+    assert!(transcript.contains("bye"), "{transcript}");
+    assert!(!transcript.contains("not implemented"), "{transcript}");
+}
+
+#[test]
+fn repl_session_reports_compile_errors_without_stopping() {
+    let transcript = super::render_repl_session("unknown_name\n1 + 1\nexit\n");
+
+    assert!(transcript.contains("error:"), "{transcript}");
+    assert!(transcript.contains("unknown_name"), "{transcript}");
+    assert!(
+        transcript.contains("ok: expression compiled"),
+        "{transcript}"
+    );
+    assert!(transcript.contains("bye"), "{transcript}");
 }
 
 #[test]
@@ -966,54 +1003,31 @@ fn daemon_addr_prefers_explicit_value() {
 }
 
 #[test]
-fn root_hashes_reuse_snapshot_without_force_rebuild() {
-    let input = Path::new("tests/main.sg");
-    let snapshot = snapshot_with_root_hashes(input, 111, 222);
-    let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(
-        input,
-        "invalid source {}",
-        &snapshot,
-        false,
-        None,
-        None,
-    );
-    assert_eq!(interface_hash, 111);
-    assert_eq!(impl_hash, 222);
+fn root_hashes_follow_semantic_source() {
+    let source = "def main() -> i64 { 1 }";
+    let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(source, None, None);
+    assert_eq!(interface_hash, super::interface_fingerprint(source));
+    assert_eq!(impl_hash, super::implementation_fingerprint(source));
 }
 
 #[test]
-fn force_rebuild_root_hashes_can_reuse_previous_interface_when_impl_unchanged() {
-    let input = Path::new("tests/main.sg");
-    let snapshot = snapshot_with_root_hashes(input, 111, 222);
-    let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(
-        input,
-        "def main() -> i64 { 1 }",
-        &snapshot,
-        true,
-        Some(222),
-        Some(333),
-    );
-    assert_eq!(impl_hash, 222);
-    assert_eq!(interface_hash, 111);
+fn root_hashes_reuse_previous_interface_when_semantic_source_is_unchanged() {
+    let source = "def main() -> i64 { 1 }";
+    let impl_hash = super::implementation_fingerprint(source);
+    let (interface_hash, actual_impl_hash) =
+        super::resolve_root_hashes_for_request(source, Some(impl_hash), Some(333));
+    assert_eq!(actual_impl_hash, impl_hash);
+    assert_eq!(interface_hash, 333);
 }
 
 #[test]
-fn force_rebuild_root_hashes_fallback_to_previous_interface_when_snapshot_missing() {
-    let input = Path::new("tests/main.sg");
-    let mut snapshot = snapshot_with_root_hashes(input, 111, 222);
-    snapshot.frontend_session_store.modules.clear();
+fn root_hashes_recompute_interface_when_semantic_source_changes() {
     let source = "def main() -> i64 { 1 }";
     let source_impl_hash = super::implementation_fingerprint(source);
-    let (interface_hash, impl_hash) = super::resolve_root_hashes_for_request(
-        input,
-        source,
-        &snapshot,
-        true,
-        Some(source_impl_hash),
-        Some(333),
-    );
+    let (interface_hash, impl_hash) =
+        super::resolve_root_hashes_for_request(source, Some(source_impl_hash ^ 1), Some(333));
     assert_eq!(impl_hash, source_impl_hash);
-    assert_eq!(interface_hash, 333);
+    assert_eq!(interface_hash, super::interface_fingerprint(source));
 }
 
 #[test]
@@ -1169,6 +1183,14 @@ fn daemon_default_addr_constant_has_host_and_port() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn daemon_happy_path_handles_build_request() {
+    let root = std::env::temp_dir().join(format!("sengoo-sgc-daemon-happy-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let input = root.join("main.sg");
+    fs::write(&input, "def main() -> i64 {\n    1\n}\n").unwrap();
+    let input_string = input.to_string_lossy().to_string();
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -1176,13 +1198,12 @@ async fn daemon_happy_path_handles_build_request() {
         handle_daemon_client(stream).await.unwrap();
     });
 
-    let input = bench_root_dir().join("tests").join("simple_array.sg");
     let request = daemon_request_build(
-        input.to_string_lossy().as_ref(),
+        &input_string,
         None,
         2,
         ContractChecksMode::Auto,
-        false,
+        true,
         false,
         false,
         FrontendJobs::Auto,
@@ -1197,6 +1218,7 @@ async fn daemon_happy_path_handles_build_request() {
     assert!(response.ok, "{}", response.message);
 
     server.await.unwrap();
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -3204,7 +3226,10 @@ fn compile_and_run_example(
     relative_path: &str,
     extra_c_inputs: &[&str],
 ) -> Option<std::process::Output> {
-    let source = read_example_source(relative_path);
+    let source = super::expand_stdlib_imports_for_source(&read_example_source(relative_path))
+        .unwrap_or_else(|err| {
+            panic!("example {relative_path} stdlib imports should expand: {err}")
+        });
     let llvm_ir = compile_source(&source, 1)
         .unwrap_or_else(|err| panic!("example {relative_path} should compile: {err}"));
 
@@ -3317,6 +3342,10 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/generics/01_vec_i64.sg",
         "examples/generics/02_option_unwrap.sg",
         "examples/generics/03_result_chain.sg",
+        "examples/generics/04_stdlib_collections.sg",
+        "examples/stdlib/01_strings.sg",
+        "examples/stdlib/02_math.sg",
+        "examples/stdlib/03_error.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3332,6 +3361,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/README.md",
         "examples/async/README.md",
         "examples/generics/README.md",
+        "examples/stdlib/README.md",
         "examples/traits/README.md",
         "examples/ffi/README.md",
     ] {
@@ -3349,7 +3379,14 @@ fn examples_catalog_lists_expanded_categories() {
     );
 
     let index = fs::read_to_string(workspace_root.join("examples/README.md")).unwrap();
-    for category in ["async/", "generics/", "traits/", "ffi/", "reflection/"] {
+    for category in [
+        "async/",
+        "generics/",
+        "stdlib/",
+        "traits/",
+        "ffi/",
+        "reflection/",
+    ] {
         assert!(
             index.contains(category),
             "examples index should link {category}"
@@ -3409,6 +3446,30 @@ fn examples_smoke_generics_result_chain() {
         "examples/generics/03_result_chain.sg",
         "18",
     );
+}
+
+#[test]
+fn examples_smoke_generics_stdlib_collections_import() {
+    assert_example_output(
+        "generics-stdlib-collections",
+        "examples/generics/04_stdlib_collections.sg",
+        "60",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_strings_import() {
+    assert_example_output("stdlib-strings", "examples/stdlib/01_strings.sg", "8");
+}
+
+#[test]
+fn examples_smoke_stdlib_math_import() {
+    assert_example_output("stdlib-math", "examples/stdlib/02_math.sg", "50");
+}
+
+#[test]
+fn examples_smoke_stdlib_error_import() {
+    assert_example_output("stdlib-error", "examples/stdlib/03_error.sg", "7");
 }
 
 #[test]
@@ -3539,7 +3600,7 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
     Some(output)
 }
 
-fn compile_reflection_example_with_modules(modules: &[&str], example: &str) -> String {
+fn compile_reflection_example_via_std_imports(example: &str) -> String {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
@@ -3547,55 +3608,262 @@ fn compile_reflection_example_with_modules(modules: &[&str], example: &str) -> S
         .unwrap_or(manifest_dir);
     let example_source = fs::read_to_string(workspace_root.join(example))
         .unwrap_or_else(|err| panic!("reflection example {example} should exist: {err}"));
-    let mut module_list = vec!["option.sg", "result.sg"];
-    module_list.extend_from_slice(modules);
-    let combined = format!(
-        "{}\n\n{}",
-        load_stdlib_modules(&module_list),
-        example_source
-    );
+    let combined = expand_stdlib_imports_for_source(&example_source).unwrap_or_else(|err| {
+        panic!("reflection example {example} stdlib imports should expand: {err}")
+    });
     compile_compiler_ir(&combined).unwrap_or_else(|err| {
-        panic!("reflection example {example} should compile with stdlib wrappers: {err}")
+        panic!("reflection example {example} should compile through its stdlib imports: {err}")
     })
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn build_emit_llvm_loads_stdlib_collection_imports() {
+    let root =
+        std::env::temp_dir().join(format!("sengoo-sgc-stdlib-imports-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let main_path = root.join("main.sg");
+    let output_path = root.join("main.ll");
+    fs::write(
+        &main_path,
+        r#"
+import std::collections;
+
+def main() -> i64 {
+    let values = vec_new_i64();
+    values.push(41);
+    let answer = values.get(0).unwrap_or(0) + 1;
+    values.free();
+    answer
+}
+"#,
+    )
+    .unwrap();
+
+    let result = cmd_build(
+        &main_path.to_string_lossy(),
+        Some(&output_path.to_string_lossy()),
+        1,
+        ContractChecksMode::Auto,
+        true,
+        true,
+        false,
+        FrontendJobs::Fixed(1),
+        false,
+        super::ReflectionCliOptions::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "sgc build should compile source-level stdlib imports: {result:?}"
+    );
+    let llvm_ir = fs::read_to_string(&output_path).unwrap();
+    assert!(llvm_ir.contains("vec_new_i64"));
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn examples_smoke_reflection_db_open_query() {
-    let ir =
-        compile_reflection_example_with_modules(&["db.sg"], "examples/reflection/db_open_query.sg");
+    let ir = compile_reflection_example_via_std_imports("examples/reflection/db_open_query.sg");
     assert!(ir.contains("sengoo_db_open"));
 }
 
 #[test]
 fn examples_smoke_reflection_lua54_eval() {
-    let ir =
-        compile_reflection_example_with_modules(&["lua54.sg"], "examples/reflection/lua54_eval.sg");
+    let ir = compile_reflection_example_via_std_imports("examples/reflection/lua54_eval.sg");
     assert!(ir.contains("sengoo_lua54_open"));
+    assert!(ir.contains("sengoo_lua54_call_i64_value"));
 }
 
 #[test]
 fn examples_smoke_reflection_proto_encode_decode() {
-    let ir = compile_reflection_example_with_modules(
-        &["proto.sg"],
-        "examples/reflection/proto_encode_decode.sg",
-    );
+    let ir =
+        compile_reflection_example_via_std_imports("examples/reflection/proto_encode_decode.sg");
     assert!(ir.contains("sengoo_proto_user_event_encode"));
 }
 
 #[test]
+fn stdlib_proto_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::proto;
+
+def main() -> i64 {
+    let event = proto_user_event(7, "alice", 42);
+    let buffer = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let encoded = proto_user_event_encode(event, buffer);
+    buffer.free();
+    encoded.unwrap_or(0)
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("proto stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("proto import should make the managed Buffer encode wrapper usable");
+
+    assert!(ir.contains("sengoo_ffi_buffer_new"));
+    assert!(ir.contains("sengoo_proto_user_event_encode"));
+}
+
+#[test]
+fn stdlib_proto_import_preloads_owned_decode_wrapper() {
+    let source = r#"
+import std::proto;
+
+def main() -> i64 {
+    let encoded = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let name = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let decoded = proto_user_event_decode(encoded, 16).unwrap_or(ProtoDecodedUserEvent { handle: 0 });
+    let id = decoded.id();
+    let copied = decoded.name_copy(name).unwrap_or(0);
+    decoded.close();
+    encoded.free();
+    name.free();
+    id + copied
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("proto stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("proto import should make the owned decode wrapper usable");
+
+    assert!(ir.contains("sengoo_proto_user_event_decode_open"));
+    assert!(ir.contains("sengoo_proto_user_event_decoded_name_copy"));
+    assert!(ir.contains("sengoo_proto_user_event_decoded_close"));
+}
+
+#[test]
+fn stdlib_net_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::net;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = net_error_name_copy(0, buffer);
+    buffer.free();
+    copied.unwrap_or(0)
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("net stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("net import should make managed Buffer output wrappers usable");
+
+    assert!(ir.contains("sengoo_ffi_buffer_new"));
+    assert!(ir.contains("sengoo_net_error_name_copy"));
+}
+
+#[test]
+fn stdlib_net_import_preloads_http_server_wrappers() {
+    let source = r#"
+import std::net;
+
+def main() -> i64 {
+    let server = http_server_bind("127.0.0.1", 0).unwrap_or(HttpServer { handle: 0 });
+    let routed = server.add_route("GET", "/health", 200, "ok").unwrap_or(false);
+    let served = server.serve_once(1).unwrap_or(false);
+    server.close();
+    if routed && !served { 1 } else { 0 }
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("net stdlib import should expand with HTTP server wrappers");
+    let ir = compile_compiler_ir(&combined).expect("net import should expose HTTP server wrappers");
+
+    assert!(ir.contains("sengoo_http_server_bind"));
+    assert!(ir.contains("sengoo_http_server_add_route"));
+    assert!(ir.contains("sengoo_http_server_serve_once"));
+}
+
+#[test]
+fn stdlib_db_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::db;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = db_last_error_copy(buffer);
+    buffer.free();
+    copied.unwrap_or(0)
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("db stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("db import should make managed Buffer output wrappers usable");
+
+    assert!(ir.contains("sengoo_ffi_buffer_new"));
+    assert!(ir.contains("sengoo_db_last_error_copy"));
+}
+
+#[test]
+fn stdlib_lua54_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::lua54;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = lua54_last_error_copy(buffer);
+    buffer.free();
+    copied.unwrap_or(0)
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("lua54 stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("lua54 import should make managed Buffer output wrappers usable");
+
+    assert!(ir.contains("sengoo_ffi_buffer_new"));
+    assert!(ir.contains("sengoo_lua54_last_error_copy"));
+}
+
+#[test]
+fn stdlib_ffi_and_lua54_imports_preload_value_call_wrappers() {
+    let source = r#"
+import std::lua54;
+
+def main() -> i64 {
+    let lib = CLib { handle: 0 };
+    let ffi_value = lib.call_i64_2("add", 20, 22).unwrap_or(0);
+    let object = lib.object_create_1("counter_new", 5, "counter_drop").unwrap_or(CppObject { handle: 0 });
+    let object_value = object.call_i64_1("counter_add", 7).unwrap_or(0);
+    let lua = Lua54 { handle: 0 };
+    let lua_value = lua.call_i64_2("add", 2, 5).unwrap_or(0);
+    ffi_value + object_value + lua_value
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("lua54 stdlib import should expand with its ffi dependency");
+    let ir = compile_compiler_ir(&combined)
+        .expect("ffi and lua54 imports should make value call wrappers usable");
+
+    assert!(ir.contains("sengoo_ffi_c_call_i64_value"));
+    assert!(ir.contains("sengoo_ffi_object_create_value"));
+    assert!(ir.contains("sengoo_ffi_object_call_i64_value"));
+    assert!(ir.contains("sengoo_lua54_call_i64_value"));
+}
+
+#[test]
 fn examples_smoke_reflection_net_tcp_echo() {
-    let ir =
-        compile_reflection_example_with_modules(&["net.sg"], "examples/reflection/net_tcp_echo.sg");
+    let ir = compile_reflection_example_via_std_imports("examples/reflection/net_tcp_echo.sg");
     assert!(ir.contains("sengoo_tcp_connect"));
 }
 
 #[test]
+fn examples_smoke_reflection_net_http_server() {
+    let ir = compile_reflection_example_via_std_imports("examples/reflection/net_http_server.sg");
+    assert!(ir.contains("sengoo_http_server_bind"));
+    assert!(ir.contains("sengoo_http_server_add_route"));
+    assert!(ir.contains("sengoo_http_server_add_middleware_require_header"));
+}
+
+#[test]
 fn examples_smoke_reflection_ffi_load_call() {
-    let ir = compile_reflection_example_with_modules(
-        &["ffi.sg"],
-        "examples/reflection/ffi_load_call.sg",
-    );
+    let ir = compile_reflection_example_via_std_imports("examples/reflection/ffi_load_call.sg");
     assert!(ir.contains("sengoo_ffi_c_open"));
+    assert!(ir.contains("sengoo_ffi_c_call_i64_value"));
 }
 
 macro_rules! require_stdlib_runtime_output {
@@ -3608,7 +3876,7 @@ macro_rules! require_stdlib_runtime_output {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn stdlib_surface_cross_module_generic_type_imports_remain_outside_current_boundary() {
+async fn stdlib_surface_cross_module_generic_type_imports_probe_successfully() {
     let root = std::env::temp_dir().join(format!(
         "sengoo-stdlib-generic-cross-module-{}",
         std::process::id()
@@ -3675,14 +3943,14 @@ def main() -> i64 {
         snapshot.module_fingerprints.len() >= 2 && !root_deps.is_empty(),
         "expected imported files to participate in the frontend dependency graph"
     );
-
-    let err_text = super::frontend_probe_module_full(&main_path.to_string_lossy(), &main_source)
-        .expect_err("cross-module imported stdlib generic type names are not supported yet");
     assert!(
-        err_text.contains("type Option is not generic"),
-        "expected current imported-generic-type boundary to be explicit, got: {}",
-        err_text
+        snapshot.diagnostics.is_empty(),
+        "expanded frontend probes should not report false diagnostics: {:?}",
+        snapshot.diagnostics
     );
+
+    super::frontend_probe_module_full(&main_path.to_string_lossy(), &main_source)
+        .expect("cross-module imported stdlib generic types should probe successfully");
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -6234,6 +6502,73 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(5));
+}
+
+#[test]
+fn stdlib_surface_runtime_bool_vec_and_hashmap_mutators_work() {
+    let output = require_stdlib_runtime_output!(
+        "bool-vec-hashmap-mutators",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_bool();
+    vec.push(true);
+    vec.push(false);
+
+    let iter = vec.iter();
+    let iter_first = iter.next().unwrap_or(false);
+    iter.reset();
+    let flip = |value| !value;
+    let iter_mapped = iter.map_with(flip).unwrap_or(true);
+    iter.reset();
+    let keep_true = |value| value == true;
+    let iter_filtered = iter.filter_with(keep_true).unwrap_or(false);
+    iter.free();
+
+    let first = vec.get(0).unwrap_or(false);
+    let second = vec.pop().unwrap_or(true);
+    let had_true = vec.contains(true);
+    vec.set(0, false);
+    let removed = vec.remove(0).unwrap_or(true);
+    let vec_ok = iter_first
+        && !iter_mapped
+        && iter_filtered
+        && first
+        && !second
+        && had_true
+        && !removed
+        && vec.is_empty();
+
+    let map = hashmap_new_bool_bool();
+    map.insert(true, false);
+    map.insert(false, true);
+    let map_true = map.get(true).unwrap_or(true);
+    let map_false = map.get(false).unwrap_or(false);
+    let had_key = map.contains(true);
+    let removed_key = map.remove(true);
+    let missing_key = map.get(true).unwrap_or(true);
+    let map_ok = !map_true && map_false && had_key && removed_key && missing_key;
+
+    let key_map = hashmap_new_bool_i64();
+    key_map.insert(true, 6);
+    let value_map = hashmap_new_i64_bool();
+    value_map.insert(3, true);
+    let mixed_ok = key_map.get(true).unwrap_or(0) == 6 && value_map.get(3).unwrap_or(false);
+
+    vec.free();
+    map.free();
+    key_map.free();
+    value_map.free();
+
+    if vec_ok && map_ok && mixed_ok {
+        9
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(9));
 }
 
 #[test]

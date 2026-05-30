@@ -1,0 +1,16 @@
+﻿pub def reflect_probe() -> i64 {
+    1
+}
+
+def main() -> i64 {
+    let probe = reflect_probe()
+    let n = 50000
+    let acc = 0
+    let i = 0
+    while i < n {
+        acc = acc + (i % 7)
+        i = i + 1
+    }
+    print(acc + probe - 1)
+    0
+}

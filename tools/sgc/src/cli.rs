@@ -3,7 +3,7 @@ use miette::Result;
 
 use crate::{
     cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run, cmd_build,
-    cmd_check, cmd_daemon, cmd_dump_ast, cmd_repl, cmd_run, current_error_format,
+    cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, current_error_format,
     dispatch_build_via_daemon, dispatch_run_via_daemon, frontend_trace_enabled,
     parse_frontend_jobs_arg, reflection_options_from_cli, resolve_daemon_addr, set_error_format,
     ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs, ReflectionMode,
@@ -159,6 +159,16 @@ pub(crate) enum Commands {
     Check {
         /// Input source file.
         input: String,
+    },
+
+    /// Generate rustdoc-like API documentation.
+    Doc {
+        /// Input source file.
+        input: String,
+
+        /// Documentation output directory.
+        #[arg(short, long, default_value = "target/doc")]
+        output: String,
     },
 
     /// Start REPL.
@@ -368,6 +378,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             .await
         }
         Commands::Check { input } => cmd_check(&input).await,
+        Commands::Doc { input, output } => cmd_doc(&input, &output).await,
         Commands::Repl => cmd_repl().await,
         Commands::DumpAst { input } => cmd_dump_ast(&input).await,
         Commands::Daemon { addr } => cmd_daemon(&addr).await,

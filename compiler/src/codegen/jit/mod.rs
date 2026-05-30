@@ -6,10 +6,12 @@ use super::common;
 use crate::mir::{MIRType, MirFunction};
 use std::collections::HashMap;
 
+mod aggregate_instructions;
 mod casts;
 mod declaration_helpers;
 mod functions;
 mod instructions;
+mod memory_instructions;
 mod ops;
 mod terminators;
 mod utils;

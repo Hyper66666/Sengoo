@@ -1,33 +1,16 @@
-use sengoo_compiler::{DeclKind, Parser, Path as AstPath, Program};
+use sengoo_compiler::{DeclKind, Parser, Program};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::source_imports::{module_map_from_env, resolve_import_path};
 use crate::{canonical_or_lossy, decl_requests_reflection, ModuleSourceInfo};
-
-fn resolve_import_candidates(source_dir: &Path, import_path: &AstPath) -> Vec<PathBuf> {
-    if import_path.segments.is_empty() {
-        return Vec::new();
-    }
-
-    let mut joined = PathBuf::new();
-    for seg in &import_path.segments {
-        joined.push(&seg.name);
-    }
-
-    let mut candidates = vec![
-        source_dir.join(&joined).with_extension("sg"),
-        source_dir.join(&joined).join("mod.sg"),
-        source_dir.join(&joined).join("index.sg"),
-    ];
-    candidates.dedup();
-    candidates
-}
 
 fn resolve_direct_import_dependencies_from_program(
     source_dir: &Path,
     program: &Program,
+    module_map: &BTreeMap<String, PathBuf>,
 ) -> Vec<PathBuf> {
     let mut deps = program
         .decls
@@ -36,11 +19,7 @@ fn resolve_direct_import_dependencies_from_program(
             DeclKind::Import(import_decl) => Some(import_decl),
             _ => None,
         })
-        .filter_map(|import_decl| {
-            resolve_import_candidates(source_dir, &import_decl.path)
-                .into_iter()
-                .find(|p| p.exists())
-        })
+        .filter_map(|import_decl| resolve_import_path(source_dir, &import_decl.path, module_map))
         .map(|path| fs::canonicalize(&path).unwrap_or(path))
         .collect::<Vec<_>>();
     deps.sort();
@@ -48,7 +27,11 @@ fn resolve_direct_import_dependencies_from_program(
     deps
 }
 
-fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathBuf>, bool) {
+fn resolve_direct_import_metadata(
+    source_dir: &Path,
+    source: &str,
+    module_map: &BTreeMap<String, PathBuf>,
+) -> (Vec<PathBuf>, bool) {
     if !source.contains("import") {
         return (Vec::new(), false);
     }
@@ -58,7 +41,7 @@ fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathB
         Err(_) => return (Vec::new(), false),
     };
 
-    let deps = resolve_direct_import_dependencies_from_program(source_dir, &program);
+    let deps = resolve_direct_import_dependencies_from_program(source_dir, &program, module_map);
     let requests_reflection = program.decls.iter().any(decl_requests_reflection);
     (deps, requests_reflection)
 }
@@ -66,6 +49,15 @@ fn resolve_direct_import_metadata(source_dir: &Path, source: &str) -> (Vec<PathB
 pub(crate) fn collect_module_sources_with_edges(
     input_path: &Path,
     root_source: &str,
+) -> BTreeMap<String, ModuleSourceInfo> {
+    let module_map = module_map_from_env().unwrap_or_default();
+    collect_module_sources_with_edges_from_map(input_path, root_source, &module_map)
+}
+
+fn collect_module_sources_with_edges_from_map(
+    input_path: &Path,
+    root_source: &str,
+    module_map: &BTreeMap<String, PathBuf>,
 ) -> BTreeMap<String, ModuleSourceInfo> {
     let root_path = fs::canonicalize(input_path).unwrap_or_else(|_| input_path.to_path_buf());
     let mut queue = vec![(root_path, Arc::<str>::from(root_source))];
@@ -79,7 +71,7 @@ pub(crate) fn collect_module_sources_with_edges(
 
         let source_dir = module_path.parent().unwrap_or(Path::new("."));
         let (deps, requests_reflection) =
-            resolve_direct_import_metadata(source_dir, source.as_ref());
+            resolve_direct_import_metadata(source_dir, source.as_ref(), module_map);
         let mut dep_keys = deps
             .iter()
             .map(|dep| canonical_or_lossy(dep))
@@ -191,4 +183,45 @@ pub(crate) fn module_dependency_levels(
     }
 
     levels
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sgc_module_graph_{}_{}", name, stamp));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn mapped_package_participates_in_graph_and_reflection_detection() {
+        let root = temp_dir("mapped");
+        let dep = root.join("dep/src/lib.sg");
+        let main = root.join("app/src/main.sg");
+        fs::create_dir_all(dep.parent().unwrap()).unwrap();
+        fs::create_dir_all(main.parent().unwrap()).unwrap();
+        fs::write(
+            &dep,
+            "import std::reflect;\ndef imported_value() -> i64 { 42 }\n",
+        )
+        .unwrap();
+        let source = "import dep;\ndef main() -> i64 { imported_value() }\n";
+        fs::write(&main, source).unwrap();
+        let module_map = BTreeMap::from([("dep".to_string(), dep.clone())]);
+
+        let sources = collect_module_sources_with_edges_from_map(&main, source, &module_map);
+        let main_id = canonical_or_lossy(&main);
+        let dep_id = canonical_or_lossy(&dep);
+
+        assert_eq!(sources[&main_id].depends_on, vec![dep_id.clone()]);
+        assert!(sources[&dep_id].requests_reflection);
+        let _ = fs::remove_dir_all(root);
+    }
 }

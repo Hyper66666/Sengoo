@@ -1,10 +1,17 @@
 extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_proto_last_error_code() -> i64;
     fn sengoo_proto_last_error_len() -> i64;
     fn sengoo_proto_last_error_copy(buffer: i64, capacity: i64) -> i64;
     fn sengoo_proto_last_error_clear() -> i64;
     fn sengoo_proto_user_event_encode(id: i64, name: i64, ts: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_proto_user_event_decode(input_ptr: i64, input_len: i64, out_id: i64, out_name_buffer: i64, out_name_capacity: i64, out_ts: i64) -> i64;
+    fn sengoo_proto_user_event_decode_open(input_ptr: i64, input_len: i64) -> i64;
+    fn sengoo_proto_user_event_decoded_id(handle: i64) -> i64;
+    fn sengoo_proto_user_event_decoded_ts(handle: i64) -> i64;
+    fn sengoo_proto_user_event_decoded_name_len(handle: i64) -> i64;
+    fn sengoo_proto_user_event_decoded_name_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_proto_user_event_decoded_close(handle: i64) -> i64;
 }
 
 struct ProtoUserEvent {
@@ -13,8 +20,37 @@ struct ProtoUserEvent {
     ts: i64,
 }
 
+struct ProtoDecodedUserEvent {
+    handle: i64,
+}
+
 def proto_last_error_code() -> i64 {
     sengoo_proto_last_error_code()
+}
+
+def proto_last_error_len() -> i64 {
+    sengoo_proto_last_error_len()
+}
+
+def proto_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> i64 {
+    sengoo_proto_last_error_copy(buffer_ptr, capacity)
+}
+
+def proto_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
+    let copied = proto_last_error_copy_raw(buffer.ptr(), buffer.len());
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_proto_last_error_code() }
+    }
+}
+
+def proto_last_error_clear() -> bool {
+    sengoo_proto_last_error_clear() == 0
+}
+
+def proto_user_event(id: i64, name: &str, ts: i64) -> ProtoUserEvent {
+    ProtoUserEvent { id: id, name_ptr: sengoo_stdlib_str_ptr(name), ts: ts }
 }
 
 def proto_user_event_encode_raw(event: ProtoUserEvent, out_buffer: i64, out_capacity: i64) -> Result<i64, i64> {
@@ -26,11 +62,56 @@ def proto_user_event_encode_raw(event: ProtoUserEvent, out_buffer: i64, out_capa
     }
 }
 
+def proto_user_event_encode(event: ProtoUserEvent, out: Buffer) -> Result<i64, i64> {
+    proto_user_event_encode_raw(event, out.ptr(), out.len())
+}
+
 def proto_user_event_decode_raw(input_ptr: i64, input_len: i64, out_id: i64, out_name_buffer: i64, out_name_capacity: i64, out_ts: i64) -> Result<i64, i64> {
     let copied = sengoo_proto_user_event_decode(input_ptr, input_len, out_id, out_name_buffer, out_name_capacity, out_ts);
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {
         Result { is_ok: false, value: 0, error: copied }
+    }
+}
+
+def proto_user_event_decode(input: Buffer, input_len: i64) -> Result<ProtoDecodedUserEvent, i64> {
+    if input_len <= 0 {
+        let handle = sengoo_proto_user_event_decode_open(input.ptr(), 0);
+        Result { is_ok: false, value: ProtoDecodedUserEvent { handle: handle }, error: sengoo_proto_last_error_code() }
+    } else {
+        let handle = sengoo_proto_user_event_decode_open(input.ptr(), input_len);
+        if handle != 0 {
+            Result { is_ok: true, value: ProtoDecodedUserEvent { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: ProtoDecodedUserEvent { handle: 0 }, error: sengoo_proto_last_error_code() }
+        }
+    }
+}
+
+impl ProtoDecodedUserEvent {
+    def id(self) -> i64 {
+        sengoo_proto_user_event_decoded_id(self.handle)
+    }
+
+    def ts(self) -> i64 {
+        sengoo_proto_user_event_decoded_ts(self.handle)
+    }
+
+    def name_len(self) -> i64 {
+        sengoo_proto_user_event_decoded_name_len(self.handle)
+    }
+
+    def name_copy(self, out: Buffer) -> Result<i64, i64> {
+        let copied = sengoo_proto_user_event_decoded_name_copy(self.handle, out.ptr(), out.len());
+        if copied >= 0 {
+            Result { is_ok: true, value: copied, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: sengoo_proto_last_error_code() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_proto_user_event_decoded_close(self.handle) == 0
     }
 }
