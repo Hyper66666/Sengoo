@@ -405,6 +405,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   `std::*` modules are also indexed from embedded stdlib sources so standard
   library symbols complete and hover correctly even outside the Sengoo source
   checkout (2026-05-31).
+- `sglsp` signature help now also searches workspace documents and imported
+  stdlib modules, while signature labels render AST types directly instead of
+  relying on token spans that can include trailing punctuation (2026-05-31).
 - `sgpm test` now forwards profile optimization flags explicitly:
   debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
   (2026-05-29).

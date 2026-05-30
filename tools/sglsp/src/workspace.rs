@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::{
     WorkspaceEdit,
 };
 
+use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 use super::symbols::{
     collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
     find_declaration_in_text, find_definition_in_text, find_symbol_occurrences,
@@ -92,6 +93,21 @@ pub(crate) fn completion_symbols_for_documents(
     }
 
     symbols
+}
+
+pub(crate) fn function_signatures_for_documents(
+    current_uri: &Url,
+    documents: &HashMap<Url, String>,
+) -> Vec<FunctionSignatureInfo> {
+    let mut signatures = Vec::new();
+
+    for (_, content) in sorted_workspace_documents(current_uri, documents) {
+        let mut document_signatures = collect_function_signatures(content);
+        document_signatures.sort_by_key(|sig| (sig.range.start.line, sig.range.start.character));
+        signatures.extend(document_signatures);
+    }
+
+    signatures
 }
 
 fn should_skip_workspace_dir(path: &Path) -> bool {
