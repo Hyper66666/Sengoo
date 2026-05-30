@@ -53,7 +53,7 @@ impl Toolchain {
                     .current_dir(&node.root_dir)
                     .arg("check")
                     .arg(&node.entry_path);
-                configure_module_map(&mut command, graph, node, false)?;
+                configure_module_map(&mut command, graph, node, true)?;
 
                 if verbose {
                     eprintln!("sgpm: {}", render_command(&command));
@@ -79,7 +79,7 @@ impl Toolchain {
                 .arg(&output)
                 .arg("-O")
                 .arg(profile.opt_level());
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -102,7 +102,7 @@ impl Toolchain {
                 .current_dir(&node.root_dir)
                 .arg("check")
                 .arg(&node.entry_path);
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -239,7 +239,7 @@ impl Toolchain {
                 .arg(&input)
                 .arg("--output")
                 .arg(&output_dir);
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));

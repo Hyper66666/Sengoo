@@ -1560,6 +1560,65 @@ fn sgpm_check_maps_dual_target_dependency_to_library_entry() {
 }
 
 #[test]
+fn sgpm_package_commands_expose_selected_package_own_library_module() {
+    let dir = temp_dir("check_own_lib_module_map");
+    let app = dir.join("app");
+    write_bin_and_lib_pkg(&app, "app");
+
+    let record = dir.join("record.txt");
+    let fake = fake_sgc(&dir);
+    let check_output = Command::new(sgpm())
+        .args([
+            "check",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", &fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm check");
+
+    assert!(
+        check_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check_output.stdout),
+        String::from_utf8_lossy(&check_output.stderr)
+    );
+    let log = fs::read_to_string(&record).unwrap().replace('\\', "/");
+    let entry = app.join("src/lib.sg").to_string_lossy().replace('\\', "/");
+    assert!(
+        log.contains(&format!("modules=app={entry}")),
+        "selected package check should expose its own library entry:\n{log}"
+    );
+
+    let build_output = Command::new(sgpm())
+        .args([
+            "build",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", &fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm build");
+
+    assert!(
+        build_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build_output.stdout),
+        String::from_utf8_lossy(&build_output.stderr)
+    );
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    assert!(
+        log.contains(&format!("modules=app={entry}")),
+        "selected package build should expose its own library entry:\n{log}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sgpm_run_rejects_library_package_with_actionable_diagnostic() {
     let dir = temp_dir("run_library");
     let lib = dir.join("libpkg");

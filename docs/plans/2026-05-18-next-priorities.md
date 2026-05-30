@@ -447,6 +447,10 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).
+- `sgpm check` and `sgpm build` now expose the selected package's own `[lib]`
+  entry in `SENGOO_MODULE_MAP`, so dual-target packages can import their own
+  library from their binary entry by package name while retaining existing
+  dependency module maps (2026-05-31).
 - `sgpm test` now forwards profile optimization flags explicitly:
   debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
   (2026-05-29).
