@@ -997,6 +997,50 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_bool_option_result_convenience_constructors_compile() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let some_flag: Option<bool> = option_some_bool(true);
+    let none_flag: Option<bool> = option_none_bool();
+    let ok_flag: Result<bool, i64> = result_ok_bool(true);
+    let err_flag: Result<bool, i64> = result_err_bool(7);
+
+    if some_flag.unwrap_or(false)
+        && none_flag.is_none()
+        && ok_flag.ok().unwrap_or(false)
+        && err_flag.err().unwrap_or(0) == 7 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: option_some_bool"),
+        "expected concrete Option<bool> constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: option_none_bool"),
+        "expected concrete Option<bool> none constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: result_ok_bool"),
+        "expected concrete Result<bool, i64> ok constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: result_err_bool"),
+        "expected concrete Result<bool, i64> err constructor\n{}",
+        ir
+    );
+}
+
+#[test]
 fn stdlib_surface_mixed_option_instantiations_emit_distinct_struct_types() {
     let ir = compile_with_stdlib(
         r#"

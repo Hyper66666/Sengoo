@@ -181,11 +181,11 @@ impl Vec<bool> {
 
     def get(self, index: i64) -> Option<bool> {
         if index < 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else if index >= sengoo_vec_len_i64(self.handle) {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
-            Option { is_some: true, value: i64_to_bool(sengoo_vec_get_or_default_i64(self.handle, index, 0)) }
+            option_some_bool(i64_to_bool(sengoo_vec_get_or_default_i64(self.handle, index, 0)))
         }
     }
 
@@ -195,9 +195,9 @@ impl Vec<bool> {
 
     def pop(self) -> Option<bool> {
         if sengoo_vec_len_i64(self.handle) == 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
-            Option { is_some: true, value: i64_to_bool(sengoo_vec_pop_or_default_i64(self.handle, 0)) }
+            option_some_bool(i64_to_bool(sengoo_vec_pop_or_default_i64(self.handle, 0)))
         }
     }
 
@@ -211,11 +211,11 @@ impl Vec<bool> {
 
     def remove(self, index: i64) -> Option<bool> {
         if index < 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else if index >= sengoo_vec_len_i64(self.handle) {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
-            Option { is_some: true, value: i64_to_bool(sengoo_vec_remove_or_default_i64(self.handle, index, 0)) }
+            option_some_bool(i64_to_bool(sengoo_vec_remove_or_default_i64(self.handle, index, 0)))
         }
     }
 }
@@ -233,18 +233,18 @@ impl<T> VecIter<T> {
 impl VecIter<bool> {
     def next(self) -> Option<bool> {
         if sengoo_vec_iter_done_i64(self.handle) != 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
-            Option { is_some: true, value: i64_to_bool(sengoo_vec_iter_next_or_default_i64(self.handle, 0)) }
+            option_some_bool(i64_to_bool(sengoo_vec_iter_next_or_default_i64(self.handle, 0)))
         }
     }
 
     def map_with(self, f: fn(bool) -> bool) -> Option<bool> {
         if sengoo_vec_iter_done_i64(self.handle) != 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
             let value = i64_to_bool(sengoo_vec_iter_next_or_default_i64(self.handle, 0));
-            Option { is_some: true, value: f(value) }
+            option_some_bool(f(value))
         }
     }
 
@@ -262,9 +262,9 @@ impl VecIter<bool> {
             }
         }
         if found != 0 {
-            Option { is_some: true, value: matched }
+            option_some_bool(matched)
         } else {
-            Option { is_some: false, value: false }
+            option_none_bool()
         }
     }
 }
@@ -381,9 +381,9 @@ impl HashMap<bool, bool> {
 
     def get(self, key: bool) -> Option<bool> {
         if sengoo_hashmap_contains_i64(self.handle, bool_to_i64(key)) != 0 {
-            Option { is_some: true, value: i64_to_bool(sengoo_hashmap_get_or_default_i64(self.handle, bool_to_i64(key), 0)) }
+            option_some_bool(i64_to_bool(sengoo_hashmap_get_or_default_i64(self.handle, bool_to_i64(key), 0)))
         } else {
-            Option { is_some: false, value: false }
+            option_none_bool()
         }
     }
 
@@ -407,9 +407,9 @@ impl HashMap<i64, bool> {
 
     def get(self, key: i64) -> Option<bool> {
         if sengoo_hashmap_contains_i64(self.handle, key) != 0 {
-            Option { is_some: true, value: i64_to_bool(sengoo_hashmap_get_or_default_i64(self.handle, key, 0)) }
+            option_some_bool(i64_to_bool(sengoo_hashmap_get_or_default_i64(self.handle, key, 0)))
         } else {
-            Option { is_some: false, value: false }
+            option_none_bool()
         }
     }
 
@@ -461,18 +461,18 @@ impl<V> HashMapIter<V> {
 impl HashMapIter<bool> {
     def next(self) -> Option<bool> {
         if sengoo_hashmap_iter_done_i64(self.handle) != 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
-            Option { is_some: true, value: i64_to_bool(sengoo_hashmap_iter_next_or_default_i64(self.handle, 0)) }
+            option_some_bool(i64_to_bool(sengoo_hashmap_iter_next_or_default_i64(self.handle, 0)))
         }
     }
 
     def map_with(self, f: fn(bool) -> bool) -> Option<bool> {
         if sengoo_hashmap_iter_done_i64(self.handle) != 0 {
-            Option { is_some: false, value: false }
+            option_none_bool()
         } else {
             let value = i64_to_bool(sengoo_hashmap_iter_next_or_default_i64(self.handle, 0));
-            Option { is_some: true, value: f(value) }
+            option_some_bool(f(value))
         }
     }
 
@@ -490,9 +490,9 @@ impl HashMapIter<bool> {
             }
         }
         if found != 0 {
-            Option { is_some: true, value: matched }
+            option_some_bool(matched)
         } else {
-            Option { is_some: false, value: false }
+            option_none_bool()
         }
     }
 }
@@ -535,7 +535,6 @@ impl Iterator for HashMapIter<i64> {
         }
     }
 }
-
 
 
 

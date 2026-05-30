@@ -1,4 +1,4 @@
-# Sengoo Next Priorities (updated 2026-05-30)
+# Sengoo Next Priorities (updated 2026-05-31)
 
 ## Current State
 
@@ -407,6 +407,11 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   `result_ok_with<T, E>` / `result_err_with<T, E>`, and a runnable
   `examples/stdlib/04_option_result.sg` smoke test covers bool constructors
   plus projection helpers (2026-05-31).
+- `std::option` now also exposes `option_some_bool` / `option_none_bool`, and
+  `std::result` exposes `result_ok_bool` / `result_err_bool` for
+  `Result<bool, i64>`. Bool `Vec`/`HashMap` helpers reuse these constructors
+  instead of hand-writing tagged `Option<bool>` literals, with compiler
+  surface and `sgc` runtime smoke coverage (2026-05-31).
 - `sglsp` completion and hover now use the same workspace document set as
   definition, references, rename, and workspace-symbol queries. Imported
   `std::*` modules are also indexed from embedded stdlib sources so standard
