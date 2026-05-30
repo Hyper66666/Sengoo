@@ -6631,6 +6631,29 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_runtime_bool_option_result_unwrap_and_expect_work() {
+    let output = require_stdlib_runtime_output!(
+        "bool-option-result-unwrap-expect",
+        r#"
+def main() -> i64 {
+    let option_value = option_some_bool(true).unwrap();
+    let expected_option = option_some_bool(true).expect("option bool ok");
+    let result_value = result_ok_bool(false).unwrap();
+    let expected_result = result_ok_bool(true).expect("result bool ok");
+
+    if option_value && expected_option && !result_value && expected_result {
+        11
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(11));
+}
+
+#[test]
 fn stdlib_surface_runtime_generic_result_projections_work() {
     let output = require_stdlib_runtime_output!(
         "generic-result-projections",

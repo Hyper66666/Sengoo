@@ -1041,6 +1041,47 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_bool_option_result_unwrap_and_expect_compile() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let option_value = option_some_bool(true).unwrap();
+    let expected_option = option_some_bool(true).expect("option bool ok");
+    let result_value = result_ok_bool(false).unwrap();
+    let expected_result = result_ok_bool(true).expect("result bool ok");
+
+    if option_value && expected_option && !result_value && expected_result {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: Option_bool_unwrap"),
+        "expected Option<bool>.unwrap specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Option_bool_expect"),
+        "expected Option<bool>.expect specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Result_bool_i64_unwrap"),
+        "expected Result<bool, i64>.unwrap specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Result_bool_i64_expect"),
+        "expected Result<bool, i64>.expect specialization\n{}",
+        ir
+    );
+}
+
+#[test]
 fn stdlib_surface_mixed_option_instantiations_emit_distinct_struct_types() {
     let ir = compile_with_stdlib(
         r#"

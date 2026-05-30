@@ -95,3 +95,22 @@ impl Option<i64> {
         }
     }
 }
+
+impl Option<bool> {
+    def expect(self, msg: &str) -> bool {
+        if self.is_some {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_option_unwrap_i64() != 0
+        }
+    }
+
+    def unwrap(self) -> bool {
+        if self.is_some {
+            self.value
+        } else {
+            sengoo_panic_option_unwrap_i64() != 0
+        }
+    }
+}
