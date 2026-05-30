@@ -429,8 +429,13 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   family needed by those wrappers (2026-05-31).
 - `sglsp` symbol collection now includes impl, trait, and class methods, so
   imported stdlib APIs such as `Option.unwrap`, `Option.expect`, and
-  `Iterator.next` appear in completion/hover/workspace-symbol flows instead of
-  only top-level declarations (2026-05-31).
+  `Iterator.next` appear in completion and hover, while workspace method
+  declarations also participate in workspace-symbol flows instead of only
+  top-level declarations (2026-05-31).
+- `sglsp` go-to-definition now resolves imported stdlib symbols and methods to
+  stable `sengoo-stdlib:/<module>.sg` locations, replacing the old unknown-symbol
+  fallback that could jump back to the current call site for `unwrap`-style
+  method names (2026-05-31).
 - `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
   for parseable buffers, while retaining trailing-whitespace cleanup as the
   fallback for incomplete in-editor source (2026-05-31).
