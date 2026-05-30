@@ -393,6 +393,18 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `std::net` now exposes the existing HTTP server runtime through `HttpServer`
   wrappers for bind, limits, static routes, required-header middleware, WS
   echo routes, serve-once timeout handling, and close (2026-05-30).
+- Generic free functions now materialize concrete MIR/IR instances at call
+  sites, so stdlib helpers can expose normal generic constructors instead of
+  only hand-written scalar entry points. `std::option` now provides
+  `option_some<T>` / `option_none_with<T>`, `std::result` provides
+  `result_ok_with<T, E>` / `result_err_with<T, E>`, and a runnable
+  `examples/stdlib/04_option_result.sg` smoke test covers bool constructors
+  plus projection helpers (2026-05-31).
+- `sglsp` completion and hover now use the same workspace document set as
+  definition, references, rename, and workspace-symbol queries. Imported
+  `std::*` modules are also indexed from embedded stdlib sources so standard
+  library symbols complete and hover correctly even outside the Sengoo source
+  checkout (2026-05-31).
 - `sgpm test` now forwards profile optimization flags explicitly:
   debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
   (2026-05-29).

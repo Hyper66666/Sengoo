@@ -54,18 +54,18 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
+    fn lower_materialized_function(
+        &mut self,
+        specialized: hir::HIRFunction,
+        param_count: usize,
+    ) -> Option<String> {
         if self.known_functions.contains(&specialized.name) {
             return Some(specialized.name);
         }
 
         self.function_sigs.insert(
             specialized.name.clone(),
-            build_hir_function_sig(
-                &specialized.return_type,
-                explicit_hir_method_param_count(&specialized),
-                self.struct_defs,
-            ),
+            build_hir_function_sig(&specialized.return_type, param_count, self.struct_defs),
         );
         self.known_functions.insert(specialized.name.clone());
 
@@ -90,6 +90,82 @@ impl<'a> LoweringContext<'a> {
                 None
             }
         }
+    }
+
+    fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
+        let param_count = explicit_hir_method_param_count(&specialized);
+        self.lower_materialized_function(specialized, param_count)
+    }
+
+    pub(super) fn try_materialize_generic_function(
+        &mut self,
+        name: &str,
+        arg_locals: &[Local],
+    ) -> Option<CallTargetPlan> {
+        let template = self.options.generic_function_templates.get(name)?.clone();
+        if template.params.len() != arg_locals.len() {
+            return None;
+        }
+
+        let actual_arg_types =
+            collect_local_types(arg_locals, |local| self.get_local_type(local).clone());
+        let mut mir_subst = HashMap::new();
+        for (param, actual_ty) in template.params.iter().zip(actual_arg_types.iter()) {
+            bind_mir_subst_from_hir_type(&param.ty, actual_ty, self.struct_defs, &mut mir_subst);
+        }
+
+        let mut hir_subst = HashMap::new();
+        for type_param in &template.type_params {
+            let Some(mir_ty) = mir_subst.get(&type_param.name) else {
+                self.errors.push(format!(
+                    "generic function {}: type parameter {} could not be inferred during MIR lowering",
+                    name, type_param.name
+                ));
+                return None;
+            };
+            let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(mir_ty) else {
+                self.errors.push(format!(
+                    "generic function {}: concrete type argument for {} could not be resolved during MIR lowering",
+                    name, type_param.name
+                ));
+                return None;
+            };
+            hir_subst.insert(type_param.name.clone(), hir_ty);
+        }
+
+        for ty in hir_subst.values() {
+            if matches!(ty.kind, hir::HIRTypeKind::Named { .. }) {
+                self.concrete_type_registry
+                    .register_instance(crate::type_naming::hir_type_instance_name(ty), ty.clone());
+            }
+        }
+
+        let mut specialized =
+            crate::mir::hir_specialization_helpers::substitute_hir_function(&template, &hir_subst);
+        specialized.type_params.clear();
+        let suffixes = template
+            .type_params
+            .iter()
+            .filter_map(|param| hir_subst.get(&param.name))
+            .map(crate::type_naming::hir_type_instance_name)
+            .collect::<Vec<_>>();
+        specialized.name = format!("{}_{}", template.name, suffixes.join("_"));
+
+        let specialized_name =
+            self.lower_materialized_function(specialized.clone(), specialized.params.len())?;
+        let ret_type = self
+            .function_sigs
+            .get(&specialized_name)
+            .map(|sig| sig.ret_type.clone())
+            .unwrap_or_else(|| {
+                hir_type_to_mir_with_structs(&specialized.return_type, self.struct_defs)
+            });
+
+        Some(CallTargetPlan {
+            func_name: specialized_name,
+            ret_type,
+            env_ptr_local: None,
+        })
     }
 
     pub(super) fn try_materialize_inherent_method(

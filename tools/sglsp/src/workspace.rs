@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::{
 use super::symbols::{
     collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
     find_declaration_in_text, find_definition_in_text, find_symbol_occurrences,
-    valid_identifier_name,
+    valid_identifier_name, AstSymbol,
 };
 
 pub(crate) fn workspace_symbols_for_documents(
@@ -39,6 +39,59 @@ pub(crate) fn workspace_symbols_for_documents(
     }
 
     items
+}
+
+fn sorted_workspace_documents<'a>(
+    current_uri: &Url,
+    documents: &'a HashMap<Url, String>,
+) -> Vec<(&'a Url, &'a String)> {
+    let mut sorted_docs = documents.iter().collect::<Vec<_>>();
+    sorted_docs.sort_by(|(left_uri, _), (right_uri, _)| {
+        match (
+            left_uri.as_str() == current_uri.as_str(),
+            right_uri.as_str() == current_uri.as_str(),
+        ) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => left_uri.as_str().cmp(right_uri.as_str()),
+        }
+    });
+    sorted_docs
+}
+
+pub(crate) fn find_symbol_detail_in_documents(
+    current_uri: &Url,
+    symbol: &str,
+    documents: &HashMap<Url, String>,
+) -> Option<AstSymbol> {
+    for (_, content) in sorted_workspace_documents(current_uri, documents) {
+        if let Some(found) = collect_ast_symbols(content)
+            .into_iter()
+            .find(|item| item.name == symbol)
+        {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+pub(crate) fn completion_symbols_for_documents(
+    current_uri: &Url,
+    documents: &HashMap<Url, String>,
+) -> Vec<AstSymbol> {
+    let mut seen = std::collections::HashSet::new();
+    let mut symbols = Vec::new();
+
+    for (_, content) in sorted_workspace_documents(current_uri, documents) {
+        for symbol in collect_ast_symbols(content) {
+            if seen.insert(symbol.name.clone()) {
+                symbols.push(symbol);
+            }
+        }
+    }
+
+    symbols
 }
 
 fn should_skip_workspace_dir(path: &Path) -> bool {

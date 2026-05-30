@@ -258,8 +258,8 @@ def main() -> i64 {
     let names = mir.iter().map(|f| f.name.as_str()).collect::<HashSet<_>>();
     assert!(names.contains("main"));
     assert!(
-        names.contains("id"),
-        "instantiated generic function should be kept in lazy mode"
+        names.contains("id_i64"),
+        "instantiated generic function should be materialized in lazy mode"
     );
 }
 

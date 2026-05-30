@@ -1,0 +1,28 @@
+// examples/stdlib/04_option_result.sg
+//
+// Demonstrates: generic std::option/std::result constructors and projections.
+//
+// Run: sgc run examples/stdlib/04_option_result.sg
+// Expected output: 4
+
+import std::option;
+import std::result;
+
+def main() -> i64 {
+    let some_flag: Option<bool> = option_some(true);
+    let none_flag: Option<bool> = option_none_with(false);
+    let ok_flag: Result<bool, bool> = result_ok_with(true, false);
+    let err_flag: Result<bool, bool> = result_err_with(false, true);
+
+    let ok = some_flag.unwrap_or(false)
+        && none_flag.is_none()
+        && ok_flag.ok().unwrap_or(false)
+        && err_flag.err().unwrap_or(false);
+
+    if ok {
+        print(4);
+    } else {
+        print(0);
+    }
+    0
+}
