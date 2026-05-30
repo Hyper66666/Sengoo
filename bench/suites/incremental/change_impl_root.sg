@@ -1,0 +1,10 @@
+import math_util;
+
+def calc(x: i64) -> i64 {
+    x * 2 + 1
+}
+
+def main() -> i64 {
+    print(calc(21))
+    0
+}

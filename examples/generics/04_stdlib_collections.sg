@@ -1,0 +1,22 @@
+// examples/generics/04_stdlib_collections.sg
+//
+// Demonstrates: importing the runtime-backed std::collections Vec<i64>.
+//
+// Run: sgc run examples/generics/04_stdlib_collections.sg
+// Expected output: 60
+
+import std::collections;
+
+def main() -> i64 {
+    let values = vec_new_i64();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+
+    let total = values.get(0).unwrap_or(0)
+        + values.get(1).unwrap_or(0)
+        + values.get(2).unwrap_or(0);
+    values.free();
+    print(total);
+    0
+}

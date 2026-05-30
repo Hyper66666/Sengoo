@@ -1,0 +1,293 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sengoo 编程语言</title>
+    <meta
+      name="description"
+      content="Sengoo 是一门面向原生软件、异步运行时、泛型标准库与反射集成的现代编译型语言。"
+    />
+    <meta property="og:title" content="Sengoo 编程语言" />
+    <meta
+      property="og:description"
+      content="Sengoo combines async-first runtime work, generic standard library modules, reflection wrappers, and practical tooling."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.sengoo.top/" />
+    <meta name="theme-color" content="#f6fbff" />
+    <meta name="color-scheme" content="light" />
+    <link rel="preload" as="style" href="assets/css/styles.css?v=20260519-transparent" />
+    <link rel="stylesheet" href="assets/css/styles.css?v=20260519-transparent" />
+    <script defer src="assets/js/main.js?v=20260519-transparent"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Sengoo home">
+        <img class="brand-mark" src="assets/img/sengoo-mark.png?v=20260519-transparent" alt="" width="36" height="36" decoding="async" />
+        <span>
+          <strong>Sengoo</strong>
+          <small data-i18n="brand.tagline">现代系统语言实验室</small>
+        </span>
+      </a>
+      <button class="nav-toggle" aria-expanded="false" aria-controls="site-nav" data-i18n="nav.menu">
+        菜单
+      </button>
+      <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+        <a href="#why" data-i18n="nav.why">为什么选择</a>
+        <a href="#learn" data-i18n="nav.learn">语言速览</a>
+        <a href="#tools" data-i18n="nav.tools">工具链</a>
+        <a href="#runtime" data-i18n="nav.runtime">运行时</a>
+        <div class="language-switch" aria-label="Language switcher">
+          <button type="button" class="lang-btn active" data-lang="zh">中</button>
+          <button type="button" class="lang-btn" data-lang="en">EN</button>
+        </div>
+        <a
+          class="nav-github"
+          href="https://github.com/Hyper66666/Sengoo"
+          target="_blank"
+          rel="noopener"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              fill="currentColor"
+              d="M12 .5C5.65.5.5 5.66.5 12.02c0 5.09 3.29 9.4 7.86 10.92.58.11.79-.25.79-.56v-2.02c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.18c0 .31.21.68.8.56A11.52 11.52 0 0 0 23.5 12.02C23.5 5.66 18.35.5 12 .5Z"
+            />
+          </svg>
+          <span>GitHub</span>
+        </a>
+        <a class="nav-cta" href="#install" data-i18n="nav.getStarted">开始使用</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero section-shell">
+        <div class="hero-copy reveal">
+          <p class="eyebrow" data-i18n="hero.eyebrow">编译型 · 异步 · 泛型 · 可集成</p>
+          <h1 data-i18n="hero.title">为可靠原生软件而生的语言工作台。</h1>
+          <p class="hero-lede" data-i18n="hero.lede">
+            Sengoo 借鉴 Rust 的工程可信度与 Python 的上手友好度：清晰语法、不断成长的工具链、异步运行时原语，以及面向真实系统的原生集成能力。
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#install" data-i18n="hero.primary">立即开始</a>
+            <a class="button secondary" href="#learn" data-i18n="hero.secondary">查看语言速览</a>
+          </div>
+          <dl class="release-strip" aria-label="Project highlights">
+            <div>
+              <dt data-i18n="hero.stat1Label">当前重点</dt>
+              <dd data-i18n="hero.stat1Value">Async + Generics</dd>
+            </div>
+            <div>
+              <dt data-i18n="hero.stat2Label">工具链</dt>
+              <dd>sgc · sgfmt · sglsp · sgpm</dd>
+            </div>
+            <div>
+              <dt data-i18n="hero.stat3Label">运行时</dt>
+              <dd data-i18n="hero.stat3Value">原生异步 + 反射</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="hero-visual reveal delay-1" aria-label="Sengoo logo and code example">
+          <img
+            class="hero-logo"
+            src="assets/img/sengoo-mark.png?v=20260519-transparent"
+            alt="Sengoo brand mark"
+            width="320"
+            height="320"
+            decoding="async"
+            fetchpriority="high"
+          />
+          <div class="hero-panel">
+            <div class="terminal-bar">
+              <span></span><span></span><span></span>
+              <strong>main.sg</strong>
+            </div>
+            <pre><code><span class="muted">async</span> def fetch_total() -&gt; i64 {
+    let task = spawn_task(worker())
+    let waited = timeout(task, 500)
+    select(waited, sleep(20))
+}
+
+def main() -&gt; i64 {
+    let result = await fetch_total()
+    print(result)
+    result
+}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="why" class="why section-shell">
+        <div class="section-heading reveal">
+          <p class="eyebrow" data-i18n="why.eyebrow">为什么选择 Sengoo?</p>
+          <h2 data-i18n="why.title">写起来轻盈，编译器内部足够硬核。</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card reveal">
+            <span class="icon">01</span>
+            <h3 data-i18n="why.card1Title">可预测的原生执行</h3>
+            <p data-i18n="why.card1Body">
+              HIR 到 MIR 的降低流程为静态检查、异步帧生成、原生代码生成和定向优化留下了清晰空间。
+            </p>
+          </article>
+          <article class="feature-card reveal delay-1">
+            <span class="icon">02</span>
+            <h3 data-i18n="why.card2Title">异步路径优先</h3>
+            <p data-i18n="why.card2Body">
+              sleep、timeout、spawn、join、select、任务状态与取消正在由编译器和运行时共同打通。
+            </p>
+          </article>
+          <article class="feature-card reveal delay-2">
+            <span class="icon">03</span>
+            <h3 data-i18n="why.card3Title">持续扩展的泛型标准库</h3>
+            <p data-i18n="why.card3Body">
+              Option、Result、collections、math、string 与 error 模块拆分清晰，适合直接在源码层组合。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="learn" class="learn section-shell">
+        <div class="learn-card reveal">
+          <div>
+            <p class="eyebrow" data-i18n="learn.eyebrow">语言速览</p>
+            <h2 data-i18n="learn.title">清爽语法，严肃编译管线。</h2>
+            <p data-i18n="learn.body">
+              Sengoo 希望代码能被快速阅读，同时保留能解释错误、优化原生输出并守住异步边界的编译器架构。
+            </p>
+          </div>
+          <div class="snippet-stack">
+            <pre><code>struct Point {
+    x: i64,
+    y: i64,
+}
+
+impl Point {
+    def sum(self) -&gt; i64 {
+        self.x + self.y
+    }
+}</code></pre>
+            <pre><code>def safe_div(a: i64, b: i64) -&gt; Result&lt;i64, i64&gt; {
+    if b == 0 {
+        result_err_i64(1)
+    } else {
+        result_ok_i64(a / b)
+    }
+}</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="tools" class="tools section-shell">
+        <div class="section-heading reveal">
+          <p class="eyebrow" data-i18n="tools.eyebrow">工具链</p>
+          <h2 data-i18n="tools.title">围绕编译器生长的一组工具。</h2>
+        </div>
+        <div class="tool-board reveal">
+          <article>
+            <h3>sgc</h3>
+            <p data-i18n="tools.sgc">编译器 CLI，覆盖 check、build、run、原生输出与运行时集成。</p>
+          </article>
+          <article>
+            <h3>sgpm</h3>
+            <p data-i18n="tools.sgpm">离线包管理器 MVP，支持 manifest、path dependencies、tree 与 clean。</p>
+          </article>
+          <article>
+            <h3>sgfmt</h3>
+            <p data-i18n="tools.sgfmt">格式化入口，随着语言演进保持源码一致性。</p>
+          </article>
+          <article>
+            <h3>sglsp</h3>
+            <p data-i18n="tools.sglsp">语言服务器路径，为编辑器诊断和项目体验打底。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="runtime" class="runtime section-shell">
+        <div class="runtime-copy reveal">
+          <p class="eyebrow" data-i18n="runtime.eyebrow">运行时集成</p>
+          <h2 data-i18n="runtime.title">把原生服务包装成 Sengoo 代码能使用的能力。</h2>
+          <p data-i18n="runtime.body">
+            运行时栈暴露异步调度、网络句柄、数据库调用、Lua 5.4 桥接、protobuf 辅助函数和 FFI wrapper，让源码示例逐步走向真实集成。
+          </p>
+        </div>
+        <div class="runtime-grid reveal delay-1">
+          <span data-i18n="runtime.item1">异步运行时</span>
+          <span data-i18n="runtime.item2">数据库包装</span>
+          <span data-i18n="runtime.item3">Lua54 桥接</span>
+          <span data-i18n="runtime.item4">Protobuf</span>
+          <span data-i18n="runtime.item5">网络 API</span>
+          <span data-i18n="runtime.item6">原生 FFI</span>
+        </div>
+      </section>
+
+      <section id="install" class="install section-shell">
+        <div class="install-panel reveal">
+          <div>
+            <p class="eyebrow" data-i18n="install.eyebrow">开始使用</p>
+            <h2 data-i18n="install.title">Clone, build, run.</h2>
+            <p data-i18n="install.body">
+              Sengoo 仍在快速演进。先从仓库构建工具链，再用 sgpm 创建或运行一个包。
+            </p>
+            <a
+              class="install-github"
+              href="https://github.com/Hyper66666/Sengoo"
+              target="_blank"
+              rel="noopener"
+              data-i18n="install.github"
+            >github.com/Hyper66666/Sengoo →</a>
+          </div>
+          <pre><code>cargo build --workspace
+target/debug/sgpm new hello
+target/debug/sgpm build --manifest-path hello
+target/debug/sgpm run --manifest-path hello</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">
+        <img class="footer-mark" src="assets/img/sengoo-mark.png?v=20260519-transparent" alt="" width="40" height="40" decoding="async" />
+        <div>
+          <strong>Sengoo</strong>
+          <p data-i18n="footer.body">为编译器工程和真实系统软件保留想象力。</p>
+        </div>
+      </div>
+      <div class="footer-links">
+        <a
+          class="footer-github"
+          href="https://github.com/Hyper66666/Sengoo"
+          target="_blank"
+          rel="noopener"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              fill="currentColor"
+              d="M12 .5C5.65.5.5 5.66.5 12.02c0 5.09 3.29 9.4 7.86 10.92.58.11.79-.25.79-.56v-2.02c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.62 1.58.23 2.75.11 3.04.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.18c0 .31.21.68.8.56A11.52 11.52 0 0 0 23.5 12.02C23.5 5.66 18.35.5 12 .5Z"
+            />
+          </svg>
+          <span data-i18n="footer.github">源代码 · GitHub</span>
+        </a>
+        <a href="#top" data-i18n="footer.back">回到顶部</a>
+      </div>
+    </footer>
+    <svg aria-hidden="true" focusable="false" class="svg-defs">
+      <defs>
+        <linearGradient id="sg-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#0034b8" />
+          <stop offset="55%" stop-color="#0868f6" />
+          <stop offset="100%" stop-color="#16a3ff" />
+        </linearGradient>
+        <symbol id="sg-mark" viewBox="0 0 64 64">
+          <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#sg-grad)" />
+          <path
+            d="M42 22c-2.4-2.6-6-4-10.4-4-6 0-10.4 3.2-10.4 8 0 4 2.4 6 8.4 7l4.4 .8c3.6 .8 5.2 1.6 5.2 3.6 0 2.4-2.4 3.6-6.4 3.6-4 0-6.8-1.6-8.4-4.4l-4.8 2.8c2.4 4.4 7.2 6.8 13.2 6.8 6.8 0 11.6-3.2 11.6-8.4 0-4-2.8-6.4-8.8-7.6l-4.4-.8c-3.2-.6-4.8-1.4-4.8-3 0-2 2.4-3.2 6-3.2 3.6 0 6 1.2 7.6 3.2z"
+            fill="#ffffff"
+          />
+        </symbol>
+      </defs>
+    </svg>
+  </body>
+</html>
+

@@ -338,7 +338,7 @@ impl TypeEnv {
     /// 创建错误类型
     ///
     /// `TyKind::Error` 仅有一种结构形状，多次调用会被 interner 去重为同一 id，
-        /// 但 origin tag 仍递增以保留现有的 per-instance 诊断语义。
+    /// 但 origin tag 仍递增以保留现有的 per-instance 诊断语义。
     pub fn error_ty(&mut self) -> Ty {
         self.new_ty(TyKind::Error)
     }
@@ -586,7 +586,10 @@ mod tests {
 
         // env2 立即看到。
         assert_eq!(env2.interner().borrow().len(), initial_len + 1);
-        assert_eq!(env2.interner().borrow().try_lookup(id_a), Some(&novel_kind_a));
+        assert_eq!(
+            env2.interner().borrow().try_lookup(id_a),
+            Some(&novel_kind_a)
+        );
 
         // 反向：通过 env2 写入，env1 立刻可见，且 id 不重复。
         let id_b = env2.interner().borrow_mut().intern(novel_kind_b);

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub const SENGOO_PROTO_OK: i32 = 0;
@@ -21,10 +23,27 @@ impl Default for ProtoErrorState {
     }
 }
 
+#[derive(Clone, Debug)]
+struct DecodedUserEvent {
+    id: u32,
+    name: String,
+    ts: u64,
+}
+
 static PROTO_LAST_ERROR: OnceLock<Mutex<ProtoErrorState>> = OnceLock::new();
+static PROTO_DECODED_USER_EVENTS: OnceLock<Mutex<HashMap<u64, DecodedUserEvent>>> = OnceLock::new();
+static NEXT_PROTO_DECODED_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 fn proto_last_error() -> &'static Mutex<ProtoErrorState> {
     PROTO_LAST_ERROR.get_or_init(|| Mutex::new(ProtoErrorState::default()))
+}
+
+fn proto_decoded_user_events() -> &'static Mutex<HashMap<u64, DecodedUserEvent>> {
+    PROTO_DECODED_USER_EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_decoded_handle() -> u64 {
+    NEXT_PROTO_DECODED_HANDLE.fetch_add(1, Ordering::Relaxed)
 }
 
 fn clear_error() {
@@ -294,6 +313,154 @@ pub extern "C" fn sengoo_proto_user_event_decode(
     name_bytes.len() as i64
 }
 
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decode_open(
+    input_ptr: *const u8,
+    input_len: usize,
+) -> u64 {
+    clear_error();
+    if input_ptr.is_null() || input_len == 0 {
+        set_error(
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+            "input buffer is null or empty",
+        );
+        return 0;
+    }
+    let input = unsafe { std::slice::from_raw_parts(input_ptr, input_len) };
+    let (id, name, ts) = match decode_user_event_wire(input) {
+        Ok(value) => value,
+        Err(_) => return 0,
+    };
+    let mut table = match proto_decoded_user_events().lock() {
+        Ok(table) => table,
+        Err(_) => {
+            set_error(
+                SENGOO_PROTO_ERR_INTERNAL,
+                "decoded user event table poisoned",
+            );
+            return 0;
+        }
+    };
+    let handle = next_decoded_handle();
+    table.insert(handle, DecodedUserEvent { id, name, ts });
+    handle
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decoded_id(handle: u64) -> i64 {
+    clear_error();
+    let table = match proto_decoded_user_events().lock() {
+        Ok(table) => table,
+        Err(_) => {
+            return set_error(
+                SENGOO_PROTO_ERR_INTERNAL,
+                "decoded user event table poisoned",
+            ) as i64;
+        }
+    };
+    match table.get(&handle) {
+        Some(event) => event.id as i64,
+        None => set_error(
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+            format!("decoded user event handle {handle} not found"),
+        ) as i64,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decoded_ts(handle: u64) -> i64 {
+    clear_error();
+    let table = match proto_decoded_user_events().lock() {
+        Ok(table) => table,
+        Err(_) => {
+            return set_error(
+                SENGOO_PROTO_ERR_INTERNAL,
+                "decoded user event table poisoned",
+            ) as i64;
+        }
+    };
+    match table.get(&handle) {
+        Some(event) => event.ts as i64,
+        None => set_error(
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+            format!("decoded user event handle {handle} not found"),
+        ) as i64,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decoded_name_len(handle: u64) -> i64 {
+    clear_error();
+    let table = match proto_decoded_user_events().lock() {
+        Ok(table) => table,
+        Err(_) => {
+            return set_error(
+                SENGOO_PROTO_ERR_INTERNAL,
+                "decoded user event table poisoned",
+            ) as i64;
+        }
+    };
+    match table.get(&handle) {
+        Some(event) => event.name.len() as i64,
+        None => set_error(
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+            format!("decoded user event handle {handle} not found"),
+        ) as i64,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decoded_name_copy(
+    handle: u64,
+    buffer: *mut u8,
+    capacity: usize,
+) -> i64 {
+    clear_error();
+    let name = {
+        let table = match proto_decoded_user_events().lock() {
+            Ok(table) => table,
+            Err(_) => {
+                return set_error(
+                    SENGOO_PROTO_ERR_INTERNAL,
+                    "decoded user event table poisoned",
+                ) as i64;
+            }
+        };
+        match table.get(&handle) {
+            Some(event) => event.name.clone(),
+            None => {
+                return set_error(
+                    SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+                    format!("decoded user event handle {handle} not found"),
+                ) as i64;
+            }
+        }
+    };
+    copy_bytes_to_buffer(name.as_bytes(), buffer, capacity)
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_proto_user_event_decoded_close(handle: u64) -> i32 {
+    clear_error();
+    let mut table = match proto_decoded_user_events().lock() {
+        Ok(table) => table,
+        Err(_) => {
+            return set_error(
+                SENGOO_PROTO_ERR_INTERNAL,
+                "decoded user event table poisoned",
+            );
+        }
+    };
+    if table.remove(&handle).is_some() {
+        SENGOO_PROTO_OK
+    } else {
+        set_error(
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT,
+            format!("decoded user event handle {handle} not found"),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +512,41 @@ mod tests {
         assert_eq!(out_id, 7);
         assert_eq!(out_ts, 42);
         assert_eq!(&out_name[..name_len as usize], b"bob");
+    }
+
+    #[test]
+    fn protobuf_decode_open_exposes_owned_event_fields() {
+        let mut output = vec![0u8; 64];
+        let name = c_str("bob");
+        let written =
+            sengoo_proto_user_event_encode(7, name.as_ptr(), 42, output.as_mut_ptr(), output.len());
+        assert!(written > 0);
+
+        let decoded = sengoo_proto_user_event_decode_open(output.as_ptr(), written as usize);
+        assert_ne!(decoded, 0);
+        assert_eq!(sengoo_proto_user_event_decoded_id(decoded), 7);
+        assert_eq!(sengoo_proto_user_event_decoded_ts(decoded), 42);
+        assert_eq!(sengoo_proto_user_event_decoded_name_len(decoded), 3);
+
+        let mut out_name = vec![0u8; 16];
+        let copied = sengoo_proto_user_event_decoded_name_copy(
+            decoded,
+            out_name.as_mut_ptr(),
+            out_name.len(),
+        );
+        assert_eq!(&out_name[..copied as usize], b"bob");
+        assert_eq!(
+            sengoo_proto_user_event_decoded_close(decoded),
+            SENGOO_PROTO_OK
+        );
+        assert_eq!(
+            sengoo_proto_user_event_decoded_id(decoded),
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT as i64
+        );
+        assert_eq!(
+            sengoo_proto_last_error_code(),
+            SENGOO_PROTO_ERR_INVALID_ARGUMENT
+        );
     }
 
     #[test]

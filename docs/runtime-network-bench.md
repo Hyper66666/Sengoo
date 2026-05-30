@@ -14,6 +14,27 @@ This document describes the runtime network benchmark used for:
 - `i64 sengoo_net_bench_last_error_copy(u8* buffer, usize capacity)`
 - `i32 sengoo_net_bench_last_error_clear()`
 
+## Sengoo stdlib wrapper
+
+`import std::net` also preloads `std::ffi`, so callers can allocate a managed
+`Buffer` and pass it to `net_bench_run` or `net_bench_last_error_copy`:
+
+```sg
+import std::net;
+
+def main() -> i64 {
+    let report = ffi_buffer_new(4096);
+    if report.is_err() {
+        0
+    } else {
+        let buffer = report.unwrap_or(Buffer { handle: 0 });
+        let copied = net_bench_run(4, 6, 3, 24, buffer);
+        buffer.free();
+        copied.unwrap_or(0)
+    }
+}
+```
+
 ## Report format
 
 `sengoo_net_bench_run` writes a JSON report:
@@ -39,4 +60,3 @@ This document describes the runtime network benchmark used for:
 - Benchmark runs on loopback TCP (`127.0.0.1`) for reproducibility.
 - RTT path: concurrent clients send messages and wait for echoed response.
 - Broadcast path: server writes to all connections each round and measures client receive latencies.
-

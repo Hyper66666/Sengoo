@@ -1,0 +1,30 @@
+# Generated benchmark outputs
+results/*.json
+results/*.env
+.cross-lang-work/
+.scenario-matrix-work/
+.advanced-work/
+.interop-work/
+.llm-scheduler-work/
+tmp-workset-recover/
+results/.tmp/
+
+# Generated suite artifacts
+suites/**/build/
+suites/tmp_1000k_single/
+
+# Generated smoke/e2e artifacts
+tests/build/
+tests/_case_tmp/
+tests/_tmp/
+
+# Demo generated artifacts
+demos/**/build/
+demos/**/results/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Editor settings
+.vscode/

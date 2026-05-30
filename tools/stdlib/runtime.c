@@ -25,6 +25,10 @@ void sengoo_print_str(const char* s) {
     }
 }
 
+long long sengoo_stdlib_str_ptr(const char* s) {
+    return (long long)(intptr_t)s;
+}
+
 long long sengoo_panic_option_unwrap_i64(void) {
     fprintf(stderr, "Option unwrap failed\n");
     exit(1);

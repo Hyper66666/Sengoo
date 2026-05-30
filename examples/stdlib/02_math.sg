@@ -1,0 +1,22 @@
+// examples/stdlib/02_math.sg
+//
+// Demonstrates: importing std::math integer helper functions.
+//
+// Run: sgc run examples/stdlib/02_math.sg
+// Expected output: 50
+
+import std::math;
+
+def main() -> i64 {
+    let score = abs_i64(-5)
+        + min_i64(9, 4)
+        + max_i64(3, 7)
+        + sign_i64(-8)
+        + clamp_i64(12, 0, 9)
+        + gcd_i64(18, 12)
+        + lcm_i64(4, 6)
+        + pow_i64(2, 3);
+
+    print(score);
+    0
+}

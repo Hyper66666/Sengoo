@@ -1,11 +1,12 @@
 use sengoo_compiler::{lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker};
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use crate::{
-    function_fingerprints_for_program, generic_fingerprints_for_program,
+    expand_imports_for_source, function_fingerprints_for_program, generic_fingerprints_for_program,
     implementation_fingerprint, implementation_fingerprint_from_normalized, interface_fingerprint,
     interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
     interface_fingerprint_from_program, normalize_source_for_hash, source_fingerprint,
@@ -14,10 +15,11 @@ use crate::{
 };
 
 pub(crate) fn frontend_probe_module_full(
-    _path: &str,
+    path: &str,
     source: &str,
 ) -> std::result::Result<(u64, u64), String> {
-    let parsed = Parser::parse(source).map_err(|e| format!("parse failed: {}", e))?;
+    let semantic_source = semantic_source_for_frontend_probe(path, source)?;
+    let parsed = Parser::parse(&semantic_source).map_err(|e| format!("parse failed: {}", e))?;
     let mut checker = TypeChecker::new();
     checker
         .check_program(&parsed)
@@ -39,11 +41,12 @@ pub(crate) fn frontend_probe_module_full(
 }
 
 pub(crate) fn frontend_probe_module_body_only(
-    _path: &str,
+    path: &str,
     source: &str,
     impacted_symbols: &[String],
 ) -> std::result::Result<(u64, u64), String> {
-    let parsed = Parser::parse(source).map_err(|e| format!("parse failed: {}", e))?;
+    let semantic_source = semantic_source_for_frontend_probe(path, source)?;
+    let parsed = Parser::parse(&semantic_source).map_err(|e| format!("parse failed: {}", e))?;
 
     let checked_function_names = impacted_symbols
         .iter()
@@ -68,6 +71,11 @@ pub(crate) fn frontend_probe_module_body_only(
         interface_fingerprint(source),
         implementation_fingerprint(source),
     ))
+}
+
+fn semantic_source_for_frontend_probe(path: &str, source: &str) -> Result<String, String> {
+    expand_imports_for_source(Path::new(path), source)
+        .map_err(|err| format!("import expansion failed: {}", err))
 }
 
 pub(crate) fn hir_fragment_fingerprint(functions: &[FunctionFingerprint]) -> u64 {

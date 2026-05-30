@@ -90,7 +90,11 @@ pub(super) fn resolve_insert_columns(table: &DbTable, sql_left: &str) -> Result<
     Ok(table.columns.clone())
 }
 
-pub(super) fn exec_insert(conn: &mut DbConnection, sql: &str, params: &Value) -> Result<usize, i32> {
+pub(super) fn exec_insert(
+    conn: &mut DbConnection,
+    sql: &str,
+    params: &Value,
+) -> Result<usize, i32> {
     let prefix = "INSERT INTO";
     let rest = sql[prefix.len()..].trim();
     let Some(values_pos) = find_keyword_case_insensitive(rest, " VALUES") else {
@@ -214,7 +218,11 @@ pub(super) fn build_select_result(
     })
 }
 
-pub(super) fn run_select(conn: &DbConnection, sql: &str, params: &Value) -> Result<DbQueryResult, i32> {
+pub(super) fn run_select(
+    conn: &DbConnection,
+    sql: &str,
+    params: &Value,
+) -> Result<DbQueryResult, i32> {
     let prefix = "SELECT";
     let rest = sql[prefix.len()..].trim();
     let Some(from_pos) = find_keyword_case_insensitive(rest, " FROM ") else {
@@ -268,7 +276,11 @@ pub(super) fn run_select(conn: &DbConnection, sql: &str, params: &Value) -> Resu
     build_select_result(table, &selected_columns, where_filter)
 }
 
-pub(super) fn exec_delete(conn: &mut DbConnection, sql: &str, params: &Value) -> Result<usize, i32> {
+pub(super) fn exec_delete(
+    conn: &mut DbConnection,
+    sql: &str,
+    params: &Value,
+) -> Result<usize, i32> {
     let prefix = "DELETE FROM";
     let rest = sql[prefix.len()..].trim();
     let (table_name_raw, where_part) =
@@ -306,7 +318,11 @@ pub(super) fn exec_delete(conn: &mut DbConnection, sql: &str, params: &Value) ->
     Ok(before.saturating_sub(table.rows.len()))
 }
 
-pub(super) fn execute_statement(conn: &mut DbConnection, sql: &str, params: &Value) -> Result<usize, i32> {
+pub(super) fn execute_statement(
+    conn: &mut DbConnection,
+    sql: &str,
+    params: &Value,
+) -> Result<usize, i32> {
     let normalized = sql.trim();
     if normalized.is_empty() {
         return Err(set_error(SENGOO_DB_ERR_PARSE, "empty SQL"));

@@ -8,12 +8,20 @@ struct Result<T, E> {
     error: E,
 }
 
+def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E> {
+    Result { is_ok: true, value: value, error: error_placeholder }
+}
+
+def result_err_with<T, E>(value_placeholder: T, error: E) -> Result<T, E> {
+    Result { is_ok: false, value: value_placeholder, error: error }
+}
+
 def result_ok_i64(value: i64) -> Result<i64, i64> {
-    Result { is_ok: true, value: value, error: 0 }
+    result_ok_with(value, 0)
 }
 
 def result_err_i64(error: i64) -> Result<i64, i64> {
-    Result { is_ok: false, value: 0, error: error }
+    result_err_with(0, error)
 }
 
 impl<T, E> Result<T, E> {

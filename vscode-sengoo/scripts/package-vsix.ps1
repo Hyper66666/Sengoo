@@ -2,9 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$baseVsix = Join-Path $root 'sengoo-1.0.0.base.vsix'
-$finalVsix = Join-Path $root 'sengoo-1.0.0.vsix'
 $tempRoot = Join-Path $root '.vsix-build'
+$baseVsix = Join-Path $tempRoot 'base.vsix'
+$finalVsix = Join-Path $root 'sengoo-1.0.0.vsix'
 $tempZip = Join-Path $tempRoot 'base.zip'
 $extractRoot = Join-Path $tempRoot 'extract'
 
@@ -28,12 +28,8 @@ if (Test-Path $tempRoot) {
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 
 Invoke-Checked 'npm run compile'
-Invoke-Checked 'npx @vscode/vsce package --no-yarn --no-dependencies --allow-missing-repository'
+Invoke-Checked "npx @vscode/vsce package --no-yarn --no-dependencies --allow-missing-repository --out ""$baseVsix"""
 
-if (Test-Path $baseVsix) {
-    Remove-Item -Force $baseVsix
-}
-Move-Item $finalVsix $baseVsix
 Copy-Item $baseVsix $tempZip -Force
 Expand-Archive -Path $tempZip -DestinationPath $extractRoot -Force
 
@@ -65,5 +61,9 @@ if (Test-Path $finalVsix) {
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($extractRoot, $finalVsix)
+
+if (Test-Path $tempRoot) {
+    Remove-Item -Recurse -Force $tempRoot
+}
 
 Write-Host "Packaged: $finalVsix"

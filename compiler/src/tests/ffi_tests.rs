@@ -62,6 +62,31 @@ def main() -> i64 {
 }
 
 #[test]
+fn extern_str_parameter_codegen_emits_c_string_pointer() {
+    let source = r#"
+extern "C" {
+    fn c_strlen(value: &str) -> i64;
+}
+
+def main() -> i64 {
+    c_strlen("hello")
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("extern &str parameter should compile");
+    assert!(
+        ir.contains("declare i64 @c_strlen(i8*)"),
+        "expected &str extern parameter to lower as C string pointer, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i64 @c_strlen(i8*"),
+        "expected call to pass an i8* argument, got:\n{}",
+        ir
+    );
+}
+
+#[test]
 fn export_name_attribute_changes_emitted_symbol() {
     let source = r#"
 #[export_name = "sengoo_add_export"]
@@ -110,13 +135,13 @@ def main() -> i32 { 0 }
 fn ffi_rejects_non_ffi_safe_types() {
     let source = r#"
 extern "C" {
-    fn bad_ref(arg: str) -> i64;
+    fn bad_mut_ref(arg: &mut str) -> i64;
 }
 
 def main() -> i32 { 0 }
 "#;
 
-    let err = compile_to_ir(source).expect_err("reference in extern signature should fail");
+    let err = compile_to_ir(source).expect_err("mutable reference in extern signature should fail");
     let msg = err.to_string();
     assert!(
         msg.contains("FFI type"),

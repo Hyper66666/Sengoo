@@ -3,11 +3,11 @@ mod ffi_utils;
 mod sql;
 mod state;
 mod status;
-pub use status::*;
 use exec::*;
 use ffi_utils::*;
 use sql::*;
 use state::*;
+pub use status::*;
 
 #[no_mangle]
 pub extern "C" fn sengoo_db_last_error_code() -> i32 {

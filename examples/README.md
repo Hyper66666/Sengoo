@@ -18,6 +18,7 @@ Some FFI examples need `clang` and are driven by `make`; see
 |---|---|
 | [`async/`](async/) | `async def`, `sleep`, `spawn`, `select`, and task lifecycle APIs |
 | [`generics/`](generics/) | Generic structs, generic impl methods, `Option<T>`, and `Result<T, E>` |
+| [`stdlib/`](stdlib/) | Source-level standard library imports and everyday helper APIs |
 | [`traits/`](traits/) | Trait methods, concrete impls, and generic trait method instantiation |
 | [`ffi/`](ffi/) | Sengoo calling C and C calling exported Sengoo symbols |
 | [`reflection/`](reflection/) | Runtime wrapper demos for DB, Lua, proto, net, and FFI reflection paths |

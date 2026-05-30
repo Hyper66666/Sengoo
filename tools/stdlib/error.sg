@@ -11,6 +11,42 @@ def assert(cond: bool) -> bool {
     }
 }
 
+def assert_true(cond: bool) -> bool {
+    assert(cond)
+}
+
+def assert_false(cond: bool) -> bool {
+    assert(!cond)
+}
+
 def assert_eq_i64(lhs: i64, rhs: i64) -> bool {
     assert(lhs == rhs)
+}
+
+def assert_ne_i64(lhs: i64, rhs: i64) -> bool {
+    assert(lhs != rhs)
+}
+
+def assert_eq_bool(lhs: bool, rhs: bool) -> bool {
+    assert(lhs == rhs)
+}
+
+def assert_ne_bool(lhs: bool, rhs: bool) -> bool {
+    assert(lhs != rhs)
+}
+
+def assert_eq_str(lhs: &str, rhs: &str) -> bool {
+    assert(lhs == rhs)
+}
+
+def assert_ne_str(lhs: &str, rhs: &str) -> bool {
+    assert(lhs != rhs)
+}
+
+def assert_eq_f64(lhs: f64, rhs: f64) -> bool {
+    assert(lhs == rhs)
+}
+
+def assert_ne_f64(lhs: f64, rhs: f64) -> bool {
+    assert(lhs != rhs)
 }

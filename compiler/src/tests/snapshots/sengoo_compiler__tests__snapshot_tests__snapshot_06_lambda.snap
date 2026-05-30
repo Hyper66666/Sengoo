@@ -34,7 +34,7 @@ declare i64 @sengoo_async_run_main_i64(i64)
 define i64 @main() {
 bb_0:
     %u_2 = alloca i64
-    %u_4 = alloca i64
+    %u_4 = alloca i64 (i64)*
     %u_5 = alloca [1 x i64]
     %t_1 = add i64 0, 10
     store i64 %t_1, i64* %u_2

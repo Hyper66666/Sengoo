@@ -92,6 +92,7 @@ Important context:
 - `build <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--emit-llvm] [--force-rebuild] [--low-memory] [--daemon]`
 - `run <file.sg> [-O 0..3] [--contract-checks auto|on|off] [--engine auto|native|lli] [--force-rebuild] [--low-memory] [--daemon]`
 - `check <file.sg>`
+- `doc <file.sg> [--output target/doc]`
 - Global flag: `--error-format text|json` (default: `text`)
 - `dump-ast <file.sg>`
 - `daemon --addr <host:port>`
@@ -105,6 +106,7 @@ target/release/sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 target/release/sgc build examples/08_struct.sg --emit-llvm
 target/release/sgc build examples/08_struct.sg --emit-llvm --low-memory
 target/release/sgc --error-format json check examples/09_method_call.sg
+target/release/sgc doc examples/09_method_call.sg --output target/doc
 target/release/sgc daemon --addr 127.0.0.1:48765
 ```
 
@@ -309,6 +311,7 @@ target/release/sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 target/release/sgc build examples/08_struct.sg --emit-llvm
 target/release/sgc build examples/08_struct.sg --emit-llvm --low-memory
 target/release/sgc --error-format json check examples/09_method_call.sg
+target/release/sgc doc examples/09_method_call.sg --output target/doc
 target/release/sgc daemon --addr 127.0.0.1:48765
 ```
 

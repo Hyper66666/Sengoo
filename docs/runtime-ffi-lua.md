@@ -39,12 +39,15 @@ This document describes the runtime C/C++ FFI wrapper and Lua bridge in branch `
 - `u64 sengoo_ffi_c_open(const u8* path)`
 - `i32 sengoo_ffi_c_close(u64 handle)`
 - `i32 sengoo_ffi_c_call_i64(u64 handle, const u8* symbol, usize argc, const i64* argv, i64* out_value)`
+- `i64 sengoo_ffi_c_call_i64_value(u64 handle, const u8* symbol, usize argc, i64 a0, i64 a1, i64 a2, i64 a3)`
 
 ### C++ wrapper primitives (C shim friendly)
 
 - `u64 sengoo_ffi_object_create(u64 lib_handle, const u8* constructor_symbol, usize argc, const i64* argv, const u8* destructor_symbol)`
+- `u64 sengoo_ffi_object_create_value(u64 lib_handle, const u8* constructor_symbol, usize argc, i64 a0, i64 a1, i64 a2, i64 a3, const u8* destructor_symbol)`
 - `i64 sengoo_ffi_object_raw_ptr(u64 object_handle)`
 - `i32 sengoo_ffi_object_call_i64(u64 object_handle, const u8* method_symbol, usize argc, const i64* argv, i64* out_value)`
+- `i64 sengoo_ffi_object_call_i64_value(u64 object_handle, const u8* method_symbol, usize argc, i64 a0, i64 a1, i64 a2)`
 - `i32 sengoo_ffi_object_destroy(u64 object_handle)`
 
 - `u64 sengoo_ffi_callback_bind_i64(u64 lib_handle, const u8* symbol, usize arity)`
@@ -58,6 +61,19 @@ This document describes the runtime C/C++ FFI wrapper and Lua bridge in branch `
 - `i64 sengoo_ffi_buffer_copy_out(u64 buffer_handle, u8* out_buffer, usize out_capacity)`
 - `i32 sengoo_ffi_buffer_copy_in(u64 buffer_handle, const u8* src_ptr, usize src_len)`
 - `i32 sengoo_ffi_buffer_free(u64 buffer_handle)`
+
+The Sengoo `std::ffi` wrapper exposes managed helpers for these raw buffer
+copies: `ffi_last_error_copy(buffer: Buffer)` and `Buffer.copy_out(out:
+Buffer)` return `Result<i64, i64>` while keeping the `_raw` functions available
+for explicit pointer/capacity handoff. Fixed-arity helpers avoid pointer slots
+for common calls:
+
+```sg
+let lib = ffi_open("self://builtin").unwrap_or(CLib { handle: 0 });
+let value = lib.call_i64_2("sengoo_ffi_builtin_add2", 10, 32);
+lib.close();
+value.unwrap_or(0)
+```
 
 Special test/baseline path:
 
@@ -82,10 +98,16 @@ Special test/baseline path:
 - `i32 sengoo_lua54_close(u64 handle)`
 - `i32 sengoo_lua54_exec(u64 handle, const u8* chunk)`
 - `i32 sengoo_lua54_call_i64(u64 handle, const u8* func_name, usize argc, const i64* argv, i64* out_value)`
+- `i64 sengoo_lua54_call_i64_value(u64 handle, const u8* func_name, usize argc, i64 a0, i64 a1, i64 a2, i64 a3)`
 - `i32 sengoo_lua54_last_error_code()`
 - `i64 sengoo_lua54_last_error_len()`
 - `i64 sengoo_lua54_last_error_copy(u8* buffer, usize capacity)`
 - `i32 sengoo_lua54_last_error_clear()`
+
+`import std::lua54` preloads `std::ffi`, so Lua54 diagnostics can be copied with
+`lua54_last_error_copy(buffer: Buffer)` without spelling raw output pointers.
+`Lua54.call_i64_0` through `Lua54.call_i64_4` cover common calls without raw
+argument/result pointer slots.
 
 Lua 5.4 bridge key codes:
 
@@ -127,6 +149,6 @@ Key codes:
    - `Counter* counter_new(int64_t init)`
    - `int64_t counter_add(Counter* ptr, int64_t delta)`
    - `void counter_drop(Counter* ptr)`
-2. Use `sengoo_ffi_object_create` with constructor and destructor symbols.
-3. Use `sengoo_ffi_object_call_i64` for methods.
+2. Use `CLib.object_create_0` through `object_create_4` for common constructors.
+3. Use `CppObject.call_i64_0` through `call_i64_3` for common methods.
 4. Use `sengoo_ffi_buffer_*` for byte payload handoff (protobuf/string/blob).

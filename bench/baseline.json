@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-02-15T18:00:00Z",
+  "targets": {
+    "runtime_median_improvement_pct": 30,
+    "full_compile_reduction_pct": 35,
+    "incremental_compile_reduction_pct": 60
+  },
+  "cases": {
+    "runtime/runtime/basic_loop.sg": {
+      "p50_ms": 157.54
+    },
+    "compile/compile/mod_tree_root.sg": {
+      "total_ms": 902.25
+    },
+    "incremental/incremental/change_impl_root.sg": {
+      "before_ms": 879.38,
+      "after_ms": 998.22
+    }
+  },
+  "notes": "Route B final verification on 2026-02-15 keeps baseline values frozen; KPI targets are not yet met (runtime +6.99%, full compile -24.17%, incremental +0.27%)."
+}

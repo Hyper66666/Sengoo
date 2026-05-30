@@ -4,6 +4,7 @@
   "description": "Sengoo 编程语言支持 - 语法高亮、代码片段、LSP 集成、运行调试",
   "version": "1.0.0",
   "publisher": "sengoo-lang",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -13,16 +14,17 @@
     "Debuggers"
   ],
   "files": [
-    "out/extension.js",
-    "out/extension.js.map",
-    "out/toolPaths.js",
-    "out/toolPaths.js.map",
+    "dist/extension.js",
+    "dist/extension.js.map",
+    "dist/toolPaths.js",
+    "dist/toolPaths.js.map",
     "snippets/**",
     "syntaxes/**",
     "language-configuration.json",
+    "LICENSE*",
     "README.md"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "activationEvents": [
     "onLanguage:sengoo",
     "onDebug",
@@ -239,7 +241,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "test": "npm run compile && node ./out/toolPaths.test.js",
+    "test": "npm run compile && node ./dist/toolPaths.test.js",
     "watch": "tsc -watch -p ./",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-vsix.ps1"
   },

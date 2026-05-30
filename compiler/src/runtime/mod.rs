@@ -75,6 +75,12 @@ pub extern "C" fn sengoo_str_len(s: *const u8) -> usize {
     }
 }
 
+/// Return the raw pointer value backing a Sengoo `&str`.
+#[no_mangle]
+pub extern "C" fn sengoo_stdlib_str_ptr(s: *const u8) -> i64 {
+    s as isize as i64
+}
+
 /// 字符串比较
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]

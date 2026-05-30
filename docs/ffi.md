@@ -9,6 +9,7 @@ This document describes the current FFI MVP surface.
 ```sg
 extern "C" {
     pub fn c_add(a: i64, b: i64) -> i64;
+    pub fn c_strlen(value: &str) -> i64;
     pub unsafe fn read_buffer(ptr: *mut u8, len: usize) -> i64;
 }
 ```
@@ -49,12 +50,13 @@ extern "C" {
 - integer types (`i8/i16/i32/i64/i128/isize/u8/u16/u32/u64/u128/usize`)
 - `f32`, `f64`
 - `bool`, `char`
+- immutable `&str` parameters, lowered as null-terminated `i8*` C strings
 - raw pointers (`*const T`, `*mut T`) where `T` is recursively FFI-safe
 
 Rejected examples:
 
-- references (`&T`, `&mut T`)
-- `str`, slices, tuples, ADTs, function values
+- references other than immutable `&str` (`&T`, `&mut T`)
+- bare `str`, slices, tuples, ADTs, function values
 
 ## End-to-end Repro
 

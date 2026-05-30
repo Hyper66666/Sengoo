@@ -77,6 +77,38 @@ Selected error codes:
 - `12`: `handle_not_found`
 - `14`: `remote_closed`
 
+## Sengoo stdlib wrapper
+
+`import std::net` preloads the network wrapper and its `std::ffi` dependency, so
+caller-owned output payloads can use managed `Buffer` handles instead of raw
+pointer/capacity pairs:
+
+```sg
+import std::net;
+
+def main() -> i64 {
+    let out = ffi_buffer_new(256);
+    if out.is_err() {
+        0
+    } else {
+        let buffer = out.unwrap_or(Buffer { handle: 0 });
+        let copied = net_error_name_copy(net_last_error(), buffer);
+        buffer.free();
+        copied.unwrap_or(0)
+    }
+}
+```
+
+The same `Buffer` pattern is exposed by `TcpStream.recv`,
+`UdpSocket.recv`, `HttpClient.body_copy`, `WsClient.recv_text`,
+`net_bench_last_error_copy`, and `net_bench_run`.
+
+`HttpServer` wraps the HTTP server baseline with `&str` helpers for bind,
+static routes, required-header middleware, and WS echo routes. Its
+`serve_once(timeout_ms)` method returns `Ok(true)` after serving one client,
+`Ok(false)` on timeout, and `Err(code)` for runtime failures. Example:
+`examples/reflection/net_http_server.sg`.
+
 ## Return Conventions
 
 - Handle-returning APIs: `0` means failure.

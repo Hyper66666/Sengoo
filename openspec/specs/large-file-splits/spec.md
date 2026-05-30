@@ -15,7 +15,6 @@ First applied by `large-file-splits-runtime-db` (archived
 which split `runtime/src/reflect/runtime_db.rs` (978 LoC) into a 6-file
 directory module (largest 431 LoC) and captured the reusable SOP in that
 change's `tasks.md` §9.
-
 ## Requirements
 ### Requirement: Public Rust API preservation
 
@@ -127,3 +126,74 @@ The split, when it is the first instance of a broader track, MUST capture the ap
 - **AND** the SOP section MUST be copyable verbatim by the next Large File
   Splits change.
 
+### Requirement: Inherent impl block splitting
+
+Large-file split changes MUST preserve the public type surface when decomposing a large inherent `impl` block across multiple sibling module files; the split may use multiple `impl TypeName { ... }` blocks, but public method names, signatures, return types, and re-export paths MUST remain unchanged.
+
+#### Scenario: Public constructor and methods remain available
+
+- **GIVEN** a module exposes `pub struct TypeName` with public inherent methods such as `new`, `generate`, and `to_string`
+- **WHEN** the implementation is split from a single `impl TypeName` block into sibling submodules that each contain their own `impl TypeName` block
+- **THEN** external consumers MUST still compile using the same public paths and method calls
+- **AND** no public method MAY require a new trait import, wrapper type, or module-qualified helper call.
+
+#### Scenario: Cross-file helpers use module-scoped visibility
+
+- **GIVEN** a private method from the original impl block is moved to one sibling submodule and called by a method in another sibling submodule
+- **WHEN** Rust privacy requires visibility widening for that call
+- **THEN** the helper MUST be widened no further than `pub(super)` unless it was already public before the split
+- **AND** methods used only inside their new submodule MUST remain private.
+
+#### Scenario: Existing submodule helpers continue to attach to the same type
+
+- **GIVEN** the original file already declares a child submodule containing `impl TypeName` helper methods
+- **WHEN** the parent file is converted to a directory module
+- **THEN** that existing helper submodule MUST remain under the same logical module path
+- **AND** its helper methods MUST continue attaching to the same public type without changing caller code.
+
+### Requirement: Existing child directory root splitting
+
+Large-file split changes MUST preserve existing child helper modules when converting a large module root file into `mod.rs`; the split MUST keep the same logical module path for the parent and all existing children, and MUST avoid leaking parent-private implementation details outside the parent module boundary.
+
+#### Scenario: Existing child helper paths remain stable
+
+- **GIVEN** a module root file `foo.rs` declares child modules that already resolve to files under `foo/*.rs`
+- **WHEN** the root file is converted to `foo/mod.rs`
+- **THEN** each existing child module MUST continue resolving under the same logical parent module path
+- **AND** callers outside the parent module MUST NOT need to update imports because of the physical file move.
+
+#### Scenario: Parent-private context remains contained
+
+- **GIVEN** the original root file owns a private context type whose fields and helper methods are used by child helper modules
+- **WHEN** root methods are split into sibling files under the same directory module
+- **THEN** private fields and helper methods MUST remain no more visible than required by Rust privacy
+- **AND** any necessary helper method promotion MUST stop at `pub(super)` unless the item was already part of the public API.
+
+#### Scenario: Existing helper tests keep compiling
+
+- **GIVEN** existing child helper modules contain unit tests that instantiate root-owned helper types or structs
+- **WHEN** the root file is split into `mod.rs` plus sibling helper files
+- **THEN** those tests MUST keep compiling without changing their asserted behavior
+- **AND** test-only imports MAY be adjusted only to preserve access to the same logical items.
+
+### Requirement: Tooling command module splitting
+
+Large-file split changes that decompose tooling or CLI command modules MUST preserve command entry points, command-line observable behavior, test-only re-export paths, and generated artifact semantics while moving implementation details into focused submodules.
+
+#### Scenario: Command entry points remain stable
+
+- **WHEN** a tooling module exposing `pub(crate)` command entry points is split into a directory module
+- **THEN** existing callers MUST continue importing and invoking the same command functions through the same module root path
+- **AND** command function names, argument order, return types, asyncness, and crate visibility MUST remain unchanged.
+
+#### Scenario: CLI-observable behavior remains stable
+
+- **WHEN** command orchestration code is moved into sibling files
+- **THEN** CLI flags, stdout/stderr message text, message ordering, exit behavior, cache metadata, and generated artifact paths MUST remain unchanged
+- **AND** existing command tests MUST pass without changing asserted output text or fixture values.
+
+#### Scenario: Test-only helper re-exports remain stable
+
+- **WHEN** helper functions used by crate-local tests are moved out of a large tooling module root
+- **THEN** existing test imports through the parent module or crate root MUST continue compiling unchanged
+- **AND** any helper visibility widening required by the split MUST stop at `pub(super)` or `pub(crate)` as appropriate for the pre-existing test surface.

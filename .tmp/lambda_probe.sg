@@ -1,0 +1,1 @@
+def main() -> i64 { let flip = |value| !value; 0 }

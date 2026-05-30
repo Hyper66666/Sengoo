@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader as StdBufReader, Read};
 use std::path::Path;
 
-use crate::{ast_interface_signature, canonical_or_lossy, ModuleGraphSnapshot};
+use crate::ast_interface_signature;
 
 pub(crate) fn source_fingerprint(source: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -145,35 +145,17 @@ fn resolve_root_interface_hash(
 }
 
 pub(crate) fn resolve_root_hashes_for_request(
-    input_path: &Path,
     source: &str,
-    snapshot: &ModuleGraphSnapshot,
-    _force_rebuild: bool,
     previous_root_implementation_hash: Option<u64>,
     previous_root_interface_hash: Option<u64>,
 ) -> (u64, u64) {
-    let root_module = canonical_or_lossy(input_path);
-    let snapshot_hashes = snapshot
-        .frontend_session_store
-        .modules
-        .iter()
-        .find(|entry| entry.module_id == root_module)
-        .map(|entry| (entry.interface_hash, entry.body_hash));
-
-    let root_implementation_hash = snapshot_hashes
-        .map(|(_, body_hash)| body_hash)
-        .unwrap_or_else(|| implementation_fingerprint(source));
-
-    let root_interface_hash = snapshot_hashes
-        .map(|(interface_hash, _)| interface_hash)
-        .unwrap_or_else(|| {
-            resolve_root_interface_hash(
-                source,
-                root_implementation_hash,
-                previous_root_implementation_hash,
-                previous_root_interface_hash,
-            )
-        });
+    let root_implementation_hash = implementation_fingerprint(source);
+    let root_interface_hash = resolve_root_interface_hash(
+        source,
+        root_implementation_hash,
+        previous_root_implementation_hash,
+        previous_root_interface_hash,
+    );
 
     (root_interface_hash, root_implementation_hash)
 }

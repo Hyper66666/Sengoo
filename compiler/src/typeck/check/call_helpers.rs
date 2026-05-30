@@ -8,7 +8,7 @@ impl TypeChecker {
     ) -> FunctionTy {
         let mut call_subst = subst.clone();
         for generic_param in &fn_ty.generic_params {
-            call_subst.insert(*generic_param, self.env.new_ty_var());
+            call_subst.insert(*generic_param, self.infer.fresh_ty_var());
         }
         FunctionTy::new(
             fn_ty.has_self,

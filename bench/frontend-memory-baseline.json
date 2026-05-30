@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "frozen_on": "2026-02-18",
+  "baseline_report_id": "1771352687788-advanced-pipeline",
+  "baseline_report_path": "bench/results/1771352687788-advanced-pipeline.json",
+  "metrics": {
+    "100000": {
+      "compile_frontend_llvm_avg_ms": 481.39090000040596,
+      "e2e_avg_ms": 1578.1615666674043,
+      "peak_rss_mb_avg": 142.021484375
+    },
+    "1000000": {
+      "compile_frontend_llvm_avg_ms": 4325.07540000006,
+      "e2e_avg_ms": 5487.357500000144,
+      "peak_rss_mb_avg": 1387.8671875
+    }
+  },
+  "thresholds": {
+    "max_frontend_regression_pct": {
+      "100000": 12.0,
+      "1000000": 12.0
+    },
+    "max_rss_regression_pct": {
+      "100000": 12.0,
+      "1000000": 12.0
+    }
+  }
+}

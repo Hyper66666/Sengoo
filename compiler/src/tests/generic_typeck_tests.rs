@@ -258,8 +258,8 @@ def main() -> i64 {
     let names = mir.iter().map(|f| f.name.as_str()).collect::<HashSet<_>>();
     assert!(names.contains("main"));
     assert!(
-        names.contains("id"),
-        "instantiated generic function should be kept in lazy mode"
+        names.contains("id_i64"),
+        "instantiated generic function should be materialized in lazy mode"
     );
 }
 
@@ -318,6 +318,36 @@ def main() -> i64 {
     assert!(
         ir.contains("Box_i64_get"),
         "expected monomorphized method call in IR\n{}",
+        ir
+    );
+}
+
+#[test]
+fn generic_function_can_return_struct_literal_parameterized_by_function_type() {
+    let source = r#"
+struct Box<T> {
+    value: T,
+}
+
+def make_box<T>(value: T) -> Box<T> {
+    Box { value: value }
+}
+
+def main() -> i64 {
+    let boxed = make_box(true);
+    if boxed.value {
+        1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic function should construct a generic struct literal from its parameter");
+    assert!(
+        ir.contains("; Function: make_box_bool"),
+        "expected bool-specialized make_box\n{}",
         ir
     );
 }
