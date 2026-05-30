@@ -430,6 +430,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   `sengoo-compiler` pipeline when `sgc --error-format json` cannot be started,
   so editors still receive parse/type errors even when `sgc` is missing from
   PATH (2026-05-31).
+- `sglsp` also falls back to embedded compiler diagnostics when a discovered
+  `sgc` exits with non-JSON error text, covering stale tools or mismatched PATH
+  entries that do not support `--error-format json` (2026-05-31).
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).
