@@ -143,6 +143,28 @@ mod tests {
     }
 
     #[test]
+    fn stdlib_symbols_include_impl_and_trait_methods() {
+        let option_symbols = stdlib_symbols_for_content("import std::option;\n");
+        let option_names = option_symbols
+            .iter()
+            .map(|symbol| (symbol.name.as_str(), symbol.detail.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(option_names.contains(&("unwrap", "method")));
+        assert!(option_names.contains(&("expect", "method")));
+        assert!(option_names.contains(&("ok_or", "method")));
+
+        let collection_symbols = stdlib_symbols_for_content("import std::collections;\n");
+        let collection_names = collection_symbols
+            .iter()
+            .map(|symbol| (symbol.name.as_str(), symbol.detail.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(collection_names.contains(&("Iterator", "trait")));
+        assert!(collection_names.contains(&("next", "trait method")));
+    }
+
+    #[test]
     fn stdlib_symbol_detail_resolves_imported_symbol() {
         let symbol = stdlib_symbol_detail_for_content("import std::option;\n", "option_some")
             .expect("imported stdlib symbol should resolve");
