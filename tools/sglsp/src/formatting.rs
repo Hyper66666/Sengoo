@@ -35,3 +35,20 @@ pub(crate) fn normalized_format(content: &str) -> String {
 fn line_char_len(line: &str) -> u32 {
     u32::try_from(line.chars().count()).unwrap_or(u32::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_format_uses_sgfmt_style_for_parseable_source() {
+        let source = "def main()->i64{\nlet x=1+2\nx\n}";
+
+        let formatted = normalized_format(source);
+
+        assert_eq!(
+            formatted,
+            "def main() -> i64 {\n    let x = 1 + 2;\n    x;\n}"
+        );
+    }
+}
