@@ -1,4 +1,4 @@
-use sengoo_compiler::ast::{Decl, DeclKind};
+use sengoo_compiler::ast::{ClassMember, Decl, DeclKind, Function, TraitItem};
 use sengoo_compiler::Parser as SgParser;
 use tower_lsp::lsp_types::{CompletionItemKind, Position, Range, SymbolKind};
 
@@ -34,6 +34,21 @@ fn declaration_kind(kind: &DeclKind) -> (&'static str, CompletionItemKind) {
     }
 }
 
+fn push_function_symbol(
+    content: &str,
+    function: &Function,
+    detail: &'static str,
+    kind: CompletionItemKind,
+    out: &mut Vec<AstSymbol>,
+) {
+    out.push(AstSymbol {
+        name: function.name.name.clone(),
+        detail: detail.to_string(),
+        kind,
+        range: span_to_range(content, function.name.span.lo, function.name.span.hi),
+    });
+}
+
 fn collect_decl_symbols(content: &str, decl: &Decl, out: &mut Vec<AstSymbol>) {
     if let Some(name) = decl.name() {
         let (detail, kind) = declaration_kind(&decl.kind);
@@ -45,10 +60,44 @@ fn collect_decl_symbols(content: &str, decl: &Decl, out: &mut Vec<AstSymbol>) {
         });
     }
 
-    if let DeclKind::Module(module_decl) = &decl.kind {
-        for nested in &module_decl.items {
-            collect_decl_symbols(content, nested, out);
+    match &decl.kind {
+        DeclKind::Module(module_decl) => {
+            for nested in &module_decl.items {
+                collect_decl_symbols(content, nested, out);
+            }
         }
+        DeclKind::Class(class_decl) => {
+            for member in &class_decl.members {
+                if let ClassMember::Method(method) = member {
+                    push_function_symbol(
+                        content,
+                        method,
+                        "method",
+                        CompletionItemKind::METHOD,
+                        out,
+                    );
+                }
+            }
+        }
+        DeclKind::Trait(trait_decl) => {
+            for item in &trait_decl.items {
+                if let TraitItem::Function(function) = item {
+                    push_function_symbol(
+                        content,
+                        function,
+                        "trait method",
+                        CompletionItemKind::METHOD,
+                        out,
+                    );
+                }
+            }
+        }
+        DeclKind::Impl(impl_decl) => {
+            for method in &impl_decl.items {
+                push_function_symbol(content, method, "method", CompletionItemKind::METHOD, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -74,6 +123,7 @@ pub(super) fn completion_kind_to_symbol_kind(kind: CompletionItemKind) -> Symbol
         CompletionItemKind::TYPE_PARAMETER => SymbolKind::TYPE_PARAMETER,
         CompletionItemKind::CONSTANT => SymbolKind::CONSTANT,
         CompletionItemKind::MODULE => SymbolKind::MODULE,
+        CompletionItemKind::METHOD => SymbolKind::METHOD,
         _ => SymbolKind::VARIABLE,
     }
 }

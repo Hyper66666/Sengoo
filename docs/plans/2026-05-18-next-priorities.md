@@ -427,6 +427,10 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   preloading for reflection modules: importing `std::ffi`, `std::db`,
   `std::lua54`, `std::net`, or `std::proto` also exposes the `Option`/`Result`
   family needed by those wrappers (2026-05-31).
+- `sglsp` symbol collection now includes impl, trait, and class methods, so
+  imported stdlib APIs such as `Option.unwrap`, `Option.expect`, and
+  `Iterator.next` appear in completion/hover/workspace-symbol flows instead of
+  only top-level declarations (2026-05-31).
 - `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
   for parseable buffers, while retaining trailing-whitespace cleanup as the
   fallback for incomplete in-editor source (2026-05-31).
