@@ -415,6 +415,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
   for parseable buffers, while retaining trailing-whitespace cleanup as the
   fallback for incomplete in-editor source (2026-05-31).
+- `sglsp` range formatting now returns edits limited to the requested line
+  span instead of replacing the entire document, using `sgfmt` output when line
+  mapping is stable and a whitespace-only fallback otherwise (2026-05-31).
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).
