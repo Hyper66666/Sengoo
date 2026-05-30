@@ -21,8 +21,12 @@ use formatting::{full_document_range, normalized_format};
 #[cfg(test)]
 use semantic::SemanticKind;
 use semantic::{semantic_legend, semantic_tokens_for};
-use signatures::{active_call_site, collect_function_signatures, FunctionSignatureInfo};
-use stdlib::{stdlib_symbol_detail_for_content, stdlib_symbols_for_content};
+#[cfg(test)]
+use signatures::collect_function_signatures;
+use signatures::{active_call_site, FunctionSignatureInfo};
+use stdlib::{
+    stdlib_signatures_for_content, stdlib_symbol_detail_for_content, stdlib_symbols_for_content,
+};
 #[cfg(test)]
 use symbols::find_symbol_occurrences;
 use symbols::{
@@ -32,9 +36,9 @@ use symbols::{
 use text_editing::{apply_content_changes, folding_ranges_for, position_to_byte_index};
 use workspace::{
     completion_symbols_for_documents, find_symbol_detail_in_documents,
-    goto_definition_in_documents, references_in_documents, rename_in_documents,
-    workspace_documents_for_roots_and_open_documents, workspace_roots_from_initialize,
-    workspace_symbols_for_documents,
+    function_signatures_for_documents, goto_definition_in_documents, references_in_documents,
+    rename_in_documents, workspace_documents_for_roots_and_open_documents,
+    workspace_roots_from_initialize, workspace_symbols_for_documents,
 };
 
 #[tokio::main]
@@ -297,7 +301,8 @@ impl LanguageServer for SengooLanguageServer {
     ) -> LspResult<Option<SignatureHelp>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let Some(content) = self.document_text(&uri).await else {
+        let documents = self.workspace_documents().await;
+        let Some(content) = documents.get(&uri).cloned() else {
             return Ok(None);
         };
 
@@ -308,8 +313,9 @@ impl LanguageServer for SengooLanguageServer {
             return Ok(None);
         };
 
-        let mut signatures = collect_function_signatures(&content)
+        let mut signatures = function_signatures_for_documents(&uri, &documents)
             .into_iter()
+            .chain(stdlib_signatures_for_content(&content))
             .filter(|sig| sig.name == call_name)
             .collect::<Vec<_>>();
 
@@ -325,8 +331,6 @@ impl LanguageServer for SengooLanguageServer {
         if signatures.is_empty() {
             return Ok(None);
         }
-
-        signatures.sort_by_key(|sig| (sig.range.start.line, sig.range.start.character));
 
         let signature_items = signatures
             .iter()
@@ -633,6 +637,35 @@ def main() -> i64 { 0 }
 
         assert_eq!(symbol.name, "SharedThing");
         assert_eq!(symbol.detail, "struct");
+    }
+
+    #[test]
+    fn signature_symbols_include_workspace_documents_current_first() {
+        let current_uri = Url::parse("file:///workspace/main.sg").unwrap();
+        let shared_uri = Url::parse("file:///workspace/shared.sg").unwrap();
+        let mut documents = HashMap::new();
+        documents.insert(
+            current_uri.clone(),
+            "def local_call(value: i64) -> i64 { value }\n".to_string(),
+        );
+        documents.insert(
+            shared_uri,
+            "def shared_call(flag: bool) -> bool { flag }\n".to_string(),
+        );
+
+        let signatures = workspace::function_signatures_for_documents(&current_uri, &documents);
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            labels,
+            vec![
+                "def local_call(value: i64) -> i64",
+                "def shared_call(flag: bool) -> bool"
+            ]
+        );
     }
 
     #[test]

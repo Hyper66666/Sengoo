@@ -1,3 +1,4 @@
+use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 use super::symbols::{collect_ast_symbols, AstSymbol};
 use std::collections::HashSet;
 
@@ -75,6 +76,24 @@ fn add_stdlib_module_symbols(
     }
 }
 
+fn add_stdlib_module_signatures(
+    module: &str,
+    seen_modules: &mut HashSet<String>,
+    out: &mut Vec<FunctionSignatureInfo>,
+) {
+    if !seen_modules.insert(module.to_string()) {
+        return;
+    }
+
+    if let Some(source) = stdlib_source(module) {
+        out.extend(collect_function_signatures(source));
+    }
+
+    for dependency in stdlib_dependencies(module) {
+        add_stdlib_module_signatures(dependency, seen_modules, out);
+    }
+}
+
 pub(super) fn stdlib_symbols_for_content(content: &str) -> Vec<AstSymbol> {
     let mut seen_modules = HashSet::new();
     let mut seen_symbols = HashSet::new();
@@ -91,6 +110,17 @@ pub(super) fn stdlib_symbol_detail_for_content(content: &str, symbol: &str) -> O
     stdlib_symbols_for_content(content)
         .into_iter()
         .find(|item| item.name == symbol)
+}
+
+pub(super) fn stdlib_signatures_for_content(content: &str) -> Vec<FunctionSignatureInfo> {
+    let mut seen_modules = HashSet::new();
+    let mut signatures = Vec::new();
+
+    for module in imported_stdlib_modules(content) {
+        add_stdlib_module_signatures(&module, &mut seen_modules, &mut signatures);
+    }
+
+    signatures
 }
 
 #[cfg(test)]
@@ -118,5 +148,18 @@ mod tests {
 
         assert_eq!(symbol.name, "option_some");
         assert_eq!(symbol.detail, "function");
+    }
+
+    #[test]
+    fn stdlib_signatures_follow_imported_modules() {
+        let signatures = stdlib_signatures_for_content("import std::option;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"def option_some<T>(value: T) -> Option<T>"));
+        assert!(labels
+            .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
     }
 }

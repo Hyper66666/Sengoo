@@ -1,4 +1,4 @@
-use sengoo_compiler::ast::{Decl, DeclKind, Function, SelfParam, Type};
+use sengoo_compiler::ast::{Decl, DeclKind, Function, Path, SelfParam, TraitBound, Type, TypeKind};
 use sengoo_compiler::Parser as SgParser;
 use tower_lsp::lsp_types::Range;
 
@@ -27,12 +27,94 @@ fn span_text(content: &str, lo: u32, hi: u32) -> String {
     content[start..end].trim().to_string()
 }
 
-fn type_snippet(content: &str, ty: &Type) -> String {
-    let text = span_text(content, ty.span.lo, ty.span.hi);
-    if text.is_empty() {
-        "_".to_string()
-    } else {
-        text
+fn path_label(path: &Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
+fn trait_bound_label(bound: &TraitBound) -> String {
+    if bound.params.is_empty() {
+        return path_label(&bound.path);
+    }
+
+    format!(
+        "{}<{}>",
+        path_label(&bound.path),
+        bound
+            .params
+            .iter()
+            .map(type_snippet)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn type_snippet(ty: &Type) -> String {
+    match &ty.kind {
+        TypeKind::Path(path) => path_label(path),
+        TypeKind::PathWithArgs { path, args } => format!(
+            "{}<{}>",
+            path_label(path),
+            args.iter().map(type_snippet).collect::<Vec<_>>().join(", ")
+        ),
+        TypeKind::Tuple(types) if types.is_empty() => "unit".to_string(),
+        TypeKind::Tuple(types) => format!(
+            "({})",
+            types
+                .iter()
+                .map(type_snippet)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeKind::Array(elem, len) => format!("[{}; {}]", type_snippet(elem), len),
+        TypeKind::Slice(elem) => format!("[{}]", type_snippet(elem)),
+        TypeKind::Ptr { base, is_mut } => {
+            if *is_mut {
+                format!("*mut {}", type_snippet(base))
+            } else {
+                format!("*const {}", type_snippet(base))
+            }
+        }
+        TypeKind::Ref { base, is_mut } => {
+            if *is_mut {
+                format!("&mut {}", type_snippet(base))
+            } else {
+                format!("&{}", type_snippet(base))
+            }
+        }
+        TypeKind::Fn { params, ret } => {
+            let params = params
+                .iter()
+                .map(type_snippet)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ret = ret
+                .as_ref()
+                .map(|ty| type_snippet(ty))
+                .unwrap_or_else(|| "unit".to_string());
+            format!("fn({params}) -> {ret}")
+        }
+        TypeKind::Never => "!".to_string(),
+        TypeKind::Infer => "_".to_string(),
+        TypeKind::Dyn(bounds) => format!(
+            "dyn {}",
+            bounds
+                .iter()
+                .map(trait_bound_label)
+                .collect::<Vec<_>>()
+                .join(" + ")
+        ),
+        TypeKind::ImplTrait(bounds) => format!(
+            "impl {}",
+            bounds
+                .iter()
+                .map(trait_bound_label)
+                .collect::<Vec<_>>()
+                .join(" + ")
+        ),
     }
 }
 
@@ -45,18 +127,14 @@ fn self_param_snippet(self_param: SelfParam) -> &'static str {
     }
 }
 
-fn function_signature_label(content: &str, function: &Function) -> (String, Vec<String>) {
+fn function_signature_label(function: &Function) -> (String, Vec<String>) {
     let mut params = Vec::new();
     if let Some(self_param) = function.self_param {
         params.push(self_param_snippet(self_param).to_string());
     }
 
     for param in &function.params {
-        params.push(format!(
-            "{}: {}",
-            param.name.name,
-            type_snippet(content, &param.ty)
-        ));
+        params.push(format!("{}: {}", param.name.name, type_snippet(&param.ty)));
     }
 
     let generic_suffix = if function.type_params.is_empty() {
@@ -76,7 +154,7 @@ fn function_signature_label(content: &str, function: &Function) -> (String, Vec<
     let ret = function
         .return_type
         .as_ref()
-        .map(|ty| type_snippet(content, ty))
+        .map(type_snippet)
         .unwrap_or_else(|| "unit".to_string());
 
     let async_prefix = if function.is_async { "async " } else { "" };
@@ -100,7 +178,7 @@ fn collect_function_signatures_from_decl(
 ) {
     match &decl.kind {
         DeclKind::Function(function) => {
-            let (label, params) = function_signature_label(content, function);
+            let (label, params) = function_signature_label(function);
             out.push(FunctionSignatureInfo {
                 name: function.name.name.clone(),
                 label,
@@ -125,7 +203,7 @@ fn collect_function_signatures_from_decl(
                 target
             };
             for method in &impl_decl.items {
-                let (base_label, params) = function_signature_label(content, method);
+                let (base_label, params) = function_signature_label(method);
                 out.push(FunctionSignatureInfo {
                     name: method.name.name.clone(),
                     label: format!("{} [impl {}]", base_label, target),
