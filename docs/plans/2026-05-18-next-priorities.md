@@ -387,6 +387,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sgpm` now applies the scaffold package-name grammar to hand-written
   manifests, dependency keys, and optional binary names, preventing path-like
   names from escaping output or local registry directories (2026-05-30).
+- `sgpm fmt` now formats both package sources and `tests/**/*.sg` files, so the
+  package formatting workflow covers the same first-class test tree that
+  `sgpm test` executes (2026-05-31).
 - Registry configuration keys and dependency selectors now require
   alphanumeric boundaries with lowercase ASCII letters, digits, `_`, `-`, or
   `.` internally, preventing ambiguous lockfile identifiers and remote-cache

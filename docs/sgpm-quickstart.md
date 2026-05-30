@@ -279,7 +279,7 @@ sgpm test
 # Run tests with the release profile (-O2).
 sgpm test --release
 
-# Format src/**/*.sg using sgfmt.
+# Format src/**/*.sg and tests/**/*.sg using sgfmt.
 sgpm fmt
 
 # Check formatting without writing.
