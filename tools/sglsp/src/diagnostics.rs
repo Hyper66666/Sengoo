@@ -370,6 +370,49 @@ pub(crate) fn compiler_diagnostics_from_sgc_json(uri: &Url, content: &str) -> Ve
     compiler_diagnostics_from_sgc_tool("sgc", uri, content)
 }
 
+fn diagnostics_from_failed_sgc_output(content: &str, stderr: &str) -> Vec<Diagnostic> {
+    let Some(payload) = parse_sgc_payload(stderr) else {
+        let embedded = embedded_compiler_diagnostics(content);
+        if !embedded.is_empty() {
+            return embedded;
+        }
+
+        let summary = stderr
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| "compilation failed".to_string());
+        return vec![Diagnostic {
+            range: full_document_range(content),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            source: Some("sgc".to_string()),
+            message: summary,
+            ..Default::default()
+        }];
+    };
+
+    let range = diagnostic_range_from_payload(content, &payload)
+        .or_else(|| fallback_diagnostic_range_from_compiler(content))
+        .unwrap_or_else(|| full_document_range(content));
+    let mut message = payload
+        .message
+        .unwrap_or_else(|| "compilation failed".to_string());
+    if !payload.details.is_empty() {
+        message.push('\n');
+        message.push_str(&payload.details.join("\n"));
+    }
+
+    vec![Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: payload.stage.map(NumberOrString::String),
+        source: Some("sgc".to_string()),
+        message,
+        ..Default::default()
+    }]
+}
+
 fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> Vec<Diagnostic> {
     let scratch = temporary_source_path(uri);
     if fs::write(&scratch, content).is_err() {
@@ -393,39 +436,7 @@ fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> V
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let payload = parse_sgc_payload(&stderr);
-    let fallback_range = fallback_diagnostic_range_from_compiler(content);
-
-    let (message, code, range) = if let Some(payload) = payload {
-        let range = diagnostic_range_from_payload(content, &payload)
-            .or(fallback_range)
-            .unwrap_or_else(|| full_document_range(content));
-        let mut message = payload
-            .message
-            .unwrap_or_else(|| "compilation failed".to_string());
-        if !payload.details.is_empty() {
-            message.push('\n');
-            message.push_str(&payload.details.join("\n"));
-        }
-        (message, payload.stage, range)
-    } else {
-        let summary = stderr
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .map(|line| line.trim().to_string())
-            .unwrap_or_else(|| "compilation failed".to_string());
-        let range = fallback_range.unwrap_or_else(|| full_document_range(content));
-        (summary, None, range)
-    };
-
-    vec![Diagnostic {
-        range,
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: code.map(NumberOrString::String),
-        source: Some("sgc".to_string()),
-        message,
-        ..Default::default()
-    }]
+    diagnostics_from_failed_sgc_output(content, &stderr)
 }
 
 fn quick_fix_action(
@@ -688,6 +699,25 @@ mod tests {
             "sglsp-definitely-missing-sgc-for-test",
             &Url::parse("file:///workspace/main.sg").unwrap(),
             src,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sengoo-compiler"));
+        assert_eq!(diagnostics[0].range.start.line, 1);
+        assert_eq!(diagnostics[0].range.start.character, 8);
+        assert!(
+            diagnostics[0].message.contains("expected identifier"),
+            "message should include embedded compiler error: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn compiler_diagnostics_fall_back_to_embedded_compiler_when_sgc_output_is_not_json() {
+        let src = "def main() -> i64 {\n    let = 1;\n}\n";
+        let diagnostics = diagnostics_from_failed_sgc_output(
+            src,
+            "error: unrecognized option '--error-format'\ntry 'sgc --help'\n",
         );
 
         assert_eq!(diagnostics.len(), 1);
