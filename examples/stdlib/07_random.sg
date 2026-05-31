@@ -1,0 +1,30 @@
+// examples/stdlib/07_random.sg
+//
+// Demonstrates: importing std::random helpers for deterministic seeding,
+// non-negative i64 values, bounded ranges, and booleans.
+//
+// Run: sgc run examples/stdlib/07_random.sg
+// Expected output: 8
+
+import std::random;
+
+def main() -> i64 {
+    random_seed(123);
+    let first = random_i64();
+    let bounded = random_range_i64(10, 20);
+    let coin = random_bool();
+
+    random_seed(123);
+    let first_again = random_i64();
+    let collapsed = random_range_i64(5, 5);
+
+    let ok = first == first_again
+        && first >= 0
+        && bounded >= 10
+        && bounded < 20
+        && (coin || !coin)
+        && collapsed == 5;
+
+    print(if ok { 8 } else { 0 });
+    0
+}

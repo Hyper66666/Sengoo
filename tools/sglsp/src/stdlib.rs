@@ -15,6 +15,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("net", include_str!("../../stdlib/net.sg")),
     ("option", include_str!("../../stdlib/option.sg")),
     ("proto", include_str!("../../stdlib/proto.sg")),
+    ("random", include_str!("../../stdlib/random.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
     ("time", include_str!("../../stdlib/time.sg")),
@@ -305,5 +306,19 @@ mod tests {
         assert!(names.contains(&"time_unix_ms"));
         assert!(names.contains(&"time_sleep_ms"));
         assert!(names.contains(&"time_elapsed_ms"));
+    }
+
+    #[test]
+    fn stdlib_symbols_include_random_helpers() {
+        let symbols = stdlib_symbols_for_content("import std::random;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"random_seed"));
+        assert!(names.contains(&"random_i64"));
+        assert!(names.contains(&"random_range_i64"));
+        assert!(names.contains(&"random_bool"));
     }
 }

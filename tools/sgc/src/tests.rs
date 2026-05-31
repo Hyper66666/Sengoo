@@ -3494,6 +3494,11 @@ fn examples_smoke_stdlib_env_time_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_random_import() {
+    assert_example_output("stdlib-random", "examples/stdlib/07_random.sg", "8");
+}
+
+#[test]
 fn examples_smoke_traits_iterator_basic() {
     assert_example_output(
         "traits-iterator-basic",
