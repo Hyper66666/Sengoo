@@ -50,9 +50,9 @@ impl<'source> Parser<'source> {
 
     /// 解析源码并返回 AST。
     pub fn parse(source: &str) -> Result<Program> {
-        let expanded_source = macro_expander::expand_declarative_macros(source)?;
-        let expanded_source = derive_expander::expand_derive_macros(&expanded_source)?;
-        let mut parser = Parser::new(&expanded_source);
+        let macro_expanded = macro_expander::expand_declarative_macros(source)?;
+        let expanded_source = derive_expander::expand_derive_macros(macro_expanded.as_ref())?;
+        let mut parser = Parser::new(expanded_source.as_ref());
         let program = parser.parse_program()?;
         if !parser.errors.is_empty() {
             return Err(CompileError::ParseError(parser.errors.remove(0)));

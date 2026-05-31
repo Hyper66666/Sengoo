@@ -91,6 +91,12 @@ impl TypeChecker {
     }
 
     pub(super) fn check_function_decl(&mut self, fn_decl: &Function) -> Result<()> {
+        // Each function body is inferred with fresh, monotonically-increasing type
+        // variable ids, so substitution entries from previously-checked functions
+        // can never be looked up again. Dropping them here keeps `subst` bounded to
+        // the current body instead of growing with the whole program — which made
+        // every `unify`/checkpoint clone O(total vars) and the phase O(n²).
+        self.infer.reset_subst();
         self.env.push_scope();
         let generic_meta = self.bind_type_params_with_meta(&fn_decl.type_params)?;
 
@@ -322,6 +328,9 @@ impl TypeChecker {
         class_name: &str,
         method: &Function,
     ) -> Result<()> {
+        // See `check_function_decl`: method bodies likewise allocate fresh type
+        // variables, so resetting the substitution per body keeps it bounded.
+        self.infer.reset_subst();
         self.env.push_scope();
         self.bind_type_params_with_meta(&method.type_params)?;
 

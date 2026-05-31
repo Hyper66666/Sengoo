@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::env;
 use std::process::Command;
 
@@ -36,10 +37,15 @@ struct DeriveInvocation {
     target: DeriveTarget,
 }
 
-pub(super) fn expand_derive_macros(source: &str) -> Result<String> {
+pub(super) fn expand_derive_macros(source: &str) -> Result<Cow<'_, str>> {
+    // 没有任何属性（`#`）就不可能有 `#[derive(...)]`，直接借用源码短路，
+    // 避免旧实现里整源扫描复制 + UTF-8 重校验后又丢弃再 `source.to_string()`。
+    if !source.contains('#') {
+        return Ok(Cow::Borrowed(source));
+    }
     let (without_attributes, invocations) = collect_derive_invocations(source)?;
     if invocations.is_empty() {
-        return Ok(source.to_string());
+        return Ok(Cow::Borrowed(source));
     }
 
     let mut expanded = without_attributes;
@@ -73,7 +79,7 @@ pub(super) fn expand_derive_macros(source: &str) -> Result<String> {
     }
 
     validate_expanded_source(&expanded)?;
-    Ok(expanded)
+    Ok(Cow::Owned(expanded))
 }
 
 fn collect_derive_invocations(source: &str) -> Result<(String, Vec<DeriveInvocation>)> {

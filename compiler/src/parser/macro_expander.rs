@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::error::{CompileError, ParseError};
@@ -23,12 +24,21 @@ struct DeclarativeMacro {
     arms: Vec<MacroArm>,
 }
 
-pub(super) fn expand_declarative_macros(source: &str) -> Result<String> {
+pub(super) fn expand_declarative_macros(source: &str) -> Result<Cow<'_, str>> {
+    // 常见路径：源码中没有任何宏定义。此时旧实现会整源复制一份并重新做
+    // UTF-8 校验，随后又把它丢弃再 `source.to_string()`。先做一次廉价的
+    // 子串扫描短路掉这条路径，避免对大文件的双份分配。
+    if !source.contains("macro_rules!") {
+        return Ok(Cow::Borrowed(source));
+    }
     let (without_definitions, macros) = extract_macro_definitions(source)?;
     if macros.is_empty() {
-        return Ok(source.to_string());
+        return Ok(Cow::Borrowed(source));
     }
-    expand_macro_invocations(&without_definitions, &macros)
+    Ok(Cow::Owned(expand_macro_invocations(
+        &without_definitions,
+        &macros,
+    )?))
 }
 
 fn extract_macro_definitions(source: &str) -> Result<(String, HashMap<String, DeclarativeMacro>)> {
