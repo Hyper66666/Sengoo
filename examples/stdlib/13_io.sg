@@ -1,0 +1,17 @@
+// examples/stdlib/13_io.sg
+//
+// Demonstrates: importing std::io helpers for exact stdout/stderr writes and flushing.
+//
+// Run: sgc run examples/stdlib/13_io.sg
+// Expected output: 13
+
+import std::io;
+
+def main() -> i64 {
+    let out = io_stdout_write("1").unwrap_or(0);
+    let err = io_stderr_write("").unwrap_or(0);
+    let flushed = io_stdout_flush().unwrap_or(false) && io_stderr_flush().unwrap_or(false);
+
+    print(if out == 1 && err == 0 && flushed { 3 } else { 0 });
+    0
+}

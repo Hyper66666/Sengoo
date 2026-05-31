@@ -33,6 +33,7 @@ use sengoo_compiler::compile_to_ir as compile_compiler_ir;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -3407,6 +3408,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/05_file.sg",
         "examples/stdlib/11_args.sg",
         "examples/stdlib/12_dir.sg",
+        "examples/stdlib/13_io.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3592,6 +3594,48 @@ fn examples_smoke_stdlib_dir_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_io_import() {
+    assert_example_output("stdlib-io", "examples/stdlib/13_io.sg", "13");
+}
+
+#[test]
+fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "io-stdin",
+        r#"
+import std::io;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read_line(buffer).unwrap_or(0);
+    let wrote = io_stdout_write("out").unwrap_or(0);
+    let err = io_stderr_write("err").unwrap_or(0);
+    let flushed = io_stdout_flush().unwrap_or(false) && io_stderr_flush().unwrap_or(false);
+    buffer.free();
+
+    if read == 4 && wrote == 3 && err == 3 && flushed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "abc\nxyz",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "out");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "err");
+}
+
+#[test]
 fn stdlib_args_pipeline_ir_declares_runtime_calls() {
     let source = super::expand_stdlib_imports_for_source(
         "import std::args;\n\ndef main() -> i64 {\n    arg_copy(0, ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 })).unwrap_or(0)\n}\n",
@@ -3730,6 +3774,61 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&obj_path);
+    let _ = fs::remove_file(&runtime_obj);
+    let _ = fs::remove_file(&exe_path);
+    Some(output)
+}
+
+fn compile_and_run_stdlib_import_program_with_stdin(
+    tag: &str,
+    source: &str,
+    stdin: &str,
+) -> Option<std::process::Output> {
+    let source = expand_stdlib_imports_for_source(source)
+        .unwrap_or_else(|err| panic!("stdlib imports should expand: {err}"));
+    let llvm_ir = compile_source(&source, 1)
+        .unwrap_or_else(|err| panic!("stdlib source should compile: {err}"));
+
+    let clang = find_clang()?;
+    let runtime_c = find_runtime_c()?;
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return None;
+    }
+
+    let ll_path = temp_artifact(&format!("stdlib-import-runtime-{tag}"), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
+
+    let runtime_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-runtime"), obj_ext);
+    compile_ir_to_object(&clang, Path::new(&runtime_c), &runtime_obj, 2).unwrap();
+
+    let exe_path = temp_artifact(
+        &format!("stdlib-import-runtime-{tag}"),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    link_native_binary_from_objects(&clang, &[main_obj.clone(), runtime_obj.clone()], &exe_path)
+        .unwrap();
+
+    let mut child = Command::new(&exe_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("stdlib binary should spawn");
+    if let Some(mut input) = child.stdin.take() {
+        input
+            .write_all(stdin.as_bytes())
+            .expect("stdin should be writable");
+    }
+    let output = child
+        .wait_with_output()
+        .expect("stdlib binary should run to completion");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
     let _ = fs::remove_file(&runtime_obj);
     let _ = fs::remove_file(&exe_path);
     Some(output)

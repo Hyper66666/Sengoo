@@ -15,6 +15,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
 - `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, and empty-directory removal.
+- `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
@@ -42,7 +43,7 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
+std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::io`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
 
 ## Directory Helpers
@@ -53,6 +54,17 @@ tooling: `dir_exists(path)`, `dir_create(path)`, `dir_create_all(path)`, and
 exists. `dir_remove` only removes empty directories; recursive tree deletion and
 directory listing are deferred until Sengoo has a broader filesystem safety and
 string/iterator design.
+
+## Standard I/O Helpers
+
+`std::io` provides synchronous process stream helpers. `io_stdin_read(buffer)`
+copies up to `buffer.len()` bytes from stdin, and `io_stdin_read_line(buffer)`
+copies up to the buffer capacity or through one newline; EOF without bytes is a
+successful `0` byte read. `io_stdout_write(data)` and `io_stderr_write(data)`
+write exactly the provided string bytes without appending newlines, while
+`io_stdout_flush()` and `io_stderr_flush()` expose fallible stream flushing.
+Async I/O, terminal control, file descriptor APIs, and owned-string stdin
+helpers remain deferred.
 
 ## Path Helpers
 

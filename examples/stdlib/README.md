@@ -16,3 +16,4 @@ Run each file with `sgc run <path>`.
 | [`10_collections.sg`](10_collections.sg) | Importing `std::collections` helpers for runtime-backed vectors, maps, and iterator flows | `60` |
 | [`11_args.sg`](11_args.sg) | Importing `std::args` helpers for user argument count, length checks, and Buffer-backed copy | `11` |
 | [`12_dir.sg`](12_dir.sg) | Importing `std::dir` helpers for directory existence, creation, recursive creation, and empty-directory removal | `12` |
+| [`13_io.sg`](13_io.sg) | Importing `std::io` helpers for exact stdout/stderr writes and flushing | `13` |

@@ -309,6 +309,37 @@ def main() -> i64 {
 }
 
 #[test]
+fn io_module_imports_standard_stream_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "io.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read(buffer).unwrap_or(0);
+    let line = io_stdin_read_line(buffer).unwrap_or(0);
+    let out = io_stdout_write("ok").unwrap_or(0);
+    let err = io_stderr_write("warn").unwrap_or(0);
+    let flushed = io_stdout_flush().unwrap_or(false) && io_stderr_flush().unwrap_or(false);
+    buffer.free();
+
+    if read >= 0 && line >= 0 && out == 2 && err == 4 && flushed {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_io_stdin_read"));
+    assert!(ir.contains("sengoo_io_stdin_read_line"));
+    assert!(ir.contains("sengoo_io_stdout_write"));
+    assert!(ir.contains("sengoo_io_stderr_write"));
+    assert!(ir.contains("sengoo_io_stdout_flush"));
+    assert!(ir.contains("sengoo_io_stderr_flush"));
+}
+
+#[test]
 fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "args.sg"],
