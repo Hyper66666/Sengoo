@@ -14,6 +14,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
+- `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, and empty-directory removal.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
@@ -41,8 +42,17 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::args`, `import std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
+std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
+
+## Directory Helpers
+
+`std::dir` covers the portable setup operations needed by small scripts and
+tooling: `dir_exists(path)`, `dir_create(path)`, `dir_create_all(path)`, and
+`dir_remove(path)`. Creation is idempotent when the target directory already
+exists. `dir_remove` only removes empty directories; recursive tree deletion and
+directory listing are deferred until Sengoo has a broader filesystem safety and
+string/iterator design.
 
 ## Path Helpers
 

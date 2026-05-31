@@ -3406,6 +3406,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/04_option_result.sg",
         "examples/stdlib/05_file.sg",
         "examples/stdlib/11_args.sg",
+        "examples/stdlib/12_dir.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3583,6 +3584,11 @@ fn examples_smoke_stdlib_args_import() {
         &["alpha", "beta"],
         "11",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_dir_import() {
+    assert_example_output("stdlib-dir", "examples/stdlib/12_dir.sg", "12");
 }
 
 #[test]

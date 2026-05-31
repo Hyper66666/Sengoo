@@ -7,6 +7,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("args", include_str!("../../stdlib/args.sg")),
     ("collections", include_str!("../../stdlib/collections.sg")),
     ("db", include_str!("../../stdlib/db.sg")),
+    ("dir", include_str!("../../stdlib/dir.sg")),
     ("env", include_str!("../../stdlib/env.sg")),
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
@@ -36,7 +37,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "env" | "path" | "process" | "args" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -373,6 +374,31 @@ mod tests {
             labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
         );
         assert!(labels.contains(&"def process_id() -> i64"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_dir_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::dir;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"dir_exists"));
+        assert!(names.contains(&"dir_create"));
+        assert!(names.contains(&"dir_create_all"));
+        assert!(names.contains(&"dir_remove"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::dir;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def dir_exists(path: &str) -> bool"));
+        assert!(labels.contains(&"def dir_create_all(path: &str) -> Result<bool, i64>"));
+        assert!(labels.contains(&"def dir_remove(path: &str) -> Result<bool, i64>"));
     }
 
     #[test]

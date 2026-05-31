@@ -1,0 +1,38 @@
+// examples/stdlib/12_dir.sg
+//
+// Demonstrates: importing std::dir helpers for directory existence,
+// idempotent creation, recursive creation, and empty-directory removal.
+//
+// Run: sgc run examples/stdlib/12_dir.sg
+// Expected output: 12
+
+import std::dir;
+
+def main() -> i64 {
+    let root = "sengoo-stdlib-dir-example";
+    let nested = "sengoo-stdlib-dir-example/nested";
+
+    dir_remove(nested);
+    dir_remove(root);
+
+    let root_created = dir_create(root).unwrap_or(false);
+    let nested_created = dir_create_all(nested).unwrap_or(false);
+    let root_exists = dir_exists(root);
+    let nested_exists = dir_exists(nested);
+    let repeat_ok = dir_create_all(nested).unwrap_or(false);
+    let nested_removed = dir_remove(nested).unwrap_or(false);
+    let root_removed = dir_remove(root).unwrap_or(false);
+    let gone = !dir_exists(root);
+
+    let ok = root_created
+        && nested_created
+        && root_exists
+        && nested_exists
+        && repeat_ok
+        && nested_removed
+        && root_removed
+        && gone;
+
+    print(if ok { 12 } else { 0 });
+    0
+}

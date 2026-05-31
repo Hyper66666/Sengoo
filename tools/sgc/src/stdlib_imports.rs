@@ -14,6 +14,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "collections",
     "ffi",
     "file",
+    "dir",
     "env",
     "time",
     "random",
@@ -39,6 +40,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "db"
             | "ffi"
             | "file"
+            | "dir"
             | "env"
             | "path"
             | "process"
@@ -51,7 +53,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "env" | "path" | "process" | "args" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -247,6 +249,18 @@ mod tests {
 
         assert!(expanded.contains("def process_id"));
         assert!(expanded.contains("def process_current_dir_copy"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn dir_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::dir;\ndef main() -> i64 { 0 }\n")
+                .expect("dir stdlib import should expand");
+
+        assert!(expanded.contains("def dir_exists"));
+        assert!(expanded.contains("def dir_create_all"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }
