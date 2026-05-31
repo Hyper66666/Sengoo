@@ -15,6 +15,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("net", include_str!("../../stdlib/net.sg")),
     ("option", include_str!("../../stdlib/option.sg")),
     ("path", include_str!("../../stdlib/path.sg")),
+    ("process", include_str!("../../stdlib/process.sg")),
     ("proto", include_str!("../../stdlib/proto.sg")),
     ("random", include_str!("../../stdlib/random.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
@@ -34,7 +35,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "env" | "path" => &["ffi"],
+        "file" | "env" | "path" | "process" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -346,5 +347,30 @@ mod tests {
             &"def path_join(left: &str, right: &str, buffer: Buffer) -> Result<i64, i64>"
         ));
         assert!(labels.contains(&"def path_is_absolute(path: &str) -> bool"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_process_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::process;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"process_id"));
+        assert!(names.contains(&"process_current_dir_copy"));
+        assert!(names.contains(&"process_exit_code"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::process;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
+        );
+        assert!(labels.contains(&"def process_id() -> i64"));
     }
 }

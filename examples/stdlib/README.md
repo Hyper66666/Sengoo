@@ -12,3 +12,4 @@ Run each file with `sgc run <path>`.
 | [`06_env_time.sg`](06_env_time.sg) | Importing `std::env` and `std::time` helpers for environment checks, clock reads, sleep, and exit-code selection | `6` |
 | [`07_random.sg`](07_random.sg) | Importing `std::random` helpers for deterministic seeding, non-negative i64 values, bounded ranges, and booleans | `8` |
 | [`08_path.sg`](08_path.sg) | Importing `std::path` helpers for separator discovery, absolute checks, joining, extraction, and lexical normalization | `9` |
+| [`09_process.sg`](09_process.sg) | Importing `std::process` helpers for process metadata, current working directory copy, and exit-code selection | `10` |

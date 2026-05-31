@@ -10,9 +10,11 @@
 #include <time.h>
 
 #ifdef _WIN32
+#include <direct.h>
 #include <windows.h>
 #else
 #include <errno.h>
+#include <unistd.h>
 #endif
 
 void sengoo_print_i64(long long val) {
@@ -656,6 +658,76 @@ long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long l
     free(segment_starts);
     free(segment_lens);
     return copied;
+}
+
+long long sengoo_process_id(void) {
+#ifdef _WIN32
+    return (long long)GetCurrentProcessId();
+#else
+    return (long long)getpid();
+#endif
+}
+
+static char* sengoo_process_current_dir_alloc(void) {
+#ifdef _WIN32
+    return _getcwd(NULL, 0);
+#else
+    size_t capacity = 256;
+    while (capacity <= (size_t)(1024 * 1024)) {
+        char* buffer = (char*)malloc(capacity);
+        if (!buffer) {
+            return NULL;
+        }
+
+        errno = 0;
+        if (getcwd(buffer, capacity)) {
+            return buffer;
+        }
+
+        int err = errno;
+        free(buffer);
+        if (err != ERANGE) {
+            return NULL;
+        }
+        capacity *= 2;
+    }
+    return NULL;
+#endif
+}
+
+long long sengoo_process_current_dir_len(void) {
+    char* cwd = sengoo_process_current_dir_alloc();
+    if (!cwd) {
+        return -1;
+    }
+
+    size_t len = strlen(cwd);
+    free(cwd);
+    return (long long)len;
+}
+
+long long sengoo_process_current_dir_copy(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return -1;
+    }
+
+    char* cwd = sengoo_process_current_dir_alloc();
+    if (!cwd) {
+        return -1;
+    }
+
+    size_t len = strlen(cwd);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        free(cwd);
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(out, cwd, len);
+    }
+    free(cwd);
+    return (long long)len;
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {

@@ -3504,6 +3504,11 @@ fn examples_smoke_stdlib_path_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_process_import() {
+    assert_example_output("stdlib-process", "examples/stdlib/09_process.sg", "10");
+}
+
+#[test]
 fn examples_smoke_traits_iterator_basic() {
     assert_example_output(
         "traits-iterator-basic",

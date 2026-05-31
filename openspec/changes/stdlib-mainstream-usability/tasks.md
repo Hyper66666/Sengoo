@@ -15,15 +15,15 @@
 - [x] 2.1 Audit the runtime ABI and existing stdlib conventions for a safe process module boundary.
 - [x] 2.2 Decide whether command execution is in scope or whether this phase should only cover process metadata/exit helpers.
 - [x] 2.3 Record command execution and command-line argument access as deferred unless a follow-up OpenSpec specifies ABI/security details.
-- [ ] 2.4 Add compiler surface tests for `std::process` metadata and Buffer-backed current-dir helpers.
-- [ ] 2.5 Add `sgc` stdlib import expansion tests for `import std::process;` including `ffi`/`Result` dependencies.
-- [ ] 2.6 Add `sglsp` stdlib symbol/signature tests for `std::process`.
-- [ ] 2.7 Implement `tools/stdlib/process.sg` with safe wrappers and `_raw` helpers where needed.
-- [ ] 2.8 Add C runtime support in `tools/stdlib/runtime.c` for process ID and current working directory length/copy.
-- [ ] 2.9 Wire `process` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
-- [ ] 2.10 Add `examples/stdlib/09_process.sg` and document it in `examples/stdlib/README.md`.
-- [ ] 2.11 Update `tools/stdlib/README.md` with the `std::process` contract and deferred command/argv limitations.
-- [ ] 2.12 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, `cargo clippy -p sengoo-compiler -p sgc -p sglsp --all-targets -- -D warnings`, and `git diff --check`.
+- [x] 2.4 Add compiler surface tests for `std::process` metadata and Buffer-backed current-dir helpers.
+- [x] 2.5 Add `sgc` stdlib import expansion tests for `import std::process;` including `ffi`/`Result` dependencies.
+- [x] 2.6 Add `sglsp` stdlib symbol/signature tests for `std::process`.
+- [x] 2.7 Implement `tools/stdlib/process.sg` with safe wrappers and `_raw` helpers where needed.
+- [x] 2.8 Add C runtime support in `tools/stdlib/runtime.c` for process ID and current working directory length/copy.
+- [x] 2.9 Wire `process` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
+- [x] 2.10 Add `examples/stdlib/09_process.sg` and document it in `examples/stdlib/README.md`.
+- [x] 2.11 Update `tools/stdlib/README.md` with the `std::process` contract and deferred command/argv limitations.
+- [x] 2.12 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, `cargo clippy -p sengoo-compiler -p sgc -p sglsp --all-targets -- -D warnings`, and `git diff --check`.
 
 ## 3. Phase 3 - data-format and collection ergonomics gate
 
