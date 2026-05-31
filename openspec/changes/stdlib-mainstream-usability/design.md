@@ -72,7 +72,11 @@ The Phase 2 API should focus on portable metadata and exit-code ergonomics:
 
 This keeps the implementation useful for scripts that combine `std::file`, `std::path`, and `std::env`, while avoiding a partial process-management API that would be hard to make safe and portable.
 
-Data-format work must decide whether to implement a tiny JSON-shaped utility surface or wait for a richer string/byte-slice model.
+### Decision 5: Phase 3 promotes supported collections and defers JSON
+
+The repo has runtime-backed collection support for i64/bool vectors, maps, and iterators, plus a reflection-specific protobuf event shape. It does not yet have a general JSON value model, owned-string return ABI, byte-slice abstraction, or runtime-backed string-key/string-value collections.
+
+Phase 3 should therefore promote the existing supported collection surface into `examples/stdlib` and document the current constraints. General JSON parsing/formatting and `Vec<&str>` / `HashMap<&str, ...>` support remain deferred until the compiler/runtime can represent the outputs and ownership model directly.
 
 ## Risks / Trade-offs
 
@@ -86,6 +90,8 @@ Data-format work must decide whether to implement a tiny JSON-shaped utility sur
   **Mitigation:** each module task includes both wiring points and tests.
 - **Risk:** A `std::process` module without argv/command execution may look incomplete.  
   **Mitigation:** document the deferred ABI work explicitly and make the available metadata helpers reliable first.
+- **Risk:** Promoting collections without string-key/value containers may overstate generality.  
+  **Mitigation:** examples and docs must show supported i64/bool shapes and explicitly defer string collections.
 
 ## Migration Plan
 
@@ -96,7 +102,8 @@ Data-format work must decide whether to implement a tiny JSON-shaped utility sur
 5. Run the verification baseline.
 6. Add `std::process` metadata helpers without command execution.
 7. Re-evaluate command-line argument and command execution scope in a separate OpenSpec before implementation.
-8. Re-evaluate data-format scope from the evidence gathered in Phase 1 and Phase 2.
+8. Promote the supported `std::collections` surface into the stdlib example catalog.
+9. Revisit JSON/string-collection scope only after the required value/string/byte-slice ABI work is specified.
 
 ## Open Questions
 

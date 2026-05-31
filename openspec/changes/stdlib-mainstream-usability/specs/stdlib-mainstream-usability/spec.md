@@ -64,3 +64,15 @@ Process execution and JSON-like data-format helpers SHALL NOT be added opportuni
 #### Scenario: A later phase proposes command-line argument access
 - **WHEN** a future implementation needs command-line argument access from Sengoo source code
 - **THEN** it first updates OpenSpec with compiler/runtime entry ABI changes and tests
+
+### Requirement: Collection ergonomics SHALL document currently supported runtime-backed shapes
+The standard library examples SHALL include a first-class `std::collections` example for the currently supported runtime-backed `Vec<T>`, `HashMap<K, V>`, and iterator helpers.
+
+#### Scenario: A user looks for collection examples
+- **WHEN** a user opens `examples/stdlib`
+- **THEN** the catalog includes a runnable `std::collections` example
+- **AND** the example uses currently supported runtime-backed scalar shapes rather than implying unsupported string containers
+
+#### Scenario: A later phase proposes generic data-format helpers or string collections
+- **WHEN** a future implementation needs JSON-like parsing/formatting or `Vec<&str>` / `HashMap<&str, ...>` support
+- **THEN** it first updates OpenSpec with the required value, string, byte-slice, and ownership model
