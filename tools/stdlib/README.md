@@ -19,6 +19,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
 - `process.sg`: runtime-backed process metadata helpers for process ID, current working directory length/copy into managed `Buffer` handles, and conventional exit-code selection.
+- `args.sg`: runtime-backed command-line argument helpers for user argument count, existence checks, byte lengths, and managed `Buffer` copy. The executable/source path is not exposed as argument index `0`.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
 
@@ -40,7 +41,7 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
+std::args`, `import std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
 
 ## Path Helpers
@@ -62,9 +63,20 @@ a portable subset. `process_current_dir_len()` reports the byte length of the
 working directory, and `process_current_dir_copy(buffer)` copies it into a
 managed `Buffer` and returns the copied byte count. `process_exit_code(success,
 failure_code)` maps a boolean success value to `0` or the caller-provided
-failure code. Command execution and command-line argument access are intentionally
-deferred until Sengoo has a specified compiler/runtime entry ABI and a safe
-argument-vector API.
+failure code. Command execution is intentionally deferred until Sengoo has a
+specified shell-free process API; command-line argument reads live in
+`std::args`.
+
+## Argument Helpers
+
+`std::args` exposes the current program's user-supplied trailing arguments.
+`args_len()` excludes the executable or source path, so `sgc run main.sg --
+alpha beta` and a native binary invoked as `main alpha beta` both report a count
+of `2`. `arg_exists(index)` checks that user-argument index, `arg_len(index)`
+returns its byte length, and `arg_copy(index, buffer)` copies bytes into a
+managed `Buffer` and returns the copied byte count. Invalid indices return an
+error-shaped `Result`. Command execution remains out of scope; this module only
+reads the current process argument vector.
 
 ## Reflection Wrappers
 

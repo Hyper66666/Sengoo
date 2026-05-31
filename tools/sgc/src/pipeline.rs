@@ -2,7 +2,8 @@ use miette::{IntoDiagnostic, Result};
 use sengoo_compiler::hir::HIRItem;
 use sengoo_compiler::mir::MirFunction;
 use sengoo_compiler::{
-    lower_ast, lower_hir_with_options, Codegen, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
+    collect_ffi_codegen_config, lower_ast, lower_hir_with_options, Codegen, FfiCodegenConfig,
+    MirLowerOptions, MirOptLevel, Parser, TypeChecker,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -176,14 +177,14 @@ pub(crate) fn compile_source_with_phase_timings(
     opt_level: u8,
 ) -> Result<(String, BTreeMap<String, f64>)> {
     let resolved_memory_mode = resolve_frontend_memory_mode(source.len());
-    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(
+    let (mir_fns, ffi_codegen, mut phases) = compile_frontend_to_mir_with_phase_timings(
         source,
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
     )?;
 
     let codegen_start = Instant::now();
-    let mut codegen = Codegen::new();
+    let mut codegen = Codegen::with_ffi(ffi_codegen);
     let llvm_ir = match resolved_memory_mode {
         FrontendMemoryMode::Stream | FrontendMemoryMode::LowMemory => {
             let mut out = Vec::new();
@@ -209,11 +210,12 @@ fn compile_frontend_to_mir_with_phase_timings(
     source: &str,
     opt_level: u8,
     low_memory_mode: bool,
-) -> Result<(Vec<MirFunction>, BTreeMap<String, f64>)> {
+) -> Result<(Vec<MirFunction>, FfiCodegenConfig, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
 
     let (
         mut mir_fns,
+        ffi_codegen,
         parse_ms,
         typeck_ms,
         mir_ms,
@@ -309,6 +311,7 @@ fn compile_frontend_to_mir_with_phase_timings(
             drop(type_env.take());
             drop(program.take());
         }
+        let ffi_codegen = collect_ffi_codegen_config(&hir_module);
         let mir_lower_start = Instant::now();
         let mut mir_fns = lower_hir_with_options(
             &hir_module.items,
@@ -355,6 +358,7 @@ fn compile_frontend_to_mir_with_phase_timings(
 
         (
             mir_fns,
+            ffi_codegen,
             parse_ms,
             typeck_ms,
             mir_ms,
@@ -386,7 +390,7 @@ fn compile_frontend_to_mir_with_phase_timings(
         prune_start.elapsed().as_secs_f64() * 1000.0,
     );
 
-    Ok((mir_fns, phases))
+    Ok((mir_fns, ffi_codegen, phases))
 }
 
 pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
@@ -405,7 +409,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
     let resolved_memory_mode =
         forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.len()));
-    let (mir_fns, mut phases) = compile_frontend_to_mir_with_phase_timings(
+    let (mir_fns, ffi_codegen, mut phases) = compile_frontend_to_mir_with_phase_timings(
         source,
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
@@ -425,7 +429,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
             )
         })?;
         let mut writer = BufWriter::new(file);
-        let mut codegen = Codegen::new();
+        let mut codegen = Codegen::with_ffi(ffi_codegen.clone());
         codegen
             .codegen_to_writer(&mir_fns, &mut writer)
             .map_err(|e| miette::miette!("codegen failed: {}", e))
@@ -435,7 +439,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
 
     if let Err(_err) = stream_result {
         effective_mode = FrontendMemoryMode::Legacy;
-        let mut codegen = Codegen::new();
+        let mut codegen = Codegen::with_ffi(ffi_codegen.clone());
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;
@@ -443,7 +447,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
             .into_diagnostic()
             .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
     } else if matches!(resolved_memory_mode, FrontendMemoryMode::Legacy) {
-        let mut codegen = Codegen::new();
+        let mut codegen = Codegen::with_ffi(ffi_codegen);
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;

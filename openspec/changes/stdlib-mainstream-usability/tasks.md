@@ -37,18 +37,18 @@
 
 ## 4. Phase 4 - command-line argument ABI
 
-- [ ] 4.1 Add compiler surface tests proving `std::args` imports compile and args users get an opt-in `main(argc, argv)` wrapper.
-- [ ] 4.2 Add a compiler regression test proving programs that do not call args helpers still emit the existing zero-argument `main` shape.
-- [ ] 4.3 Add `sgc` stdlib import expansion tests for `import std::args;` including `ffi`, `Buffer`, and `Result` dependencies.
-- [ ] 4.4 Add `sglsp` stdlib symbol/signature tests for `std::args`.
-- [ ] 4.5 Implement `tools/stdlib/args.sg` with safe wrappers for argument count, existence, length, and Buffer-backed copy.
-- [ ] 4.6 Add C runtime support in `tools/stdlib/runtime.c` for initializing and reading `argc`/`argv` user arguments.
-- [ ] 4.7 Implement opt-in compiler codegen for the args main wrapper while preserving mapped calls to the source-level user `main`.
-- [ ] 4.8 Forward trailing `sgc run` args through native and `lli` execution without including args in compile-cache keys.
-- [ ] 4.9 Wire `args` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
-- [ ] 4.10 Add `examples/stdlib/11_args.sg` and document it in `examples/stdlib/README.md`.
-- [ ] 4.11 Update `tools/stdlib/README.md` with the `std::args` contract and the command-execution deferral.
-- [ ] 4.12 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, `cargo clippy -p sengoo-compiler -p sgc -p sglsp --all-targets -- -D warnings`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
+- [x] 4.1 Add compiler surface tests proving `std::args` imports compile and args users get an opt-in `main(argc, argv)` wrapper.
+- [x] 4.2 Add a compiler regression test proving programs that do not call args helpers still emit the existing zero-argument `main` shape.
+- [x] 4.3 Add `sgc` stdlib import expansion tests for `import std::args;` including `ffi`, `Buffer`, and `Result` dependencies.
+- [x] 4.4 Add `sglsp` stdlib symbol/signature tests for `std::args`.
+- [x] 4.5 Implement `tools/stdlib/args.sg` with safe wrappers for argument count, existence, length, and Buffer-backed copy.
+- [x] 4.6 Add C runtime support in `tools/stdlib/runtime.c` for initializing and reading `argc`/`argv` user arguments.
+- [x] 4.7 Implement opt-in compiler codegen for the args main wrapper while preserving mapped calls to the source-level user `main`.
+- [x] 4.8 Forward trailing `sgc run` args through native and `lli` execution without including args in compile-cache keys.
+- [x] 4.9 Wire `args` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
+- [x] 4.10 Add `examples/stdlib/11_args.sg` and document it in `examples/stdlib/README.md`.
+- [x] 4.11 Update `tools/stdlib/README.md` with the `std::args` contract and the command-execution deferral.
+- [x] 4.12 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, `cargo clippy -p sengoo-compiler -p sgc -p sglsp --all-targets -- -D warnings`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
 
 ## 5. Process invariants
 

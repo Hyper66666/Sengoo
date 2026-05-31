@@ -373,6 +373,35 @@ fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
 }
 
 #[test]
+fn stdlib_runtime_exports_managed_buffer_helpers() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+
+    for symbol in [
+        "sengoo_ffi_last_error_code",
+        "sengoo_ffi_last_error_len",
+        "sengoo_ffi_last_error_copy",
+        "sengoo_ffi_last_error_clear",
+        "sengoo_ffi_buffer_new",
+        "sengoo_ffi_buffer_from_bytes",
+        "sengoo_ffi_buffer_len",
+        "sengoo_ffi_buffer_ptr",
+        "sengoo_ffi_buffer_copy_out",
+        "sengoo_ffi_buffer_copy_in",
+        "sengoo_ffi_buffer_free",
+    ] {
+        assert!(
+            runtime_c.contains(symbol),
+            "runtime stdlib missing Buffer helper: {symbol}"
+        );
+    }
+}
+
+#[test]
 fn openspec_acceptance_scripts_target_real_test_filters() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -3221,10 +3250,11 @@ fn assert_example_file(relative_path: &str) {
     );
 }
 
-fn compile_and_run_example(
+fn compile_and_run_example_with_args(
     tag: &str,
     relative_path: &str,
     extra_c_inputs: &[&str],
+    args: &[&str],
 ) -> Option<std::process::Output> {
     let source = super::expand_stdlib_imports_for_source(&read_example_source(relative_path))
         .unwrap_or_else(|err| {
@@ -3296,6 +3326,7 @@ fn compile_and_run_example(
     }
 
     let output = Command::new(&exe_path)
+        .args(args)
         .output()
         .expect("example executable should run");
 
@@ -3317,7 +3348,33 @@ fn assert_example_output_with_c_inputs(
     extra_c_inputs: &[&str],
     expected_stdout: &str,
 ) {
-    let Some(output) = compile_and_run_example(tag, relative_path, extra_c_inputs) else {
+    assert_example_output_with_c_inputs_and_args(
+        tag,
+        relative_path,
+        extra_c_inputs,
+        &[],
+        expected_stdout,
+    );
+}
+
+fn assert_example_output_with_args(
+    tag: &str,
+    relative_path: &str,
+    args: &[&str],
+    expected_stdout: &str,
+) {
+    assert_example_output_with_c_inputs_and_args(tag, relative_path, &[], args, expected_stdout);
+}
+
+fn assert_example_output_with_c_inputs_and_args(
+    tag: &str,
+    relative_path: &str,
+    extra_c_inputs: &[&str],
+    args: &[&str],
+    expected_stdout: &str,
+) {
+    let Some(output) = compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args)
+    else {
         return;
     };
     assert!(
@@ -3348,6 +3405,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/03_error.sg",
         "examples/stdlib/04_option_result.sg",
         "examples/stdlib/05_file.sg",
+        "examples/stdlib/11_args.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3515,6 +3573,32 @@ fn examples_smoke_stdlib_collections_import() {
         "examples/stdlib/10_collections.sg",
         "60",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_args_import() {
+    assert_example_output_with_args(
+        "stdlib-args",
+        "examples/stdlib/11_args.sg",
+        &["alpha", "beta"],
+        "11",
+    );
+}
+
+#[test]
+fn stdlib_args_pipeline_ir_declares_runtime_calls() {
+    let source = super::expand_stdlib_imports_for_source(
+        "import std::args;\n\ndef main() -> i64 {\n    arg_copy(0, ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 })).unwrap_or(0)\n}\n",
+    )
+    .expect("args import should expand");
+
+    let (ir, _) =
+        compile_source_with_phase_timings(&source, 1).expect("args source should compile");
+
+    assert!(ir.contains("declare void @sengoo_args_init(i64, i64)"));
+    assert!(ir.contains("declare i64 @sengoo_args_len()"));
+    assert!(ir.contains("declare i64 @sengoo_arg_len(i64)"));
+    assert!(ir.contains("declare i64 @sengoo_arg_copy(i64, i64, i64)"));
 }
 
 #[test]

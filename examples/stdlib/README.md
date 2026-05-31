@@ -14,3 +14,4 @@ Run each file with `sgc run <path>`.
 | [`08_path.sg`](08_path.sg) | Importing `std::path` helpers for separator discovery, absolute checks, joining, extraction, and lexical normalization | `9` |
 | [`09_process.sg`](09_process.sg) | Importing `std::process` helpers for process metadata, current working directory copy, and exit-code selection | `10` |
 | [`10_collections.sg`](10_collections.sg) | Importing `std::collections` helpers for runtime-backed vectors, maps, and iterator flows | `60` |
+| [`11_args.sg`](11_args.sg) | Importing `std::args` helpers for user argument count, length checks, and Buffer-backed copy | `11` |

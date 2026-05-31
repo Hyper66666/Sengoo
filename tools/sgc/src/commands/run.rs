@@ -17,7 +17,7 @@ pub(crate) async fn cmd_run(
     contract_checks: ContractChecksMode,
     requested_engine: RunEngine,
     force_rebuild: bool,
-    _args: &[String],
+    args: &[String],
     low_memory: bool,
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
@@ -204,6 +204,15 @@ pub(crate) async fn cmd_run(
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    let lli_extra_objects = if matches!(resolved_engine, RunEngine::Lli) {
+        if let (Some(clang), Some(runtime_c)) = (clang_exe.as_deref(), runtime_c.as_deref()) {
+            vec![ensure_runtime_object(clang, runtime_c, opt_level)?]
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
     let generic_feature_flags = vec![
         format!("run_engine={:?}", requested_engine),
         format!("resolved_engine={:?}", resolved_engine),
@@ -265,7 +274,7 @@ pub(crate) async fn cmd_run(
                             &reflection,
                             Some(Path::new(&metadata.llvm_ir_path)),
                         )?;
-                        run_native_binary(Path::new(exe))
+                        run_native_binary_with_args(Path::new(exe), args)
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
@@ -277,7 +286,12 @@ pub(crate) async fn cmd_run(
                             &reflection,
                             Some(Path::new(&metadata.llvm_ir_path)),
                         )?;
-                        run_with_lli(lli, Path::new(&metadata.llvm_ir_path))
+                        run_with_lli_args(
+                            lli,
+                            Path::new(&metadata.llvm_ir_path),
+                            args,
+                            &lli_extra_objects,
+                        )
                     }
                     RunEngine::Auto => Err(miette::miette!("compile failed")),
                 };
@@ -377,13 +391,18 @@ pub(crate) async fn cmd_run(
                         let exe = previous.executable_path.as_deref().ok_or_else(|| {
                             miette::miette!("cache corrupted: missing native executable path")
                         })?;
-                        run_native_binary(Path::new(exe))
+                        run_native_binary_with_args(Path::new(exe), args)
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
                             miette::miette!("cache hit but lli is unavailable; try --force-rebuild")
                         })?;
-                        run_with_lli(lli, Path::new(&previous.llvm_ir_path))
+                        run_with_lli_args(
+                            lli,
+                            Path::new(&previous.llvm_ir_path),
+                            args,
+                            &lli_extra_objects,
+                        )
                     }
                     RunEngine::Auto => Err(miette::miette!("compile failed")),
                 };
@@ -414,7 +433,7 @@ pub(crate) async fn cmd_run(
                                         }
                                     };
                                     println!("run workset plan: {}", label);
-                                    return run_native_binary(&executable_path);
+                                    return run_native_binary_with_args(&executable_path, args);
                                 }
                                 Err(err) => {
                                     println!("run workset fallback: {}", err);
@@ -528,13 +547,13 @@ pub(crate) async fn cmd_run(
                 opt_level,
             )?;
             link_native_binary_from_objects(clang, &object_paths, &executable_path)?;
-            run_native_binary(&executable_path)?;
+            run_native_binary_with_args(&executable_path, args)?;
         }
         RunEngine::Lli => {
             let lli = lli_exe
                 .as_deref()
                 .ok_or_else(|| miette::miette!("lli is required for --engine lli"))?;
-            run_with_lli(lli, &llvm_ir_path)?;
+            run_with_lli_args(lli, &llvm_ir_path, args, &lli_extra_objects)?;
         }
         RunEngine::Auto => {
             return Err(miette::miette!(

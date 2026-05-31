@@ -281,6 +281,49 @@ def main() -> i64 {
 }
 
 #[test]
+fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "args.sg"],
+        r#"
+def main() -> i64 {
+    let first_len = arg_len(0).unwrap_or(0);
+    let buffer = ffi_buffer_new(first_len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied = arg_copy(0, buffer).unwrap_or(0);
+    let exists = arg_exists(0);
+    buffer.free();
+
+    if args_len() >= 0 && exists && copied == first_len {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_args_len"));
+    assert!(ir.contains("sengoo_arg_len"));
+    assert!(ir.contains("sengoo_arg_copy"));
+    assert!(ir.contains("declare void @sengoo_args_init(i64, i64)"));
+    assert!(ir.contains("declare i64 @sengoo_args_len()"));
+    assert!(ir.contains("declare i64 @sengoo_arg_len(i64)"));
+    assert!(ir.contains("declare i64 @sengoo_arg_copy(i64, i64, i64)"));
+    assert!(ir.contains("define i64 @sengoo_user_main()"));
+    assert!(ir.contains("define i32 @main(i32 %argc, i8** %argv)"));
+    assert!(ir.contains("call void @sengoo_args_init"));
+    assert!(ir.contains("call i64 @sengoo_user_main()"));
+}
+
+#[test]
+fn codegen_preserves_zero_argument_main_without_args_runtime() {
+    let ir = compile_to_ir("def main() -> i64 {\n    0\n}\n").expect("plain main should compile");
+
+    assert!(ir.contains("define i64 @main()"));
+    assert!(!ir.contains("sengoo_args_init"));
+    assert!(!ir.contains("sengoo_user_main"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],

@@ -1,0 +1,34 @@
+// examples/stdlib/11_args.sg
+//
+// Demonstrates: importing std::args helpers for user command-line arguments,
+// argument length checks, and Buffer-backed argument copy.
+//
+// Run: sgc run examples/stdlib/11_args.sg -- alpha beta
+// Expected output: 11
+
+import std::args;
+
+def main() -> i64 {
+    let first_len = arg_len(0).unwrap_or(0);
+    let second_len = arg_len(1).unwrap_or(0);
+    let first = ffi_buffer_new(first_len).unwrap_or(Buffer { handle: 0 });
+    let second = ffi_buffer_new(second_len).unwrap_or(Buffer { handle: 0 });
+    let first_copied = arg_copy(0, first).unwrap_or(0);
+    let second_copied = arg_copy(1, second).unwrap_or(0);
+
+    first.free();
+    second.free();
+
+    let ok = args_len() == 2
+        && arg_exists(0)
+        && arg_exists(1)
+        && !arg_exists(2)
+        && first_len == 5
+        && second_len == 4
+        && first_copied == first_len
+        && second_copied == second_len
+        && arg_len(2).is_err();
+
+    print(if ok { 11 } else { 0 });
+    0
+}

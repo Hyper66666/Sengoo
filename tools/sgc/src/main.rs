@@ -104,7 +104,7 @@ pub(crate) use native_toolchain::{
     append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object,
     compile_native_binary, default_build_output_path_for_case, ensure_runtime_object,
     link_native_binary_from_objects, linker_mode_from_env,
-    recover_native_output_from_cached_artifacts, run_native_binary, run_with_lli,
+    recover_native_output_from_cached_artifacts, run_native_binary_with_args, run_with_lli_args,
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
