@@ -116,6 +116,30 @@ def main() -> i64 {
 }
 
 #[test]
+fn strconv_module_imports_i64_parse_and_format_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "strconv.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let parsed = strconv_parse_i64(" -42\n").unwrap_or(0);
+    let formatted = strconv_format_i64(parsed + 50, buffer).unwrap_or(0);
+    let source = ffi_buffer_from_bytes("123").unwrap_or(Buffer { handle: 0 });
+    let parsed_buffer = strconv_parse_i64_buffer(source, 3).unwrap_or(0);
+    let invalid = strconv_parse_i64("12x").unwrap_or(7);
+    source.free();
+    buffer.free();
+    formatted + parsed_buffer + invalid
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_strconv_last_error_code"));
+    assert!(ir.contains("sengoo_strconv_parse_i64"));
+    assert!(ir.contains("sengoo_strconv_format_i64"));
+}
+
+#[test]
 fn env_module_imports_process_and_variable_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "env.sg"],

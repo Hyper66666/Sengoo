@@ -1,0 +1,49 @@
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_strconv_last_error_code() -> i64;
+    fn sengoo_strconv_parse_i64(data_ptr: i64, len: i64) -> i64;
+    fn sengoo_strconv_format_i64(value: i64, buffer_ptr: i64, capacity: i64) -> i64;
+}
+
+def strconv_last_error_code() -> i64 {
+    sengoo_strconv_last_error_code()
+}
+
+def strconv_i64_value_result(value: i64) -> Result<i64, i64> {
+    let error = sengoo_strconv_last_error_code();
+    if error == 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: error }
+    }
+}
+
+def strconv_parse_i64_raw(data_ptr: i64, len: i64) -> Result<i64, i64> {
+    strconv_i64_value_result(sengoo_strconv_parse_i64(data_ptr, len))
+}
+
+def strconv_parse_i64(value: &str) -> Result<i64, i64> {
+    strconv_parse_i64_raw(sengoo_stdlib_str_ptr(value), value.len())
+}
+
+def strconv_parse_i64_buffer(buffer: Buffer, len: i64) -> Result<i64, i64> {
+    let capacity = buffer.len();
+    if len >= 0 && len <= capacity {
+        strconv_parse_i64_raw(buffer.ptr(), len)
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def strconv_format_i64_raw(value: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    let written = sengoo_strconv_format_i64(value, buffer_ptr, capacity);
+    if written >= 0 {
+        Result { is_ok: true, value: written, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: sengoo_strconv_last_error_code() }
+    }
+}
+
+def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64> {
+    strconv_format_i64_raw(value, buffer.ptr(), buffer.len())
+}

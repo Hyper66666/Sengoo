@@ -3409,6 +3409,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/11_args.sg",
         "examples/stdlib/12_dir.sg",
         "examples/stdlib/13_io.sg",
+        "examples/stdlib/14_strconv.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3599,6 +3600,11 @@ fn examples_smoke_stdlib_io_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_strconv_import() {
+    assert_example_output("stdlib-strconv", "examples/stdlib/14_strconv.sg", "14");
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -3633,6 +3639,48 @@ def main() -> i64 {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "out");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "err");
+}
+
+#[test]
+fn stdlib_strconv_runtime_parses_and_formats_i64_values() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "strconv-i64",
+        r#"
+import std::io;
+import std::strconv;
+
+def main() -> i64 {
+    let input = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let out = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read_line(input).unwrap_or(0);
+    let parsed = strconv_parse_i64_buffer(input, read).unwrap_or(0);
+    let literal = strconv_parse_i64("  -5\n").unwrap_or(0);
+    let invalid = strconv_parse_i64("12x").unwrap_or(99);
+    let overflow = strconv_parse_i64("9223372036854775808").unwrap_or(77);
+    let formatted = strconv_format_i64(parsed + literal, out).unwrap_or(0);
+    let wrote = io_stdout_write_raw(out.ptr(), formatted).unwrap_or(0);
+    input.free();
+    out.free();
+
+    if parsed == 19 && literal == -5 && invalid == 99 && overflow == 77 && formatted == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "19\n",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "14");
 }
 
 #[test]

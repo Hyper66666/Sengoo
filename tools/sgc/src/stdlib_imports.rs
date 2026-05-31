@@ -13,6 +13,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "error",
     "collections",
     "ffi",
+    "strconv",
     "file",
     "dir",
     "io",
@@ -38,6 +39,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
         "option"
             | "result"
             | "collections"
+            | "strconv"
             | "db"
             | "ffi"
             | "file"
@@ -55,7 +57,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -287,6 +289,18 @@ mod tests {
 
         assert!(expanded.contains("def args_len"));
         assert!(expanded.contains("def arg_copy"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn strconv_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::strconv;\ndef main() -> i64 { 0 }\n")
+                .expect("strconv stdlib import should expand");
+
+        assert!(expanded.contains("def strconv_parse_i64"));
+        assert!(expanded.contains("def strconv_format_i64"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

@@ -11,6 +11,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
   bool/i64 unwrap, map, and projection helpers.
 - `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, and i64/bool collection mutators. Current runtime-backed shapes cover scalar i64/bool combinations; string-key/string-value collections are deferred until Sengoo has a specified string/byte-slice ownership model.
 - `string.sg`: Sengoo-side wrappers over built-in string lowering and runtime string search: `str_len`, equality, contains/prefix/suffix/index helpers, empty checks, append, and repeat.
+- `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
@@ -43,8 +44,21 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::io`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
+std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::io`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, `import std::proto`, and `import std::strconv`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
+
+## String Conversion Helpers
+
+`std::strconv` provides deterministic decimal `i64` conversion. `strconv_parse_i64`
+parses a normal `&str`, while `strconv_parse_i64_raw` and
+`strconv_parse_i64_buffer(buffer, len)` parse explicit byte ranges so callers
+can consume data returned by `std::args`, `std::file`, or `std::io`.
+`strconv_format_i64(value, buffer)` writes base-10 ASCII into a managed Buffer
+and returns the byte count; it does not append a NUL terminator. Parsing accepts
+optional ASCII whitespace and a leading sign, rejects non-whitespace trailing
+characters, and reports overflow as an error-shaped `Result`. Floats, radix
+selection, locale-specific formatting, arbitrary precision values, and
+owned-string returns remain deferred.
 
 ## Directory Helpers
 
