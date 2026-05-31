@@ -23,6 +23,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("random", include_str!("../../stdlib/random.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
+    ("strconv", include_str!("../../stdlib/strconv.sg")),
     ("time", include_str!("../../stdlib/time.sg")),
 ];
 
@@ -38,7 +39,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -451,5 +452,29 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels.contains(&"def arg_len(index: i64) -> Result<i64, i64>"));
         assert!(labels.contains(&"def arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_strconv_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::strconv;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"strconv_parse_i64"));
+        assert!(names.contains(&"strconv_parse_i64_buffer"));
+        assert!(names.contains(&"strconv_format_i64"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::strconv;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def strconv_parse_i64(value: &str) -> Result<i64, i64>"));
+        assert!(labels
+            .contains(&"def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64>"));
     }
 }

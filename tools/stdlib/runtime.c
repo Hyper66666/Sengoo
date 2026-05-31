@@ -265,6 +265,99 @@ long long sengoo_str_index_of(const char* value, const char* needle) {
     return (long long)(found - value);
 }
 
+enum {
+    SENGOO_STRCONV_STATUS_OK = 0,
+    SENGOO_STRCONV_ERR_INVALID = 1,
+    SENGOO_STRCONV_ERR_OVERFLOW = 2,
+    SENGOO_STRCONV_ERR_BUFFER = 3,
+    SENGOO_STRCONV_ERR_INTERNAL = 4
+};
+
+static int sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+
+static long long sengoo_strconv_set_error(int code) {
+    sengoo_strconv_last_error = code;
+    return 0;
+}
+
+long long sengoo_strconv_last_error_code(void) {
+    return (long long)sengoo_strconv_last_error;
+}
+
+long long sengoo_strconv_parse_i64(long long data_ptr, long long len) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    const unsigned char* data = (const unsigned char*)(intptr_t)data_ptr;
+    if (len < 0 || (len > 0 && !data)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    size_t n = (size_t)len;
+    size_t i = 0;
+    while (i < n && isspace((unsigned char)data[i])) {
+        i++;
+    }
+
+    int negative = 0;
+    if (i < n && (data[i] == '+' || data[i] == '-')) {
+        negative = data[i] == '-';
+        i++;
+    }
+
+    if (i >= n || !isdigit((unsigned char)data[i])) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    unsigned long long limit = negative
+        ? (unsigned long long)LLONG_MAX + 1ULL
+        : (unsigned long long)LLONG_MAX;
+    unsigned long long acc = 0;
+    while (i < n && isdigit((unsigned char)data[i])) {
+        unsigned long long digit = (unsigned long long)(data[i] - '0');
+        if (acc > (limit - digit) / 10ULL) {
+            return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_OVERFLOW);
+        }
+        acc = acc * 10ULL + digit;
+        i++;
+    }
+
+    while (i < n && isspace((unsigned char)data[i])) {
+        i++;
+    }
+    if (i != n) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    if (negative) {
+        if (acc == (unsigned long long)LLONG_MAX + 1ULL) {
+            return LLONG_MIN;
+        }
+        return -(long long)acc;
+    }
+    return (long long)acc;
+}
+
+long long sengoo_strconv_format_i64(long long value, long long buffer_ptr, long long capacity) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    char* out = (char*)(intptr_t)buffer_ptr;
+    if (capacity < 0) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    char temp[32];
+    int written = snprintf(temp, sizeof(temp), "%lld", value);
+    if (written < 0 || (size_t)written >= sizeof(temp)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INTERNAL) - 1;
+    }
+    if ((unsigned long long)written > (unsigned long long)capacity || (written > 0 && !out)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    if (written > 0) {
+        memcpy(out, temp, (size_t)written);
+    }
+    return (long long)written;
+}
+
 long long sengoo_file_exists(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
