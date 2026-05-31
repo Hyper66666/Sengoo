@@ -8,6 +8,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("db", include_str!("../../stdlib/db.sg")),
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
+    ("file", include_str!("../../stdlib/file.sg")),
     ("lua54", include_str!("../../stdlib/lua54.sg")),
     ("math", include_str!("../../stdlib/math.sg")),
     ("net", include_str!("../../stdlib/net.sg")),
@@ -29,6 +30,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
+        "file" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -260,5 +262,19 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(labels
             .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_file_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::file;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"file_exists"));
+        assert!(names.contains(&"file_write_str"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
     }
 }

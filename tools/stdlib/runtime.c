@@ -1,3 +1,5 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <assert.h>
 #include <limits.h>
 #include <stdint.h>
@@ -27,6 +29,104 @@ void sengoo_print_str(const char* s) {
 
 long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
+}
+
+long long sengoo_file_exists(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return 0;
+    }
+    fclose(file);
+    return 1;
+}
+
+long long sengoo_file_len(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return -1;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return -1;
+    }
+    long size = ftell(file);
+    fclose(file);
+    if (size < 0) {
+        return -1;
+    }
+    return (long long)size;
+}
+
+long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (!path || path[0] == '\0' || !out || out_capacity < 0) {
+        return -1;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return -1;
+    }
+    size_t read = fread(out, 1, (size_t)out_capacity, file);
+    int failed = ferror(file);
+    fclose(file);
+    if (failed) {
+        return -1;
+    }
+    return (long long)read;
+}
+
+static long long sengoo_file_write_mode(
+    long long path_ptr,
+    long long data_ptr,
+    long long len,
+    const char* mode
+) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (!path || path[0] == '\0' || len < 0 || (!data && len > 0)) {
+        return -1;
+    }
+
+    FILE* file = fopen(path, mode);
+    if (!file) {
+        return -1;
+    }
+    size_t expected = (size_t)len;
+    size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, file);
+    int close_status = fclose(file);
+    if (wrote != expected || close_status != 0) {
+        return -1;
+    }
+    return (long long)wrote;
+}
+
+long long sengoo_file_write_str(long long path_ptr, long long data_ptr, long long len) {
+    return sengoo_file_write_mode(path_ptr, data_ptr, len, "wb");
+}
+
+long long sengoo_file_append_str(long long path_ptr, long long data_ptr, long long len) {
+    return sengoo_file_write_mode(path_ptr, data_ptr, len, "ab");
+}
+
+long long sengoo_file_remove(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return 1;
+    }
+
+    return remove(path);
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {
