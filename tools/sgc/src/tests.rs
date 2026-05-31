@@ -3499,6 +3499,11 @@ fn examples_smoke_stdlib_random_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_path_import() {
+    assert_example_output("stdlib-path", "examples/stdlib/08_path.sg", "9");
+}
+
+#[test]
 fn examples_smoke_traits_iterator_basic() {
     assert_example_output(
         "traits-iterator-basic",

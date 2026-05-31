@@ -1,14 +1,14 @@
 ## 1. Phase 1 - `std::path`
 
-- [ ] 1.1 Add compiler surface tests for `std::path` path predicates and Buffer-backed output helpers.
-- [ ] 1.2 Add `sgc` stdlib import expansion tests for `import std::path;` including `ffi`/`Result` dependencies.
-- [ ] 1.3 Add `sglsp` stdlib symbol/signature tests for `std::path`.
-- [ ] 1.4 Implement `tools/stdlib/path.sg` with safe wrappers and `_raw` helpers where needed.
-- [ ] 1.5 Add C runtime support in `tools/stdlib/runtime.c` for separator, absolute checks, join, parent, file name, stem, extension, and lexical normalization.
-- [ ] 1.6 Wire `path` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
-- [ ] 1.7 Add `examples/stdlib/08_path.sg` and document it in `examples/stdlib/README.md`.
-- [ ] 1.8 Update `tools/stdlib/README.md` with the `std::path` contract and limitations.
-- [ ] 1.9 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, and `git diff --check`.
+- [x] 1.1 Add compiler surface tests for `std::path` path predicates and Buffer-backed output helpers.
+- [x] 1.2 Add `sgc` stdlib import expansion tests for `import std::path;` including `ffi`/`Result` dependencies.
+- [x] 1.3 Add `sglsp` stdlib symbol/signature tests for `std::path`.
+- [x] 1.4 Implement `tools/stdlib/path.sg` with safe wrappers and `_raw` helpers where needed.
+- [x] 1.5 Add C runtime support in `tools/stdlib/runtime.c` for separator, absolute checks, join, parent, file name, stem, extension, and lexical normalization.
+- [x] 1.6 Wire `path` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
+- [x] 1.7 Add `examples/stdlib/08_path.sg` and document it in `examples/stdlib/README.md`.
+- [x] 1.8 Update `tools/stdlib/README.md` with the `std::path` contract and limitations.
+- [x] 1.9 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, and `git diff --check`.
 
 ## 2. Phase 2 - process usability gate
 
@@ -25,7 +25,7 @@
 
 ## 4. Process invariants
 
-- [ ] 4.1 Every new stdlib module is discoverable through `sglsp` completion/definition/signature paths.
-- [ ] 4.2 Every new stdlib module has at least one runnable example.
-- [ ] 4.3 Every runtime-produced string output uses the managed `Buffer` convention until an owned-string ABI is specified.
-- [ ] 4.4 No new external dependency is introduced without an explicit OpenSpec update.
+- [x] 4.1 Every new stdlib module is discoverable through `sglsp` completion/definition/signature paths.
+- [x] 4.2 Every new stdlib module has at least one runnable example.
+- [x] 4.3 Every runtime-produced string output uses the managed `Buffer` convention until an owned-string ABI is specified.
+- [x] 4.4 No new external dependency is introduced without an explicit OpenSpec update.

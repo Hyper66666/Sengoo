@@ -17,6 +17,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "env",
     "time",
     "random",
+    "path",
     "db",
     "lua54",
     "net",
@@ -37,6 +38,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "ffi"
             | "file"
             | "env"
+            | "path"
             | "lua54"
             | "net"
             | "proto"
@@ -45,7 +47,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" | "env" => &["ffi"],
+        "file" | "env" | "path" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -219,5 +221,17 @@ mod tests {
 
         assert!(expanded.contains("def random_seed"));
         assert!(expanded.contains("def random_range_i64"));
+    }
+
+    #[test]
+    fn path_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::path;\ndef main() -> i64 { 0 }\n")
+                .expect("path stdlib import should expand");
+
+        assert!(expanded.contains("def path_join"));
+        assert!(expanded.contains("def path_normalize"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
     }
 }

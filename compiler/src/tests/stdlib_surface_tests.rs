@@ -197,6 +197,61 @@ def main() -> i64 {
 }
 
 #[test]
+fn path_module_imports_cross_platform_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "path.sg"],
+        r#"
+def main() -> i64 {
+    let joined = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let parent = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let file_name = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let stem = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let extension = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let normalized = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+
+    let separator = path_separator();
+    let joined_len = path_join("alpha", "beta.sg", joined).unwrap_or(0);
+    let parent_len = path_parent("alpha/beta.sg", parent).unwrap_or(0);
+    let file_name_len = path_file_name("alpha/beta.sg", file_name).unwrap_or(0);
+    let stem_len = path_stem("alpha/beta.sg", stem).unwrap_or(0);
+    let extension_len = path_extension("alpha/beta.sg", extension).unwrap_or(0);
+    let normalized_len = path_normalize("alpha//./beta/../gamma.sg", normalized).unwrap_or(0);
+    let absolute = path_is_absolute("/alpha") || path_is_absolute("C:/alpha") || path_is_absolute("\\\\server\\share");
+
+    joined.free();
+    parent.free();
+    file_name.free();
+    stem.free();
+    extension.free();
+    normalized.free();
+
+    if separator > 0
+        && joined_len > 0
+        && parent_len > 0
+        && file_name_len > 0
+        && stem_len > 0
+        && extension_len > 0
+        && normalized_len > 0
+        && absolute {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_path_separator"));
+    assert!(ir.contains("sengoo_path_is_absolute"));
+    assert!(ir.contains("sengoo_path_join"));
+    assert!(ir.contains("sengoo_path_parent"));
+    assert!(ir.contains("sengoo_path_file_name"));
+    assert!(ir.contains("sengoo_path_stem"));
+    assert!(ir.contains("sengoo_path_extension"));
+    assert!(ir.contains("sengoo_path_normalize"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],
