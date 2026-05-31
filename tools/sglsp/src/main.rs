@@ -29,10 +29,10 @@ use stdlib::{
     stdlib_symbols_for_content,
 };
 #[cfg(test)]
-use symbols::find_symbol_occurrences;
+use symbols::find_declaration_in_text;
 use symbols::{
     collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
-    valid_identifier_name,
+    find_symbol_occurrences, valid_identifier_name,
 };
 use text_editing::{apply_content_changes, folding_ranges_for, position_to_byte_index};
 use workspace::{
@@ -129,6 +129,34 @@ fn stdlib_definition_for_cursor_fallback(
     stdlib_definition_for_content(content, symbol_name).map(GotoDefinitionResponse::Scalar)
 }
 
+fn document_highlights_for_content(
+    content: &str,
+    position: Position,
+) -> Option<Vec<DocumentHighlight>> {
+    let symbol = extract_identifier_at(content, position)?;
+    let highlights = find_symbol_occurrences(content, &symbol.name)
+        .into_iter()
+        .map(|range| DocumentHighlight {
+            range,
+            kind: Some(DocumentHighlightKind::TEXT),
+        })
+        .collect::<Vec<_>>();
+
+    (!highlights.is_empty()).then_some(highlights)
+}
+
+fn prepare_rename_for_content(content: &str, position: Position) -> Option<PrepareRenameResponse> {
+    let symbol = extract_identifier_at(content, position)?;
+    if !valid_identifier_name(&symbol.name) {
+        return None;
+    }
+
+    Some(PrepareRenameResponse::RangeWithPlaceholder {
+        range: symbol.range,
+        placeholder: symbol.name,
+    })
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for SengooLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
@@ -150,8 +178,12 @@ impl LanguageServer for SengooLanguageServer {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
                     retrigger_characters: Some(vec![",".to_string()]),
@@ -300,6 +332,19 @@ impl LanguageServer for SengooLanguageServer {
             params.context.include_declaration,
             &documents,
         ))
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> LspResult<Option<Vec<DocumentHighlight>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let Some(content) = self.document_text(&uri).await else {
+            return Ok(None);
+        };
+
+        Ok(document_highlights_for_content(&content, position))
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
@@ -532,6 +577,19 @@ impl LanguageServer for SengooLanguageServer {
             &documents,
         ))
     }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> LspResult<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+        let Some(content) = self.document_text(&uri).await else {
+            return Ok(None);
+        };
+
+        Ok(prepare_rename_for_content(&content, position))
+    }
 }
 
 #[cfg(test)]
@@ -563,6 +621,73 @@ mod tests {
         let text = "foo foobar foo_1\nfoo";
         let ranges = find_symbol_occurrences(text, "foo");
         assert_eq!(ranges.len(), 2);
+    }
+
+    #[test]
+    fn references_ignore_comments_and_string_literals() {
+        let text = "foo // foo\nlet label = \"foo \\\" foo\";\nfoo";
+        let ranges = find_symbol_occurrences(text, "foo");
+
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start.line, 0);
+        assert_eq!(ranges[1].start.line, 2);
+    }
+
+    #[test]
+    fn document_highlights_use_code_occurrences() {
+        let text = "foo // foo\nlet label = \"foo\";\nfoo";
+        let highlights = document_highlights_for_content(
+            text,
+            Position {
+                line: 0,
+                character: 1,
+            },
+        )
+        .expect("document highlights should be available");
+
+        assert_eq!(highlights.len(), 2);
+        assert!(highlights
+            .iter()
+            .all(|highlight| highlight.kind == Some(DocumentHighlightKind::TEXT)));
+        assert_eq!(highlights[0].range.start.line, 0);
+        assert_eq!(highlights[1].range.start.line, 2);
+    }
+
+    #[test]
+    fn declaration_lookup_ignores_comments_and_string_literals() {
+        let text = "// def hidden() -> i64 { 0 }\nlet label = \"def hidden()\";\ndef visible() -> i64 { 0 }";
+
+        assert!(find_declaration_in_text(text, "hidden").is_none());
+        assert_eq!(
+            find_declaration_in_text(text, "visible")
+                .expect("visible declaration should be found")
+                .start
+                .line,
+            2
+        );
+    }
+
+    #[test]
+    fn prepare_rename_returns_current_identifier_range() {
+        let text = "def main() -> i64 {\n    let answer = 42;\n    answer\n}";
+        let response = prepare_rename_for_content(
+            text,
+            Position {
+                line: 1,
+                character: 8,
+            },
+        )
+        .expect("identifier should be renameable");
+
+        match response {
+            PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
+                assert_eq!(placeholder, "answer");
+                assert_eq!(range.start.line, 1);
+                assert_eq!(range.start.character, 8);
+                assert_eq!(range.end.character, 14);
+            }
+            other => panic!("expected range with placeholder, got {other:?}"),
+        }
     }
 
     #[test]
