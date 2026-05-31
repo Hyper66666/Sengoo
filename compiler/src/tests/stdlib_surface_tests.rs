@@ -90,6 +90,32 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_search_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["string.sg"],
+        r#"
+def main() -> i64 {
+    let text = "sengoo";
+    let score = if str_contains(text, "goo")
+        && str_starts_with(text, "sen")
+        && str_ends_with(text, "goo")
+        && str_index_of(text, "go") == 3 {
+        1
+    } else {
+        0
+    };
+    score
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_contains"));
+    assert!(ir.contains("sengoo_str_starts_with"));
+    assert!(ir.contains("sengoo_str_ends_with"));
+    assert!(ir.contains("sengoo_str_index_of"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],

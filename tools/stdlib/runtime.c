@@ -31,6 +31,44 @@ long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
 }
 
+long long sengoo_str_contains(const char* value, const char* needle) {
+    if (!value || !needle) {
+        return 0;
+    }
+    return strstr(value, needle) != NULL ? 1 : 0;
+}
+
+long long sengoo_str_starts_with(const char* value, const char* prefix) {
+    if (!value || !prefix) {
+        return 0;
+    }
+    size_t prefix_len = strlen(prefix);
+    return strncmp(value, prefix, prefix_len) == 0 ? 1 : 0;
+}
+
+long long sengoo_str_ends_with(const char* value, const char* suffix) {
+    if (!value || !suffix) {
+        return 0;
+    }
+    size_t value_len = strlen(value);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > value_len) {
+        return 0;
+    }
+    return memcmp(value + value_len - suffix_len, suffix, suffix_len) == 0 ? 1 : 0;
+}
+
+long long sengoo_str_index_of(const char* value, const char* needle) {
+    if (!value || !needle) {
+        return -1;
+    }
+    const char* found = strstr(value, needle);
+    if (!found) {
+        return -1;
+    }
+    return (long long)(found - value);
+}
+
 long long sengoo_file_exists(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
