@@ -13,3 +13,4 @@ Run each file with `sgc run <path>`.
 | [`07_random.sg`](07_random.sg) | Importing `std::random` helpers for deterministic seeding, non-negative i64 values, bounded ranges, and booleans | `8` |
 | [`08_path.sg`](08_path.sg) | Importing `std::path` helpers for separator discovery, absolute checks, joining, extraction, and lexical normalization | `9` |
 | [`09_process.sg`](09_process.sg) | Importing `std::process` helpers for process metadata, current working directory copy, and exit-code selection | `10` |
+| [`10_collections.sg`](10_collections.sg) | Importing `std::collections` helpers for runtime-backed vectors, maps, and iterator flows | `60` |

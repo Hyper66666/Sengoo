@@ -9,7 +9,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, and i64/bool collection mutators.
+- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, and i64/bool collection mutators. Current runtime-backed shapes cover scalar i64/bool combinations; string-key/string-value collections are deferred until Sengoo has a specified string/byte-slice ownership model.
 - `string.sg`: Sengoo-side wrappers over built-in string lowering and runtime string search: `str_len`, equality, contains/prefix/suffix/index helpers, empty checks, append, and repeat.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
