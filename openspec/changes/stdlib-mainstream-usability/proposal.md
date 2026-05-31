@@ -10,8 +10,10 @@ This change defines the next standard-library usability program so future edits 
 - Phase 1 focuses on `std::path`: path separator discovery, absolute-path checks, file-name/stem/extension/parent extraction, joining, and normalization into managed `Buffer` outputs.
 - Phase 2 focuses on `std::process`: portable process metadata and conventional exit-code helpers. Command execution and command-line argument access are explicitly deferred until the compiler/runtime entry ABI can support them safely.
 - Phase 3 focuses on data-format and collection ergonomics: JSON-like helpers are deferred until Sengoo has a better value/string/byte-slice model, while currently supported `std::collections` shapes become first-class stdlib examples.
+- Phase 4 focuses on `std::args`: a compiler/runtime entry ABI that exposes user-supplied command-line arguments without changing ordinary zero-argument `main` programs that do not use the module.
 - Every new stdlib source module must be wired through `sgc` source import expansion, `sglsp` stdlib symbol/signature indexing, stdlib docs, and runnable examples.
 - No source-language syntax change is required by this proposal.
+- Command execution remains out of scope; `std::args` only reads the current program's argument vector.
 
 ## Capabilities
 
@@ -24,7 +26,10 @@ This change defines the next standard-library usability program so future edits 
 - Affected code:
   - `tools/stdlib/*.sg`
   - `tools/stdlib/runtime.c`
+  - `compiler/src/codegen/**`
   - `tools/sgc/src/stdlib_imports.rs`
+  - `tools/sgc/src/native_toolchain.rs`
+  - `tools/sgc/src/commands/run.rs`
   - `tools/sgc/src/tests.rs`
   - `tools/sglsp/src/stdlib.rs`
   - `compiler/src/tests/stdlib_surface_tests.rs`
