@@ -20,3 +20,4 @@ Run each file with `sgc run <path>`.
 | [`14_strconv.sg`](14_strconv.sg) | Importing `std::strconv` helpers for decimal i64 parsing and Buffer-backed formatting | `14` |
 | [`15_dir_listing.sg`](15_dir_listing.sg) | Importing `std::dir` helpers for deterministic non-recursive directory listing | `15` |
 | [`16_file_copy_move.sg`](16_file_copy_move.sg) | Importing `std::file` helpers for binary copy, host-rename move, and explicit overwrite selection | `16` |
+| [`17_process_run.sg`](17_process_run.sg) | Importing `std::process` helpers for synchronous shell-free child execution with explicit arguments | `17` |

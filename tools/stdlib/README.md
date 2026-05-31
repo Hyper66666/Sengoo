@@ -21,7 +21,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
-- `process.sg`: runtime-backed process metadata helpers for process ID, current working directory length/copy into managed `Buffer` handles, and conventional exit-code selection.
+- `process.sg`: runtime-backed process metadata helpers for process ID, current working directory length/copy into managed `Buffer` handles, conventional exit-code selection, and synchronous shell-free child execution with zero through three explicit arguments.
 - `args.sg`: runtime-backed command-line argument helpers for user argument count, existence checks, byte lengths, and managed `Buffer` copy. The executable/source path is not exposed as argument index `0`.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
@@ -115,9 +115,14 @@ a portable subset. `process_current_dir_len()` reports the byte length of the
 working directory, and `process_current_dir_copy(buffer)` copies it into a
 managed `Buffer` and returns the copied byte count. `process_exit_code(success,
 failure_code)` maps a boolean success value to `0` or the caller-provided
-failure code. Command execution is intentionally deferred until Sengoo has a
-specified shell-free process API; command-line argument reads live in
-`std::args`.
+failure code. `process_run(executable)` and `process_run_1` through
+`process_run_3` start the requested executable directly, inherit the current
+standard streams, block until completion, and return the normal child exit
+code. The runtime does not invoke a shell internally: shell metacharacters stay
+inside literal child arguments unless the caller explicitly selects a shell
+executable. Arbitrary-length argv, stream capture, pipes, cwd/environment
+overrides, background handles, timeouts, signals, cancellation, and async
+execution remain deferred; command-line argument reads live in `std::args`.
 
 ## Argument Helpers
 

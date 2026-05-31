@@ -378,6 +378,11 @@ mod tests {
         assert!(names.contains(&"process_id"));
         assert!(names.contains(&"process_current_dir_copy"));
         assert!(names.contains(&"process_exit_code"));
+        assert!(names.contains(&"process_run"));
+        assert!(names.contains(&"process_run_1"));
+        assert!(names.contains(&"process_run_2"));
+        assert!(names.contains(&"process_run_3"));
+        assert!(names.contains(&"process_run_raw"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -390,6 +395,10 @@ mod tests {
             labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
         );
         assert!(labels.contains(&"def process_id() -> i64"));
+        assert!(labels.contains(&"def process_run(executable: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(
+            &"def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Result<i64, i64>"
+        ));
     }
 
     #[test]
