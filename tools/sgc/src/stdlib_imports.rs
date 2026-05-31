@@ -255,6 +255,8 @@ mod tests {
 
         assert!(expanded.contains("def process_id"));
         assert!(expanded.contains("def process_current_dir_copy"));
+        assert!(expanded.contains("def process_run"));
+        assert!(expanded.contains("def process_run_3"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

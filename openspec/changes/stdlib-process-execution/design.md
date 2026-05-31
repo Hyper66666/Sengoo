@@ -56,7 +56,8 @@ missing pointers for used argument slots.
 ## Runtime Contract
 
 On Windows, the runtime uses `CreateProcessA`, waits for completion, and reads
-the process exit code. It constructs a command line by quoting each argv entry
+the process exit code. It lets the host resolve the executable from the
+constructed command line, escaping and quoting argv entries as needed
 according to the Windows C-runtime parsing convention so spaces, quotes, and
 backslashes remain inside the intended argument.
 

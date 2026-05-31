@@ -315,9 +315,13 @@ def main() -> i64 {
     let pid = process_id();
     let ok_code = process_exit_code(true, 9);
     let err_code = process_exit_code(false, 9);
+    let missing_0 = process_run("sengoo-missing-process").is_err();
+    let missing_1 = process_run_1("sengoo-missing-process", "a").is_err();
+    let missing_2 = process_run_2("sengoo-missing-process", "a", "b").is_err();
+    let missing_3 = process_run_3("sengoo-missing-process", "a", "b", "c").is_err();
     buffer.free();
 
-    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 {
+    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 && missing_0 && missing_1 && missing_2 && missing_3 {
         1
     } else {
         0
@@ -329,6 +333,7 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_process_id"));
     assert!(ir.contains("sengoo_process_current_dir_len"));
     assert!(ir.contains("sengoo_process_current_dir_copy"));
+    assert!(ir.contains("sengoo_process_run"));
     assert!(ir.contains("process_exit_code"));
 }
 

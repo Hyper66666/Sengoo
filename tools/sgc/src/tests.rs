@@ -3412,6 +3412,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/14_strconv.sg",
         "examples/stdlib/15_dir_listing.sg",
         "examples/stdlib/16_file_copy_move.sg",
+        "examples/stdlib/17_process_run.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3625,6 +3626,15 @@ fn examples_smoke_stdlib_file_copy_move_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_process_run_import() {
+    assert_example_output(
+        "stdlib-process-run",
+        "examples/stdlib/17_process_run.sg",
+        "17",
+    );
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -3763,6 +3773,71 @@ def main() -> i64 {
         return;
     };
 
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_process_runtime_runs_literal_argument_and_reports_exit_code() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let child_c = temp_artifact("process-run-child", "c");
+    let child_exe = temp_artifact("process-run-child", if cfg!(windows) { "exe" } else { "" });
+    fs::write(
+        &child_c,
+        r#"
+int main(int argc, char** argv) {
+    const char* expected = "hello world";
+    int index = 0;
+    if (argc != 2) {
+        return 8;
+    }
+    while (expected[index] != '\0' && argv[1][index] == expected[index]) {
+        index++;
+    }
+    return expected[index] == '\0' && argv[1][index] == '\0' ? 7 : 8;
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(&clang)
+        .arg(&child_c)
+        .arg("-o")
+        .arg(&child_exe)
+        .status()
+        .expect("process-run child fixture should compile");
+    assert!(status.success(), "process-run child fixture should compile");
+
+    let executable = child_exe.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::process;
+
+def main() -> i64 {{
+    let code = process_run_1("{executable}", "hello world").unwrap_or(-1);
+    let rejected_empty = process_run("").is_err();
+    if code == 7 && rejected_empty {{
+        0
+    }} else {{
+        1
+    }}
+}}
+"#
+    );
+    let output = compile_and_run_stdlib_import_program_with_stdin("process-run", &source, "");
+
+    let _ = fs::remove_file(&child_c);
+    let _ = fs::remove_file(&child_exe);
+
+    let Some(output) = output else {
+        return;
+    };
     assert!(
         output.status.success(),
         "stdout:\n{}\nstderr:\n{}",

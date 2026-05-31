@@ -16,6 +16,8 @@
 #include <windows.h>
 #else
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -1514,6 +1516,232 @@ long long sengoo_process_current_dir_copy(long long out_buffer, long long out_ca
     }
     free(cwd);
     return (long long)len;
+}
+
+static int sengoo_process_run_args_are_valid(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    if (!executable || executable[0] == '\0' || arg_count < 0 || arg_count > 3) {
+        return 0;
+    }
+    for (long long i = 0; i < arg_count; i++) {
+        if (!args[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+#ifdef _WIN32
+static int sengoo_size_add(size_t* total, size_t value) {
+    if (SIZE_MAX - *total < value) {
+        return -1;
+    }
+    *total += value;
+    return 0;
+}
+
+static char* sengoo_windows_append_quoted_arg(char* out, const char* arg) {
+    *out++ = '"';
+    while (*arg) {
+        size_t backslashes = 0;
+        while (*arg == '\\') {
+            backslashes++;
+            arg++;
+        }
+
+        if (*arg == '"') {
+            for (size_t i = 0; i < backslashes * 2 + 1; i++) {
+                *out++ = '\\';
+            }
+            *out++ = *arg++;
+        } else if (*arg == '\0') {
+            for (size_t i = 0; i < backslashes * 2; i++) {
+                *out++ = '\\';
+            }
+        } else {
+            for (size_t i = 0; i < backslashes; i++) {
+                *out++ = '\\';
+            }
+            *out++ = *arg++;
+        }
+    }
+    *out++ = '"';
+    return out;
+}
+
+static int sengoo_windows_arg_needs_quotes(const char* arg) {
+    if (arg[0] == '\0') {
+        return 1;
+    }
+    while (*arg) {
+        if (*arg == ' ' || *arg == '\t' || *arg == '"') {
+            return 1;
+        }
+        arg++;
+    }
+    return 0;
+}
+
+static char* sengoo_windows_append_arg(char* out, const char* arg) {
+    if (sengoo_windows_arg_needs_quotes(arg)) {
+        return sengoo_windows_append_quoted_arg(out, arg);
+    }
+    while (*arg) {
+        *out++ = *arg++;
+    }
+    return out;
+}
+
+static char* sengoo_windows_process_command_line(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    const char* values[4] = {executable, args[0], args[1], args[2]};
+    size_t value_count = (size_t)arg_count + 1;
+    size_t capacity = 1;
+    for (size_t i = 0; i < value_count; i++) {
+        size_t len = strlen(values[i]);
+        if (len > (SIZE_MAX - 3) / 2
+            || sengoo_size_add(&capacity, len * 2 + 3) != 0) {
+            return NULL;
+        }
+    }
+
+    char* command_line = (char*)malloc(capacity);
+    if (!command_line) {
+        return NULL;
+    }
+
+    char* out = command_line;
+    for (size_t i = 0; i < value_count; i++) {
+        if (i > 0) {
+            *out++ = ' ';
+        }
+        out = sengoo_windows_append_arg(out, values[i]);
+    }
+    *out = '\0';
+    return command_line;
+}
+
+static long long sengoo_process_run_windows(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    char* command_line = sengoo_windows_process_command_line(executable, args, arg_count);
+    if (!command_line) {
+        return -1;
+    }
+
+    STARTUPINFOA startup_info = {0};
+    PROCESS_INFORMATION process_info = {0};
+    startup_info.cb = sizeof(startup_info);
+    BOOL created = CreateProcessA(
+        NULL,
+        command_line,
+        NULL,
+        NULL,
+        TRUE,
+        0,
+        NULL,
+        NULL,
+        &startup_info,
+        &process_info
+    );
+    free(command_line);
+    if (!created) {
+        return -1;
+    }
+
+    DWORD wait_status = WaitForSingleObject(process_info.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    int ok = wait_status == WAIT_OBJECT_0 && GetExitCodeProcess(process_info.hProcess, &exit_code);
+    CloseHandle(process_info.hThread);
+    CloseHandle(process_info.hProcess);
+    return ok ? (long long)exit_code : -1;
+}
+#else
+static long long sengoo_process_run_unix(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    int startup_pipe[2];
+    if (pipe(startup_pipe) != 0) {
+        return -1;
+    }
+
+    int flags = fcntl(startup_pipe[1], F_GETFD);
+    if (flags < 0 || fcntl(startup_pipe[1], F_SETFD, flags | FD_CLOEXEC) != 0) {
+        close(startup_pipe[0]);
+        close(startup_pipe[1]);
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(startup_pipe[0]);
+        close(startup_pipe[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        close(startup_pipe[0]);
+        char* argv[5] = {(char*)executable, NULL, NULL, NULL, NULL};
+        for (long long i = 0; i < arg_count; i++) {
+            argv[i + 1] = (char*)args[i];
+        }
+        execvp(executable, argv);
+        int startup_errno = errno;
+        (void)write(startup_pipe[1], &startup_errno, sizeof(startup_errno));
+        _exit(127);
+    }
+
+    close(startup_pipe[1]);
+    int startup_errno = 0;
+    ssize_t startup_read;
+    do {
+        startup_read = read(startup_pipe[0], &startup_errno, sizeof(startup_errno));
+    } while (startup_read < 0 && errno == EINTR);
+    close(startup_pipe[0]);
+
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (startup_read != 0 || waited != pid || !WIFEXITED(status)) {
+        return -1;
+    }
+    return (long long)WEXITSTATUS(status);
+}
+#endif
+
+long long sengoo_process_run(
+    long long executable_ptr,
+    long long arg0_ptr,
+    long long arg1_ptr,
+    long long arg2_ptr,
+    long long arg_count
+) {
+    const char* executable = (const char*)(intptr_t)executable_ptr;
+    const char* args[3] = {
+        (const char*)(intptr_t)arg0_ptr,
+        (const char*)(intptr_t)arg1_ptr,
+        (const char*)(intptr_t)arg2_ptr,
+    };
+    if (!sengoo_process_run_args_are_valid(executable, args, arg_count)) {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return sengoo_process_run_windows(executable, args, arg_count);
+#else
+    return sengoo_process_run_unix(executable, args, arg_count);
+#endif
 }
 
 static long long sengoo_runtime_argc = 0;
