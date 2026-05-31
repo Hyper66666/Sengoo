@@ -41,6 +41,187 @@ long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
 }
 
+enum {
+    SENGOO_FFI_STATUS_OK = 0,
+    SENGOO_FFI_ERR_INVALID_ARGUMENT = -2001,
+    SENGOO_FFI_ERR_INVALID_HANDLE = -2002,
+    SENGOO_FFI_ERR_BUFFER = -2006,
+    SENGOO_FFI_ERR_INTERNAL = -2099
+};
+
+typedef struct {
+    unsigned char* bytes;
+    size_t len;
+} SengooFfiBuffer;
+
+static int sengoo_ffi_last_error = SENGOO_FFI_STATUS_OK;
+static char sengoo_ffi_last_error_message[256] = {0};
+
+static void sengoo_ffi_clear_error_state(void) {
+    sengoo_ffi_last_error = SENGOO_FFI_STATUS_OK;
+    sengoo_ffi_last_error_message[0] = '\0';
+}
+
+static int sengoo_ffi_set_error(int code, const char* message) {
+    sengoo_ffi_last_error = code;
+    if (message) {
+        snprintf(
+            sengoo_ffi_last_error_message,
+            sizeof(sengoo_ffi_last_error_message),
+            "%s",
+            message
+        );
+    } else {
+        sengoo_ffi_last_error_message[0] = '\0';
+    }
+    return code;
+}
+
+long long sengoo_ffi_last_error_code(void) {
+    return (long long)sengoo_ffi_last_error;
+}
+
+long long sengoo_ffi_last_error_len(void) {
+    return (long long)strlen(sengoo_ffi_last_error_message);
+}
+
+long long sengoo_ffi_last_error_copy(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "negative output capacity");
+    }
+
+    size_t len = strlen(sengoo_ffi_last_error_message);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
+    }
+
+    if (len > 0) {
+        memcpy(out, sengoo_ffi_last_error_message, len);
+    }
+    return (long long)len;
+}
+
+long long sengoo_ffi_last_error_clear(void) {
+    sengoo_ffi_clear_error_state();
+    return SENGOO_FFI_STATUS_OK;
+}
+
+static SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle) {
+    return handle == 0 ? NULL : (SengooFfiBuffer*)(intptr_t)handle;
+}
+
+long long sengoo_ffi_buffer_new(long long capacity) {
+    sengoo_ffi_clear_error_state();
+    if (capacity < 0) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "negative buffer capacity");
+    }
+
+    SengooFfiBuffer* buffer = (SengooFfiBuffer*)calloc(1, sizeof(SengooFfiBuffer));
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer allocation failed");
+    }
+
+    if (capacity > 0) {
+        buffer->bytes = (unsigned char*)calloc((size_t)capacity, 1);
+        if (!buffer->bytes) {
+            free(buffer);
+            return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
+        }
+    }
+    buffer->len = (size_t)capacity;
+    return (long long)(intptr_t)buffer;
+}
+
+long long sengoo_ffi_buffer_from_bytes(long long data_ptr, long long len) {
+    sengoo_ffi_clear_error_state();
+    const unsigned char* data = (const unsigned char*)(intptr_t)data_ptr;
+    if (len < 0 || (len > 0 && !data)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
+    }
+
+    long long handle = sengoo_ffi_buffer_new(len);
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(handle);
+    if (!buffer) {
+        return 0;
+    }
+    if (len > 0) {
+        memcpy(buffer->bytes, data, (size_t)len);
+    }
+    return handle;
+}
+
+long long sengoo_ffi_buffer_len(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return (long long)buffer->len;
+}
+
+long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return (long long)(intptr_t)buffer->bytes;
+}
+
+long long sengoo_ffi_buffer_copy_out(long long buffer_handle, long long out_buffer, long long out_capacity) {
+    sengoo_ffi_clear_error_state();
+    char* out = (char*)(intptr_t)out_buffer;
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (out_capacity < 0 || (unsigned long long)buffer->len > (unsigned long long)out_capacity || (buffer->len > 0 && !out)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
+    }
+    if (buffer->len > 0) {
+        memcpy(out, buffer->bytes, buffer->len);
+    }
+    return (long long)buffer->len;
+}
+
+long long sengoo_ffi_buffer_copy_in(long long buffer_handle, long long src_ptr, long long src_len) {
+    sengoo_ffi_clear_error_state();
+    const unsigned char* src = (const unsigned char*)(intptr_t)src_ptr;
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (src_len < 0 || (src_len > 0 && !src)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
+    }
+
+    unsigned char* bytes = NULL;
+    if (src_len > 0) {
+        bytes = (unsigned char*)malloc((size_t)src_len);
+        if (!bytes) {
+            return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
+        }
+        memcpy(bytes, src, (size_t)src_len);
+    }
+
+    free(buffer->bytes);
+    buffer->bytes = bytes;
+    buffer->len = (size_t)src_len;
+    return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_ffi_buffer_free(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    free(buffer->bytes);
+    free(buffer);
+    return SENGOO_FFI_STATUS_OK;
+}
+
 long long sengoo_str_contains(const char* value, const char* needle) {
     if (!value || !needle) {
         return 0;
@@ -727,6 +908,70 @@ long long sengoo_process_current_dir_copy(long long out_buffer, long long out_ca
         memcpy(out, cwd, len);
     }
     free(cwd);
+    return (long long)len;
+}
+
+static long long sengoo_runtime_argc = 0;
+static char** sengoo_runtime_argv = NULL;
+
+void sengoo_args_init(long long argc, long long argv_ptr) {
+    if (argc <= 0 || argv_ptr == 0) {
+        sengoo_runtime_argc = 0;
+        sengoo_runtime_argv = NULL;
+        return;
+    }
+
+    sengoo_runtime_argc = argc;
+    sengoo_runtime_argv = (char**)(intptr_t)argv_ptr;
+}
+
+static const char* sengoo_user_arg_at(long long index) {
+    if (index < 0 || !sengoo_runtime_argv) {
+        return NULL;
+    }
+
+    long long os_index = index + 1;
+    if (os_index <= 0 || os_index >= sengoo_runtime_argc) {
+        return NULL;
+    }
+
+    return sengoo_runtime_argv[os_index];
+}
+
+long long sengoo_args_len(void) {
+    if (sengoo_runtime_argc <= 1) {
+        return 0;
+    }
+    return sengoo_runtime_argc - 1;
+}
+
+long long sengoo_arg_len(long long index) {
+    const char* arg = sengoo_user_arg_at(index);
+    if (!arg) {
+        return -1;
+    }
+    return (long long)strlen(arg);
+}
+
+long long sengoo_arg_copy(long long index, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return -1;
+    }
+
+    const char* arg = sengoo_user_arg_at(index);
+    if (!arg) {
+        return -1;
+    }
+
+    size_t len = strlen(arg);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(out, arg, len);
+    }
     return (long long)len;
 }
 

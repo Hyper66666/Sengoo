@@ -174,15 +174,16 @@ impl Codegen {
 
                 self.emit_indent();
 
+                let callee = self.emitted_function_name(func);
                 if ret_ty == "void" {
                     self.ir
-                        .push_str(&format!("call void @{}({})\n", func, arg_strs.join(", ")));
+                        .push_str(&format!("call void @{}({})\n", callee, arg_strs.join(", ")));
                 } else {
                     self.ir.push_str(&format!(
                         "{} = call {} @{}({})\n",
                         dest,
                         ret_ty,
-                        func,
+                        callee,
                         arg_strs.join(", ")
                     ));
                 }

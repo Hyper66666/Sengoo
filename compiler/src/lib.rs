@@ -14,7 +14,7 @@ pub(crate) mod type_naming;
 pub mod typeck;
 
 pub use ast::*;
-pub use codegen::{jit::JITCodegen, Codegen};
+pub use codegen::{jit::JITCodegen, Codegen, FfiCodegenConfig};
 pub use error::{CompileError, Result};
 pub use hir::lower_ast;
 pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};
@@ -46,7 +46,7 @@ impl Default for CompileOptions {
     }
 }
 
-fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodegenConfig {
+pub fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodegenConfig {
     let mut config = codegen::FfiCodegenConfig::default();
 
     for item in &hir_module.items {

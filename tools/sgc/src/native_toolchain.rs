@@ -508,8 +508,9 @@ pub(crate) fn compile_native_binary(
     Ok(())
 }
 
-pub(crate) fn run_native_binary(executable_path: &Path) -> Result<()> {
+pub(crate) fn run_native_binary_with_args(executable_path: &Path, args: &[String]) -> Result<()> {
     let run_output = Command::new(executable_path)
+        .args(args)
         .output()
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to execute native binary: {}", e))?;
@@ -531,9 +532,19 @@ pub(crate) fn run_native_binary(executable_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn run_with_lli(lli_exe: &str, llvm_ir_path: &Path) -> Result<()> {
-    let output = Command::new(lli_exe)
+pub(crate) fn run_with_lli_args(
+    lli_exe: &str,
+    llvm_ir_path: &Path,
+    args: &[String],
+    extra_objects: &[PathBuf],
+) -> Result<()> {
+    let mut command = Command::new(lli_exe);
+    for object in extra_objects {
+        command.arg(format!("--extra-object={}", object.display()));
+    }
+    let output = command
         .arg(llvm_ir_path)
+        .args(args)
         .output()
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to invoke lli: {}", e))?;

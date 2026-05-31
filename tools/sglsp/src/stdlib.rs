@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use tower_lsp::lsp_types::{Location, Url};
 
 const STDLIB_SOURCES: &[(&str, &str)] = &[
+    ("args", include_str!("../../stdlib/args.sg")),
     ("collections", include_str!("../../stdlib/collections.sg")),
     ("db", include_str!("../../stdlib/db.sg")),
     ("env", include_str!("../../stdlib/env.sg")),
@@ -35,7 +36,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "env" | "path" | "process" => &["ffi"],
+        "file" | "env" | "path" | "process" | "args" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -372,5 +373,29 @@ mod tests {
             labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
         );
         assert!(labels.contains(&"def process_id() -> i64"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_args_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::args;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"args_len"));
+        assert!(names.contains(&"arg_exists"));
+        assert!(names.contains(&"arg_len"));
+        assert!(names.contains(&"arg_copy"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::args;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def arg_len(index: i64) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64>"));
     }
 }
