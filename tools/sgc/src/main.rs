@@ -112,8 +112,8 @@ pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_link
 pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
     compile_source_to_llvm_file_with_phase_timings,
-    compile_source_to_llvm_file_with_phase_timings_with_mode, set_contract_runtime_checks_override,
-    set_large_project_mode_override,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, maybe_print_phase_timings,
+    set_contract_runtime_checks_override, set_large_project_mode_override,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;

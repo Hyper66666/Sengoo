@@ -4200,6 +4200,11 @@ fn compile_phase_timings_include_expected_keys() {
     assert!(phases.contains_key("mir_prune"));
     assert!(phases.contains_key("codegen"));
     assert!(phases.contains_key("link"));
+    // Frontend hotspot profiling: the `mir` bucket is sub-split so callers can
+    // attribute cost to HIR lowering vs MIR lowering vs MIR optimization.
+    assert!(phases.contains_key("hir_lower"));
+    assert!(phases.contains_key("mir_lower"));
+    assert!(phases.contains_key("mir_opt"));
 }
 
 #[test]

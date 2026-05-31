@@ -6,7 +6,7 @@ impl<'a> LoweringContext<'a> {
         mir_fn: &'a mut MirFunction,
         lambda_counter: &'a mut usize,
         known_functions: &'a HashSet<String>,
-        known_function_sigs: &HashMap<String, FunctionSig>,
+        known_function_sigs: &'a HashMap<String, FunctionSig>,
         struct_defs: &'a HashMap<String, &'a hir::HIRStruct>,
         concrete_type_registry: ConcreteTypeRegistry,
         options: MirLowerOptions,
@@ -31,10 +31,10 @@ impl<'a> LoweringContext<'a> {
             lambda_counter,
             lambda_functions: Vec::new(),
             lambda_names: HashMap::new(),
-            function_sigs: known_function_sigs.clone(),
+            function_sigs: Cow::Borrowed(known_function_sigs),
             lambda_environments: HashMap::new(),
             type_names: HashMap::new(),
-            known_functions: known_functions.clone(),
+            known_functions: Cow::Borrowed(known_functions),
             struct_defs,
             concrete_type_registry,
             options,
@@ -63,11 +63,11 @@ impl<'a> LoweringContext<'a> {
             return Some(specialized.name);
         }
 
-        self.function_sigs.insert(
+        self.function_sigs.to_mut().insert(
             specialized.name.clone(),
             build_hir_function_sig(&specialized.return_type, param_count, self.struct_defs),
         );
-        self.known_functions.insert(specialized.name.clone());
+        self.known_functions.to_mut().insert(specialized.name.clone());
 
         match lower_function(
             &specialized,

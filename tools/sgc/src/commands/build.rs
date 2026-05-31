@@ -435,7 +435,7 @@ pub(crate) async fn cmd_build(
         }
     }
 
-    let (_phases, effective_memory_mode) =
+    let (phases, effective_memory_mode) =
         compile_source_to_llvm_file_with_phase_timings_with_mode(
             &source,
             opt_level,
@@ -450,6 +450,7 @@ pub(crate) async fn cmd_build(
             emit_compile_error(Some(input), &e.to_string());
             miette::miette!("compile failed")
         })?;
+    crate::maybe_print_phase_timings(&phases);
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)

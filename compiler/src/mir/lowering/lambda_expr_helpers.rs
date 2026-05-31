@@ -110,12 +110,12 @@ pub(super) fn lower_lambda_expr_with_expected(
                 env_ptr_local: None,
             },
         );
-        ctx.function_sigs.insert(
+        ctx.function_sigs.to_mut().insert(
             lambda_name.clone(),
             build_function_sig(ret_type.clone(), param_types.len(), env_var_types),
         );
     } else {
-        ctx.function_sigs.insert(
+        ctx.function_sigs.to_mut().insert(
             lambda_name.clone(),
             build_function_sig(ret_type.clone(), param_types.len(), vec![]),
         );

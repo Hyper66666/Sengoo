@@ -76,12 +76,12 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
-        self.known_functions.insert(async_block_name.clone());
+        self.known_functions.to_mut().insert(async_block_name.clone());
         self.options
             .async_functions
             .borrow_mut()
             .insert(async_block_name.clone());
-        self.function_sigs.insert(
+        self.function_sigs.to_mut().insert(
             async_block_name.clone(),
             build_function_sig(result_ty.clone(), capture_arity, vec![]),
         );
