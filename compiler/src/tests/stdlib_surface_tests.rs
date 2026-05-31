@@ -281,6 +281,34 @@ def main() -> i64 {
 }
 
 #[test]
+fn dir_module_imports_directory_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "dir.sg"],
+        r#"
+def main() -> i64 {
+    let root = "target/sengoo-stdlib-dir-surface";
+    let nested = "target/sengoo-stdlib-dir-surface/nested";
+    let created = dir_create_all(nested).unwrap_or(false);
+    let nested_exists = dir_exists(nested);
+    let removed_nested = dir_remove(nested).unwrap_or(false);
+    let removed_root = dir_remove(root).unwrap_or(false);
+
+    if created && nested_exists && removed_nested && removed_root {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_dir_exists"));
+    assert!(ir.contains("sengoo_dir_create"));
+    assert!(ir.contains("sengoo_dir_create_all"));
+    assert!(ir.contains("sengoo_dir_remove"));
+}
+
+#[test]
 fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "args.sg"],

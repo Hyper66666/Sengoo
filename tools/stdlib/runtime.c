@@ -2,18 +2,19 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
 #include <windows.h>
 #else
-#include <errno.h>
 #include <unistd.h>
 #endif
 
@@ -839,6 +840,100 @@ long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long l
     free(segment_starts);
     free(segment_lens);
     return copied;
+}
+
+static int sengoo_dir_exists_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+#else
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISDIR(info.st_mode) ? 1 : 0;
+#endif
+}
+
+static int sengoo_dir_create_one_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+    if (sengoo_dir_exists_cstr(path)) {
+        return 0;
+    }
+
+#ifdef _WIN32
+    if (_mkdir(path) == 0) {
+        return 0;
+    }
+#else
+    if (mkdir(path, 0777) == 0) {
+        return 0;
+    }
+#endif
+
+    return sengoo_dir_exists_cstr(path) ? 0 : -1;
+}
+
+long long sengoo_dir_exists(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_dir_exists_cstr(path) ? 1 : 0;
+}
+
+long long sengoo_dir_create(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_dir_create_one_cstr(path);
+}
+
+long long sengoo_dir_create_all(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+    if (sengoo_dir_exists_cstr(path)) {
+        return 0;
+    }
+
+    size_t len = strlen(path);
+    char* scratch = (char*)malloc(len + 1);
+    if (!scratch) {
+        return -1;
+    }
+    memcpy(scratch, path, len + 1);
+
+    size_t root_len = sengoo_path_root_len(scratch);
+    for (size_t i = root_len; i < len; i++) {
+        if (!sengoo_path_is_sep(scratch[i])) {
+            continue;
+        }
+
+        scratch[i] = '\0';
+        if (i > root_len && sengoo_dir_create_one_cstr(scratch) != 0) {
+            scratch[i] = path[i];
+            free(scratch);
+            return -1;
+        }
+        scratch[i] = path[i];
+    }
+
+    int status = sengoo_dir_create_one_cstr(scratch);
+    free(scratch);
+    return status == 0 ? 0 : -1;
+}
+
+long long sengoo_dir_remove(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return _rmdir(path) == 0 ? 0 : -1;
+#else
+    return rmdir(path) == 0 ? 0 : -1;
+#endif
 }
 
 long long sengoo_process_id(void) {
