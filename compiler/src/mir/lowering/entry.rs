@@ -141,6 +141,8 @@ pub fn lower_hir_with_options(
                     &options,
                     &inherent_method_templates,
                     &trait_method_templates,
+                    HashSet::new(),
+                    HashMap::new(),
                 ) {
                     Ok((mir_fn, lambdas)) => {
                         results.push(mir_fn);
@@ -170,6 +172,8 @@ pub fn lower_hir_with_options(
                             &options,
                             &inherent_method_templates,
                             &trait_method_templates,
+                            HashSet::new(),
+                            HashMap::new(),
                         ) {
                             Ok((mir_fn, lambdas)) => {
                                 results.push(mir_fn);
@@ -195,6 +199,8 @@ pub fn lower_hir_with_options(
             &options,
             &inherent_method_templates,
             &trait_method_templates,
+            HashSet::new(),
+            HashMap::new(),
         ) {
             Ok((mir_fn, lambdas)) => {
                 results.push(mir_fn);

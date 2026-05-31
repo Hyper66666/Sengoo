@@ -11,6 +11,8 @@ pub(super) fn lower_function(
     options: &MirLowerOptions,
     inherent_method_templates: &[InherentMethodTemplate],
     trait_method_templates: &[TraitMethodTemplate],
+    inherited_known_overlay: HashSet<String>,
+    inherited_sigs_overlay: HashMap<String, FunctionSig>,
 ) -> Result<(MirFunction, Vec<MirFunction>), String> {
     let params: Vec<MIRType> = fn_item
         .params
@@ -33,6 +35,12 @@ pub(super) fn lower_function(
         inherent_method_templates,
         trait_method_templates,
     );
+    // Seed this context's private overlay with the caller's already-materialized
+    // instances (empty at the top level; the parent's small overlay when this is
+    // a nested generic/method materialization). Only the small overlay is moved
+    // in — the program-global base tables stay borrowed and are never cloned.
+    ctx.known_functions_overlay = inherited_known_overlay;
+    ctx.function_sigs_overlay = inherited_sigs_overlay;
 
     // 为函数参数创建局部变量并绑定到符号。
     for (i, param) in fn_item.params.iter().enumerate() {
