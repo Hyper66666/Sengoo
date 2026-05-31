@@ -15,7 +15,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
-- `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, and empty-directory removal.
+- `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic non-recursive listing, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
@@ -62,12 +62,16 @@ owned-string returns remain deferred.
 
 ## Directory Helpers
 
-`std::dir` covers the portable setup operations needed by small scripts and
-tooling: `dir_exists(path)`, `dir_create(path)`, `dir_create_all(path)`, and
+`std::dir` covers the portable directory operations needed by small scripts and
+tooling: `dir_exists(path)`, `dir_create(path)`, `dir_create_all(path)`,
+`dir_entry_count(path)`, `dir_entry_name(path, index, buffer)`, and
 `dir_remove(path)`. Creation is idempotent when the target directory already
-exists. `dir_remove` only removes empty directories; recursive tree deletion and
-directory listing are deferred until Sengoo has a broader filesystem safety and
-string/iterator design.
+exists. Listing is non-recursive, excludes `.` and `..`, sorts entry names by
+unsigned byte order for deterministic indexes, copies one child name into a
+managed `Buffer`, and returns the byte count without appending a NUL terminator.
+`dir_remove` only removes empty directories; recursive tree deletion, recursive
+traversal, glob matching, metadata structs, owned-string entry returns, and
+persistent iterator/list APIs remain deferred.
 
 ## Standard I/O Helpers
 

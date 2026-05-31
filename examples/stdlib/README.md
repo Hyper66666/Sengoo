@@ -18,3 +18,4 @@ Run each file with `sgc run <path>`.
 | [`12_dir.sg`](12_dir.sg) | Importing `std::dir` helpers for directory existence, creation, recursive creation, and empty-directory removal | `12` |
 | [`13_io.sg`](13_io.sg) | Importing `std::io` helpers for exact stdout/stderr writes and flushing | `13` |
 | [`14_strconv.sg`](14_strconv.sg) | Importing `std::strconv` helpers for decimal i64 parsing and Buffer-backed formatting | `14` |
+| [`15_dir_listing.sg`](15_dir_listing.sg) | Importing `std::dir` helpers for deterministic non-recursive directory listing | `15` |

@@ -15,6 +15,7 @@
 #include <direct.h>
 #include <windows.h>
 #else
+#include <dirent.h>
 #include <unistd.h>
 #endif
 
@@ -1031,6 +1032,190 @@ long long sengoo_dir_remove(long long path_ptr) {
 #else
     return rmdir(path) == 0 ? 0 : -1;
 #endif
+}
+
+typedef struct {
+    char** names;
+    size_t len;
+    size_t cap;
+} SengooDirEntryList;
+
+static void sengoo_dir_entry_list_free(SengooDirEntryList* list) {
+    if (!list) {
+        return;
+    }
+    for (size_t i = 0; i < list->len; i++) {
+        free(list->names[i]);
+    }
+    free(list->names);
+    list->names = NULL;
+    list->len = 0;
+    list->cap = 0;
+}
+
+static char* sengoo_strdup_bytes(const char* value) {
+    if (!value) {
+        return NULL;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, value, len + 1);
+    return copy;
+}
+
+static int sengoo_dir_entry_list_push(SengooDirEntryList* list, const char* name) {
+    if (!list || !name) {
+        return -1;
+    }
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        return 0;
+    }
+
+    if (list->len == list->cap) {
+        size_t next_cap = list->cap == 0 ? 8 : list->cap * 2;
+        char** next_names = (char**)realloc(list->names, next_cap * sizeof(char*));
+        if (!next_names) {
+            return -1;
+        }
+        list->names = next_names;
+        list->cap = next_cap;
+    }
+
+    char* copy = sengoo_strdup_bytes(name);
+    if (!copy) {
+        return -1;
+    }
+    list->names[list->len++] = copy;
+    return 0;
+}
+
+static int sengoo_dir_entry_name_compare(const void* lhs, const void* rhs) {
+    const char* a = *(const char* const*)lhs;
+    const char* b = *(const char* const*)rhs;
+    return strcmp(a, b);
+}
+
+static int sengoo_dir_collect_entries(const char* path, SengooDirEntryList* list) {
+    if (!path || path[0] == '\0' || !list) {
+        return -1;
+    }
+    memset(list, 0, sizeof(*list));
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return -1;
+    }
+
+    size_t path_len = strlen(path);
+    int needs_sep = path_len > 0 && !sengoo_path_is_sep(path[path_len - 1]);
+    size_t pattern_len = path_len + (needs_sep ? 1 : 0) + 1;
+    char* pattern = (char*)malloc(pattern_len + 1);
+    if (!pattern) {
+        return -1;
+    }
+    memcpy(pattern, path, path_len);
+    size_t pos = path_len;
+    if (needs_sep) {
+        pattern[pos++] = '\\';
+    }
+    pattern[pos++] = '*';
+    pattern[pos] = '\0';
+
+    WIN32_FIND_DATAA find_data;
+    HANDLE handle = FindFirstFileA(pattern, &find_data);
+    free(pattern);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+
+    do {
+        if (sengoo_dir_entry_list_push(list, find_data.cFileName) != 0) {
+            FindClose(handle);
+            sengoo_dir_entry_list_free(list);
+            return -1;
+        }
+    } while (FindNextFileA(handle, &find_data));
+    DWORD err = GetLastError();
+    FindClose(handle);
+    if (err != ERROR_NO_MORE_FILES) {
+        sengoo_dir_entry_list_free(list);
+        return -1;
+    }
+#else
+    DIR* dir = opendir(path);
+    if (!dir) {
+        return -1;
+    }
+
+    errno = 0;
+    struct dirent* entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (sengoo_dir_entry_list_push(list, entry->d_name) != 0) {
+            closedir(dir);
+            sengoo_dir_entry_list_free(list);
+            return -1;
+        }
+    }
+    int read_errno = errno;
+    closedir(dir);
+    if (read_errno != 0) {
+        sengoo_dir_entry_list_free(list);
+        return -1;
+    }
+#endif
+
+    if (list->len > 1) {
+        qsort(list->names, list->len, sizeof(char*), sengoo_dir_entry_name_compare);
+    }
+    return 0;
+}
+
+long long sengoo_dir_entry_count(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    SengooDirEntryList list;
+    if (sengoo_dir_collect_entries(path, &list) != 0) {
+        return -1;
+    }
+    size_t count = list.len;
+    sengoo_dir_entry_list_free(&list);
+    if (count > (size_t)LLONG_MAX) {
+        return -1;
+    }
+    return (long long)count;
+}
+
+long long sengoo_dir_entry_name(long long path_ptr, long long index, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (index < 0 || out_capacity < 0) {
+        return -1;
+    }
+
+    SengooDirEntryList list;
+    if (sengoo_dir_collect_entries(path, &list) != 0) {
+        return -1;
+    }
+
+    if ((unsigned long long)index >= (unsigned long long)list.len) {
+        sengoo_dir_entry_list_free(&list);
+        return -1;
+    }
+
+    const char* name = list.names[index];
+    size_t len = strlen(name);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        sengoo_dir_entry_list_free(&list);
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, name, len);
+    }
+    sengoo_dir_entry_list_free(&list);
+    return (long long)len;
 }
 
 long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {

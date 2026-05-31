@@ -390,6 +390,8 @@ mod tests {
         assert!(names.contains(&"dir_create"));
         assert!(names.contains(&"dir_create_all"));
         assert!(names.contains(&"dir_remove"));
+        assert!(names.contains(&"dir_entry_count"));
+        assert!(names.contains(&"dir_entry_name"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -401,6 +403,10 @@ mod tests {
         assert!(labels.contains(&"def dir_exists(path: &str) -> bool"));
         assert!(labels.contains(&"def dir_create_all(path: &str) -> Result<bool, i64>"));
         assert!(labels.contains(&"def dir_remove(path: &str) -> Result<bool, i64>"));
+        assert!(labels.contains(&"def dir_entry_count(path: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(
+            &"def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64>"
+        ));
     }
 
     #[test]
