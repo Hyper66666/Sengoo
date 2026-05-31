@@ -198,6 +198,8 @@ mod tests {
                 .expect("file stdlib import should expand");
 
         assert!(expanded.contains("def file_exists"));
+        assert!(expanded.contains("def file_copy"));
+        assert!(expanded.contains("def file_move"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

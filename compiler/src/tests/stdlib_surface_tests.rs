@@ -140,6 +140,34 @@ def main() -> i64 {
 }
 
 #[test]
+fn file_module_imports_copy_and_move_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "file.sg"],
+        r#"
+def main() -> i64 {
+    let source = "target/sengoo-stdlib-file-surface-source.txt";
+    let copy = "target/sengoo-stdlib-file-surface-copy.txt";
+    let moved = "target/sengoo-stdlib-file-surface-moved.txt";
+    let wrote = file_write_str(source, "abc").unwrap_or(0);
+    let copied = file_copy(source, copy, false).unwrap_or(0);
+    let moved_ok = file_move(copy, moved, false).unwrap_or(false);
+    file_remove(source);
+    file_remove(moved);
+
+    if wrote == 3 && copied == 3 && moved_ok {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_file_copy"));
+    assert!(ir.contains("sengoo_file_move"));
+}
+
+#[test]
 fn env_module_imports_process_and_variable_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "env.sg"],

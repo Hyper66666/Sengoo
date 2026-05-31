@@ -46,6 +46,8 @@ when that primitive succeeds.
 - When `overwrite == false`, an existing destination is rejected.
 - When `overwrite == true`, copy truncates/replaces the destination file and
   move requests host replacement semantics.
+- Copy rejects destinations that already refer to the source file, even when
+  overwrite is enabled, so aliases cannot truncate their own input.
 - Copy removes a newly-created partial destination when a read/write/close
   error occurs.
 - Move does not fall back to copy-plus-remove when the host rename fails, so
@@ -73,7 +75,7 @@ is not claimed as a race-free filesystem transaction.
 - Compiler surface tests cover the copy/move wrappers and runtime symbols.
 - `sgc` import expansion tests expose the helpers through `std::file`.
 - `sglsp` symbol/signature tests expose the new functions.
-- Runtime smoke tests verify byte copying, no-overwrite rejection, explicit
-  overwrite, successful move, source retention after copy, and source removal
-  after move.
+- Runtime smoke tests verify byte copying, no-overwrite rejection, same-file
+  copy rejection, explicit overwrite, successful move, source retention after
+  copy, and source removal after move.
 - The stdlib example catalog includes a runnable file copy/move example.

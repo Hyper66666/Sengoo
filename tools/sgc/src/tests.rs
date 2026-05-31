@@ -3411,6 +3411,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/13_io.sg",
         "examples/stdlib/14_strconv.sg",
         "examples/stdlib/15_dir_listing.sg",
+        "examples/stdlib/16_file_copy_move.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3615,6 +3616,15 @@ fn examples_smoke_stdlib_dir_listing_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_file_copy_move_import() {
+    assert_example_output(
+        "stdlib-file-copy-move",
+        "examples/stdlib/16_file_copy_move.sg",
+        "16",
+    );
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -3705,6 +3715,60 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "a.txt");
+}
+
+#[test]
+fn stdlib_file_runtime_copies_moves_and_requires_explicit_overwrite() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "file-copy-move",
+        r#"
+import std::file;
+
+def main() -> i64 {
+    let source = "sengoo_tmp_file_transfer_source.txt";
+    let copy = "sengoo_tmp_file_transfer_copy.txt";
+    let moved = "sengoo_tmp_file_transfer_moved.txt";
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    let wrote = file_write_str(source, "alpha").unwrap_or(0);
+    let copied = file_copy(source, copy, false).unwrap_or(0);
+    let source_kept = file_exists(source);
+    let copy_exists = file_exists(copy);
+    let reject_copy = file_copy(source, copy, false).is_err();
+    let overwrote = file_copy(source, copy, true).unwrap_or(0);
+    let reject_same_file_copy = file_copy(source, source, true).is_err();
+    let source_len = file_len(source).unwrap_or(0);
+
+    file_write_str(moved, "old");
+    let reject_move = file_move(copy, moved, false).is_err();
+    let moved_ok = file_move(copy, moved, true).unwrap_or(false);
+    let copy_gone = !file_exists(copy);
+    let moved_exists = file_exists(moved);
+
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    if wrote == 5 && copied == 5 && source_kept && copy_exists && reject_copy && overwrote == 5 && reject_same_file_copy && source_len == 5 && reject_move && moved_ok && copy_gone && moved_exists {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
