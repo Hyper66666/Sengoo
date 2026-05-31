@@ -22,8 +22,8 @@ use super::{
     FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata, ReflectionMode,
-    RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION,
-    DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
+    RunCacheMetadata, RunEngine, RuntimeSourceIdentity, BUILD_GRAPH_SCHEMA_VERSION,
+    DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
     FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
     LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
@@ -59,6 +59,7 @@ fn metadata_for_test() -> RunCacheMetadata {
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/a.ll".to_string(),
         executable_path: Some("tests/build/a.exe".to_string()),
         llvm_ir_hash: 999,
@@ -189,7 +190,7 @@ fn cache_miss_when_opt_level_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -204,7 +205,7 @@ fn cache_miss_when_engine_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Lli,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -219,9 +220,70 @@ fn cache_hit_when_key_matches() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn cache_miss_when_runtime_source_fingerprint_changes() {
+    let mut metadata = metadata_for_test();
+    metadata.runtime_c_fingerprint = Some(11);
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
+    );
+
+    assert!(!metadata_matches(&metadata, &key));
+    assert!(cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason == "runtime source changed"));
+}
+
+#[test]
+fn cache_miss_when_runtime_source_fingerprint_is_missing() {
+    let mut metadata = metadata_for_test();
+    metadata.runtime_c_fingerprint = None;
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
+    );
+
+    assert!(!metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn legacy_cache_metadata_defaults_missing_runtime_source_fingerprint() {
+    let mut run_json = serde_json::to_value(metadata_for_test()).unwrap();
+    run_json
+        .as_object_mut()
+        .unwrap()
+        .remove("runtime_c_fingerprint");
+    let run_metadata: RunCacheMetadata = serde_json::from_value(run_json).unwrap();
+    assert_eq!(run_metadata.runtime_c_fingerprint, None);
+
+    let build_metadata: BuildCacheMetadata = serde_json::from_value(serde_json::json!({
+        "source_hash": 123,
+        "module_fingerprints": [],
+        "opt_level": 1,
+        "contract_checks": false,
+        "emit_llvm": false,
+        "runtime_c": "tools/stdlib/runtime.c",
+        "llvm_ir_path": "tests/build/a.ll",
+        "output_path": "tests/build/a.exe"
+    }))
+    .unwrap();
+    assert_eq!(build_metadata.runtime_c_fingerprint, None);
 }
 
 #[test]
@@ -234,7 +296,7 @@ fn cache_miss_when_module_dependency_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -249,7 +311,7 @@ fn cache_mismatch_reasons_include_module_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     let reasons = cache_mismatch_reasons(&metadata, &key);
     assert!(reasons
@@ -1385,7 +1447,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         1,
         false,
         false,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
         "tests/build/a.exe".to_string(),
     );
     let metadata = BuildCacheMetadata {
@@ -1398,6 +1460,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/a.ll".to_string(),
         output_path: "tests/build/a.exe".to_string(),
         llvm_ir_hash: 777,
@@ -1405,6 +1468,41 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         build_graph_v2: None,
     };
     assert!(!build_metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn build_cache_miss_when_runtime_source_fingerprint_changes() {
+    let key = build_cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        false,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
+        "tests/build/a.exe".to_string(),
+    );
+    let metadata = BuildCacheMetadata {
+        cache_schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        source_hash: 123,
+        root_interface_hash: 101,
+        root_implementation_hash: 123,
+        module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
+        opt_level: 1,
+        contract_checks: false,
+        emit_llvm: false,
+        runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(11),
+        llvm_ir_path: "tests/build/a.ll".to_string(),
+        output_path: "tests/build/a.exe".to_string(),
+        llvm_ir_hash: 777,
+        object_path: Some("tests/build/a.obj".to_string()),
+        build_graph_v2: None,
+    };
+
+    assert!(!build_metadata_matches(&metadata, &key));
+    assert!(super::build_cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason == "runtime source changed"));
 }
 
 #[test]
@@ -1434,6 +1532,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 10,
@@ -1484,6 +1583,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         requested_engine: RunEngine::Native,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 44,
@@ -6355,6 +6455,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 33,
@@ -6394,6 +6495,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 33,
@@ -6910,6 +7012,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 33,
@@ -6949,6 +7052,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 33,

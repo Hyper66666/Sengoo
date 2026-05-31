@@ -270,6 +270,8 @@ struct RunCacheMetadata {
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
+    #[serde(default)]
+    runtime_c_fingerprint: Option<u64>,
     llvm_ir_path: String,
     executable_path: Option<String>,
     #[serde(default)]
@@ -281,6 +283,18 @@ struct RunCacheMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeSourceIdentity {
+    path: Option<String>,
+    fingerprint: Option<u64>,
+}
+
+impl RuntimeSourceIdentity {
+    fn new(path: Option<String>, fingerprint: Option<u64>) -> Self {
+        Self { path, fingerprint }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RunCacheKey {
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
@@ -289,6 +303,7 @@ struct RunCacheKey {
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
+    runtime_c_fingerprint: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,6 +322,8 @@ struct BuildCacheMetadata {
     contract_checks: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
+    #[serde(default)]
+    runtime_c_fingerprint: Option<u64>,
     llvm_ir_path: String,
     output_path: String,
     #[serde(default)]
@@ -325,6 +342,7 @@ struct BuildCacheKey {
     contract_checks: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
+    runtime_c_fingerprint: Option<u64>,
     output_path: String,
 }
 

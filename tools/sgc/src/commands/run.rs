@@ -200,6 +200,7 @@ pub(crate) async fn cmd_run(
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
+    let runtime_c_fingerprint = optional_file_fingerprint(runtime_c.as_deref())?;
     let clang_exe = find_clang();
     let lli_exe = find_lli();
 
@@ -245,7 +246,7 @@ pub(crate) async fn cmd_run(
         contract_checks_enabled,
         requested_engine,
         resolved_engine,
-        runtime_c.clone(),
+        RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
     );
     let mut edit_impact: Option<EditImpact> = None;
 
@@ -586,6 +587,7 @@ pub(crate) async fn cmd_run(
         requested_engine,
         resolved_engine,
         runtime_c,
+        runtime_c_fingerprint,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
         executable_path: if matches!(resolved_engine, RunEngine::Native) {
             Some(executable_path.to_string_lossy().to_string())

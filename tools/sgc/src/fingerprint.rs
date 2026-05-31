@@ -53,6 +53,11 @@ pub(crate) fn file_fingerprint(path: &Path) -> Result<u64> {
     Ok(hasher.finish())
 }
 
+pub(crate) fn optional_file_fingerprint(path: Option<&str>) -> Result<Option<u64>> {
+    path.map(|path| file_fingerprint(Path::new(path)))
+        .transpose()
+}
+
 pub(crate) fn implementation_fingerprint(source: &str) -> u64 {
     let normalized = normalize_source_for_hash(source);
     implementation_fingerprint_from_normalized(&normalized)

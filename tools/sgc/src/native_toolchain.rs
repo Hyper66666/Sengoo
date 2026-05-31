@@ -6,11 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(not(windows))]
 use std::sync::atomic::Ordering;
-use std::time::UNIX_EPOCH;
 
 use crate::{
-    object_file_extension, BuildCacheMetadata, CachedNativeRecoveryPlan, LinkerMode,
-    RunCacheMetadata, RunEngine,
+    file_fingerprint, object_file_extension, BuildCacheMetadata, CachedNativeRecoveryPlan,
+    LinkerMode, RunCacheMetadata, RunEngine,
 };
 #[cfg(not(windows))]
 use crate::{LINKER_AVAILABLE, LINKER_UNAVAILABLE, LLD_AVAILABILITY};
@@ -18,24 +17,11 @@ use crate::{LINKER_AVAILABLE, LINKER_UNAVAILABLE, LLD_AVAILABILITY};
 fn runtime_object_cache_path(runtime_c_path: &Path, opt_level: u8) -> Result<PathBuf> {
     let canonical =
         fs::canonicalize(runtime_c_path).unwrap_or_else(|_| runtime_c_path.to_path_buf());
-    let meta = fs::metadata(&canonical).into_diagnostic().map_err(|e| {
-        miette::miette!(
-            "failed to stat runtime source {}: {}",
-            canonical.display(),
-            e
-        )
-    })?;
-    let modified_secs = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let runtime_c_fingerprint = file_fingerprint(&canonical)?;
 
     let mut hasher = DefaultHasher::new();
     canonical.to_string_lossy().hash(&mut hasher);
-    meta.len().hash(&mut hasher);
-    modified_secs.hash(&mut hasher);
+    runtime_c_fingerprint.hash(&mut hasher);
     opt_level.hash(&mut hasher);
     if cfg!(windows) {
         "x86_64-pc-windows-msvc".hash(&mut hasher);
@@ -688,5 +674,24 @@ mod tests {
         assert_eq!(resolved, runtime_root);
 
         let _ = fs::remove_dir_all(&resolved);
+    }
+
+    #[test]
+    fn runtime_object_cache_path_changes_when_equal_length_source_bytes_change() {
+        let root = temp_test_dir("runtime-object-content");
+        let runtime_c = root.join("runtime.c");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&runtime_c, "aaaa").unwrap();
+        let modified = fs::metadata(&runtime_c).unwrap().modified().unwrap();
+        let before = runtime_object_cache_path(&runtime_c, 1).unwrap();
+
+        fs::write(&runtime_c, "bbbb").unwrap();
+        let file = fs::OpenOptions::new().write(true).open(&runtime_c).unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let after = runtime_object_cache_path(&runtime_c, 1).unwrap();
+
+        assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&root);
     }
 }
