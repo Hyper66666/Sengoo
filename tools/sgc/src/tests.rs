@@ -3410,6 +3410,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/12_dir.sg",
         "examples/stdlib/13_io.sg",
         "examples/stdlib/14_strconv.sg",
+        "examples/stdlib/15_dir_listing.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3605,6 +3606,15 @@ fn examples_smoke_stdlib_strconv_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_dir_listing_import() {
+    assert_example_output(
+        "stdlib-dir-listing",
+        "examples/stdlib/15_dir_listing.sg",
+        "15",
+    );
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -3639,6 +3649,62 @@ def main() -> i64 {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "out");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "err");
+}
+
+#[test]
+fn stdlib_dir_runtime_lists_entries_in_deterministic_order() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "dir-listing",
+        r#"
+import std::dir;
+import std::file;
+import std::io;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_dir_listing_runtime";
+    let a = "sengoo_tmp_dir_listing_runtime/a.txt";
+    let b = "sengoo_tmp_dir_listing_runtime/b.txt";
+    file_remove(a);
+    file_remove(b);
+    dir_remove(root);
+
+    let created = dir_create(root).unwrap_or(false);
+    let empty_count = dir_entry_count(root).unwrap_or(-1);
+    let wrote_b = file_write_str(b, "b").unwrap_or(0);
+    let wrote_a = file_write_str(a, "a").unwrap_or(0);
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let small = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let count = dir_entry_count(root).unwrap_or(0);
+    let first = dir_entry_name(root, 0, buffer).unwrap_or(0);
+    let wrote_name = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
+    let too_small = dir_entry_name(root, 0, small).is_err();
+    let missing = dir_entry_name(root, 2, buffer).is_err();
+
+    small.free();
+    buffer.free();
+    file_remove(a);
+    file_remove(b);
+    let removed = dir_remove(root).unwrap_or(false);
+
+    if created && empty_count == 0 && wrote_a == 1 && wrote_b == 1 && count == 2 && first == 5 && wrote_name == 5 && too_small && missing && removed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "a.txt");
 }
 
 #[test]

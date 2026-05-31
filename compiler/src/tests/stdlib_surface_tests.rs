@@ -312,12 +312,16 @@ fn dir_module_imports_directory_helpers() {
 def main() -> i64 {
     let root = "target/sengoo-stdlib-dir-surface";
     let nested = "target/sengoo-stdlib-dir-surface/nested";
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
     let created = dir_create_all(nested).unwrap_or(false);
     let nested_exists = dir_exists(nested);
+    let count = dir_entry_count(root).unwrap_or(0);
+    let first = dir_entry_name(root, 0, buffer).unwrap_or(0);
     let removed_nested = dir_remove(nested).unwrap_or(false);
     let removed_root = dir_remove(root).unwrap_or(false);
+    buffer.free();
 
-    if created && nested_exists && removed_nested && removed_root {
+    if created && nested_exists && count >= 1 && first >= 0 && removed_nested && removed_root {
         1
     } else {
         0
@@ -330,6 +334,8 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_dir_create"));
     assert!(ir.contains("sengoo_dir_create_all"));
     assert!(ir.contains("sengoo_dir_remove"));
+    assert!(ir.contains("sengoo_dir_entry_count"));
+    assert!(ir.contains("sengoo_dir_entry_name"));
 }
 
 #[test]

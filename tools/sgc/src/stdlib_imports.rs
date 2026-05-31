@@ -265,6 +265,8 @@ mod tests {
 
         assert!(expanded.contains("def dir_exists"));
         assert!(expanded.contains("def dir_create_all"));
+        assert!(expanded.contains("def dir_entry_count"));
+        assert!(expanded.contains("def dir_entry_name"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

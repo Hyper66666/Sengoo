@@ -4,6 +4,8 @@ extern "C" {
     fn sengoo_dir_create(path: i64) -> i64;
     fn sengoo_dir_create_all(path: i64) -> i64;
     fn sengoo_dir_remove(path: i64) -> i64;
+    fn sengoo_dir_entry_count(path: i64) -> i64;
+    fn sengoo_dir_entry_name(path: i64, index: i64, buffer: i64, capacity: i64) -> i64;
 }
 
 def dir_bool_result(status: i64) -> Result<bool, i64> {
@@ -11,6 +13,14 @@ def dir_bool_result(status: i64) -> Result<bool, i64> {
         Result { is_ok: true, value: true, error: 0 }
     } else {
         Result { is_ok: false, value: false, error: 1 }
+    }
+}
+
+def dir_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
     }
 }
 
@@ -44,4 +54,20 @@ def dir_remove_raw(path_ptr: i64) -> Result<bool, i64> {
 
 def dir_remove(path: &str) -> Result<bool, i64> {
     dir_remove_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def dir_entry_count_raw(path_ptr: i64) -> Result<i64, i64> {
+    dir_i64_result(sengoo_dir_entry_count(path_ptr))
+}
+
+def dir_entry_count(path: &str) -> Result<i64, i64> {
+    dir_entry_count_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def dir_entry_name_raw(path_ptr: i64, index: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    dir_i64_result(sengoo_dir_entry_name(path_ptr, index, buffer_ptr, capacity))
+}
+
+def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64> {
+    dir_entry_name_raw(sengoo_stdlib_str_ptr(path), index, buffer.ptr(), buffer.len())
 }
