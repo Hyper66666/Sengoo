@@ -28,6 +28,11 @@ pub(crate) struct BenchCaseResult {
     pub(crate) p95_ms: Option<f64>,
     pub(crate) phases: Option<BTreeMap<String, f64>>,
     pub(crate) total_ms: Option<f64>,
+    /// Compiler process peak RSS (high-water mark) in bytes for this case, when
+    /// the platform can report it. Omitted from JSON when absent so reports for
+    /// suites that do not measure memory stay byte-for-byte unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) peak_rss_bytes: Option<u64>,
     pub(crate) before_ms: Option<f64>,
     pub(crate) after_ms: Option<f64>,
     pub(crate) cache_reused_modules: Option<u32>,
@@ -420,6 +425,7 @@ pub(crate) async fn cmd_bench_run(
             p95_ms: p95,
             phases: None,
             total_ms: None,
+            peak_rss_bytes: None,
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
@@ -535,7 +541,20 @@ pub(crate) async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u3
             phase_avg.entry(required.to_string()).or_insert(0.0);
         }
 
-        println!("  - {}: avg={:.2}ms", case_name, avg_ms);
+        // Compiler peak RSS high-water mark reached while compiling this case.
+        // Compilation runs in-process, so this is the sgc process peak; it is
+        // most meaningful for single-case frontend probes (the OS peak working
+        // set is monotonic across a process's lifetime).
+        let peak_rss_bytes = crate::pipeline::process_peak_rss_bytes();
+        match peak_rss_bytes {
+            Some(bytes) => println!(
+                "  - {}: avg={:.2}ms peak_rss={:.2}MB",
+                case_name,
+                avg_ms,
+                bytes as f64 / (1024.0 * 1024.0)
+            ),
+            None => println!("  - {}: avg={:.2}ms", case_name, avg_ms),
+        }
 
         results.push(BenchCaseResult {
             name: case_name,
@@ -546,6 +565,7 @@ pub(crate) async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u3
             p95_ms: percentile(&sample_ms, 0.95),
             phases: Some(phase_avg),
             total_ms: Some(avg_ms),
+            peak_rss_bytes,
             before_ms: None,
             after_ms: None,
             cache_reused_modules: None,
@@ -578,4 +598,63 @@ pub(crate) async fn cmd_bench_compile(suite: &str, opt_level: u8, iterations: u3
 
 fn phase_is_timing_metric(phase: &str) -> bool {
     !phase.ends_with("_removed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_case(peak_rss_bytes: Option<u64>) -> BenchCaseResult {
+        BenchCaseResult {
+            name: "probe".to_string(),
+            iterations: 1,
+            warmup: 0,
+            sample_ms: vec![1.0],
+            p50_ms: Some(1.0),
+            p95_ms: Some(1.0),
+            phases: None,
+            total_ms: Some(1.0),
+            peak_rss_bytes,
+            before_ms: None,
+            after_ms: None,
+            cache_reused_modules: None,
+            generic_cache_hit_ratio: None,
+            generic_rebuilt_instances: None,
+            frontend_scheduler: None,
+            frontend_fallback_events: None,
+            frontend_planner_trace: None,
+        }
+    }
+
+    #[test]
+    fn bench_report_omits_peak_rss_when_absent() {
+        let json = serde_json::to_string(&sample_case(None)).unwrap();
+        assert!(
+            !json.contains("peak_rss_bytes"),
+            "peak_rss_bytes must be omitted when None so reports stay schema-compatible: {json}"
+        );
+    }
+
+    #[test]
+    fn bench_report_includes_peak_rss_when_present() {
+        let json = serde_json::to_string(&sample_case(Some(2_097_152))).unwrap();
+        assert!(
+            json.contains("\"peak_rss_bytes\":2097152"),
+            "peak_rss_bytes should serialize as a raw byte count: {json}"
+        );
+    }
+
+    #[test]
+    fn frontend_probe_generators_are_solidified() {
+        // The frontend-perf program relies on a reproducible probe generator
+        // committed in-tree, not a throwaway tmp script.
+        for script_name in ["gen_frontend_probe.py", "gen_lowering_overlay_probe.py"] {
+            let script = bench_root_dir().join("scripts").join(script_name);
+            assert!(
+                script.exists(),
+                "expected committed frontend probe generator at {}",
+                script.to_string_lossy()
+            );
+        }
+    }
 }

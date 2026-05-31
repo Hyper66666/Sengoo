@@ -439,21 +439,20 @@ pub(crate) async fn cmd_run(
         println!("run workset plan: full rebuild");
     }
 
-    let (phases, effective_memory_mode) =
-        compile_source_to_llvm_file_with_phase_timings_with_mode(
-            &source,
-            opt_level,
-            &llvm_ir_path,
-            if low_memory {
-                Some(FrontendMemoryMode::LowMemory)
-            } else {
-                None
-            },
-        )
-        .map_err(|e| {
-            emit_compile_error(Some(input), &e.to_string());
-            miette::miette!("compile failed")
-        })?;
+    let (phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings_with_mode(
+        &source,
+        opt_level,
+        &llvm_ir_path,
+        if low_memory {
+            Some(FrontendMemoryMode::LowMemory)
+        } else {
+            None
+        },
+    )
+    .map_err(|e| {
+        emit_compile_error(Some(input), &e.to_string());
+        miette::miette!("compile failed")
+    })?;
     crate::maybe_print_phase_timings(&phases);
     println!(
         "frontend memory mode: {}",

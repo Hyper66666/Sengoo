@@ -493,11 +493,24 @@ pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
 
     // Time-valued phases, in pipeline execution order.
     const TIME_PHASES: [&str; 8] = [
-        "parse", "typeck", "ast_prune", "hir_prune", "mir", "mir_prune", "codegen", "link",
+        "parse",
+        "typeck",
+        "ast_prune",
+        "hir_prune",
+        "mir",
+        "mir_prune",
+        "codegen",
+        "link",
     ];
     // Frontend = everything before object codegen.
-    const FRONTEND_PHASES: [&str; 6] =
-        ["parse", "typeck", "ast_prune", "hir_prune", "mir", "mir_prune"];
+    const FRONTEND_PHASES: [&str; 6] = [
+        "parse",
+        "typeck",
+        "ast_prune",
+        "hir_prune",
+        "mir",
+        "mir_prune",
+    ];
 
     let get = |key: &str| phases.get(key).copied().unwrap_or(0.0);
     let frontend: f64 = FRONTEND_PHASES.iter().map(|key| get(key)).sum();
@@ -505,7 +518,11 @@ pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
 
     let parts: Vec<String> = TIME_PHASES
         .iter()
-        .filter_map(|key| phases.get(*key).map(|value| format!("{}={:.3}ms", key, value)))
+        .filter_map(|key| {
+            phases
+                .get(*key)
+                .map(|value| format!("{}={:.3}ms", key, value))
+        })
         .collect();
 
     let frontend_pct = if measured > 0.0 {
@@ -527,11 +544,89 @@ pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
     const MIR_SUBPHASES: [&str; 3] = ["hir_lower", "mir_lower", "mir_opt"];
     let sub_parts: Vec<String> = MIR_SUBPHASES
         .iter()
-        .filter_map(|key| phases.get(*key).map(|value| format!("{}={:.3}ms", key, value)))
+        .filter_map(|key| {
+            phases
+                .get(*key)
+                .map(|value| format!("{}={:.3}ms", key, value))
+        })
         .collect();
     if !sub_parts.is_empty() {
         eprintln!("[sgc phase-timings]   mir split: {}", sub_parts.join(" "));
     }
+}
+
+/// Best-effort peak resident set size (high-water mark) of the current process,
+/// in bytes; `None` when the platform cannot report it without extra crates.
+///
+/// This reads the OS-maintained high-water mark directly — Windows
+/// `PeakWorkingSetSize` and Linux `VmHWM` — so it is exact and needs no
+/// sampling loop, unlike the external Python harness that polls current RSS.
+/// It only observes process memory and never changes any compilation result;
+/// the compile benchmark uses it to record compiler peak memory (the
+/// `frontend-compile-perf` Phase 3 peak-RSS target) next to per-phase timings,
+/// natively and dependency-free. Semantics match the harness's
+/// `PeakWorkingSetSize` (Windows) / RSS-from-`/proc` (Linux) accounting.
+#[cfg(target_os = "linux")]
+pub(crate) fn process_peak_rss_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("VmHWM:") {
+            // Format: `VmHWM:\t   12345 kB`.
+            let kib: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            return Some(kib.saturating_mul(1024));
+        }
+    }
+    None
+}
+
+/// See the platform-neutral doc on the Linux variant above.
+#[cfg(windows)]
+pub(crate) fn process_peak_rss_bytes() -> Option<u64> {
+    // `PROCESS_MEMORY_COUNTERS` layout per the Win32 API; only
+    // `PeakWorkingSetSize` is read. `GetCurrentProcess` and
+    // `K32GetProcessMemoryInfo` are exported by kernel32 (already linked by
+    // std), so this stays dependency-free.
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    extern "system" {
+        fn GetCurrentProcess() -> *mut core::ffi::c_void;
+        fn K32GetProcessMemoryInfo(
+            process: *mut core::ffi::c_void,
+            counters: *mut ProcessMemoryCounters,
+            cb: u32,
+        ) -> i32;
+    }
+
+    // SAFETY: `counters` is a correctly sized, zero-initialized POD buffer whose
+    // `cb` is set to its own size, exactly as the API requires; the current
+    // process pseudo-handle is always valid. We only read scalar fields back.
+    unsafe {
+        let mut counters: ProcessMemoryCounters = std::mem::zeroed();
+        counters.cb = std::mem::size_of::<ProcessMemoryCounters>() as u32;
+        if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) != 0 {
+            Some(counters.peak_working_set_size as u64)
+        } else {
+            None
+        }
+    }
+}
+
+/// See the platform-neutral doc on the Linux variant above.
+#[cfg(not(any(target_os = "linux", windows)))]
+pub(crate) fn process_peak_rss_bytes() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -671,5 +766,24 @@ def b(x: i64) -> i64 {
 
         assert_eq!(removed, 0);
         assert_eq!(after, before);
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn process_peak_rss_is_reported_on_supported_platforms() {
+        // On the platforms this project builds/tests on (Windows, Linux), the
+        // OS high-water mark is always queryable and must be a positive value.
+        let rss =
+            super::process_peak_rss_bytes().expect("peak RSS should be reported on Windows/Linux");
+        assert!(
+            rss > 0,
+            "peak RSS should be a positive byte count, got {rss}"
+        );
+        // Sanity bound: a live test process uses at least a few hundred KiB and
+        // far less than 1 TiB; this guards against a unit/field-offset mistake.
+        assert!(
+            rss > 64 * 1024 && rss < (1u64 << 40),
+            "peak RSS {rss} bytes is implausible (unit or struct-layout bug?)"
+        );
     }
 }

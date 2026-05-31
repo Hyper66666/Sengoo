@@ -223,6 +223,7 @@ pub(crate) async fn cmd_bench_incremental(
             p95_ms: None,
             phases: None,
             total_ms: None,
+            peak_rss_bytes: None,
             before_ms: Some(before_avg),
             after_ms: Some(after_avg),
             cache_reused_modules: Some(reused_avg),
