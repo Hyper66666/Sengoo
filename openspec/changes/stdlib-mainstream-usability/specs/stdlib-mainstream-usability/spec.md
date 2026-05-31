@@ -40,9 +40,27 @@ Until Sengoo has a specified owned-string return ABI, stdlib runtime helpers tha
 - **THEN** it accepts a managed `Buffer`
 - **AND** it returns `Result<i64, i64>` indicating bytes written or an error code
 
+### Requirement: Process utilities SHALL expose portable process metadata without command execution
+The standard library SHALL provide `std::process` helpers for process ID, current working directory length/copy, and conventional exit-code selection.
+
+#### Scenario: A program inspects the current process
+- **WHEN** a Sengoo program imports `std::process`
+- **THEN** it can call `process_id()` to get a positive process identifier
+- **AND** it can call `process_current_dir_len()` and `process_current_dir_copy(buffer)` to copy the current working directory into a managed `Buffer`
+- **AND** fallible string-producing helpers return `Result<i64, i64>` with the byte count on success
+
+#### Scenario: A program maps a boolean success value to an exit code
+- **WHEN** a program calls `process_exit_code(true, failure_code)`
+- **THEN** it returns `0`
+- **AND** `process_exit_code(false, failure_code)` returns `failure_code`
+
 ### Requirement: Process and data-format usability SHALL be gated by explicit follow-up design
 Process execution and JSON-like data-format helpers SHALL NOT be added opportunistically in the path phase.
 
 #### Scenario: A later phase proposes command execution or JSON helpers
 - **WHEN** a future implementation needs process execution or JSON-like parsing/formatting
 - **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, and tests
+
+#### Scenario: A later phase proposes command-line argument access
+- **WHEN** a future implementation needs command-line argument access from Sengoo source code
+- **THEN** it first updates OpenSpec with compiler/runtime entry ABI changes and tests

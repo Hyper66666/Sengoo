@@ -57,11 +57,22 @@ The C runtime path must work on Windows and Unix-like hosts:
 - normalization is lexical only; it must not touch the filesystem or resolve symlinks
 - normalization trims redundant trailing separators except for roots and emits `.` for an empty relative result
 
-### Decision 4: Process/data-format work is gated after path
+### Decision 4: `std::process` metadata is Phase 2
 
 Process and JSON-like helpers are important, but they are easier to misuse and harder to test portably. They should follow path once the module wiring and Buffer conventions are proven again.
 
-Process work must decide whether the runtime can expose command execution without shell-injection footguns. Data-format work must decide whether to implement a tiny JSON-shaped utility surface or wait for a richer string/byte-slice model.
+The current compiler/runtime entry ABI does not expose stable `argc`/`argv` to Sengoo programs, and a command execution API would need careful shell-avoidance, argument-vector, environment, working-directory, timeout, and output-capture semantics. Phase 2 therefore excludes command execution and command-line argument access.
+
+The Phase 2 API should focus on portable metadata and exit-code ergonomics:
+
+- `process_id() -> i64`
+- `process_current_dir_len() -> Result<i64, i64>`
+- `process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>`
+- `process_exit_code(success: bool, failure_code: i64) -> i64`
+
+This keeps the implementation useful for scripts that combine `std::file`, `std::path`, and `std::env`, while avoiding a partial process-management API that would be hard to make safe and portable.
+
+Data-format work must decide whether to implement a tiny JSON-shaped utility surface or wait for a richer string/byte-slice model.
 
 ## Risks / Trade-offs
 
@@ -73,6 +84,8 @@ Process work must decide whether the runtime can expose command execution withou
   **Mitigation:** phase-gate implementation and require tests/examples per module.
 - **Risk:** `sgc` and `sglsp` drift when new modules are added.  
   **Mitigation:** each module task includes both wiring points and tests.
+- **Risk:** A `std::process` module without argv/command execution may look incomplete.  
+  **Mitigation:** document the deferred ABI work explicitly and make the available metadata helpers reliable first.
 
 ## Migration Plan
 
@@ -81,9 +94,12 @@ Process work must decide whether the runtime can expose command execution withou
 3. Add compiler surface tests, `sgc` import tests, `sglsp` symbol tests, and a runnable `examples/stdlib/08_path.sg`.
 4. Update `tools/stdlib/README.md` and `examples/stdlib/README.md`.
 5. Run the verification baseline.
-6. Re-evaluate process/data-format scope from the evidence gathered in Phase 1.
+6. Add `std::process` metadata helpers without command execution.
+7. Re-evaluate command-line argument and command execution scope in a separate OpenSpec before implementation.
+8. Re-evaluate data-format scope from the evidence gathered in Phase 1 and Phase 2.
 
 ## Open Questions
 
-- Should Phase 2 expose command execution at all, or stop at process metadata/exit-code helpers until a safer API exists?
+- What compiler/runtime entry ABI should expose command-line arguments to Sengoo source code?
+- What command execution API can avoid shell injection while still being ergonomic?
 - Should JSON-like helpers wait for an owned-string/byte-slice ABI?
