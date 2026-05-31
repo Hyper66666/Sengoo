@@ -73,7 +73,8 @@ pub(crate) use error_reporting::{
 pub(crate) use fingerprint::{
     file_fingerprint, implementation_fingerprint, implementation_fingerprint_from_normalized,
     interface_fingerprint, interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
-    normalize_source_for_hash, resolve_root_hashes_for_request, source_fingerprint,
+    normalize_source_for_hash, optional_file_fingerprint, resolve_root_hashes_for_request,
+    source_fingerprint,
 };
 pub(crate) use frontend_helpers::{
     dependency_graph_digest, frontend_cache_entry_for_module, frontend_probe_module_body_only,
