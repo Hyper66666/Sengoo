@@ -185,6 +185,7 @@ pub(super) fn find_symbol_occurrences(content: &str, symbol: &str) -> Vec<Range>
 
     for (line_idx, line) in content.lines().enumerate() {
         let bytes = line.as_bytes();
+        let code_mask = code_byte_mask(line);
         let mut i = 0usize;
 
         while i + symbol_bytes.len() <= bytes.len() {
@@ -193,7 +194,7 @@ pub(super) fn find_symbol_occurrences(content: &str, symbol: &str) -> Vec<Range>
             let right_bound = i + symbol_bytes.len();
             let right_ok = right_bound == bytes.len() || !is_identifier_byte(bytes[right_bound]);
 
-            if matched && left_ok && right_ok {
+            if matched && left_ok && right_ok && is_code_span(&code_mask, i, right_bound) {
                 ranges.push(Range {
                     start: Position {
                         line: line_idx as u32,
@@ -214,20 +215,63 @@ pub(super) fn find_symbol_occurrences(content: &str, symbol: &str) -> Vec<Range>
     ranges
 }
 
+fn code_byte_mask(line: &str) -> Vec<bool> {
+    let bytes = line.as_bytes();
+    let mut mask = vec![true; bytes.len()];
+    let mut in_string = false;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if in_string {
+            mask[i] = false;
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                mask[i + 1] = false;
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            for item in &mut mask[i..] {
+                *item = false;
+            }
+            break;
+        }
+
+        if bytes[i] == b'"' {
+            mask[i] = false;
+            in_string = true;
+        }
+        i += 1;
+    }
+
+    mask
+}
+
+fn is_code_span(mask: &[bool], start: usize, end: usize) -> bool {
+    start < end && end <= mask.len() && mask[start..end].iter().all(|is_code| *is_code)
+}
+
 pub(super) fn find_declaration_in_text(content: &str, symbol: &str) -> Option<Range> {
-    let declaration_keywords = ["fn", "struct", "let", "const", "type", "enum"];
+    let declaration_keywords = ["def", "fn", "struct", "let", "const", "type", "enum"];
 
     for keyword in declaration_keywords {
         let pattern = format!("{keyword} {symbol}");
         for (line_idx, line) in content.lines().enumerate() {
             if let Some(pos) = line.find(&pattern) {
+                let code_mask = code_byte_mask(line);
                 let symbol_start = pos + keyword.len() + 1;
                 let symbol_end = symbol_start + symbol.len();
                 let bytes = line.as_bytes();
 
                 let left_ok = symbol_start == 0 || !is_identifier_byte(bytes[symbol_start - 1]);
                 let right_ok = symbol_end == bytes.len() || !is_identifier_byte(bytes[symbol_end]);
-                if left_ok && right_ok {
+                if left_ok && right_ok && is_code_span(&code_mask, pos, symbol_end) {
                     return Some(Range {
                         start: Position {
                             line: line_idx as u32,
