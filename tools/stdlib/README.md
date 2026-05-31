@@ -14,6 +14,8 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
+- `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
+- `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
 
@@ -35,7 +37,7 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::db`, `import std::file`, `import std::lua54`, `import std::net`, and `import std::proto`
+std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
 
 ## Reflection Wrappers

@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::{Location, Url};
 const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("collections", include_str!("../../stdlib/collections.sg")),
     ("db", include_str!("../../stdlib/db.sg")),
+    ("env", include_str!("../../stdlib/env.sg")),
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
     ("file", include_str!("../../stdlib/file.sg")),
@@ -16,6 +17,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("proto", include_str!("../../stdlib/proto.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
+    ("time", include_str!("../../stdlib/time.sg")),
 ];
 
 fn stdlib_source(module: &str) -> Option<&'static str> {
@@ -30,7 +32,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" => &["ffi"],
+        "file" | "env" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -276,5 +278,32 @@ mod tests {
         assert!(names.contains(&"file_write_str"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_env_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::env;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"env_var_copy"));
+        assert!(names.contains(&"env_has_var"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+    }
+
+    #[test]
+    fn stdlib_symbols_include_time_helpers() {
+        let symbols = stdlib_symbols_for_content("import std::time;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"time_unix_ms"));
+        assert!(names.contains(&"time_sleep_ms"));
+        assert!(names.contains(&"time_elapsed_ms"));
     }
 }

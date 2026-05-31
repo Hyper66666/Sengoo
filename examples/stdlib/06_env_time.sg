@@ -1,0 +1,29 @@
+// examples/stdlib/06_env_time.sg
+//
+// Demonstrates: importing std::env and std::time helpers for environment checks,
+// clock reads, sleep, and conventional process exit-code selection.
+//
+// Run: sgc run examples/stdlib/06_env_time.sg
+// Expected output: 6
+
+import std::env;
+import std::time;
+
+def main() -> i64 {
+    let missing_name = "__SENGOO_STD_ENV_MISSING__";
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let missing = !env_has_var(missing_name)
+        && env_var_len(missing_name).is_err()
+        && env_var_copy(missing_name, buffer).is_err();
+    buffer.free();
+
+    let before = time_unix_ms();
+    let slept = time_sleep_ms(0);
+    let after = time_unix_ms();
+    let elapsed = time_elapsed_ms(before, after);
+    let platform = env_is_windows() || env_is_unix();
+    let exit_code = env_exit_code(missing && slept && platform && after >= before && elapsed >= 0, 6);
+
+    print(if exit_code == 0 { 6 } else { 0 });
+    0
+}

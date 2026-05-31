@@ -6,6 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <errno.h>
+#include <time.h>
+#endif
 
 void sengoo_print_i64(long long val) {
     printf("%lld\n", val);
@@ -165,6 +173,107 @@ long long sengoo_file_remove(long long path_ptr) {
     }
 
     return remove(path);
+}
+
+long long sengoo_env_var_len(long long name_ptr) {
+    const char* name = (const char*)(intptr_t)name_ptr;
+    if (!name || name[0] == '\0') {
+        return -1;
+    }
+
+    const char* value = getenv(name);
+    if (!value) {
+        return -1;
+    }
+    return (long long)strlen(value);
+}
+
+long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long long out_capacity) {
+    const char* name = (const char*)(intptr_t)name_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (!name || name[0] == '\0' || out_capacity < 0) {
+        return -1;
+    }
+
+    const char* value = getenv(name);
+    if (!value) {
+        return -1;
+    }
+
+    size_t len = strlen(value);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, value, len);
+    }
+    return (long long)len;
+}
+
+long long sengoo_env_is_windows(void) {
+#ifdef _WIN32
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+long long sengoo_env_is_unix(void) {
+#ifdef _WIN32
+    return 0;
+#else
+    return 1;
+#endif
+}
+
+long long sengoo_time_unix_seconds(void) {
+    time_t now = time(NULL);
+    if (now == (time_t)-1) {
+        return -1;
+    }
+    return (long long)now;
+}
+
+long long sengoo_time_unix_ms(void) {
+#if defined(TIME_UTC)
+    struct timespec ts;
+    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
+        return ((long long)ts.tv_sec * 1000LL) + ((long long)ts.tv_nsec / 1000000LL);
+    }
+#endif
+    long long seconds = sengoo_time_unix_seconds();
+    if (seconds < 0) {
+        return -1;
+    }
+    return seconds * 1000LL;
+}
+
+long long sengoo_time_sleep_ms(long long ms) {
+    if (ms < 0) {
+        return 1;
+    }
+    if (ms == 0) {
+        return 0;
+    }
+
+#ifdef _WIN32
+    while (ms > 0) {
+        DWORD chunk = ms > (long long)UINT_MAX ? (DWORD)UINT_MAX : (DWORD)ms;
+        Sleep(chunk);
+        ms -= (long long)chunk;
+    }
+    return 0;
+#else
+    struct timespec req;
+    req.tv_sec = (time_t)(ms / 1000LL);
+    req.tv_nsec = (long)((ms % 1000LL) * 1000000LL);
+    while (nanosleep(&req, &req) != 0) {
+        if (errno != EINTR) {
+            return 1;
+        }
+    }
+    return 0;
+#endif
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {

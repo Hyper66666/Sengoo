@@ -14,6 +14,8 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "collections",
     "ffi",
     "file",
+    "env",
+    "time",
     "db",
     "lua54",
     "net",
@@ -27,13 +29,22 @@ fn is_virtual_stdlib_module(module: &str) -> bool {
 fn source_module_needs_result_family(module: &str) -> bool {
     matches!(
         module,
-        "option" | "result" | "collections" | "db" | "ffi" | "file" | "lua54" | "net" | "proto"
+        "option"
+            | "result"
+            | "collections"
+            | "db"
+            | "ffi"
+            | "file"
+            | "env"
+            | "lua54"
+            | "net"
+            | "proto"
     )
 }
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" => &["ffi"],
+        "file" | "env" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -176,5 +187,26 @@ mod tests {
         assert!(expanded.contains("def file_exists"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn env_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::env;\ndef main() -> i64 { 0 }\n")
+                .expect("env stdlib import should expand");
+
+        assert!(expanded.contains("def env_var_copy"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn time_import_expands_source_module() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::time;\ndef main() -> i64 { 0 }\n")
+                .expect("time stdlib import should expand");
+
+        assert!(expanded.contains("def time_unix_ms"));
+        assert!(expanded.contains("def time_sleep_ms"));
     }
 }
