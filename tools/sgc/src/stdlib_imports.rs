@@ -15,6 +15,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "ffi",
     "file",
     "dir",
+    "io",
     "env",
     "time",
     "random",
@@ -41,6 +42,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "ffi"
             | "file"
             | "dir"
+            | "io"
             | "env"
             | "path"
             | "process"
@@ -53,7 +55,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" | "dir" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -261,6 +263,18 @@ mod tests {
 
         assert!(expanded.contains("def dir_exists"));
         assert!(expanded.contains("def dir_create_all"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn io_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::io;\ndef main() -> i64 { 0 }\n")
+                .expect("io stdlib import should expand");
+
+        assert!(expanded.contains("def io_stdin_read"));
+        assert!(expanded.contains("def io_stderr_write"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

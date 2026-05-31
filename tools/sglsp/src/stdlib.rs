@@ -12,6 +12,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
     ("file", include_str!("../../stdlib/file.sg")),
+    ("io", include_str!("../../stdlib/io.sg")),
     ("lua54", include_str!("../../stdlib/lua54.sg")),
     ("math", include_str!("../../stdlib/math.sg")),
     ("net", include_str!("../../stdlib/net.sg")),
@@ -37,7 +38,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "dir" | "env" | "path" | "process" | "args" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -399,6 +400,33 @@ mod tests {
         assert!(labels.contains(&"def dir_exists(path: &str) -> bool"));
         assert!(labels.contains(&"def dir_create_all(path: &str) -> Result<bool, i64>"));
         assert!(labels.contains(&"def dir_remove(path: &str) -> Result<bool, i64>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_io_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::io;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"io_stdin_read"));
+        assert!(names.contains(&"io_stdin_read_line"));
+        assert!(names.contains(&"io_stdout_write"));
+        assert!(names.contains(&"io_stderr_write"));
+        assert!(names.contains(&"io_stdout_flush"));
+        assert!(names.contains(&"io_stderr_flush"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::io;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def io_stdin_read(buffer: Buffer) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def io_stdout_write(data: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def io_stderr_flush() -> Result<bool, i64>"));
     }
 
     #[test]

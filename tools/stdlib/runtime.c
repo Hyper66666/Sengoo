@@ -223,6 +223,10 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
     return SENGOO_FFI_STATUS_OK;
 }
 
+long long sengoo_str_len(const char* value) {
+    return value ? (long long)strlen(value) : 0;
+}
+
 long long sengoo_str_contains(const char* value, const char* needle) {
     if (!value || !needle) {
         return 0;
@@ -934,6 +938,79 @@ long long sengoo_dir_remove(long long path_ptr) {
 #else
     return rmdir(path) == 0 ? 0 : -1;
 #endif
+}
+
+long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (out_capacity > 0 && !out)) {
+        return -1;
+    }
+    if (out_capacity == 0) {
+        return 0;
+    }
+
+    size_t read = fread(out, 1, (size_t)out_capacity, stdin);
+    if (ferror(stdin)) {
+        return -1;
+    }
+    return (long long)read;
+}
+
+long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (out_capacity > 0 && !out)) {
+        return -1;
+    }
+    if (out_capacity == 0) {
+        return 0;
+    }
+
+    size_t count = 0;
+    while (count < (size_t)out_capacity) {
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
+            if (ferror(stdin)) {
+                return -1;
+            }
+            break;
+        }
+
+        out[count++] = (char)ch;
+        if (ch == '\n') {
+            break;
+        }
+    }
+    return (long long)count;
+}
+
+static long long sengoo_io_write_stream(FILE* stream, long long data_ptr, long long len) {
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (!stream || len < 0 || (len > 0 && !data)) {
+        return -1;
+    }
+
+    size_t expected = (size_t)len;
+    size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, stream);
+    if (wrote != expected || ferror(stream)) {
+        return -1;
+    }
+    return (long long)wrote;
+}
+
+long long sengoo_io_stdout_write(long long data_ptr, long long len) {
+    return sengoo_io_write_stream(stdout, data_ptr, len);
+}
+
+long long sengoo_io_stderr_write(long long data_ptr, long long len) {
+    return sengoo_io_write_stream(stderr, data_ptr, len);
+}
+
+long long sengoo_io_stdout_flush(void) {
+    return fflush(stdout) == 0 ? 0 : -1;
+}
+
+long long sengoo_io_stderr_flush(void) {
+    return fflush(stderr) == 0 ? 0 : -1;
 }
 
 long long sengoo_process_id(void) {
