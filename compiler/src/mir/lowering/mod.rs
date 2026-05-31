@@ -40,7 +40,6 @@ use crate::mir::{
 };
 use crate::symbol::SymbolId;
 use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 mod aggregate_expr_helpers;
@@ -153,20 +152,23 @@ struct LoweringContext<'a> {
     lambda_functions: Vec<MirFunction>,
     /// lambda名称到Local的映射，用于lambda引用解析。
     lambda_names: HashMap<Local, String>,
-    /// lambda函数集合，存储生成的所有lambda MIR函数。
+    /// 会话级共享的函数签名基表（只读借用，永不克隆）。
     ///
-    /// 以 `Cow` 持有会话级共享的函数签名表：常规函数降级只读借用基表（零克隆），
-    /// 仅当需要插入单态化/lambda/async 实例时才 `to_mut()` 触发一次克隆。
-    /// 这消除了原先「每个函数都整表克隆一次」造成的 O(n²) 降级开销。
-    function_sigs: Cow<'a, HashMap<String, FunctionSig>>,
+    /// 函数签名表拆分为 `base`（会话级不可变基表）+ `overlay`（本上下文私有覆盖表）。
+    /// 常规函数降级只读借用基表；插入单态化/lambda/async 实例时只写入 `overlay`（O(1)）。
+    /// 嵌套上下文（lambda/async/单态化）继承时只克隆体量很小的 `overlay`，绝不整表克隆
+    /// 基表，因此即便在 lambda/async/generic 密集场景下降级仍保持 O(n)。
+    function_sigs_base: &'a HashMap<String, FunctionSig>,
+    /// 本上下文私有的函数签名覆盖表（仅含本次降级新产生的实例）。
+    function_sigs_overlay: HashMap<String, FunctionSig>,
     /// lambda环境信息表，按名称索引。
     lambda_environments: HashMap<String, LambdaEnv>,
     /// 局部变量名与MIR类型的映射表。
     type_names: HashMap<Local, String>,
-    /// 已知函数名集合，用于快速判断标识符是否表示函数调用。
-    ///
-    /// 同 `function_sigs`，以 `Cow` 共享借用会话级基集合，仅在插入新名字时才克隆。
-    known_functions: Cow<'a, HashSet<String>>,
+    /// 已知函数名基集合（只读借用，永不克隆）。拆分约定同 `function_sigs_base`。
+    known_functions_base: &'a HashSet<String>,
+    /// 本上下文私有的已知函数名覆盖集合（仅含本次降级新产生的名字）。
+    known_functions_overlay: HashSet<String>,
     struct_defs: &'a HashMap<String, &'a hir::HIRStruct>,
     concrete_type_registry: ConcreteTypeRegistry,
     options: MirLowerOptions,
@@ -180,6 +182,35 @@ struct LoweringContext<'a> {
 }
 
 impl<'a> LoweringContext<'a> {
+    /// 查找函数签名：先看本上下文 `overlay`，再回落到会话级基表。
+    fn function_sig(&self, name: &str) -> Option<&FunctionSig> {
+        self.function_sigs_overlay
+            .get(name)
+            .or_else(|| self.function_sigs_base.get(name))
+    }
+
+    /// 是否为已知函数：`overlay` 或基集合命中即可。
+    fn is_known_function(&self, name: &str) -> bool {
+        self.known_functions_overlay.contains(name) || self.known_functions_base.contains(name)
+    }
+
+    /// 遍历全部已知函数名（基集合 + `overlay`，两者互不相交）。
+    fn known_function_names(&self) -> impl Iterator<Item = &String> {
+        self.known_functions_base
+            .iter()
+            .chain(self.known_functions_overlay.iter())
+    }
+
+    /// 向本上下文 `overlay` 登记一个函数签名（O(1)，绝不克隆基表）。
+    fn insert_function_sig(&mut self, name: String, sig: FunctionSig) {
+        self.function_sigs_overlay.insert(name, sig);
+    }
+
+    /// 向本上下文 `overlay` 登记一个已知函数名（O(1)）。
+    fn insert_known_function(&mut self, name: String) {
+        self.known_functions_overlay.insert(name);
+    }
+
     /// 返回当前上下文的指令列表的可变引用。
     /// 根据参数列表收集表达式中的自由变量及其对应 `Local`。
     fn collect_free_vars(

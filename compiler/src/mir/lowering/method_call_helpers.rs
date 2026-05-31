@@ -96,13 +96,11 @@ pub(super) fn resolve_method_call_target_with_ctx(
     let dispatch_plan = build_method_dispatch_plan(explicit_type_name, &receiver_ty, method);
 
     let known_function_entries: Vec<(String, usize)> = ctx
-        .known_functions
-        .iter()
+        .known_function_names()
         .map(|name| {
             (
                 name.clone(),
-                ctx.function_sigs
-                    .get(name)
+                ctx.function_sig(name)
                     .map(|sig| sig.param_count)
                     .unwrap_or(0),
             )
@@ -128,8 +126,7 @@ pub(super) fn emit_resolved_method_call(
     resolved_func_name: &str,
 ) -> Local {
     let ret_type = ctx
-        .function_sigs
-        .get(resolved_func_name)
+        .function_sig(resolved_func_name)
         .map(|sig| sig.ret_type.clone())
         .unwrap_or(MIR_I64);
     let struct_type_name = match &ret_type {

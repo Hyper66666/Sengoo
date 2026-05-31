@@ -19,17 +19,21 @@ impl<'a> LoweringContext<'a> {
         async_fn.is_async = true;
         let async_start = async_fn.start_block;
 
+        let inherited_known = self.known_functions_overlay.clone();
+        let inherited_sigs = self.function_sigs_overlay.clone();
         let mut async_ctx = LoweringContext::new(
             &mut async_fn,
             self.lambda_counter,
-            &self.known_functions,
-            &self.function_sigs,
+            self.known_functions_base,
+            self.function_sigs_base,
             self.struct_defs,
             self.concrete_type_registry.clone(),
             self.options.clone(),
             self.inherent_method_templates,
             self.trait_method_templates,
         );
+        async_ctx.known_functions_overlay = inherited_known;
+        async_ctx.function_sigs_overlay = inherited_sigs;
         async_ctx.current_block = Some(async_start);
 
         for (index, (var_name, outer_local)) in free_vars.iter().enumerate() {
@@ -76,12 +80,12 @@ impl<'a> LoweringContext<'a> {
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
-        self.known_functions.to_mut().insert(async_block_name.clone());
+        self.insert_known_function(async_block_name.clone());
         self.options
             .async_functions
             .borrow_mut()
             .insert(async_block_name.clone());
-        self.function_sigs.to_mut().insert(
+        self.insert_function_sig(
             async_block_name.clone(),
             build_function_sig(result_ty.clone(), capture_arity, vec![]),
         );

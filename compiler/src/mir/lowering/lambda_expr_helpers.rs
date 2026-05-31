@@ -35,17 +35,21 @@ pub(super) fn lower_lambda_expr_with_expected(
     let mut lambda_fn =
         MirFunction::new(lambda_name.clone(), param_types.clone(), ret_type.clone());
     let lambda_start = lambda_fn.start_block;
+    let inherited_known = ctx.known_functions_overlay.clone();
+    let inherited_sigs = ctx.function_sigs_overlay.clone();
     let mut lambda_ctx = LoweringContext::new(
         &mut lambda_fn,
         ctx.lambda_counter,
-        &ctx.known_functions,
-        &ctx.function_sigs,
+        ctx.known_functions_base,
+        ctx.function_sigs_base,
         ctx.struct_defs,
         ctx.concrete_type_registry.clone(),
         ctx.options.clone(),
         ctx.inherent_method_templates,
         ctx.trait_method_templates,
     );
+    lambda_ctx.known_functions_overlay = inherited_known;
+    lambda_ctx.function_sigs_overlay = inherited_sigs;
     lambda_ctx.current_block = Some(lambda_start);
 
     if !free_vars.is_empty() {
@@ -110,12 +114,12 @@ pub(super) fn lower_lambda_expr_with_expected(
                 env_ptr_local: None,
             },
         );
-        ctx.function_sigs.to_mut().insert(
+        ctx.insert_function_sig(
             lambda_name.clone(),
             build_function_sig(ret_type.clone(), param_types.len(), env_var_types),
         );
     } else {
-        ctx.function_sigs.to_mut().insert(
+        ctx.insert_function_sig(
             lambda_name.clone(),
             build_function_sig(ret_type.clone(), param_types.len(), vec![]),
         );
@@ -204,7 +208,7 @@ mod tests {
             .get(&result)
             .cloned()
             .expect("lambda name should be recorded");
-        assert!(ctx.function_sigs.contains_key(&lambda_name));
+        assert!(ctx.function_sig(&lambda_name).is_some());
         assert!(ctx.lambda_functions.iter().any(|f| f.name == lambda_name));
     }
 }
