@@ -8,7 +8,7 @@ This change defines the next standard-library usability program so future edits 
 
 - Add a `stdlib-mainstream-usability` capability that defines the minimum bar for "mainstream-language usable" standard-library modules.
 - Phase 1 focuses on `std::path`: path separator discovery, absolute-path checks, file-name/stem/extension/parent extraction, joining, and normalization into managed `Buffer` outputs.
-- Phase 2 focuses on process and command ergonomics: conventional exit-code helpers, environment-backed command configuration, and a minimal command execution surface if the runtime ABI can support it without unsafe pointer choreography.
+- Phase 2 focuses on `std::process`: portable process metadata and conventional exit-code helpers. Command execution and command-line argument access are explicitly deferred until the compiler/runtime entry ABI can support them safely.
 - Phase 3 focuses on data-format and collection ergonomics: JSON-like encode/decode helpers or a documented alternative, plus higher-level collection examples and supported-string collection paths where compiler/runtime support allows it.
 - Every new stdlib source module must be wired through `sgc` source import expansion, `sglsp` stdlib symbol/signature indexing, stdlib docs, and runnable examples.
 - No source-language syntax change is required by this proposal.
