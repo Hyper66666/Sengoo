@@ -12,7 +12,6 @@
 #include <windows.h>
 #else
 #include <errno.h>
-#include <time.h>
 #endif
 
 void sengoo_print_i64(long long val) {
@@ -274,6 +273,48 @@ long long sengoo_time_sleep_ms(long long ms) {
     }
     return 0;
 #endif
+}
+
+static uint64_t sengoo_random_state = 0x9e3779b97f4a7c15ULL;
+
+static uint64_t sengoo_random_next_u64(void) {
+    uint64_t x = sengoo_random_state;
+    if (x == 0) {
+        x = 0x9e3779b97f4a7c15ULL;
+    }
+
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    sengoo_random_state = x;
+    return x * 2685821657736338717ULL;
+}
+
+long long sengoo_random_seed(long long seed) {
+    uint64_t normalized = (uint64_t)seed;
+    if (normalized == 0) {
+        normalized = 0x9e3779b97f4a7c15ULL;
+    }
+    sengoo_random_state = normalized;
+    return 0;
+}
+
+long long sengoo_random_i64(void) {
+    return (long long)(sengoo_random_next_u64() >> 1);
+}
+
+long long sengoo_random_range_i64(long long min, long long max) {
+    if (max <= min) {
+        return min;
+    }
+
+    uint64_t span = (uint64_t)max - (uint64_t)min;
+    uint64_t offset = sengoo_random_next_u64() % span;
+    return min + (long long)offset;
+}
+
+long long sengoo_random_bool(void) {
+    return (long long)(sengoo_random_next_u64() & 1ULL);
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {

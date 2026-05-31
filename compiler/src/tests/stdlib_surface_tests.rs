@@ -171,6 +171,32 @@ def main() -> i64 {
 }
 
 #[test]
+fn random_module_imports_seeded_random_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["random.sg"],
+        r#"
+def main() -> i64 {
+    random_seed(123);
+    let value = random_i64();
+    let bounded = random_range_i64(10, 20);
+    let coin = random_bool();
+
+    if value >= 0 && bounded >= 10 && bounded < 20 && (coin || !coin) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_random_seed"));
+    assert!(ir.contains("sengoo_random_i64"));
+    assert!(ir.contains("sengoo_random_range_i64"));
+    assert!(ir.contains("sengoo_random_bool"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],

@@ -16,6 +16,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
+- `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
 

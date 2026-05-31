@@ -16,6 +16,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "file",
     "env",
     "time",
+    "random",
     "db",
     "lua54",
     "net",
@@ -208,5 +209,15 @@ mod tests {
 
         assert!(expanded.contains("def time_unix_ms"));
         assert!(expanded.contains("def time_sleep_ms"));
+    }
+
+    #[test]
+    fn random_import_expands_source_module() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::random;\ndef main() -> i64 { 0 }\n")
+                .expect("random stdlib import should expand");
+
+        assert!(expanded.contains("def random_seed"));
+        assert!(expanded.contains("def random_range_i64"));
     }
 }

@@ -1,0 +1,22 @@
+extern "C" {
+    fn sengoo_random_seed(seed: i64) -> i64;
+    fn sengoo_random_i64() -> i64;
+    fn sengoo_random_range_i64(min: i64, max: i64) -> i64;
+    fn sengoo_random_bool() -> i64;
+}
+
+def random_seed(seed: i64) -> bool {
+    sengoo_random_seed(seed) == 0
+}
+
+def random_i64() -> i64 {
+    sengoo_random_i64()
+}
+
+def random_range_i64(min: i64, max: i64) -> i64 {
+    sengoo_random_range_i64(min, max)
+}
+
+def random_bool() -> bool {
+    sengoo_random_bool() != 0
+}
