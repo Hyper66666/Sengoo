@@ -78,6 +78,25 @@ The repo has runtime-backed collection support for i64/bool vectors, maps, and i
 
 Phase 3 should therefore promote the existing supported collection surface into `examples/stdlib` and document the current constraints. General JSON parsing/formatting and `Vec<&str>` / `HashMap<&str, ...>` support remain deferred until the compiler/runtime can represent the outputs and ownership model directly.
 
+### Decision 6: `std::args` uses an opt-in main wrapper
+
+Command-line argument access is a mainstream scripting expectation, but it touches the compiler/runtime entry ABI. Ordinary Sengoo programs currently emit a zero-argument `main` function. To preserve that shape for existing programs, the compiler should only generate an OS-level `main(argc, argv)` wrapper when the MIR calls the args runtime.
+
+When enabled, codegen should emit the user function as an internal program main, emit a platform entry wrapper named `main`, initialize the runtime args table from `argc/argv`, and then call the user main. Calls to the source-level `main` inside generated IR must resolve to the internal user-main symbol, not to the OS wrapper.
+
+The runtime API should expose user-supplied arguments only: `args_len()` is the count of arguments after the executable name, `arg_len(index)` returns the byte length of one user argument, and `arg_copy(index, buffer)` copies that argument into a managed `Buffer`. This avoids leaking platform-specific `argv[0]` behavior into Sengoo source.
+
+The source module should be a small safe wrapper over C runtime functions, following the existing Buffer/Result convention:
+
+- `args_len() -> i64`
+- `arg_exists(index: i64) -> bool`
+- `arg_len(index: i64) -> Result<i64, i64>`
+- `arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64>`
+
+`sgc run` already parses trailing arguments. The command layer should forward those trailing args to native binaries and to `lli` so `sgc run file.sg -- a b` observes the same two user args as a native binary invoked as `program a b`.
+
+Compile caches remain independent of runtime arguments: changing trailing args should affect only the invocation step, not source hashing, object reuse, or relinking decisions.
+
 ## Risks / Trade-offs
 
 - **Risk:** Buffer-backed APIs feel less ergonomic than owned strings.  
@@ -92,6 +111,10 @@ Phase 3 should therefore promote the existing supported collection surface into 
   **Mitigation:** document the deferred ABI work explicitly and make the available metadata helpers reliable first.
 - **Risk:** Promoting collections without string-key/value containers may overstate generality.  
   **Mitigation:** examples and docs must show supported i64/bool shapes and explicitly defer string collections.
+- **Risk:** Rewriting `main` can break snapshots and tools that expect zero-argument `main`.
+  **Mitigation:** generate the wrapper only when args runtime calls are present.
+- **Risk:** Runtime args beginning with `-` could be confused with `lli` options.
+  **Mitigation:** pass args after the input IR path so they are program arguments, and cover `sgc run --` behavior with an integration smoke.
 
 ## Migration Plan
 
@@ -101,12 +124,12 @@ Phase 3 should therefore promote the existing supported collection surface into 
 4. Update `tools/stdlib/README.md` and `examples/stdlib/README.md`.
 5. Run the verification baseline.
 6. Add `std::process` metadata helpers without command execution.
-7. Re-evaluate command-line argument and command execution scope in a separate OpenSpec before implementation.
+7. Re-evaluate command-line argument and command execution scope before implementation; this update resolves argv access only and keeps command execution separate.
 8. Promote the supported `std::collections` surface into the stdlib example catalog.
 9. Revisit JSON/string-collection scope only after the required value/string/byte-slice ABI work is specified.
+10. Add `std::args` with an opt-in entry wrapper and command-layer argument forwarding.
 
 ## Open Questions
 
-- What compiler/runtime entry ABI should expose command-line arguments to Sengoo source code?
 - What command execution API can avoid shell injection while still being ergonomic?
 - Should JSON-like helpers wait for an owned-string/byte-slice ABI?

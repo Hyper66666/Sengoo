@@ -61,9 +61,43 @@ Process execution and JSON-like data-format helpers SHALL NOT be added opportuni
 - **WHEN** a future implementation needs process execution or JSON-like parsing/formatting
 - **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, and tests
 
-#### Scenario: A later phase proposes command-line argument access
-- **WHEN** a future implementation needs command-line argument access from Sengoo source code
-- **THEN** it first updates OpenSpec with compiler/runtime entry ABI changes and tests
+#### Scenario: A later phase proposes additional process or entry ABI features
+- **WHEN** a future implementation needs process execution, environment mutation, or a command-line surface beyond `std::args`
+- **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, ABI changes, and tests
+
+### Requirement: Command-line arguments SHALL be available through an opt-in stdlib module
+The standard library SHALL provide `std::args` helpers for counting user-supplied command-line arguments and copying individual argument text into managed `Buffer` handles.
+
+#### Scenario: The args API exposes user arguments only
+- **WHEN** a program imports `std::args`
+- **THEN** it can call `args_len()`, `arg_exists(index)`, `arg_len(index)`, and `arg_copy(index, buffer)`
+- **AND** index `0` refers to the first user-supplied argument after the executable or source path
+
+#### Scenario: A program reads arguments passed through `sgc run`
+- **WHEN** a user runs `sgc run program.sg -- alpha beta`
+- **THEN** a program importing `std::args` observes `args_len() == 2`
+- **AND** `arg_len(0)` returns the byte length of `alpha`
+- **AND** `arg_copy(0, buffer)` copies `alpha`
+- **AND** `arg_copy(1, buffer)` copies `beta`
+
+#### Scenario: Runtime args do not affect compile artifact reuse
+- **WHEN** a user runs the same source through `sgc run` with different trailing arguments
+- **THEN** source hashing, object reuse, and relinking decisions remain based on source and compiler inputs rather than argument values
+- **AND** each invocation still observes the current trailing arguments at runtime
+
+#### Scenario: A native binary reads direct command-line arguments
+- **WHEN** a user builds a native binary from a program importing `std::args`
+- **AND** runs the binary as `program alpha beta`
+- **THEN** `args_len() == 2`
+- **AND** argument index `0` is `alpha`, not the executable path
+
+#### Scenario: A program does not use the args runtime
+- **WHEN** a Sengoo program does not call `std::args` helpers
+- **THEN** compiler output preserves the existing zero-argument `main` function shape
+
+#### Scenario: An argument index is out of range
+- **WHEN** a program calls `arg_len(index)` or `arg_copy(index, buffer)` with a negative or out-of-range index
+- **THEN** the helper returns an error-shaped `Result`
 
 ### Requirement: Collection ergonomics SHALL document currently supported runtime-backed shapes
 The standard library examples SHALL include a first-class `std::collections` example for the currently supported runtime-backed `Vec<T>`, `HashMap<K, V>`, and iterator helpers.

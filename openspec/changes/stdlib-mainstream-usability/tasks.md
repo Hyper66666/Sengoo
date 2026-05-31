@@ -35,9 +35,24 @@
 - [x] 3.6 Update `tools/stdlib/README.md` with the current collection shape limits and JSON/string-collection deferrals.
 - [x] 3.7 Verify: focused red/green test, `cargo fmt --check`, `cargo test -p sgc`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
 
-## 4. Process invariants
+## 4. Phase 4 - command-line argument ABI
 
-- [x] 4.1 Every new stdlib module is discoverable through `sglsp` completion/definition/signature paths.
-- [x] 4.2 Every new stdlib module has at least one runnable example.
-- [x] 4.3 Every runtime-produced string output uses the managed `Buffer` convention until an owned-string ABI is specified.
-- [x] 4.4 No new external dependency is introduced without an explicit OpenSpec update.
+- [ ] 4.1 Add compiler surface tests proving `std::args` imports compile and args users get an opt-in `main(argc, argv)` wrapper.
+- [ ] 4.2 Add a compiler regression test proving programs that do not call args helpers still emit the existing zero-argument `main` shape.
+- [ ] 4.3 Add `sgc` stdlib import expansion tests for `import std::args;` including `ffi`, `Buffer`, and `Result` dependencies.
+- [ ] 4.4 Add `sglsp` stdlib symbol/signature tests for `std::args`.
+- [ ] 4.5 Implement `tools/stdlib/args.sg` with safe wrappers for argument count, existence, length, and Buffer-backed copy.
+- [ ] 4.6 Add C runtime support in `tools/stdlib/runtime.c` for initializing and reading `argc`/`argv` user arguments.
+- [ ] 4.7 Implement opt-in compiler codegen for the args main wrapper while preserving mapped calls to the source-level user `main`.
+- [ ] 4.8 Forward trailing `sgc run` args through native and `lli` execution without including args in compile-cache keys.
+- [ ] 4.9 Wire `args` into `tools/sgc/src/stdlib_imports.rs` and `tools/sglsp/src/stdlib.rs`.
+- [ ] 4.10 Add `examples/stdlib/11_args.sg` and document it in `examples/stdlib/README.md`.
+- [ ] 4.11 Update `tools/stdlib/README.md` with the `std::args` contract and the command-execution deferral.
+- [ ] 4.12 Verify: focused red/green tests, `cargo fmt --check`, `cargo test -p sengoo-compiler --lib`, `cargo test -p sgc`, `cargo test -p sglsp`, `cargo clippy -p sengoo-compiler -p sgc -p sglsp --all-targets -- -D warnings`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
+
+## 5. Process invariants
+
+- [x] 5.1 Every new stdlib module is discoverable through `sglsp` completion/definition/signature paths.
+- [x] 5.2 Every new stdlib module has at least one runnable example.
+- [x] 5.3 Every runtime-produced string output uses the managed `Buffer` convention until an owned-string ABI is specified.
+- [x] 5.4 No new external dependency is introduced without an explicit OpenSpec update.
