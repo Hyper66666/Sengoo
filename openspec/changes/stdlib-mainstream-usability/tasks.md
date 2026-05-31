@@ -28,12 +28,12 @@
 ## 3. Phase 3 - data-format and collection ergonomics gate
 
 - [x] 3.1 Audit whether JSON-like helpers are viable before an owned-string/byte-slice ABI lands.
-- [ ] 3.2 Promote `collections` into `examples/stdlib` as a first-class stdlib example entry.
+- [x] 3.2 Promote `collections` into `examples/stdlib` as a first-class stdlib example entry.
 - [x] 3.3 Gate `Vec<&str>` / `HashMap<&str, ...>` support on compiler/runtime evidence rather than assuming generic containers are fully general.
-- [ ] 3.4 Add an `examples/stdlib/10_collections.sg` runtime smoke example covering supported `Vec<i64>` / `HashMap<i64, i64>` / iterator flows.
-- [ ] 3.5 Add `sgc` example smoke coverage and update `examples/stdlib/README.md`.
-- [ ] 3.6 Update `tools/stdlib/README.md` with the current collection shape limits and JSON/string-collection deferrals.
-- [ ] 3.7 Verify: focused red/green test, `cargo fmt --check`, `cargo test -p sgc`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
+- [x] 3.4 Add an `examples/stdlib/10_collections.sg` runtime smoke example covering supported `Vec<i64>` / `HashMap<i64, i64>` / iterator flows.
+- [x] 3.5 Add `sgc` example smoke coverage and update `examples/stdlib/README.md`.
+- [x] 3.6 Update `tools/stdlib/README.md` with the current collection shape limits and JSON/string-collection deferrals.
+- [x] 3.7 Verify: focused red/green test, `cargo fmt --check`, `cargo test -p sgc`, `cmd /c openspec validate stdlib-mainstream-usability --strict`, and `git diff --check`.
 
 ## 4. Process invariants
 

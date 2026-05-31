@@ -3509,6 +3509,15 @@ fn examples_smoke_stdlib_process_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_collections_import() {
+    assert_example_output(
+        "stdlib-collections",
+        "examples/stdlib/10_collections.sg",
+        "60",
+    );
+}
+
+#[test]
 fn examples_smoke_traits_iterator_basic() {
     assert_example_output(
         "traits-iterator-basic",
