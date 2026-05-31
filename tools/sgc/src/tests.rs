@@ -3347,6 +3347,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/02_math.sg",
         "examples/stdlib/03_error.sg",
         "examples/stdlib/04_option_result.sg",
+        "examples/stdlib/05_file.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3480,6 +3481,11 @@ fn examples_smoke_stdlib_option_result_import() {
         "examples/stdlib/04_option_result.sg",
         "7",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_file_import() {
+    assert_example_output("stdlib-file", "examples/stdlib/05_file.sg", "15");
 }
 
 #[test]
@@ -3853,6 +3859,32 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_ffi_object_create_value"));
     assert!(ir.contains("sengoo_ffi_object_call_i64_value"));
     assert!(ir.contains("sengoo_lua54_call_i64_value"));
+}
+
+#[test]
+fn stdlib_file_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::file;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let wrote = file_write_str("target/sgc-file-smoke.txt", "hello").unwrap_or(0);
+    let read = file_read_into("target/sgc-file-smoke.txt", buffer).unwrap_or(0);
+    let len = file_len("target/sgc-file-smoke.txt").unwrap_or(0);
+    let exists = file_exists("target/sgc-file-smoke.txt");
+    buffer.free();
+    file_remove("target/sgc-file-smoke.txt");
+    if exists { wrote + read + len } else { 0 }
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("file stdlib import should expand with its ffi dependency");
+    let ir = compile_compiler_ir(&combined)
+        .expect("file import should make managed Buffer file wrappers usable");
+
+    assert!(ir.contains("sengoo_file_write_str"));
+    assert!(ir.contains("sengoo_file_read_into"));
+    assert!(ir.contains("sengoo_file_len"));
 }
 
 #[test]

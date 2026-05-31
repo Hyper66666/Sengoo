@@ -1,0 +1,77 @@
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_file_exists(path: i64) -> i64;
+    fn sengoo_file_len(path: i64) -> i64;
+    fn sengoo_file_read_into(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_file_write_str(path: i64, data: i64, len: i64) -> i64;
+    fn sengoo_file_append_str(path: i64, data: i64, len: i64) -> i64;
+    fn sengoo_file_remove(path: i64) -> i64;
+}
+
+def file_exists_raw(path_ptr: i64) -> bool {
+    sengoo_file_exists(path_ptr) != 0
+}
+
+def file_exists(path: &str) -> bool {
+    file_exists_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def file_len_raw(path_ptr: i64) -> Result<i64, i64> {
+    let len = sengoo_file_len(path_ptr);
+    if len >= 0 {
+        Result { is_ok: true, value: len, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def file_len(path: &str) -> Result<i64, i64> {
+    file_len_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def file_read_into_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    let read = sengoo_file_read_into(path_ptr, buffer_ptr, capacity);
+    if read >= 0 {
+        Result { is_ok: true, value: read, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def file_read_into(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    file_read_into_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def file_write_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i64> {
+    let wrote = sengoo_file_write_str(path_ptr, data_ptr, len);
+    if wrote >= 0 {
+        Result { is_ok: true, value: wrote, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def file_write_str(path: &str, data: &str) -> Result<i64, i64> {
+    file_write_str_raw(sengoo_stdlib_str_ptr(path), sengoo_stdlib_str_ptr(data), data.len())
+}
+
+def file_append_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i64> {
+    let wrote = sengoo_file_append_str(path_ptr, data_ptr, len);
+    if wrote >= 0 {
+        Result { is_ok: true, value: wrote, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def file_append_str(path: &str, data: &str) -> Result<i64, i64> {
+    file_append_str_raw(sengoo_stdlib_str_ptr(path), sengoo_stdlib_str_ptr(data), data.len())
+}
+
+def file_remove_raw(path_ptr: i64) -> bool {
+    sengoo_file_remove(path_ptr) == 0
+}
+
+def file_remove(path: &str) -> bool {
+    file_remove_raw(sengoo_stdlib_str_ptr(path))
+}

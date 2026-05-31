@@ -13,6 +13,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "error",
     "collections",
     "ffi",
+    "file",
     "db",
     "lua54",
     "net",
@@ -26,12 +27,13 @@ fn is_virtual_stdlib_module(module: &str) -> bool {
 fn source_module_needs_result_family(module: &str) -> bool {
     matches!(
         module,
-        "option" | "result" | "collections" | "db" | "ffi" | "lua54" | "net" | "proto"
+        "option" | "result" | "collections" | "db" | "ffi" | "file" | "lua54" | "net" | "proto"
     )
 }
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
+        "file" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -163,5 +165,16 @@ mod tests {
         let source = "import std::reflect;\ndef main() -> i64 { 0 }\n";
 
         assert_eq!(expand_stdlib_imports_for_source(source).unwrap(), source);
+    }
+
+    #[test]
+    fn file_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::file;\ndef main() -> i64 { 0 }\n")
+                .expect("file stdlib import should expand");
+
+        assert!(expanded.contains("def file_exists"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
     }
 }
