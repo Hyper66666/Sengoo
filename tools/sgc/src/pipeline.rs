@@ -284,10 +284,12 @@ fn compile_frontend_to_mir_with_phase_timings(
 
         let mir_start = Instant::now();
         let runtime_contract_checks = contract_runtime_checks_enabled(opt_level);
+        let hir_lower_start = Instant::now();
         let mut hir_module = lower_ast(
             program.as_ref().expect("program present during lowering"),
             type_env.as_ref().expect("type env present during lowering"),
         );
+        let hir_lower_ms = hir_lower_start.elapsed().as_secs_f64() * 1000.0;
         let mut hir_prune_ms = 0.0;
         let mut hir_pruned_count = 0usize;
         let mut hir_prune_applied = false;
@@ -307,6 +309,7 @@ fn compile_frontend_to_mir_with_phase_timings(
             drop(type_env.take());
             drop(program.take());
         }
+        let mir_lower_start = Instant::now();
         let mut mir_fns = lower_hir_with_options(
             &hir_module.items,
             MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone()),
@@ -320,6 +323,7 @@ fn compile_frontend_to_mir_with_phase_timings(
                     .map_err(|e| miette::miette!("{}", e))?;
             mir_fns.extend(async_helpers);
         }
+        let mir_lower_ms = mir_lower_start.elapsed().as_secs_f64() * 1000.0;
         drop(hir_module);
         if !low_memory_mode {
             drop(type_env.take());
@@ -336,12 +340,18 @@ fn compile_frontend_to_mir_with_phase_timings(
         let mir_opt_level = MirOptLevel::from_u8(effective_opt_level)
             .ok_or_else(|| miette::miette!("invalid optimization level: {}", opt_level))?;
         let pipeline = sengoo_compiler::mir::opt::pipeline_for_level(mir_opt_level);
+        let mir_opt_start = Instant::now();
         pipeline.run(&mut mir_fns);
+        let mir_opt_ms = mir_opt_start.elapsed().as_secs_f64() * 1000.0;
         let mir_ms = mir_start.elapsed().as_secs_f64() * 1000.0;
         phases.insert(
             "contract_runtime_checks".to_string(),
             if runtime_contract_checks { 1.0 } else { 0.0 },
         );
+        // Sub-phase split of the `mir` bucket, for frontend hotspot profiling.
+        phases.insert("hir_lower".to_string(), hir_lower_ms);
+        phases.insert("mir_lower".to_string(), mir_lower_ms);
+        phases.insert("mir_opt".to_string(), mir_opt_ms);
 
         (
             mir_fns,
@@ -448,6 +458,80 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
     );
     phases.insert("link".to_string(), 0.0);
     Ok((phases, effective_mode))
+}
+
+/// Whether the env-gated per-phase compile timing breakdown is enabled.
+///
+/// Follows the same opt-in spelling as the other `SENGOO_*` pipeline toggles
+/// (`SENGOO_LARGE_PROJECT_MODE`, `SENGOO_CONTRACT_CHECKS`).
+fn phase_timings_enabled() -> bool {
+    std::env::var("SENGOO_PHASE_TIMINGS")
+        .ok()
+        .map(|raw| {
+            matches!(
+                raw.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on" | "yes" | "enable" | "enabled"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// Print the per-phase frontend/codegen timing breakdown to stderr when
+/// `SENGOO_PHASE_TIMINGS` is set.
+///
+/// The pipeline already records `parse` / `typeck` / `mir` (and prune) phase
+/// timings but the command layer previously discarded them. Surfacing the
+/// split is a measurement aid for frontend optimization work; it never changes
+/// compilation behavior and writes to stderr so stdout build/run output is
+/// untouched. Note: for `sgc build`, link is measured separately downstream, so
+/// the `link` entry here is `0` and the reported percentage is over frontend +
+/// codegen only.
+pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
+    if !phase_timings_enabled() {
+        return;
+    }
+
+    // Time-valued phases, in pipeline execution order.
+    const TIME_PHASES: [&str; 8] = [
+        "parse", "typeck", "ast_prune", "hir_prune", "mir", "mir_prune", "codegen", "link",
+    ];
+    // Frontend = everything before object codegen.
+    const FRONTEND_PHASES: [&str; 6] =
+        ["parse", "typeck", "ast_prune", "hir_prune", "mir", "mir_prune"];
+
+    let get = |key: &str| phases.get(key).copied().unwrap_or(0.0);
+    let frontend: f64 = FRONTEND_PHASES.iter().map(|key| get(key)).sum();
+    let measured: f64 = TIME_PHASES.iter().map(|key| get(key)).sum();
+
+    let parts: Vec<String> = TIME_PHASES
+        .iter()
+        .filter_map(|key| phases.get(*key).map(|value| format!("{}={:.3}ms", key, value)))
+        .collect();
+
+    let frontend_pct = if measured > 0.0 {
+        frontend / measured * 100.0
+    } else {
+        0.0
+    };
+
+    eprintln!(
+        "[sgc phase-timings] {} | frontend={:.3}ms measured={:.3}ms (frontend {:.1}% of measured)",
+        parts.join(" "),
+        frontend,
+        measured,
+        frontend_pct
+    );
+
+    // Sub-split of the `mir` bucket (hir lowering vs mir lowering vs mir opt),
+    // shown separately so it is not double-counted in the totals above.
+    const MIR_SUBPHASES: [&str; 3] = ["hir_lower", "mir_lower", "mir_opt"];
+    let sub_parts: Vec<String> = MIR_SUBPHASES
+        .iter()
+        .filter_map(|key| phases.get(*key).map(|value| format!("{}={:.3}ms", key, value)))
+        .collect();
+    if !sub_parts.is_empty() {
+        eprintln!("[sgc phase-timings]   mir split: {}", sub_parts.join(" "));
+    }
 }
 
 #[cfg(test)]

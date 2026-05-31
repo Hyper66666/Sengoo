@@ -40,6 +40,7 @@ use crate::mir::{
 };
 use crate::symbol::SymbolId;
 use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 mod aggregate_expr_helpers;
@@ -153,13 +154,19 @@ struct LoweringContext<'a> {
     /// lambda名称到Local的映射，用于lambda引用解析。
     lambda_names: HashMap<Local, String>,
     /// lambda函数集合，存储生成的所有lambda MIR函数。
-    function_sigs: HashMap<String, FunctionSig>,
+    ///
+    /// 以 `Cow` 持有会话级共享的函数签名表：常规函数降级只读借用基表（零克隆），
+    /// 仅当需要插入单态化/lambda/async 实例时才 `to_mut()` 触发一次克隆。
+    /// 这消除了原先「每个函数都整表克隆一次」造成的 O(n²) 降级开销。
+    function_sigs: Cow<'a, HashMap<String, FunctionSig>>,
     /// lambda环境信息表，按名称索引。
     lambda_environments: HashMap<String, LambdaEnv>,
     /// 局部变量名与MIR类型的映射表。
     type_names: HashMap<Local, String>,
     /// 已知函数名集合，用于快速判断标识符是否表示函数调用。
-    known_functions: HashSet<String>,
+    ///
+    /// 同 `function_sigs`，以 `Cow` 共享借用会话级基集合，仅在插入新名字时才克隆。
+    known_functions: Cow<'a, HashSet<String>>,
     struct_defs: &'a HashMap<String, &'a hir::HIRStruct>,
     concrete_type_registry: ConcreteTypeRegistry,
     options: MirLowerOptions,
