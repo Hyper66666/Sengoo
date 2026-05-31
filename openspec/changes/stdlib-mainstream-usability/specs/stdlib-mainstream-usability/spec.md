@@ -27,6 +27,11 @@ The standard library SHALL provide `std::path` helpers for path separator discov
 - **THEN** the result is normalized lexically into the provided `Buffer`
 - **AND** the helper does not resolve symlinks or require the path to exist on disk
 
+#### Scenario: Joining with an absolute right-hand side
+- **WHEN** a program joins a base path with a right-hand side that is already absolute
+- **THEN** `path_join` writes the absolute right-hand side into the provided `Buffer`
+- **AND** it does not prefix the base path
+
 ### Requirement: Runtime-produced string outputs SHALL use managed Buffer handles
 Until Sengoo has a specified owned-string return ABI, stdlib runtime helpers that produce string-like output SHALL copy into managed `Buffer` handles and report byte counts.
 

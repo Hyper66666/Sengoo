@@ -53,7 +53,9 @@ The C runtime path must work on Windows and Unix-like hosts:
 - `path_separator()` returns the platform-preferred separator byte
 - `path_is_absolute` recognizes Windows drive roots, UNC-like roots, and Unix roots
 - joining should avoid duplicate separators where possible
+- an absolute right-hand side in `path_join` replaces the left-hand side
 - normalization is lexical only; it must not touch the filesystem or resolve symlinks
+- normalization trims redundant trailing separators except for roots and emits `.` for an empty relative result
 
 ### Decision 4: Process/data-format work is gated after path
 
@@ -83,7 +85,5 @@ Process work must decide whether the runtime can expose command execution withou
 
 ## Open Questions
 
-- Should `path_normalize` preserve trailing separators or always trim them except roots?
-- Should `path_join` treat an absolute right-hand side as a replacement or as an error-like fallback?
 - Should Phase 2 expose command execution at all, or stop at process metadata/exit-code helpers until a safer API exists?
 - Should JSON-like helpers wait for an owned-string/byte-slice ABI?

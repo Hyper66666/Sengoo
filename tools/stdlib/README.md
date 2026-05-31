@@ -17,6 +17,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
+- `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
 
@@ -38,8 +39,20 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, and `import std::proto`
+std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
+
+## Path Helpers
+
+`std::path` treats both `/` and `\` as separators. `path_separator()` returns
+the host-preferred separator byte, and `path_is_absolute` recognizes Unix roots,
+Windows drive roots such as `C:/tmp`, and UNC-like leading double separators.
+String-producing helpers (`path_join`, `path_parent`, `path_file_name`,
+`path_stem`, `path_extension`, and `path_normalize`) write into managed
+`Buffer` handles and return `Result<i64, i64>` with the byte count on success.
+`path_join` treats an absolute right-hand side as a replacement. `path_normalize`
+is lexical only: it removes duplicate separators, `.` segments, and simple
+`..` segments without touching the filesystem or resolving symlinks.
 
 ## Reflection Wrappers
 

@@ -1,6 +1,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 
 #include <assert.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -315,6 +316,346 @@ long long sengoo_random_range_i64(long long min, long long max) {
 
 long long sengoo_random_bool(void) {
     return (long long)(sengoo_random_next_u64() & 1ULL);
+}
+
+static int sengoo_path_is_sep(char ch) {
+    return ch == '/' || ch == '\\';
+}
+
+static char sengoo_path_preferred_sep(void) {
+#ifdef _WIN32
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
+static int sengoo_path_has_drive_root(const char* path) {
+    return path && isalpha((unsigned char)path[0]) && path[1] == ':' && sengoo_path_is_sep(path[2]);
+}
+
+static int sengoo_path_is_absolute_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (sengoo_path_has_drive_root(path)) {
+        return 1;
+    }
+    if (sengoo_path_is_sep(path[0])) {
+        return 1;
+    }
+    return 0;
+}
+
+static size_t sengoo_path_root_len(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (sengoo_path_has_drive_root(path)) {
+        return 3;
+    }
+    if (sengoo_path_is_sep(path[0]) && sengoo_path_is_sep(path[1])) {
+        return 2;
+    }
+    if (sengoo_path_is_sep(path[0])) {
+        return 1;
+    }
+    return 0;
+}
+
+static long long sengoo_copy_path_bytes(const char* data, size_t len, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (unsigned long long)len > (unsigned long long)out_capacity) {
+        return -1;
+    }
+    if (len > 0 && (!data || !out)) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, data, len);
+    }
+    return (long long)len;
+}
+
+static int sengoo_path_file_name_range(const char* path, size_t* out_start, size_t* out_len) {
+    if (!path || path[0] == '\0' || !out_start || !out_len) {
+        return 0;
+    }
+
+    size_t root_len = sengoo_path_root_len(path);
+    size_t end = strlen(path);
+    while (end > root_len && sengoo_path_is_sep(path[end - 1])) {
+        end--;
+    }
+    if (end <= root_len) {
+        return 0;
+    }
+
+    size_t start = end;
+    while (start > root_len && !sengoo_path_is_sep(path[start - 1])) {
+        start--;
+    }
+
+    *out_start = start;
+    *out_len = end - start;
+    return *out_len > 0;
+}
+
+long long sengoo_path_separator(void) {
+    return (long long)(unsigned char)sengoo_path_preferred_sep();
+}
+
+long long sengoo_path_is_absolute(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_path_is_absolute_cstr(path) ? 1 : 0;
+}
+
+long long sengoo_path_join(long long left_ptr, long long right_ptr, long long out_buffer, long long out_capacity) {
+    const char* left = (const char*)(intptr_t)left_ptr;
+    const char* right = (const char*)(intptr_t)right_ptr;
+    if (!left || !right) {
+        return -1;
+    }
+
+    if (sengoo_path_is_absolute_cstr(right) || left[0] == '\0') {
+        return sengoo_copy_path_bytes(right, strlen(right), out_buffer, out_capacity);
+    }
+    if (right[0] == '\0') {
+        return sengoo_copy_path_bytes(left, strlen(left), out_buffer, out_capacity);
+    }
+
+    size_t left_len = strlen(left);
+    size_t left_root = sengoo_path_root_len(left);
+    while (left_len > left_root && sengoo_path_is_sep(left[left_len - 1])) {
+        left_len--;
+    }
+
+    size_t right_len = strlen(right);
+    size_t right_start = 0;
+    while (right_start < right_len && sengoo_path_is_sep(right[right_start])) {
+        right_start++;
+    }
+
+    int needs_sep = left_len > 0 && right_start < right_len && !sengoo_path_is_sep(left[left_len - 1]);
+    size_t result_len = left_len + (needs_sep ? 1u : 0u) + (right_len - right_start);
+    char* result = (char*)malloc(result_len + 1u);
+    if (!result) {
+        return -1;
+    }
+
+    size_t pos = 0;
+    if (left_len > 0) {
+        memcpy(result + pos, left, left_len);
+        pos += left_len;
+    }
+    if (needs_sep) {
+        result[pos++] = sengoo_path_preferred_sep();
+    }
+    if (right_len > right_start) {
+        memcpy(result + pos, right + right_start, right_len - right_start);
+        pos += right_len - right_start;
+    }
+    result[pos] = '\0';
+
+    long long copied = sengoo_copy_path_bytes(result, result_len, out_buffer, out_capacity);
+    free(result);
+    return copied;
+}
+
+long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    size_t root_len = sengoo_path_root_len(path);
+    size_t end = strlen(path);
+    while (end > root_len && sengoo_path_is_sep(path[end - 1])) {
+        end--;
+    }
+    if (end <= root_len) {
+        return -1;
+    }
+
+    size_t pos = end;
+    while (pos > root_len && !sengoo_path_is_sep(path[pos - 1])) {
+        pos--;
+    }
+    if (pos == 0) {
+        return -1;
+    }
+
+    size_t sep_index = pos - 1;
+    size_t parent_len = sep_index < root_len ? root_len : sep_index;
+    if (parent_len == 0 && root_len > 0) {
+        parent_len = root_len;
+    }
+    if (parent_len == 0) {
+        return -1;
+    }
+
+    return sengoo_copy_path_bytes(path, parent_len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_file_name(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+    return sengoo_copy_path_bytes(path + start, len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_stem(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+
+    size_t dot = start + len;
+    while (dot > start && path[dot - 1] != '.') {
+        dot--;
+    }
+    if (dot == start || dot == start + len) {
+        return sengoo_copy_path_bytes(path + start, len, out_buffer, out_capacity);
+    }
+
+    size_t dot_index = dot - 1;
+    size_t stem_len = dot_index > start ? dot_index - start : len;
+    return sengoo_copy_path_bytes(path + start, stem_len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_extension(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+
+    size_t dot = start + len;
+    while (dot > start && path[dot - 1] != '.') {
+        dot--;
+    }
+    if (dot == start || dot == start + len) {
+        return -1;
+    }
+
+    size_t dot_index = dot - 1;
+    if (dot_index == start || dot_index + 1 >= start + len) {
+        return -1;
+    }
+    return sengoo_copy_path_bytes(path + dot_index + 1, (start + len) - dot_index - 1, out_buffer, out_capacity);
+}
+
+static int sengoo_path_segment_is_dotdot(const char* segment, size_t len) {
+    return len == 2 && segment[0] == '.' && segment[1] == '.';
+}
+
+long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path) {
+        return -1;
+    }
+
+    size_t input_len = strlen(path);
+    char sep = sengoo_path_preferred_sep();
+    char* result = (char*)malloc(input_len + 4u);
+    size_t* segment_starts = (size_t*)calloc(input_len + 1u, sizeof(size_t));
+    size_t* segment_lens = (size_t*)calloc(input_len + 1u, sizeof(size_t));
+    if (!result || !segment_starts || !segment_lens) {
+        free(result);
+        free(segment_starts);
+        free(segment_lens);
+        return -1;
+    }
+
+    size_t cursor = 0;
+    size_t result_len = 0;
+    size_t base_len = 0;
+    size_t segment_count = 0;
+    int absolute = 0;
+
+    if (sengoo_path_has_drive_root(path)) {
+        result[result_len++] = path[0];
+        result[result_len++] = ':';
+        result[result_len++] = sep;
+        cursor = 3;
+        base_len = 3;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    } else if (sengoo_path_is_sep(path[0]) && sengoo_path_is_sep(path[1])) {
+        result[result_len++] = sep;
+        result[result_len++] = sep;
+        cursor = 2;
+        base_len = 2;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    } else if (sengoo_path_is_sep(path[0])) {
+        result[result_len++] = sep;
+        cursor = 1;
+        base_len = 1;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    }
+
+    while (cursor < input_len) {
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+        size_t start = cursor;
+        while (cursor < input_len && !sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+        size_t len = cursor - start;
+        if (len == 0 || (len == 1 && path[start] == '.')) {
+            continue;
+        }
+
+        if (sengoo_path_segment_is_dotdot(path + start, len)) {
+            if (segment_count > 0
+                && !sengoo_path_segment_is_dotdot(result + segment_starts[segment_count - 1], segment_lens[segment_count - 1])) {
+                segment_count--;
+                result_len = segment_starts[segment_count];
+                if (result_len > base_len && result_len > 0 && result[result_len - 1] == sep) {
+                    result_len--;
+                }
+                continue;
+            }
+            if (absolute) {
+                continue;
+            }
+        }
+
+        if (result_len > 0 && result[result_len - 1] != sep && result[result_len - 1] != ':') {
+            result[result_len++] = sep;
+        }
+        segment_starts[segment_count] = result_len;
+        segment_lens[segment_count] = len;
+        memcpy(result + result_len, path + start, len);
+        result_len += len;
+        segment_count++;
+    }
+
+    if (result_len == 0) {
+        result[result_len++] = '.';
+    }
+    result[result_len] = '\0';
+
+    long long copied = sengoo_copy_path_bytes(result, result_len, out_buffer, out_capacity);
+    free(result);
+    free(segment_starts);
+    free(segment_lens);
+    return copied;
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {
