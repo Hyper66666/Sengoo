@@ -41,6 +41,11 @@ symbol cloning a measured cost.
 - [x] 2.5 Leave the six interned-types §6.1 cloner sites unchanged for this slice; the measured hot path is fresh-var instantiation/unification work, not symbol-owned `Ty` clones.
 - [x] 2.6 Defer trait/impl registry handle migration until a deep-generic or very-large-signature workload makes registry-owned `Ty` cloning a measured cost.
 
+Archival note: the original `interned-types` delta was removed during archive
+review because the profiling gate deferred that storage migration. The
+canonical interned-types contract remains unchanged until a measured workload
+justifies a dedicated follow-up.
+
 ## 3. Phase 2 — Lowering overlay for materialization-heavy paths (if warranted)
 
 - [x] 3.1 Add a reproducible lowering materialization probe generator (`bench/scripts/gen_lowering_overlay_probe.py`) and measure `Cow::to_mut()` behavior. The sync lambda/generic materialization probe (`.tmp/lowering_overlay_sync_2500.sg`) showed `mir_lower=1040.709ms`; a mixed async probe showed async lowering itself dominates, so the acceptance gate isolates the materialization path.
