@@ -1,0 +1,29 @@
+extern "C" {
+    fn sengoo_time_unix_seconds() -> i64;
+    fn sengoo_time_unix_ms() -> i64;
+    fn sengoo_time_sleep_ms(ms: i64) -> i64;
+}
+
+def time_unix_seconds() -> i64 {
+    sengoo_time_unix_seconds()
+}
+
+def time_unix_ms() -> i64 {
+    sengoo_time_unix_ms()
+}
+
+def time_sleep_ms(ms: i64) -> bool {
+    sengoo_time_sleep_ms(ms) == 0
+}
+
+def time_elapsed_ms(start_ms: i64, end_ms: i64) -> i64 {
+    if end_ms >= start_ms {
+        end_ms - start_ms
+    } else {
+        0
+    }
+}
+
+def time_since_ms(start_ms: i64) -> i64 {
+    time_elapsed_ms(start_ms, time_unix_ms())
+}

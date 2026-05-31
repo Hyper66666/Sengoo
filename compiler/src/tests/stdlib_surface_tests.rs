@@ -116,6 +116,61 @@ def main() -> i64 {
 }
 
 #[test]
+fn env_module_imports_process_and_variable_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "env.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = env_var_copy("SENGOO_TEST_ENV", buffer).unwrap_or(0);
+    let present = env_has_var("SENGOO_TEST_ENV");
+    let windows = env_is_windows();
+    let unix = env_is_unix();
+    let code = env_exit_code(false, 7);
+    buffer.free();
+
+    if copied >= 0 && (windows || unix) && code == 7 {
+        if present { 1 } else { 0 }
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_env_var_len"));
+    assert!(ir.contains("sengoo_env_var_copy"));
+    assert!(ir.contains("sengoo_env_is_windows"));
+    assert!(ir.contains("sengoo_env_is_unix"));
+    assert!(ir.contains("env_exit_code"));
+}
+
+#[test]
+fn time_module_imports_clock_and_sleep_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["time.sg"],
+        r#"
+def main() -> i64 {
+    let before = time_unix_ms();
+    time_sleep_ms(0);
+    let after = time_unix_ms();
+
+    if after >= before && time_unix_seconds() >= 0 {
+        time_elapsed_ms(before, after)
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_time_unix_ms"));
+    assert!(ir.contains("sengoo_time_unix_seconds"));
+    assert!(ir.contains("sengoo_time_sleep_ms"));
+    assert!(ir.contains("time_elapsed_ms"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],

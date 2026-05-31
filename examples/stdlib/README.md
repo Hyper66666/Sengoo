@@ -9,3 +9,4 @@ Run each file with `sgc run <path>`.
 | [`03_error.sg`](03_error.sg) | Importing `std::error` assertion helpers for booleans, integers, strings, and floats | `7` |
 | [`04_option_result.sg`](04_option_result.sg) | Importing `std::option` and `std::result` bool constructors, unwrap helpers, and projections | `7` |
 | [`05_file.sg`](05_file.sg) | Importing `std::file` helpers for write, append, read, length, existence, and removal | `15` |
+| [`06_env_time.sg`](06_env_time.sg) | Importing `std::env` and `std::time` helpers for environment checks, clock reads, sleep, and exit-code selection | `6` |

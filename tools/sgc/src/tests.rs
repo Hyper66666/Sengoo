@@ -3489,6 +3489,11 @@ fn examples_smoke_stdlib_file_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_env_time_import() {
+    assert_example_output("stdlib-env-time", "examples/stdlib/06_env_time.sg", "6");
+}
+
+#[test]
 fn examples_smoke_traits_iterator_basic() {
     assert_example_output(
         "traits-iterator-basic",
