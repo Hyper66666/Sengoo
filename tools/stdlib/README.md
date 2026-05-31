@@ -18,6 +18,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
+- `process.sg`: runtime-backed process metadata helpers for process ID, current working directory length/copy into managed `Buffer` handles, and conventional exit-code selection.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
 
@@ -39,7 +40,7 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, and `import std::proto`
+std::db`, `import std::env`, `import std::file`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, and `import std::proto`
 preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
 
 ## Path Helpers
@@ -53,6 +54,17 @@ String-producing helpers (`path_join`, `path_parent`, `path_file_name`,
 `path_join` treats an absolute right-hand side as a replacement. `path_normalize`
 is lexical only: it removes duplicate separators, `.` segments, and simple
 `..` segments without touching the filesystem or resolving symlinks.
+
+## Process Helpers
+
+`std::process` exposes the current process ID and current working directory in
+a portable subset. `process_current_dir_len()` reports the byte length of the
+working directory, and `process_current_dir_copy(buffer)` copies it into a
+managed `Buffer` and returns the copied byte count. `process_exit_code(success,
+failure_code)` maps a boolean success value to `0` or the caller-provided
+failure code. Command execution and command-line argument access are intentionally
+deferred until Sengoo has a specified compiler/runtime entry ABI and a safe
+argument-vector API.
 
 ## Reflection Wrappers
 

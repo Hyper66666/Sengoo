@@ -252,6 +252,35 @@ def main() -> i64 {
 }
 
 #[test]
+fn process_module_imports_metadata_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "process.sg"],
+        r#"
+def main() -> i64 {
+    let len = process_current_dir_len().unwrap_or(0);
+    let buffer = ffi_buffer_new(len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied = process_current_dir_copy(buffer).unwrap_or(0);
+    let pid = process_id();
+    let ok_code = process_exit_code(true, 9);
+    let err_code = process_exit_code(false, 9);
+    buffer.free();
+
+    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_process_id"));
+    assert!(ir.contains("sengoo_process_current_dir_len"));
+    assert!(ir.contains("sengoo_process_current_dir_copy"));
+    assert!(ir.contains("process_exit_code"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],
