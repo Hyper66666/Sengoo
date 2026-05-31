@@ -14,7 +14,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
-- `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, and reading into managed `Buffer` handles.
+- `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
 - `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic non-recursive listing, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
@@ -72,6 +72,18 @@ managed `Buffer`, and returns the byte count without appending a NUL terminator.
 `dir_remove` only removes empty directories; recursive tree deletion, recursive
 traversal, glob matching, metadata structs, owned-string entry returns, and
 persistent iterator/list APIs remain deferred.
+
+## File Helpers
+
+`std::file` provides binary `file_copy(source, destination, overwrite)` and
+host-rename `file_move(source, destination, overwrite)` helpers alongside its
+basic read, write, append, length, existence, and removal operations. Copy
+returns the transferred byte count, while move returns an ok-shaped boolean
+when the host rename succeeds. Existing destinations are rejected unless
+callers explicitly opt into replacement, and copy rejects source aliases that
+already refer to the destination file. Recursive directory transfer,
+cross-filesystem move fallback, metadata-preservation guarantees, atomic-copy
+claims, progress callbacks, and async file I/O remain deferred.
 
 ## Standard I/O Helpers
 

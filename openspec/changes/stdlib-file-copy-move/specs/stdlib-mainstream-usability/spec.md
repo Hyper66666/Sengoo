@@ -26,6 +26,12 @@ and moving files with an explicit overwrite choice.
 - **THEN** the destination bytes are replaced with the source bytes
 - **AND** the helper returns the number of bytes copied
 
+#### Scenario: A program cannot copy a file onto itself
+- **WHEN** source and destination refer to the same host file
+- **AND** a program calls `file_copy(source, destination, overwrite)`
+- **THEN** the helper returns an error-shaped result
+- **AND** leaves the source bytes intact
+
 #### Scenario: A program moves a file with host rename semantics
 - **WHEN** a program calls `file_move(source, destination, overwrite)`
 - **AND** the host rename primitive succeeds

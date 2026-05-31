@@ -6,6 +6,8 @@ extern "C" {
     fn sengoo_file_write_str(path: i64, data: i64, len: i64) -> i64;
     fn sengoo_file_append_str(path: i64, data: i64, len: i64) -> i64;
     fn sengoo_file_remove(path: i64) -> i64;
+    fn sengoo_file_copy(source: i64, destination: i64, overwrite: i64) -> i64;
+    fn sengoo_file_move(source: i64, destination: i64, overwrite: i64) -> i64;
 }
 
 def file_exists_raw(path_ptr: i64) -> bool {
@@ -74,4 +76,38 @@ def file_remove_raw(path_ptr: i64) -> bool {
 
 def file_remove(path: &str) -> bool {
     file_remove_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def file_copy_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Result<i64, i64> {
+    let copied = sengoo_file_copy(source_ptr, destination_ptr, if overwrite { 1 } else { 0 });
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def file_copy(source: &str, destination: &str, overwrite: bool) -> Result<i64, i64> {
+    file_copy_raw(
+        sengoo_stdlib_str_ptr(source),
+        sengoo_stdlib_str_ptr(destination),
+        overwrite,
+    )
+}
+
+def file_move_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Result<bool, i64> {
+    let status = sengoo_file_move(source_ptr, destination_ptr, if overwrite { 1 } else { 0 });
+    if status == 0 {
+        Result { is_ok: true, value: true, error: 0 }
+    } else {
+        Result { is_ok: false, value: false, error: 1 }
+    }
+}
+
+def file_move(source: &str, destination: &str, overwrite: bool) -> Result<bool, i64> {
+    file_move_raw(
+        sengoo_stdlib_str_ptr(source),
+        sengoo_stdlib_str_ptr(destination),
+        overwrite,
+    )
 }

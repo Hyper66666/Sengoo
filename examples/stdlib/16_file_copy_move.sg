@@ -1,0 +1,47 @@
+// examples/stdlib/16_file_copy_move.sg
+//
+// Demonstrates: importing std::file helpers for binary copy, host-rename move,
+// and explicit overwrite selection.
+//
+// Run: sgc run examples/stdlib/16_file_copy_move.sg
+// Expected output: 16
+
+import std::file;
+
+def main() -> i64 {
+    let source = "sengoo-stdlib-file-copy-source.txt";
+    let copy = "sengoo-stdlib-file-copy-copy.txt";
+    let moved = "sengoo-stdlib-file-copy-moved.txt";
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    let wrote = file_write_str(source, "abc").unwrap_or(0);
+    let copied = file_copy(source, copy, false).unwrap_or(0);
+    let rejected_copy = file_copy(source, copy, false).is_err();
+    let prepared_destination = file_write_str(moved, "old").unwrap_or(0);
+    let rejected_move = file_move(copy, moved, false).is_err();
+    let moved_ok = file_move(copy, moved, true).unwrap_or(false);
+    let source_kept = file_exists(source);
+    let copy_gone = !file_exists(copy);
+    let destination_exists = file_exists(moved);
+
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    print(if wrote == 3
+        && copied == 3
+        && rejected_copy
+        && prepared_destination == 3
+        && rejected_move
+        && moved_ok
+        && source_kept
+        && copy_gone
+        && destination_exists {
+        16
+    } else {
+        0
+    });
+    0
+}

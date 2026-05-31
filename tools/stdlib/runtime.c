@@ -457,6 +457,161 @@ long long sengoo_file_remove(long long path_ptr) {
     return remove(path);
 }
 
+static int sengoo_path_entry_exists_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+#else
+    struct stat info;
+    return lstat(path, &info) == 0 ? 1 : 0;
+#endif
+}
+
+static int sengoo_path_is_regular_file_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+#else
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISREG(info.st_mode) ? 1 : 0;
+#endif
+}
+
+static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* right) {
+#ifdef _WIN32
+    HANDLE left_handle = CreateFileA(
+        left,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (left_handle == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+
+    HANDLE right_handle = CreateFileA(
+        right,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (right_handle == INVALID_HANDLE_VALUE) {
+        CloseHandle(left_handle);
+        return 0;
+    }
+
+    BY_HANDLE_FILE_INFORMATION left_info;
+    BY_HANDLE_FILE_INFORMATION right_info;
+    int same = GetFileInformationByHandle(left_handle, &left_info)
+        && GetFileInformationByHandle(right_handle, &right_info)
+        && left_info.dwVolumeSerialNumber == right_info.dwVolumeSerialNumber
+        && left_info.nFileIndexHigh == right_info.nFileIndexHigh
+        && left_info.nFileIndexLow == right_info.nFileIndexLow;
+    CloseHandle(right_handle);
+    CloseHandle(left_handle);
+    return same ? 1 : 0;
+#else
+    struct stat left_info;
+    struct stat right_info;
+    return stat(left, &left_info) == 0
+        && stat(right, &right_info) == 0
+        && left_info.st_dev == right_info.st_dev
+        && left_info.st_ino == right_info.st_ino ? 1 : 0;
+#endif
+}
+
+long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long long overwrite) {
+    const char* source = (const char*)(intptr_t)source_ptr;
+    const char* destination = (const char*)(intptr_t)destination_ptr;
+    if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
+        return -1;
+    }
+
+    int destination_existed = sengoo_path_entry_exists_cstr(destination);
+    if (!overwrite && destination_existed) {
+        return -1;
+    }
+    if (destination_existed && sengoo_paths_refer_to_same_file_cstr(source, destination)) {
+        return -1;
+    }
+
+    FILE* input = fopen(source, "rb");
+    if (!input) {
+        return -1;
+    }
+
+    FILE* output = fopen(destination, "wb");
+    if (!output) {
+        fclose(input);
+        return -1;
+    }
+
+    unsigned char buffer[8192];
+    unsigned long long total = 0;
+    int failed = 0;
+    for (;;) {
+        size_t read = fread(buffer, 1, sizeof(buffer), input);
+        if (read > 0) {
+            if ((unsigned long long)read > (unsigned long long)LLONG_MAX - total
+                || fwrite(buffer, 1, read, output) != read) {
+                failed = 1;
+                break;
+            }
+            total += (unsigned long long)read;
+        }
+        if (read < sizeof(buffer)) {
+            if (ferror(input)) {
+                failed = 1;
+            }
+            break;
+        }
+    }
+
+    if (fclose(output) != 0) {
+        failed = 1;
+    }
+    if (fclose(input) != 0) {
+        failed = 1;
+    }
+    if (failed) {
+        if (!destination_existed) {
+            remove(destination);
+        }
+        return -1;
+    }
+    return (long long)total;
+}
+
+long long sengoo_file_move(long long source_ptr, long long destination_ptr, long long overwrite) {
+    const char* source = (const char*)(intptr_t)source_ptr;
+    const char* destination = (const char*)(intptr_t)destination_ptr;
+    if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
+        return -1;
+    }
+    if (!overwrite && sengoo_path_entry_exists_cstr(destination)) {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return MoveFileExA(source, destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0) ? 0 : -1;
+#else
+    return rename(source, destination) == 0 ? 0 : -1;
+#endif
+}
+
 long long sengoo_env_var_len(long long name_ptr) {
     const char* name = (const char*)(intptr_t)name_ptr;
     if (!name || name[0] == '\0') {

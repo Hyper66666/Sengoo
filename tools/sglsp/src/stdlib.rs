@@ -283,8 +283,22 @@ mod tests {
 
         assert!(names.contains(&"file_exists"));
         assert!(names.contains(&"file_write_str"));
+        assert!(names.contains(&"file_copy"));
+        assert!(names.contains(&"file_move"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::file;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(
+            &"def file_copy(source: &str, destination: &str, overwrite: bool) -> Result<i64, i64>"
+        ));
+        assert!(labels.contains(
+            &"def file_move(source: &str, destination: &str, overwrite: bool) -> Result<bool, i64>"
+        ));
     }
 
     #[test]

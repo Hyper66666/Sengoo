@@ -19,3 +19,4 @@ Run each file with `sgc run <path>`.
 | [`13_io.sg`](13_io.sg) | Importing `std::io` helpers for exact stdout/stderr writes and flushing | `13` |
 | [`14_strconv.sg`](14_strconv.sg) | Importing `std::strconv` helpers for decimal i64 parsing and Buffer-backed formatting | `14` |
 | [`15_dir_listing.sg`](15_dir_listing.sg) | Importing `std::dir` helpers for deterministic non-recursive directory listing | `15` |
+| [`16_file_copy_move.sg`](16_file_copy_move.sg) | Importing `std::file` helpers for binary copy, host-rename move, and explicit overwrite selection | `16` |
