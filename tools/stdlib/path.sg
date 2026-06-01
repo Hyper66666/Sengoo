@@ -1,0 +1,79 @@
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_path_separator() -> i64;
+    fn sengoo_path_is_absolute(path: i64) -> i64;
+    fn sengoo_path_join(left: i64, right: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_parent(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_file_name(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_stem(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_extension(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_normalize(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+}
+
+def path_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def path_separator() -> i64 {
+    sengoo_path_separator()
+}
+
+def path_is_absolute_raw(path_ptr: i64) -> bool {
+    sengoo_path_is_absolute(path_ptr) != 0
+}
+
+def path_is_absolute(path: &str) -> bool {
+    path_is_absolute_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def path_join_raw(left_ptr: i64, right_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_join(left_ptr, right_ptr, buffer_ptr, capacity))
+}
+
+def path_join(left: &str, right: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_join_raw(sengoo_stdlib_str_ptr(left), sengoo_stdlib_str_ptr(right), buffer.ptr(), buffer.len())
+}
+
+def path_parent_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_parent(path_ptr, buffer_ptr, capacity))
+}
+
+def path_parent(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_parent_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def path_file_name_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_file_name(path_ptr, buffer_ptr, capacity))
+}
+
+def path_file_name(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_file_name_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def path_stem_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_stem(path_ptr, buffer_ptr, capacity))
+}
+
+def path_stem(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_stem_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def path_extension_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_extension(path_ptr, buffer_ptr, capacity))
+}
+
+def path_extension(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_extension_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def path_normalize_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    path_i64_result(sengoo_path_normalize(path_ptr, buffer_ptr, capacity))
+}
+
+def path_normalize(path: &str, buffer: Buffer) -> Result<i64, i64> {
+    path_normalize_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}

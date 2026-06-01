@@ -12,6 +12,10 @@ def main() -> i64 {
     let repeated = str_repeat("ha", 2);
     let score = if str_eq(word, "sengoo")
         && str_ne(word, repeated)
+        && str_contains(word, "goo")
+        && str_starts_with(word, "sen")
+        && str_ends_with(word, "goo")
+        && str_index_of(word, "goo") == 3
         && str_is_empty("")
         && str_is_not_empty(repeated) {
         str_len(word) + str_len(repeated) - 2

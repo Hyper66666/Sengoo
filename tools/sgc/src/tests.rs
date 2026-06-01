@@ -22,8 +22,8 @@ use super::{
     FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata, ReflectionMode,
-    RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION, DAEMON_PROTOCOL_VERSION,
-    DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
+    RunCacheMetadata, RunEngine, RuntimeSourceIdentity, BUILD_GRAPH_SCHEMA_VERSION,
+    DAEMON_PROTOCOL_VERSION, DEFAULT_DAEMON_ADDR, DEFAULT_SYMBOL_FINGERPRINT_MAX_SOURCE_BYTES,
     FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES, GENERIC_INSTANCE_CACHE_SCHEMA_VERSION,
     LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
@@ -33,6 +33,7 @@ use sengoo_compiler::compile_to_ir as compile_compiler_ir;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -58,6 +59,7 @@ fn metadata_for_test() -> RunCacheMetadata {
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/a.ll".to_string(),
         executable_path: Some("tests/build/a.exe".to_string()),
         llvm_ir_hash: 999,
@@ -188,7 +190,7 @@ fn cache_miss_when_opt_level_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -203,7 +205,7 @@ fn cache_miss_when_engine_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Lli,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -218,9 +220,70 @@ fn cache_hit_when_key_matches() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn cache_miss_when_runtime_source_fingerprint_changes() {
+    let mut metadata = metadata_for_test();
+    metadata.runtime_c_fingerprint = Some(11);
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
+    );
+
+    assert!(!metadata_matches(&metadata, &key));
+    assert!(cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason == "runtime source changed"));
+}
+
+#[test]
+fn cache_miss_when_runtime_source_fingerprint_is_missing() {
+    let mut metadata = metadata_for_test();
+    metadata.runtime_c_fingerprint = None;
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
+    );
+
+    assert!(!metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn legacy_cache_metadata_defaults_missing_runtime_source_fingerprint() {
+    let mut run_json = serde_json::to_value(metadata_for_test()).unwrap();
+    run_json
+        .as_object_mut()
+        .unwrap()
+        .remove("runtime_c_fingerprint");
+    let run_metadata: RunCacheMetadata = serde_json::from_value(run_json).unwrap();
+    assert_eq!(run_metadata.runtime_c_fingerprint, None);
+
+    let build_metadata: BuildCacheMetadata = serde_json::from_value(serde_json::json!({
+        "source_hash": 123,
+        "module_fingerprints": [],
+        "opt_level": 1,
+        "contract_checks": false,
+        "emit_llvm": false,
+        "runtime_c": "tools/stdlib/runtime.c",
+        "llvm_ir_path": "tests/build/a.ll",
+        "output_path": "tests/build/a.exe"
+    }))
+    .unwrap();
+    assert_eq!(build_metadata.runtime_c_fingerprint, None);
 }
 
 #[test]
@@ -233,7 +296,7 @@ fn cache_miss_when_module_dependency_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(!metadata_matches(&metadata, &key));
 }
@@ -248,7 +311,7 @@ fn cache_mismatch_reasons_include_module_changes() {
         false,
         RunEngine::Auto,
         RunEngine::Native,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     let reasons = cache_mismatch_reasons(&metadata, &key);
     assert!(reasons
@@ -368,6 +431,35 @@ fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
         assert!(
             runtime_c.contains(symbol),
             "runtime stdlib missing symbol: {symbol}"
+        );
+    }
+}
+
+#[test]
+fn stdlib_runtime_exports_managed_buffer_helpers() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(manifest_dir);
+    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+
+    for symbol in [
+        "sengoo_ffi_last_error_code",
+        "sengoo_ffi_last_error_len",
+        "sengoo_ffi_last_error_copy",
+        "sengoo_ffi_last_error_clear",
+        "sengoo_ffi_buffer_new",
+        "sengoo_ffi_buffer_from_bytes",
+        "sengoo_ffi_buffer_len",
+        "sengoo_ffi_buffer_ptr",
+        "sengoo_ffi_buffer_copy_out",
+        "sengoo_ffi_buffer_copy_in",
+        "sengoo_ffi_buffer_free",
+    ] {
+        assert!(
+            runtime_c.contains(symbol),
+            "runtime stdlib missing Buffer helper: {symbol}"
         );
     }
 }
@@ -1355,7 +1447,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         1,
         false,
         false,
-        Some("tools/stdlib/runtime.c".to_string()),
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
         "tests/build/a.exe".to_string(),
     );
     let metadata = BuildCacheMetadata {
@@ -1368,6 +1460,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/a.ll".to_string(),
         output_path: "tests/build/a.exe".to_string(),
         llvm_ir_hash: 777,
@@ -1375,6 +1468,41 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         build_graph_v2: None,
     };
     assert!(!build_metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn build_cache_miss_when_runtime_source_fingerprint_changes() {
+    let key = build_cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        false,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
+        "tests/build/a.exe".to_string(),
+    );
+    let metadata = BuildCacheMetadata {
+        cache_schema_version: BUILD_GRAPH_SCHEMA_VERSION,
+        source_hash: 123,
+        root_interface_hash: 101,
+        root_implementation_hash: 123,
+        module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
+        opt_level: 1,
+        contract_checks: false,
+        emit_llvm: false,
+        runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(11),
+        llvm_ir_path: "tests/build/a.ll".to_string(),
+        output_path: "tests/build/a.exe".to_string(),
+        llvm_ir_hash: 777,
+        object_path: Some("tests/build/a.obj".to_string()),
+        build_graph_v2: None,
+    };
+
+    assert!(!build_metadata_matches(&metadata, &key));
+    assert!(super::build_cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason == "runtime source changed"));
 }
 
 #[test]
@@ -1404,6 +1532,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 10,
@@ -1454,6 +1583,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         requested_engine: RunEngine::Native,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 44,
@@ -3221,10 +3351,11 @@ fn assert_example_file(relative_path: &str) {
     );
 }
 
-fn compile_and_run_example(
+fn compile_and_run_example_with_args(
     tag: &str,
     relative_path: &str,
     extra_c_inputs: &[&str],
+    args: &[&str],
 ) -> Option<std::process::Output> {
     let source = super::expand_stdlib_imports_for_source(&read_example_source(relative_path))
         .unwrap_or_else(|err| {
@@ -3296,6 +3427,7 @@ fn compile_and_run_example(
     }
 
     let output = Command::new(&exe_path)
+        .args(args)
         .output()
         .expect("example executable should run");
 
@@ -3317,7 +3449,33 @@ fn assert_example_output_with_c_inputs(
     extra_c_inputs: &[&str],
     expected_stdout: &str,
 ) {
-    let Some(output) = compile_and_run_example(tag, relative_path, extra_c_inputs) else {
+    assert_example_output_with_c_inputs_and_args(
+        tag,
+        relative_path,
+        extra_c_inputs,
+        &[],
+        expected_stdout,
+    );
+}
+
+fn assert_example_output_with_args(
+    tag: &str,
+    relative_path: &str,
+    args: &[&str],
+    expected_stdout: &str,
+) {
+    assert_example_output_with_c_inputs_and_args(tag, relative_path, &[], args, expected_stdout);
+}
+
+fn assert_example_output_with_c_inputs_and_args(
+    tag: &str,
+    relative_path: &str,
+    extra_c_inputs: &[&str],
+    args: &[&str],
+    expected_stdout: &str,
+) {
+    let Some(output) = compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args)
+    else {
         return;
     };
     assert!(
@@ -3347,6 +3505,14 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/02_math.sg",
         "examples/stdlib/03_error.sg",
         "examples/stdlib/04_option_result.sg",
+        "examples/stdlib/05_file.sg",
+        "examples/stdlib/11_args.sg",
+        "examples/stdlib/12_dir.sg",
+        "examples/stdlib/13_io.sg",
+        "examples/stdlib/14_strconv.sg",
+        "examples/stdlib/15_dir_listing.sg",
+        "examples/stdlib/16_file_copy_move.sg",
+        "examples/stdlib/17_process_run.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3478,8 +3644,364 @@ fn examples_smoke_stdlib_option_result_import() {
     assert_example_output(
         "stdlib-option-result",
         "examples/stdlib/04_option_result.sg",
-        "4",
+        "7",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_file_import() {
+    assert_example_output("stdlib-file", "examples/stdlib/05_file.sg", "15");
+}
+
+#[test]
+fn examples_smoke_stdlib_env_time_import() {
+    assert_example_output("stdlib-env-time", "examples/stdlib/06_env_time.sg", "6");
+}
+
+#[test]
+fn examples_smoke_stdlib_random_import() {
+    assert_example_output("stdlib-random", "examples/stdlib/07_random.sg", "8");
+}
+
+#[test]
+fn examples_smoke_stdlib_path_import() {
+    assert_example_output("stdlib-path", "examples/stdlib/08_path.sg", "9");
+}
+
+#[test]
+fn examples_smoke_stdlib_process_import() {
+    assert_example_output("stdlib-process", "examples/stdlib/09_process.sg", "10");
+}
+
+#[test]
+fn examples_smoke_stdlib_collections_import() {
+    assert_example_output(
+        "stdlib-collections",
+        "examples/stdlib/10_collections.sg",
+        "60",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_args_import() {
+    assert_example_output_with_args(
+        "stdlib-args",
+        "examples/stdlib/11_args.sg",
+        &["alpha", "beta"],
+        "11",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_dir_import() {
+    assert_example_output("stdlib-dir", "examples/stdlib/12_dir.sg", "12");
+}
+
+#[test]
+fn examples_smoke_stdlib_io_import() {
+    assert_example_output("stdlib-io", "examples/stdlib/13_io.sg", "13");
+}
+
+#[test]
+fn examples_smoke_stdlib_strconv_import() {
+    assert_example_output("stdlib-strconv", "examples/stdlib/14_strconv.sg", "14");
+}
+
+#[test]
+fn examples_smoke_stdlib_dir_listing_import() {
+    assert_example_output(
+        "stdlib-dir-listing",
+        "examples/stdlib/15_dir_listing.sg",
+        "15",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_file_copy_move_import() {
+    assert_example_output(
+        "stdlib-file-copy-move",
+        "examples/stdlib/16_file_copy_move.sg",
+        "16",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_process_run_import() {
+    assert_example_output(
+        "stdlib-process-run",
+        "examples/stdlib/17_process_run.sg",
+        "17",
+    );
+}
+
+#[test]
+fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "io-stdin",
+        r#"
+import std::io;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read_line(buffer).unwrap_or(0);
+    let wrote = io_stdout_write("out").unwrap_or(0);
+    let err = io_stderr_write("err").unwrap_or(0);
+    let flushed = io_stdout_flush().unwrap_or(false) && io_stderr_flush().unwrap_or(false);
+    buffer.free();
+
+    if read == 4 && wrote == 3 && err == 3 && flushed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "abc\nxyz",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "out");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "err");
+}
+
+#[test]
+fn stdlib_dir_runtime_lists_entries_in_deterministic_order() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "dir-listing",
+        r#"
+import std::dir;
+import std::file;
+import std::io;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_dir_listing_runtime";
+    let a = "sengoo_tmp_dir_listing_runtime/a.txt";
+    let b = "sengoo_tmp_dir_listing_runtime/b.txt";
+    file_remove(a);
+    file_remove(b);
+    dir_remove(root);
+
+    let created = dir_create(root).unwrap_or(false);
+    let empty_count = dir_entry_count(root).unwrap_or(-1);
+    let wrote_b = file_write_str(b, "b").unwrap_or(0);
+    let wrote_a = file_write_str(a, "a").unwrap_or(0);
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let small = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let count = dir_entry_count(root).unwrap_or(0);
+    let first = dir_entry_name(root, 0, buffer).unwrap_or(0);
+    let wrote_name = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
+    let too_small = dir_entry_name(root, 0, small).is_err();
+    let missing = dir_entry_name(root, 2, buffer).is_err();
+
+    small.free();
+    buffer.free();
+    file_remove(a);
+    file_remove(b);
+    let removed = dir_remove(root).unwrap_or(false);
+
+    if created && empty_count == 0 && wrote_a == 1 && wrote_b == 1 && count == 2 && first == 5 && wrote_name == 5 && too_small && missing && removed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "a.txt");
+}
+
+#[test]
+fn stdlib_file_runtime_copies_moves_and_requires_explicit_overwrite() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "file-copy-move",
+        r#"
+import std::file;
+
+def main() -> i64 {
+    let source = "sengoo_tmp_file_transfer_source.txt";
+    let copy = "sengoo_tmp_file_transfer_copy.txt";
+    let moved = "sengoo_tmp_file_transfer_moved.txt";
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    let wrote = file_write_str(source, "alpha").unwrap_or(0);
+    let copied = file_copy(source, copy, false).unwrap_or(0);
+    let source_kept = file_exists(source);
+    let copy_exists = file_exists(copy);
+    let reject_copy = file_copy(source, copy, false).is_err();
+    let overwrote = file_copy(source, copy, true).unwrap_or(0);
+    let reject_same_file_copy = file_copy(source, source, true).is_err();
+    let source_len = file_len(source).unwrap_or(0);
+
+    file_write_str(moved, "old");
+    let reject_move = file_move(copy, moved, false).is_err();
+    let moved_ok = file_move(copy, moved, true).unwrap_or(false);
+    let copy_gone = !file_exists(copy);
+    let moved_exists = file_exists(moved);
+
+    file_remove(source);
+    file_remove(copy);
+    file_remove(moved);
+
+    if wrote == 5 && copied == 5 && source_kept && copy_exists && reject_copy && overwrote == 5 && reject_same_file_copy && source_len == 5 && reject_move && moved_ok && copy_gone && moved_exists {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_process_runtime_runs_literal_argument_and_reports_exit_code() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let child_c = temp_artifact("process-run-child", "c");
+    let child_exe = temp_artifact("process-run-child", if cfg!(windows) { "exe" } else { "" });
+    fs::write(
+        &child_c,
+        r#"
+int main(int argc, char** argv) {
+    const char* expected = "hello world";
+    int index = 0;
+    if (argc != 2) {
+        return 8;
+    }
+    while (expected[index] != '\0' && argv[1][index] == expected[index]) {
+        index++;
+    }
+    return expected[index] == '\0' && argv[1][index] == '\0' ? 7 : 8;
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(&clang)
+        .arg(&child_c)
+        .arg("-o")
+        .arg(&child_exe)
+        .status()
+        .expect("process-run child fixture should compile");
+    assert!(status.success(), "process-run child fixture should compile");
+
+    let executable = child_exe.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::process;
+
+def main() -> i64 {{
+    let code = process_run_1("{executable}", "hello world").unwrap_or(-1);
+    let rejected_empty = process_run("").is_err();
+    if code == 7 && rejected_empty {{
+        0
+    }} else {{
+        1
+    }}
+}}
+"#
+    );
+    let output = compile_and_run_stdlib_import_program_with_stdin("process-run", &source, "");
+
+    let _ = fs::remove_file(&child_c);
+    let _ = fs::remove_file(&child_exe);
+
+    let Some(output) = output else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_strconv_runtime_parses_and_formats_i64_values() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "strconv-i64",
+        r#"
+import std::io;
+import std::strconv;
+
+def main() -> i64 {
+    let input = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let out = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read_line(input).unwrap_or(0);
+    let parsed = strconv_parse_i64_buffer(input, read).unwrap_or(0);
+    let literal = strconv_parse_i64("  -5\n").unwrap_or(0);
+    let invalid = strconv_parse_i64("12x").unwrap_or(99);
+    let overflow = strconv_parse_i64("9223372036854775808").unwrap_or(77);
+    let formatted = strconv_format_i64(parsed + literal, out).unwrap_or(0);
+    let wrote = io_stdout_write_raw(out.ptr(), formatted).unwrap_or(0);
+    input.free();
+    out.free();
+
+    if parsed == 19 && literal == -5 && invalid == 99 && overflow == 77 && formatted == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "19\n",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "14");
+}
+
+#[test]
+fn stdlib_args_pipeline_ir_declares_runtime_calls() {
+    let source = super::expand_stdlib_imports_for_source(
+        "import std::args;\n\ndef main() -> i64 {\n    arg_copy(0, ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 })).unwrap_or(0)\n}\n",
+    )
+    .expect("args import should expand");
+
+    let (ir, _) =
+        compile_source_with_phase_timings(&source, 1).expect("args source should compile");
+
+    assert!(ir.contains("declare void @sengoo_args_init(i64, i64)"));
+    assert!(ir.contains("declare i64 @sengoo_args_len()"));
+    assert!(ir.contains("declare i64 @sengoo_arg_len(i64)"));
+    assert!(ir.contains("declare i64 @sengoo_arg_copy(i64, i64, i64)"));
 }
 
 #[test]
@@ -3605,6 +4127,61 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&obj_path);
+    let _ = fs::remove_file(&runtime_obj);
+    let _ = fs::remove_file(&exe_path);
+    Some(output)
+}
+
+fn compile_and_run_stdlib_import_program_with_stdin(
+    tag: &str,
+    source: &str,
+    stdin: &str,
+) -> Option<std::process::Output> {
+    let source = expand_stdlib_imports_for_source(source)
+        .unwrap_or_else(|err| panic!("stdlib imports should expand: {err}"));
+    let llvm_ir = compile_source(&source, 1)
+        .unwrap_or_else(|err| panic!("stdlib source should compile: {err}"));
+
+    let clang = find_clang()?;
+    let runtime_c = find_runtime_c()?;
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return None;
+    }
+
+    let ll_path = temp_artifact(&format!("stdlib-import-runtime-{tag}"), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
+
+    let runtime_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-runtime"), obj_ext);
+    compile_ir_to_object(&clang, Path::new(&runtime_c), &runtime_obj, 2).unwrap();
+
+    let exe_path = temp_artifact(
+        &format!("stdlib-import-runtime-{tag}"),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    link_native_binary_from_objects(&clang, &[main_obj.clone(), runtime_obj.clone()], &exe_path)
+        .unwrap();
+
+    let mut child = Command::new(&exe_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("stdlib binary should spawn");
+    if let Some(mut input) = child.stdin.take() {
+        input
+            .write_all(stdin.as_bytes())
+            .expect("stdin should be writable");
+    }
+    let output = child
+        .wait_with_output()
+        .expect("stdlib binary should run to completion");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
     let _ = fs::remove_file(&runtime_obj);
     let _ = fs::remove_file(&exe_path);
     Some(output)
@@ -3853,6 +4430,32 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_ffi_object_create_value"));
     assert!(ir.contains("sengoo_ffi_object_call_i64_value"));
     assert!(ir.contains("sengoo_lua54_call_i64_value"));
+}
+
+#[test]
+fn stdlib_file_import_preloads_buffer_wrapper() {
+    let source = r#"
+import std::file;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let wrote = file_write_str("target/sgc-file-smoke.txt", "hello").unwrap_or(0);
+    let read = file_read_into("target/sgc-file-smoke.txt", buffer).unwrap_or(0);
+    let len = file_len("target/sgc-file-smoke.txt").unwrap_or(0);
+    let exists = file_exists("target/sgc-file-smoke.txt");
+    buffer.free();
+    file_remove("target/sgc-file-smoke.txt");
+    if exists { wrote + read + len } else { 0 }
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("file stdlib import should expand with its ffi dependency");
+    let ir = compile_compiler_ir(&combined)
+        .expect("file import should make managed Buffer file wrappers usable");
+
+    assert!(ir.contains("sengoo_file_write_str"));
+    assert!(ir.contains("sengoo_file_read_into"));
+    assert!(ir.contains("sengoo_file_len"));
 }
 
 #[test]
@@ -4200,6 +4803,11 @@ fn compile_phase_timings_include_expected_keys() {
     assert!(phases.contains_key("mir_prune"));
     assert!(phases.contains_key("codegen"));
     assert!(phases.contains_key("link"));
+    // Frontend hotspot profiling: the `mir` bucket is sub-split so callers can
+    // attribute cost to HIR lowering vs MIR lowering vs MIR optimization.
+    assert!(phases.contains_key("hir_lower"));
+    assert!(phases.contains_key("mir_lower"));
+    assert!(phases.contains_key("mir_opt"));
 }
 
 #[test]
@@ -5847,6 +6455,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 33,
@@ -5886,6 +6495,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         contract_checks: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         output_path: "tests/build/main.exe".to_string(),
         llvm_ir_hash: 33,
@@ -6402,6 +7012,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 33,
@@ -6441,6 +7052,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
+        runtime_c_fingerprint: Some(777),
         llvm_ir_path: "tests/build/main.ll".to_string(),
         executable_path: Some("tests/build/main.exe".to_string()),
         llvm_ir_hash: 33,
@@ -6603,6 +7215,54 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(25));
+}
+
+#[test]
+fn stdlib_surface_runtime_bool_option_result_constructors_work() {
+    let output = require_stdlib_runtime_output!(
+        "bool-option-result-constructors",
+        r#"
+def main() -> i64 {
+    let some_flag = option_some_bool(true);
+    let none_flag = option_none_bool();
+    let ok_flag = result_ok_bool(true);
+    let err_flag = result_err_bool(7);
+
+    if some_flag.unwrap_or(false)
+        && none_flag.is_none()
+        && ok_flag.ok().unwrap_or(false) {
+        err_flag.err().unwrap_or(0)
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(7));
+}
+
+#[test]
+fn stdlib_surface_runtime_bool_option_result_unwrap_and_expect_work() {
+    let output = require_stdlib_runtime_output!(
+        "bool-option-result-unwrap-expect",
+        r#"
+def main() -> i64 {
+    let option_value = option_some_bool(true).unwrap();
+    let expected_option = option_some_bool(true).expect("option bool ok");
+    let result_value = result_ok_bool(false).unwrap();
+    let expected_result = result_ok_bool(true).expect("result bool ok");
+
+    if option_value && expected_option && !result_value && expected_result {
+        11
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(11));
 }
 
 #[test]

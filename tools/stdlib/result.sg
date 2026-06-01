@@ -24,6 +24,14 @@ def result_err_i64(error: i64) -> Result<i64, i64> {
     result_err_with(0, error)
 }
 
+def result_ok_bool(value: bool) -> Result<bool, i64> {
+    result_ok_with(value, 0)
+}
+
+def result_err_bool(error: i64) -> Result<bool, i64> {
+    result_err_with(false, error)
+}
+
 impl<T, E> Result<T, E> {
     def is_ok(self) -> bool {
         self.is_ok
@@ -101,6 +109,25 @@ impl Result<i64, i64> {
             result_ok_i64(self.value)
         } else {
             result_err_i64(self.error + delta)
+        }
+    }
+}
+
+impl Result<bool, i64> {
+    def expect(self, msg: &str) -> bool {
+        if self.is_ok {
+            self.value
+        } else {
+            print(msg);
+            sengoo_panic_result_unwrap_i64() != 0
+        }
+    }
+
+    def unwrap(self) -> bool {
+        if self.is_ok {
+            self.value
+        } else {
+            sengoo_panic_result_unwrap_i64() != 0
         }
     }
 }

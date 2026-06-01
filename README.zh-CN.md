@@ -363,8 +363,10 @@ graph 命令，或用 `--workspace` 对支持的 package graph 命令执行全�
 不重写文件；`--locked` 会让 package graph 命令在 lockfile 过期时先失败，
 不再调用外部工具。当前 manifest 格式和命令说明见 `docs/sgpm-quickstart.md`。
 声明 `[lib]` 的 path、git 和 registry package 现在可以在应用源码中按依赖名
-导入；构建 dependent binary 前，纯库依赖会先完成类型检查。依赖键目前必须与
-目标 package 的 `[package].name` 一致，暂不支持重命名 alias。
+导入；构建 dependent binary 前，纯库依赖会先完成类型检查。同时声明 `[bin]`
+和 `[lib]` 的 package，也可以在自己的 binary 入口中按 package 名导入自己的
+库。依赖键目前必须与目标 package 的 `[package].name` 一致，暂不支持重命名
+alias。
 
 ## 标准库
 

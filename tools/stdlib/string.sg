@@ -1,3 +1,10 @@
+extern "C" {
+    fn sengoo_str_contains(value: &str, needle: &str) -> i64;
+    fn sengoo_str_starts_with(value: &str, prefix: &str) -> i64;
+    fn sengoo_str_ends_with(value: &str, suffix: &str) -> i64;
+    fn sengoo_str_index_of(value: &str, needle: &str) -> i64;
+}
+
 def str_len(value: &str) -> i64 {
     value.len()
 }
@@ -12,6 +19,22 @@ def str_concat(lhs: &str, rhs: &str) -> &str {
 
 def str_ne(lhs: &str, rhs: &str) -> bool {
     !str_eq(lhs, rhs)
+}
+
+def str_contains(value: &str, needle: &str) -> bool {
+    sengoo_str_contains(value, needle) != 0
+}
+
+def str_starts_with(value: &str, prefix: &str) -> bool {
+    sengoo_str_starts_with(value, prefix) != 0
+}
+
+def str_ends_with(value: &str, suffix: &str) -> bool {
+    sengoo_str_ends_with(value, suffix) != 0
+}
+
+def str_index_of(value: &str, needle: &str) -> i64 {
+    sengoo_str_index_of(value, needle)
 }
 
 def str_is_empty(value: &str) -> bool {

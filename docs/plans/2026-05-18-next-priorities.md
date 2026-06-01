@@ -1,4 +1,4 @@
-# Sengoo Next Priorities (updated 2026-05-30)
+# Sengoo Next Priorities (updated 2026-05-31)
 
 ## Current State
 
@@ -387,6 +387,9 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sgpm` now applies the scaffold package-name grammar to hand-written
   manifests, dependency keys, and optional binary names, preventing path-like
   names from escaping output or local registry directories (2026-05-30).
+- `sgpm fmt` now formats both package sources and `tests/**/*.sg` files, so the
+  package formatting workflow covers the same first-class test tree that
+  `sgpm test` executes (2026-05-31).
 - Registry configuration keys and dependency selectors now require
   alphanumeric boundaries with lowercase ASCII letters, digits, `_`, `-`, or
   `.` internally, preventing ambiguous lockfile identifiers and remote-cache
@@ -404,6 +407,14 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
   `result_ok_with<T, E>` / `result_err_with<T, E>`, and a runnable
   `examples/stdlib/04_option_result.sg` smoke test covers bool constructors
   plus projection helpers (2026-05-31).
+- `std::option` now also exposes `option_some_bool` / `option_none_bool`, and
+  `std::result` exposes `result_ok_bool` / `result_err_bool` for
+  `Result<bool, i64>`. Bool `Vec`/`HashMap` helpers reuse these constructors
+  instead of hand-writing tagged `Option<bool>` literals, with compiler
+  surface and `sgc` runtime smoke coverage (2026-05-31).
+- `Option<bool>` and `Result<bool, i64>` now provide `unwrap` and `expect`
+  specializations alongside the existing `unwrap_or`, matching the i64
+  convenience surface for common success-path use (2026-05-31).
 - `sglsp` completion and hover now use the same workspace document set as
   definition, references, rename, and workspace-symbol queries. Imported
   `std::*` modules are also indexed from embedded stdlib sources so standard
@@ -412,15 +423,39 @@ Polish the user-facing toolchain after the compiler/runtime debt is reduced:
 - `sglsp` signature help now also searches workspace documents and imported
   stdlib modules, while signature labels render AST types directly instead of
   relying on token spans that can include trailing punctuation (2026-05-31).
+- `sglsp` stdlib completion/signature dependencies now mirror `sgc` stdlib
+  preloading for reflection modules: importing `std::ffi`, `std::db`,
+  `std::lua54`, `std::net`, or `std::proto` also exposes the `Option`/`Result`
+  family needed by those wrappers (2026-05-31).
+- `sglsp` symbol collection now includes impl, trait, and class methods, so
+  imported stdlib APIs such as `Option.unwrap`, `Option.expect`, and
+  `Iterator.next` appear in completion and hover, while workspace method
+  declarations also participate in workspace-symbol flows instead of only
+  top-level declarations (2026-05-31).
+- `sglsp` go-to-definition now resolves imported stdlib symbols and methods to
+  stable `sengoo-stdlib:/<module>.sg` locations, replacing the old unknown-symbol
+  fallback that could jump back to the current call site for `unwrap`-style
+  method names (2026-05-31).
 - `sglsp` document/range formatting now reuses the shared `sgfmt` formatter API
   for parseable buffers, while retaining trailing-whitespace cleanup as the
   fallback for incomplete in-editor source (2026-05-31).
 - `sglsp` range formatting now returns edits limited to the requested line
   span instead of replacing the entire document, using `sgfmt` output when line
   mapping is stable and a whitespace-only fallback otherwise (2026-05-31).
+- `sglsp` compiler diagnostics now fall back to the embedded
+  `sengoo-compiler` pipeline when `sgc --error-format json` cannot be started,
+  so editors still receive parse/type errors even when `sgc` is missing from
+  PATH (2026-05-31).
+- `sglsp` also falls back to embedded compiler diagnostics when a discovered
+  `sgc` exits with non-JSON error text, covering stale tools or mismatched PATH
+  entries that do not support `--error-format json` (2026-05-31).
 - `sgpm doc` now exposes package-level API documentation generation through
   `sgc doc`, including workspace/package selection, lockfile checking, and
   `[lib]`-first entry selection for reusable packages (2026-05-31).
+- `sgpm check` and `sgpm build` now expose the selected package's own `[lib]`
+  entry in `SENGOO_MODULE_MAP`, so dual-target packages can import their own
+  library from their binary entry by package name while retaining existing
+  dependency module maps (2026-05-31).
 - `sgpm test` now forwards profile optimization flags explicitly:
   debug uses `sgc run -O 0`, and `--release` uses `sgc run -O 2`
   (2026-05-29).

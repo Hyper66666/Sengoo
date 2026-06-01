@@ -329,6 +329,17 @@ fn fake_sgc(dir: &Path) -> PathBuf {
     script
 }
 
+#[cfg(windows)]
+fn fake_sgfmt(dir: &Path) -> PathBuf {
+    let script = dir.join("sgfmt.cmd");
+    fs::write(
+        &script,
+        "@echo off\r\necho %CD% :: %* >> \"%SGPM_RECORD%\"\r\nexit /b 0\r\n",
+    )
+    .unwrap();
+    script
+}
+
 #[cfg(not(windows))]
 fn fake_sgc(dir: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -337,6 +348,22 @@ fn fake_sgc(dir: &Path) -> PathBuf {
     fs::write(
         &script,
         "#!/bin/sh\nprintf '%s :: %s :: modules=%s\\n' \"$PWD\" \"$*\" \"$SENGOO_MODULE_MAP\" >> \"$SGPM_RECORD\"\nexit 0\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
+#[cfg(not(windows))]
+fn fake_sgfmt(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = dir.join("sgfmt");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s :: %s\\n' \"$PWD\" \"$*\" >> \"$SGPM_RECORD\"\nexit 0\n",
     )
     .unwrap();
     let mut perms = fs::metadata(&script).unwrap().permissions();
@@ -1533,6 +1560,65 @@ fn sgpm_check_maps_dual_target_dependency_to_library_entry() {
 }
 
 #[test]
+fn sgpm_package_commands_expose_selected_package_own_library_module() {
+    let dir = temp_dir("check_own_lib_module_map");
+    let app = dir.join("app");
+    write_bin_and_lib_pkg(&app, "app");
+
+    let record = dir.join("record.txt");
+    let fake = fake_sgc(&dir);
+    let check_output = Command::new(sgpm())
+        .args([
+            "check",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", &fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm check");
+
+    assert!(
+        check_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check_output.stdout),
+        String::from_utf8_lossy(&check_output.stderr)
+    );
+    let log = fs::read_to_string(&record).unwrap().replace('\\', "/");
+    let entry = app.join("src/lib.sg").to_string_lossy().replace('\\', "/");
+    assert!(
+        log.contains(&format!("modules=app={entry}")),
+        "selected package check should expose its own library entry:\n{log}"
+    );
+
+    let build_output = Command::new(sgpm())
+        .args([
+            "build",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", &fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm build");
+
+    assert!(
+        build_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&build_output.stdout),
+        String::from_utf8_lossy(&build_output.stderr)
+    );
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    assert!(
+        log.contains(&format!("modules=app={entry}")),
+        "selected package build should expose its own library entry:\n{log}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sgpm_run_rejects_library_package_with_actionable_diagnostic() {
     let dir = temp_dir("run_library");
     let lib = dir.join("libpkg");
@@ -1678,6 +1764,54 @@ fn sgpm_test_exposes_library_package_to_its_tests() {
         log.contains(&format!("modules=libpkg={entry}")),
         "library tests should receive their own public module mapping:\n{log}"
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sgpm_fmt_formats_src_and_tests_files() {
+    let dir = temp_dir("fmt_src_and_tests");
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::create_dir_all(app.join("tests")).unwrap();
+    fs::write(app.join("tests/basic.sg"), "def main() -> i64 { 0 }\n").unwrap();
+
+    let record = dir.join("record.txt");
+    let fake_sgc = fake_sgc(&dir);
+    let fake_sgfmt = fake_sgfmt(&dir);
+    let output = Command::new(sgpm())
+        .args([
+            "fmt",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", fake_sgc)
+        .env("SGPM_SGFMT", fake_sgfmt)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm fmt");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    assert!(
+        log.contains("/src/main.sg --write"),
+        "fmt should format package sources:\n{log}"
+    );
+    assert!(
+        log.contains("/tests/basic.sg --write"),
+        "fmt should format package tests:\n{log}"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("formatted 2 Sengoo source file(s)"),
+        "stdout should count src and tests files:\n{stdout}"
+    );
+
     let _ = fs::remove_dir_all(dir);
 }
 

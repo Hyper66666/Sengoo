@@ -1,0 +1,33 @@
+extern "C" {
+    fn sengoo_args_len() -> i64;
+    fn sengoo_arg_len(index: i64) -> i64;
+    fn sengoo_arg_copy(index: i64, out_buffer: i64, out_capacity: i64) -> i64;
+}
+
+def args_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def args_len() -> i64 {
+    sengoo_args_len()
+}
+
+def arg_exists(index: i64) -> bool {
+    index >= 0 && index < args_len()
+}
+
+def arg_len(index: i64) -> Result<i64, i64> {
+    args_i64_result(sengoo_arg_len(index))
+}
+
+def arg_copy_raw(index: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    args_i64_result(sengoo_arg_copy(index, buffer_ptr, capacity))
+}
+
+def arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64> {
+    arg_copy_raw(index, buffer.ptr(), buffer.len())
+}

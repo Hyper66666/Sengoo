@@ -1,0 +1,21 @@
+// examples/stdlib/17_process_run.sg
+//
+// Demonstrates: importing std::process helpers for synchronous shell-free
+// child execution. This example selects a shell explicitly at the call site.
+//
+// Run: sgc run examples/stdlib/17_process_run.sg
+// Expected output: 17
+
+import std::env;
+import std::process;
+
+def main() -> i64 {
+    let code = if env_is_windows() {
+        process_run_3("cmd.exe", "/D", "/C", "exit /B 17").unwrap_or(0)
+    } else {
+        process_run_2("sh", "-c", "exit 17").unwrap_or(0)
+    };
+
+    print(code);
+    0
+}

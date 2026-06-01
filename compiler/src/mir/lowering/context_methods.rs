@@ -6,7 +6,7 @@ impl<'a> LoweringContext<'a> {
         mir_fn: &'a mut MirFunction,
         lambda_counter: &'a mut usize,
         known_functions: &'a HashSet<String>,
-        known_function_sigs: &HashMap<String, FunctionSig>,
+        known_function_sigs: &'a HashMap<String, FunctionSig>,
         struct_defs: &'a HashMap<String, &'a hir::HIRStruct>,
         concrete_type_registry: ConcreteTypeRegistry,
         options: MirLowerOptions,
@@ -31,10 +31,12 @@ impl<'a> LoweringContext<'a> {
             lambda_counter,
             lambda_functions: Vec::new(),
             lambda_names: HashMap::new(),
-            function_sigs: known_function_sigs.clone(),
+            function_sigs_base: known_function_sigs,
+            function_sigs_overlay: HashMap::new(),
             lambda_environments: HashMap::new(),
             type_names: HashMap::new(),
-            known_functions: known_functions.clone(),
+            known_functions_base: known_functions,
+            known_functions_overlay: HashSet::new(),
             struct_defs,
             concrete_type_registry,
             options,
@@ -59,26 +61,28 @@ impl<'a> LoweringContext<'a> {
         specialized: hir::HIRFunction,
         param_count: usize,
     ) -> Option<String> {
-        if self.known_functions.contains(&specialized.name) {
+        if self.is_known_function(&specialized.name) {
             return Some(specialized.name);
         }
 
-        self.function_sigs.insert(
+        self.insert_function_sig(
             specialized.name.clone(),
             build_hir_function_sig(&specialized.return_type, param_count, self.struct_defs),
         );
-        self.known_functions.insert(specialized.name.clone());
+        self.insert_known_function(specialized.name.clone());
 
         match lower_function(
             &specialized,
             self.lambda_counter,
-            &self.known_functions,
-            &self.function_sigs,
+            self.known_functions_base,
+            self.function_sigs_base,
             self.struct_defs,
             self.concrete_type_registry.clone(),
             &self.options,
             self.inherent_method_templates,
             self.trait_method_templates,
+            self.known_functions_overlay.clone(),
+            self.function_sigs_overlay.clone(),
         ) {
             Ok((mir_fn, nested)) => {
                 self.lambda_functions.push(mir_fn);
@@ -154,8 +158,7 @@ impl<'a> LoweringContext<'a> {
         let specialized_name =
             self.lower_materialized_function(specialized.clone(), specialized.params.len())?;
         let ret_type = self
-            .function_sigs
-            .get(&specialized_name)
+            .function_sig(&specialized_name)
             .map(|sig| sig.ret_type.clone())
             .unwrap_or_else(|| {
                 hir_type_to_mir_with_structs(&specialized.return_type, self.struct_defs)
@@ -301,5 +304,52 @@ impl<'a> LoweringContext<'a> {
         let name = format!("$__async_block{}", self.lambda_counter);
         *self.lambda_counter += 1;
         name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn materialized_entries_are_kept_in_overlay_without_mutating_base() {
+        let mut mir_fn = MirFunction::new("probe".to_string(), Vec::new(), MIR_I64);
+        let mut lambda_counter = 0;
+        let mut known_functions = HashSet::new();
+        known_functions.insert("base".to_string());
+        let mut function_sigs = HashMap::new();
+        function_sigs.insert(
+            "base".to_string(),
+            build_function_sig(MIR_I64, 0, Vec::new()),
+        );
+        let struct_defs = HashMap::new();
+        let concrete_named_types = HashMap::new();
+
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::new(&struct_defs, &concrete_named_types),
+            MirLowerOptions::default(),
+            &[],
+            &[],
+        );
+
+        ctx.insert_known_function("materialized".to_string());
+        ctx.insert_function_sig(
+            "materialized".to_string(),
+            build_function_sig(MIR_BOOL, 1, Vec::new()),
+        );
+
+        assert!(ctx.is_known_function("base"));
+        assert!(ctx.is_known_function("materialized"));
+        assert_eq!(
+            ctx.function_sig("materialized").map(|sig| &sig.ret_type),
+            Some(&MIR_BOOL)
+        );
+        assert!(!known_functions.contains("materialized"));
+        assert!(!function_sigs.contains_key("materialized"));
     }
 }

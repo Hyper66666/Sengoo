@@ -145,8 +145,9 @@ def main() -> i64 {
 type-checked before dependent binary packages are compiled. Running `sgpm run`
 from a pure library package fails with a prompt to add `[bin]`. Library package
 tests also receive their package's own `[lib]` module, so `tests/*.sg` files can
-import the public package name. If a dependency declares both `[bin]` and
-`[lib]`, imports use `[lib].path` while build and run keep using `[bin].path`.
+import the public package name. If a package declares both `[bin]` and `[lib]`,
+its binary can import its own library by package name; dependency imports still
+use `[lib].path` while build and run keep using `[bin].path`.
 
 `sgpm` local registries use this directory layout:
 
@@ -279,7 +280,7 @@ sgpm test
 # Run tests with the release profile (-O2).
 sgpm test --release
 
-# Format src/**/*.sg using sgfmt.
+# Format src/**/*.sg and tests/**/*.sg using sgfmt.
 sgpm fmt
 
 # Check formatting without writing.

@@ -29,7 +29,9 @@ impl<'source> Lexer<'source> {
     /// Tokenize 源代码，返回 Token 流（跳过空白和注释）
     pub fn tokenize(source: &'source str) -> Vec<Token> {
         let mut lexer = TokenKind::lexer(source);
-        let mut tokens = Vec::new();
+        // 预留容量以避免大文件下 token 向量反复扩容/搬迁。
+        // 经验估计：平均每个 token 约占 4 字节源码，宁可略多于反复 realloc。
+        let mut tokens = Vec::with_capacity(source.len() / 4 + 16);
 
         while let Some(result) = lexer.next() {
             if let Ok(kind) = result {

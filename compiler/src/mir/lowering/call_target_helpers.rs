@@ -23,8 +23,7 @@ pub(super) enum CallTargetResolution {
 impl<'a> LoweringContext<'a> {
     fn fallback_named_call_target(&self, name: &str) -> CallTargetPlan {
         let ret_type = self
-            .function_sigs
-            .get(name)
+            .function_sig(name)
             .map(|sig| sig.ret_type.clone())
             .unwrap_or(MIR_I64);
         CallTargetPlan {
@@ -42,8 +41,7 @@ impl<'a> LoweringContext<'a> {
         if let Some(&var_local) = self.local_names.get(name) {
             if let Some(lambda_name) = self.lambda_names.get(&var_local) {
                 let ret_type = self
-                    .function_sigs
-                    .get(lambda_name)
+                    .function_sig(lambda_name)
                     .map(|sig| sig.ret_type.clone())
                     .unwrap_or(MIR_I64);
                 let env_ptr_local = self

@@ -17,7 +17,7 @@ pub(crate) async fn cmd_run(
     contract_checks: ContractChecksMode,
     requested_engine: RunEngine,
     force_rebuild: bool,
-    _args: &[String],
+    args: &[String],
     low_memory: bool,
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
@@ -200,10 +200,20 @@ pub(crate) async fn cmd_run(
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
+    let runtime_c_fingerprint = optional_file_fingerprint(runtime_c.as_deref())?;
     let clang_exe = find_clang();
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    let lli_extra_objects = if matches!(resolved_engine, RunEngine::Lli) {
+        if let (Some(clang), Some(runtime_c)) = (clang_exe.as_deref(), runtime_c.as_deref()) {
+            vec![ensure_runtime_object(clang, runtime_c, opt_level)?]
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
     let generic_feature_flags = vec![
         format!("run_engine={:?}", requested_engine),
         format!("resolved_engine={:?}", resolved_engine),
@@ -236,7 +246,7 @@ pub(crate) async fn cmd_run(
         contract_checks_enabled,
         requested_engine,
         resolved_engine,
-        runtime_c.clone(),
+        RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
     );
     let mut edit_impact: Option<EditImpact> = None;
 
@@ -265,7 +275,7 @@ pub(crate) async fn cmd_run(
                             &reflection,
                             Some(Path::new(&metadata.llvm_ir_path)),
                         )?;
-                        run_native_binary(Path::new(exe))
+                        run_native_binary_with_args(Path::new(exe), args)
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
@@ -277,7 +287,12 @@ pub(crate) async fn cmd_run(
                             &reflection,
                             Some(Path::new(&metadata.llvm_ir_path)),
                         )?;
-                        run_with_lli(lli, Path::new(&metadata.llvm_ir_path))
+                        run_with_lli_args(
+                            lli,
+                            Path::new(&metadata.llvm_ir_path),
+                            args,
+                            &lli_extra_objects,
+                        )
                     }
                     RunEngine::Auto => Err(miette::miette!("compile failed")),
                 };
@@ -377,13 +392,18 @@ pub(crate) async fn cmd_run(
                         let exe = previous.executable_path.as_deref().ok_or_else(|| {
                             miette::miette!("cache corrupted: missing native executable path")
                         })?;
-                        run_native_binary(Path::new(exe))
+                        run_native_binary_with_args(Path::new(exe), args)
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
                             miette::miette!("cache hit but lli is unavailable; try --force-rebuild")
                         })?;
-                        run_with_lli(lli, Path::new(&previous.llvm_ir_path))
+                        run_with_lli_args(
+                            lli,
+                            Path::new(&previous.llvm_ir_path),
+                            args,
+                            &lli_extra_objects,
+                        )
                     }
                     RunEngine::Auto => Err(miette::miette!("compile failed")),
                 };
@@ -414,7 +434,7 @@ pub(crate) async fn cmd_run(
                                         }
                                     };
                                     println!("run workset plan: {}", label);
-                                    return run_native_binary(&executable_path);
+                                    return run_native_binary_with_args(&executable_path, args);
                                 }
                                 Err(err) => {
                                     println!("run workset fallback: {}", err);
@@ -439,21 +459,21 @@ pub(crate) async fn cmd_run(
         println!("run workset plan: full rebuild");
     }
 
-    let (_phases, effective_memory_mode) =
-        compile_source_to_llvm_file_with_phase_timings_with_mode(
-            &source,
-            opt_level,
-            &llvm_ir_path,
-            if low_memory {
-                Some(FrontendMemoryMode::LowMemory)
-            } else {
-                None
-            },
-        )
-        .map_err(|e| {
-            emit_compile_error(Some(input), &e.to_string());
-            miette::miette!("compile failed")
-        })?;
+    let (phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings_with_mode(
+        &source,
+        opt_level,
+        &llvm_ir_path,
+        if low_memory {
+            Some(FrontendMemoryMode::LowMemory)
+        } else {
+            None
+        },
+    )
+    .map_err(|e| {
+        emit_compile_error(Some(input), &e.to_string());
+        miette::miette!("compile failed")
+    })?;
+    crate::maybe_print_phase_timings(&phases);
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
@@ -528,13 +548,13 @@ pub(crate) async fn cmd_run(
                 opt_level,
             )?;
             link_native_binary_from_objects(clang, &object_paths, &executable_path)?;
-            run_native_binary(&executable_path)?;
+            run_native_binary_with_args(&executable_path, args)?;
         }
         RunEngine::Lli => {
             let lli = lli_exe
                 .as_deref()
                 .ok_or_else(|| miette::miette!("lli is required for --engine lli"))?;
-            run_with_lli(lli, &llvm_ir_path)?;
+            run_with_lli_args(lli, &llvm_ir_path, args, &lli_extra_objects)?;
         }
         RunEngine::Auto => {
             return Err(miette::miette!(
@@ -567,6 +587,7 @@ pub(crate) async fn cmd_run(
         requested_engine,
         resolved_engine,
         runtime_c,
+        runtime_c_fingerprint,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
         executable_path: if matches!(resolved_engine, RunEngine::Native) {
             Some(executable_path.to_string_lossy().to_string())

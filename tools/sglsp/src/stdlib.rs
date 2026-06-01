@@ -1,19 +1,30 @@
 use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 use super::symbols::{collect_ast_symbols, AstSymbol};
 use std::collections::HashSet;
+use tower_lsp::lsp_types::{Location, Url};
 
 const STDLIB_SOURCES: &[(&str, &str)] = &[
+    ("args", include_str!("../../stdlib/args.sg")),
     ("collections", include_str!("../../stdlib/collections.sg")),
     ("db", include_str!("../../stdlib/db.sg")),
+    ("dir", include_str!("../../stdlib/dir.sg")),
+    ("env", include_str!("../../stdlib/env.sg")),
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
+    ("file", include_str!("../../stdlib/file.sg")),
+    ("io", include_str!("../../stdlib/io.sg")),
     ("lua54", include_str!("../../stdlib/lua54.sg")),
     ("math", include_str!("../../stdlib/math.sg")),
     ("net", include_str!("../../stdlib/net.sg")),
     ("option", include_str!("../../stdlib/option.sg")),
+    ("path", include_str!("../../stdlib/path.sg")),
+    ("process", include_str!("../../stdlib/process.sg")),
     ("proto", include_str!("../../stdlib/proto.sg")),
+    ("random", include_str!("../../stdlib/random.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
+    ("strconv", include_str!("../../stdlib/strconv.sg")),
+    ("time", include_str!("../../stdlib/time.sg")),
 ];
 
 fn stdlib_source(module: &str) -> Option<&'static str> {
@@ -27,6 +38,8 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "collections" => &["option"],
         "option" => &["result"],
         "result" => &["option"],
+        "ffi" => &["option", "result"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -94,6 +107,37 @@ fn add_stdlib_module_signatures(
     }
 }
 
+fn stdlib_module_uri(module: &str) -> Option<Url> {
+    Url::parse(&format!("sengoo-stdlib:/{module}.sg")).ok()
+}
+
+fn stdlib_definition_in_module(
+    module: &str,
+    symbol: &str,
+    seen_modules: &mut HashSet<String>,
+) -> Option<Location> {
+    if !seen_modules.insert(module.to_string()) {
+        return None;
+    }
+
+    if let Some(source) = stdlib_source(module) {
+        if let Some(found) = collect_ast_symbols(source)
+            .into_iter()
+            .find(|item| item.name == symbol)
+        {
+            return Some(Location::new(stdlib_module_uri(module)?, found.range));
+        }
+    }
+
+    for dependency in stdlib_dependencies(module) {
+        if let Some(location) = stdlib_definition_in_module(dependency, symbol, seen_modules) {
+            return Some(location);
+        }
+    }
+
+    None
+}
+
 pub(super) fn stdlib_symbols_for_content(content: &str) -> Vec<AstSymbol> {
     let mut seen_modules = HashSet::new();
     let mut seen_symbols = HashSet::new();
@@ -110,6 +154,18 @@ pub(super) fn stdlib_symbol_detail_for_content(content: &str, symbol: &str) -> O
     stdlib_symbols_for_content(content)
         .into_iter()
         .find(|item| item.name == symbol)
+}
+
+pub(super) fn stdlib_definition_for_content(content: &str, symbol: &str) -> Option<Location> {
+    let mut seen_modules = HashSet::new();
+
+    for module in imported_stdlib_modules(content) {
+        if let Some(location) = stdlib_definition_in_module(&module, symbol, &mut seen_modules) {
+            return Some(location);
+        }
+    }
+
+    None
 }
 
 pub(super) fn stdlib_signatures_for_content(content: &str) -> Vec<FunctionSignatureInfo> {
@@ -142,12 +198,44 @@ mod tests {
     }
 
     #[test]
+    fn stdlib_symbols_include_impl_and_trait_methods() {
+        let option_symbols = stdlib_symbols_for_content("import std::option;\n");
+        let option_names = option_symbols
+            .iter()
+            .map(|symbol| (symbol.name.as_str(), symbol.detail.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(option_names.contains(&("unwrap", "method")));
+        assert!(option_names.contains(&("expect", "method")));
+        assert!(option_names.contains(&("ok_or", "method")));
+
+        let collection_symbols = stdlib_symbols_for_content("import std::collections;\n");
+        let collection_names = collection_symbols
+            .iter()
+            .map(|symbol| (symbol.name.as_str(), symbol.detail.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(collection_names.contains(&("Iterator", "trait")));
+        assert!(collection_names.contains(&("next", "trait method")));
+    }
+
+    #[test]
     fn stdlib_symbol_detail_resolves_imported_symbol() {
         let symbol = stdlib_symbol_detail_for_content("import std::option;\n", "option_some")
             .expect("imported stdlib symbol should resolve");
 
         assert_eq!(symbol.name, "option_some");
         assert_eq!(symbol.detail, "function");
+    }
+
+    #[test]
+    fn stdlib_definition_resolves_imported_methods() {
+        let location = stdlib_definition_for_content("import std::option;\n", "unwrap")
+            .expect("imported stdlib method definition should resolve");
+
+        assert_eq!(location.uri.scheme(), "sengoo-stdlib");
+        assert!(location.uri.as_str().ends_with("/option.sg"));
+        assert!(location.range.start.line > 0);
     }
 
     #[test]
@@ -161,5 +249,261 @@ mod tests {
         assert!(labels.contains(&"def option_some<T>(value: T) -> Option<T>"));
         assert!(labels
             .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_ffi_result_family_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::net;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"TcpStream"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+        assert!(names.contains(&"result_ok_with"));
+
+        let signatures = stdlib_signatures_for_content("import std::ffi;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels
+            .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_file_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::file;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"file_exists"));
+        assert!(names.contains(&"file_write_str"));
+        assert!(names.contains(&"file_copy"));
+        assert!(names.contains(&"file_move"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::file;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(
+            &"def file_copy(source: &str, destination: &str, overwrite: bool) -> Result<i64, i64>"
+        ));
+        assert!(labels.contains(
+            &"def file_move(source: &str, destination: &str, overwrite: bool) -> Result<bool, i64>"
+        ));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_env_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::env;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"env_var_copy"));
+        assert!(names.contains(&"env_has_var"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+    }
+
+    #[test]
+    fn stdlib_symbols_include_time_helpers() {
+        let symbols = stdlib_symbols_for_content("import std::time;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"time_unix_ms"));
+        assert!(names.contains(&"time_sleep_ms"));
+        assert!(names.contains(&"time_elapsed_ms"));
+    }
+
+    #[test]
+    fn stdlib_symbols_include_random_helpers() {
+        let symbols = stdlib_symbols_for_content("import std::random;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"random_seed"));
+        assert!(names.contains(&"random_i64"));
+        assert!(names.contains(&"random_range_i64"));
+        assert!(names.contains(&"random_bool"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_path_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::path;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"path_separator"));
+        assert!(names.contains(&"path_join"));
+        assert!(names.contains(&"path_normalize"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::path;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(
+            &"def path_join(left: &str, right: &str, buffer: Buffer) -> Result<i64, i64>"
+        ));
+        assert!(labels.contains(&"def path_is_absolute(path: &str) -> bool"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_process_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::process;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"process_id"));
+        assert!(names.contains(&"process_current_dir_copy"));
+        assert!(names.contains(&"process_exit_code"));
+        assert!(names.contains(&"process_run"));
+        assert!(names.contains(&"process_run_1"));
+        assert!(names.contains(&"process_run_2"));
+        assert!(names.contains(&"process_run_3"));
+        assert!(names.contains(&"process_run_raw"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::process;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
+        );
+        assert!(labels.contains(&"def process_id() -> i64"));
+        assert!(labels.contains(&"def process_run(executable: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(
+            &"def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Result<i64, i64>"
+        ));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_dir_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::dir;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"dir_exists"));
+        assert!(names.contains(&"dir_create"));
+        assert!(names.contains(&"dir_create_all"));
+        assert!(names.contains(&"dir_remove"));
+        assert!(names.contains(&"dir_entry_count"));
+        assert!(names.contains(&"dir_entry_name"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::dir;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def dir_exists(path: &str) -> bool"));
+        assert!(labels.contains(&"def dir_create_all(path: &str) -> Result<bool, i64>"));
+        assert!(labels.contains(&"def dir_remove(path: &str) -> Result<bool, i64>"));
+        assert!(labels.contains(&"def dir_entry_count(path: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(
+            &"def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64>"
+        ));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_io_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::io;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"io_stdin_read"));
+        assert!(names.contains(&"io_stdin_read_line"));
+        assert!(names.contains(&"io_stdout_write"));
+        assert!(names.contains(&"io_stderr_write"));
+        assert!(names.contains(&"io_stdout_flush"));
+        assert!(names.contains(&"io_stderr_flush"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::io;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def io_stdin_read(buffer: Buffer) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def io_stdout_write(data: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def io_stderr_flush() -> Result<bool, i64>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_args_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::args;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"args_len"));
+        assert!(names.contains(&"arg_exists"));
+        assert!(names.contains(&"arg_len"));
+        assert!(names.contains(&"arg_copy"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::args;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def arg_len(index: i64) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_strconv_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::strconv;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"strconv_parse_i64"));
+        assert!(names.contains(&"strconv_parse_i64_buffer"));
+        assert!(names.contains(&"strconv_format_i64"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::strconv;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def strconv_parse_i64(value: &str) -> Result<i64, i64>"));
+        assert!(labels
+            .contains(&"def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64>"));
     }
 }

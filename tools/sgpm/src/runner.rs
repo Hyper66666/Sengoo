@@ -53,7 +53,7 @@ impl Toolchain {
                     .current_dir(&node.root_dir)
                     .arg("check")
                     .arg(&node.entry_path);
-                configure_module_map(&mut command, graph, node, false)?;
+                configure_module_map(&mut command, graph, node, true)?;
 
                 if verbose {
                     eprintln!("sgpm: {}", render_command(&command));
@@ -79,7 +79,7 @@ impl Toolchain {
                 .arg(&output)
                 .arg("-O")
                 .arg(profile.opt_level());
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -102,7 +102,7 @@ impl Toolchain {
                 .current_dir(&node.root_dir)
                 .arg("check")
                 .arg(&node.entry_path);
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -190,7 +190,7 @@ impl Toolchain {
 
         let mut formatted = 0usize;
         for node in &graph.nodes {
-            for file in discover_source_files(&node.root_dir)? {
+            for file in discover_format_files(&node.root_dir)? {
                 let mut command = Command::new(sgfmt);
                 command.current_dir(&node.root_dir).arg(&file);
                 if check {
@@ -239,7 +239,7 @@ impl Toolchain {
                 .arg(&input)
                 .arg("--output")
                 .arg(&output_dir);
-            configure_module_map(&mut command, graph, node, false)?;
+            configure_module_map(&mut command, graph, node, true)?;
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -363,12 +363,17 @@ fn discover_tests(root: &Path) -> Result<Vec<PathBuf>> {
     collect_sg_files(&tests_dir)
 }
 
-fn discover_source_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let src_dir = root.join("src");
-    if !src_dir.exists() {
-        return Ok(Vec::new());
+fn discover_format_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for dir_name in ["src", "tests"] {
+        let dir = root.join(dir_name);
+        if dir.exists() {
+            files.extend(collect_sg_files(&dir)?);
+        }
     }
-    collect_sg_files(&src_dir)
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 fn collect_sg_files(root: &Path) -> Result<Vec<PathBuf>> {

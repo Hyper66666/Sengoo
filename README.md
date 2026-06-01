@@ -367,9 +367,10 @@ fail before invoking external tools when the lockfile is stale. See
 `docs/sgpm-quickstart.md` for the current manifest and command surface.
 Path, git, and registry packages that declare `[lib]` can now be imported by
 dependency name from application source; pure library dependencies are
-type-checked before dependent binaries are built. Dependency keys currently
-must match the target package's `[package].name`; renamed aliases are not
-supported yet.
+type-checked before dependent binaries are built. Packages that declare both
+`[bin]` and `[lib]` can also import their own library by package name from
+their binary entry. Dependency keys currently must match the target package's
+`[package].name`; renamed aliases are not supported yet.
 
 ## Standard Library
 

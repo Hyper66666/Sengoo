@@ -169,6 +169,7 @@ pub(crate) async fn cmd_build(
         }
     }
     let runtime_c = find_runtime_c();
+    let runtime_c_fingerprint = optional_file_fingerprint(runtime_c.as_deref())?;
 
     let output_file = if let Some(out) = output {
         out.to_string()
@@ -247,7 +248,7 @@ pub(crate) async fn cmd_build(
         opt_level,
         contract_checks_enabled,
         emit_llvm,
-        runtime_c.clone(),
+        RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
         output_file.clone(),
     );
     let mut edit_impact: Option<EditImpact> = None;
@@ -435,21 +436,21 @@ pub(crate) async fn cmd_build(
         }
     }
 
-    let (_phases, effective_memory_mode) =
-        compile_source_to_llvm_file_with_phase_timings_with_mode(
-            &source,
-            opt_level,
-            &llvm_ir_path,
-            if low_memory {
-                Some(FrontendMemoryMode::LowMemory)
-            } else {
-                None
-            },
-        )
-        .map_err(|e| {
-            emit_compile_error(Some(input), &e.to_string());
-            miette::miette!("compile failed")
-        })?;
+    let (phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings_with_mode(
+        &source,
+        opt_level,
+        &llvm_ir_path,
+        if low_memory {
+            Some(FrontendMemoryMode::LowMemory)
+        } else {
+            None
+        },
+    )
+    .map_err(|e| {
+        emit_compile_error(Some(input), &e.to_string());
+        miette::miette!("compile failed")
+    })?;
+    crate::maybe_print_phase_timings(&phases);
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
@@ -474,6 +475,7 @@ pub(crate) async fn cmd_build(
             contract_checks: contract_checks_enabled,
             emit_llvm: true,
             runtime_c,
+            runtime_c_fingerprint,
             llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
             output_path: output_file.clone(),
             llvm_ir_hash,
@@ -578,6 +580,7 @@ pub(crate) async fn cmd_build(
         contract_checks: contract_checks_enabled,
         emit_llvm: false,
         runtime_c,
+        runtime_c_fingerprint,
         llvm_ir_path: llvm_ir_path.to_string_lossy().to_string(),
         output_path: output_file.clone(),
         llvm_ir_hash,

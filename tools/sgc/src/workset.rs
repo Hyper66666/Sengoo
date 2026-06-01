@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::{
     canonical_or_lossy, module_invalidation_stats, BuildCacheKey, BuildCacheMetadata, BuildGraphV2,
     BuildWorksetPlan, CodegenWorksetManifest, EditClass, EditImpact, GenericInstancePlanStats,
-    ModuleFingerprint, RunCacheKey, RunCacheMetadata, RunEngine, BUILD_GRAPH_SCHEMA_VERSION,
+    ModuleFingerprint, RunCacheKey, RunCacheMetadata, RunEngine, RuntimeSourceIdentity,
+    BUILD_GRAPH_SCHEMA_VERSION,
 };
 
 const DEFAULT_WORKSET_MANIFEST_MAX_ITEMS: usize = 2048;
@@ -201,7 +202,7 @@ pub(crate) fn cache_key(
     contract_checks: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
-    runtime_c: Option<String>,
+    runtime_c: RuntimeSourceIdentity,
 ) -> RunCacheKey {
     RunCacheKey {
         source_hash,
@@ -210,7 +211,8 @@ pub(crate) fn cache_key(
         contract_checks,
         requested_engine,
         resolved_engine,
-        runtime_c,
+        runtime_c: runtime_c.path,
+        runtime_c_fingerprint: runtime_c.fingerprint,
     }
 }
 
@@ -220,7 +222,7 @@ pub(crate) fn build_cache_key(
     opt_level: u8,
     contract_checks: bool,
     emit_llvm: bool,
-    runtime_c: Option<String>,
+    runtime_c: RuntimeSourceIdentity,
     output_path: String,
 ) -> BuildCacheKey {
     BuildCacheKey {
@@ -229,7 +231,8 @@ pub(crate) fn build_cache_key(
         opt_level,
         contract_checks,
         emit_llvm,
-        runtime_c,
+        runtime_c: runtime_c.path,
+        runtime_c_fingerprint: runtime_c.fingerprint,
         output_path,
     }
 }
@@ -242,6 +245,7 @@ pub(crate) fn metadata_matches(metadata: &RunCacheMetadata, key: &RunCacheKey) -
         && metadata.requested_engine == key.requested_engine
         && metadata.resolved_engine == key.resolved_engine
         && metadata.runtime_c == key.runtime_c
+        && metadata.runtime_c_fingerprint == key.runtime_c_fingerprint
 }
 
 pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildCacheKey) -> bool {
@@ -252,6 +256,7 @@ pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildC
         && metadata.contract_checks == key.contract_checks
         && metadata.emit_llvm == key.emit_llvm
         && metadata.runtime_c == key.runtime_c
+        && metadata.runtime_c_fingerprint == key.runtime_c_fingerprint
         && metadata.output_path == key.output_path
 }
 
@@ -312,6 +317,9 @@ pub(crate) fn build_cache_mismatch_reasons(
     }
     if metadata.runtime_c != key.runtime_c {
         reasons.push("runtime path changed".to_string());
+    }
+    if metadata.runtime_c_fingerprint != key.runtime_c_fingerprint {
+        reasons.push("runtime source changed".to_string());
     }
     if metadata.output_path != key.output_path {
         reasons.push("output path changed".to_string());
@@ -667,6 +675,9 @@ pub(crate) fn cache_mismatch_reasons(
     }
     if metadata.runtime_c != key.runtime_c {
         reasons.push("runtime path changed".to_string());
+    }
+    if metadata.runtime_c_fingerprint != key.runtime_c_fingerprint {
+        reasons.push("runtime source changed".to_string());
     }
 
     if reasons.is_empty() {

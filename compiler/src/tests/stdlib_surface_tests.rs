@@ -90,6 +90,362 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_search_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["string.sg"],
+        r#"
+def main() -> i64 {
+    let text = "sengoo";
+    let score = if str_contains(text, "goo")
+        && str_starts_with(text, "sen")
+        && str_ends_with(text, "goo")
+        && str_index_of(text, "go") == 3 {
+        1
+    } else {
+        0
+    };
+    score
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_contains"));
+    assert!(ir.contains("sengoo_str_starts_with"));
+    assert!(ir.contains("sengoo_str_ends_with"));
+    assert!(ir.contains("sengoo_str_index_of"));
+}
+
+#[test]
+fn strconv_module_imports_i64_parse_and_format_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "strconv.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let parsed = strconv_parse_i64(" -42\n").unwrap_or(0);
+    let formatted = strconv_format_i64(parsed + 50, buffer).unwrap_or(0);
+    let source = ffi_buffer_from_bytes("123").unwrap_or(Buffer { handle: 0 });
+    let parsed_buffer = strconv_parse_i64_buffer(source, 3).unwrap_or(0);
+    let invalid = strconv_parse_i64("12x").unwrap_or(7);
+    source.free();
+    buffer.free();
+    formatted + parsed_buffer + invalid
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_strconv_last_error_code"));
+    assert!(ir.contains("sengoo_strconv_parse_i64"));
+    assert!(ir.contains("sengoo_strconv_format_i64"));
+}
+
+#[test]
+fn file_module_imports_copy_and_move_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "file.sg"],
+        r#"
+def main() -> i64 {
+    let source = "target/sengoo-stdlib-file-surface-source.txt";
+    let copy = "target/sengoo-stdlib-file-surface-copy.txt";
+    let moved = "target/sengoo-stdlib-file-surface-moved.txt";
+    let wrote = file_write_str(source, "abc").unwrap_or(0);
+    let copied = file_copy(source, copy, false).unwrap_or(0);
+    let moved_ok = file_move(copy, moved, false).unwrap_or(false);
+    file_remove(source);
+    file_remove(moved);
+
+    if wrote == 3 && copied == 3 && moved_ok {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_file_copy"));
+    assert!(ir.contains("sengoo_file_move"));
+}
+
+#[test]
+fn env_module_imports_process_and_variable_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "env.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = env_var_copy("SENGOO_TEST_ENV", buffer).unwrap_or(0);
+    let present = env_has_var("SENGOO_TEST_ENV");
+    let windows = env_is_windows();
+    let unix = env_is_unix();
+    let code = env_exit_code(false, 7);
+    buffer.free();
+
+    if copied >= 0 && (windows || unix) && code == 7 {
+        if present { 1 } else { 0 }
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_env_var_len"));
+    assert!(ir.contains("sengoo_env_var_copy"));
+    assert!(ir.contains("sengoo_env_is_windows"));
+    assert!(ir.contains("sengoo_env_is_unix"));
+    assert!(ir.contains("env_exit_code"));
+}
+
+#[test]
+fn time_module_imports_clock_and_sleep_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["time.sg"],
+        r#"
+def main() -> i64 {
+    let before = time_unix_ms();
+    time_sleep_ms(0);
+    let after = time_unix_ms();
+
+    if after >= before && time_unix_seconds() >= 0 {
+        time_elapsed_ms(before, after)
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_time_unix_ms"));
+    assert!(ir.contains("sengoo_time_unix_seconds"));
+    assert!(ir.contains("sengoo_time_sleep_ms"));
+    assert!(ir.contains("time_elapsed_ms"));
+}
+
+#[test]
+fn random_module_imports_seeded_random_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["random.sg"],
+        r#"
+def main() -> i64 {
+    random_seed(123);
+    let value = random_i64();
+    let bounded = random_range_i64(10, 20);
+    let coin = random_bool();
+
+    if value >= 0 && bounded >= 10 && bounded < 20 && (coin || !coin) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_random_seed"));
+    assert!(ir.contains("sengoo_random_i64"));
+    assert!(ir.contains("sengoo_random_range_i64"));
+    assert!(ir.contains("sengoo_random_bool"));
+}
+
+#[test]
+fn path_module_imports_cross_platform_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "path.sg"],
+        r#"
+def main() -> i64 {
+    let joined = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let parent = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let file_name = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let stem = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let extension = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let normalized = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+
+    let separator = path_separator();
+    let joined_len = path_join("alpha", "beta.sg", joined).unwrap_or(0);
+    let parent_len = path_parent("alpha/beta.sg", parent).unwrap_or(0);
+    let file_name_len = path_file_name("alpha/beta.sg", file_name).unwrap_or(0);
+    let stem_len = path_stem("alpha/beta.sg", stem).unwrap_or(0);
+    let extension_len = path_extension("alpha/beta.sg", extension).unwrap_or(0);
+    let normalized_len = path_normalize("alpha//./beta/../gamma.sg", normalized).unwrap_or(0);
+    let absolute = path_is_absolute("/alpha") || path_is_absolute("C:/alpha") || path_is_absolute("\\\\server\\share");
+
+    joined.free();
+    parent.free();
+    file_name.free();
+    stem.free();
+    extension.free();
+    normalized.free();
+
+    if separator > 0
+        && joined_len > 0
+        && parent_len > 0
+        && file_name_len > 0
+        && stem_len > 0
+        && extension_len > 0
+        && normalized_len > 0
+        && absolute {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_path_separator"));
+    assert!(ir.contains("sengoo_path_is_absolute"));
+    assert!(ir.contains("sengoo_path_join"));
+    assert!(ir.contains("sengoo_path_parent"));
+    assert!(ir.contains("sengoo_path_file_name"));
+    assert!(ir.contains("sengoo_path_stem"));
+    assert!(ir.contains("sengoo_path_extension"));
+    assert!(ir.contains("sengoo_path_normalize"));
+}
+
+#[test]
+fn process_module_imports_metadata_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "process.sg"],
+        r#"
+def main() -> i64 {
+    let len = process_current_dir_len().unwrap_or(0);
+    let buffer = ffi_buffer_new(len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied = process_current_dir_copy(buffer).unwrap_or(0);
+    let pid = process_id();
+    let ok_code = process_exit_code(true, 9);
+    let err_code = process_exit_code(false, 9);
+    let missing_0 = process_run("sengoo-missing-process").is_err();
+    let missing_1 = process_run_1("sengoo-missing-process", "a").is_err();
+    let missing_2 = process_run_2("sengoo-missing-process", "a", "b").is_err();
+    let missing_3 = process_run_3("sengoo-missing-process", "a", "b", "c").is_err();
+    buffer.free();
+
+    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 && missing_0 && missing_1 && missing_2 && missing_3 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_process_id"));
+    assert!(ir.contains("sengoo_process_current_dir_len"));
+    assert!(ir.contains("sengoo_process_current_dir_copy"));
+    assert!(ir.contains("sengoo_process_run"));
+    assert!(ir.contains("process_exit_code"));
+}
+
+#[test]
+fn dir_module_imports_directory_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "dir.sg"],
+        r#"
+def main() -> i64 {
+    let root = "target/sengoo-stdlib-dir-surface";
+    let nested = "target/sengoo-stdlib-dir-surface/nested";
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let created = dir_create_all(nested).unwrap_or(false);
+    let nested_exists = dir_exists(nested);
+    let count = dir_entry_count(root).unwrap_or(0);
+    let first = dir_entry_name(root, 0, buffer).unwrap_or(0);
+    let removed_nested = dir_remove(nested).unwrap_or(false);
+    let removed_root = dir_remove(root).unwrap_or(false);
+    buffer.free();
+
+    if created && nested_exists && count >= 1 && first >= 0 && removed_nested && removed_root {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_dir_exists"));
+    assert!(ir.contains("sengoo_dir_create"));
+    assert!(ir.contains("sengoo_dir_create_all"));
+    assert!(ir.contains("sengoo_dir_remove"));
+    assert!(ir.contains("sengoo_dir_entry_count"));
+    assert!(ir.contains("sengoo_dir_entry_name"));
+}
+
+#[test]
+fn io_module_imports_standard_stream_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "io.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read(buffer).unwrap_or(0);
+    let line = io_stdin_read_line(buffer).unwrap_or(0);
+    let out = io_stdout_write("ok").unwrap_or(0);
+    let err = io_stderr_write("warn").unwrap_or(0);
+    let flushed = io_stdout_flush().unwrap_or(false) && io_stderr_flush().unwrap_or(false);
+    buffer.free();
+
+    if read >= 0 && line >= 0 && out == 2 && err == 4 && flushed {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_io_stdin_read"));
+    assert!(ir.contains("sengoo_io_stdin_read_line"));
+    assert!(ir.contains("sengoo_io_stdout_write"));
+    assert!(ir.contains("sengoo_io_stderr_write"));
+    assert!(ir.contains("sengoo_io_stdout_flush"));
+    assert!(ir.contains("sengoo_io_stderr_flush"));
+}
+
+#[test]
+fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "args.sg"],
+        r#"
+def main() -> i64 {
+    let first_len = arg_len(0).unwrap_or(0);
+    let buffer = ffi_buffer_new(first_len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied = arg_copy(0, buffer).unwrap_or(0);
+    let exists = arg_exists(0);
+    buffer.free();
+
+    if args_len() >= 0 && exists && copied == first_len {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_args_len"));
+    assert!(ir.contains("sengoo_arg_len"));
+    assert!(ir.contains("sengoo_arg_copy"));
+    assert!(ir.contains("declare void @sengoo_args_init(i64, i64)"));
+    assert!(ir.contains("declare i64 @sengoo_args_len()"));
+    assert!(ir.contains("declare i64 @sengoo_arg_len(i64)"));
+    assert!(ir.contains("declare i64 @sengoo_arg_copy(i64, i64, i64)"));
+    assert!(ir.contains("define i64 @sengoo_user_main()"));
+    assert!(ir.contains("define i32 @main(i32 %argc, i8** %argv)"));
+    assert!(ir.contains("call void @sengoo_args_init"));
+    assert!(ir.contains("call i64 @sengoo_user_main()"));
+}
+
+#[test]
+fn codegen_preserves_zero_argument_main_without_args_runtime() {
+    let ir = compile_to_ir("def main() -> i64 {\n    0\n}\n").expect("plain main should compile");
+
+    assert!(ir.contains("define i64 @main()"));
+    assert!(!ir.contains("sengoo_args_init"));
+    assert!(!ir.contains("sengoo_user_main"));
+}
+
+#[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
         &["math.sg"],
@@ -992,6 +1348,91 @@ def main() -> i64 {
     assert!(
         ir.contains("; Function: result_err_with_bool_bool"),
         "expected generic result_err_with<bool, bool> specialization\n{}",
+        ir
+    );
+}
+
+#[test]
+fn stdlib_surface_bool_option_result_convenience_constructors_compile() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let some_flag: Option<bool> = option_some_bool(true);
+    let none_flag: Option<bool> = option_none_bool();
+    let ok_flag: Result<bool, i64> = result_ok_bool(true);
+    let err_flag: Result<bool, i64> = result_err_bool(7);
+
+    if some_flag.unwrap_or(false)
+        && none_flag.is_none()
+        && ok_flag.ok().unwrap_or(false)
+        && err_flag.err().unwrap_or(0) == 7 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: option_some_bool"),
+        "expected concrete Option<bool> constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: option_none_bool"),
+        "expected concrete Option<bool> none constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: result_ok_bool"),
+        "expected concrete Result<bool, i64> ok constructor\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: result_err_bool"),
+        "expected concrete Result<bool, i64> err constructor\n{}",
+        ir
+    );
+}
+
+#[test]
+fn stdlib_surface_bool_option_result_unwrap_and_expect_compile() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let option_value = option_some_bool(true).unwrap();
+    let expected_option = option_some_bool(true).expect("option bool ok");
+    let result_value = result_ok_bool(false).unwrap();
+    let expected_result = result_ok_bool(true).expect("result bool ok");
+
+    if option_value && expected_option && !result_value && expected_result {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: Option_bool_unwrap"),
+        "expected Option<bool>.unwrap specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Option_bool_expect"),
+        "expected Option<bool>.expect specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Result_bool_i64_unwrap"),
+        "expected Result<bool, i64>.unwrap specialization\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("; Function: Result_bool_i64_expect"),
+        "expected Result<bool, i64>.expect specialization\n{}",
         ir
     );
 }

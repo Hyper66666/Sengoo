@@ -1,0 +1,30 @@
+// examples/stdlib/05_file.sg
+//
+// Demonstrates: importing std::file helpers for write, append, read, length, existence, and removal.
+//
+// Run: sgc run examples/stdlib/05_file.sg
+// Expected output: 15
+
+import std::file;
+
+def main() -> i64 {
+    let path = "sengoo-stdlib-file-example.txt";
+    let wrote = file_write_str(path, "abc").unwrap_or(0);
+    let appended = file_append_str(path, "de").unwrap_or(0);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let read = file_read_into(path, buffer).unwrap_or(0);
+    let len = file_len(path).unwrap_or(0);
+    let existed = file_exists(path);
+    buffer.free();
+    let removed = file_remove(path);
+    let gone = !file_exists(path);
+
+    let score = if existed && removed && gone {
+        wrote + appended + read + len
+    } else {
+        0
+    };
+
+    print(score);
+    0
+}

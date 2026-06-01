@@ -1,0 +1,36 @@
+// examples/stdlib/08_path.sg
+//
+// Demonstrates: importing std::path helpers for separator discovery,
+// absolute checks, joining, extraction, and lexical normalization.
+//
+// Run: sgc run examples/stdlib/08_path.sg
+// Expected output: 9
+
+import std::path;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+
+    let separator = path_separator();
+    let joined = path_join("alpha", "beta.sg", buffer).unwrap_or(0);
+    let parent = path_parent("alpha/beta.sg", buffer).unwrap_or(0);
+    let file_name = path_file_name("alpha/beta.sg", buffer).unwrap_or(0);
+    let stem = path_stem("alpha/beta.sg", buffer).unwrap_or(0);
+    let extension = path_extension("alpha/beta.sg", buffer).unwrap_or(0);
+    let normalized = path_normalize("alpha//./beta/../gamma.sg", buffer).unwrap_or(0);
+    let absolute = path_is_absolute("/") && path_is_absolute("C:/alpha") && !path_is_absolute("alpha");
+
+    buffer.free();
+
+    let ok = separator > 0
+        && joined == 13
+        && parent == 5
+        && file_name == 7
+        && stem == 4
+        && extension == 2
+        && normalized == 14
+        && absolute;
+
+    print(if ok { 9 } else { 0 });
+    0
+}

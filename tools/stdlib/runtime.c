@@ -1,9 +1,25 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <assert.h>
+#include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#else
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 void sengoo_print_i64(long long val) {
     printf("%lld\n", val);
@@ -27,6 +43,1769 @@ void sengoo_print_str(const char* s) {
 
 long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
+}
+
+enum {
+    SENGOO_FFI_STATUS_OK = 0,
+    SENGOO_FFI_ERR_INVALID_ARGUMENT = -2001,
+    SENGOO_FFI_ERR_INVALID_HANDLE = -2002,
+    SENGOO_FFI_ERR_BUFFER = -2006,
+    SENGOO_FFI_ERR_INTERNAL = -2099
+};
+
+typedef struct {
+    unsigned char* bytes;
+    size_t len;
+} SengooFfiBuffer;
+
+static int sengoo_ffi_last_error = SENGOO_FFI_STATUS_OK;
+static char sengoo_ffi_last_error_message[256] = {0};
+
+static void sengoo_ffi_clear_error_state(void) {
+    sengoo_ffi_last_error = SENGOO_FFI_STATUS_OK;
+    sengoo_ffi_last_error_message[0] = '\0';
+}
+
+static int sengoo_ffi_set_error(int code, const char* message) {
+    sengoo_ffi_last_error = code;
+    if (message) {
+        snprintf(
+            sengoo_ffi_last_error_message,
+            sizeof(sengoo_ffi_last_error_message),
+            "%s",
+            message
+        );
+    } else {
+        sengoo_ffi_last_error_message[0] = '\0';
+    }
+    return code;
+}
+
+long long sengoo_ffi_last_error_code(void) {
+    return (long long)sengoo_ffi_last_error;
+}
+
+long long sengoo_ffi_last_error_len(void) {
+    return (long long)strlen(sengoo_ffi_last_error_message);
+}
+
+long long sengoo_ffi_last_error_copy(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "negative output capacity");
+    }
+
+    size_t len = strlen(sengoo_ffi_last_error_message);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
+    }
+
+    if (len > 0) {
+        memcpy(out, sengoo_ffi_last_error_message, len);
+    }
+    return (long long)len;
+}
+
+long long sengoo_ffi_last_error_clear(void) {
+    sengoo_ffi_clear_error_state();
+    return SENGOO_FFI_STATUS_OK;
+}
+
+static SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle) {
+    return handle == 0 ? NULL : (SengooFfiBuffer*)(intptr_t)handle;
+}
+
+long long sengoo_ffi_buffer_new(long long capacity) {
+    sengoo_ffi_clear_error_state();
+    if (capacity < 0) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "negative buffer capacity");
+    }
+
+    SengooFfiBuffer* buffer = (SengooFfiBuffer*)calloc(1, sizeof(SengooFfiBuffer));
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer allocation failed");
+    }
+
+    if (capacity > 0) {
+        buffer->bytes = (unsigned char*)calloc((size_t)capacity, 1);
+        if (!buffer->bytes) {
+            free(buffer);
+            return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
+        }
+    }
+    buffer->len = (size_t)capacity;
+    return (long long)(intptr_t)buffer;
+}
+
+long long sengoo_ffi_buffer_from_bytes(long long data_ptr, long long len) {
+    sengoo_ffi_clear_error_state();
+    const unsigned char* data = (const unsigned char*)(intptr_t)data_ptr;
+    if (len < 0 || (len > 0 && !data)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
+    }
+
+    long long handle = sengoo_ffi_buffer_new(len);
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(handle);
+    if (!buffer) {
+        return 0;
+    }
+    if (len > 0) {
+        memcpy(buffer->bytes, data, (size_t)len);
+    }
+    return handle;
+}
+
+long long sengoo_ffi_buffer_len(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return (long long)buffer->len;
+}
+
+long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return (long long)(intptr_t)buffer->bytes;
+}
+
+long long sengoo_ffi_buffer_copy_out(long long buffer_handle, long long out_buffer, long long out_capacity) {
+    sengoo_ffi_clear_error_state();
+    char* out = (char*)(intptr_t)out_buffer;
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (out_capacity < 0 || (unsigned long long)buffer->len > (unsigned long long)out_capacity || (buffer->len > 0 && !out)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
+    }
+    if (buffer->len > 0) {
+        memcpy(out, buffer->bytes, buffer->len);
+    }
+    return (long long)buffer->len;
+}
+
+long long sengoo_ffi_buffer_copy_in(long long buffer_handle, long long src_ptr, long long src_len) {
+    sengoo_ffi_clear_error_state();
+    const unsigned char* src = (const unsigned char*)(intptr_t)src_ptr;
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (src_len < 0 || (src_len > 0 && !src)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
+    }
+
+    unsigned char* bytes = NULL;
+    if (src_len > 0) {
+        bytes = (unsigned char*)malloc((size_t)src_len);
+        if (!bytes) {
+            return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
+        }
+        memcpy(bytes, src, (size_t)src_len);
+    }
+
+    free(buffer->bytes);
+    buffer->bytes = bytes;
+    buffer->len = (size_t)src_len;
+    return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_ffi_buffer_free(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    free(buffer->bytes);
+    free(buffer);
+    return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_str_len(const char* value) {
+    return value ? (long long)strlen(value) : 0;
+}
+
+long long sengoo_str_contains(const char* value, const char* needle) {
+    if (!value || !needle) {
+        return 0;
+    }
+    return strstr(value, needle) != NULL ? 1 : 0;
+}
+
+long long sengoo_str_starts_with(const char* value, const char* prefix) {
+    if (!value || !prefix) {
+        return 0;
+    }
+    size_t prefix_len = strlen(prefix);
+    return strncmp(value, prefix, prefix_len) == 0 ? 1 : 0;
+}
+
+long long sengoo_str_ends_with(const char* value, const char* suffix) {
+    if (!value || !suffix) {
+        return 0;
+    }
+    size_t value_len = strlen(value);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > value_len) {
+        return 0;
+    }
+    return memcmp(value + value_len - suffix_len, suffix, suffix_len) == 0 ? 1 : 0;
+}
+
+long long sengoo_str_index_of(const char* value, const char* needle) {
+    if (!value || !needle) {
+        return -1;
+    }
+    const char* found = strstr(value, needle);
+    if (!found) {
+        return -1;
+    }
+    return (long long)(found - value);
+}
+
+enum {
+    SENGOO_STRCONV_STATUS_OK = 0,
+    SENGOO_STRCONV_ERR_INVALID = 1,
+    SENGOO_STRCONV_ERR_OVERFLOW = 2,
+    SENGOO_STRCONV_ERR_BUFFER = 3,
+    SENGOO_STRCONV_ERR_INTERNAL = 4
+};
+
+static int sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+
+static long long sengoo_strconv_set_error(int code) {
+    sengoo_strconv_last_error = code;
+    return 0;
+}
+
+long long sengoo_strconv_last_error_code(void) {
+    return (long long)sengoo_strconv_last_error;
+}
+
+long long sengoo_strconv_parse_i64(long long data_ptr, long long len) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    const unsigned char* data = (const unsigned char*)(intptr_t)data_ptr;
+    if (len < 0 || (len > 0 && !data)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    size_t n = (size_t)len;
+    size_t i = 0;
+    while (i < n && isspace((unsigned char)data[i])) {
+        i++;
+    }
+
+    int negative = 0;
+    if (i < n && (data[i] == '+' || data[i] == '-')) {
+        negative = data[i] == '-';
+        i++;
+    }
+
+    if (i >= n || !isdigit((unsigned char)data[i])) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    unsigned long long limit = negative
+        ? (unsigned long long)LLONG_MAX + 1ULL
+        : (unsigned long long)LLONG_MAX;
+    unsigned long long acc = 0;
+    while (i < n && isdigit((unsigned char)data[i])) {
+        unsigned long long digit = (unsigned long long)(data[i] - '0');
+        if (acc > (limit - digit) / 10ULL) {
+            return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_OVERFLOW);
+        }
+        acc = acc * 10ULL + digit;
+        i++;
+    }
+
+    while (i < n && isspace((unsigned char)data[i])) {
+        i++;
+    }
+    if (i != n) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+    }
+
+    if (negative) {
+        if (acc == (unsigned long long)LLONG_MAX + 1ULL) {
+            return LLONG_MIN;
+        }
+        return -(long long)acc;
+    }
+    return (long long)acc;
+}
+
+long long sengoo_strconv_format_i64(long long value, long long buffer_ptr, long long capacity) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    char* out = (char*)(intptr_t)buffer_ptr;
+    if (capacity < 0) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    char temp[32];
+    int written = snprintf(temp, sizeof(temp), "%lld", value);
+    if (written < 0 || (size_t)written >= sizeof(temp)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INTERNAL) - 1;
+    }
+    if ((unsigned long long)written > (unsigned long long)capacity || (written > 0 && !out)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    if (written > 0) {
+        memcpy(out, temp, (size_t)written);
+    }
+    return (long long)written;
+}
+
+long long sengoo_file_exists(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return 0;
+    }
+    fclose(file);
+    return 1;
+}
+
+long long sengoo_file_len(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return -1;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return -1;
+    }
+    long size = ftell(file);
+    fclose(file);
+    if (size < 0) {
+        return -1;
+    }
+    return (long long)size;
+}
+
+long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (!path || path[0] == '\0' || !out || out_capacity < 0) {
+        return -1;
+    }
+
+    FILE* file = fopen(path, "rb");
+    if (!file) {
+        return -1;
+    }
+    size_t read = fread(out, 1, (size_t)out_capacity, file);
+    int failed = ferror(file);
+    fclose(file);
+    if (failed) {
+        return -1;
+    }
+    return (long long)read;
+}
+
+static long long sengoo_file_write_mode(
+    long long path_ptr,
+    long long data_ptr,
+    long long len,
+    const char* mode
+) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (!path || path[0] == '\0' || len < 0 || (!data && len > 0)) {
+        return -1;
+    }
+
+    FILE* file = fopen(path, mode);
+    if (!file) {
+        return -1;
+    }
+    size_t expected = (size_t)len;
+    size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, file);
+    int close_status = fclose(file);
+    if (wrote != expected || close_status != 0) {
+        return -1;
+    }
+    return (long long)wrote;
+}
+
+long long sengoo_file_write_str(long long path_ptr, long long data_ptr, long long len) {
+    return sengoo_file_write_mode(path_ptr, data_ptr, len, "wb");
+}
+
+long long sengoo_file_append_str(long long path_ptr, long long data_ptr, long long len) {
+    return sengoo_file_write_mode(path_ptr, data_ptr, len, "ab");
+}
+
+long long sengoo_file_remove(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return 1;
+    }
+
+    return remove(path);
+}
+
+static int sengoo_path_entry_exists_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+#else
+    struct stat info;
+    return lstat(path, &info) == 0 ? 1 : 0;
+#endif
+}
+
+static int sengoo_path_is_regular_file_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+#else
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISREG(info.st_mode) ? 1 : 0;
+#endif
+}
+
+static int sengoo_paths_refer_to_same_file_cstr(const char* left, const char* right) {
+#ifdef _WIN32
+    HANDLE left_handle = CreateFileA(
+        left,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (left_handle == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+
+    HANDLE right_handle = CreateFileA(
+        right,
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (right_handle == INVALID_HANDLE_VALUE) {
+        CloseHandle(left_handle);
+        return 0;
+    }
+
+    BY_HANDLE_FILE_INFORMATION left_info;
+    BY_HANDLE_FILE_INFORMATION right_info;
+    int same = GetFileInformationByHandle(left_handle, &left_info)
+        && GetFileInformationByHandle(right_handle, &right_info)
+        && left_info.dwVolumeSerialNumber == right_info.dwVolumeSerialNumber
+        && left_info.nFileIndexHigh == right_info.nFileIndexHigh
+        && left_info.nFileIndexLow == right_info.nFileIndexLow;
+    CloseHandle(right_handle);
+    CloseHandle(left_handle);
+    return same ? 1 : 0;
+#else
+    struct stat left_info;
+    struct stat right_info;
+    return stat(left, &left_info) == 0
+        && stat(right, &right_info) == 0
+        && left_info.st_dev == right_info.st_dev
+        && left_info.st_ino == right_info.st_ino ? 1 : 0;
+#endif
+}
+
+long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long long overwrite) {
+    const char* source = (const char*)(intptr_t)source_ptr;
+    const char* destination = (const char*)(intptr_t)destination_ptr;
+    if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
+        return -1;
+    }
+
+    int destination_existed = sengoo_path_entry_exists_cstr(destination);
+    if (!overwrite && destination_existed) {
+        return -1;
+    }
+    if (destination_existed && sengoo_paths_refer_to_same_file_cstr(source, destination)) {
+        return -1;
+    }
+
+    FILE* input = fopen(source, "rb");
+    if (!input) {
+        return -1;
+    }
+
+    FILE* output = fopen(destination, "wb");
+    if (!output) {
+        fclose(input);
+        return -1;
+    }
+
+    unsigned char buffer[8192];
+    unsigned long long total = 0;
+    int failed = 0;
+    for (;;) {
+        size_t read = fread(buffer, 1, sizeof(buffer), input);
+        if (read > 0) {
+            if ((unsigned long long)read > (unsigned long long)LLONG_MAX - total
+                || fwrite(buffer, 1, read, output) != read) {
+                failed = 1;
+                break;
+            }
+            total += (unsigned long long)read;
+        }
+        if (read < sizeof(buffer)) {
+            if (ferror(input)) {
+                failed = 1;
+            }
+            break;
+        }
+    }
+
+    if (fclose(output) != 0) {
+        failed = 1;
+    }
+    if (fclose(input) != 0) {
+        failed = 1;
+    }
+    if (failed) {
+        if (!destination_existed) {
+            remove(destination);
+        }
+        return -1;
+    }
+    return (long long)total;
+}
+
+long long sengoo_file_move(long long source_ptr, long long destination_ptr, long long overwrite) {
+    const char* source = (const char*)(intptr_t)source_ptr;
+    const char* destination = (const char*)(intptr_t)destination_ptr;
+    if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
+        return -1;
+    }
+    if (!overwrite && sengoo_path_entry_exists_cstr(destination)) {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return MoveFileExA(source, destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0) ? 0 : -1;
+#else
+    return rename(source, destination) == 0 ? 0 : -1;
+#endif
+}
+
+long long sengoo_env_var_len(long long name_ptr) {
+    const char* name = (const char*)(intptr_t)name_ptr;
+    if (!name || name[0] == '\0') {
+        return -1;
+    }
+
+    const char* value = getenv(name);
+    if (!value) {
+        return -1;
+    }
+    return (long long)strlen(value);
+}
+
+long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long long out_capacity) {
+    const char* name = (const char*)(intptr_t)name_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (!name || name[0] == '\0' || out_capacity < 0) {
+        return -1;
+    }
+
+    const char* value = getenv(name);
+    if (!value) {
+        return -1;
+    }
+
+    size_t len = strlen(value);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, value, len);
+    }
+    return (long long)len;
+}
+
+long long sengoo_env_is_windows(void) {
+#ifdef _WIN32
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+long long sengoo_env_is_unix(void) {
+#ifdef _WIN32
+    return 0;
+#else
+    return 1;
+#endif
+}
+
+long long sengoo_time_unix_seconds(void) {
+    time_t now = time(NULL);
+    if (now == (time_t)-1) {
+        return -1;
+    }
+    return (long long)now;
+}
+
+long long sengoo_time_unix_ms(void) {
+#if defined(TIME_UTC)
+    struct timespec ts;
+    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
+        return ((long long)ts.tv_sec * 1000LL) + ((long long)ts.tv_nsec / 1000000LL);
+    }
+#endif
+    long long seconds = sengoo_time_unix_seconds();
+    if (seconds < 0) {
+        return -1;
+    }
+    return seconds * 1000LL;
+}
+
+long long sengoo_time_sleep_ms(long long ms) {
+    if (ms < 0) {
+        return 1;
+    }
+    if (ms == 0) {
+        return 0;
+    }
+
+#ifdef _WIN32
+    while (ms > 0) {
+        DWORD chunk = ms > (long long)UINT_MAX ? (DWORD)UINT_MAX : (DWORD)ms;
+        Sleep(chunk);
+        ms -= (long long)chunk;
+    }
+    return 0;
+#else
+    struct timespec req;
+    req.tv_sec = (time_t)(ms / 1000LL);
+    req.tv_nsec = (long)((ms % 1000LL) * 1000000LL);
+    while (nanosleep(&req, &req) != 0) {
+        if (errno != EINTR) {
+            return 1;
+        }
+    }
+    return 0;
+#endif
+}
+
+static uint64_t sengoo_random_state = 0x9e3779b97f4a7c15ULL;
+
+static uint64_t sengoo_random_next_u64(void) {
+    uint64_t x = sengoo_random_state;
+    if (x == 0) {
+        x = 0x9e3779b97f4a7c15ULL;
+    }
+
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    sengoo_random_state = x;
+    return x * 2685821657736338717ULL;
+}
+
+long long sengoo_random_seed(long long seed) {
+    uint64_t normalized = (uint64_t)seed;
+    if (normalized == 0) {
+        normalized = 0x9e3779b97f4a7c15ULL;
+    }
+    sengoo_random_state = normalized;
+    return 0;
+}
+
+long long sengoo_random_i64(void) {
+    return (long long)(sengoo_random_next_u64() >> 1);
+}
+
+long long sengoo_random_range_i64(long long min, long long max) {
+    if (max <= min) {
+        return min;
+    }
+
+    uint64_t span = (uint64_t)max - (uint64_t)min;
+    uint64_t offset = sengoo_random_next_u64() % span;
+    return min + (long long)offset;
+}
+
+long long sengoo_random_bool(void) {
+    return (long long)(sengoo_random_next_u64() & 1ULL);
+}
+
+static int sengoo_path_is_sep(char ch) {
+    return ch == '/' || ch == '\\';
+}
+
+static char sengoo_path_preferred_sep(void) {
+#ifdef _WIN32
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
+static int sengoo_path_has_drive_root(const char* path) {
+    return path && isalpha((unsigned char)path[0]) && path[1] == ':' && sengoo_path_is_sep(path[2]);
+}
+
+static int sengoo_path_is_absolute_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (sengoo_path_has_drive_root(path)) {
+        return 1;
+    }
+    if (sengoo_path_is_sep(path[0])) {
+        return 1;
+    }
+    return 0;
+}
+
+static size_t sengoo_path_root_len(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+    if (sengoo_path_has_drive_root(path)) {
+        return 3;
+    }
+    if (sengoo_path_is_sep(path[0]) && sengoo_path_is_sep(path[1])) {
+        return 2;
+    }
+    if (sengoo_path_is_sep(path[0])) {
+        return 1;
+    }
+    return 0;
+}
+
+static long long sengoo_copy_path_bytes(const char* data, size_t len, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (unsigned long long)len > (unsigned long long)out_capacity) {
+        return -1;
+    }
+    if (len > 0 && (!data || !out)) {
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, data, len);
+    }
+    return (long long)len;
+}
+
+static int sengoo_path_file_name_range(const char* path, size_t* out_start, size_t* out_len) {
+    if (!path || path[0] == '\0' || !out_start || !out_len) {
+        return 0;
+    }
+
+    size_t root_len = sengoo_path_root_len(path);
+    size_t end = strlen(path);
+    while (end > root_len && sengoo_path_is_sep(path[end - 1])) {
+        end--;
+    }
+    if (end <= root_len) {
+        return 0;
+    }
+
+    size_t start = end;
+    while (start > root_len && !sengoo_path_is_sep(path[start - 1])) {
+        start--;
+    }
+
+    *out_start = start;
+    *out_len = end - start;
+    return *out_len > 0;
+}
+
+long long sengoo_path_separator(void) {
+    return (long long)(unsigned char)sengoo_path_preferred_sep();
+}
+
+long long sengoo_path_is_absolute(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_path_is_absolute_cstr(path) ? 1 : 0;
+}
+
+long long sengoo_path_join(long long left_ptr, long long right_ptr, long long out_buffer, long long out_capacity) {
+    const char* left = (const char*)(intptr_t)left_ptr;
+    const char* right = (const char*)(intptr_t)right_ptr;
+    if (!left || !right) {
+        return -1;
+    }
+
+    if (sengoo_path_is_absolute_cstr(right) || left[0] == '\0') {
+        return sengoo_copy_path_bytes(right, strlen(right), out_buffer, out_capacity);
+    }
+    if (right[0] == '\0') {
+        return sengoo_copy_path_bytes(left, strlen(left), out_buffer, out_capacity);
+    }
+
+    size_t left_len = strlen(left);
+    size_t left_root = sengoo_path_root_len(left);
+    while (left_len > left_root && sengoo_path_is_sep(left[left_len - 1])) {
+        left_len--;
+    }
+
+    size_t right_len = strlen(right);
+    size_t right_start = 0;
+    while (right_start < right_len && sengoo_path_is_sep(right[right_start])) {
+        right_start++;
+    }
+
+    int needs_sep = left_len > 0 && right_start < right_len && !sengoo_path_is_sep(left[left_len - 1]);
+    size_t result_len = left_len + (needs_sep ? 1u : 0u) + (right_len - right_start);
+    char* result = (char*)malloc(result_len + 1u);
+    if (!result) {
+        return -1;
+    }
+
+    size_t pos = 0;
+    if (left_len > 0) {
+        memcpy(result + pos, left, left_len);
+        pos += left_len;
+    }
+    if (needs_sep) {
+        result[pos++] = sengoo_path_preferred_sep();
+    }
+    if (right_len > right_start) {
+        memcpy(result + pos, right + right_start, right_len - right_start);
+        pos += right_len - right_start;
+    }
+    result[pos] = '\0';
+
+    long long copied = sengoo_copy_path_bytes(result, result_len, out_buffer, out_capacity);
+    free(result);
+    return copied;
+}
+
+long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+    size_t root_len = sengoo_path_root_len(path);
+    size_t end = strlen(path);
+    while (end > root_len && sengoo_path_is_sep(path[end - 1])) {
+        end--;
+    }
+    if (end <= root_len) {
+        return -1;
+    }
+
+    size_t pos = end;
+    while (pos > root_len && !sengoo_path_is_sep(path[pos - 1])) {
+        pos--;
+    }
+    if (pos == 0) {
+        return -1;
+    }
+
+    size_t sep_index = pos - 1;
+    size_t parent_len = sep_index < root_len ? root_len : sep_index;
+    if (parent_len == 0 && root_len > 0) {
+        parent_len = root_len;
+    }
+    if (parent_len == 0) {
+        return -1;
+    }
+
+    return sengoo_copy_path_bytes(path, parent_len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_file_name(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+    return sengoo_copy_path_bytes(path + start, len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_stem(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+
+    size_t dot = start + len;
+    while (dot > start && path[dot - 1] != '.') {
+        dot--;
+    }
+    if (dot == start || dot == start + len) {
+        return sengoo_copy_path_bytes(path + start, len, out_buffer, out_capacity);
+    }
+
+    size_t dot_index = dot - 1;
+    size_t stem_len = dot_index > start ? dot_index - start : len;
+    return sengoo_copy_path_bytes(path + start, stem_len, out_buffer, out_capacity);
+}
+
+long long sengoo_path_extension(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    size_t start = 0;
+    size_t len = 0;
+    if (!sengoo_path_file_name_range(path, &start, &len)) {
+        return -1;
+    }
+
+    size_t dot = start + len;
+    while (dot > start && path[dot - 1] != '.') {
+        dot--;
+    }
+    if (dot == start || dot == start + len) {
+        return -1;
+    }
+
+    size_t dot_index = dot - 1;
+    if (dot_index == start || dot_index + 1 >= start + len) {
+        return -1;
+    }
+    return sengoo_copy_path_bytes(path + dot_index + 1, (start + len) - dot_index - 1, out_buffer, out_capacity);
+}
+
+static int sengoo_path_segment_is_dotdot(const char* segment, size_t len) {
+    return len == 2 && segment[0] == '.' && segment[1] == '.';
+}
+
+long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path) {
+        return -1;
+    }
+
+    size_t input_len = strlen(path);
+    char sep = sengoo_path_preferred_sep();
+    char* result = (char*)malloc(input_len + 4u);
+    size_t* segment_starts = (size_t*)calloc(input_len + 1u, sizeof(size_t));
+    size_t* segment_lens = (size_t*)calloc(input_len + 1u, sizeof(size_t));
+    if (!result || !segment_starts || !segment_lens) {
+        free(result);
+        free(segment_starts);
+        free(segment_lens);
+        return -1;
+    }
+
+    size_t cursor = 0;
+    size_t result_len = 0;
+    size_t base_len = 0;
+    size_t segment_count = 0;
+    int absolute = 0;
+
+    if (sengoo_path_has_drive_root(path)) {
+        result[result_len++] = path[0];
+        result[result_len++] = ':';
+        result[result_len++] = sep;
+        cursor = 3;
+        base_len = 3;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    } else if (sengoo_path_is_sep(path[0]) && sengoo_path_is_sep(path[1])) {
+        result[result_len++] = sep;
+        result[result_len++] = sep;
+        cursor = 2;
+        base_len = 2;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    } else if (sengoo_path_is_sep(path[0])) {
+        result[result_len++] = sep;
+        cursor = 1;
+        base_len = 1;
+        absolute = 1;
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+    }
+
+    while (cursor < input_len) {
+        while (cursor < input_len && sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+        size_t start = cursor;
+        while (cursor < input_len && !sengoo_path_is_sep(path[cursor])) {
+            cursor++;
+        }
+        size_t len = cursor - start;
+        if (len == 0 || (len == 1 && path[start] == '.')) {
+            continue;
+        }
+
+        if (sengoo_path_segment_is_dotdot(path + start, len)) {
+            if (segment_count > 0
+                && !sengoo_path_segment_is_dotdot(result + segment_starts[segment_count - 1], segment_lens[segment_count - 1])) {
+                segment_count--;
+                result_len = segment_starts[segment_count];
+                if (result_len > base_len && result_len > 0 && result[result_len - 1] == sep) {
+                    result_len--;
+                }
+                continue;
+            }
+            if (absolute) {
+                continue;
+            }
+        }
+
+        if (result_len > 0 && result[result_len - 1] != sep && result[result_len - 1] != ':') {
+            result[result_len++] = sep;
+        }
+        segment_starts[segment_count] = result_len;
+        segment_lens[segment_count] = len;
+        memcpy(result + result_len, path + start, len);
+        result_len += len;
+        segment_count++;
+    }
+
+    if (result_len == 0) {
+        result[result_len++] = '.';
+    }
+    result[result_len] = '\0';
+
+    long long copied = sengoo_copy_path_bytes(result, result_len, out_buffer, out_capacity);
+    free(result);
+    free(segment_starts);
+    free(segment_lens);
+    return copied;
+}
+
+static int sengoo_dir_exists_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+#else
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISDIR(info.st_mode) ? 1 : 0;
+#endif
+}
+
+static int sengoo_dir_create_one_cstr(const char* path) {
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+    if (sengoo_dir_exists_cstr(path)) {
+        return 0;
+    }
+
+#ifdef _WIN32
+    if (_mkdir(path) == 0) {
+        return 0;
+    }
+#else
+    if (mkdir(path, 0777) == 0) {
+        return 0;
+    }
+#endif
+
+    return sengoo_dir_exists_cstr(path) ? 0 : -1;
+}
+
+long long sengoo_dir_exists(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_dir_exists_cstr(path) ? 1 : 0;
+}
+
+long long sengoo_dir_create(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    return sengoo_dir_create_one_cstr(path);
+}
+
+long long sengoo_dir_create_all(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+    if (sengoo_dir_exists_cstr(path)) {
+        return 0;
+    }
+
+    size_t len = strlen(path);
+    char* scratch = (char*)malloc(len + 1);
+    if (!scratch) {
+        return -1;
+    }
+    memcpy(scratch, path, len + 1);
+
+    size_t root_len = sengoo_path_root_len(scratch);
+    for (size_t i = root_len; i < len; i++) {
+        if (!sengoo_path_is_sep(scratch[i])) {
+            continue;
+        }
+
+        scratch[i] = '\0';
+        if (i > root_len && sengoo_dir_create_one_cstr(scratch) != 0) {
+            scratch[i] = path[i];
+            free(scratch);
+            return -1;
+        }
+        scratch[i] = path[i];
+    }
+
+    int status = sengoo_dir_create_one_cstr(scratch);
+    free(scratch);
+    return status == 0 ? 0 : -1;
+}
+
+long long sengoo_dir_remove(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return _rmdir(path) == 0 ? 0 : -1;
+#else
+    return rmdir(path) == 0 ? 0 : -1;
+#endif
+}
+
+typedef struct {
+    char** names;
+    size_t len;
+    size_t cap;
+} SengooDirEntryList;
+
+static void sengoo_dir_entry_list_free(SengooDirEntryList* list) {
+    if (!list) {
+        return;
+    }
+    for (size_t i = 0; i < list->len; i++) {
+        free(list->names[i]);
+    }
+    free(list->names);
+    list->names = NULL;
+    list->len = 0;
+    list->cap = 0;
+}
+
+static char* sengoo_strdup_bytes(const char* value) {
+    if (!value) {
+        return NULL;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, value, len + 1);
+    return copy;
+}
+
+static int sengoo_dir_entry_list_push(SengooDirEntryList* list, const char* name) {
+    if (!list || !name) {
+        return -1;
+    }
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        return 0;
+    }
+
+    if (list->len == list->cap) {
+        size_t next_cap = list->cap == 0 ? 8 : list->cap * 2;
+        char** next_names = (char**)realloc(list->names, next_cap * sizeof(char*));
+        if (!next_names) {
+            return -1;
+        }
+        list->names = next_names;
+        list->cap = next_cap;
+    }
+
+    char* copy = sengoo_strdup_bytes(name);
+    if (!copy) {
+        return -1;
+    }
+    list->names[list->len++] = copy;
+    return 0;
+}
+
+static int sengoo_dir_entry_name_compare(const void* lhs, const void* rhs) {
+    const char* a = *(const char* const*)lhs;
+    const char* b = *(const char* const*)rhs;
+    return strcmp(a, b);
+}
+
+static int sengoo_dir_collect_entries(const char* path, SengooDirEntryList* list) {
+    if (!path || path[0] == '\0' || !list) {
+        return -1;
+    }
+    memset(list, 0, sizeof(*list));
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return -1;
+    }
+
+    size_t path_len = strlen(path);
+    int needs_sep = path_len > 0 && !sengoo_path_is_sep(path[path_len - 1]);
+    size_t pattern_len = path_len + (needs_sep ? 1 : 0) + 1;
+    char* pattern = (char*)malloc(pattern_len + 1);
+    if (!pattern) {
+        return -1;
+    }
+    memcpy(pattern, path, path_len);
+    size_t pos = path_len;
+    if (needs_sep) {
+        pattern[pos++] = '\\';
+    }
+    pattern[pos++] = '*';
+    pattern[pos] = '\0';
+
+    WIN32_FIND_DATAA find_data;
+    HANDLE handle = FindFirstFileA(pattern, &find_data);
+    free(pattern);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+
+    do {
+        if (sengoo_dir_entry_list_push(list, find_data.cFileName) != 0) {
+            FindClose(handle);
+            sengoo_dir_entry_list_free(list);
+            return -1;
+        }
+    } while (FindNextFileA(handle, &find_data));
+    DWORD err = GetLastError();
+    FindClose(handle);
+    if (err != ERROR_NO_MORE_FILES) {
+        sengoo_dir_entry_list_free(list);
+        return -1;
+    }
+#else
+    DIR* dir = opendir(path);
+    if (!dir) {
+        return -1;
+    }
+
+    errno = 0;
+    struct dirent* entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (sengoo_dir_entry_list_push(list, entry->d_name) != 0) {
+            closedir(dir);
+            sengoo_dir_entry_list_free(list);
+            return -1;
+        }
+    }
+    int read_errno = errno;
+    closedir(dir);
+    if (read_errno != 0) {
+        sengoo_dir_entry_list_free(list);
+        return -1;
+    }
+#endif
+
+    if (list->len > 1) {
+        qsort(list->names, list->len, sizeof(char*), sengoo_dir_entry_name_compare);
+    }
+    return 0;
+}
+
+long long sengoo_dir_entry_count(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    SengooDirEntryList list;
+    if (sengoo_dir_collect_entries(path, &list) != 0) {
+        return -1;
+    }
+    size_t count = list.len;
+    sengoo_dir_entry_list_free(&list);
+    if (count > (size_t)LLONG_MAX) {
+        return -1;
+    }
+    return (long long)count;
+}
+
+long long sengoo_dir_entry_name(long long path_ptr, long long index, long long out_buffer, long long out_capacity) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    char* out = (char*)(intptr_t)out_buffer;
+    if (index < 0 || out_capacity < 0) {
+        return -1;
+    }
+
+    SengooDirEntryList list;
+    if (sengoo_dir_collect_entries(path, &list) != 0) {
+        return -1;
+    }
+
+    if ((unsigned long long)index >= (unsigned long long)list.len) {
+        sengoo_dir_entry_list_free(&list);
+        return -1;
+    }
+
+    const char* name = list.names[index];
+    size_t len = strlen(name);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        sengoo_dir_entry_list_free(&list);
+        return -1;
+    }
+    if (len > 0) {
+        memcpy(out, name, len);
+    }
+    sengoo_dir_entry_list_free(&list);
+    return (long long)len;
+}
+
+long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (out_capacity > 0 && !out)) {
+        return -1;
+    }
+    if (out_capacity == 0) {
+        return 0;
+    }
+
+    size_t read = fread(out, 1, (size_t)out_capacity, stdin);
+    if (ferror(stdin)) {
+        return -1;
+    }
+    return (long long)read;
+}
+
+long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0 || (out_capacity > 0 && !out)) {
+        return -1;
+    }
+    if (out_capacity == 0) {
+        return 0;
+    }
+
+    size_t count = 0;
+    while (count < (size_t)out_capacity) {
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
+            if (ferror(stdin)) {
+                return -1;
+            }
+            break;
+        }
+
+        out[count++] = (char)ch;
+        if (ch == '\n') {
+            break;
+        }
+    }
+    return (long long)count;
+}
+
+static long long sengoo_io_write_stream(FILE* stream, long long data_ptr, long long len) {
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (!stream || len < 0 || (len > 0 && !data)) {
+        return -1;
+    }
+
+    size_t expected = (size_t)len;
+    size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, stream);
+    if (wrote != expected || ferror(stream)) {
+        return -1;
+    }
+    return (long long)wrote;
+}
+
+long long sengoo_io_stdout_write(long long data_ptr, long long len) {
+    return sengoo_io_write_stream(stdout, data_ptr, len);
+}
+
+long long sengoo_io_stderr_write(long long data_ptr, long long len) {
+    return sengoo_io_write_stream(stderr, data_ptr, len);
+}
+
+long long sengoo_io_stdout_flush(void) {
+    return fflush(stdout) == 0 ? 0 : -1;
+}
+
+long long sengoo_io_stderr_flush(void) {
+    return fflush(stderr) == 0 ? 0 : -1;
+}
+
+long long sengoo_process_id(void) {
+#ifdef _WIN32
+    return (long long)GetCurrentProcessId();
+#else
+    return (long long)getpid();
+#endif
+}
+
+static char* sengoo_process_current_dir_alloc(void) {
+#ifdef _WIN32
+    return _getcwd(NULL, 0);
+#else
+    size_t capacity = 256;
+    while (capacity <= (size_t)(1024 * 1024)) {
+        char* buffer = (char*)malloc(capacity);
+        if (!buffer) {
+            return NULL;
+        }
+
+        errno = 0;
+        if (getcwd(buffer, capacity)) {
+            return buffer;
+        }
+
+        int err = errno;
+        free(buffer);
+        if (err != ERANGE) {
+            return NULL;
+        }
+        capacity *= 2;
+    }
+    return NULL;
+#endif
+}
+
+long long sengoo_process_current_dir_len(void) {
+    char* cwd = sengoo_process_current_dir_alloc();
+    if (!cwd) {
+        return -1;
+    }
+
+    size_t len = strlen(cwd);
+    free(cwd);
+    return (long long)len;
+}
+
+long long sengoo_process_current_dir_copy(long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return -1;
+    }
+
+    char* cwd = sengoo_process_current_dir_alloc();
+    if (!cwd) {
+        return -1;
+    }
+
+    size_t len = strlen(cwd);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        free(cwd);
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(out, cwd, len);
+    }
+    free(cwd);
+    return (long long)len;
+}
+
+static int sengoo_process_run_args_are_valid(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    if (!executable || executable[0] == '\0' || arg_count < 0 || arg_count > 3) {
+        return 0;
+    }
+    for (long long i = 0; i < arg_count; i++) {
+        if (!args[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+#ifdef _WIN32
+static int sengoo_size_add(size_t* total, size_t value) {
+    if (SIZE_MAX - *total < value) {
+        return -1;
+    }
+    *total += value;
+    return 0;
+}
+
+static char* sengoo_windows_append_quoted_arg(char* out, const char* arg) {
+    *out++ = '"';
+    while (*arg) {
+        size_t backslashes = 0;
+        while (*arg == '\\') {
+            backslashes++;
+            arg++;
+        }
+
+        if (*arg == '"') {
+            for (size_t i = 0; i < backslashes * 2 + 1; i++) {
+                *out++ = '\\';
+            }
+            *out++ = *arg++;
+        } else if (*arg == '\0') {
+            for (size_t i = 0; i < backslashes * 2; i++) {
+                *out++ = '\\';
+            }
+        } else {
+            for (size_t i = 0; i < backslashes; i++) {
+                *out++ = '\\';
+            }
+            *out++ = *arg++;
+        }
+    }
+    *out++ = '"';
+    return out;
+}
+
+static int sengoo_windows_arg_needs_quotes(const char* arg) {
+    if (arg[0] == '\0') {
+        return 1;
+    }
+    while (*arg) {
+        if (*arg == ' ' || *arg == '\t' || *arg == '"') {
+            return 1;
+        }
+        arg++;
+    }
+    return 0;
+}
+
+static char* sengoo_windows_append_arg(char* out, const char* arg) {
+    if (sengoo_windows_arg_needs_quotes(arg)) {
+        return sengoo_windows_append_quoted_arg(out, arg);
+    }
+    while (*arg) {
+        *out++ = *arg++;
+    }
+    return out;
+}
+
+static char* sengoo_windows_process_command_line(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    const char* values[4] = {executable, args[0], args[1], args[2]};
+    size_t value_count = (size_t)arg_count + 1;
+    size_t capacity = 1;
+    for (size_t i = 0; i < value_count; i++) {
+        size_t len = strlen(values[i]);
+        if (len > (SIZE_MAX - 3) / 2
+            || sengoo_size_add(&capacity, len * 2 + 3) != 0) {
+            return NULL;
+        }
+    }
+
+    char* command_line = (char*)malloc(capacity);
+    if (!command_line) {
+        return NULL;
+    }
+
+    char* out = command_line;
+    for (size_t i = 0; i < value_count; i++) {
+        if (i > 0) {
+            *out++ = ' ';
+        }
+        out = sengoo_windows_append_arg(out, values[i]);
+    }
+    *out = '\0';
+    return command_line;
+}
+
+static long long sengoo_process_run_windows(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    char* command_line = sengoo_windows_process_command_line(executable, args, arg_count);
+    if (!command_line) {
+        return -1;
+    }
+
+    STARTUPINFOA startup_info = {0};
+    PROCESS_INFORMATION process_info = {0};
+    startup_info.cb = sizeof(startup_info);
+    BOOL created = CreateProcessA(
+        NULL,
+        command_line,
+        NULL,
+        NULL,
+        TRUE,
+        0,
+        NULL,
+        NULL,
+        &startup_info,
+        &process_info
+    );
+    free(command_line);
+    if (!created) {
+        return -1;
+    }
+
+    DWORD wait_status = WaitForSingleObject(process_info.hProcess, INFINITE);
+    DWORD exit_code = 0;
+    int ok = wait_status == WAIT_OBJECT_0 && GetExitCodeProcess(process_info.hProcess, &exit_code);
+    CloseHandle(process_info.hThread);
+    CloseHandle(process_info.hProcess);
+    return ok ? (long long)exit_code : -1;
+}
+#else
+static long long sengoo_process_run_unix(
+    const char* executable,
+    const char* const args[3],
+    long long arg_count
+) {
+    int startup_pipe[2];
+    if (pipe(startup_pipe) != 0) {
+        return -1;
+    }
+
+    int flags = fcntl(startup_pipe[1], F_GETFD);
+    if (flags < 0 || fcntl(startup_pipe[1], F_SETFD, flags | FD_CLOEXEC) != 0) {
+        close(startup_pipe[0]);
+        close(startup_pipe[1]);
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(startup_pipe[0]);
+        close(startup_pipe[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        close(startup_pipe[0]);
+        char* argv[5] = {(char*)executable, NULL, NULL, NULL, NULL};
+        for (long long i = 0; i < arg_count; i++) {
+            argv[i + 1] = (char*)args[i];
+        }
+        execvp(executable, argv);
+        int startup_errno = errno;
+        (void)write(startup_pipe[1], &startup_errno, sizeof(startup_errno));
+        _exit(127);
+    }
+
+    close(startup_pipe[1]);
+    int startup_errno = 0;
+    ssize_t startup_read;
+    do {
+        startup_read = read(startup_pipe[0], &startup_errno, sizeof(startup_errno));
+    } while (startup_read < 0 && errno == EINTR);
+    close(startup_pipe[0]);
+
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (startup_read != 0 || waited != pid || !WIFEXITED(status)) {
+        return -1;
+    }
+    return (long long)WEXITSTATUS(status);
+}
+#endif
+
+long long sengoo_process_run(
+    long long executable_ptr,
+    long long arg0_ptr,
+    long long arg1_ptr,
+    long long arg2_ptr,
+    long long arg_count
+) {
+    const char* executable = (const char*)(intptr_t)executable_ptr;
+    const char* args[3] = {
+        (const char*)(intptr_t)arg0_ptr,
+        (const char*)(intptr_t)arg1_ptr,
+        (const char*)(intptr_t)arg2_ptr,
+    };
+    if (!sengoo_process_run_args_are_valid(executable, args, arg_count)) {
+        return -1;
+    }
+
+#ifdef _WIN32
+    return sengoo_process_run_windows(executable, args, arg_count);
+#else
+    return sengoo_process_run_unix(executable, args, arg_count);
+#endif
+}
+
+static long long sengoo_runtime_argc = 0;
+static char** sengoo_runtime_argv = NULL;
+
+void sengoo_args_init(long long argc, long long argv_ptr) {
+    if (argc <= 0 || argv_ptr == 0) {
+        sengoo_runtime_argc = 0;
+        sengoo_runtime_argv = NULL;
+        return;
+    }
+
+    sengoo_runtime_argc = argc;
+    sengoo_runtime_argv = (char**)(intptr_t)argv_ptr;
+}
+
+static const char* sengoo_user_arg_at(long long index) {
+    if (index < 0 || !sengoo_runtime_argv) {
+        return NULL;
+    }
+
+    long long os_index = index + 1;
+    if (os_index <= 0 || os_index >= sengoo_runtime_argc) {
+        return NULL;
+    }
+
+    return sengoo_runtime_argv[os_index];
+}
+
+long long sengoo_args_len(void) {
+    if (sengoo_runtime_argc <= 1) {
+        return 0;
+    }
+    return sengoo_runtime_argc - 1;
+}
+
+long long sengoo_arg_len(long long index) {
+    const char* arg = sengoo_user_arg_at(index);
+    if (!arg) {
+        return -1;
+    }
+    return (long long)strlen(arg);
+}
+
+long long sengoo_arg_copy(long long index, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return -1;
+    }
+
+    const char* arg = sengoo_user_arg_at(index);
+    if (!arg) {
+        return -1;
+    }
+
+    size_t len = strlen(arg);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return -1;
+    }
+
+    if (len > 0) {
+        memcpy(out, arg, len);
+    }
+    return (long long)len;
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {

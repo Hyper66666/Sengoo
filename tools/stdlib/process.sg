@@ -1,0 +1,70 @@
+extern "C" {
+    fn sengoo_process_id() -> i64;
+    fn sengoo_process_current_dir_len() -> i64;
+    fn sengoo_process_current_dir_copy(out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_process_run(executable: i64, arg0: i64, arg1: i64, arg2: i64, arg_count: i64) -> i64;
+}
+
+def process_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 1 }
+    }
+}
+
+def process_id() -> i64 {
+    sengoo_process_id()
+}
+
+def process_current_dir_len() -> Result<i64, i64> {
+    process_i64_result(sengoo_process_current_dir_len())
+}
+
+def process_current_dir_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    process_i64_result(sengoo_process_current_dir_copy(buffer_ptr, capacity))
+}
+
+def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64> {
+    process_current_dir_copy_raw(buffer.ptr(), buffer.len())
+}
+
+def process_exit_code(success: bool, failure_code: i64) -> i64 {
+    if success {
+        0
+    } else {
+        failure_code
+    }
+}
+
+def process_run_raw(executable_ptr: i64, arg0_ptr: i64, arg1_ptr: i64, arg2_ptr: i64, arg_count: i64) -> Result<i64, i64> {
+    process_i64_result(sengoo_process_run(executable_ptr, arg0_ptr, arg1_ptr, arg2_ptr, arg_count))
+}
+
+def process_run(executable: &str) -> Result<i64, i64> {
+    process_run_raw(sengoo_stdlib_str_ptr(executable), 0, 0, 0, 0)
+}
+
+def process_run_1(executable: &str, arg0: &str) -> Result<i64, i64> {
+    process_run_raw(sengoo_stdlib_str_ptr(executable), sengoo_stdlib_str_ptr(arg0), 0, 0, 1)
+}
+
+def process_run_2(executable: &str, arg0: &str, arg1: &str) -> Result<i64, i64> {
+    process_run_raw(
+        sengoo_stdlib_str_ptr(executable),
+        sengoo_stdlib_str_ptr(arg0),
+        sengoo_stdlib_str_ptr(arg1),
+        0,
+        2,
+    )
+}
+
+def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Result<i64, i64> {
+    process_run_raw(
+        sengoo_stdlib_str_ptr(executable),
+        sengoo_stdlib_str_ptr(arg0),
+        sengoo_stdlib_str_ptr(arg1),
+        sengoo_stdlib_str_ptr(arg2),
+        3,
+    )
+}

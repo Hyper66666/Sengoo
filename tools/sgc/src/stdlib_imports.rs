@@ -13,6 +13,16 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "error",
     "collections",
     "ffi",
+    "strconv",
+    "file",
+    "dir",
+    "io",
+    "env",
+    "time",
+    "random",
+    "path",
+    "process",
+    "args",
     "db",
     "lua54",
     "net",
@@ -26,12 +36,28 @@ fn is_virtual_stdlib_module(module: &str) -> bool {
 fn source_module_needs_result_family(module: &str) -> bool {
     matches!(
         module,
-        "option" | "result" | "collections" | "db" | "ffi" | "lua54" | "net" | "proto"
+        "option"
+            | "result"
+            | "collections"
+            | "strconv"
+            | "db"
+            | "ffi"
+            | "file"
+            | "dir"
+            | "io"
+            | "env"
+            | "path"
+            | "process"
+            | "args"
+            | "lua54"
+            | "net"
+            | "proto"
     )
 }
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -163,5 +189,125 @@ mod tests {
         let source = "import std::reflect;\ndef main() -> i64 { 0 }\n";
 
         assert_eq!(expand_stdlib_imports_for_source(source).unwrap(), source);
+    }
+
+    #[test]
+    fn file_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::file;\ndef main() -> i64 { 0 }\n")
+                .expect("file stdlib import should expand");
+
+        assert!(expanded.contains("def file_exists"));
+        assert!(expanded.contains("def file_copy"));
+        assert!(expanded.contains("def file_move"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn env_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::env;\ndef main() -> i64 { 0 }\n")
+                .expect("env stdlib import should expand");
+
+        assert!(expanded.contains("def env_var_copy"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn time_import_expands_source_module() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::time;\ndef main() -> i64 { 0 }\n")
+                .expect("time stdlib import should expand");
+
+        assert!(expanded.contains("def time_unix_ms"));
+        assert!(expanded.contains("def time_sleep_ms"));
+    }
+
+    #[test]
+    fn random_import_expands_source_module() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::random;\ndef main() -> i64 { 0 }\n")
+                .expect("random stdlib import should expand");
+
+        assert!(expanded.contains("def random_seed"));
+        assert!(expanded.contains("def random_range_i64"));
+    }
+
+    #[test]
+    fn path_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::path;\ndef main() -> i64 { 0 }\n")
+                .expect("path stdlib import should expand");
+
+        assert!(expanded.contains("def path_join"));
+        assert!(expanded.contains("def path_normalize"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn process_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::process;\ndef main() -> i64 { 0 }\n")
+                .expect("process stdlib import should expand");
+
+        assert!(expanded.contains("def process_id"));
+        assert!(expanded.contains("def process_current_dir_copy"));
+        assert!(expanded.contains("def process_run"));
+        assert!(expanded.contains("def process_run_3"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn dir_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::dir;\ndef main() -> i64 { 0 }\n")
+                .expect("dir stdlib import should expand");
+
+        assert!(expanded.contains("def dir_exists"));
+        assert!(expanded.contains("def dir_create_all"));
+        assert!(expanded.contains("def dir_entry_count"));
+        assert!(expanded.contains("def dir_entry_name"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn io_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::io;\ndef main() -> i64 { 0 }\n")
+                .expect("io stdlib import should expand");
+
+        assert!(expanded.contains("def io_stdin_read"));
+        assert!(expanded.contains("def io_stderr_write"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn args_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::args;\ndef main() -> i64 { 0 }\n")
+                .expect("args stdlib import should expand");
+
+        assert!(expanded.contains("def args_len"));
+        assert!(expanded.contains("def arg_copy"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn strconv_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::strconv;\ndef main() -> i64 { 0 }\n")
+                .expect("strconv stdlib import should expand");
+
+        assert!(expanded.contains("def strconv_parse_i64"));
+        assert!(expanded.contains("def strconv_format_i64"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
     }
 }

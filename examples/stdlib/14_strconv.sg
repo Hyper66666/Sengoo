@@ -1,0 +1,25 @@
+// examples/stdlib/14_strconv.sg
+//
+// Demonstrates: importing std::strconv helpers for decimal i64 parse and Buffer-backed formatting.
+//
+// Run: sgc run examples/stdlib/14_strconv.sg
+// Expected output: 14
+
+import std::strconv;
+import std::io;
+
+def main() -> i64 {
+    let out = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let parsed = strconv_parse_i64(" 19\n").unwrap_or(0);
+    let invalid = strconv_parse_i64("12x").is_err();
+    let overflow = strconv_parse_i64("9223372036854775808").is_err();
+    let formatted = strconv_format_i64(parsed - 5, out).unwrap_or(0);
+    let wrote = io_stdout_write_raw(out.ptr(), formatted).unwrap_or(0);
+    let newline = io_stdout_write("\n").unwrap_or(0);
+    out.free();
+
+    if !(invalid && overflow && formatted == 2 && wrote == 2 && newline == 1) {
+        print(0);
+    }
+    0
+}

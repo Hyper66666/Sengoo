@@ -1,0 +1,29 @@
+// examples/stdlib/09_process.sg
+//
+// Demonstrates: importing std::process helpers for process metadata,
+// current working directory copy, and exit-code selection.
+//
+// Run: sgc run examples/stdlib/09_process.sg
+// Expected output: 10
+
+import std::process;
+
+def main() -> i64 {
+    let cwd_len = process_current_dir_len().unwrap_or(0);
+    let cwd = ffi_buffer_new(cwd_len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied = process_current_dir_copy(cwd).unwrap_or(0);
+    let pid = process_id();
+    let ok_code = process_exit_code(true, 10);
+    let err_code = process_exit_code(false, 10);
+
+    cwd.free();
+
+    let ok = cwd_len > 0
+        && copied == cwd_len
+        && pid > 0
+        && ok_code == 0
+        && err_code == 10;
+
+    print(if ok { 10 } else { 0 });
+    0
+}

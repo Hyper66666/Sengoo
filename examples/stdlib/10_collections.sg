@@ -1,0 +1,52 @@
+// examples/stdlib/10_collections.sg
+//
+// Demonstrates: importing std::collections helpers for runtime-backed Vec<i64>,
+// HashMap<i64, i64>, and iterator flows.
+//
+// Run: sgc run examples/stdlib/10_collections.sg
+// Expected output: 60
+
+import std::collections;
+
+def main() -> i64 {
+    let values = vec_new_i64();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+
+    let vector_total = values.get(0).unwrap_or(0)
+        + values.get(1).unwrap_or(0)
+        + values.get(2).unwrap_or(0);
+
+    let iter = values.iter();
+    let iter_score = iter.next().unwrap_or(0)
+        + iter.map_add(1).unwrap_or(0)
+        + iter.filter_even().unwrap_or(0);
+    iter.free();
+
+    let counts = hashmap_new_i64_i64();
+    counts.insert(1, 10);
+    counts.insert(2, 20);
+    counts.insert(3, 30);
+
+    let map_total = counts.get(1).unwrap_or(0)
+        + counts.get(2).unwrap_or(0)
+        + counts.get(3).unwrap_or(0);
+    let removed = counts.remove(2);
+    let missing = !counts.contains(2);
+
+    let ok = values.len() == 3
+        && values.contains(20)
+        && vector_total == 60
+        && iter_score == 61
+        && counts.len() == 3
+        && map_total == 60
+        && removed
+        && missing;
+
+    values.free();
+    counts.free();
+
+    print(if ok { 60 } else { 0 });
+    0
+}

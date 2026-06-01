@@ -68,6 +68,9 @@ pub struct Codegen {
 
     /// Counter used to create stable temporary names for generated load instructions.
     load_counter: usize,
+
+    /// Whether this module needs an OS `main(argc, argv)` wrapper for `std::args`.
+    emit_args_main_wrapper: bool,
 }
 
 impl Codegen {
@@ -94,6 +97,8 @@ impl Codegen {
             type_str_cache: HashMap::new(),
 
             load_counter: 0,
+
+            emit_args_main_wrapper: false,
         };
 
         cg.emit_header();
@@ -154,8 +159,10 @@ impl Codegen {
 
         let return_type = self.mir_type_to_llvm_cached(&mir_fn.return_type);
 
+        let function_name = self.emitted_function_name(&mir_fn.name);
+
         self.ir
-            .push_str(&format!("define {} @{}(", return_type, mir_fn.name));
+            .push_str(&format!("define {} @{}(", return_type, function_name));
 
         for (i, ty) in mir_fn.params.iter().enumerate() {
             let param_name = format!("%l_{}", i + 1);

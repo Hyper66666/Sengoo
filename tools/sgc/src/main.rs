@@ -73,7 +73,8 @@ pub(crate) use error_reporting::{
 pub(crate) use fingerprint::{
     file_fingerprint, implementation_fingerprint, implementation_fingerprint_from_normalized,
     interface_fingerprint, interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
-    normalize_source_for_hash, resolve_root_hashes_for_request, source_fingerprint,
+    normalize_source_for_hash, optional_file_fingerprint, resolve_root_hashes_for_request,
+    source_fingerprint,
 };
 pub(crate) use frontend_helpers::{
     dependency_graph_digest, frontend_cache_entry_for_module, frontend_probe_module_body_only,
@@ -104,7 +105,7 @@ pub(crate) use native_toolchain::{
     append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object,
     compile_native_binary, default_build_output_path_for_case, ensure_runtime_object,
     link_native_binary_from_objects, linker_mode_from_env,
-    recover_native_output_from_cached_artifacts, run_native_binary, run_with_lli,
+    recover_native_output_from_cached_artifacts, run_native_binary_with_args, run_with_lli_args,
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
@@ -112,8 +113,8 @@ pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_link
 pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
     compile_source_to_llvm_file_with_phase_timings,
-    compile_source_to_llvm_file_with_phase_timings_with_mode, set_contract_runtime_checks_override,
-    set_large_project_mode_override,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, maybe_print_phase_timings,
+    set_contract_runtime_checks_override, set_large_project_mode_override,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;

@@ -48,12 +48,15 @@ impl Codegen {
         self.name_cache.clear();
         self.type_str_cache.clear();
         self.load_counter = 0;
+        self.emit_args_main_wrapper = false;
         self.emit_header();
         self.declare_runtime_functions();
     }
 
     pub(super) fn emit_module_ir(&mut self, mir_fns: &[MirFunction]) -> Result<(), String> {
         self.prepare_codegen_buffers();
+        self.emit_args_main_wrapper = Self::module_uses_args_runtime(mir_fns);
+        self.maybe_declare_args_runtime_functions();
 
         let capacity = Self::estimate_ir_capacity(mir_fns);
         self.ir.reserve(capacity);
@@ -74,7 +77,122 @@ impl Codegen {
             self.codegen_function(mir_fn)?;
         }
 
+        self.emit_args_main_wrapper(mir_fns)?;
         self.emit_export_symbol_wrappers(mir_fns);
+        Ok(())
+    }
+
+    pub(super) fn emitted_function_name<'a>(&self, name: &'a str) -> &'a str {
+        if self.emit_args_main_wrapper && name == "main" {
+            "sengoo_user_main"
+        } else {
+            name
+        }
+    }
+
+    fn args_runtime_function_name(func: &str) -> bool {
+        matches!(
+            func,
+            "sengoo_args_len" | "sengoo_arg_len" | "sengoo_arg_copy"
+        )
+    }
+
+    fn module_uses_args_runtime(mir_fns: &[MirFunction]) -> bool {
+        mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. }
+                        if Self::args_runtime_function_name(func)
+                )
+            }) || mir_fn.basic_blocks.iter().any(|bb| {
+                matches!(
+                    &bb.terminator,
+                    Some(mir::Terminator::Call { func, .. })
+                        if Self::args_runtime_function_name(func)
+                )
+            })
+        })
+    }
+
+    fn maybe_declare_args_runtime_functions(&mut self) {
+        if !self.emit_args_main_wrapper {
+            return;
+        }
+
+        for decl in [
+            "declare void @sengoo_args_init(i64, i64)\n",
+            "declare i64 @sengoo_args_len()\n",
+            "declare i64 @sengoo_arg_len(i64)\n",
+            "declare i64 @sengoo_arg_copy(i64, i64, i64)\n",
+        ] {
+            if !self.declarations.contains(decl) {
+                self.declarations.push_str(decl);
+            }
+        }
+    }
+
+    fn emit_args_main_wrapper(&mut self, mir_fns: &[MirFunction]) -> Result<(), String> {
+        if !self.emit_args_main_wrapper {
+            return Ok(());
+        }
+
+        let Some(main_fn) = mir_fns.iter().find(|f| f.name == "main") else {
+            return Err("std::args requires a source-level main function".to_string());
+        };
+        if !main_fn.params.is_empty() {
+            return Err("std::args requires a zero-argument source-level main".to_string());
+        }
+
+        let ret_ty = self.mir_type_to_llvm_cached(&main_fn.return_type);
+
+        self.ir.push_str("\n; Args runtime entry wrapper\n");
+        self.ir
+            .push_str("define i32 @main(i32 %argc, i8** %argv) {\n");
+        self.indent += 1;
+        self.ir.push_str("bb_0:\n");
+        self.indent += 1;
+        self.emit_indent();
+        self.ir.push_str("%argc64 = sext i32 %argc to i64\n");
+        self.emit_indent();
+        self.ir.push_str("%argv64 = ptrtoint i8** %argv to i64\n");
+        self.emit_indent();
+        self.ir
+            .push_str("call void @sengoo_args_init(i64 %argc64, i64 %argv64)\n");
+
+        match ret_ty.as_str() {
+            "void" => {
+                self.emit_indent();
+                self.ir.push_str("call void @sengoo_user_main()\n");
+                self.emit_indent();
+                self.ir.push_str("ret i32 0\n");
+            }
+            "i64" => {
+                self.emit_indent();
+                self.ir.push_str("%result = call i64 @sengoo_user_main()\n");
+                self.emit_indent();
+                self.ir.push_str("%exit_code = trunc i64 %result to i32\n");
+                self.emit_indent();
+                self.ir.push_str("ret i32 %exit_code\n");
+            }
+            "i32" => {
+                self.emit_indent();
+                self.ir.push_str("%result = call i32 @sengoo_user_main()\n");
+                self.emit_indent();
+                self.ir.push_str("ret i32 %result\n");
+            }
+            _ => {
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("call {} @sengoo_user_main()\n", ret_ty));
+                self.emit_indent();
+                self.ir.push_str("ret i32 0\n");
+            }
+        }
+
+        self.indent -= 1;
+        self.indent -= 1;
+        self.ir.push_str("}\n");
         Ok(())
     }
 
@@ -133,10 +251,11 @@ impl Codegen {
             self.indent += 1;
             self.emit_indent();
 
+            let target_name = self.emitted_function_name(&export.internal_name);
             if ret_ty == "void" {
                 self.ir.push_str(&format!(
-                    "call void {}({})\n",
-                    export.internal_name,
+                    "call void @{}({})\n",
+                    target_name,
                     args.join(", ")
                 ));
                 self.emit_indent();
@@ -145,7 +264,7 @@ impl Codegen {
                 self.ir.push_str(&format!(
                     "%export_ret = call {} @{}({})\n",
                     ret_ty,
-                    export.internal_name,
+                    target_name,
                     args.join(", ")
                 ));
                 self.emit_indent();

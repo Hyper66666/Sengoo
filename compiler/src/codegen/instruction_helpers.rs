@@ -502,7 +502,11 @@ impl Codegen {
                 // Lower the built-in print function through puts when applicable.
                 let is_print = func == "print";
 
-                let actual_func = if is_print { "puts" } else { func };
+                let actual_func = if is_print {
+                    "puts"
+                } else {
+                    self.emitted_function_name(func)
+                };
 
                 let callee = if actual_func.starts_with('%') || actual_func.starts_with('@') {
                     actual_func.to_string()
