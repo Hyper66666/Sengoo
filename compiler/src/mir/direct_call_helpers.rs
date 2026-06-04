@@ -108,8 +108,11 @@ pub(crate) fn collect_direct_calls_in_expr(expr: &HIRExpr, out: &mut HashSet<Str
         HIRExpr::Await(inner) => {
             collect_direct_calls_in_expr(inner, out);
         }
-        HIRExpr::AsyncBlock(body) => {
+        HIRExpr::AsyncBlock(body) | HIRExpr::TryBlock(body) => {
             collect_direct_calls_in_body(body, out);
+        }
+        HIRExpr::Try(inner) => {
+            collect_direct_calls_in_expr(inner, out);
         }
     }
 }

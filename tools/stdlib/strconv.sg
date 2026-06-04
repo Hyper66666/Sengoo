@@ -6,7 +6,21 @@ extern "C" {
 }
 
 def strconv_last_error_code() -> i64 {
-    sengoo_strconv_last_error_code()
+    strconv_status_from_raw_code(sengoo_strconv_last_error_code())
+}
+
+def strconv_status_from_raw_code(error: i64) -> i64 {
+    if error == 0 {
+        STATUS_OK()
+    } else if error == 1 {
+        STATUS_PARSE()
+    } else if error == 2 {
+        STATUS_OVERFLOW()
+    } else if error == 3 {
+        STATUS_BUFFER_TOO_SMALL()
+    } else {
+        status_from_raw_ffi(error)
+    }
 }
 
 def strconv_i64_value_result(value: i64) -> Result<i64, i64> {
@@ -14,7 +28,7 @@ def strconv_i64_value_result(value: i64) -> Result<i64, i64> {
     if error == 0 {
         Result { is_ok: true, value: value, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: error }
+        Result { is_ok: false, value: 0, error: strconv_status_from_raw_code(error) }
     }
 }
 
@@ -30,8 +44,10 @@ def strconv_parse_i64_buffer(buffer: Buffer, len: i64) -> Result<i64, i64> {
     let capacity = buffer.len();
     if len >= 0 && len <= capacity {
         strconv_parse_i64_raw(buffer.ptr(), len)
+    } else if len > capacity {
+        Result { is_ok: false, value: 0, error: STATUS_BUFFER_TOO_SMALL() }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
     }
 }
 
@@ -40,7 +56,7 @@ def strconv_format_i64_raw(value: i64, buffer_ptr: i64, capacity: i64) -> Result
     if written >= 0 {
         Result { is_ok: true, value: written, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_strconv_last_error_code() }
+        Result { is_ok: false, value: 0, error: strconv_status_from_raw_code(sengoo_strconv_last_error_code()) }
     }
 }
 

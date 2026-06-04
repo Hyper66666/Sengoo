@@ -8,18 +8,18 @@ use super::{
     compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
     derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
     derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_object, expand_stdlib_imports_for_source, find_clang,
+    edit_class_label, ensure_runtime_objects, expand_stdlib_imports_for_source, find_clang,
     find_runtime_c, format_edit_impact_lines, generic_fingerprints_for_module,
     generic_instance_hit_ratio, handle_daemon_client, link_native_binary_from_objects,
     maybe_emit_reflection_sidecar, metadata_matches, module_dependency_levels,
     module_fingerprints_for_source, module_invalidation_stats, parse_frontend_jobs_arg,
     parse_linker_mode, reflection_options_from_cli, reflection_sidecar_path_for_artifact,
-    resolve_bench_suite_path, resolve_daemon_addr, resolve_engine,
-    select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
-    validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
-    BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode, DaemonDispatchOutcome,
-    EditClass, EditImpact, FrontendFallbackScope, FrontendJobs, FrontendMemoryMode,
-    FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
+    resolve_bench_suite_path, resolve_daemon_addr, resolve_engine, runtime_bundle_fingerprint,
+    runtime_source_bundle, select_reflection_i64_zero_arity_symbol, send_daemon_request,
+    signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
+    BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode,
+    DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
+    FrontendMemoryMode, FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata, ReflectionMode,
     RunCacheMetadata, RunEngine, RuntimeSourceIdentity, BUILD_GRAPH_SCHEMA_VERSION,
@@ -357,12 +357,7 @@ fn example_reference_docs_cover_core_cases() {
 
 #[test]
 fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(manifest_dir);
-    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+    let runtime_c = load_runtime_bundle_source_for_tests();
 
     for symbol in [
         "sengoo_vec_new_i64",
@@ -403,13 +398,49 @@ fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
 }
 
 #[test]
+fn stdlib_runtime_exports_text_collection_operations() {
+    let runtime_c = load_runtime_bundle_source_for_tests();
+
+    for symbol in [
+        "sengoo_text_list_new",
+        "sengoo_text_list_len",
+        "sengoo_text_list_clear_status",
+        "sengoo_text_list_free_status",
+        "sengoo_text_list_push",
+        "sengoo_text_list_get_copy",
+        "sengoo_text_list_set",
+        "sengoo_text_list_remove_copy",
+        "sengoo_text_list_iter_new",
+        "sengoo_text_list_iter_done",
+        "sengoo_text_list_iter_next_copy",
+        "sengoo_text_list_iter_reset_status",
+        "sengoo_text_list_iter_free_status",
+        "sengoo_string_map_new",
+        "sengoo_string_map_len",
+        "sengoo_string_map_clear_status",
+        "sengoo_string_map_free_status",
+        "sengoo_string_map_insert_i64",
+        "sengoo_string_map_get_or_default_i64",
+        "sengoo_string_map_insert_bool",
+        "sengoo_string_map_get_or_default_bool",
+        "sengoo_string_map_contains",
+        "sengoo_string_map_remove",
+        "sengoo_string_map_key_iter_new",
+        "sengoo_string_map_key_iter_done",
+        "sengoo_string_map_key_iter_next_copy",
+        "sengoo_string_map_key_iter_reset_status",
+        "sengoo_string_map_key_iter_free_status",
+    ] {
+        assert!(
+            runtime_c.contains(symbol),
+            "runtime stdlib missing text collection symbol: {symbol}"
+        );
+    }
+}
+
+#[test]
 fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(manifest_dir);
-    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+    let runtime_c = load_runtime_bundle_source_for_tests();
 
     for symbol in [
         "sengoo_vec_iter_new_i64",
@@ -437,12 +468,7 @@ fn stdlib_runtime_exports_iterator_and_option_result_adapters() {
 
 #[test]
 fn stdlib_runtime_exports_managed_buffer_helpers() {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(manifest_dir);
-    let runtime_c = fs::read_to_string(workspace_root.join("tools/stdlib/runtime.c")).unwrap();
+    let runtime_c = load_runtime_bundle_source_for_tests();
 
     for symbol in [
         "sengoo_ffi_last_error_code",
@@ -462,6 +488,155 @@ fn stdlib_runtime_exports_managed_buffer_helpers() {
             "runtime stdlib missing Buffer helper: {symbol}"
         );
     }
+}
+
+#[test]
+fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
+    let root = std::env::temp_dir().join(format!(
+        "sengoo-runtime-bundle-discovery-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    for file in [
+        "runtime.c",
+        "runtime_collections.c",
+        "runtime_json.c",
+        "runtime_process.c",
+        "runtime_shared.h",
+    ] {
+        fs::write(root.join(file), b"/* test runtime bundle input */\n").unwrap();
+    }
+
+    let anchor = root.join("runtime.c");
+    let bundle = runtime_source_bundle(&anchor.to_string_lossy())
+        .expect("runtime source bundle should be discoverable");
+    let file_names = bundle
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        file_names,
+        vec![
+            "runtime.c",
+            "runtime_collections.c",
+            "runtime_json.c",
+            "runtime_process.c",
+        ]
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn runtime_bundle_fingerprint_changes_when_split_source_or_header_changes() {
+    let root = std::env::temp_dir().join(format!(
+        "sengoo-runtime-bundle-fingerprint-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("runtime.c"),
+        b"long long anchor(void) { return 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("runtime_json.c"),
+        b"long long split(void) { return 2; }\n",
+    )
+    .unwrap();
+    fs::write(root.join("runtime_shared.h"), b"#define VALUE 1\n").unwrap();
+
+    let anchor = root.join("runtime.c");
+    let before = runtime_bundle_fingerprint(&anchor.to_string_lossy())
+        .expect("runtime bundle fingerprint should hash split inputs");
+    fs::write(
+        root.join("runtime_json.c"),
+        b"long long split(void) { return 3; }\n",
+    )
+    .unwrap();
+    let after_source = runtime_bundle_fingerprint(&anchor.to_string_lossy())
+        .expect("runtime bundle fingerprint should change after split source edit");
+    fs::write(root.join("runtime_shared.h"), b"#define VALUE 4\n").unwrap();
+    let after_header = runtime_bundle_fingerprint(&anchor.to_string_lossy())
+        .expect("runtime bundle fingerprint should change after shared header edit");
+
+    assert_ne!(before, after_source);
+    assert_ne!(after_source, after_header);
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn native_runtime_bundle_links_split_sources_for_full_and_object_link_paths() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let root =
+        std::env::temp_dir().join(format!("sengoo-runtime-bundle-link-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let anchor = root.join("runtime.c");
+    fs::write(
+        &anchor,
+        b"/* anchor runtime source intentionally empty */\n",
+    )
+    .unwrap();
+    fs::write(root.join("runtime_shared.h"), b"/* shared header */\n").unwrap();
+    fs::write(
+        root.join("runtime_json.c"),
+        b"long long sengoo_runtime_split_probe(void) { return 42; }\n",
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_runtime_split_probe() -> i64;
+}
+
+def main() -> i64 {
+    sengoo_runtime_split_probe()
+}
+"#;
+    let llvm_ir = compile_source(source, 1).expect("split runtime probe should compile");
+    let ll_path = temp_artifact("runtime-bundle-link", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let anchor_str = anchor.to_string_lossy().to_string();
+
+    let full_exe = temp_artifact(
+        "runtime-bundle-link-full",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &full_exe, Some(&anchor_str), 1).unwrap();
+    let full_output = Command::new(&full_exe)
+        .output()
+        .expect("full runtime bundle executable should run");
+    assert_eq!(full_output.status.code(), Some(42));
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("runtime-bundle-link-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1).unwrap();
+    let inc_exe = temp_artifact(
+        "runtime-bundle-link-objects",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &anchor_str, 1).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
+    let inc_output = Command::new(&inc_exe)
+        .output()
+        .expect("object runtime bundle executable should run");
+    assert_eq!(inc_output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&full_exe);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&inc_exe);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -774,6 +949,19 @@ fn render_compile_error_json_contains_expected_fields() {
     assert_eq!(value["stage"], "typecheck");
     assert_eq!(value["message"], "expected i64, found bool");
     assert_eq!(value["input"], "tests/demo.sg");
+}
+
+#[test]
+fn render_compile_error_json_extracts_stable_diagnostic_code() {
+    let raw = "typecheck failed: [non-exhaustive-match] match is not exhaustive: missing Blue";
+    let json = super::render_compile_error_json(Some("tests/match.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["code"], "non-exhaustive-match");
+    assert!(value["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("non-exhaustive-match"));
 }
 
 #[test]
@@ -3257,7 +3445,7 @@ fn incremental_link_output_matches_full_link_output() {
 
     let mut object_paths = vec![obj_path.clone()];
     if let Some(runtime_c) = runtime_c.as_deref() {
-        object_paths.push(ensure_runtime_object(&clang, runtime_c, 2).unwrap());
+        object_paths.extend(ensure_runtime_objects(&clang, runtime_c, 2).unwrap());
     }
     link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
 
@@ -3275,32 +3463,12 @@ fn incremental_link_output_matches_full_link_output() {
 
 static STDLIB_RUNTIME_C_READY: OnceLock<bool> = OnceLock::new();
 fn stdlib_runtime_c_is_compilable(clang: &str, runtime_c: &Path) -> bool {
-    *STDLIB_RUNTIME_C_READY.get_or_init(|| {
-        let probe_obj = temp_artifact(
-            "stdlib-runtime-c-probe",
-            if cfg!(windows) { "obj" } else { "o" },
-        );
-        let mut command = Command::new(clang);
-        command.arg("-Wno-override-module").arg("-O2");
-        #[cfg(windows)]
-        {
-            command.arg("--target=x86_64-pc-windows-msvc");
-        }
-        let status = command
-            .arg("-c")
-            .arg(runtime_c)
-            .arg("-o")
-            .arg(&probe_obj)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = fs::remove_file(&probe_obj);
-        status.map(|status| status.success()).unwrap_or(false)
-    })
+    *STDLIB_RUNTIME_C_READY
+        .get_or_init(|| ensure_runtime_objects(clang, &runtime_c.to_string_lossy(), 2).is_ok())
 }
 
 fn load_stdlib_surface_source() -> String {
-    load_stdlib_modules(&["option.sg", "result.sg", "collections.sg"])
+    load_stdlib_modules(&["option.sg", "result.sg", "ffi.sg", "collections.sg"])
 }
 
 fn load_stdlib_modules(modules: &[&str]) -> String {
@@ -3327,6 +3495,28 @@ fn workspace_root_for_tests() -> PathBuf {
         .and_then(|p| p.parent())
         .unwrap_or(manifest_dir)
         .to_path_buf()
+}
+
+fn load_runtime_bundle_source_for_tests() -> String {
+    let runtime_c = find_runtime_c().unwrap_or_else(|| {
+        workspace_root_for_tests()
+            .join("tools/stdlib/runtime.c")
+            .to_string_lossy()
+            .to_string()
+    });
+    runtime_source_bundle(&runtime_c)
+        .expect("runtime bundle should be discoverable")
+        .into_iter()
+        .map(|path| {
+            fs::read_to_string(&path).unwrap_or_else(|err| {
+                panic!(
+                    "runtime source {} should be readable: {err}",
+                    path.display()
+                )
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn read_example_source(relative_path: &str) -> String {
@@ -3381,15 +3571,17 @@ fn compile_and_run_example_with_args(
         return None;
     }
 
-    let runtime_obj = temp_artifact(&format!("examples-smoke-{tag}-runtime"), obj_ext);
-    if compile_ir_to_object(&clang, Path::new(&runtime_c), &runtime_obj, 1).is_err() {
-        let _ = fs::remove_file(&ll_path);
-        let _ = fs::remove_file(&main_obj);
-        let _ = fs::remove_file(&runtime_obj);
-        return None;
-    }
+    let runtime_objects = match ensure_runtime_objects(&clang, &runtime_c, 1) {
+        Ok(objects) => objects,
+        Err(_) => {
+            let _ = fs::remove_file(&ll_path);
+            let _ = fs::remove_file(&main_obj);
+            return None;
+        }
+    };
 
-    let mut object_paths = vec![main_obj.clone(), runtime_obj.clone()];
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(runtime_objects);
     let workspace_root = workspace_root_for_tests();
     let mut extra_objects = Vec::new();
     for extra_input in extra_c_inputs {
@@ -3403,7 +3595,6 @@ fn compile_and_run_example_with_args(
         if compile_ir_to_object(&clang, &workspace_root.join(extra_input), &extra_obj, 1).is_err() {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
-            let _ = fs::remove_file(&runtime_obj);
             for object in &extra_objects {
                 let _ = fs::remove_file(object);
             }
@@ -3419,7 +3610,8 @@ fn compile_and_run_example_with_args(
     );
     if link_native_binary_from_objects(&clang, &object_paths, &exe_path).is_err() {
         let _ = fs::remove_file(&ll_path);
-        for object in &object_paths {
+        let _ = fs::remove_file(&main_obj);
+        for object in &extra_objects {
             let _ = fs::remove_file(object);
         }
         let _ = fs::remove_file(&exe_path);
@@ -3432,7 +3624,8 @@ fn compile_and_run_example_with_args(
         .expect("example executable should run");
 
     let _ = fs::remove_file(&ll_path);
-    for object in &object_paths {
+    let _ = fs::remove_file(&main_obj);
+    for object in &extra_objects {
         let _ = fs::remove_file(object);
     }
     let _ = fs::remove_file(&exe_path);
@@ -3513,6 +3706,9 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/15_dir_listing.sg",
         "examples/stdlib/16_file_copy_move.sg",
         "examples/stdlib/17_process_run.sg",
+        "examples/stdlib/18_status_buffer.sg",
+        "examples/stdlib/18_json.sg",
+        "examples/stdlib/19_process_capture.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3567,6 +3763,32 @@ fn examples_catalog_lists_expanded_categories() {
             "{readme} should link the examples index"
         );
     }
+}
+
+#[test]
+fn stdlib_json_example_uses_public_json_wrappers() {
+    let source = read_example_source("examples/stdlib/18_json.sg");
+
+    assert!(
+        !source.contains("sengoo_json_"),
+        "JSON example should demonstrate std::json wrappers instead of raw C bridge calls"
+    );
+    for needle in ["json_parse(", "json_doc_object(", ".root()", ".serialize("] {
+        assert!(
+            source.contains(needle),
+            "JSON example should include wrapper usage: {needle}"
+        );
+    }
+}
+
+#[test]
+fn stdlib_status_buffer_example_imports_ffi_explicitly() {
+    let source = read_example_source("examples/stdlib/18_status_buffer.sg");
+
+    assert!(
+        source.contains("import std::ffi;"),
+        "status/buffer example should import std::ffi explicitly before using Buffer helpers"
+    );
 }
 
 #[test]
@@ -3735,6 +3957,29 @@ fn examples_smoke_stdlib_process_run_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_status_buffer_import() {
+    assert_example_output(
+        "stdlib-status-buffer",
+        "examples/stdlib/18_status_buffer.sg",
+        "18",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_json_import() {
+    assert_example_output("stdlib-json", "examples/stdlib/18_json.sg", "18");
+}
+
+#[test]
+fn examples_smoke_stdlib_process_capture_import() {
+    assert_example_output(
+        "stdlib-process-capture",
+        "examples/stdlib/19_process_capture.sg",
+        "19",
+    );
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -3825,6 +4070,158 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "a.txt");
+}
+
+#[test]
+fn stdlib_file_metadata_and_dir_walk_runtime_cover_statuses_and_bounded_order() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "file-metadata-dir-walk",
+        r#"
+import std::dir;
+import std::file;
+import std::io;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_dir_walk_runtime";
+    let nested = "sengoo_tmp_dir_walk_runtime/nested";
+    let deep = "sengoo_tmp_dir_walk_runtime/nested/deep";
+    let a = "sengoo_tmp_dir_walk_runtime/a.txt";
+    let b = "sengoo_tmp_dir_walk_runtime/b.txt";
+    let c = "sengoo_tmp_dir_walk_runtime/nested/c.txt";
+    let d = "sengoo_tmp_dir_walk_runtime/nested/deep/d.txt";
+    let missing = "sengoo_tmp_dir_walk_runtime/missing.txt";
+
+    file_remove(a);
+    file_remove(b);
+    file_remove(c);
+    file_remove(d);
+    dir_remove(deep);
+    dir_remove(nested);
+    dir_remove(root);
+
+    let created = dir_create_all(deep).unwrap_or(false);
+    let wrote_a = file_write_str(a, "a").unwrap_or(0);
+    let wrote_b = file_write_str(b, "bb").unwrap_or(0);
+    let wrote_c = file_write_str(c, "ccc").unwrap_or(0);
+    let wrote_d = file_write_str(d, "dddd").unwrap_or(0);
+
+    let file_kind_result = file_kind(a);
+    let dir_kind_result = file_kind(root);
+    let missing_kind = file_kind(missing);
+    let size_result = file_size(c);
+    let unsupported_size = file_size(root);
+    let modified_result = file_modified_unix_ms(a);
+
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let small = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let walk = dir_walk(root, 1).unwrap_or(DirWalk { handle: 0 });
+    let first = walk.next(buffer);
+    let first_len = first.unwrap_or(0);
+    let first_out = io_stdout_write_raw(buffer.ptr(), first_len).unwrap_or(0);
+    let sep0 = io_stdout_write("|").unwrap_or(0);
+    let second = walk.next(buffer);
+    let second_len = second.unwrap_or(0);
+    let second_out = io_stdout_write_raw(buffer.ptr(), second_len).unwrap_or(0);
+    let sep1 = io_stdout_write("|").unwrap_or(0);
+    let third = walk.next(buffer);
+    let third_len = third.unwrap_or(0);
+    let third_out = io_stdout_write_raw(buffer.ptr(), third_len).unwrap_or(0);
+    let sep2 = io_stdout_write("|").unwrap_or(0);
+    let fourth = walk.next(buffer);
+    let fourth_len = fourth.unwrap_or(0);
+    let fourth_out = io_stdout_write_raw(buffer.ptr(), fourth_len).unwrap_or(0);
+    let sep3 = io_stdout_write("|").unwrap_or(0);
+    let fifth = walk.next(buffer);
+    let fifth_len = fifth.unwrap_or(0);
+    let fifth_out = io_stdout_write_raw(buffer.ptr(), fifth_len).unwrap_or(0);
+    let done_len = walk.next(buffer).unwrap_or(-1);
+    let closed = walk.close();
+
+    let small_walk = dir_walk(root, 0).unwrap_or(DirWalk { handle: 0 });
+    let too_small = small_walk.next(small);
+    let small_closed = small_walk.close();
+    let bad_depth = dir_walk(root, -1);
+    let missing_walk = dir_walk(missing, 0);
+
+    small.free();
+    buffer.free();
+    file_remove(a);
+    file_remove(b);
+    file_remove(c);
+    file_remove(d);
+    let removed_deep = dir_remove(deep).unwrap_or(false);
+    let removed_nested = dir_remove(nested).unwrap_or(false);
+    let removed_root = dir_remove(root).unwrap_or(false);
+
+    let modified_ok = if modified_result.is_ok {
+        modified_result.value > 0
+    } else {
+        modified_result.error == 8
+    };
+
+    if created
+        && wrote_a == 1
+        && wrote_b == 2
+        && wrote_c == 3
+        && wrote_d == 4
+        && file_kind_result.is_ok
+        && file_kind_result.value == PATH_KIND_FILE()
+        && dir_kind_result.is_ok
+        && dir_kind_result.value == PATH_KIND_DIR()
+        && missing_kind.is_err()
+        && missing_kind.error == 5
+        && size_result.is_ok
+        && size_result.value == 3
+        && unsupported_size.is_err()
+        && unsupported_size.error == 8
+        && modified_ok
+        && first_len == 5
+        && second_len == 5
+        && third_len == 6
+        && fourth_len == 12
+        && fifth_len == 11
+        && first_out == 5
+        && second_out == 5
+        && third_out == 6
+        && fourth_out == 12
+        && fifth_out == 11
+        && sep0 == 1
+        && sep1 == 1
+        && sep2 == 1
+        && sep3 == 1
+        && done_len == 0
+        && closed
+        && too_small.is_err()
+        && too_small.error == 4
+        && small_closed
+        && bad_depth.is_err()
+        && bad_depth.error == 2
+        && missing_walk.is_err()
+        && missing_walk.error == 5
+        && removed_deep
+        && removed_nested
+        && removed_root {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "a.txt|b.txt|nested|nested/c.txt|nested/deep"
+    );
 }
 
 #[test]
@@ -3947,6 +4344,293 @@ def main() -> i64 {{
 }
 
 #[test]
+fn stdlib_process_command_captures_output_and_controls_child() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let child_c = temp_artifact("process-command-child", "c");
+    let child_exe = temp_artifact(
+        "process-command-child",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    fs::write(
+        &child_c,
+        r#"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#define getcwd _getcwd
+static void sleep_ms(unsigned long ms) { Sleep(ms); }
+#else
+#include <unistd.h>
+static void sleep_ms(unsigned long ms) { usleep(ms * 1000); }
+#endif
+
+static int path_eq(const char* left, const char* right) {
+    if (!left || !right) {
+        return 0;
+    }
+    while (*left != '\0' && *right != '\0') {
+        char lhs = *left++;
+        char rhs = *right++;
+#ifdef _WIN32
+        if (lhs == '\\') {
+            lhs = '/';
+        }
+        if (rhs == '\\') {
+            rhs = '/';
+        }
+#endif
+        if (lhs != rhs) {
+            return 0;
+        }
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        return 90;
+    }
+
+    if (strcmp(argv[1], "literal") == 0) {
+        return argc == 3 && strcmp(argv[2], "literal spaces &^%$!") == 0 ? 7 : 8;
+    }
+
+    if (strcmp(argv[1], "inherit") == 0) {
+        fprintf(stdout, "inherit-stdout");
+        fprintf(stderr, "inherit-stderr");
+        fflush(stdout);
+        fflush(stderr);
+        return 23;
+    }
+
+    if (strcmp(argv[1], "inspect") == 0) {
+        char cwd[1024];
+        const char* flag = getenv("SENGOO_FLAG");
+        const char* removed = getenv("SENGOO_REMOVE_ME");
+        const char* path = getenv("PATH");
+        if (argc != 5) {
+            return 30;
+        }
+        if (!getcwd(cwd, sizeof(cwd))) {
+            return 31;
+        }
+        fprintf(stdout, "123");
+        fprintf(stderr, "456");
+        fflush(stdout);
+        fflush(stderr);
+        if (strcmp(argv[2], "hello world &^%$!") != 0) {
+            return 32;
+        }
+        if (!path_eq(cwd, argv[3])) {
+            return 33;
+        }
+        if (!flag || strcmp(flag, argv[4]) != 0) {
+            return 34;
+        }
+        if (removed != NULL) {
+            return 35;
+        }
+        if (path != NULL) {
+            return 36;
+        }
+        return 19;
+    }
+
+    if (strcmp(argv[1], "timeout") == 0) {
+        fprintf(stdout, "12");
+        fprintf(stderr, "34");
+        fflush(stdout);
+        fflush(stderr);
+        sleep_ms(300);
+        return 5;
+    }
+
+    return 91;
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(&clang)
+        .arg(&child_c)
+        .arg("-o")
+        .arg(&child_exe)
+        .status()
+        .expect("process-command child fixture should compile");
+    assert!(
+        status.success(),
+        "process-command child fixture should compile"
+    );
+
+    let cwd_dir = temp_artifact("process-command-cwd", "dir");
+    let _ = fs::remove_dir_all(&cwd_dir);
+    fs::create_dir_all(&cwd_dir).unwrap();
+
+    let executable = child_exe.to_string_lossy().replace('\\', "/");
+    let expected_cwd = cwd_dir.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::ffi;
+import std::process;
+import std::strconv;
+
+def main() -> i64 {{
+    let fixed = process_run_2("{executable}", "literal", "literal spaces &^%$!").unwrap_or(-1);
+
+    let inherited = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let inherited_arg = inherited.arg("inherit").unwrap_or(false);
+    let inherited_output = inherited.run().unwrap_or(ProcessOutput {{ handle: 0 }});
+    let inherited_code = inherited_output.exit_code().unwrap_or(-1);
+    let inherited_stdout_len = inherited_output.stdout_len().unwrap_or(-1);
+    let inherited_stderr_len = inherited_output.stderr_len().unwrap_or(-1);
+    let inherited_output_closed = inherited_output.close();
+    let inherited_output_reused = inherited_output.stdout_len().is_err();
+    let inherited_command_closed = inherited.close();
+    let inherited_command_reused = inherited.arg("again").is_err();
+
+    let stdout_buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let stderr_buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let command = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let inspect_arg0 = command.arg("inspect").unwrap_or(false);
+    let inspect_arg1 = command.arg("hello world &^%$!").unwrap_or(false);
+    let inspect_arg2 = command.arg("{expected_cwd}").unwrap_or(false);
+    let inspect_arg3 = command.arg("kept").unwrap_or(false);
+    let inspect_cwd = command.cwd("{expected_cwd}").unwrap_or(false);
+    let inspect_clear = command.env_clear().unwrap_or(false);
+    let inspect_set = command.env_set("SENGOO_FLAG", "kept").unwrap_or(false);
+    let inspect_set_removed = command.env_set("SENGOO_REMOVE_ME", "present").unwrap_or(false);
+    let inspect_remove = command.env_remove("SENGOO_REMOVE_ME").unwrap_or(false);
+    let inspect_capture_stdout = command.capture_stdout(true).unwrap_or(false);
+    let inspect_capture_stderr = command.capture_stderr(true).unwrap_or(false);
+    let output = command.run().unwrap_or(ProcessOutput {{ handle: 0 }});
+    let code = output.exit_code().unwrap_or(-1);
+    let timed_out = output.timed_out();
+    let stdout_len = output.stdout_len().unwrap_or(-1);
+    let stderr_len = output.stderr_len().unwrap_or(-1);
+    let stdout_copied = output.stdout_copy(stdout_buffer).unwrap_or(-1);
+    let stderr_copied = output.stderr_copy(stderr_buffer).unwrap_or(-1);
+    let stdout_value = strconv_parse_i64_buffer(stdout_buffer, stdout_copied).unwrap_or(-1);
+    let stderr_value = strconv_parse_i64_buffer(stderr_buffer, stderr_copied).unwrap_or(-1);
+    let output_closed = output.close();
+    let output_reused = output.stderr_len().is_err();
+    let command_closed = command.close();
+    let command_reused = command.run().is_err();
+
+    let timeout_stdout = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let timeout_stderr = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let timeout = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let timeout_arg = timeout.arg("timeout").unwrap_or(false);
+    let timeout_capture_stdout = timeout.capture_stdout(true).unwrap_or(false);
+    let timeout_capture_stderr = timeout.capture_stderr(true).unwrap_or(false);
+    let timeout_set = timeout.timeout_ms(50).unwrap_or(false);
+    let timeout_output = timeout.run().unwrap_or(ProcessOutput {{ handle: 0 }});
+    let timeout_exit = timeout_output.exit_code();
+    let timeout_timed_out = timeout_output.timed_out();
+    let timeout_stdout_len = timeout_output.stdout_len().unwrap_or(-1);
+    let timeout_stderr_len = timeout_output.stderr_len().unwrap_or(-1);
+    let timeout_stdout_copied = timeout_output.stdout_copy(timeout_stdout).unwrap_or(-1);
+    let timeout_stderr_copied = timeout_output.stderr_copy(timeout_stderr).unwrap_or(-1);
+    let timeout_stdout_value = strconv_parse_i64_buffer(timeout_stdout, timeout_stdout_copied).unwrap_or(-1);
+    let timeout_stderr_value = strconv_parse_i64_buffer(timeout_stderr, timeout_stderr_copied).unwrap_or(-1);
+    let timeout_output_closed = timeout_output.close();
+    let timeout_command_closed = timeout.close();
+
+    let ok =
+        fixed == 7
+        && inherited_arg
+        && inherited_code == 23
+        && inherited_stdout_len == 0
+        && inherited_stderr_len == 0
+        && inherited_output_closed
+        && inherited_output_reused
+        && inherited_command_closed
+        && inherited_command_reused
+        && inspect_arg0
+        && inspect_arg1
+        && inspect_arg2
+        && inspect_arg3
+        && inspect_cwd
+        && inspect_clear
+        && inspect_set
+        && inspect_set_removed
+        && inspect_remove
+        && inspect_capture_stdout
+        && inspect_capture_stderr
+        && code == 19
+        && !timed_out
+        && stdout_len == 3
+        && stderr_len == 3
+        && stdout_copied == 3
+        && stderr_copied == 3
+        && stdout_value == 123
+        && stderr_value == 456
+        && output_closed
+        && output_reused
+        && command_closed
+        && command_reused
+        && timeout_arg
+        && timeout_capture_stdout
+        && timeout_capture_stderr
+        && timeout_set
+        && timeout_exit.is_err()
+        && timeout_exit.error == 11
+        && timeout_timed_out
+        && timeout_stdout_len == 2
+        && timeout_stderr_len == 2
+        && timeout_stdout_copied == 2
+        && timeout_stderr_copied == 2
+        && timeout_stdout_value == 12
+        && timeout_stderr_value == 34
+        && timeout_output_closed
+        && timeout_command_closed;
+
+    stdout_buffer.free();
+    stderr_buffer.free();
+    timeout_stdout.free();
+    timeout_stderr.free();
+
+    if ok {{
+        0
+    }} else {{
+        1
+    }}
+}}
+"#
+    );
+    let output = compile_and_run_stdlib_import_program_with_stdin("process-command", &source, "");
+
+    let _ = fs::remove_file(&child_c);
+    let _ = fs::remove_file(&child_exe);
+    let _ = fs::remove_dir_all(&cwd_dir);
+
+    let Some(output) = output else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("inherit-stdout"),
+        "stdout should include inherited child stdout, got:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("inherit-stderr"),
+        "stderr should include inherited child stderr, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn stdlib_strconv_runtime_parses_and_formats_i64_values() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "strconv-i64",
@@ -3986,6 +4670,299 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "14");
+}
+
+#[test]
+fn stdlib_legacy_fallible_wrappers_return_status_categories() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "legacy-status-categories",
+        r#"
+import std::dir;
+import std::file;
+import std::process;
+import std::status;
+import std::strconv;
+
+def main() -> i64 {
+    let small = ffi_buffer_new(1).unwrap_or(Buffer { handle: 0 });
+    let missing_file = file_len("__sengoo_missing_status_file__").err().unwrap_or(0);
+    let missing_dir = dir_entry_count("__sengoo_missing_status_dir__").err().unwrap_or(0);
+    let invalid_process = process_run("").err().unwrap_or(0);
+    let cwd_too_small = process_current_dir_copy(small).err().unwrap_or(0);
+    let parse_error = strconv_parse_i64("12x").err().unwrap_or(0);
+    let invalid_slice = strconv_parse_i64_buffer(small, 2).err().unwrap_or(0);
+    small.free();
+
+    let missing_file_ok = missing_file == STATUS_NOT_FOUND() || missing_file == STATUS_IO();
+    let missing_dir_ok = missing_dir == STATUS_NOT_FOUND() || missing_dir == STATUS_IO();
+
+    if missing_file_ok
+        && missing_dir_ok
+        && invalid_process == STATUS_INVALID_ARGUMENT()
+        && cwd_too_small == STATUS_BUFFER_TOO_SMALL()
+        && parse_error == STATUS_PARSE()
+        && invalid_slice == STATUS_BUFFER_TOO_SMALL() {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_fallible_wrappers_do_not_use_legacy_generic_error_literal() {
+    let workspace_root = workspace_root_for_tests();
+    for module in [
+        "tools/stdlib/args.sg",
+        "tools/stdlib/dir.sg",
+        "tools/stdlib/env.sg",
+        "tools/stdlib/file.sg",
+        "tools/stdlib/io.sg",
+        "tools/stdlib/path.sg",
+        "tools/stdlib/process.sg",
+        "tools/stdlib/strconv.sg",
+    ] {
+        let source = fs::read_to_string(workspace_root.join(module))
+            .unwrap_or_else(|err| panic!("{module} should be readable: {err}"));
+        assert!(
+            !source.contains("error: 1"),
+            "{module} should map fallible wrapper errors through std::status instead of legacy error: 1"
+        );
+    }
+}
+
+#[test]
+fn stdlib_json_runtime_parses_queries_builds_and_serializes_values() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-runtime",
+        r#"
+import std::io;
+import std::json;
+
+def main() -> i64 {
+    let parsed_input = ffi_buffer_from_bytes("[null,false,42,9223372036854775807,2.5]").unwrap_or(Buffer { handle: 0 });
+    let parsed = json_parse_buffer(parsed_input, parsed_input.len()).unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let first = root.array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let second = root.array_get(1).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let count = root.array_get(2).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let big = root.array_get(3).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let ratio = root.array_get(4).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+
+    let built = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let built_root = built.root();
+    let built_items = built.new_array().unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let built_name = built.new_string("sengoo").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let built_ok = built.new_bool(true).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let built_null = built.new_null().unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let built_false = built.new_bool(false).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let built_x = built.new_string("x").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let output_buffer = ffi_buffer_new(256).unwrap_or(Buffer { handle: 0 });
+    let name_buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+
+    let set_name = built_root.object_set("name", built_name).unwrap_or(false);
+    let set_ok = built_root.object_set("ok", built_ok).unwrap_or(false);
+    let ratio_result = ratio.number_f64();
+    let built_ratio = built.new_number(ratio_result.value).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let set_ratio = built_root.object_set("ratio", built_ratio).unwrap_or(false);
+    let push_null = built_items.array_push(built_null).unwrap_or(false);
+    let push_false = built_items.array_push(built_false).unwrap_or(false);
+    let push_x = built_items.array_push(built_x).unwrap_or(false);
+    let set_items = built_root.object_set("items", built_items).unwrap_or(false);
+
+    let root_kind = root.kind().unwrap_or(0);
+    let has_name = built_root.object_has("name");
+    let missing = built_root.object_get("missing").is_err();
+    let item_len = root.array_len().unwrap_or(0);
+    let bad_index = root.array_get(5).is_err();
+    let built_name_value = built_root.object_get("name").unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let copied_name = built_name_value.string_copy(name_buffer).unwrap_or(0);
+    let wrote_name = io_stdout_write_raw(name_buffer.ptr(), copied_name).unwrap_or(0);
+    let wrote_sep = io_stdout_write("|").unwrap_or(0);
+    let count_i64 = count.number_i64().unwrap_or(0);
+    let big_i64 = big.number_i64().unwrap_or(0);
+    let ratio_i64_err = ratio.number_i64().is_err();
+    let ratio_f64_ok = ratio_result.is_ok();
+    let first_is_null = first.is_null();
+    let second_bool = second.bool_value().unwrap_or(true);
+    let serialized = built.serialize(output_buffer).unwrap_or(0);
+    let wrote_json = io_stdout_write_raw(output_buffer.ptr(), serialized).unwrap_or(0);
+
+    parsed_input.free();
+    name_buffer.free();
+    output_buffer.free();
+    let built_closed = built.close();
+    let parsed_closed = parsed.close();
+
+    if root_kind == JSON_KIND_ARRAY()
+        && has_name
+        && missing
+        && item_len == 5
+        && bad_index
+        && copied_name == 6
+        && wrote_name == 6
+        && wrote_sep == 1
+        && count_i64 == 42
+        && big_i64 == 9223372036854775807
+        && ratio_i64_err
+        && ratio_f64_ok
+        && first_is_null
+        && !second_bool
+        && set_name
+        && set_ok
+        && set_ratio
+        && push_null
+        && push_false
+        && push_x
+        && set_items
+        && serialized > 0
+        && wrote_json == serialized
+        && built_closed
+        && parsed_closed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "sengoo|{\"name\":\"sengoo\",\"ok\":true,\"ratio\":2.5,\"items\":[null,false,\"x\"]}"
+    );
+}
+
+#[test]
+fn stdlib_json_runtime_reports_parse_errors_and_limits() {
+    let too_deep = format!("{}0{}", "[".repeat(70), "]".repeat(70));
+    let too_many_nodes = format!("[{}]", vec!["0"; 5000].join(","));
+    let too_large = format!("[{}]", vec!["0"; 20000].join(","));
+    let too_deep = too_deep.replace('\\', "\\\\").replace('"', "\\\"");
+    let too_many_nodes = too_many_nodes.replace('\\', "\\\\").replace('"', "\\\"");
+    let too_large = too_large.replace('\\', "\\\\").replace('"', "\\\"");
+
+    let source = format!(
+        r#"
+import std::json;
+
+def main() -> i64 {{
+    let message = ffi_buffer_new(128).unwrap_or(Buffer {{ handle: 0 }});
+    let invalid = json_parse("[1, ]").is_err();
+    let invalid_code = json_last_error_code();
+    let invalid_offset = json_last_error_offset();
+    let invalid_message = json_last_error_copy(message).unwrap_or(0);
+    let deep = json_parse("{too_deep}").is_err();
+    let deep_code = json_last_error_code();
+    let deep_offset = json_last_error_offset();
+    let too_many = json_parse("{too_many_nodes}").is_err();
+    let too_many_code = json_last_error_code();
+    let too_big = json_parse("{too_large}").is_err();
+    let too_big_code = json_last_error_code();
+    let empty_doc = JsonDoc {{ handle: 0 }};
+    let empty_close = !empty_doc.close();
+    message.free();
+
+    if !invalid {{
+        1
+    }} else if invalid_code != 10 {{
+        2
+    }} else if invalid_offset < 0 {{
+        3
+    }} else if invalid_message <= 0 {{
+        4
+    }} else if !deep {{
+        5
+    }} else if deep_code != 10 {{
+        6
+    }} else if deep_offset < 0 {{
+        7
+    }} else if !too_many {{
+        8
+    }} else if too_many_code != 10 && too_many_code != 14 {{
+        20 + too_many_code
+    }} else if !too_big {{
+        10
+    }} else if too_big_code != 10 {{
+        11
+    }} else if !empty_close {{
+        12
+    }} else {{
+        0
+    }}
+}}
+"#
+    );
+
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin("json-errors", &source, "")
+    else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_json_bool_wrong_kind_updates_last_error_code() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "json-bool-wrong-kind",
+        r#"
+import std::json;
+import std::status;
+
+def main() -> i64 {
+    let parsed = json_parse("[1]").unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let value = root.array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let wrong_kind = value.bool_value().err().unwrap_or(0);
+    let last = json_last_error_code();
+    let closed = parsed.close();
+
+    if wrong_kind == STATUS_INVALID_ARGUMENT() && last == STATUS_INVALID_ARGUMENT() && closed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -4112,13 +5089,8 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         let _ = fs::remove_file(&exe_path);
         return None;
     }
-    let runtime_obj = temp_artifact(
-        &format!("stdlib-runtime-c-{}", tag),
-        if cfg!(windows) { "obj" } else { "o" },
-    );
-    compile_ir_to_object(&clang, &runtime_c, &runtime_obj, 2).unwrap();
-
-    let object_paths = vec![obj_path.clone(), runtime_obj.clone()];
+    let mut object_paths = vec![obj_path.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c.to_string_lossy(), 2).unwrap());
     link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
 
     let output = Command::new(&exe_path)
@@ -4127,7 +5099,6 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&obj_path);
-    let _ = fs::remove_file(&runtime_obj);
     let _ = fs::remove_file(&exe_path);
     Some(output)
 }
@@ -4155,15 +5126,13 @@ fn compile_and_run_stdlib_import_program_with_stdin(
     let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
     compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
 
-    let runtime_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-runtime"), obj_ext);
-    compile_ir_to_object(&clang, Path::new(&runtime_c), &runtime_obj, 2).unwrap();
-
     let exe_path = temp_artifact(
         &format!("stdlib-import-runtime-{tag}"),
         if cfg!(windows) { "exe" } else { "" },
     );
-    link_native_binary_from_objects(&clang, &[main_obj.clone(), runtime_obj.clone()], &exe_path)
-        .unwrap();
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 2).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
 
     let mut child = Command::new(&exe_path)
         .stdin(Stdio::piped())
@@ -4182,7 +5151,6 @@ fn compile_and_run_stdlib_import_program_with_stdin(
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&main_obj);
-    let _ = fs::remove_file(&runtime_obj);
     let _ = fs::remove_file(&exe_path);
     Some(output)
 }
@@ -4250,6 +5218,33 @@ def main() -> i64 {
     assert!(llvm_ir.contains("vec_new_i64"));
 
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn stdlib_collections_import_preloads_buffer_and_text_collection_symbols() {
+    let source = r#"
+import std::collections;
+
+def main() -> i64 {
+    let list = text_list_new();
+    let map = string_map_i64_new();
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let copied = list.get_copy(0, buffer).unwrap_or(0);
+    buffer.free();
+    list.free();
+    map.free();
+    copied
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("collections stdlib import should expand with transitive dependencies");
+    let ir = compile_compiler_ir(&combined)
+        .expect("collections import should make Buffer-backed text collections usable");
+
+    assert!(ir.contains("sengoo_ffi_buffer_new"));
+    assert!(ir.contains("sengoo_text_list_new"));
+    assert!(ir.contains("sengoo_text_list_get_copy"));
+    assert!(ir.contains("sengoo_string_map_new"));
 }
 
 #[test]
@@ -4721,6 +5716,31 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn stdlib_surface_runtime_iterator_filter_even_progresses() {
+    let output = require_stdlib_runtime_output!(
+        "iter-filter-even-progresses",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_i64();
+    vec.push(1);
+    vec.push(2);
+    vec.push(3);
+
+    let iter = vec.iter();
+    let first_even = iter.filter_even().unwrap_or(0);
+    let done_after_match = iter.next().unwrap_or(0);
+    iter.free();
+    vec.free();
+
+    first_even + done_after_match
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(5));
 }
 
 #[test]
@@ -7197,6 +8217,180 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(9));
+}
+
+#[test]
+fn stdlib_import_runtime_text_list_copies_values_and_iterates() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "text-list",
+        r#"
+import std::collections;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let list = text_list_new();
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let small = ffi_buffer_new(1).unwrap_or(Buffer { handle: 0 });
+
+    let pushed_first = list.push(str_append("al", "pha"));
+    let pushed_second = list.push("beta");
+    let first = list.get_copy(0, buffer).unwrap_or(0);
+    let wrote_first = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
+    let wrote_sep_one = io_stdout_write("|").unwrap_or(0);
+    let replaced = list.set(1, str_repeat("z", 2));
+    let removed = list.remove_copy(0, buffer).unwrap_or(0);
+    let wrote_removed = io_stdout_write_raw(buffer.ptr(), removed).unwrap_or(0);
+    let wrote_sep_two = io_stdout_write("|").unwrap_or(0);
+    let too_small = list.get_copy(0, small).is_err();
+    let missing = list.get_copy(9, buffer).is_err();
+
+    let iter = list.iter();
+    let not_done = !iter.done();
+    let iter_len = iter.next_copy(buffer).unwrap_or(0);
+    let iter_done = iter.done();
+    let wrote_iter = io_stdout_write_raw(buffer.ptr(), iter_len).unwrap_or(0);
+    iter.reset();
+    let iter_len_again = iter.next_copy(buffer).unwrap_or(0);
+    let reset_ok = iter_len_again == 2;
+    let final_len = list.len();
+    iter.free();
+
+    small.free();
+    buffer.free();
+    list.free();
+
+    if pushed_first
+        && pushed_second
+        && first == 5
+        && wrote_first == 5
+        && wrote_sep_one == 1
+        && replaced
+        && removed == 5
+        && wrote_removed == 5
+        && wrote_sep_two == 1
+        && too_small
+        && missing
+        && not_done
+        && iter_len == 2
+        && iter_done
+        && wrote_iter == 2
+        && reset_ok
+        && final_len == 1 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "alpha|alpha|zz");
+}
+
+#[test]
+fn stdlib_import_runtime_string_maps_copy_keys_and_iterate_deterministically() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-maps",
+        r#"
+import std::collections;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let numbers = string_map_i64_new();
+    let flags = string_map_bool_new();
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+
+    let inserted_beta = numbers.insert(str_append("be", "ta"), 1);
+    let inserted_alpha = numbers.insert("alpha", 2);
+    let replaced_beta = numbers.insert("beta", 7);
+    let contains_alpha = numbers.contains("alpha");
+    let beta_value = numbers.get("beta").unwrap_or(0);
+    let removed_alpha = numbers.remove("alpha");
+    let missing_alpha = !numbers.contains("alpha");
+
+    let inserted_on = flags.insert(str_append("o", "n"), true);
+    let inserted_off = flags.insert("off", false);
+    let replaced_on = flags.insert("on", false);
+    let on_value = flags.get("on").unwrap_or(true);
+    let off_value = flags.get("off").unwrap_or(true);
+
+    let iter = numbers.iter_keys();
+    let first = iter.next_copy(buffer).unwrap_or(0);
+    let wrote_first = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
+    let wrote_sep = io_stdout_write("|").unwrap_or(0);
+    let second = iter.next_copy(buffer).unwrap_or(0);
+    let wrote_second = io_stdout_write_raw(buffer.ptr(), second).unwrap_or(0);
+    let iter_done = iter.done();
+    iter.free();
+
+    let flag_iter = flags.iter_keys();
+    let flag_sep_one = io_stdout_write("|").unwrap_or(0);
+    let flag_first = flag_iter.next_copy(buffer).unwrap_or(0);
+    let flag_wrote_first = io_stdout_write_raw(buffer.ptr(), flag_first).unwrap_or(0);
+    let flag_sep_two = io_stdout_write("|").unwrap_or(0);
+    let flag_second = flag_iter.next_copy(buffer).unwrap_or(0);
+    let flag_wrote_second = io_stdout_write_raw(buffer.ptr(), flag_second).unwrap_or(0);
+    let flag_iter_done = flag_iter.done();
+    flag_iter.free();
+
+    buffer.free();
+    numbers.free();
+    flags.free();
+
+    if inserted_beta
+        && inserted_alpha
+        && replaced_beta
+        && contains_alpha
+        && beta_value == 7
+        && removed_alpha
+        && missing_alpha
+        && inserted_on
+        && inserted_off
+        && replaced_on
+        && !on_value
+        && !off_value
+        && first == 4
+        && wrote_first == 4
+        && wrote_sep == 1
+        && second == 0
+        && wrote_second == 0
+        && iter_done
+        && flag_sep_one == 1
+        && flag_first == 3
+        && flag_wrote_first == 3
+        && flag_sep_two == 1
+        && flag_second == 2
+        && flag_wrote_second == 2
+        && flag_iter_done {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "beta||off|on");
 }
 
 #[test]

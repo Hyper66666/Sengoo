@@ -15,6 +15,7 @@ use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDis
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
+use crate::mir::build_enum_defs;
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
 use crate::mir::impl_specialization_helpers::{
@@ -76,6 +77,7 @@ mod options;
 mod pattern_methods;
 mod pointer_expr_helpers;
 mod print_methods;
+mod try_expr_helpers;
 mod while_expr_helpers;
 use self::aggregate_expr_helpers::{
     lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr,
@@ -99,6 +101,7 @@ use self::op_expr_helpers::{
     lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr,
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
+use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};
 pub use options::MirLowerOptions;
@@ -179,6 +182,7 @@ struct LoweringContext<'a> {
     /// handle produced by a `foo__start(...)` call. Propagated through let
     /// bindings so that `let f = async_fn(); await f` resolves correctly.
     future_origins: HashMap<Local, String>,
+    try_scope_stack: Vec<try_expr_helpers::TryScope>,
 }
 
 impl<'a> LoweringContext<'a> {

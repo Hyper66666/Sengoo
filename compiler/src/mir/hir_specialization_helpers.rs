@@ -247,6 +247,8 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
         HIRExpr::AsyncBlock(body) => {
             HIRExpr::AsyncBlock(Box::new(substitute_hir_body(body, subst)))
         }
+        HIRExpr::Try(inner) => HIRExpr::Try(Box::new(substitute_hir_expr(inner, subst))),
+        HIRExpr::TryBlock(body) => HIRExpr::TryBlock(Box::new(substitute_hir_body(body, subst))),
     }
 }
 

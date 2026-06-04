@@ -25,6 +25,12 @@ pub enum HIRPattern {
         fields: Vec<(String, Option<HIRPattern>)>,
     },
 
+    /// 枚举变体模式（含单元/元组/结构体字段）
+    EnumVariant {
+        discriminant: u32,
+        fields: Vec<(String, Option<HIRPattern>)>,
+    },
+
     /// 元组模式
     Tuple(Vec<HIRPattern>),
 

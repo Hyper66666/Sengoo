@@ -26,8 +26,10 @@ mod contract_helpers;
 mod decl_helpers;
 mod expr_helpers;
 mod generic_meta_helpers;
+mod match_helpers;
 mod stmt_helpers;
 mod trait_impl_helpers;
+mod try_helpers;
 
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
@@ -65,12 +67,16 @@ pub struct TypeChecker {
     /// Registered impl blocks used for method and trait resolution.
     impl_registry: ImplRegistry,
     struct_field_defs: HashMap<String, Vec<(String, Type)>>,
+    enum_variants: HashMap<String, Vec<String>>,
+    enum_variant_field_tys: HashMap<String, HashMap<String, Vec<Ty>>>,
     struct_type_params: HashMap<String, Vec<TypeParam>>,
     class_decls: HashMap<String, ClassDeclInfo>,
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
     generic_type_metas: HashMap<String, GenericTypeMeta>,
     async_context_depth: usize,
     async_functions: HashSet<String>,
+    propagation_stack: Vec<try_helpers::PropagationContext>,
+    try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
 }
 
 impl TypeChecker {
@@ -83,12 +89,16 @@ impl TypeChecker {
             trait_registry: TraitRegistry::new(),
             impl_registry: ImplRegistry::new(),
             struct_field_defs: HashMap::new(),
+            enum_variants: HashMap::new(),
+            enum_variant_field_tys: HashMap::new(),
             struct_type_params: HashMap::new(),
             class_decls: HashMap::new(),
             generic_function_metas: HashMap::new(),
             generic_type_metas: HashMap::new(),
             async_context_depth: 0,
             async_functions: HashSet::new(),
+            propagation_stack: Vec::new(),
+            try_block_mode_stack: Vec::new(),
         }
     }
 
@@ -268,13 +278,6 @@ impl TypeChecker {
             }
             DeclKind::Struct(struct_decl) => {
                 let name = struct_decl.name.name.clone();
-                let ty = self.env.new_ty(TyKind::Adt {
-                    name: name.clone(),
-                    args: vec![],
-                });
-                self.env.insert_type(name, ty);
-                let type_meta = self.collect_generic_type_meta(&struct_decl.type_params);
-                self.set_generic_type_meta(struct_decl.name.name.clone(), type_meta);
                 let fields = struct_decl
                     .fields
                     .iter()
@@ -287,6 +290,20 @@ impl TypeChecker {
                         (field_name, field.ty.clone())
                     })
                     .collect::<Vec<_>>();
+                let ty = self.env.new_ty(TyKind::Adt {
+                    name: name.clone(),
+                    args: vec![],
+                });
+                if self.env.owned_string_ty.is_none()
+                    && name == "String"
+                    && fields.len() == 1
+                    && fields[0].0 == "handle"
+                {
+                    self.env.owned_string_ty = Some(ty.clone());
+                }
+                self.env.insert_type(name, ty);
+                let type_meta = self.collect_generic_type_meta(&struct_decl.type_params);
+                self.set_generic_type_meta(struct_decl.name.name.clone(), type_meta);
                 self.struct_field_defs
                     .insert(struct_decl.name.name.clone(), fields);
                 self.struct_type_params.insert(
@@ -300,7 +317,26 @@ impl TypeChecker {
                     name: name.clone(),
                     args: vec![],
                 });
-                self.env.insert_type(name, ty);
+                self.env.insert_type(name.clone(), ty);
+                let variants = enum_decl
+                    .variants
+                    .iter()
+                    .map(|variant| variant.name.name.clone())
+                    .collect::<Vec<_>>();
+                self.enum_variants.insert(name.clone(), variants);
+                let mut variant_fields = HashMap::new();
+                for variant in &enum_decl.variants {
+                    let field_tys = variant
+                        .fields
+                        .iter()
+                        .map(|field| match field {
+                            crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
+                            crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
+                        })
+                        .collect::<TyResult<Vec<_>>>()?;
+                    variant_fields.insert(variant.name.name.clone(), field_tys);
+                }
+                self.enum_variant_field_tys.insert(name, variant_fields);
                 let type_meta = self.collect_generic_type_meta(&enum_decl.type_params);
                 self.set_generic_type_meta(enum_decl.name.name.clone(), type_meta);
             }
@@ -728,7 +764,7 @@ impl TypeChecker {
                 body,
             } => self.check_for(pattern, iter, body),
             ExprKind::Loop(body) => self.check_loop(body),
-            ExprKind::Match { scrutinee, arms } => self.check_match(scrutinee, arms),
+            ExprKind::Match { scrutinee, arms } => self.check_match(scrutinee, arms, expr.span),
             ExprKind::Return(value) => self.check_return(value),
             ExprKind::Break(value) => self.check_break(value),
             ExprKind::Continue => self.check_continue(),
@@ -837,6 +873,8 @@ impl TypeChecker {
                     }
                 }
             }
+            ExprKind::Try(operand) => self.check_try_expr(operand),
+            ExprKind::TryBlock(block) => self.check_try_block_expr(block),
             _ => Ok(self.env.error_ty()),
         }
     }

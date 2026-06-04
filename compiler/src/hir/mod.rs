@@ -15,7 +15,7 @@ pub use expr::{HIRBinaryOp, HIRExpr, HIRLiteral, HIRUnaryOp};
 pub use item::{
     HIRConst, HIREnum, HIRExternBlock, HIRExternFunction, HIRExternItem, HIRExternStatic,
     HIRFunction, HIRImpl, HIRItem, HIRParam, HIRStatic, HIRStruct, HIRTrait, HIRTraitItem,
-    HIRTypeParam, HIRTypeParamBound,
+    HIRTypeParam, HIRTypeParamBound, HIRVariant,
 };
 pub use lower::lower_ast;
 pub use pattern::{HIRMatchArm, HIRPattern};

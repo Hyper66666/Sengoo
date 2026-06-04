@@ -1,4 +1,5 @@
 use crate::hir;
+use crate::mir::EnumDefMap;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -10,6 +11,7 @@ pub struct MirLowerOptions {
     pub lazy_generic_mono: bool,
     pub async_functions: Rc<RefCell<HashSet<String>>>,
     pub(crate) generic_function_templates: Rc<HashMap<String, hir::HIRFunction>>,
+    pub(crate) enum_defs: Rc<EnumDefMap>,
 }
 
 impl Default for MirLowerOptions {
@@ -19,7 +21,15 @@ impl Default for MirLowerOptions {
             lazy_generic_mono: true,
             async_functions: Rc::new(RefCell::new(HashSet::new())),
             generic_function_templates: Rc::new(HashMap::new()),
+            enum_defs: Rc::new(EnumDefMap::new()),
         }
+    }
+}
+
+impl MirLowerOptions {
+    pub(crate) fn with_enum_defs(mut self, enum_defs: EnumDefMap) -> Self {
+        self.enum_defs = Rc::new(enum_defs);
+        self
     }
 }
 
@@ -34,6 +44,7 @@ impl MirLowerOptions {
             lazy_generic_mono,
             async_functions: Rc::new(RefCell::new(async_functions)),
             generic_function_templates: Rc::new(HashMap::new()),
+            enum_defs: Rc::new(EnumDefMap::new()),
         }
     }
 

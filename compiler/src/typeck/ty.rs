@@ -360,8 +360,54 @@ pub enum TypeckError {
     TypeTooLarge { ty: TyKind },
     /// 循环依赖
     CyclicType,
+    /// match 未覆盖所有变体/分支
+    NonExhaustiveMatch {
+        missing: Vec<String>,
+        span_lo: u32,
+        span_hi: u32,
+    },
+    /// match 中不可达分支
+    UnreachableMatchArm { span_lo: u32, span_hi: u32 },
+    /// match 守卫必须为 bool
+    GuardNotBool { span_lo: u32, span_hi: u32 },
+    /// or-pattern 绑定不一致
+    OrPatternBindingMismatch { span_lo: u32, span_hi: u32 },
+    /// `?` 使用位置或传播类型不合法
+    InvalidQuestionMark {
+        message: String,
+        span_lo: u32,
+        span_hi: u32,
+    },
     /// 其他错误
     Other(String),
+}
+
+impl TypeckError {
+    pub fn stable_code(&self) -> Option<&'static str> {
+        match self {
+            Self::NonExhaustiveMatch { .. } => Some("non-exhaustive-match"),
+            Self::UnreachableMatchArm { .. } => Some("unreachable-match-arm"),
+            Self::GuardNotBool { .. } => Some("guard-not-bool"),
+            Self::OrPatternBindingMismatch { .. } => Some("or-pattern-binding-mismatch"),
+            Self::InvalidQuestionMark { .. } => Some("invalid-question-mark"),
+            _ => None,
+        }
+    }
+
+    pub fn span(&self) -> Option<(u32, u32)> {
+        match self {
+            Self::NonExhaustiveMatch {
+                span_lo, span_hi, ..
+            }
+            | Self::UnreachableMatchArm { span_lo, span_hi }
+            | Self::GuardNotBool { span_lo, span_hi }
+            | Self::OrPatternBindingMismatch { span_lo, span_hi }
+            | Self::InvalidQuestionMark {
+                span_lo, span_hi, ..
+            } => Some((*span_lo, *span_hi)),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for TypeckError {
@@ -405,6 +451,28 @@ impl fmt::Display for TypeckError {
             }
             TypeckError::CyclicType => {
                 write!(f, "循环类型依赖")
+            }
+            TypeckError::NonExhaustiveMatch { missing, .. } => {
+                write!(
+                    f,
+                    "[non-exhaustive-match] match is not exhaustive: missing {}",
+                    missing.join(", ")
+                )
+            }
+            TypeckError::UnreachableMatchArm { .. } => {
+                write!(f, "[unreachable-match-arm] unreachable match arm")
+            }
+            TypeckError::GuardNotBool { .. } => {
+                write!(f, "[guard-not-bool] match guard must be bool")
+            }
+            TypeckError::OrPatternBindingMismatch { .. } => {
+                write!(
+                    f,
+                    "[or-pattern-binding-mismatch] or-pattern alternatives must bind the same names with compatible types"
+                )
+            }
+            TypeckError::InvalidQuestionMark { message, .. } => {
+                write!(f, "[invalid-question-mark] {}", message)
             }
             TypeckError::Other(msg) => {
                 write!(f, "{}", msg)

@@ -6,13 +6,20 @@ extern "C" {
     fn sengoo_dir_remove(path: i64) -> i64;
     fn sengoo_dir_entry_count(path: i64) -> i64;
     fn sengoo_dir_entry_name(path: i64, index: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_dir_walk_new(root: i64, max_depth: i64) -> i64;
+    fn sengoo_dir_walk_next(handle: i64, buffer: i64) -> i64;
+    fn sengoo_dir_walk_close(handle: i64) -> i64;
+}
+
+struct DirWalk {
+    handle: i64,
 }
 
 def dir_bool_result(status: i64) -> Result<bool, i64> {
     if status == 0 {
         Result { is_ok: true, value: true, error: 0 }
     } else {
-        Result { is_ok: false, value: false, error: 1 }
+        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
     }
 }
 
@@ -20,7 +27,25 @@ def dir_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
         Result { is_ok: true, value: value, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
+}
+
+def dir_status_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
+}
+
+def dir_walk_result(value: i64) -> Result<DirWalk, i64> {
+    if value > 0 {
+        Result { is_ok: true, value: DirWalk { handle: value }, error: 0 }
+    } else if value < 0 {
+        Result { is_ok: false, value: DirWalk { handle: 0 }, error: status_from_raw_ffi(value) }
+    } else {
+        Result { is_ok: false, value: DirWalk { handle: 0 }, error: STATUS_UNKNOWN() }
     }
 }
 
@@ -70,4 +95,22 @@ def dir_entry_name_raw(path_ptr: i64, index: i64, buffer_ptr: i64, capacity: i64
 
 def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64> {
     dir_entry_name_raw(sengoo_stdlib_str_ptr(path), index, buffer.ptr(), buffer.len())
+}
+
+def dir_walk_raw(root_ptr: i64, max_depth: i64) -> Result<DirWalk, i64> {
+    dir_walk_result(sengoo_dir_walk_new(root_ptr, max_depth))
+}
+
+def dir_walk(root: &str, max_depth: i64) -> Result<DirWalk, i64> {
+    dir_walk_raw(sengoo_stdlib_str_ptr(root), max_depth)
+}
+
+impl DirWalk {
+    def next(self, buffer: Buffer) -> Result<i64, i64> {
+        dir_status_i64_result(sengoo_dir_walk_next(self.handle, buffer.handle))
+    }
+
+    def close(self) -> bool {
+        sengoo_dir_walk_close(self.handle) == 0
+    }
 }

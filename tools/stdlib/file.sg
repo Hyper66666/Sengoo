@@ -8,6 +8,21 @@ extern "C" {
     fn sengoo_file_remove(path: i64) -> i64;
     fn sengoo_file_copy(source: i64, destination: i64, overwrite: i64) -> i64;
     fn sengoo_file_move(source: i64, destination: i64, overwrite: i64) -> i64;
+    fn sengoo_file_kind(path: i64) -> i64;
+    fn sengoo_file_size(path: i64) -> i64;
+    fn sengoo_file_modified_unix_ms(path: i64) -> i64;
+}
+
+def PATH_KIND_FILE() -> i64 { 1 }
+def PATH_KIND_DIR() -> i64 { 2 }
+def PATH_KIND_SYMLINK() -> i64 { 3 }
+
+def file_status_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
 }
 
 def file_exists_raw(path_ptr: i64) -> bool {
@@ -23,7 +38,7 @@ def file_len_raw(path_ptr: i64) -> Result<i64, i64> {
     if len >= 0 {
         Result { is_ok: true, value: len, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(len) }
     }
 }
 
@@ -36,7 +51,7 @@ def file_read_into_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<
     if read >= 0 {
         Result { is_ok: true, value: read, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(read) }
     }
 }
 
@@ -49,7 +64,7 @@ def file_write_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i6
     if wrote >= 0 {
         Result { is_ok: true, value: wrote, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(wrote) }
     }
 }
 
@@ -62,7 +77,7 @@ def file_append_str_raw(path_ptr: i64, data_ptr: i64, len: i64) -> Result<i64, i
     if wrote >= 0 {
         Result { is_ok: true, value: wrote, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(wrote) }
     }
 }
 
@@ -83,7 +98,7 @@ def file_copy_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Res
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
     }
 }
 
@@ -100,7 +115,7 @@ def file_move_raw(source_ptr: i64, destination_ptr: i64, overwrite: bool) -> Res
     if status == 0 {
         Result { is_ok: true, value: true, error: 0 }
     } else {
-        Result { is_ok: false, value: false, error: 1 }
+        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
     }
 }
 
@@ -110,4 +125,28 @@ def file_move(source: &str, destination: &str, overwrite: bool) -> Result<bool, 
         sengoo_stdlib_str_ptr(destination),
         overwrite,
     )
+}
+
+def file_kind_raw(path_ptr: i64) -> Result<i64, i64> {
+    file_status_i64_result(sengoo_file_kind(path_ptr))
+}
+
+def file_kind(path: &str) -> Result<i64, i64> {
+    file_kind_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def file_size_raw(path_ptr: i64) -> Result<i64, i64> {
+    file_status_i64_result(sengoo_file_size(path_ptr))
+}
+
+def file_size(path: &str) -> Result<i64, i64> {
+    file_size_raw(sengoo_stdlib_str_ptr(path))
+}
+
+def file_modified_unix_ms_raw(path_ptr: i64) -> Result<i64, i64> {
+    file_status_i64_result(sengoo_file_modified_unix_ms(path_ptr))
+}
+
+def file_modified_unix_ms(path: &str) -> Result<i64, i64> {
+    file_modified_unix_ms_raw(sengoo_stdlib_str_ptr(path))
 }

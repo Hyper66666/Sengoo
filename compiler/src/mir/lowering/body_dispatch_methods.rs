@@ -141,6 +141,8 @@ impl<'a> LoweringContext<'a> {
             } => lower_method_call_expr(self, receiver, method, args),
             HIRExpr::Await(inner) => lower_await_expr(self, inner),
             HIRExpr::AsyncBlock(body) => lower_async_block_expr(self, body),
+            HIRExpr::Try(operand) => lower_try_expr(self, operand),
+            HIRExpr::TryBlock(body) => lower_try_block_expr(self, body),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }

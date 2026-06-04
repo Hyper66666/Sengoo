@@ -22,7 +22,10 @@ fn load_stdlib_surface(modules: &[&str]) -> String {
 }
 
 fn compile_with_stdlib(program: &str) -> String {
-    compile_with_stdlib_modules(&["option.sg", "result.sg", "collections.sg"], program)
+    compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "collections.sg"],
+        program,
+    )
 }
 
 fn compile_with_stdlib_modules(modules: &[&str], program: &str) -> String {
@@ -64,7 +67,7 @@ def main() -> i64 {
 #[test]
 fn string_module_imports_and_runs_str_len() {
     let ir = compile_with_stdlib_modules(
-        &["string.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
         r#"
 def main() -> i64 {
     let greeting = str_append("he", "llo");
@@ -90,9 +93,35 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_owned_string_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let built = string_from_str("hi");
+    if built.is_ok == false {
+        return 0;
+    }
+    let owned = built.value;
+    if owned.len() != 2 {
+        return 0;
+    }
+    let moved = owned;
+    moved.drop();
+    1
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_from_str_copy"));
+    assert!(ir.contains("sengoo_string_len"));
+    assert!(ir.contains("sengoo_string_free_status"));
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["string.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
         r#"
 def main() -> i64 {
     let text = "sengoo";
@@ -118,7 +147,13 @@ def main() -> i64 {
 #[test]
 fn strconv_module_imports_i64_parse_and_format_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "strconv.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "strconv.sg",
+        ],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
@@ -142,7 +177,7 @@ def main() -> i64 {
 #[test]
 fn file_module_imports_copy_and_move_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "file.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "file.sg"],
         r#"
 def main() -> i64 {
     let source = "target/sengoo-stdlib-file-surface-source.txt";
@@ -170,7 +205,7 @@ def main() -> i64 {
 #[test]
 fn env_module_imports_process_and_variable_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "env.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "env.sg"],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
@@ -251,7 +286,7 @@ def main() -> i64 {
 #[test]
 fn path_module_imports_cross_platform_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "path.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "path.sg"],
         r#"
 def main() -> i64 {
     let joined = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
@@ -306,7 +341,13 @@ def main() -> i64 {
 #[test]
 fn process_module_imports_metadata_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "process.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "process.sg",
+        ],
         r#"
 def main() -> i64 {
     let len = process_current_dir_len().unwrap_or(0);
@@ -340,7 +381,7 @@ def main() -> i64 {
 #[test]
 fn dir_module_imports_directory_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "dir.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "dir.sg"],
         r#"
 def main() -> i64 {
     let root = "target/sengoo-stdlib-dir-surface";
@@ -372,9 +413,69 @@ def main() -> i64 {
 }
 
 #[test]
+fn file_and_dir_modules_import_metadata_and_recursive_walk_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "file.sg",
+            "dir.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let root = "target/sengoo-stdlib-metadata-surface";
+    let child = "target/sengoo-stdlib-metadata-surface/child.txt";
+    let nested = "target/sengoo-stdlib-metadata-surface/nested";
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+
+    let made = dir_create_all(nested).unwrap_or(false);
+    let wrote = file_write_str(child, "abc").unwrap_or(0);
+    let kind = file_kind(child).unwrap_or(0);
+    let dir_kind = file_kind(root).unwrap_or(0);
+    let size = file_size(child).unwrap_or(0);
+    let modified = file_modified_unix_ms(child).unwrap_or(0);
+    let walk = dir_walk(root, 1).unwrap_or(DirWalk { handle: 0 });
+    let first = walk.next(buffer).unwrap_or(0);
+    let closed = walk.close();
+
+    file_remove(child);
+    dir_remove(nested);
+    let removed = dir_remove(root).unwrap_or(false);
+    buffer.free();
+
+    if made
+        && wrote == 3
+        && kind == PATH_KIND_FILE()
+        && dir_kind == PATH_KIND_DIR()
+        && size == 3
+        && modified >= 0
+        && first >= 0
+        && closed
+        && removed {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("PATH_KIND_FILE"));
+    assert!(ir.contains("PATH_KIND_DIR"));
+    assert!(ir.contains("sengoo_file_kind"));
+    assert!(ir.contains("sengoo_file_size"));
+    assert!(ir.contains("sengoo_file_modified_unix_ms"));
+    assert!(ir.contains("sengoo_dir_walk_new"));
+    assert!(ir.contains("sengoo_dir_walk_next"));
+    assert!(ir.contains("sengoo_dir_walk_close"));
+}
+
+#[test]
 fn io_module_imports_standard_stream_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "io.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "io.sg"],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
@@ -405,7 +506,7 @@ def main() -> i64 {
 #[test]
 fn args_module_imports_argument_helpers_and_emits_opt_in_entry_wrapper() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "args.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "args.sg"],
         r#"
 def main() -> i64 {
     let first_len = arg_len(0).unwrap_or(0);
@@ -520,6 +621,67 @@ def main() -> i64 {
     assert!(ir.contains("assert_ne_str"));
     assert!(ir.contains("assert_eq_f64"));
     assert!(ir.contains("sengoo_str_eq"));
+}
+
+#[test]
+fn status_module_imports_categories_and_messages() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let unknown = STATUS_UNKNOWN();
+    let invalid = STATUS_INVALID_ARGUMENT();
+    let buffer_error = STATUS_BUFFER_TOO_SMALL();
+    let mapped = status_from_raw_ffi(-2001);
+    let name_len = status_name_copy(buffer_error, buffer).unwrap_or(0);
+    let message_len = status_message_copy(invalid, buffer).unwrap_or(0);
+    buffer.free();
+    unknown + mapped + name_len + message_len
+}
+"#,
+    );
+
+    assert!(ir.contains("STATUS_UNKNOWN"));
+    assert!(ir.contains("STATUS_INVALID_ARGUMENT"));
+    assert!(ir.contains("sengoo_status_name_copy"));
+    assert!(ir.contains("sengoo_status_message_copy"));
+    assert!(ir.contains("status_from_raw_ffi"));
+}
+
+#[test]
+fn ffi_buffer_imports_composable_text_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg"],
+        r#"
+def main() -> i64 {
+    let source = ffi_buffer_from_bytes("abcdef").unwrap_or(Buffer { handle: 0 });
+    let out = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let capacity = out.capacity();
+    out.clear();
+    let copied = out.copy_from_str("ab").unwrap_or(0);
+    let appended = out.append_str("cd").unwrap_or(0);
+    let range = source.copy_range(1, 3, out).unwrap_or(0);
+    let used = out.used_len();
+    let utf8 = out.is_utf8();
+    source.free();
+    out.free();
+    if capacity >= 16 && copied == 2 && appended == 2 && range == 3 && used == 3 && utf8 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_ffi_buffer_capacity"));
+    assert!(ir.contains("sengoo_ffi_buffer_used_len"));
+    assert!(ir.contains("sengoo_ffi_buffer_clear"));
+    assert!(ir.contains("sengoo_ffi_buffer_copy_range"));
+    assert!(ir.contains("sengoo_ffi_buffer_copy_in"));
+    assert!(ir.contains("sengoo_ffi_buffer_append"));
+    assert!(ir.contains("sengoo_ffi_buffer_is_utf8"));
 }
 
 #[test]

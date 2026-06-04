@@ -33,26 +33,25 @@ def sign_i64(value: i64) -> i64 {
 }
 
 def clamp_i64(value: i64, lower: i64, upper: i64) -> i64 {
-    let min_bound = min_i64(lower, upper);
-    let max_bound = max_i64(lower, upper);
-    if value < min_bound {
-        min_bound
-    } else if value > max_bound {
-        max_bound
+    if value < min_i64(lower, upper) {
+        min_i64(lower, upper)
+    } else if value > max_i64(lower, upper) {
+        max_i64(lower, upper)
     } else {
         value
     }
 }
 
 def gcd_i64(lhs: i64, rhs: i64) -> i64 {
-    let a = abs_i64(lhs);
-    let b = abs_i64(rhs);
-    while b != 0 {
-        let next = a % b;
-        a = b;
-        b = next;
+    gcd_i64_positive(abs_i64(lhs), abs_i64(rhs))
+}
+
+def gcd_i64_positive(lhs: i64, rhs: i64) -> i64 {
+    if rhs == 0 {
+        lhs
+    } else {
+        gcd_i64_positive(rhs, lhs % rhs)
     }
-    a
 }
 
 def lcm_i64(lhs: i64, rhs: i64) -> i64 {
@@ -64,11 +63,9 @@ def lcm_i64(lhs: i64, rhs: i64) -> i64 {
 }
 
 def pow_i64(base: i64, exp: i64) -> i64 {
-    let result = 1;
-    let remaining = exp;
-    while remaining > 0 {
-        result = result * base;
-        remaining = remaining - 1;
+    if exp <= 0 {
+        1
+    } else {
+        base * pow_i64(base, exp - 1)
     }
-    result
 }

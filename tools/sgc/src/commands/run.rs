@@ -200,14 +200,14 @@ pub(crate) async fn cmd_run(
     drop(graph_snapshot);
 
     let runtime_c = find_runtime_c();
-    let runtime_c_fingerprint = optional_file_fingerprint(runtime_c.as_deref())?;
+    let runtime_c_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
     let clang_exe = find_clang();
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
     let lli_extra_objects = if matches!(resolved_engine, RunEngine::Lli) {
         if let (Some(clang), Some(runtime_c)) = (clang_exe.as_deref(), runtime_c.as_deref()) {
-            vec![ensure_runtime_object(clang, runtime_c, opt_level)?]
+            ensure_runtime_objects(clang, runtime_c, opt_level)?
         } else {
             Vec::new()
         }

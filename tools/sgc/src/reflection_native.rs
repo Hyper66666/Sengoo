@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use crate::{
-    compile_ir_to_object, ensure_runtime_object, linker_mode_from_env, object_file_extension,
+    compile_ir_to_object, ensure_runtime_objects, linker_mode_from_env, object_file_extension,
     validate_reflection_metadata, LinkerMode, ReflectionMetadata, LINKER_AVAILABLE,
     LINKER_UNAVAILABLE, LLD_AVAILABILITY,
 };
@@ -199,7 +199,7 @@ fn compile_reflection_shared_library(
     compile_ir_to_object(clang_exe, llvm_ir_path, &object_path, opt_level)?;
     let mut object_paths = vec![object_path];
     if let Some(runtime_c) = runtime_c {
-        object_paths.push(ensure_runtime_object(clang_exe, runtime_c, opt_level)?);
+        object_paths.extend(ensure_runtime_objects(clang_exe, runtime_c, opt_level)?);
     }
     link_shared_library_from_objects(
         clang_exe,

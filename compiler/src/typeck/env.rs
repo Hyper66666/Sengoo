@@ -115,6 +115,8 @@ pub struct TypeEnv {
     /// 进 `TypeInfer`、`borrow_check` 把 env clone 进 `BorrowChecker` 等场景）
     /// 通过 `Rc` 浅复制共享同一 arena 和同一套 [`crate::typeck::interner::InternedTyId`] 编号。
     interner: Rc<RefCell<TyInterner>>,
+    /// Canonical stdlib `String { handle: i64 }` type identity for move rules.
+    pub owned_string_ty: Option<Ty>,
 }
 
 impl TypeEnv {
@@ -125,6 +127,7 @@ impl TypeEnv {
             next_ty_id: 0,
             next_ty_var_id: 0,
             interner: Rc::new(RefCell::new(TyInterner::new())),
+            owned_string_ty: None,
         };
         // 创建全局作用域
         env.push_scope();

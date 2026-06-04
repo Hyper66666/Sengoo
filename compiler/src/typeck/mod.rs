@@ -13,7 +13,7 @@ pub mod ty;
 
 pub use borrow::{BorrowChecker, BorrowError};
 pub use check::TypeChecker;
-pub use env::TypeEnv;
+pub use env::{SymbolKind, TypeEnv};
 pub use infer::TypeInfer;
 pub use interner::{InternedTyId, InternedTyKind, TyInterner};
 pub use r#trait::{
@@ -31,7 +31,6 @@ use crate::Result;
 pub fn typeck(program: &Program) -> Result<Program> {
     let mut checker = TypeChecker::new();
     checker.check_program(program)?;
-    borrow_check(program, checker.env())?;
     Ok(program.clone())
 }
 
@@ -46,7 +45,7 @@ pub fn borrow_check(program: &Program, env: &TypeEnv) -> Result<()> {
         .map_err(|errs| crate::error::CompileError::TypeckError(format_borrow_errors(&errs)))
 }
 
-fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
+pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
     if errors.is_empty() {
         return TypeckError::Other("borrow check failed with unknown error".to_string());
     }
@@ -77,6 +76,14 @@ fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
             } => lines.push(format!(
                 "cannot move borrowed value `{}` (borrow {:?}, move {:?})",
                 var, borrow_span, move_span
+            )),
+            BorrowError::UseAfterMove {
+                var,
+                use_span,
+                move_span,
+            } => lines.push(format!(
+                "use of moved value `{}` (moved {:?}, used {:?})",
+                var, move_span, use_span
             )),
         }
     }

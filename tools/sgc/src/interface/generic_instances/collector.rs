@@ -178,7 +178,8 @@ pub(super) fn collect_generic_instances_in_expr(
         ExprKind::Block(block)
         | ExprKind::Loop(block)
         | ExprKind::AsyncBlock(block)
-        | ExprKind::ParallelBlock(block) => {
+        | ExprKind::ParallelBlock(block)
+        | ExprKind::TryBlock(block) => {
             collect_generic_instances_in_block(
                 out,
                 seen,

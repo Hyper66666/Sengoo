@@ -490,14 +490,12 @@ pub(crate) fn synthesize_cfg_poll(
             f.basic_blocks[resume_block].push(store_inst);
         }
 
-        let remapped_handle = remap_local(point.future_handle, &local_map)?;
-        push_frame_load_into_typed(
+        let restored_handle = push_frame_load_typed(
             &mut f,
             resume_block,
             handle,
             frame_await_slot(layout, point.state_index - 1),
-            remapped_handle,
-            &MIR_I64,
+            MIR_I64,
         )?;
         emit_suspend_transition(
             &mut f,
@@ -505,7 +503,7 @@ pub(crate) fn synthesize_cfg_poll(
             layout,
             handle,
             &point.poll_func,
-            remapped_handle,
+            restored_handle,
             translated_blocks[&point.ready_block],
             pending_blocks[&point.block],
             point.state_index,

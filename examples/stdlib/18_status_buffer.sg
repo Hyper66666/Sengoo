@@ -1,0 +1,42 @@
+// examples/stdlib/18_status_buffer.sg
+//
+// Demonstrates: importing std::status helpers and composable Buffer text methods.
+//
+// Run: sgc run examples/stdlib/18_status_buffer.sg
+// Expected output: 18
+
+import std::status;
+import std::ffi;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let out = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+
+    let name_len = status_name_copy(STATUS_BUFFER_TOO_SMALL(), buffer).unwrap_or(0);
+    let message_len = status_message_copy(STATUS_INVALID_ARGUMENT(), buffer).unwrap_or(0);
+    let copied = buffer.copy_from_str("abcdef").unwrap_or(0);
+    let appended = buffer.append_str("gh").unwrap_or(0);
+    let range = buffer.copy_range(2, 3, out).unwrap_or(0);
+    let used = out.used_len();
+    let mapped = status_from_raw_ffi(-2001);
+
+    let ok = name_len > 0
+        && message_len > 0
+        && copied == 6
+        && appended == 2
+        && range == 3
+        && used == 3
+        && buffer.capacity() >= 64
+        && buffer.is_utf8()
+        && mapped == STATUS_INVALID_ARGUMENT();
+
+    out.free();
+    buffer.free();
+
+    if ok {
+        print(18);
+    } else {
+        print(0);
+    }
+    0
+}

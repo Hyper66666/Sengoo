@@ -1,0 +1,49 @@
+extern "C" {
+    fn sengoo_status_name_copy(code: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_status_message_copy(code: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_status_from_raw_ffi(code: i64) -> i64;
+}
+
+def STATUS_OK() -> i64 { 0 }
+def STATUS_UNKNOWN() -> i64 { 1 }
+def STATUS_INVALID_ARGUMENT() -> i64 { 2 }
+def STATUS_INVALID_HANDLE() -> i64 { 3 }
+def STATUS_BUFFER_TOO_SMALL() -> i64 { 4 }
+def STATUS_NOT_FOUND() -> i64 { 5 }
+def STATUS_ALREADY_EXISTS() -> i64 { 6 }
+def STATUS_PERMISSION_DENIED() -> i64 { 7 }
+def STATUS_UNSUPPORTED() -> i64 { 8 }
+def STATUS_IO() -> i64 { 9 }
+def STATUS_PARSE() -> i64 { 10 }
+def STATUS_TIMEOUT() -> i64 { 11 }
+def STATUS_INTERRUPTED() -> i64 { 12 }
+def STATUS_OVERFLOW() -> i64 { 13 }
+def STATUS_OUT_OF_MEMORY() -> i64 { 14 }
+
+def status_from_raw_ffi(code: i64) -> i64 {
+    sengoo_status_from_raw_ffi(code)
+}
+
+def status_copy_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
+}
+
+def status_name_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    status_copy_result(sengoo_status_name_copy(code, buffer_ptr, capacity))
+}
+
+def status_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64> {
+    status_name_copy_raw(code, buffer.ptr(), buffer.len())
+}
+
+def status_message_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    status_copy_result(sengoo_status_message_copy(code, buffer_ptr, capacity))
+}
+
+def status_message_copy(code: i64, buffer: Buffer) -> Result<i64, i64> {
+    status_message_copy_raw(code, buffer.ptr(), buffer.len())
+}

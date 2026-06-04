@@ -3,6 +3,22 @@ extern "C" {
     fn sengoo_str_starts_with(value: &str, prefix: &str) -> i64;
     fn sengoo_str_ends_with(value: &str, suffix: &str) -> i64;
     fn sengoo_str_index_of(value: &str, needle: &str) -> i64;
+    fn sengoo_string_new() -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+    fn sengoo_string_len(handle: i64) -> i64;
+    fn sengoo_string_is_empty(handle: i64) -> i64;
+    fn sengoo_string_from_str_copy(value_ptr: i64) -> i64;
+    fn sengoo_string_from_buffer(buffer_handle: i64, used_len: i64) -> i64;
+    fn sengoo_string_clone_status(handle: i64) -> i64;
+    fn sengoo_string_push_str_status(handle: i64, value_ptr: i64) -> i64;
+    fn sengoo_string_clear_status(handle: i64) -> i64;
+    fn sengoo_string_copy_to_buffer(handle: i64, buffer_handle: i64) -> i64;
+    fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+}
+
+struct String {
+    handle: i64,
 }
 
 def str_len(value: &str) -> i64 {
@@ -57,4 +73,86 @@ def str_repeat(value: &str, count: i64) -> &str {
         remaining = remaining - 1;
     }
     out
+}
+
+def string_copy_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 0 - value }
+    }
+}
+
+def string_result_ok(value: String) -> Result<String, i64> {
+    Result { is_ok: true, value: value, error: 0 }
+}
+
+def string_result_err(error: i64) -> Result<String, i64> {
+    Result { is_ok: false, value: String { handle: 0 }, error: error }
+}
+
+def string_new() -> String {
+    String { handle: sengoo_string_new() }
+}
+
+def string_from_str(value: &str) -> Result<String, i64> {
+    let raw = sengoo_string_from_str_copy(sengoo_stdlib_str_ptr(value));
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+def string_from_buffer(buffer: Buffer, used_len: i64) -> Result<String, i64> {
+    let raw = sengoo_string_from_buffer(buffer.handle, used_len);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+impl String {
+    def len(self) -> i64 {
+        sengoo_string_len(self.handle)
+    }
+
+    def is_empty(self) -> bool {
+        sengoo_string_is_empty(self.handle) != 0
+    }
+
+    def clone(self) -> Result<String, i64> {
+        let raw = sengoo_string_clone_status(self.handle);
+        if raw >= 0 {
+            string_result_ok(String { handle: raw })
+        } else {
+            string_result_err(0 - raw)
+        }
+    }
+
+    def push_str(self, value: &str) -> Result<bool, i64> {
+        let raw = sengoo_string_push_str_status(self.handle, sengoo_stdlib_str_ptr(value));
+        if raw >= 0 {
+            result_ok_bool(true)
+        } else {
+            result_err_bool(0 - raw)
+        }
+    }
+
+    def clear(self) -> bool {
+        sengoo_string_clear_status(self.handle) >= 0
+    }
+
+    def copy_to_buffer(self, buffer: Buffer) -> Result<i64, i64> {
+        string_copy_result(sengoo_string_copy_to_buffer(self.handle, buffer.handle))
+    }
+
+    def drop(self) -> bool {
+        sengoo_string_free_status(self.handle) >= 0
+    }
+
+    def eq(self, other: String) -> bool {
+        sengoo_string_eq(self.handle, other.handle) != 0
+    }
 }

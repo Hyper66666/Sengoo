@@ -1,4 +1,5 @@
 use sengoo_compiler::error::{ParseError, TypeError};
+use sengoo_compiler::typeck::TypeckError;
 use sengoo_compiler::CompileError;
 
 use super::{
@@ -15,17 +16,31 @@ fn compile_error_details(raw: &str) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+fn diagnostic_code_from_message(message: &str) -> Option<String> {
+    let start = message.find("[")? + 1;
+    let rest = &message[start..];
+    let end = rest.find(']')?;
+    let code = &rest[..end];
+    if code.is_empty() {
+        None
+    } else {
+        Some(code.to_string())
+    }
+}
+
 fn compile_error_payload(
     input: Option<&str>,
     raw: &str,
     location: Option<CompilerErrorLocationJson>,
 ) -> CompilerErrorJson {
     let (stage, message) = split_compiler_error_stage(raw);
+    let code = diagnostic_code_from_message(&message);
     CompilerErrorJson {
         ok: false,
         kind: "compile_error",
         stage,
         message,
+        code,
         input: input.map(str::to_owned),
         hint: Some("use --error-format text for human-friendly diagnostics".to_string()),
         details: compile_error_details(raw),
@@ -105,10 +120,19 @@ fn source_span_from_type_error(error: &TypeError) -> Option<&miette::SourceSpan>
     }
 }
 
-fn source_span_from_compile_error(error: &CompileError) -> Option<&miette::SourceSpan> {
+fn source_span_from_typeck_error(error: &TypeckError) -> Option<miette::SourceSpan> {
+    error.span().map(|(lo, hi)| {
+        let lo = lo as usize;
+        let len = (hi as usize).saturating_sub(lo);
+        miette::SourceSpan::new(lo.into(), len)
+    })
+}
+
+fn source_span_from_compile_error(error: &CompileError) -> Option<miette::SourceSpan> {
     match error {
-        CompileError::ParseError(error) => source_span_from_parse_error(error),
-        CompileError::TypeError(error) => source_span_from_type_error(error),
+        CompileError::ParseError(error) => source_span_from_parse_error(error).copied(),
+        CompileError::TypeError(error) => source_span_from_type_error(error).copied(),
+        CompileError::TypeckError(error) => source_span_from_typeck_error(error),
         _ => None,
     }
 }
@@ -155,7 +179,7 @@ pub(super) fn location_from_compile_error(
     source: &str,
     error: &CompileError,
 ) -> Option<CompilerErrorLocationJson> {
-    source_span_from_compile_error(error).map(|span| location_from_source_span(source, span))
+    source_span_from_compile_error(error).map(|span| location_from_source_span(source, &span))
 }
 
 pub(crate) fn emit_compile_error_with_location(

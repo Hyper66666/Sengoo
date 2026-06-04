@@ -44,7 +44,9 @@ mod workset;
 pub(crate) use commands::{
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
 };
-pub(crate) use commands::{cmd_build, cmd_run};
+pub(crate) use commands::{
+    cmd_build, cmd_run, cmd_test, resolve_test_root, TestOptions, TestOutputFormat,
+};
 
 #[cfg(test)]
 pub(crate) use bench::bench_root_dir;
@@ -73,8 +75,7 @@ pub(crate) use error_reporting::{
 pub(crate) use fingerprint::{
     file_fingerprint, implementation_fingerprint, implementation_fingerprint_from_normalized,
     interface_fingerprint, interface_fingerprint_fast, interface_fingerprint_fast_from_normalized,
-    normalize_source_for_hash, optional_file_fingerprint, resolve_root_hashes_for_request,
-    source_fingerprint,
+    normalize_source_for_hash, resolve_root_hashes_for_request, source_fingerprint,
 };
 pub(crate) use frontend_helpers::{
     dependency_graph_digest, frontend_cache_entry_for_module, frontend_probe_module_body_only,
@@ -103,12 +104,14 @@ pub(crate) use interface::{
 pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
 pub(crate) use native_toolchain::{
     append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object,
-    compile_native_binary, default_build_output_path_for_case, ensure_runtime_object,
-    link_native_binary_from_objects, linker_mode_from_env,
+    compile_native_binary, default_build_output_path_for_case, ensure_runtime_objects,
+    link_native_binary_from_objects, linker_mode_from_env, optional_runtime_bundle_fingerprint,
     recover_native_output_from_cached_artifacts, run_native_binary_with_args, run_with_lli_args,
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};
+#[cfg(test)]
+pub(crate) use native_toolchain::{runtime_bundle_fingerprint, runtime_source_bundle};
 #[cfg(test)]
 pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
@@ -200,6 +203,8 @@ struct CompilerErrorJson {
     kind: &'static str,
     stage: &'static str,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
     input: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hint: Option<String>,

@@ -147,6 +147,12 @@ pub enum HIRExpr {
 
     /// Async block (currently rejected at typeck, reserved for future use)
     AsyncBlock(Box<HIRBody>),
+
+    /// `expr?` error propagation
+    Try(Box<HIRExpr>),
+
+    /// `try { ... }` scoped propagation
+    TryBlock(Box<HIRBody>),
 }
 
 /// HIR 字面量

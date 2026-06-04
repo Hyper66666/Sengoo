@@ -263,6 +263,7 @@ impl Formatter {
                 format!("|{}| {}", params, self.format_expr(body))
             }
             ExprKind::Try(base) => format!("{}?", self.format_expr(base)),
+            ExprKind::TryBlock(block) => format!("try {}", self.format_block_inline(block)),
             ExprKind::Cast { expr, ty } => {
                 format!("{} as {}", self.format_expr(expr), self.format_type(ty))
             }

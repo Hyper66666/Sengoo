@@ -14,7 +14,7 @@ def path_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
         Result { is_ok: true, value: value, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
     }
 }
 

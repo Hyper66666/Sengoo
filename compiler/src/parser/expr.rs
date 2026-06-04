@@ -22,6 +22,7 @@ const PREC_ADD: u8 = 9;
 const PREC_MUL: u8 = 10;
 const PREC_UNARY: u8 = 11;
 const PREC_CALL: u8 = 12;
+const PREC_POSTFIX: u8 = 13;
 
 impl<'source> Parser<'source> {
     pub(super) fn parse_expr(&mut self) -> Result<Expr> {
@@ -301,6 +302,10 @@ impl<'source> Parser<'source> {
 
                 TokenKind::MatchKw => {
                     return self.parse_match_expr();
+                }
+
+                TokenKind::TryKw => {
+                    return self.parse_try_block_expr();
                 }
 
                 // 解析lambda表达式（闭包）。
@@ -599,6 +604,8 @@ impl<'source> Parser<'source> {
                 }
             }
 
+            TokenKind::Question => ExprKind::Try(Box::new(left)),
+
             // 未知中缀运算符，返回原表达式。
             _ => {
                 return Err(CompileError::ParseError(
@@ -639,6 +646,8 @@ impl<'source> Parser<'source> {
             TokenKind::Star | TokenKind::Slash | TokenKind::Percent => PREC_MUL,
 
             TokenKind::Dot | TokenKind::LBracket | TokenKind::LParen => PREC_CALL,
+
+            TokenKind::Question => PREC_POSTFIX,
 
             TokenKind::DotDot => PREC_OR,
 

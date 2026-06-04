@@ -371,9 +371,13 @@ alias。
 ## 标准库
 
 源码侧标准库位于 `tools/stdlib/`，并按能力面拆分为 `option.sg`、
-`result.sg`、`collections.sg`、`string.sg`、`math.sg`、`error.sg`，以及
-`ffi.sg`、`db.sg`、`lua54.sg`、`net.sg`、`proto.sg` 等反射 wrapper。
-模块说明和当前延期项见 `tools/stdlib/README.md`。
+`result.sg`、`collections.sg`、`string.sg`、`strconv.sg`、`json.sg`、
+`status.sg`、`io.sg`、`file.sg`、`dir.sg`、`path.sg`、`process.sg`、
+`args.sg`、`env.sg`、`math.sg`、`error.sg`，以及 `ffi.sg`、`db.sg`、
+`lua54.sg`、`net.sg`、`proto.sg` 等反射 wrapper。运行时桥接分布在
+`runtime.c`、`runtime_collections.c`、`runtime_json.c`、
+`runtime_process.c`、`runtime_string.c`。模块说明和当前延期项见
+`tools/stdlib/README.md`。
 
 可以直接在 Sengoo 源码里导入标准库模块：
 
@@ -526,23 +530,45 @@ Sengoo/
 `-- vscode-sengoo/   # VS Code 扩展
 ```
 
+## 语言易用性（Try / Match）
+
+编译器已落地固定的 `try-and-match-ergonomics` 能力（见
+`openspec/specs/try-and-match-ergonomics/spec.md`）：
+
+- 后缀 `?`：支持 `Result<T, E>` 与 `Option<T>`，类型不匹配时给出稳定诊断
+- `try { ... }`：在块内承载传播，并按推断的容器类型返回
+- `match`：枚举变体模式、守卫、`|` 或模式，以及穷尽性检查
+- MIR：守卫臂与枚举判别式分发；`match` + `await` 异步路径由 `cargo test -p sgc match` 覆盖
+
+可运行示例见 `examples/ergonomics/`。
+
 ## 项目状态
 
-当前阶段：仍然偏早期，但迭代速度很快。
+当前阶段：仍偏早期，但迭代很快——CLI 已可用于真实本地项目，编译器 /
+标准库 / 工具链以周为单位持续交付。
 
 当前重点：
 
-- async phase-2 能力扩展与 runtime 语义完善
-- 真实编辑场景下更强的增量一致性
-- 更好的 interop 与 reflection 易用性
-- 工具链和开发体验打磨
+- FFI / 异步边界的 runtime 加固与标准库广度扩展
+- `sgc test` 清单化测试与包级 smoke gate
+- 前端编译剖析与 MIR lowering 热路径优化
+- 工具链体验（`sglsp` 诊断、JSON 错误输出、标准库索引）
 
-近期工程重构（2026 年 5 月）：
+开发进度（2026 年 5–6 月）：
 
-- Runtime：`NetRuntime` 实例现在统一接管 TCP / UDP / HTTP / WS / HttpServer 全部状态；`runtime/src/net.rs` 的 extern C ABI 已退化为薄壳层，旧的全局访问器（`udp_sockets`、`http_responses`、`ws_streams`、`http_servers`、`next_handle`）全部移除。覆盖：`cargo test -p sengoo-runtime --lib` 通过 42/42，另含 19 个 `net::tests` 与 6 个 instance 级 smoke 测试。
-- Runtime：Lua54 反射测试通过仅用于测试的互斥锁串行化，避免在动态库可用时全局 `LUA54_LAST_ERROR` 出现并发竞争。
-- Typeck：`SymbolKind::Function` 不再重复持有 `params`/`ret`；新增 `env.declare_fn(name, params, ret)` helper，把原先 `fn_ty(...).clone()` + `insert_fn(...)` 两次调用合并为一次，函数声明位点的多余 params/ret 克隆全部消除。`cargo test -p sengoo-compiler --lib` 通过 539/539。
-- HIR：类继承解析在递归保护 HashSet、按类查找 HashMap 与本地去重集合中全程借用 AST 字符串切片，不改行为的前提下把 `compiler/src/hir/lower.rs` 的 `.clone()` 计数从 59 降到 52。
+- **控制流**：`?`、`try {}`、枚举 `match`、守卫与或模式已贯通 parser → typeck → MIR → 原生代码生成；回归测试位于 `compiler/src/tests/*try*` 与 `*match*`。
+- **异步**：resume lowering 不再把 frame load 写回 future 局部变量（修复 `match` + `await` 的 LLVM SSA 重复定义）；`cargo test -p sgc match` 覆盖原生异步 match smoke。
+- **标准库**：脚本向能力面扩展——自有 `String`、`std::json`、`std::status` 错误分类、同步 `std::io`、目录列举与复制/移动（`std::dir`、`std::file`）、无 shell 的 `std::process` 及捕获/超时、十进制 `std::strconv`。示例 `examples/stdlib/15`–`20` 演示新模块。
+- **编译流水线**：原生产物缓存对 `runtime.c` **内容** 做指纹（不仅路径），避免就地修改 runtime 后仍链接旧行为。前端分阶段计时与 MIR lowering 热路径修复（含基于 `Cow` 的块状态更新）已写入 `openspec/specs/frontend-build-performance/`。
+- **工具链**：`sgc` 增加清单驱动的 `test` 路径；`sglsp` 的 stdlib 跳转与诊断与 `std::*` 导入对齐。`sgc` 大型源文件已拆分以利于维护（interface 命令、指纹、增量 bench 挂钩）。
+- **5 月已完成的基础重构**（仍有效）：`NetRuntime` 统一持有 socket/server 状态；Lua54 反射测试在测试构建中互斥串行；`env.declare_fn` 消除函数类型重复克隆；HIR 类继承解析改为借用 AST 名称而非克隆字符串。
+
+本地集成分支验证快照（2026 年 6 月）：
+
+- `cargo test -p sengoo-compiler --lib` — 编译器单元测试
+- `cargo test -p sgc match` — 异步 / match 原生 smoke
+- `cargo test -p sglsp` — 语言服务
+- `openspec validate --all --strict` — 规范一致性
 
 说明：
 

@@ -92,7 +92,10 @@ pub(crate) fn collect_named_symbols(expr: &HIRExpr, target_name: &str, out: &mut
             collect_named_symbols(body, target_name, out);
         }
         HIRExpr::Await(inner) => collect_named_symbols(inner, target_name, out),
-        HIRExpr::AsyncBlock(body) => collect_named_symbols_in_body(body, target_name, out),
+        HIRExpr::AsyncBlock(body) | HIRExpr::TryBlock(body) => {
+            collect_named_symbols_in_body(body, target_name, out);
+        }
+        HIRExpr::Try(inner) => collect_named_symbols(inner, target_name, out),
         HIRExpr::Lit(_) | HIRExpr::Return(None) | HIRExpr::Break(None) | HIRExpr::Continue => {}
     }
 }
@@ -238,10 +241,10 @@ fn collect_vars_from_expr(
                 collect_vars_from_expr(arg, param_names, local_names, free_vars);
             }
         }
-        HIRExpr::Await(inner) => {
+        HIRExpr::Await(inner) | HIRExpr::Try(inner) => {
             collect_vars_from_expr(inner, param_names, local_names, free_vars);
         }
-        HIRExpr::AsyncBlock(body) => {
+        HIRExpr::AsyncBlock(body) | HIRExpr::TryBlock(body) => {
             collect_vars_from_body(body, param_names, local_names, free_vars);
         }
         HIRExpr::Match { scrutinee, arms } => {

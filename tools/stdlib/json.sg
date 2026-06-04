@@ -1,0 +1,232 @@
+extern "C" {
+    fn sengoo_json_parse_text(data: i64, len: i64) -> i64;
+    fn sengoo_json_parse_buffer(buffer: i64, input_len: i64) -> i64;
+    fn sengoo_json_doc_object_new() -> i64;
+    fn sengoo_json_doc_close(handle: i64) -> i64;
+    fn sengoo_json_doc_root(handle: i64) -> i64;
+    fn sengoo_json_doc_serialize(handle: i64, buffer: i64) -> i64;
+    fn sengoo_json_doc_new_object(handle: i64) -> i64;
+    fn sengoo_json_doc_new_array(handle: i64) -> i64;
+    fn sengoo_json_doc_new_string(handle: i64, value: i64) -> i64;
+    fn sengoo_json_doc_new_bool(handle: i64, value: i64) -> i64;
+    fn sengoo_json_doc_new_number(handle: i64, value: f64) -> i64;
+    fn sengoo_json_doc_new_null(handle: i64) -> i64;
+    fn sengoo_json_value_kind(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_object_has(doc_handle: i64, node_id: i64, key: i64) -> i64;
+    fn sengoo_json_object_get(doc_handle: i64, node_id: i64, key: i64) -> i64;
+    fn sengoo_json_object_set(doc_handle: i64, node_id: i64, key: i64, value_doc_handle: i64, value_node_id: i64) -> i64;
+    fn sengoo_json_array_len(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_array_get(doc_handle: i64, node_id: i64, index: i64) -> i64;
+    fn sengoo_json_array_push(doc_handle: i64, node_id: i64, value_doc_handle: i64, value_node_id: i64) -> i64;
+    fn sengoo_json_string_copy(doc_handle: i64, node_id: i64, buffer: i64) -> i64;
+    fn sengoo_json_bool_value(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_number_i64(doc_handle: i64, node_id: i64) -> i64;
+    fn sengoo_json_number_f64(doc_handle: i64, node_id: i64) -> f64;
+    fn sengoo_json_last_error_code() -> i64;
+    fn sengoo_json_last_error_offset() -> i64;
+    fn sengoo_json_last_error_copy(buffer: i64) -> i64;
+}
+
+struct JsonDoc {
+    handle: i64,
+}
+
+struct JsonValue {
+    doc_handle: i64,
+    node_id: i64,
+}
+
+def JSON_KIND_NULL() -> i64 { 0 }
+def JSON_KIND_BOOL() -> i64 { 1 }
+def JSON_KIND_NUMBER() -> i64 { 2 }
+def JSON_KIND_STRING() -> i64 { 3 }
+def JSON_KIND_ARRAY() -> i64 { 4 }
+def JSON_KIND_OBJECT() -> i64 { 5 }
+
+def json_error_or_unknown() -> i64 {
+    if sengoo_json_last_error_code() == 0 {
+        1
+    } else {
+        sengoo_json_last_error_code()
+    }
+}
+
+def json_doc_result(handle: i64) -> Result<JsonDoc, i64> {
+    if handle != 0 {
+        Result { is_ok: true, value: JsonDoc { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: JsonDoc { handle: 0 }, error: json_error_or_unknown() }
+    }
+}
+
+def json_value_result(doc_handle: i64, node_id: i64) -> Result<JsonValue, i64> {
+    if doc_handle != 0 && node_id != 0 {
+        Result { is_ok: true, value: JsonValue { doc_handle: doc_handle, node_id: node_id }, error: 0 }
+    } else {
+        Result { is_ok: false, value: JsonValue { doc_handle: 0, node_id: 0 }, error: json_error_or_unknown() }
+    }
+}
+
+def json_i64_result(value: i64) -> Result<i64, i64> {
+    let code = sengoo_json_last_error_code();
+    if code == 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: code }
+    }
+}
+
+def json_count_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: 0 - value }
+    }
+}
+
+def json_bool_status_result(value: i64) -> Result<bool, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value != 0, error: 0 }
+    } else {
+        Result { is_ok: false, value: false, error: 0 - value }
+    }
+}
+
+def json_f64_result(value: f64) -> Result<f64, i64> {
+    let code = sengoo_json_last_error_code();
+    if code == 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: value, error: code }
+    }
+}
+
+def json_parse(text: &str) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_text(sengoo_stdlib_str_ptr(text), text.len()))
+}
+
+def json_parse_buffer(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_parse_buffer(buffer.handle, input_len))
+}
+
+def json_doc_object() -> Result<JsonDoc, i64> {
+    json_doc_result(sengoo_json_doc_object_new())
+}
+
+def json_last_error_code() -> i64 {
+    sengoo_json_last_error_code()
+}
+
+def json_last_error_offset() -> i64 {
+    sengoo_json_last_error_offset()
+}
+
+def json_last_error_copy(buffer: Buffer) -> Result<i64, i64> {
+    json_count_result(sengoo_json_last_error_copy(buffer.handle))
+}
+
+impl JsonDoc {
+    def root(self) -> JsonValue {
+        JsonValue { doc_handle: self.handle, node_id: sengoo_json_doc_root(self.handle) }
+    }
+
+    def close(self) -> bool {
+        sengoo_json_doc_close(self.handle) == 0
+    }
+
+    def serialize(self, buffer: Buffer) -> Result<i64, i64> {
+        json_count_result(sengoo_json_doc_serialize(self.handle, buffer.handle))
+    }
+
+    def new_object(self) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_object(self.handle))
+    }
+
+    def new_array(self) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_array(self.handle))
+    }
+
+    def new_string(self, value: &str) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_string(self.handle, sengoo_stdlib_str_ptr(value)))
+    }
+
+    def new_bool(self, value: bool) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_bool(self.handle, if value { 1 } else { 0 }))
+    }
+
+    def new_number(self, value: f64) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_number(self.handle, value))
+    }
+
+    def new_null(self) -> Result<JsonValue, i64> {
+        json_value_result(self.handle, sengoo_json_doc_new_null(self.handle))
+    }
+}
+
+impl JsonValue {
+    def kind(self) -> Result<i64, i64> {
+        json_i64_result(sengoo_json_value_kind(self.doc_handle, self.node_id))
+    }
+
+    def is_null(self) -> bool {
+        self.kind().unwrap_or(-1) == JSON_KIND_NULL()
+    }
+
+    def object_has_raw(self, key_ptr: i64) -> bool {
+        sengoo_json_object_has(self.doc_handle, self.node_id, key_ptr) != 0
+    }
+
+    def object_has(self, key: &str) -> bool {
+        self.object_has_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def object_get_raw(self, key_ptr: i64) -> Result<JsonValue, i64> {
+        json_value_result(self.doc_handle, sengoo_json_object_get(self.doc_handle, self.node_id, key_ptr))
+    }
+
+    def object_get(self, key: &str) -> Result<JsonValue, i64> {
+        self.object_get_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def object_set_raw(self, key_ptr: i64, value: JsonValue) -> Result<bool, i64> {
+        json_bool_status_result(sengoo_json_object_set(self.doc_handle, self.node_id, key_ptr, value.doc_handle, value.node_id))
+    }
+
+    def object_set(self, key: &str, value: JsonValue) -> Result<bool, i64> {
+        self.object_set_raw(sengoo_stdlib_str_ptr(key), value)
+    }
+
+    def array_len(self) -> Result<i64, i64> {
+        json_count_result(sengoo_json_array_len(self.doc_handle, self.node_id))
+    }
+
+    def array_get(self, index: i64) -> Result<JsonValue, i64> {
+        json_value_result(self.doc_handle, sengoo_json_array_get(self.doc_handle, self.node_id, index))
+    }
+
+    def array_push(self, value: JsonValue) -> Result<bool, i64> {
+        json_bool_status_result(sengoo_json_array_push(self.doc_handle, self.node_id, value.doc_handle, value.node_id))
+    }
+
+    def string_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        json_count_result(sengoo_json_string_copy(self.doc_handle, self.node_id, buffer.handle))
+    }
+
+    def bool_value(self) -> Result<bool, i64> {
+        let value = sengoo_json_bool_value(self.doc_handle, self.node_id);
+        let code = sengoo_json_last_error_code();
+        if code == 0 {
+            Result { is_ok: true, value: value != 0, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: code }
+        }
+    }
+
+    def number_i64(self) -> Result<i64, i64> {
+        json_i64_result(sengoo_json_number_i64(self.doc_handle, self.node_id))
+    }
+
+    def number_f64(self) -> Result<f64, i64> {
+        json_f64_result(sengoo_json_number_f64(self.doc_handle, self.node_id))
+    }
+}

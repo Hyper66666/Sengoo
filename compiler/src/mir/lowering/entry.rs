@@ -39,7 +39,9 @@ pub fn lower_hir_with_options(
     }
     let concrete_named_types =
         collect_concrete_named_types_with_impl_variants(items, &known_named_types);
+    let enum_defs = build_enum_defs(items, &struct_defs);
     let concrete_type_registry = ConcreteTypeRegistry::new(&struct_defs, &concrete_named_types);
+    let options = options.with_enum_defs(enum_defs);
     let inherent_method_templates = collect_inherent_method_templates(items);
     let mut trait_method_templates: Vec<TraitMethodTemplate> = Vec::new();
     let mut eager_trait_functions: Vec<hir::HIRFunction> = Vec::new();

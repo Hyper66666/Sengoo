@@ -1,4 +1,5 @@
 use super::*;
+use crate::typeck::BorrowChecker;
 
 impl TypeChecker {
     /// 检查块表达式，按顺序检查所有语句并返回最终类型。
@@ -10,6 +11,12 @@ impl TypeChecker {
             if let Some(ty) = self.check_stmt(stmt)? {
                 result_ty = ty;
             }
+        }
+
+        let mut borrow_checker = BorrowChecker::new(self.env.clone());
+        borrow_checker.check_block(block);
+        if let Err(errs) = borrow_checker.finish() {
+            return Err(crate::typeck::format_borrow_errors(&errs));
         }
 
         self.env.pop_scope();
@@ -142,27 +149,13 @@ impl TypeChecker {
     }
 
     /// 检查match表达式，验证所有分支类型一致。
-    pub(super) fn check_match(&mut self, scrutinee: &Expr, arms: &[MatchArm]) -> TyResult<Ty> {
-        self.check_expr(scrutinee)?;
-
-        let mut arm_types = Vec::new();
-        for arm in arms {
-            if let Some(guard) = &arm.guard {
-                self.check_expr(guard)?;
-            }
-            let arm_ty = self.check_expr(&arm.body)?;
-            arm_types.push(arm_ty);
-        }
-
-        let result_ty = arm_types
-            .first()
-            .cloned()
-            .unwrap_or_else(|| self.env.unit_ty());
-        for arm_ty in &arm_types {
-            self.infer.unify(&result_ty, arm_ty)?;
-        }
-
-        Ok(result_ty)
+    pub(super) fn check_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+        match_span: crate::lexer::Span,
+    ) -> TyResult<Ty> {
+        self.check_match_expr(scrutinee, arms, match_span)
     }
 
     /// 检查return语句，验证返回值类型与函数返回类型匹配。

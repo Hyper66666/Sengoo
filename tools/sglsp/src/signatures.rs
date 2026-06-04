@@ -197,6 +197,7 @@ fn collect_function_signatures_from_decl(
                 impl_decl.target_type.span.lo,
                 impl_decl.target_type.span.hi,
             );
+            let target = target.trim_end_matches('{').trim().to_string();
             let target = if target.is_empty() {
                 "_".to_string()
             } else {

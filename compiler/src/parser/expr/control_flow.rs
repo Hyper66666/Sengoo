@@ -98,6 +98,14 @@ impl<'source> Parser<'source> {
         Ok(Expr::new(ExprKind::Loop(body), self.span_at(lo)))
     }
 
+    /// 解析 `try { ... }` 错误传播作用域块。
+    pub(super) fn parse_try_block_expr(&mut self) -> Result<Expr> {
+        let lo = self.current_span().lo;
+        self.expect(TokenKind::TryKw)?;
+        let block = self.parse_block()?;
+        Ok(Expr::new(ExprKind::TryBlock(block), self.span_at(lo)))
+    }
+
     /// 解析match模式匹配表达式。
     pub(super) fn parse_match_expr(&mut self) -> Result<Expr> {
         let lo = self.current_span().lo;

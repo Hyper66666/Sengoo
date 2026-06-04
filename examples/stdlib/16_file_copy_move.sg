@@ -1,7 +1,7 @@
 // examples/stdlib/16_file_copy_move.sg
 //
 // Demonstrates: importing std::file helpers for binary copy, host-rename move,
-// and explicit overwrite selection.
+// explicit overwrite selection, and portable metadata.
 //
 // Run: sgc run examples/stdlib/16_file_copy_move.sg
 // Expected output: 16
@@ -25,6 +25,9 @@ def main() -> i64 {
     let source_kept = file_exists(source);
     let copy_gone = !file_exists(copy);
     let destination_exists = file_exists(moved);
+    let kind = file_kind(moved).unwrap_or(0);
+    let size = file_size(moved).unwrap_or(0);
+    let modified = file_modified_unix_ms(moved).unwrap_or(0);
 
     file_remove(source);
     file_remove(copy);
@@ -38,7 +41,10 @@ def main() -> i64 {
         && moved_ok
         && source_kept
         && copy_gone
-        && destination_exists {
+        && destination_exists
+        && kind == PATH_KIND_FILE()
+        && size == 3
+        && modified > 0 {
         16
     } else {
         0

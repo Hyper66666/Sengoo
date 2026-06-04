@@ -20,9 +20,15 @@ extern "C" {
     fn sengoo_ffi_buffer_new(capacity: i64) -> i64;
     fn sengoo_ffi_buffer_from_bytes(data: i64, len: i64) -> i64;
     fn sengoo_ffi_buffer_len(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_capacity(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_used_len(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_ptr(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_copy_out(buffer_handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_ffi_buffer_copy_in(buffer_handle: i64, src_ptr: i64, src_len: i64) -> i64;
+    fn sengoo_ffi_buffer_clear(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_copy_range(buffer_handle: i64, start: i64, len: i64, out_buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_append(buffer_handle: i64, src_ptr: i64, src_len: i64) -> i64;
+    fn sengoo_ffi_buffer_is_utf8(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_free(buffer_handle: i64) -> i64;
 }
 
@@ -86,6 +92,28 @@ def ffi_i64_value_result(value: i64) -> Result<i64, i64> {
         Result { is_ok: true, value: value, error: 0 }
     } else {
         Result { is_ok: false, value: 0, error: error }
+    }
+}
+
+def ffi_status_from_raw(code: i64) -> i64 {
+    if code == 0 {
+        0
+    } else if code == -2001 {
+        2
+    } else if code == -2002 {
+        3
+    } else if code == -2006 {
+        4
+    } else {
+        1
+    }
+}
+
+def ffi_byte_count_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: ffi_status_from_raw(value) }
     }
 }
 
@@ -263,6 +291,14 @@ impl Buffer {
         sengoo_ffi_buffer_len(self.handle)
     }
 
+    def capacity(self) -> i64 {
+        sengoo_ffi_buffer_capacity(self.handle)
+    }
+
+    def used_len(self) -> i64 {
+        sengoo_ffi_buffer_used_len(self.handle)
+    }
+
     def ptr(self) -> i64 {
         sengoo_ffi_buffer_ptr(self.handle)
     }
@@ -286,6 +322,31 @@ impl Buffer {
 
     def copy_in(self, src: &str) -> bool {
         self.copy_in_raw(sengoo_stdlib_str_ptr(src), src.len())
+    }
+
+    def clear(self) -> bool {
+        sengoo_ffi_buffer_clear(self.handle) == 0
+    }
+
+    def copy_range(self, start: i64, len: i64, out: Buffer) -> Result<i64, i64> {
+        ffi_byte_count_result(sengoo_ffi_buffer_copy_range(self.handle, start, len, out.handle))
+    }
+
+    def copy_from_str(self, value: &str) -> Result<i64, i64> {
+        let status = sengoo_ffi_buffer_copy_in(self.handle, sengoo_stdlib_str_ptr(value), value.len());
+        if status == 0 {
+            Result { is_ok: true, value: value.len(), error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: ffi_status_from_raw(status) }
+        }
+    }
+
+    def append_str(self, value: &str) -> Result<i64, i64> {
+        ffi_byte_count_result(sengoo_ffi_buffer_append(self.handle, sengoo_stdlib_str_ptr(value), value.len()))
+    }
+
+    def is_utf8(self) -> bool {
+        sengoo_ffi_buffer_is_utf8(self.handle) != 0
     }
 
     def free(self) -> bool {

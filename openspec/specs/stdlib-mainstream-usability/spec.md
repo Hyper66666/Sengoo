@@ -43,6 +43,28 @@ Until Sengoo has a specified owned-string return ABI, stdlib runtime helpers tha
 - **THEN** it accepts a managed `Buffer`
 - **AND** it returns `Result<i64, i64>` indicating bytes written or an error code
 
+### Requirement: Standard-library status errors SHALL expose stable categories and messages
+Fallible stdlib APIs SHALL expose stable numeric status categories through `std::status` while keeping source-level `Result<T, i64>` shapes compatible.
+
+#### Scenario: A program distinguishes common error causes
+- **WHEN** a stdlib helper fails because of an invalid argument, missing path, permission denial, unsupported platform feature, parse failure, timeout, interrupted operation, buffer-too-small output, or I/O failure
+- **THEN** the returned error identifies the corresponding `STATUS_*` category when the cause is known
+- **AND** host failures that cannot be distinguished portably return `STATUS_UNKNOWN`
+
+#### Scenario: A program copies a generic diagnostic
+- **WHEN** a program imports `std::status`
+- **THEN** it can copy a stable status name or message into a managed `Buffer`
+- **AND** existing `std::error` assertion helpers remain a separate module
+
+### Requirement: JSON utilities SHALL use managed handles for parsing, querying, building, and serialization
+The standard library SHALL provide `std::json` helpers using runtime-owned `JsonDoc` handles, document-owned `JsonValue` handles, and managed `Buffer` output.
+
+#### Scenario: A program parses, queries, builds, and closes JSON
+- **WHEN** a program imports `std::json`
+- **THEN** it can parse JSON text or buffer bytes, query object/array/scalar values, build new JSON values, serialize into a `Buffer`, and close document handles
+- **AND** parse failures and incompatible scalar reads return stable status categories and copyable diagnostics
+- **AND** streaming JSON, JSON5, schema validation, and dynamic Sengoo object mapping still require a future OpenSpec update
+
 ### Requirement: Process utilities SHALL expose portable process metadata without command execution
 The standard library SHALL provide `std::process` helpers for process ID, current working directory length/copy, and conventional exit-code selection.
 
@@ -57,12 +79,12 @@ The standard library SHALL provide `std::process` helpers for process ID, curren
 - **THEN** it returns `0`
 - **AND** `process_exit_code(false, failure_code)` returns `failure_code`
 
-### Requirement: Process and data-format usability SHALL be gated by explicit follow-up design
-Process execution and JSON-like data-format helpers SHALL NOT be added opportunistically in the path phase.
+### Requirement: Later process and data-format extensions SHALL remain gated by explicit follow-up design
+The `stdlib-next-usability-wave` change satisfies the follow-up design gate for handle-based `std::json` and shell-free process command/output helpers. Later process or data-format expansions beyond those accepted APIs SHALL NOT be added opportunistically.
 
-#### Scenario: A later phase proposes command execution or JSON helpers
-- **WHEN** a future implementation needs process execution or JSON-like parsing/formatting
-- **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, and tests
+#### Scenario: A later phase proposes process or JSON extensions
+- **WHEN** a future implementation needs streaming JSON, JSON5, schema validation, dynamic Sengoo object mapping, implicit shell commands, pipes, background tasks, signals, cancellation, or async process execution
+- **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, lifecycle semantics, and tests
 
 #### Scenario: A later phase proposes additional process or entry ABI features
 - **WHEN** a future implementation needs process execution, environment mutation, or a command-line surface beyond `std::args`
@@ -103,15 +125,15 @@ The standard library SHALL provide `std::args` helpers for counting user-supplie
 - **THEN** the helper returns an error-shaped `Result`
 
 ### Requirement: Collection ergonomics SHALL document currently supported runtime-backed shapes
-The standard library examples SHALL include a first-class `std::collections` example for the currently supported runtime-backed `Vec<T>`, `HashMap<K, V>`, and iterator helpers.
+The standard library examples SHALL include a first-class `std::collections` example for the currently supported runtime-backed `Vec<T>`, `HashMap<K, V>`, iterator helpers, copied-text lists, and string-key scalar maps.
 
 #### Scenario: A user looks for collection examples
 - **WHEN** a user opens `examples/stdlib`
 - **THEN** the catalog includes a runnable `std::collections` example
-- **AND** the example uses currently supported runtime-backed scalar shapes rather than implying unsupported string containers
+- **AND** the example distinguishes scalar runtime-backed collections from copied-text list and string-key scalar map helpers
 
-#### Scenario: A later phase proposes generic data-format helpers or string collections
-- **WHEN** a future implementation needs JSON-like parsing/formatting or `Vec<&str>` / `HashMap<&str, ...>` support
+#### Scenario: A later phase proposes additional string or generic containers
+- **WHEN** a future implementation needs borrowed string storage, owned-string collection returns, arbitrary generic string values, or string-value maps beyond the copied-key scalar maps accepted here
 - **THEN** it first updates OpenSpec with the required value, string, byte-slice, and ownership model
 
 ### Requirement: Standard I/O utilities SHALL support synchronous pipeline-style programs
@@ -244,12 +266,13 @@ directory entries and copying one entry name into a managed Buffer.
   index, or provides an output Buffer that is too small
 - **THEN** the helper returns an error-shaped `Result<i64, i64>`
 
-#### Scenario: Advanced directory traversal features remain explicitly deferred
-- **WHEN** a future implementation needs recursive traversal, recursive
-  deletion, glob matching, metadata structs, owned-string entry returns, or a
-  persistent iterator/list API
-- **THEN** it first updates OpenSpec with API shape, ownership constraints,
-  portability constraints, safety constraints, and tests
+#### Scenario: Advanced directory operations remain explicitly scoped
+- **WHEN** implementation agents add recursive traversal or portable metadata
+  reads
+- **THEN** they follow the accepted traversal-handle and metadata requirements
+- **AND** recursive deletion, glob matching, symlink-following traversal,
+  owned-string entry returns, and arbitrary persistent list APIs still require a
+  future OpenSpec update
 
 ### Requirement: File utilities SHALL support explicit-overwrite copy and move
 The standard library SHALL provide `std::file` helpers for copying file bytes
@@ -328,9 +351,30 @@ executable directly with zero through three explicit string arguments.
   waiting fails, or the child does not exit normally
 - **THEN** the helper returns an error-shaped result
 
-#### Scenario: Advanced process management remains explicitly deferred
-- **WHEN** a future implementation needs arbitrary-length argv, implicit shell
-  commands, stream capture, pipes, cwd or environment overrides, background
-  handles, timeouts, signals, cancellation, or async execution
-- **THEN** it first updates OpenSpec with API shape, portability constraints,
-  security constraints, lifecycle semantics, and tests
+#### Scenario: Advanced process management remains explicitly scoped
+- **WHEN** implementation agents add dynamic argv, stream capture, cwd/env
+  overrides, or timeout helpers
+- **THEN** they follow the accepted command/output requirements
+- **AND** implicit shell commands, pipes, background handles, signals,
+  cancellation, and async execution still require a future OpenSpec update
+
+### Requirement: Process utilities SHALL support dynamic shell-free command execution and output capture
+The standard library SHALL provide runtime-owned process command and output handles for dynamic literal argv, optional cwd/environment overrides, stdout/stderr capture, and timeouts while preserving fixed-arity `process_run*` helpers.
+
+#### Scenario: A program controls and captures a child process
+- **WHEN** a program creates a process command, appends literal arguments, configures cwd/env/capture/timeout options, and runs it
+- **THEN** it receives a `ProcessOutput` handle on successful child creation
+- **AND** it can read the child exit code, timeout flag, and captured stdout/stderr bytes through managed `Buffer` helpers
+- **AND** a nonzero child exit code remains a successful process output result
+
+### Requirement: Stdlib runtime C bridges SHALL be split and linked as a bundle
+The C runtime bridge SHALL keep `runtime.c` as the anchor/core source while large domain bridges live in sibling C files compiled and linked as one runtime source bundle.
+
+#### Scenario: A runtime sibling source changes
+- **WHEN** a sibling runtime source changes
+- **THEN** runtime source fingerprinting detects the change
+- **AND** cached native build/run artifacts are invalidated or relinked
+
+#### Scenario: A program uses split runtime symbols
+- **WHEN** a program imports stdlib APIs implemented outside `runtime.c`
+- **THEN** native build, run, reflection native linking, and stdlib runtime tests include the required sibling runtime object files

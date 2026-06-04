@@ -276,6 +276,9 @@ impl From<HIRType> for MIRType {
     }
 }
 
+pub(crate) mod enum_defs;
+pub use enum_defs::{build_enum_defs, EnumDef, EnumDefMap};
+
 pub(crate) mod async_poll_helpers;
 
 pub(crate) mod async_entry_helpers;

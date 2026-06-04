@@ -1,0 +1,23 @@
+// examples/ergonomics/02_try_block.sg
+//
+// `try {}` scopes `?` and returns an explicit Result.
+//
+// Run: sgc run examples/ergonomics/02_try_block.sg
+
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+def ok_i64(v: i64) -> Result<i64, i64> {
+    Result { is_ok: true, value: v, error: 0 }
+}
+
+def main() -> i64 {
+    let r = try {
+        let x = ok_i64(3)?;
+        ok_i64(x + 4)
+    };
+    if r.is_ok { r.value } else { 0 }
+}

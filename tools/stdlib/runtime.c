@@ -11,12 +11,15 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "runtime_shared.h"
+
 #ifdef _WIN32
 #include <direct.h>
 #include <windows.h>
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -45,6 +48,41 @@ long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
 }
 
+char* sengoo_str_concat(const char* lhs, const char* rhs) {
+    size_t lhs_len = lhs ? strlen(lhs) : 0;
+    size_t rhs_len = rhs ? strlen(rhs) : 0;
+    if (lhs_len > SIZE_MAX - rhs_len - 1) {
+        return NULL;
+    }
+    char* out = (char*)malloc(lhs_len + rhs_len + 1);
+    if (!out) {
+        return NULL;
+    }
+    if (lhs_len > 0) {
+        memcpy(out, lhs, lhs_len);
+    }
+    if (rhs_len > 0) {
+        memcpy(out + lhs_len, rhs, rhs_len);
+    }
+    out[lhs_len + rhs_len] = '\0';
+    return out;
+}
+
+long long sengoo_str_eq(const char* lhs, const char* rhs) {
+    if (!lhs || !rhs) {
+        return lhs == rhs ? 1 : 0;
+    }
+    return strcmp(lhs, rhs) == 0 ? 1 : 0;
+}
+
+long long sengoo_f64_eq(double lhs, double rhs) {
+    return lhs == rhs ? 1 : 0;
+}
+
+long long sengoo_f64_ne(double lhs, double rhs) {
+    return lhs != rhs ? 1 : 0;
+}
+
 enum {
     SENGOO_FFI_STATUS_OK = 0,
     SENGOO_FFI_ERR_INVALID_ARGUMENT = -2001,
@@ -52,11 +90,6 @@ enum {
     SENGOO_FFI_ERR_BUFFER = -2006,
     SENGOO_FFI_ERR_INTERNAL = -2099
 };
-
-typedef struct {
-    unsigned char* bytes;
-    size_t len;
-} SengooFfiBuffer;
 
 static int sengoo_ffi_last_error = SENGOO_FFI_STATUS_OK;
 static char sengoo_ffi_last_error_message[256] = {0};
@@ -79,6 +112,143 @@ static int sengoo_ffi_set_error(int code, const char* message) {
         sengoo_ffi_last_error_message[0] = '\0';
     }
     return code;
+}
+
+static const char* sengoo_status_name(long long code) {
+    switch (code) {
+        case SENGOO_STATUS_OK: return "ok";
+        case SENGOO_STATUS_UNKNOWN: return "unknown";
+        case SENGOO_STATUS_INVALID_ARGUMENT: return "invalid_argument";
+        case SENGOO_STATUS_INVALID_HANDLE: return "invalid_handle";
+        case SENGOO_STATUS_BUFFER_TOO_SMALL: return "buffer_too_small";
+        case SENGOO_STATUS_NOT_FOUND: return "not_found";
+        case SENGOO_STATUS_ALREADY_EXISTS: return "already_exists";
+        case SENGOO_STATUS_PERMISSION_DENIED: return "permission_denied";
+        case SENGOO_STATUS_UNSUPPORTED: return "unsupported";
+        case SENGOO_STATUS_IO: return "io";
+        case SENGOO_STATUS_PARSE: return "parse";
+        case SENGOO_STATUS_TIMEOUT: return "timeout";
+        case SENGOO_STATUS_INTERRUPTED: return "interrupted";
+        case SENGOO_STATUS_OVERFLOW: return "overflow";
+        case SENGOO_STATUS_OUT_OF_MEMORY: return "out_of_memory";
+        default: return "unknown";
+    }
+}
+
+static const char* sengoo_status_message(long long code) {
+    switch (code) {
+        case SENGOO_STATUS_OK: return "success";
+        case SENGOO_STATUS_UNKNOWN: return "unknown failure";
+        case SENGOO_STATUS_INVALID_ARGUMENT: return "invalid argument";
+        case SENGOO_STATUS_INVALID_HANDLE: return "invalid handle";
+        case SENGOO_STATUS_BUFFER_TOO_SMALL: return "buffer too small";
+        case SENGOO_STATUS_NOT_FOUND: return "not found";
+        case SENGOO_STATUS_ALREADY_EXISTS: return "already exists";
+        case SENGOO_STATUS_PERMISSION_DENIED: return "permission denied";
+        case SENGOO_STATUS_UNSUPPORTED: return "unsupported operation";
+        case SENGOO_STATUS_IO: return "I/O failure";
+        case SENGOO_STATUS_PARSE: return "parse failure";
+        case SENGOO_STATUS_TIMEOUT: return "operation timed out";
+        case SENGOO_STATUS_INTERRUPTED: return "operation interrupted";
+        case SENGOO_STATUS_OVERFLOW: return "numeric overflow";
+        case SENGOO_STATUS_OUT_OF_MEMORY: return "out of memory";
+        default: return "unknown failure";
+    }
+}
+
+long long sengoo_status_from_raw_ffi(long long code) {
+    switch (code) {
+        case SENGOO_FFI_STATUS_OK: return SENGOO_STATUS_OK;
+        case SENGOO_FFI_ERR_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case SENGOO_FFI_ERR_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
+        case SENGOO_FFI_ERR_BUFFER: return SENGOO_STATUS_BUFFER_TOO_SMALL;
+        case SENGOO_FFI_ERR_INTERNAL: return SENGOO_STATUS_UNKNOWN;
+        case -SENGOO_STATUS_UNKNOWN: return SENGOO_STATUS_UNKNOWN;
+        case -SENGOO_STATUS_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case -SENGOO_STATUS_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
+        case -SENGOO_STATUS_BUFFER_TOO_SMALL: return SENGOO_STATUS_BUFFER_TOO_SMALL;
+        case -SENGOO_STATUS_NOT_FOUND: return SENGOO_STATUS_NOT_FOUND;
+        case -SENGOO_STATUS_ALREADY_EXISTS: return SENGOO_STATUS_ALREADY_EXISTS;
+        case -SENGOO_STATUS_PERMISSION_DENIED: return SENGOO_STATUS_PERMISSION_DENIED;
+        case -SENGOO_STATUS_UNSUPPORTED: return SENGOO_STATUS_UNSUPPORTED;
+        case -SENGOO_STATUS_IO: return SENGOO_STATUS_IO;
+        case -SENGOO_STATUS_PARSE: return SENGOO_STATUS_PARSE;
+        case -SENGOO_STATUS_TIMEOUT: return SENGOO_STATUS_TIMEOUT;
+        case -SENGOO_STATUS_INTERRUPTED: return SENGOO_STATUS_INTERRUPTED;
+        case -SENGOO_STATUS_OVERFLOW: return SENGOO_STATUS_OVERFLOW;
+        case -SENGOO_STATUS_OUT_OF_MEMORY: return SENGOO_STATUS_OUT_OF_MEMORY;
+        case SENGOO_STATUS_UNKNOWN: return SENGOO_STATUS_UNKNOWN;
+        case SENGOO_STATUS_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case SENGOO_STATUS_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
+        case SENGOO_STATUS_BUFFER_TOO_SMALL: return SENGOO_STATUS_BUFFER_TOO_SMALL;
+        case SENGOO_STATUS_NOT_FOUND: return SENGOO_STATUS_NOT_FOUND;
+        case SENGOO_STATUS_ALREADY_EXISTS: return SENGOO_STATUS_ALREADY_EXISTS;
+        case SENGOO_STATUS_PERMISSION_DENIED: return SENGOO_STATUS_PERMISSION_DENIED;
+        case SENGOO_STATUS_UNSUPPORTED: return SENGOO_STATUS_UNSUPPORTED;
+        case SENGOO_STATUS_IO: return SENGOO_STATUS_IO;
+        case SENGOO_STATUS_PARSE: return SENGOO_STATUS_PARSE;
+        case SENGOO_STATUS_TIMEOUT: return SENGOO_STATUS_TIMEOUT;
+        case SENGOO_STATUS_INTERRUPTED: return SENGOO_STATUS_INTERRUPTED;
+        case SENGOO_STATUS_OVERFLOW: return SENGOO_STATUS_OVERFLOW;
+        case SENGOO_STATUS_OUT_OF_MEMORY: return SENGOO_STATUS_OUT_OF_MEMORY;
+        default: return SENGOO_STATUS_UNKNOWN;
+    }
+}
+
+static long long sengoo_copy_status_text(const char* text, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (out_capacity < 0) {
+        return SENGOO_FFI_ERR_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(text);
+    if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
+        return SENGOO_FFI_ERR_BUFFER;
+    }
+    if (len > 0) {
+        memcpy(out, text, len);
+    }
+    return (long long)len;
+}
+
+long long sengoo_status_name_copy(long long code, long long out_buffer, long long out_capacity) {
+    return sengoo_copy_status_text(sengoo_status_name(code), out_buffer, out_capacity);
+}
+
+long long sengoo_status_message_copy(long long code, long long out_buffer, long long out_capacity) {
+    return sengoo_copy_status_text(sengoo_status_message(code), out_buffer, out_capacity);
+}
+
+static long long sengoo_negative_status_from_errno(int err, long long fallback_status) {
+    switch (err) {
+        case 0:
+            return -fallback_status;
+#ifdef ENOENT
+        case ENOENT:
+            return -SENGOO_STATUS_NOT_FOUND;
+#endif
+#ifdef ENOTDIR
+        case ENOTDIR:
+            return -SENGOO_STATUS_NOT_FOUND;
+#endif
+#ifdef EACCES
+        case EACCES:
+            return -SENGOO_STATUS_PERMISSION_DENIED;
+#endif
+#ifdef EPERM
+        case EPERM:
+            return -SENGOO_STATUS_PERMISSION_DENIED;
+#endif
+#ifdef EEXIST
+        case EEXIST:
+            return -SENGOO_STATUS_ALREADY_EXISTS;
+#endif
+#ifdef ENOMEM
+        case ENOMEM:
+            return -SENGOO_STATUS_OUT_OF_MEMORY;
+#endif
+        default:
+            return -fallback_status;
+    }
 }
 
 long long sengoo_ffi_last_error_code(void) {
@@ -111,8 +281,198 @@ long long sengoo_ffi_last_error_clear(void) {
     return SENGOO_FFI_STATUS_OK;
 }
 
-static SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle) {
+static long long sengoo_ffi_set_unsupported(const char* feature) {
+    char message[160];
+    snprintf(
+        message,
+        sizeof(message),
+        "%s is not supported by the C stdlib runtime bundle",
+        feature ? feature : "ffi bridge"
+    );
+    return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, message);
+}
+
+long long sengoo_ffi_c_open(long long path) {
+    (void)path;
+    sengoo_ffi_set_unsupported("dynamic library loading");
+    return 0;
+}
+
+long long sengoo_ffi_c_close(long long handle) {
+    (void)handle;
+    return sengoo_ffi_set_unsupported("dynamic library close");
+}
+
+long long sengoo_ffi_c_call_i64(
+    long long handle,
+    long long symbol,
+    long long argc,
+    long long argv,
+    long long out_value
+) {
+    (void)handle;
+    (void)symbol;
+    (void)argc;
+    (void)argv;
+    (void)out_value;
+    return sengoo_ffi_set_unsupported("dynamic function call");
+}
+
+long long sengoo_ffi_c_call_i64_value(
+    long long handle,
+    long long symbol,
+    long long argc,
+    long long a0,
+    long long a1,
+    long long a2,
+    long long a3
+) {
+    (void)handle;
+    (void)symbol;
+    (void)argc;
+    (void)a0;
+    (void)a1;
+    (void)a2;
+    (void)a3;
+    sengoo_ffi_set_unsupported("dynamic function call");
+    return 0;
+}
+
+long long sengoo_ffi_object_create(
+    long long lib_handle,
+    long long constructor_symbol,
+    long long argc,
+    long long argv,
+    long long destructor_symbol
+) {
+    (void)lib_handle;
+    (void)constructor_symbol;
+    (void)argc;
+    (void)argv;
+    (void)destructor_symbol;
+    sengoo_ffi_set_unsupported("ffi object creation");
+    return 0;
+}
+
+long long sengoo_ffi_object_create_value(
+    long long lib_handle,
+    long long constructor_symbol,
+    long long argc,
+    long long a0,
+    long long a1,
+    long long a2,
+    long long a3,
+    long long destructor_symbol
+) {
+    (void)lib_handle;
+    (void)constructor_symbol;
+    (void)argc;
+    (void)a0;
+    (void)a1;
+    (void)a2;
+    (void)a3;
+    (void)destructor_symbol;
+    sengoo_ffi_set_unsupported("ffi object creation");
+    return 0;
+}
+
+long long sengoo_ffi_object_raw_ptr(long long object_handle) {
+    (void)object_handle;
+    sengoo_ffi_set_unsupported("ffi object raw pointer access");
+    return 0;
+}
+
+long long sengoo_ffi_object_call_i64(
+    long long object_handle,
+    long long method_symbol,
+    long long argc,
+    long long argv,
+    long long out_value
+) {
+    (void)object_handle;
+    (void)method_symbol;
+    (void)argc;
+    (void)argv;
+    (void)out_value;
+    return sengoo_ffi_set_unsupported("ffi object method call");
+}
+
+long long sengoo_ffi_object_call_i64_value(
+    long long object_handle,
+    long long method_symbol,
+    long long argc,
+    long long a0,
+    long long a1,
+    long long a2
+) {
+    (void)object_handle;
+    (void)method_symbol;
+    (void)argc;
+    (void)a0;
+    (void)a1;
+    (void)a2;
+    sengoo_ffi_set_unsupported("ffi object method call");
+    return 0;
+}
+
+long long sengoo_ffi_object_destroy(long long object_handle) {
+    (void)object_handle;
+    return sengoo_ffi_set_unsupported("ffi object destruction");
+}
+
+long long sengoo_ffi_callback_bind_i64(long long lib_handle, long long symbol, long long arity) {
+    (void)lib_handle;
+    (void)symbol;
+    (void)arity;
+    sengoo_ffi_set_unsupported("ffi callback binding");
+    return 0;
+}
+
+long long sengoo_ffi_callback_dispatch_i64(
+    long long callback_id,
+    long long a0,
+    long long a1,
+    long long a2,
+    long long a3,
+    long long a4,
+    long long a5
+) {
+    (void)callback_id;
+    (void)a0;
+    (void)a1;
+    (void)a2;
+    (void)a3;
+    (void)a4;
+    (void)a5;
+    sengoo_ffi_set_unsupported("ffi callback dispatch");
+    return 0;
+}
+
+long long sengoo_ffi_callback_unbind(long long callback_id) {
+    (void)callback_id;
+    return sengoo_ffi_set_unsupported("ffi callback unbind");
+}
+
+SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle) {
     return handle == 0 ? NULL : (SengooFfiBuffer*)(intptr_t)handle;
+}
+
+long long sengoo_copy_bytes_to_managed_buffer(long long buffer_handle, const char* bytes, size_t len) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (len > 0 && !bytes) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (len > buffer->capacity || (len > 0 && !buffer->bytes)) {
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
+    }
+    if (len > 0) {
+        memcpy(buffer->bytes, bytes, len);
+    }
+    buffer->used_len = len;
+    return (long long)len;
 }
 
 long long sengoo_ffi_buffer_new(long long capacity) {
@@ -133,7 +493,8 @@ long long sengoo_ffi_buffer_new(long long capacity) {
             return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
         }
     }
-    buffer->len = (size_t)capacity;
+    buffer->capacity = (size_t)capacity;
+    buffer->used_len = 0;
     return (long long)(intptr_t)buffer;
 }
 
@@ -152,6 +513,7 @@ long long sengoo_ffi_buffer_from_bytes(long long data_ptr, long long len) {
     if (len > 0) {
         memcpy(buffer->bytes, data, (size_t)len);
     }
+    buffer->used_len = (size_t)len;
     return handle;
 }
 
@@ -161,7 +523,20 @@ long long sengoo_ffi_buffer_len(long long buffer_handle) {
     if (!buffer) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
-    return (long long)buffer->len;
+    return (long long)buffer->capacity;
+}
+
+long long sengoo_ffi_buffer_capacity(long long buffer_handle) {
+    return sengoo_ffi_buffer_len(buffer_handle);
+}
+
+long long sengoo_ffi_buffer_used_len(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return (long long)buffer->used_len;
 }
 
 long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
@@ -180,13 +555,13 @@ long long sengoo_ffi_buffer_copy_out(long long buffer_handle, long long out_buff
     if (!buffer) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
-    if (out_capacity < 0 || (unsigned long long)buffer->len > (unsigned long long)out_capacity || (buffer->len > 0 && !out)) {
+    if (out_capacity < 0 || (unsigned long long)buffer->used_len > (unsigned long long)out_capacity || (buffer->used_len > 0 && !out)) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
     }
-    if (buffer->len > 0) {
-        memcpy(out, buffer->bytes, buffer->len);
+    if (buffer->used_len > 0) {
+        memcpy(out, buffer->bytes, buffer->used_len);
     }
-    return (long long)buffer->len;
+    return (long long)buffer->used_len;
 }
 
 long long sengoo_ffi_buffer_copy_in(long long buffer_handle, long long src_ptr, long long src_len) {
@@ -200,19 +575,120 @@ long long sengoo_ffi_buffer_copy_in(long long buffer_handle, long long src_ptr, 
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
     }
 
-    unsigned char* bytes = NULL;
-    if (src_len > 0) {
-        bytes = (unsigned char*)malloc((size_t)src_len);
-        if (!bytes) {
-            return sengoo_ffi_set_error(SENGOO_FFI_ERR_INTERNAL, "buffer bytes allocation failed");
-        }
-        memcpy(bytes, src, (size_t)src_len);
+    if ((unsigned long long)src_len > (unsigned long long)buffer->capacity) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "buffer capacity too small");
     }
 
-    free(buffer->bytes);
-    buffer->bytes = bytes;
-    buffer->len = (size_t)src_len;
+    if (src_len > 0) {
+        memcpy(buffer->bytes, src, (size_t)src_len);
+    }
+    buffer->used_len = (size_t)src_len;
     return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_ffi_buffer_clear(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    buffer->used_len = 0;
+    return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_ffi_buffer_copy_range(long long buffer_handle, long long start, long long len, long long out_buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    SengooFfiBuffer* out = sengoo_ffi_buffer_from_handle(out_buffer_handle);
+    if (!buffer || !out) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (start < 0 || len < 0) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "negative range");
+    }
+    size_t range_start = (size_t)start;
+    size_t range_len = (size_t)len;
+    if (range_start > buffer->used_len || range_len > buffer->used_len - range_start) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "range outside buffer used length");
+    }
+    if (range_len > out->capacity) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "output capacity too small");
+    }
+    if (range_len > 0) {
+        memcpy(out->bytes, buffer->bytes + range_start, range_len);
+    }
+    out->used_len = range_len;
+    return (long long)range_len;
+}
+
+long long sengoo_ffi_buffer_append(long long buffer_handle, long long src_ptr, long long src_len) {
+    sengoo_ffi_clear_error_state();
+    const unsigned char* src = (const unsigned char*)(intptr_t)src_ptr;
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (src_len < 0 || (src_len > 0 && !src)) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_ARGUMENT, "invalid source bytes");
+    }
+    size_t append_len = (size_t)src_len;
+    if (append_len > buffer->capacity - buffer->used_len) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_BUFFER, "buffer capacity too small");
+    }
+    if (append_len > 0) {
+        memcpy(buffer->bytes + buffer->used_len, src, append_len);
+    }
+    buffer->used_len += append_len;
+    return (long long)append_len;
+}
+
+static int sengoo_bytes_are_utf8(const unsigned char* bytes, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = bytes[i];
+        if (c <= 0x7F) {
+            i++;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 >= len || (bytes[i + 1] & 0xC0) != 0x80 || c < 0xC2) {
+                return 0;
+            }
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 >= len || (bytes[i + 1] & 0xC0) != 0x80 || (bytes[i + 2] & 0xC0) != 0x80) {
+                return 0;
+            }
+            if (c == 0xE0 && bytes[i + 1] < 0xA0) {
+                return 0;
+            }
+            if (c == 0xED && bytes[i + 1] >= 0xA0) {
+                return 0;
+            }
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 >= len || (bytes[i + 1] & 0xC0) != 0x80 || (bytes[i + 2] & 0xC0) != 0x80 || (bytes[i + 3] & 0xC0) != 0x80) {
+                return 0;
+            }
+            if (c == 0xF0 && bytes[i + 1] < 0x90) {
+                return 0;
+            }
+            if (c > 0xF4 || (c == 0xF4 && bytes[i + 1] > 0x8F)) {
+                return 0;
+            }
+            i += 4;
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+long long sengoo_ffi_buffer_is_utf8(long long buffer_handle) {
+    sengoo_ffi_clear_error_state();
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    return sengoo_bytes_are_utf8(buffer->bytes, buffer->used_len) ? 1 : 0;
 }
 
 long long sengoo_ffi_buffer_free(long long buffer_handle) {
@@ -378,21 +854,22 @@ long long sengoo_file_exists(long long path_ptr) {
 long long sengoo_file_len(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     FILE* file = fopen(path, "rb");
     if (!file) {
-        return -1;
+        return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
     if (fseek(file, 0, SEEK_END) != 0) {
+        int err = errno;
         fclose(file);
-        return -1;
+        return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
     }
     long size = ftell(file);
     fclose(file);
     if (size < 0) {
-        return -1;
+        return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
     return (long long)size;
 }
@@ -401,18 +878,19 @@ long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long l
     const char* path = (const char*)(intptr_t)path_ptr;
     char* out = (char*)(intptr_t)out_buffer;
     if (!path || path[0] == '\0' || !out || out_capacity < 0) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     FILE* file = fopen(path, "rb");
     if (!file) {
-        return -1;
+        return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
     size_t read = fread(out, 1, (size_t)out_capacity, file);
     int failed = ferror(file);
+    int err = errno;
     fclose(file);
     if (failed) {
-        return -1;
+        return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
     }
     return (long long)read;
 }
@@ -426,18 +904,20 @@ static long long sengoo_file_write_mode(
     const char* path = (const char*)(intptr_t)path_ptr;
     const char* data = (const char*)(intptr_t)data_ptr;
     if (!path || path[0] == '\0' || len < 0 || (!data && len > 0)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     FILE* file = fopen(path, mode);
     if (!file) {
-        return -1;
+        return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
     size_t expected = (size_t)len;
     size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, file);
+    int write_failed = ferror(file);
+    int write_errno = errno;
     int close_status = fclose(file);
-    if (wrote != expected || close_status != 0) {
-        return -1;
+    if (wrote != expected || write_failed || close_status != 0) {
+        return sengoo_negative_status_from_errno(write_errno, SENGOO_STATUS_IO);
     }
     return (long long)wrote;
 }
@@ -539,26 +1019,29 @@ long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long
     const char* source = (const char*)(intptr_t)source_ptr;
     const char* destination = (const char*)(intptr_t)destination_ptr;
     if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
-        return -1;
+        return source && source[0] != '\0'
+            ? -SENGOO_STATUS_NOT_FOUND
+            : -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     int destination_existed = sengoo_path_entry_exists_cstr(destination);
     if (!overwrite && destination_existed) {
-        return -1;
+        return -SENGOO_STATUS_ALREADY_EXISTS;
     }
     if (destination_existed && sengoo_paths_refer_to_same_file_cstr(source, destination)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     FILE* input = fopen(source, "rb");
     if (!input) {
-        return -1;
+        return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
 
     FILE* output = fopen(destination, "wb");
     if (!output) {
+        int err = errno;
         fclose(input);
-        return -1;
+        return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
     }
 
     unsigned char buffer[8192];
@@ -592,7 +1075,7 @@ long long sengoo_file_copy(long long source_ptr, long long destination_ptr, long
         if (!destination_existed) {
             remove(destination);
         }
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
     return (long long)total;
 }
@@ -601,28 +1084,148 @@ long long sengoo_file_move(long long source_ptr, long long destination_ptr, long
     const char* source = (const char*)(intptr_t)source_ptr;
     const char* destination = (const char*)(intptr_t)destination_ptr;
     if (!sengoo_path_is_regular_file_cstr(source) || !destination || destination[0] == '\0') {
-        return -1;
+        return source && source[0] != '\0'
+            ? -SENGOO_STATUS_NOT_FOUND
+            : -SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (!overwrite && sengoo_path_entry_exists_cstr(destination)) {
-        return -1;
+        return -SENGOO_STATUS_ALREADY_EXISTS;
     }
 
 #ifdef _WIN32
-    return MoveFileExA(source, destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0) ? 0 : -1;
+    return MoveFileExA(source, destination, overwrite ? MOVEFILE_REPLACE_EXISTING : 0)
+        ? 0
+        : -SENGOO_STATUS_IO;
 #else
-    return rename(source, destination) == 0 ? 0 : -1;
+    return rename(source, destination) == 0
+        ? 0
+        : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
+#endif
+}
+
+enum {
+    SENGOO_PATH_KIND_FILE = 1,
+    SENGOO_PATH_KIND_DIR = 2,
+    SENGOO_PATH_KIND_SYMLINK = 3
+};
+
+long long sengoo_file_kind(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+        return SENGOO_PATH_KIND_SYMLINK;
+    }
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+        return SENGOO_PATH_KIND_DIR;
+    }
+    return SENGOO_PATH_KIND_FILE;
+#else
+    struct stat info;
+    if (lstat(path, &info) != 0) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    if (S_ISREG(info.st_mode)) {
+        return SENGOO_PATH_KIND_FILE;
+    }
+    if (S_ISDIR(info.st_mode)) {
+        return SENGOO_PATH_KIND_DIR;
+    }
+#ifdef S_ISLNK
+    if (S_ISLNK(info.st_mode)) {
+        return SENGOO_PATH_KIND_SYMLINK;
+    }
+#endif
+    return -SENGOO_STATUS_UNSUPPORTED;
+#endif
+}
+
+long long sengoo_file_size(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    unsigned long long size = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+    if (size > (unsigned long long)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)size;
+#else
+    struct stat info;
+    if (stat(path, &info) != 0) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    if (!S_ISREG(info.st_mode)) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    if (info.st_size < 0) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)info.st_size;
+#endif
+}
+
+long long sengoo_file_modified_unix_ms(long long path_ptr) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+
+#ifdef _WIN32
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    ULARGE_INTEGER file_time;
+    file_time.LowPart = info.ftLastWriteTime.dwLowDateTime;
+    file_time.HighPart = info.ftLastWriteTime.dwHighDateTime;
+    unsigned long long windows_ms = file_time.QuadPart / 10000ULL;
+    const unsigned long long unix_epoch_ms = 11644473600000ULL;
+    if (windows_ms < unix_epoch_ms) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    unsigned long long unix_ms = windows_ms - unix_epoch_ms;
+    if (unix_ms > (unsigned long long)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)unix_ms;
+#else
+    struct stat info;
+    if (stat(path, &info) != 0) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    if (info.st_mtime < 0) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    return ((long long)info.st_mtime) * 1000LL;
 #endif
 }
 
 long long sengoo_env_var_len(long long name_ptr) {
     const char* name = (const char*)(intptr_t)name_ptr;
     if (!name || name[0] == '\0') {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     const char* value = getenv(name);
     if (!value) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
     return (long long)strlen(value);
 }
@@ -631,17 +1234,17 @@ long long sengoo_env_var_copy(long long name_ptr, long long out_buffer, long lon
     const char* name = (const char*)(intptr_t)name_ptr;
     char* out = (char*)(intptr_t)out_buffer;
     if (!name || name[0] == '\0' || out_capacity < 0) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     const char* value = getenv(name);
     if (!value) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t len = strlen(value);
     if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
-        return -1;
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
     }
     if (len > 0) {
         memcpy(out, value, len);
@@ -804,11 +1407,14 @@ static size_t sengoo_path_root_len(const char* path) {
 
 static long long sengoo_copy_path_bytes(const char* data, size_t len, long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
-    if (out_capacity < 0 || (unsigned long long)len > (unsigned long long)out_capacity) {
-        return -1;
+    if (out_capacity < 0) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if ((unsigned long long)len > (unsigned long long)out_capacity) {
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
     }
     if (len > 0 && (!data || !out)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (len > 0) {
         memcpy(out, data, len);
@@ -853,7 +1459,7 @@ long long sengoo_path_join(long long left_ptr, long long right_ptr, long long ou
     const char* left = (const char*)(intptr_t)left_ptr;
     const char* right = (const char*)(intptr_t)right_ptr;
     if (!left || !right) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     if (sengoo_path_is_absolute_cstr(right) || left[0] == '\0') {
@@ -879,7 +1485,7 @@ long long sengoo_path_join(long long left_ptr, long long right_ptr, long long ou
     size_t result_len = left_len + (needs_sep ? 1u : 0u) + (right_len - right_start);
     char* result = (char*)malloc(result_len + 1u);
     if (!result) {
-        return -1;
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
     }
 
     size_t pos = 0;
@@ -904,7 +1510,7 @@ long long sengoo_path_join(long long left_ptr, long long right_ptr, long long ou
 long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long out_capacity) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     size_t root_len = sengoo_path_root_len(path);
@@ -913,7 +1519,7 @@ long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long
         end--;
     }
     if (end <= root_len) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t pos = end;
@@ -921,7 +1527,7 @@ long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long
         pos--;
     }
     if (pos == 0) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t sep_index = pos - 1;
@@ -930,7 +1536,7 @@ long long sengoo_path_parent(long long path_ptr, long long out_buffer, long long
         parent_len = root_len;
     }
     if (parent_len == 0) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     return sengoo_copy_path_bytes(path, parent_len, out_buffer, out_capacity);
@@ -941,7 +1547,7 @@ long long sengoo_path_file_name(long long path_ptr, long long out_buffer, long l
     size_t start = 0;
     size_t len = 0;
     if (!sengoo_path_file_name_range(path, &start, &len)) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
     return sengoo_copy_path_bytes(path + start, len, out_buffer, out_capacity);
 }
@@ -951,7 +1557,7 @@ long long sengoo_path_stem(long long path_ptr, long long out_buffer, long long o
     size_t start = 0;
     size_t len = 0;
     if (!sengoo_path_file_name_range(path, &start, &len)) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t dot = start + len;
@@ -972,7 +1578,7 @@ long long sengoo_path_extension(long long path_ptr, long long out_buffer, long l
     size_t start = 0;
     size_t len = 0;
     if (!sengoo_path_file_name_range(path, &start, &len)) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t dot = start + len;
@@ -980,12 +1586,12 @@ long long sengoo_path_extension(long long path_ptr, long long out_buffer, long l
         dot--;
     }
     if (dot == start || dot == start + len) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t dot_index = dot - 1;
     if (dot_index == start || dot_index + 1 >= start + len) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
     return sengoo_copy_path_bytes(path + dot_index + 1, (start + len) - dot_index - 1, out_buffer, out_capacity);
 }
@@ -997,7 +1603,7 @@ static int sengoo_path_segment_is_dotdot(const char* segment, size_t len) {
 long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long long out_capacity) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     size_t input_len = strlen(path);
@@ -1009,7 +1615,7 @@ long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long l
         free(result);
         free(segment_starts);
         free(segment_lens);
-        return -1;
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
     }
 
     size_t cursor = 0;
@@ -1145,7 +1751,7 @@ long long sengoo_dir_create(long long path_ptr) {
 long long sengoo_dir_create_all(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (sengoo_dir_exists_cstr(path)) {
         return 0;
@@ -1154,7 +1760,7 @@ long long sengoo_dir_create_all(long long path_ptr) {
     size_t len = strlen(path);
     char* scratch = (char*)malloc(len + 1);
     if (!scratch) {
-        return -1;
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
     }
     memcpy(scratch, path, len + 1);
 
@@ -1166,28 +1772,30 @@ long long sengoo_dir_create_all(long long path_ptr) {
 
         scratch[i] = '\0';
         if (i > root_len && sengoo_dir_create_one_cstr(scratch) != 0) {
+            int err = errno;
             scratch[i] = path[i];
             free(scratch);
-            return -1;
+            return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
         }
         scratch[i] = path[i];
     }
 
     int status = sengoo_dir_create_one_cstr(scratch);
+    int err = errno;
     free(scratch);
-    return status == 0 ? 0 : -1;
+    return status == 0 ? 0 : sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
 }
 
 long long sengoo_dir_remove(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     if (!path || path[0] == '\0') {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
 #ifdef _WIN32
-    return _rmdir(path) == 0 ? 0 : -1;
+    return _rmdir(path) == 0 ? 0 : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
 #else
-    return rmdir(path) == 0 ? 0 : -1;
+    return rmdir(path) == 0 ? 0 : sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
 #endif
 }
 
@@ -1210,7 +1818,7 @@ static void sengoo_dir_entry_list_free(SengooDirEntryList* list) {
     list->cap = 0;
 }
 
-static char* sengoo_strdup_bytes(const char* value) {
+char* sengoo_strdup_bytes(const char* value) {
     if (!value) {
         return NULL;
     }
@@ -1335,12 +1943,12 @@ long long sengoo_dir_entry_count(long long path_ptr) {
     const char* path = (const char*)(intptr_t)path_ptr;
     SengooDirEntryList list;
     if (sengoo_dir_collect_entries(path, &list) != 0) {
-        return -1;
+        return (!path || path[0] == '\0') ? -SENGOO_STATUS_INVALID_ARGUMENT : -SENGOO_STATUS_NOT_FOUND;
     }
     size_t count = list.len;
     sengoo_dir_entry_list_free(&list);
     if (count > (size_t)LLONG_MAX) {
-        return -1;
+        return -SENGOO_STATUS_OVERFLOW;
     }
     return (long long)count;
 }
@@ -1349,24 +1957,24 @@ long long sengoo_dir_entry_name(long long path_ptr, long long index, long long o
     const char* path = (const char*)(intptr_t)path_ptr;
     char* out = (char*)(intptr_t)out_buffer;
     if (index < 0 || out_capacity < 0) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     SengooDirEntryList list;
     if (sengoo_dir_collect_entries(path, &list) != 0) {
-        return -1;
+        return (!path || path[0] == '\0') ? -SENGOO_STATUS_INVALID_ARGUMENT : -SENGOO_STATUS_NOT_FOUND;
     }
 
     if ((unsigned long long)index >= (unsigned long long)list.len) {
         sengoo_dir_entry_list_free(&list);
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     const char* name = list.names[index];
     size_t len = strlen(name);
     if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
         sengoo_dir_entry_list_free(&list);
-        return -1;
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
     }
     if (len > 0) {
         memcpy(out, name, len);
@@ -1375,10 +1983,214 @@ long long sengoo_dir_entry_name(long long path_ptr, long long index, long long o
     return (long long)len;
 }
 
+typedef struct {
+    char** paths;
+    size_t len;
+    size_t cap;
+    size_t index;
+} SengooDirWalk;
+
+static SengooDirWalk* sengoo_dir_walk_from_handle(long long handle) {
+    return (SengooDirWalk*)sengoo_handle_to_ptr(handle);
+}
+
+static int sengoo_dir_walk_push(SengooDirWalk* walk, const char* path) {
+    if (!walk || !path) {
+        return 0;
+    }
+    if (walk->len == walk->cap) {
+        size_t next = walk->cap == 0 ? 16 : walk->cap;
+        if (next > SIZE_MAX / 2) {
+            return 0;
+        }
+        next *= 2;
+        char** paths = (char**)realloc(walk->paths, next * sizeof(char*));
+        if (!paths) {
+            return 0;
+        }
+        walk->paths = paths;
+        walk->cap = next;
+    }
+    char* copy = sengoo_strdup_bytes(path);
+    if (!copy) {
+        return 0;
+    }
+    walk->paths[walk->len++] = copy;
+    return 1;
+}
+
+static void sengoo_dir_walk_free(SengooDirWalk* walk) {
+    if (!walk) {
+        return;
+    }
+    for (size_t i = 0; i < walk->len; ++i) {
+        free(walk->paths[i]);
+    }
+    free(walk->paths);
+    free(walk);
+}
+
+static char* sengoo_dir_join_full_path(const char* root, const char* rel) {
+    if (!root || !rel) {
+        return NULL;
+    }
+    size_t root_len = strlen(root);
+    size_t rel_len = strlen(rel);
+    int needs_sep = root_len > 0 && rel_len > 0 && !sengoo_path_is_sep(root[root_len - 1]);
+    size_t len = root_len + (needs_sep ? 1u : 0u) + rel_len;
+    char* out = (char*)malloc(len + 1u);
+    if (!out) {
+        return NULL;
+    }
+    size_t pos = 0;
+    memcpy(out + pos, root, root_len);
+    pos += root_len;
+    if (needs_sep) {
+        out[pos++] = sengoo_path_preferred_sep();
+    }
+    for (size_t i = 0; i < rel_len; ++i) {
+        out[pos++] = rel[i] == '/' ? sengoo_path_preferred_sep() : rel[i];
+    }
+    out[pos] = '\0';
+    return out;
+}
+
+static char* sengoo_dir_join_relative_path(const char* base, const char* name) {
+    if (!name) {
+        return NULL;
+    }
+    if (!base || base[0] == '\0') {
+        return sengoo_strdup_bytes(name);
+    }
+    size_t base_len = strlen(base);
+    size_t name_len = strlen(name);
+    size_t len = base_len + 1u + name_len;
+    char* out = (char*)malloc(len + 1u);
+    if (!out) {
+        return NULL;
+    }
+    memcpy(out, base, base_len);
+    out[base_len] = '/';
+    memcpy(out + base_len + 1u, name, name_len);
+    out[len] = '\0';
+    return out;
+}
+
+static int sengoo_path_is_dir_nofollow(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES
+        && (attributes & FILE_ATTRIBUTE_DIRECTORY)
+        && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
+#else
+    struct stat info;
+    return lstat(path, &info) == 0 && S_ISDIR(info.st_mode) ? 1 : 0;
+#endif
+}
+
+static int sengoo_dir_walk_collect(SengooDirWalk* walk, const char* root, const char* rel, long long depth, long long max_depth) {
+    char* full = sengoo_dir_join_full_path(root, rel ? rel : "");
+    if (!full) {
+        return 0;
+    }
+
+    SengooDirEntryList entries;
+    if (sengoo_dir_collect_entries(full, &entries) != 0) {
+        free(full);
+        return 0;
+    }
+
+    for (size_t i = 0; i < entries.len; ++i) {
+        char* child_rel = sengoo_dir_join_relative_path(rel ? rel : "", entries.names[i]);
+        if (!child_rel) {
+            sengoo_dir_entry_list_free(&entries);
+            free(full);
+            return 0;
+        }
+        if (!sengoo_dir_walk_push(walk, child_rel)) {
+            free(child_rel);
+            sengoo_dir_entry_list_free(&entries);
+            free(full);
+            return 0;
+        }
+        char* child_full = sengoo_dir_join_full_path(root, child_rel);
+        if (!child_full) {
+            free(child_rel);
+            sengoo_dir_entry_list_free(&entries);
+            free(full);
+            return 0;
+        }
+        int should_recurse = depth < max_depth && sengoo_path_is_dir_nofollow(child_full);
+        free(child_full);
+        if (should_recurse && !sengoo_dir_walk_collect(walk, root, child_rel, depth + 1, max_depth)) {
+            free(child_rel);
+            sengoo_dir_entry_list_free(&entries);
+            free(full);
+            return 0;
+        }
+        free(child_rel);
+    }
+
+    sengoo_dir_entry_list_free(&entries);
+    free(full);
+    return 1;
+}
+
+long long sengoo_dir_walk_new(long long root_ptr, long long max_depth) {
+    const char* root = (const char*)(intptr_t)root_ptr;
+    if (!root || root[0] == '\0' || max_depth < 0) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (!sengoo_dir_exists_cstr(root)) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    SengooDirWalk* walk = (SengooDirWalk*)calloc(1, sizeof(SengooDirWalk));
+    if (!walk) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    if (!sengoo_dir_walk_collect(walk, root, "", 0, max_depth)) {
+        sengoo_dir_walk_free(walk);
+        return -SENGOO_STATUS_IO;
+    }
+    return sengoo_ptr_to_handle(walk);
+}
+
+long long sengoo_dir_walk_next(long long handle, long long buffer_handle) {
+    SengooDirWalk* walk = sengoo_dir_walk_from_handle(handle);
+    if (!walk) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (walk->index >= walk->len) {
+        SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+        if (buffer) {
+            buffer->used_len = 0;
+        }
+        return 0;
+    }
+    const char* path = walk->paths[walk->index];
+    long long copied = sengoo_copy_bytes_to_managed_buffer(buffer_handle, path, strlen(path));
+    if (copied >= 0) {
+        walk->index += 1;
+    }
+    return copied;
+}
+
+long long sengoo_dir_walk_close(long long handle) {
+    SengooDirWalk* walk = sengoo_dir_walk_from_handle(handle);
+    if (!walk) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    sengoo_dir_walk_free(walk);
+    return 0;
+}
+
 long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0 || (out_capacity > 0 && !out)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (out_capacity == 0) {
         return 0;
@@ -1386,7 +2198,7 @@ long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
 
     size_t read = fread(out, 1, (size_t)out_capacity, stdin);
     if (ferror(stdin)) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
     return (long long)read;
 }
@@ -1394,7 +2206,7 @@ long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
 long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0 || (out_capacity > 0 && !out)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (out_capacity == 0) {
         return 0;
@@ -1405,7 +2217,7 @@ long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity
         int ch = fgetc(stdin);
         if (ch == EOF) {
             if (ferror(stdin)) {
-                return -1;
+                return -SENGOO_STATUS_IO;
             }
             break;
         }
@@ -1421,13 +2233,13 @@ long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity
 static long long sengoo_io_write_stream(FILE* stream, long long data_ptr, long long len) {
     const char* data = (const char*)(intptr_t)data_ptr;
     if (!stream || len < 0 || (len > 0 && !data)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     size_t expected = (size_t)len;
     size_t wrote = expected == 0 ? 0 : fwrite(data, 1, expected, stream);
     if (wrote != expected || ferror(stream)) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
     return (long long)wrote;
 }
@@ -1441,11 +2253,11 @@ long long sengoo_io_stderr_write(long long data_ptr, long long len) {
 }
 
 long long sengoo_io_stdout_flush(void) {
-    return fflush(stdout) == 0 ? 0 : -1;
+    return fflush(stdout) == 0 ? 0 : -SENGOO_STATUS_IO;
 }
 
 long long sengoo_io_stderr_flush(void) {
-    return fflush(stderr) == 0 ? 0 : -1;
+    return fflush(stderr) == 0 ? 0 : -SENGOO_STATUS_IO;
 }
 
 long long sengoo_process_id(void) {
@@ -1486,7 +2298,7 @@ static char* sengoo_process_current_dir_alloc(void) {
 long long sengoo_process_current_dir_len(void) {
     char* cwd = sengoo_process_current_dir_alloc();
     if (!cwd) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
 
     size_t len = strlen(cwd);
@@ -1497,18 +2309,18 @@ long long sengoo_process_current_dir_len(void) {
 long long sengoo_process_current_dir_copy(long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     char* cwd = sengoo_process_current_dir_alloc();
     if (!cwd) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
 
     size_t len = strlen(cwd);
     if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
         free(cwd);
-        return -1;
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
     }
 
     if (len > 0) {
@@ -1535,7 +2347,7 @@ static int sengoo_process_run_args_are_valid(
 }
 
 #ifdef _WIN32
-static int sengoo_size_add(size_t* total, size_t value) {
+int sengoo_size_add(size_t* total, size_t value) {
     if (SIZE_MAX - *total < value) {
         return -1;
     }
@@ -1543,7 +2355,7 @@ static int sengoo_size_add(size_t* total, size_t value) {
     return 0;
 }
 
-static char* sengoo_windows_append_quoted_arg(char* out, const char* arg) {
+char* sengoo_windows_append_quoted_arg(char* out, const char* arg) {
     *out++ = '"';
     while (*arg) {
         size_t backslashes = 0;
@@ -1585,7 +2397,7 @@ static int sengoo_windows_arg_needs_quotes(const char* arg) {
     return 0;
 }
 
-static char* sengoo_windows_append_arg(char* out, const char* arg) {
+char* sengoo_windows_append_arg(char* out, const char* arg) {
     if (sengoo_windows_arg_needs_quotes(arg)) {
         return sengoo_windows_append_quoted_arg(out, arg);
     }
@@ -1634,7 +2446,7 @@ static long long sengoo_process_run_windows(
 ) {
     char* command_line = sengoo_windows_process_command_line(executable, args, arg_count);
     if (!command_line) {
-        return -1;
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
     }
 
     STARTUPINFOA startup_info = {0};
@@ -1654,7 +2466,7 @@ static long long sengoo_process_run_windows(
     );
     free(command_line);
     if (!created) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
 
     DWORD wait_status = WaitForSingleObject(process_info.hProcess, INFINITE);
@@ -1662,7 +2474,7 @@ static long long sengoo_process_run_windows(
     int ok = wait_status == WAIT_OBJECT_0 && GetExitCodeProcess(process_info.hProcess, &exit_code);
     CloseHandle(process_info.hThread);
     CloseHandle(process_info.hProcess);
-    return ok ? (long long)exit_code : -1;
+    return ok ? (long long)exit_code : -SENGOO_STATUS_IO;
 }
 #else
 static long long sengoo_process_run_unix(
@@ -1672,21 +2484,21 @@ static long long sengoo_process_run_unix(
 ) {
     int startup_pipe[2];
     if (pipe(startup_pipe) != 0) {
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
 
     int flags = fcntl(startup_pipe[1], F_GETFD);
     if (flags < 0 || fcntl(startup_pipe[1], F_SETFD, flags | FD_CLOEXEC) != 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
-        return -1;
+        return -SENGOO_STATUS_IO;
     }
     if (pid == 0) {
         close(startup_pipe[0]);
@@ -1714,7 +2526,9 @@ static long long sengoo_process_run_unix(
         waited = waitpid(pid, &status, 0);
     } while (waited < 0 && errno == EINTR);
     if (startup_read != 0 || waited != pid || !WIFEXITED(status)) {
-        return -1;
+        return startup_read != 0
+            ? sengoo_negative_status_from_errno(startup_errno, SENGOO_STATUS_IO)
+            : -SENGOO_STATUS_IO;
     }
     return (long long)WEXITSTATUS(status);
 }
@@ -1734,7 +2548,7 @@ long long sengoo_process_run(
         (const char*)(intptr_t)arg2_ptr,
     };
     if (!sengoo_process_run_args_are_valid(executable, args, arg_count)) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
 #ifdef _WIN32
@@ -1781,7 +2595,7 @@ long long sengoo_args_len(void) {
 long long sengoo_arg_len(long long index) {
     const char* arg = sengoo_user_arg_at(index);
     if (!arg) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
     return (long long)strlen(arg);
 }
@@ -1789,17 +2603,17 @@ long long sengoo_arg_len(long long index) {
 long long sengoo_arg_copy(long long index, long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0) {
-        return -1;
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
     const char* arg = sengoo_user_arg_at(index);
     if (!arg) {
-        return -1;
+        return -SENGOO_STATUS_NOT_FOUND;
     }
 
     size_t len = strlen(arg);
     if ((unsigned long long)len > (unsigned long long)out_capacity || (len > 0 && !out)) {
-        return -1;
+        return -SENGOO_STATUS_BUFFER_TOO_SMALL;
     }
 
     if (len > 0) {
@@ -1899,11 +2713,11 @@ void* sengoo_realloc(void* ptr, long long old_size, long long old_align, long lo
     return new_ptr;
 }
 
-static long long sengoo_ptr_to_handle(void* ptr) {
+long long sengoo_ptr_to_handle(void* ptr) {
     return (long long)(intptr_t)ptr;
 }
 
-static void* sengoo_handle_to_ptr(long long handle) {
+void* sengoo_handle_to_ptr(long long handle) {
     return (void*)(intptr_t)handle;
 }
 

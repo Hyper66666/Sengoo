@@ -1,13 +1,15 @@
 use clap::{Parser as ClapParser, Subcommand};
 use miette::Result;
+use std::path::Path;
 
 use crate::{
     cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run, cmd_build,
-    cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, current_error_format,
-    dispatch_build_via_daemon, dispatch_run_via_daemon, frontend_trace_enabled,
-    parse_frontend_jobs_arg, reflection_options_from_cli, resolve_daemon_addr, set_error_format,
-    ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs, ReflectionMode,
-    RunEngine, DEFAULT_DAEMON_ADDR,
+    cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, cmd_test,
+    current_error_format, dispatch_build_via_daemon, dispatch_run_via_daemon,
+    frontend_trace_enabled, parse_frontend_jobs_arg, reflection_options_from_cli,
+    resolve_daemon_addr, resolve_test_root, set_error_format, ContractChecksMode,
+    DaemonDispatchOutcome, ErrorFormat, FrontendJobs, ReflectionMode, RunEngine, TestOptions,
+    TestOutputFormat, DEFAULT_DAEMON_ADDR,
 };
 
 /// Sengoo command-line compiler.
@@ -159,6 +161,41 @@ pub(crate) enum Commands {
     Check {
         /// Input source file.
         input: String,
+    },
+
+    /// Discover and run `tests/**/*.sg` in a package directory.
+    Test {
+        /// Package directory (defaults to current directory).
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+
+        /// Keep only tests whose name/path contains TEXT.
+        #[arg(long)]
+        filter: Option<String>,
+
+        /// Run only the test whose name exactly matches NAME.
+        #[arg(long)]
+        exact: Option<String>,
+
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = TestOutputFormat::Text)]
+        format: TestOutputFormat,
+
+        /// Forward child stdout/stderr instead of capturing them.
+        #[arg(long)]
+        nocapture: bool,
+
+        /// Use release optimization for test runs.
+        #[arg(long)]
+        release: bool,
+
+        /// Manifest path used to locate the package root.
+        #[arg(long = "manifest-path")]
+        manifest_path: Option<String>,
+
+        /// Reserved for lockfile-aware package runs.
+        #[arg(long)]
+        locked: bool,
     },
 
     /// Generate rustdoc-like API documentation.
@@ -378,6 +415,29 @@ async fn dispatch(command: Commands) -> Result<()> {
             .await
         }
         Commands::Check { input } => cmd_check(&input).await,
+        Commands::Test {
+            path,
+            filter,
+            exact,
+            format,
+            nocapture,
+            release,
+            manifest_path,
+            locked: _locked,
+        } => {
+            let root = resolve_test_root(
+                path.as_deref().map(Path::new),
+                manifest_path.as_deref().map(Path::new),
+            )?;
+            cmd_test(TestOptions {
+                root: &root,
+                filter: filter.as_deref(),
+                exact: exact.as_deref(),
+                format,
+                nocapture,
+                release,
+            })
+        }
         Commands::Doc { input, output } => cmd_doc(&input, &output).await,
         Commands::Repl => cmd_repl().await,
         Commands::DumpAst { input } => cmd_dump_ast(&input).await,

@@ -3,13 +3,55 @@ extern "C" {
     fn sengoo_process_current_dir_len() -> i64;
     fn sengoo_process_current_dir_copy(out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_process_run(executable: i64, arg0: i64, arg1: i64, arg2: i64, arg_count: i64) -> i64;
+    fn sengoo_process_command_new(executable: i64) -> i64;
+    fn sengoo_process_command_arg(handle: i64, arg: i64) -> i64;
+    fn sengoo_process_command_cwd(handle: i64, cwd: i64) -> i64;
+    fn sengoo_process_command_env_set(handle: i64, name: i64, value: i64) -> i64;
+    fn sengoo_process_command_env_remove(handle: i64, name: i64) -> i64;
+    fn sengoo_process_command_env_clear(handle: i64) -> i64;
+    fn sengoo_process_command_capture_stdout(handle: i64, capture: i64) -> i64;
+    fn sengoo_process_command_capture_stderr(handle: i64, capture: i64) -> i64;
+    fn sengoo_process_command_timeout_ms(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_process_command_run(handle: i64) -> i64;
+    fn sengoo_process_command_close(handle: i64) -> i64;
+    fn sengoo_process_output_exit_code(handle: i64) -> i64;
+    fn sengoo_process_output_timed_out(handle: i64) -> i64;
+    fn sengoo_process_output_stdout_len(handle: i64) -> i64;
+    fn sengoo_process_output_stderr_len(handle: i64) -> i64;
+    fn sengoo_process_output_stdout_copy(handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_process_output_stderr_copy(handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_process_output_close(handle: i64) -> i64;
+}
+
+struct ProcessCommand {
+    handle: i64,
+}
+
+struct ProcessOutput {
+    handle: i64,
 }
 
 def process_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
         Result { is_ok: true, value: value, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: 1 }
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
+}
+
+def process_status_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(value) }
+    }
+}
+
+def process_status_bool_result(value: i64) -> Result<bool, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value != 0, error: 0 }
+    } else {
+        Result { is_ok: false, value: false, error: status_from_raw_ffi(value) }
     }
 }
 
@@ -67,4 +109,121 @@ def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Resul
         sengoo_stdlib_str_ptr(arg2),
         3,
     )
+}
+
+def process_command_raw(executable_ptr: i64) -> Result<ProcessCommand, i64> {
+    let handle = sengoo_process_command_new(executable_ptr);
+    if handle != 0 {
+        Result { is_ok: true, value: ProcessCommand { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: STATUS_UNKNOWN() }
+    }
+}
+
+def process_command(executable: &str) -> Result<ProcessCommand, i64> {
+    process_command_raw(sengoo_stdlib_str_ptr(executable))
+}
+
+def process_output_handle_result(handle: i64) -> Result<ProcessOutput, i64> {
+    if handle != 0 {
+        Result { is_ok: true, value: ProcessOutput { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: ProcessOutput { handle: 0 }, error: STATUS_UNKNOWN() }
+    }
+}
+
+impl ProcessCommand {
+    def arg_raw(self, arg_ptr: i64) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_arg(self.handle, arg_ptr))
+    }
+
+    def arg(self, value: &str) -> Result<bool, i64> {
+        self.arg_raw(sengoo_stdlib_str_ptr(value))
+    }
+
+    def cwd_raw(self, cwd_ptr: i64) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_cwd(self.handle, cwd_ptr))
+    }
+
+    def cwd(self, value: &str) -> Result<bool, i64> {
+        self.cwd_raw(sengoo_stdlib_str_ptr(value))
+    }
+
+    def env_set_raw(self, name_ptr: i64, value_ptr: i64) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_env_set(self.handle, name_ptr, value_ptr))
+    }
+
+    def env_set(self, name: &str, value: &str) -> Result<bool, i64> {
+        self.env_set_raw(sengoo_stdlib_str_ptr(name), sengoo_stdlib_str_ptr(value))
+    }
+
+    def env_remove_raw(self, name_ptr: i64) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_env_remove(self.handle, name_ptr))
+    }
+
+    def env_remove(self, name: &str) -> Result<bool, i64> {
+        self.env_remove_raw(sengoo_stdlib_str_ptr(name))
+    }
+
+    def env_clear(self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_env_clear(self.handle))
+    }
+
+    def capture_stdout(self, capture: bool) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_capture_stdout(self.handle, if capture { 1 } else { 0 }))
+    }
+
+    def capture_stderr(self, capture: bool) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_capture_stderr(self.handle, if capture { 1 } else { 0 }))
+    }
+
+    def timeout_ms(self, timeout_ms: i64) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_command_timeout_ms(self.handle, timeout_ms))
+    }
+
+    def run(self) -> Result<ProcessOutput, i64> {
+        process_output_handle_result(sengoo_process_command_run(self.handle))
+    }
+
+    def close(self) -> bool {
+        sengoo_process_command_close(self.handle) == 0
+    }
+}
+
+impl ProcessOutput {
+    def exit_code(self) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_output_exit_code(self.handle))
+    }
+
+    def timed_out(self) -> bool {
+        sengoo_process_output_timed_out(self.handle) > 0
+    }
+
+    def stdout_len(self) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_output_stdout_len(self.handle))
+    }
+
+    def stderr_len(self) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_output_stderr_len(self.handle))
+    }
+
+    def stdout_copy_raw(self, out_buffer_ptr: i64, out_capacity: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_output_stdout_copy(self.handle, out_buffer_ptr, out_capacity))
+    }
+
+    def stdout_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        self.stdout_copy_raw(buffer.ptr(), buffer.len())
+    }
+
+    def stderr_copy_raw(self, out_buffer_ptr: i64, out_capacity: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_output_stderr_copy(self.handle, out_buffer_ptr, out_capacity))
+    }
+
+    def stderr_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        self.stderr_copy_raw(buffer.ptr(), buffer.len())
+    }
+
+    def close(self) -> bool {
+        sengoo_process_output_close(self.handle) == 0
+    }
 }

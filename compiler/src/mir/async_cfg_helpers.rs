@@ -7,6 +7,7 @@ pub(crate) struct PlannedSuspendPoint {
     pub(crate) state_index: usize,
     pub(crate) block: usize,
     pub(crate) poll_func: String,
+    #[allow(dead_code)]
     pub(crate) future_handle: Local,
     pub(crate) ready_block: usize,
 }

@@ -1,6 +1,7 @@
+use super::enum_index;
 use crate::ast;
 use crate::symbol::SymbolId;
-use crate::typeck::TypeEnv;
+use crate::typeck::{SymbolKind, TyKind, TypeEnv};
 
 use super::super::{
     HIRBinaryOp, HIRBody, HIRExpr, HIRLiteral, HIRMatchArm, HIRPattern, HIRStmt, HIRType,
@@ -144,26 +145,24 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             }
         }
         ast::ExprKind::Match { scrutinee, arms } => {
+            let scrutinee_enum = scrutinee_enum_name(scrutinee, type_env);
             let scrutinee = Box::new(lower_expr(scrutinee, type_env)?);
             let hir_arms = arms
                 .iter()
                 .filter_map(|arm| {
-                    if let Some(pat) = arm.patterns.first() {
-                        let hir_pat = lower_pattern(pat).ok()?;
-                        let hir_guard = arm
-                            .guard
-                            .as_ref()
-                            .and_then(|g| lower_expr(g, type_env).ok())
-                            .map(Box::new);
-                        let hir_body = Box::new(lower_expr(&arm.body, type_env).ok()?);
-                        Some(HIRMatchArm {
-                            pat: hir_pat,
-                            guard: hir_guard,
-                            body: hir_body,
-                        })
-                    } else {
-                        None
-                    }
+                    let hir_pat =
+                        lower_arm_pattern(&arm.patterns, scrutinee_enum.as_deref()).ok()?;
+                    let hir_guard = arm
+                        .guard
+                        .as_ref()
+                        .and_then(|g| lower_expr(g, type_env).ok())
+                        .map(Box::new);
+                    let hir_body = Box::new(lower_expr(&arm.body, type_env).ok()?);
+                    Some(HIRMatchArm {
+                        pat: hir_pat,
+                        guard: hir_guard,
+                        body: hir_body,
+                    })
                 })
                 .collect();
             HIRExpr::Match {
@@ -291,10 +290,8 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             lower_expr(expr, type_env)?
         }
         ast::ExprKind::Paren(expr) => lower_expr(expr, type_env)?,
-        ast::ExprKind::Try(expr) => {
-            // 暂时跳过 Try
-            lower_expr(expr, type_env)?
-        }
+        ast::ExprKind::Try(expr) => HIRExpr::Try(Box::new(lower_expr(expr, type_env)?)),
+        ast::ExprKind::TryBlock(block) => HIRExpr::TryBlock(Box::new(lower_body(block, type_env))),
         ast::ExprKind::Yield(value) => {
             // 暂时跳过 Yield
             value
@@ -386,8 +383,53 @@ fn lower_assign_op(op: &ast::AssignOp) -> HIRBinaryOp {
     }
 }
 
+fn scrutinee_enum_name(scrutinee: &ast::Expr, type_env: &TypeEnv) -> Option<String> {
+    match &scrutinee.kind {
+        ast::ExprKind::Ident(ident) => type_env.lookup(&ident.name).and_then(|symbol| {
+            if let SymbolKind::Var(ty) = &symbol.kind {
+                if let TyKind::Adt { name, .. } = &ty.kind {
+                    return Some(name.clone());
+                }
+            }
+            None
+        }),
+        _ => None,
+    }
+}
+
+fn lower_arm_pattern(
+    patterns: &[ast::pattern::Pattern],
+    scrutinee_enum: Option<&str>,
+) -> Result<HIRPattern, String> {
+    let mut iter = patterns.iter();
+    let first = iter
+        .next()
+        .ok_or_else(|| "match arm requires at least one pattern".to_string())?;
+    let mut hir = lower_pattern(first, scrutinee_enum)?;
+    for pat in iter {
+        hir = HIRPattern::Or(Box::new(hir), Box::new(lower_pattern(pat, scrutinee_enum)?));
+    }
+    Ok(hir)
+}
+
+fn enum_variant_pattern(
+    enum_name: &str,
+    variant_name: &str,
+    fields: Vec<(String, Option<HIRPattern>)>,
+) -> Option<HIRPattern> {
+    enum_index::variant_discriminant(enum_name, variant_name).map(|discriminant| {
+        HIRPattern::EnumVariant {
+            discriminant,
+            fields,
+        }
+    })
+}
+
 /// 降低模式
-fn lower_pattern(pat: &ast::pattern::Pattern) -> Result<HIRPattern, String> {
+fn lower_pattern(
+    pat: &ast::pattern::Pattern,
+    scrutinee_enum: Option<&str>,
+) -> Result<HIRPattern, String> {
     Ok(match &pat.kind {
         ast::pattern::PatternKind::Wildcard => HIRPattern::Wild,
         ast::pattern::PatternKind::Literal(lit) => HIRPattern::Lit(lower_literal(lit)),
@@ -396,8 +438,107 @@ fn lower_pattern(pat: &ast::pattern::Pattern) -> Result<HIRPattern, String> {
             symbol: name.symbol,
             mutability: false,
         },
-        ast::pattern::PatternKind::Tuple(pats) => {
-            HIRPattern::Tuple(pats.iter().filter_map(|p| lower_pattern(p).ok()).collect())
+        ast::pattern::PatternKind::Path(path) => {
+            if path.segments.len() >= 2 {
+                let enum_name = path.segments[0].name.clone();
+                let variant_name = path
+                    .segments
+                    .last()
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+                if let Some(variant) = enum_variant_pattern(&enum_name, &variant_name, Vec::new()) {
+                    return Ok(variant);
+                }
+            }
+            if let Some(enum_name) = scrutinee_enum {
+                let variant_name = path
+                    .segments
+                    .last()
+                    .map(|segment| segment.name.clone())
+                    .unwrap_or_default();
+                if let Some(variant) = enum_variant_pattern(enum_name, &variant_name, Vec::new()) {
+                    return Ok(variant);
+                }
+            }
+            let name = path
+                .segments
+                .last()
+                .map(|segment| segment.name.clone())
+                .unwrap_or_default();
+            HIRPattern::Struct {
+                name,
+                fields: Vec::new(),
+            }
+        }
+        ast::pattern::PatternKind::TupleStruct { path, patterns } => {
+            let variant_name = path
+                .segments
+                .last()
+                .map(|segment| segment.name.clone())
+                .unwrap_or_default();
+            let fields: Vec<(String, Option<HIRPattern>)> = patterns
+                .iter()
+                .enumerate()
+                .filter_map(|(index, sub)| {
+                    lower_pattern(sub, scrutinee_enum)
+                        .ok()
+                        .map(|sub_pat| (format!("_{index}"), Some(sub_pat)))
+                })
+                .collect();
+            if path.segments.len() >= 2 {
+                let enum_name = path.segments[0].name.clone();
+                if let Some(variant) =
+                    enum_variant_pattern(&enum_name, &variant_name, fields.clone())
+                {
+                    return Ok(variant);
+                }
+            }
+            if let Some(enum_name) = scrutinee_enum {
+                if let Some(variant) =
+                    enum_variant_pattern(enum_name, &variant_name, fields.clone())
+                {
+                    return Ok(variant);
+                }
+            }
+            HIRPattern::Struct {
+                name: variant_name,
+                fields,
+            }
+        }
+        ast::pattern::PatternKind::Struct { path, fields, .. } => {
+            let name = path
+                .segments
+                .last()
+                .map(|segment| segment.name.clone())
+                .unwrap_or_default();
+            let hir_fields = fields
+                .iter()
+                .filter_map(|field| {
+                    lower_pattern(&field.pattern, scrutinee_enum)
+                        .ok()
+                        .map(|sub| (field.name.name.clone(), Some(sub)))
+                })
+                .collect();
+            HIRPattern::Struct {
+                name,
+                fields: hir_fields,
+            }
+        }
+        ast::pattern::PatternKind::Tuple(pats) => HIRPattern::Tuple(
+            pats.iter()
+                .filter_map(|p| lower_pattern(p, scrutinee_enum).ok())
+                .collect(),
+        ),
+        ast::pattern::PatternKind::Or(alts) => {
+            let mut acc: Option<HIRPattern> = None;
+            for alt in alts {
+                let lowered = lower_pattern(alt, scrutinee_enum)?;
+                acc = Some(match acc {
+                    None => lowered,
+                    Some(left) => HIRPattern::Or(Box::new(left), Box::new(lowered)),
+                });
+            }
+            acc.unwrap_or(HIRPattern::Wild)
         }
         _ => HIRPattern::Wild,
     })

@@ -439,6 +439,42 @@ fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> V
     diagnostics_from_failed_sgc_output(content, &stderr)
 }
 
+struct WildcardInsertion {
+    range: Range,
+    text: String,
+}
+
+fn wildcard_arm_insertion(content: &str, diagnostic_range: &Range) -> Option<WildcardInsertion> {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = diagnostic_range.start.line as usize;
+    for (line_idx, line) in lines.iter().enumerate().skip(start) {
+        if let Some(open_idx) = line.find('{') {
+            let indent = line[..open_idx]
+                .chars()
+                .take_while(|ch| ch.is_whitespace())
+                .collect::<String>();
+            let arm_indent = format!("{indent}    ");
+            return Some(WildcardInsertion {
+                range: Range {
+                    start: Position {
+                        line: line_idx as u32,
+                        character: line.len() as u32,
+                    },
+                    end: Position {
+                        line: line_idx as u32,
+                        character: line.len() as u32,
+                    },
+                },
+                text: format!("\n{arm_indent}_ => todo(),"),
+            });
+        }
+        if line.contains("=>") {
+            break;
+        }
+    }
+    None
+}
+
 fn quick_fix_action(
     uri: Url,
     edit: TextEdit,
@@ -540,6 +576,19 @@ pub(crate) fn quick_fix_actions(
                     diagnostic,
                     "Remove trailing whitespace",
                 ));
+            }
+            "non-exhaustive-match" => {
+                if let Some(insert) = wildcard_arm_insertion(content, &diagnostic.range) {
+                    actions.push(quick_fix_action(
+                        uri.clone(),
+                        TextEdit {
+                            range: insert.range,
+                            new_text: insert.text,
+                        },
+                        diagnostic,
+                        "Add wildcard match arm",
+                    ));
+                }
             }
             _ => {}
         }
@@ -710,6 +759,37 @@ mod tests {
             "message should include embedded compiler error: {}",
             diagnostics[0].message
         );
+    }
+
+    #[test]
+    fn non_exhaustive_match_quick_fix_adds_wildcard_arm() {
+        let text =
+            "def paint(c: Color) -> i64 {\n    match c {\n        Color::Red => 1,\n    }\n}\n";
+        let uri = Url::parse("file:///workspace/match.sg").unwrap();
+        let diagnostic = Diagnostic {
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 4,
+                },
+                end: Position {
+                    line: 1,
+                    character: 12,
+                },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("non-exhaustive-match".to_string())),
+            source: Some("sgc".to_string()),
+            message: "[non-exhaustive-match] match is not exhaustive".to_string(),
+            ..Default::default()
+        };
+        let actions = quick_fix_actions(uri, text, vec![diagnostic]);
+        assert_eq!(actions.len(), 1);
+        let title = match &actions[0] {
+            CodeActionOrCommand::CodeAction(action) => action.title.as_str(),
+            CodeActionOrCommand::Command(_) => panic!("expected code action"),
+        };
+        assert_eq!(title, "Add wildcard match arm");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 // examples/stdlib/15_dir_listing.sg
 //
-// Demonstrates: importing std::dir helpers for deterministic non-recursive directory listing.
+// Demonstrates: importing std::dir helpers for deterministic listing and bounded recursive walking.
 //
 // Run: sgc run examples/stdlib/15_dir_listing.sg
 // Expected output: 15
@@ -10,26 +10,47 @@ import std::file;
 
 def main() -> i64 {
     let root = "sengoo_tmp_dir_listing_example";
+    let nested = "sengoo_tmp_dir_listing_example/nested";
     let a = "sengoo_tmp_dir_listing_example/a.txt";
     let b = "sengoo_tmp_dir_listing_example/b.txt";
+    let c = "sengoo_tmp_dir_listing_example/nested/c.txt";
     file_remove(a);
     file_remove(b);
+    file_remove(c);
+    dir_remove(nested);
     dir_remove(root);
 
-    let made = dir_create(root).unwrap_or(false);
+    let made = dir_create_all(nested).unwrap_or(false);
     let wrote_b = file_write_str(b, "b").unwrap_or(0);
     let wrote_a = file_write_str(a, "a").unwrap_or(0);
-    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let wrote_c = file_write_str(c, "c").unwrap_or(0);
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
     let count = dir_entry_count(root).unwrap_or(0);
     let first_len = dir_entry_name(root, 0, buffer).unwrap_or(0);
-    let missing = dir_entry_name(root, 2, buffer).is_err();
+    let missing = dir_entry_name(root, 3, buffer).is_err();
+    let walk = dir_walk(root, 1).unwrap_or(DirWalk { handle: 0 });
+    let walk_first = walk.next(buffer).unwrap_or(0);
+    let walk_second = walk.next(buffer).unwrap_or(0);
+    let walk_closed = walk.close();
 
     buffer.free();
     file_remove(a);
     file_remove(b);
+    file_remove(c);
+    dir_remove(nested);
     let removed = dir_remove(root).unwrap_or(false);
 
-    print(if made && wrote_a == 1 && wrote_b == 1 && count == 2 && first_len == 5 && missing && removed {
+    print(if made
+        && wrote_a == 1
+        && wrote_b == 1
+        && wrote_c == 1
+        && count == 3
+        && first_len == 5
+        && missing
+        && walk_first == 5
+        && walk_second == 5
+        && walk_closed
+        && removed {
         15
     } else {
         0

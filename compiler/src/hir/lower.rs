@@ -7,6 +7,7 @@ use crate::symbol::SymbolId;
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
 
+mod enum_index;
 mod expressions;
 mod types;
 
@@ -15,6 +16,11 @@ use types::lower_type;
 
 /// 将 AST 程序转换为 HIR 模块
 pub fn lower_ast(program: &Program, type_env: &TypeEnv) -> Module {
+    let enum_index = enum_index::build_enum_variant_index(program);
+    enum_index::with_enum_index(enum_index, || lower_ast_inner(program, type_env))
+}
+
+fn lower_ast_inner(program: &Program, type_env: &TypeEnv) -> Module {
     let mut module = Module::new("main".to_string());
     let class_index = build_class_index(program);
 

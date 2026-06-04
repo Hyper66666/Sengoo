@@ -14,12 +14,7 @@ pub(super) fn lower_let_stmt(
 
     if let Some(value_expr) = value {
         let value_local = if let HIRExpr::Lambda { params, body } = value_expr {
-            lower_lambda_expr_with_expected(
-                ctx,
-                params,
-                body,
-                Some(hir_type_to_mir_with_structs(ty, ctx.struct_defs)),
-            )
+            lower_lambda_expr_with_expected(ctx, params, body, Some(ctx.hir_type_to_mir(ty)))
         } else {
             ctx.lower_expr(value_expr)
         };

@@ -1,0 +1,19 @@
+// examples/ergonomics/03_enum_match.sg
+//
+// Enum match with guards and wildcard fallback.
+//
+// Run: sgc run examples/ergonomics/03_enum_match.sg
+
+enum Color { Red, Green, Blue }
+
+def label(c: Color) -> i64 {
+    match c {
+        Color::Red => 1,
+        Color::Green | Color::Blue => 2,
+        _ => 0,
+    }
+}
+
+def main() -> i64 {
+    0
+}

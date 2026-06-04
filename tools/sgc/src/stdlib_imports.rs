@@ -11,8 +11,10 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "math",
     "string",
     "error",
-    "collections",
     "ffi",
+    "status",
+    "collections",
+    "json",
     "strconv",
     "file",
     "dir",
@@ -39,6 +41,8 @@ fn source_module_needs_result_family(module: &str) -> bool {
         "option"
             | "result"
             | "collections"
+            | "json"
+            | "status"
             | "strconv"
             | "db"
             | "ffi"
@@ -57,7 +61,8 @@ fn source_module_needs_result_family(module: &str) -> bool {
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
+        "collections" | "json" | "status" | "string" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["status"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -200,6 +205,9 @@ mod tests {
         assert!(expanded.contains("def file_exists"));
         assert!(expanded.contains("def file_copy"));
         assert!(expanded.contains("def file_move"));
+        assert!(expanded.contains("def file_kind"));
+        assert!(expanded.contains("def file_size"));
+        assert!(expanded.contains("def file_modified_unix_ms"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }
@@ -253,6 +261,9 @@ mod tests {
             expand_stdlib_imports_for_source("import std::process;\ndef main() -> i64 { 0 }\n")
                 .expect("process stdlib import should expand");
 
+        assert!(expanded.contains("struct ProcessCommand"));
+        assert!(expanded.contains("struct ProcessOutput"));
+        assert!(expanded.contains("def process_command"));
         assert!(expanded.contains("def process_id"));
         assert!(expanded.contains("def process_current_dir_copy"));
         assert!(expanded.contains("def process_run"));
@@ -271,6 +282,9 @@ mod tests {
         assert!(expanded.contains("def dir_create_all"));
         assert!(expanded.contains("def dir_entry_count"));
         assert!(expanded.contains("def dir_entry_name"));
+        assert!(expanded.contains("struct DirWalk"));
+        assert!(expanded.contains("def dir_walk"));
+        assert!(expanded.contains("def next(self, buffer: Buffer) -> Result<i64, i64>"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }
@@ -307,6 +321,48 @@ mod tests {
 
         assert!(expanded.contains("def strconv_parse_i64"));
         assert!(expanded.contains("def strconv_format_i64"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn collections_import_expands_ffi_for_text_collection_buffers() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::collections;\ndef main() -> i64 { 0 }\n")
+                .expect("collections stdlib import should expand");
+
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("def ffi_buffer_new"));
+        assert!(expanded.contains("struct TextList"));
+        assert!(expanded.contains("def text_list_new() -> TextList"));
+        assert!(expanded.contains("def string_map_i64_new() -> StringMapI64"));
+        assert!(expanded.contains("def string_map_bool_new() -> StringMapBool"));
+    }
+
+    #[test]
+    fn status_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::status;\ndef main() -> i64 { 0 }\n")
+                .expect("status stdlib import should expand");
+
+        assert!(expanded.contains("def STATUS_UNKNOWN"));
+        assert!(expanded.contains("def status_name_copy"));
+        assert!(expanded.contains("def status_message_copy"));
+        assert!(expanded.contains("def status_from_raw_ffi"));
+        assert!(expanded.contains("struct Buffer"));
+        assert!(expanded.contains("struct Result"));
+    }
+
+    #[test]
+    fn json_import_expands_ffi_and_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::json;\ndef main() -> i64 { 0 }\n")
+                .expect("json stdlib import should expand");
+
+        assert!(expanded.contains("struct JsonDoc"));
+        assert!(expanded.contains("struct JsonValue"));
+        assert!(expanded.contains("def json_parse"));
+        assert!(expanded.contains("def json_doc_object"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

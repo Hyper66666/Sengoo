@@ -169,7 +169,7 @@ pub(crate) async fn cmd_build(
         }
     }
     let runtime_c = find_runtime_c();
-    let runtime_c_fingerprint = optional_file_fingerprint(runtime_c.as_deref())?;
+    let runtime_c_fingerprint = optional_runtime_bundle_fingerprint(runtime_c.as_deref())?;
 
     let output_file = if let Some(out) = output {
         out.to_string()

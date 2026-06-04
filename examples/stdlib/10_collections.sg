@@ -1,7 +1,7 @@
 // examples/stdlib/10_collections.sg
 //
 // Demonstrates: importing std::collections helpers for runtime-backed Vec<i64>,
-// HashMap<i64, i64>, and iterator flows.
+// HashMap<i64, i64>, copied text lists, string-key maps, and iterator flows.
 //
 // Run: sgc run examples/stdlib/10_collections.sg
 // Expected output: 60
@@ -35,15 +35,46 @@ def main() -> i64 {
     let removed = counts.remove(2);
     let missing = !counts.contains(2);
 
+    let names = text_list_new();
+    let text_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let pushed_name = names.push("alpha");
+    let replaced_name = names.set(0, "beta");
+    let copied_name = names.get_copy(0, text_buffer).unwrap_or(0);
+
+    let scores = string_map_i64_new();
+    let inserted_b = scores.insert("b", 1);
+    let inserted_a = scores.insert("a", 2);
+    let replaced_b = scores.insert("b", 7);
+    let b_score = scores.get("b").unwrap_or(0);
+    let key_iter = scores.iter_keys();
+    let first_key = key_iter.next_copy(text_buffer).unwrap_or(0);
+    let second_key = key_iter.next_copy(text_buffer).unwrap_or(0);
+    let key_iter_done = key_iter.done();
+    key_iter.free();
+
     let ok = values.len() == 3
         && values.contains(20)
         && vector_total == 60
         && iter_score == 61
-        && counts.len() == 3
+        && counts.len() == 2
         && map_total == 60
         && removed
-        && missing;
+        && missing
+        && pushed_name
+        && replaced_name
+        && copied_name == 4
+        && inserted_b
+        && inserted_a
+        && replaced_b
+        && scores.len() == 2
+        && b_score == 7
+        && first_key == 1
+        && second_key == 1
+        && key_iter_done;
 
+    text_buffer.free();
+    names.free();
+    scores.free();
     values.free();
     counts.free();
 

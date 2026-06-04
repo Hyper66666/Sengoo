@@ -45,6 +45,15 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// 获取局部变量的MIR类型。
+    pub(super) fn hir_type_to_mir(&self, ty: &crate::hir::HIRType) -> MIRType {
+        crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+            ty,
+            self.struct_defs,
+            &self.options.enum_defs,
+            &std::collections::HashMap::new(),
+        )
+    }
+
     pub(super) fn get_local_type(&self, local: Local) -> &MIRType {
         if let Some((_, ty)) = self.mir_fn.locals.get(local.index()) {
             ty

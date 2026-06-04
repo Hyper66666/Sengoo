@@ -1,41 +1,42 @@
 use crate::hir::{HIRLiteral, HIRMatchArm, HIRPattern};
 use crate::mir::pattern_helpers::{
-    build_match_switch_plan, extract_discriminant_from_pattern, pattern_binding_plan,
-    pattern_match_plan, MatchSwitchPlan, PatternBindingPlan, PatternMatchPlan,
+    build_match_switch_plan, classify_switch_arm, pattern_binding_plan, pattern_match_plan,
+    MatchSwitchPlan, PatternBindingPlan, PatternMatchPlan,
 };
 use crate::symbol::SymbolId;
 
 #[test]
-fn extract_discriminant_from_pattern_accepts_non_negative_int_literals() {
+fn classify_switch_arm_accepts_non_negative_int_literals() {
     assert_eq!(
-        extract_discriminant_from_pattern(&HIRPattern::Lit(HIRLiteral::Int(7))),
-        Some(7)
+        classify_switch_arm(&HIRPattern::Lit(HIRLiteral::Int(7))).discriminants,
+        vec![7]
     );
     assert_eq!(
-        extract_discriminant_from_pattern(&HIRPattern::Lit(HIRLiteral::Int(u32::MAX as i64 - 1))),
-        Some(u32::MAX - 1)
+        classify_switch_arm(&HIRPattern::Lit(HIRLiteral::Int(u32::MAX as i64 - 1))).discriminants,
+        vec![u32::MAX - 1]
     );
 }
 
 #[test]
-fn extract_discriminant_from_pattern_rejects_non_discriminant_patterns() {
-    assert_eq!(
-        extract_discriminant_from_pattern(&HIRPattern::Lit(HIRLiteral::Int(-1))),
-        None
+fn classify_switch_arm_rejects_non_discriminant_patterns() {
+    assert!(classify_switch_arm(&HIRPattern::Lit(HIRLiteral::Int(-1)))
+        .discriminants
+        .is_empty());
+    assert!(
+        classify_switch_arm(&HIRPattern::Lit(HIRLiteral::Bool(true)))
+            .discriminants
+            .is_empty()
     );
-    assert_eq!(
-        extract_discriminant_from_pattern(&HIRPattern::Lit(HIRLiteral::Bool(true))),
-        None
-    );
-    assert_eq!(extract_discriminant_from_pattern(&HIRPattern::Wild), None);
-    assert_eq!(
-        extract_discriminant_from_pattern(&HIRPattern::Var {
-            name: "x".to_string(),
-            symbol: SymbolId::new(1),
-            mutability: false,
-        }),
-        None
-    );
+    assert!(classify_switch_arm(&HIRPattern::Wild)
+        .discriminants
+        .is_empty());
+    assert!(classify_switch_arm(&HIRPattern::Var {
+        name: "x".to_string(),
+        symbol: SymbolId::new(1),
+        mutability: false,
+    })
+    .discriminants
+    .is_empty());
 }
 
 #[test]
@@ -86,6 +87,21 @@ fn pattern_binding_plan_ignores_non_var_tuple_members_and_other_patterns() {
 }
 
 #[test]
+fn classify_switch_arm_flattens_or_patterns() {
+    let pat = HIRPattern::Or(
+        Box::new(HIRPattern::EnumVariant {
+            discriminant: 1,
+            fields: Vec::new(),
+        }),
+        Box::new(HIRPattern::EnumVariant {
+            discriminant: 2,
+            fields: Vec::new(),
+        }),
+    );
+    assert_eq!(classify_switch_arm(&pat).discriminants, vec![1, 2]);
+}
+
+#[test]
 fn build_match_switch_plan_routes_literal_arms_and_last_fallback() {
     let arms = vec![
         HIRMatchArm::new(
@@ -111,6 +127,75 @@ fn build_match_switch_plan_routes_literal_arms_and_last_fallback() {
         plan,
         MatchSwitchPlan {
             targets: vec![(1, 10)],
+            otherwise_block: 12,
+        }
+    );
+}
+
+#[test]
+fn build_match_switch_plan_enum_or_with_wildcard_is_also_otherwise() {
+    let arms = vec![
+        HIRMatchArm::new(
+            HIRPattern::Or(
+                Box::new(HIRPattern::EnumVariant {
+                    discriminant: 0,
+                    fields: Vec::new(),
+                }),
+                Box::new(HIRPattern::Wild),
+            ),
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(1)),
+        ),
+        HIRMatchArm::new(
+            HIRPattern::EnumVariant {
+                discriminant: 1,
+                fields: Vec::new(),
+            },
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(2)),
+        ),
+    ];
+    let plan = build_match_switch_plan(&arms, &[10, 11], 99);
+    assert_eq!(
+        plan,
+        MatchSwitchPlan {
+            targets: vec![(0, 10), (1, 11)],
+            otherwise_block: 10,
+        }
+    );
+}
+
+#[test]
+fn build_match_switch_plan_maps_or_variant_arms_before_wildcard() {
+    let arms = vec![
+        HIRMatchArm::new(
+            HIRPattern::EnumVariant {
+                discriminant: 0,
+                fields: Vec::new(),
+            },
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(1)),
+        ),
+        HIRMatchArm::new(
+            HIRPattern::Or(
+                Box::new(HIRPattern::EnumVariant {
+                    discriminant: 1,
+                    fields: Vec::new(),
+                }),
+                Box::new(HIRPattern::EnumVariant {
+                    discriminant: 2,
+                    fields: Vec::new(),
+                }),
+            ),
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(2)),
+        ),
+        HIRMatchArm::new(
+            HIRPattern::Wild,
+            crate::hir::HIRExpr::Lit(HIRLiteral::Int(0)),
+        ),
+    ];
+    let plan = build_match_switch_plan(&arms, &[10, 11, 12], 99);
+    assert_eq!(
+        plan,
+        MatchSwitchPlan {
+            targets: vec![(0, 10), (1, 11), (2, 11)],
             otherwise_block: 12,
         }
     );

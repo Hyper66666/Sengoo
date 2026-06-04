@@ -151,8 +151,11 @@ pub(crate) fn collect_concrete_named_types_from_expr(
         HIRExpr::Await(inner) => {
             collect_concrete_named_types_from_expr(inner, known_named_types, out);
         }
-        HIRExpr::AsyncBlock(body) => {
+        HIRExpr::AsyncBlock(body) | HIRExpr::TryBlock(body) => {
             collect_concrete_named_types_from_body(body, known_named_types, out);
+        }
+        HIRExpr::Try(inner) => {
+            collect_concrete_named_types_from_expr(inner, known_named_types, out);
         }
     }
 }

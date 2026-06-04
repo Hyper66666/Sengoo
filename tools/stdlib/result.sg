@@ -17,19 +17,19 @@ def result_err_with<T, E>(value_placeholder: T, error: E) -> Result<T, E> {
 }
 
 def result_ok_i64(value: i64) -> Result<i64, i64> {
-    result_ok_with(value, 0)
+    Result { is_ok: true, value: value, error: 0 }
 }
 
 def result_err_i64(error: i64) -> Result<i64, i64> {
-    result_err_with(0, error)
+    Result { is_ok: false, value: 0, error: error }
 }
 
 def result_ok_bool(value: bool) -> Result<bool, i64> {
-    result_ok_with(value, 0)
+    Result { is_ok: true, value: value, error: 0 }
 }
 
 def result_err_bool(error: i64) -> Result<bool, i64> {
-    result_err_with(false, error)
+    Result { is_ok: false, value: false, error: error }
 }
 
 impl<T, E> Result<T, E> {

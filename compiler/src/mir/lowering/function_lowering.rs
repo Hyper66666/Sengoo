@@ -1,4 +1,6 @@
 use super::*;
+use crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums;
+use std::collections::HashMap;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lower_function(
@@ -17,9 +19,25 @@ pub(super) fn lower_function(
     let params: Vec<MIRType> = fn_item
         .params
         .iter()
-        .map(|p| hir_type_to_mir_with_structs(&p.ty, struct_defs))
+        .map(|p| {
+            hir_type_to_mir_with_structs_and_enums(
+                &p.ty,
+                struct_defs,
+                &options.enum_defs,
+                &HashMap::new(),
+            )
+        })
         .collect();
-    let return_type: MIRType = hir_type_to_mir_with_structs(&fn_item.return_type, struct_defs);
+    let return_type: MIRType = hir_type_to_mir_with_structs_and_enums(
+        &fn_item.return_type,
+        struct_defs,
+        &options.enum_defs,
+        &HashMap::new(),
+    );
+    let try_propagation = matches!(
+        &return_type,
+        MIRType::Struct { name, .. } if name == "Result" || name == "Option"
+    );
 
     let mut mir_fn = MirFunction::new(fn_item.name.clone(), params, return_type);
     mir_fn.is_async = fn_item.is_async;
@@ -64,7 +82,13 @@ pub(super) fn lower_function(
     } else {
         start_block
     };
+    if try_propagation {
+        ctx.push_try_scope(try_expr_helpers::TryScope::Function);
+    }
     ctx.lower_body_to_block(&fn_item.body, body_entry);
+    if try_propagation {
+        ctx.pop_try_scope();
+    }
     if options.runtime_contract_checks {
         if let Some(postcondition) = fn_item.postcondition.as_ref() {
             ctx.inject_postcondition_checks(postcondition);

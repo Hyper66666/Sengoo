@@ -125,13 +125,15 @@ impl TypeChecker {
             self.async_functions.insert(fn_decl.name.name.clone());
         }
 
+        let propagation = Self::propagation_from_ty(&ret_ty);
         let body_ty = if fn_decl.is_async {
             self.async_context_depth += 1;
-            let result = self.check_block(&fn_decl.body);
+            let result =
+                self.with_propagation(propagation.clone(), |this| this.check_block(&fn_decl.body));
             self.async_context_depth = self.async_context_depth.saturating_sub(1);
             result?
         } else {
-            self.check_block(&fn_decl.body)?
+            self.with_propagation(propagation, |this| this.check_block(&fn_decl.body))?
         };
 
         let is_main_with_implicit_return = fn_decl.name.name == "main"

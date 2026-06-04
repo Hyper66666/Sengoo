@@ -1,6 +1,6 @@
 use crate::ast::{DeclKind, ExprKind, StmtKind, UnOp};
 use crate::hir::{HIRExpr, HIRItem};
-use crate::{typeck, Parser, TypeChecker};
+use crate::{Parser, TypeChecker};
 
 #[test]
 fn parser_interns_same_identifier_symbol_in_function_body() {
@@ -125,11 +125,8 @@ def main() -> i64 {
     }
 
     let mut type_checker = TypeChecker::new();
-    type_checker
+    let err = type_checker
         .check_program(&program)
-        .expect("source should pass type checking");
-
-    let err = typeck::borrow_check(&program, type_checker.env())
         .expect_err("borrow check should reject mutable and immutable conflict");
     let msg = err.to_string();
     assert!(

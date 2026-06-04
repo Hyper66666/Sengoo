@@ -129,7 +129,8 @@ fn collect_hir_call_targets_from_expr(
         | HIRExpr::Ascribe(inner, _)
         | HIRExpr::Ref(_, inner)
         | HIRExpr::Deref(inner)
-        | HIRExpr::Await(inner) => {
+        | HIRExpr::Await(inner)
+        | HIRExpr::Try(inner) => {
             collect_hir_call_targets_from_expr(inner, index_by_name, targets, seen);
         }
         HIRExpr::Binary(_, lhs, rhs)
@@ -184,7 +185,7 @@ fn collect_hir_call_targets_from_expr(
                 collect_hir_call_targets_from_expr(&arm.body, index_by_name, targets, seen);
             }
         }
-        HIRExpr::Loop(body) | HIRExpr::Block(body) => {
+        HIRExpr::Loop(body) | HIRExpr::Block(body) | HIRExpr::TryBlock(body) => {
             collect_hir_call_targets_from_body(body, index_by_name)
                 .into_iter()
                 .for_each(|idx| {
@@ -280,6 +281,18 @@ fn collect_hir_call_targets_from_pattern(
 ) {
     match pattern {
         HIRPattern::Wild | HIRPattern::Lit(_) | HIRPattern::Var { .. } => {}
+        HIRPattern::EnumVariant { fields, .. } => {
+            for (_, sub_pattern) in fields {
+                if let Some(sub_pattern) = sub_pattern {
+                    collect_hir_call_targets_from_pattern(
+                        sub_pattern,
+                        index_by_name,
+                        targets,
+                        seen,
+                    );
+                }
+            }
+        }
         HIRPattern::Struct { fields, .. } => {
             for (_, sub_pattern) in fields {
                 if let Some(sub_pattern) = sub_pattern {

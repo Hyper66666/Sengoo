@@ -9,22 +9,27 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, and i64/bool collection mutators. Current runtime-backed shapes cover scalar i64/bool combinations; string-key/string-value collections are deferred until Sengoo has a specified string/byte-slice ownership model.
-- `string.sg`: Sengoo-side wrappers over built-in string lowering and runtime string search: `str_len`, equality, contains/prefix/suffix/index helpers, empty checks, append, and repeat.
+- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, copied-text lists, and string-key maps for scalar i64/bool values.
+- `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
-- `file.sg`: runtime-backed file helpers for existence checks, byte length, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
-- `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic non-recursive listing, and empty-directory removal.
+- `status.sg`: stable stdlib status categories plus category name/message copy helpers for fallible runtime APIs.
+- `json.sg`: runtime-backed JSON parse/query/build/serialize helpers using document/value handles and managed `Buffer` outputs.
+- `file.sg`: runtime-backed file helpers for existence checks, byte length, metadata, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
+- `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic listing, bounded recursive walking, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
-- `process.sg`: runtime-backed process metadata helpers for process ID, current working directory length/copy into managed `Buffer` handles, conventional exit-code selection, and synchronous shell-free child execution with zero through three explicit arguments.
+- `process.sg`: runtime-backed process metadata helpers, synchronous shell-free fixed-arity child execution, and command-builder handles for dynamic argv, cwd/env overrides, output capture, and timeouts.
 - `args.sg`: runtime-backed command-line argument helpers for user argument count, existence checks, byte lengths, and managed `Buffer` copy. The executable/source path is not exposed as argument index `0`.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
-- `runtime.c`: C runtime support used by stdlib/runtime smoke paths.
+- `runtime.c`: anchor/core C runtime support used by stdlib/runtime smoke
+  paths. Large domain bridges live in sibling sources:
+  `runtime_collections.c`, `runtime_json.c`, and `runtime_process.c`, with
+  shared declarations in `runtime_shared.h`.
 
 ## Source Imports
 
@@ -44,8 +49,50 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::args`, `import std::db`, `import std::dir`, `import std::env`, `import std::file`, `import std::io`, `import std::lua54`, `import std::net`, `import std::path`, `import std::process`, `import std::proto`, and `import std::strconv`
-preload `ffi.sg` so managed `Buffer` helpers are available for output payloads.
+std::args`, `import std::collections`, `import std::db`, `import std::dir`,
+`import std::env`, `import std::file`, `import std::io`,
+`import std::json`, `import std::lua54`, `import std::net`,
+`import std::path`, `import std::process`, `import std::proto`,
+`import std::status`, and `import std::strconv`
+preload the needed source dependencies so managed `Buffer` helpers and stable
+status categories are available for output payloads and error-shaped results.
+
+## Status and Buffer Helpers
+
+`std::status` exposes stable numeric categories for fallible stdlib APIs:
+`STATUS_OK()` is `0`, `STATUS_UNKNOWN()` is the legacy generic failure `1`,
+and specific categories such as `STATUS_INVALID_ARGUMENT()`,
+`STATUS_INVALID_HANDLE()`, `STATUS_BUFFER_TOO_SMALL()`,
+`STATUS_NOT_FOUND()`, `STATUS_ALREADY_EXISTS()`,
+`STATUS_PERMISSION_DENIED()`, `STATUS_UNSUPPORTED()`, `STATUS_IO()`,
+`STATUS_PARSE()`, `STATUS_TIMEOUT()`, `STATUS_INTERRUPTED()`,
+`STATUS_OVERFLOW()`, and `STATUS_OUT_OF_MEMORY()` use the positive namespace
+specified by OpenSpec. `status_name_copy(code, buffer)` and
+`status_message_copy(code, buffer)` copy deterministic ASCII diagnostics into a
+managed `Buffer`. `status_from_raw_ffi(code)` maps existing negative FFI raw
+codes, negative `-STATUS_*` runtime returns, and positive status categories
+into the public positive namespace. Current stdlib fallible wrappers use this
+taxonomy for `Result.error`; host failures that cannot be classified portably
+map to `STATUS_UNKNOWN()`.
+
+`Buffer.len()` remains the legacy capacity helper. New composable helpers make
+that explicit: `capacity()`, `used_len()`, `clear()`,
+`copy_range(start, len, out)`, `copy_from_str(value)`, `append_str(value)`, and
+`is_utf8()`. These helpers operate on meaningful bytes tracked by the Buffer
+itself; stdlib functions that write through `buffer.ptr()` still report their
+meaningful byte count through their `Result` return value.
+
+## Collection Helpers
+
+`std::collections` keeps the existing scalar `Vec<T>` and `HashMap<K, V>`
+helpers for i64/bool combinations and adds runtime-owned text shapes for common
+tooling workloads. `TextList` copies inserted `&str` values and can copy
+elements back into a managed `Buffer` with `get_copy`, `remove_copy`, and
+iterator `next_copy`. `StringMapI64` and `StringMapBool` copy string keys on
+insert, replace existing values when a duplicate key is inserted, and expose
+deterministic key iteration by unsigned byte ordering. Key ordering is byte
+based only; Unicode normalization, locale collation, and case folding are not
+applied.
 
 ## String Conversion Helpers
 
@@ -60,6 +107,24 @@ characters, and reports overflow as an error-shaped `Result`. Floats, radix
 selection, locale-specific formatting, arbitrary precision values, and
 owned-string returns remain deferred.
 
+## JSON Helpers
+
+`std::json` parses JSON text into `JsonDoc` handles and exposes `JsonValue`
+handles for object, array, string, number, bool, and null values. `json_parse`
+accepts `&str`, while `json_parse_buffer(buffer, input_len)` parses explicit
+Buffer bytes. Object and array queries return error-shaped `Result` values for
+missing keys, out-of-range indexes, and type mismatches. Strings and serialized
+documents copy into managed `Buffer` handles. Numbers can be read as `f64`, or
+as exact `i64` when representable.
+
+Builders create object, array, string, number, bool, and null values inside a
+document. `JsonDoc.serialize(buffer)` writes compact valid JSON, and
+`JsonDoc.close()` releases runtime-owned handles. Parser diagnostics are
+available through `json_last_error_code()`, `json_last_error_offset()`, and
+`json_last_error_copy(buffer)`. The current runtime enforces conservative
+limits of 16 KiB input bytes, 64 nesting levels, and 4096 nodes; failed parses
+return no closeable partial document handle.
+
 ## Directory Helpers
 
 `std::dir` covers the portable directory operations needed by small scripts and
@@ -69,9 +134,12 @@ tooling: `dir_exists(path)`, `dir_create(path)`, `dir_create_all(path)`,
 exists. Listing is non-recursive, excludes `.` and `..`, sorts entry names by
 unsigned byte order for deterministic indexes, copies one child name into a
 managed `Buffer`, and returns the byte count without appending a NUL terminator.
-`dir_remove` only removes empty directories; recursive tree deletion, recursive
-traversal, glob matching, metadata structs, owned-string entry returns, and
-persistent iterator/list APIs remain deferred.
+`dir_walk(root, max_depth)` creates a traversal handle that copies sorted
+relative child paths into a managed `Buffer` one at a time. The walk excludes
+`.` and `..`, does not follow symlinks, and stops recursing past `max_depth`.
+`DirWalk.close()` releases the traversal handle. `dir_remove` only removes
+empty directories; recursive tree deletion, glob matching, owned-string entry
+returns, and watch APIs remain deferred.
 
 ## File Helpers
 
@@ -81,9 +149,13 @@ basic read, write, append, length, existence, and removal operations. Copy
 returns the transferred byte count, while move returns an ok-shaped boolean
 when the host rename succeeds. Existing destinations are rejected unless
 callers explicitly opt into replacement, and copy rejects source aliases that
-already refer to the destination file. Recursive directory transfer,
-cross-filesystem move fallback, metadata-preservation guarantees, atomic-copy
-claims, progress callbacks, and async file I/O remain deferred.
+already refer to the destination file. Metadata helpers expose
+`file_kind(path)`, `file_size(path)`, and `file_modified_unix_ms(path)`.
+`PATH_KIND_FILE()`, `PATH_KIND_DIR()`, and `PATH_KIND_SYMLINK()` are stable
+path-kind values; unsupported fields return `STATUS_UNSUPPORTED()`. Recursive
+directory transfer, cross-filesystem move fallback, metadata-preservation
+guarantees, atomic-copy claims, progress callbacks, and async file I/O remain
+deferred.
 
 ## Standard I/O Helpers
 
@@ -120,9 +192,21 @@ failure code. `process_run(executable)` and `process_run_1` through
 standard streams, block until completion, and return the normal child exit
 code. The runtime does not invoke a shell internally: shell metacharacters stay
 inside literal child arguments unless the caller explicitly selects a shell
-executable. Arbitrary-length argv, stream capture, pipes, cwd/environment
-overrides, background handles, timeouts, signals, cancellation, and async
-execution remain deferred; command-line argument reads live in `std::args`.
+executable.
+
+For dynamic commands, `process_command(executable)` returns a `ProcessCommand`
+handle. Callers can append literal argv entries with `arg`, set `cwd`, configure
+environment edits with `env_clear`, `env_set`, and `env_remove`, enable
+`capture_stdout`/`capture_stderr`, set `timeout_ms`, and call `run()` to obtain
+a `ProcessOutput` handle. Nonzero child exit codes are still successful process
+outputs; `exit_code()` reports them. If a timeout kills the child,
+`timed_out()` is true, `exit_code()` returns `STATUS_TIMEOUT()`, and any
+already-captured partial stdout/stderr remains copyable. `env_clear()` removes
+inherited variables such as `PATH`, so callers should pass an absolute
+executable path or set the needed environment explicitly. `ProcessCommand.close`
+and `ProcessOutput.close` release runtime-owned handles. Shell pipelines,
+background handles, signals, cancellation, stdin piping, and async execution
+remain deferred; command-line argument reads live in `std::args`.
 
 ## Argument Helpers
 

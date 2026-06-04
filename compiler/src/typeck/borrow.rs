@@ -4,8 +4,10 @@
 //! early diagnostics for obvious mutable/immutable borrow conflicts.
 
 use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
+use crate::lexer::Span;
+use crate::typeck::ty::Ty;
 use crate::typeck::TypeEnv;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Borrow category.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +50,12 @@ pub enum BorrowError {
         borrow_span: (usize, usize),
         move_span: (usize, usize),
     },
+    /// Use of a `String` value after it was moved.
+    UseAfterMove {
+        var: String,
+        use_span: (usize, usize),
+        move_span: (usize, usize),
+    },
 }
 
 /// Borrow checker.
@@ -62,6 +70,12 @@ pub struct BorrowChecker {
     lifetime_counter: usize,
     /// Collected errors.
     errors: Vec<BorrowError>,
+    /// Variables whose owned `String` value was moved in the current scope.
+    moved: HashSet<String>,
+    /// Nested scope snapshots for moved-variable tracking.
+    moved_stack: Vec<HashSet<String>>,
+    /// Last move site per variable (for diagnostics).
+    move_spans: HashMap<String, (usize, usize)>,
 }
 
 impl BorrowChecker {
@@ -73,6 +87,9 @@ impl BorrowChecker {
             borrow_stack: Vec::new(),
             lifetime_counter: 0,
             errors: Vec::new(),
+            moved: HashSet::new(),
+            moved_stack: Vec::new(),
+            move_spans: HashMap::new(),
         }
     }
 
@@ -96,6 +113,11 @@ impl BorrowChecker {
                 if let Some(value) = value {
                     self.check_expr(value);
                     self.track_borrows_in_expr(&name.name, value);
+                    if let Some(source) = Self::expr_var_name(value) {
+                        if self.var_is_lang_owned_string(&source) {
+                            self.mark_moved(&source, value.span);
+                        }
+                    }
                 }
             }
             StmtKind::Const { value, .. } => self.check_expr(value),
@@ -109,7 +131,7 @@ impl BorrowChecker {
         }
     }
 
-    fn finish(&mut self) -> std::result::Result<(), Vec<BorrowError>> {
+    pub(crate) fn finish(&mut self) -> std::result::Result<(), Vec<BorrowError>> {
         if self.errors.is_empty() {
             Ok(())
         } else {
@@ -121,15 +143,27 @@ impl BorrowChecker {
         let current = std::mem::take(&mut self.borrows);
         self.borrow_stack.push(current);
         self.borrows = HashMap::new();
+        let moved = std::mem::take(&mut self.moved);
+        self.moved_stack.push(moved);
+        self.moved = HashSet::new();
     }
 
     fn pop_scope(&mut self) {
         if let Some(prev) = self.borrow_stack.pop() {
             self.borrows = prev;
         }
+        if let Some(mut prev_moved) = self.moved_stack.pop() {
+            for name in std::mem::take(&mut self.moved) {
+                if let Some(span) = self.move_spans.remove(&name) {
+                    prev_moved.insert(name.clone());
+                    self.move_spans.insert(name, span);
+                }
+            }
+            self.moved = prev_moved;
+        }
     }
 
-    fn check_block(&mut self, block: &Block) {
+    pub(crate) fn check_block(&mut self, block: &Block) {
         self.push_scope();
         for stmt in &block.stmts {
             let _ = self.check_stmt(stmt);
@@ -155,12 +189,20 @@ impl BorrowChecker {
                 self.check_expr(func);
                 for arg in args {
                     self.check_expr(arg);
+                    self.maybe_move_string_arg(arg);
                 }
             }
-            ExprKind::MethodCall { receiver, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 self.check_expr(receiver);
+                self.check_owned_string_invalidation(receiver, &method.name);
                 for arg in args {
                     self.check_expr(arg);
+                    self.maybe_move_string_arg(arg);
                 }
             }
             ExprKind::Block(block) => self.check_block(block),
@@ -227,6 +269,7 @@ impl BorrowChecker {
             | ExprKind::Try(body)
             | ExprKind::Await(body)
             | ExprKind::Paren(body) => self.check_expr(body),
+            ExprKind::TryBlock(block) => self.check_block(block),
             ExprKind::Cast { expr, .. } | ExprKind::Is { expr, .. } => self.check_expr(expr),
             ExprKind::Return(value) | ExprKind::Break(value) | ExprKind::Yield(value) => {
                 if let Some(value) = value {
@@ -234,7 +277,80 @@ impl BorrowChecker {
                 }
             }
             ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => self.check_block(block),
-            ExprKind::Continue | ExprKind::Literal(_) | ExprKind::Ident(_) | ExprKind::Path(_) => {}
+            ExprKind::Continue | ExprKind::Literal(_) => {}
+            ExprKind::Ident(ident) => {
+                self.check_use_after_move(&ident.name, expr.span);
+            }
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_simple() {
+                    self.check_use_after_move(&ident.name, expr.span);
+                }
+            }
+        }
+    }
+
+    fn ty_is_lang_owned_string(&self, ty: &Ty) -> bool {
+        self._env
+            .owned_string_ty
+            .as_ref()
+            .is_some_and(|canonical| canonical.kind == ty.kind)
+    }
+
+    fn var_ty(&self, name: &str) -> Option<Ty> {
+        self._env
+            .lookup(name)
+            .and_then(|symbol| match &symbol.kind {
+                crate::typeck::env::SymbolKind::Var(ty) => Some(ty.clone()),
+                _ => None,
+            })
+    }
+
+    fn var_is_lang_owned_string(&self, name: &str) -> bool {
+        self.var_ty(name)
+            .is_some_and(|ty| self.ty_is_lang_owned_string(&ty))
+    }
+
+    fn check_owned_string_invalidation(&mut self, receiver: &Expr, method_name: &str) {
+        if !matches!(method_name, "push_str" | "clear" | "drop") {
+            return;
+        }
+        if let Some(name) = Self::expr_var_name(receiver) {
+            if self.moved.contains(&name) {
+                let use_span = (receiver.span.lo as usize, receiver.span.hi as usize);
+                let move_span = self.move_spans.get(&name).copied().unwrap_or(use_span);
+                self.errors.push(BorrowError::UseAfterMove {
+                    var: name,
+                    use_span,
+                    move_span,
+                });
+            }
+        }
+    }
+
+    fn mark_moved(&mut self, name: &str, span: Span) {
+        let use_span = (span.lo as usize, span.hi as usize);
+        self.moved.insert(name.to_string());
+        self.move_spans.insert(name.to_string(), use_span);
+    }
+
+    fn check_use_after_move(&mut self, name: &str, span: Span) {
+        if !self.moved.contains(name) {
+            return;
+        }
+        let use_span = (span.lo as usize, span.hi as usize);
+        let move_span = self.move_spans.get(name).copied().unwrap_or(use_span);
+        self.errors.push(BorrowError::UseAfterMove {
+            var: name.to_string(),
+            use_span,
+            move_span,
+        });
+    }
+
+    fn maybe_move_string_arg(&mut self, arg: &Expr) {
+        if let Some(name) = Self::expr_var_name(arg) {
+            if self.var_is_lang_owned_string(&name) {
+                self.mark_moved(&name, arg.span);
+            }
         }
     }
 

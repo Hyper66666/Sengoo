@@ -44,7 +44,16 @@ impl<'a> LoweringContext<'a> {
             trait_method_templates,
             async_dispatch_registry,
             future_origins: HashMap::new(),
+            try_scope_stack: Vec::new(),
         }
+    }
+
+    pub(super) fn push_try_scope(&mut self, scope: try_expr_helpers::TryScope) {
+        self.try_scope_stack.push(scope);
+    }
+
+    pub(super) fn pop_try_scope(&mut self) {
+        self.try_scope_stack.pop();
     }
 
     pub(super) fn async_dispatch_kind_id(&mut self, base_name: &str) -> Option<i64> {

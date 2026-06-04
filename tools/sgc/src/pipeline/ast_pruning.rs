@@ -335,7 +335,8 @@ fn collect_ast_call_targets_from_expr(
         AstExprKind::Block(block)
         | AstExprKind::Loop(block)
         | AstExprKind::AsyncBlock(block)
-        | AstExprKind::ParallelBlock(block) => {
+        | AstExprKind::ParallelBlock(block)
+        | AstExprKind::TryBlock(block) => {
             collect_ast_call_targets_from_block(block, index_by_name)
                 .into_iter()
                 .for_each(|idx| {

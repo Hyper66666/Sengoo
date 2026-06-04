@@ -1,0 +1,56 @@
+// examples/stdlib/19_process_capture.sg
+//
+// Demonstrates: importing std::process command builders for captured output.
+// The example selects a shell explicitly at the call site for portability.
+//
+// Run: sgc run examples/stdlib/19_process_capture.sg
+// Expected output: 19
+
+import std::env;
+import std::process;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let code = if env_is_windows() {
+        let command = process_command("cmd.exe").unwrap_or(ProcessCommand { handle: 0 });
+        let arg0 = command.arg("/D").unwrap_or(false);
+        let arg1 = command.arg("/C").unwrap_or(false);
+        let arg2 = command.arg("echo capture").unwrap_or(false);
+        let capture = command.capture_stdout(true).unwrap_or(false);
+        let output = command.run().unwrap_or(ProcessOutput { handle: 0 });
+        let exit_code = output.exit_code().unwrap_or(-1);
+        let timed_out = output.timed_out();
+        let stdout_len = output.stdout_len().unwrap_or(0);
+        let copied = output.stdout_copy(buffer).unwrap_or(0);
+        let stderr_len = output.stderr_len().unwrap_or(-1);
+        let output_closed = output.close();
+        let command_closed = command.close();
+        if arg0 && arg1 && arg2 && capture && exit_code == 0 && !timed_out && stdout_len > 0 && copied == stdout_len && stderr_len == 0 && output_closed && command_closed {
+            19
+        } else {
+            0
+        }
+    } else {
+        let command = process_command("sh").unwrap_or(ProcessCommand { handle: 0 });
+        let arg0 = command.arg("-c").unwrap_or(false);
+        let arg1 = command.arg("printf capture").unwrap_or(false);
+        let capture = command.capture_stdout(true).unwrap_or(false);
+        let output = command.run().unwrap_or(ProcessOutput { handle: 0 });
+        let exit_code = output.exit_code().unwrap_or(-1);
+        let timed_out = output.timed_out();
+        let stdout_len = output.stdout_len().unwrap_or(0);
+        let copied = output.stdout_copy(buffer).unwrap_or(0);
+        let stderr_len = output.stderr_len().unwrap_or(-1);
+        let output_closed = output.close();
+        let command_closed = command.close();
+        if arg0 && arg1 && capture && exit_code == 0 && !timed_out && stdout_len == 7 && copied == 7 && stderr_len == 0 && output_closed && command_closed {
+            19
+        } else {
+            0
+        }
+    };
+
+    buffer.free();
+    print(code);
+    0
+}

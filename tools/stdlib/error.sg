@@ -1,5 +1,7 @@
 extern "C" {
     fn sengoo_panic_option_unwrap_i64() -> i64;
+    fn sengoo_f64_eq(lhs: f64, rhs: f64) -> i64;
+    fn sengoo_f64_ne(lhs: f64, rhs: f64) -> i64;
 }
 
 def assert(cond: bool) -> bool {
@@ -44,9 +46,9 @@ def assert_ne_str(lhs: &str, rhs: &str) -> bool {
 }
 
 def assert_eq_f64(lhs: f64, rhs: f64) -> bool {
-    assert(lhs == rhs)
+    assert(sengoo_f64_eq(lhs, rhs) != 0)
 }
 
 def assert_ne_f64(lhs: f64, rhs: f64) -> bool {
-    assert(lhs != rhs)
+    assert(sengoo_f64_ne(lhs, rhs) != 0)
 }

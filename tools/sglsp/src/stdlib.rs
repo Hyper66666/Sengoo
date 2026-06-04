@@ -13,6 +13,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("ffi", include_str!("../../stdlib/ffi.sg")),
     ("file", include_str!("../../stdlib/file.sg")),
     ("io", include_str!("../../stdlib/io.sg")),
+    ("json", include_str!("../../stdlib/json.sg")),
     ("lua54", include_str!("../../stdlib/lua54.sg")),
     ("math", include_str!("../../stdlib/math.sg")),
     ("net", include_str!("../../stdlib/net.sg")),
@@ -24,6 +25,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
     ("strconv", include_str!("../../stdlib/strconv.sg")),
+    ("status", include_str!("../../stdlib/status.sg")),
     ("time", include_str!("../../stdlib/time.sg")),
 ];
 
@@ -35,11 +37,13 @@ fn stdlib_source(module: &str) -> Option<&'static str> {
 
 fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "collections" => &["option"],
+        "collections" => &["ffi"],
+        "string" => &["ffi"],
         "option" => &["result"],
         "result" => &["option"],
         "ffi" => &["option", "result"],
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["ffi"],
+        "json" | "status" => &["ffi"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["status"],
         "db" | "lua54" | "net" | "proto" => &["ffi"],
         _ => &[],
     }
@@ -220,6 +224,65 @@ mod tests {
     }
 
     #[test]
+    fn stdlib_symbols_follow_string_buffer_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::string;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"string_new"));
+        assert!(names.contains(&"string_from_str"));
+
+        let signatures = stdlib_signatures_for_content("import std::string;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def string_new() -> String"));
+        assert!(labels.contains(
+            &"def copy_to_buffer(self, buffer: Buffer) -> Result<i64, i64> [impl String]"
+        ));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_collections_buffer_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::collections;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"TextList"));
+        assert!(names.contains(&"text_list_new"));
+        assert!(names.contains(&"StringMapI64"));
+        assert!(names.contains(&"string_map_i64_new"));
+        assert!(names.contains(&"StringMapBool"));
+        assert!(names.contains(&"string_map_bool_new"));
+
+        let signatures = stdlib_signatures_for_content("import std::collections;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def text_list_new() -> TextList"));
+        assert!(labels.contains(&"def string_map_i64_new() -> StringMapI64"));
+        assert!(labels.contains(&"def string_map_bool_new() -> StringMapBool"));
+        assert!(
+            labels.contains(
+                &"def get_copy(self, index: i64, buffer: Buffer) -> Result<i64, i64> [impl TextList]"
+            ),
+            "labels: {labels:#?}"
+        );
+        assert!(
+            labels.contains(&"def iter_keys(self) -> StringMapKeyIter [impl StringMapI64]"),
+            "labels: {labels:#?}"
+        );
+    }
+
+    #[test]
     fn stdlib_symbol_detail_resolves_imported_symbol() {
         let symbol = stdlib_symbol_detail_for_content("import std::option;\n", "option_some")
             .expect("imported stdlib symbol should resolve");
@@ -285,6 +348,11 @@ mod tests {
         assert!(names.contains(&"file_write_str"));
         assert!(names.contains(&"file_copy"));
         assert!(names.contains(&"file_move"));
+        assert!(names.contains(&"PATH_KIND_FILE"));
+        assert!(names.contains(&"PATH_KIND_DIR"));
+        assert!(names.contains(&"file_kind"));
+        assert!(names.contains(&"file_size"));
+        assert!(names.contains(&"file_modified_unix_ms"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -299,6 +367,10 @@ mod tests {
         assert!(labels.contains(
             &"def file_move(source: &str, destination: &str, overwrite: bool) -> Result<bool, i64>"
         ));
+        assert!(labels.contains(&"def PATH_KIND_FILE() -> i64"));
+        assert!(labels.contains(&"def file_kind(path: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def file_size(path: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def file_modified_unix_ms(path: &str) -> Result<i64, i64>"));
     }
 
     #[test]
@@ -377,12 +449,15 @@ mod tests {
 
         assert!(names.contains(&"process_id"));
         assert!(names.contains(&"process_current_dir_copy"));
+        assert!(names.contains(&"process_command"));
         assert!(names.contains(&"process_exit_code"));
         assert!(names.contains(&"process_run"));
         assert!(names.contains(&"process_run_1"));
         assert!(names.contains(&"process_run_2"));
         assert!(names.contains(&"process_run_3"));
         assert!(names.contains(&"process_run_raw"));
+        assert!(names.contains(&"ProcessCommand"));
+        assert!(names.contains(&"ProcessOutput"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -394,6 +469,8 @@ mod tests {
         assert!(
             labels.contains(&"def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>")
         );
+        assert!(labels
+            .contains(&"def process_command(executable: &str) -> Result<ProcessCommand, i64>"));
         assert!(labels.contains(&"def process_id() -> i64"));
         assert!(labels.contains(&"def process_run(executable: &str) -> Result<i64, i64>"));
         assert!(labels.contains(
@@ -415,6 +492,8 @@ mod tests {
         assert!(names.contains(&"dir_remove"));
         assert!(names.contains(&"dir_entry_count"));
         assert!(names.contains(&"dir_entry_name"));
+        assert!(names.contains(&"DirWalk"));
+        assert!(names.contains(&"dir_walk"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -430,6 +509,13 @@ mod tests {
         assert!(labels.contains(
             &"def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64>"
         ));
+        assert!(
+            labels.contains(&"def dir_walk(root: &str, max_depth: i64) -> Result<DirWalk, i64>")
+        );
+        assert!(
+            labels.contains(&"def next(self, buffer: Buffer) -> Result<i64, i64> [impl DirWalk]")
+        );
+        assert!(labels.contains(&"def close(self) -> bool [impl DirWalk]"));
     }
 
     #[test]
@@ -505,5 +591,61 @@ mod tests {
         assert!(labels.contains(&"def strconv_parse_i64(value: &str) -> Result<i64, i64>"));
         assert!(labels
             .contains(&"def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_status_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::status;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"STATUS_UNKNOWN"));
+        assert!(names.contains(&"STATUS_INVALID_ARGUMENT"));
+        assert!(names.contains(&"status_name_copy"));
+        assert!(names.contains(&"status_message_copy"));
+        assert!(names.contains(&"status_from_raw_ffi"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::status;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def STATUS_UNKNOWN() -> i64"));
+        assert!(
+            labels.contains(&"def status_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64>")
+        );
+        assert!(labels.contains(&"def status_from_raw_ffi(code: i64) -> i64"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_json_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::json;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"JsonDoc"));
+        assert!(names.contains(&"JsonValue"));
+        assert!(names.contains(&"json_parse"));
+        assert!(names.contains(&"json_doc_object"));
+        assert!(names.contains(&"Buffer"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::json;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def json_parse(text: &str) -> Result<JsonDoc, i64>"));
+        assert!(labels.contains(
+            &"def json_parse_buffer(buffer: Buffer, input_len: i64) -> Result<JsonDoc, i64>"
+        ));
+        assert!(labels.contains(&"def json_doc_object() -> Result<JsonDoc, i64>"));
+        assert!(labels.contains(&"def number_f64(self) -> Result<f64, i64> [impl JsonValue]"));
     }
 }

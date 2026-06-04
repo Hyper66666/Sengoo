@@ -376,9 +376,12 @@ their binary entry. Dependency keys currently must match the target package's
 
 The source-side standard library lives under `tools/stdlib/` and is split by
 surface area: `option.sg`, `result.sg`, `collections.sg`, `string.sg`,
-`math.sg`, `error.sg`, and reflection wrappers such as `ffi.sg`, `db.sg`,
-`lua54.sg`, `net.sg`, and `proto.sg`. See `tools/stdlib/README.md` for module
-summaries and current deferrals.
+`strconv.sg`, `json.sg`, `status.sg`, `io.sg`, `file.sg`, `dir.sg`,
+`path.sg`, `process.sg`, `args.sg`, `env.sg`, `math.sg`, `error.sg`, and
+reflection wrappers such as `ffi.sg`, `db.sg`, `lua54.sg`, `net.sg`, and
+`proto.sg`. Runtime bridges are split across `runtime.c`, `runtime_collections.c`,
+`runtime_json.c`, `runtime_process.c`, and `runtime_string.c`. See
+`tools/stdlib/README.md` for module summaries and current deferrals.
 
 Use source modules directly from Sengoo code:
 
@@ -531,23 +534,45 @@ Sengoo/
 `-- vscode-sengoo/   # VS Code extension
 ```
 
+## Language Ergonomics (Try / Match)
+
+The compiler now ships a pinned `try-and-match-ergonomics` surface (see
+`openspec/specs/try-and-match-ergonomics/spec.md`):
+
+- Postfix `?` for `Result<T, E>` and `Option<T>` with stable mismatch diagnostics
+- `try { ... }` blocks that contain propagation and return the inferred container
+- `match` with enum variant patterns, guards, `| or` patterns, and exhaustiveness checks
+- MIR lowering for guarded arms and enum discriminant dispatch; async `match` + `await` arms are covered by `cargo test -p sgc match`
+
+Runnable samples live under `examples/ergonomics/`.
+
 ## Project Status
 
-Current stage: early but fast-iterating.
+Current stage: early but fast-iterating — usable for local projects, with weekly
+compiler/stdlib/tooling landings.
 
 Current focus:
 
-- Async phase-2 expansion and runtime semantics
-- Stronger incremental consistency under real edits
-- Better interop and reflection ergonomics
-- Tooling and developer experience polish
+- Runtime hardening for FFI/async edges and stdlib breadth
+- `sgc test` manifest workflows and package-level smoke gates
+- Frontend compile profiling and MIR lowering hot-path work
+- Tooling polish (`sglsp` diagnostics, JSON error output, stdlib indexing)
 
-Recent engineering refactors (May 2026):
+Development progress (May–June 2026):
 
-- Runtime: `NetRuntime` instance now owns all TCP/UDP/HTTP/WS/HttpServer state; the extern C ABI in `runtime/src/net.rs` is now a thin shim and the old global accessors (`udp_sockets`, `http_responses`, `ws_streams`, `http_servers`, `next_handle`) are gone. Coverage: `cargo test -p sengoo-runtime --lib` passes 42/42, plus 19 `net::tests` and 6 instance-level smoke tests.
-- Runtime: Lua54 reflection tests are serialized with a test-only mutex guard so the shared `LUA54_LAST_ERROR` global cannot race when the dynamic library is available.
-- Typeck: `SymbolKind::Function` no longer duplicates `params`/`ret`; a new `env.declare_fn(name, params, ret)` helper folds the previous `fn_ty(...).clone()` + `insert_fn(...)` pair, removing the redundant params/ret clones at every function declaration site. `cargo test -p sengoo-compiler --lib` passes 539/539.
-- HIR: class inheritance resolution borrows AST string slices throughout the recursion guard, per-class lookup map, and local-seen set, cutting `.clone()` count in `compiler/src/hir/lower.rs` from 59 to 52 without behaviour change.
+- **Control flow**: `?`, `try {}`, enum `match`, guards, and or-patterns are implemented end-to-end (parser → typeck → MIR → native codegen). Regression tests live under `compiler/src/tests/*try*` and `*match*`.
+- **Async**: resume lowering no longer reuses the future local for frame loads (fixes LLVM SSA duplicates in `match` + `await` paths). `cargo test -p sgc match` covers native async match smoke.
+- **Standard library**: mainstream scripting surface expanded — owned `String`, `std::json`, `std::status` taxonomy, synchronous `std::io`, directory listing and copy/move (`std::dir`, `std::file`), shell-free `std::process` helpers plus capture/timeouts, and decimal `std::strconv`. Examples `examples/stdlib/15`–`20` exercise the new modules.
+- **Compiler pipeline**: native artifact caches now fingerprint `runtime.c` bytes (not just path) so in-place runtime edits cannot reuse stale executables. Frontend phase timings and MIR lowering hot-path fixes (including `Cow`-based block-state updates) landed under `openspec/specs/frontend-build-performance/`.
+- **Tooling**: `sgc` gains a `test` command path for manifest-driven smoke; `sglsp` stdlib go-to-definition and diagnostics align with imported `std::*` modules. Large `sgc` sources were split for maintainability (interface commands, fingerprints, incremental bench hooks).
+- **Earlier May refactors** (still relevant): `NetRuntime` owns all socket/server state; Lua54 reflection tests are mutex-serialized in test builds; `env.declare_fn` removed duplicate function-type clones; HIR class inheritance resolution borrows AST names instead of cloning strings.
+
+Verification snapshot on the integration branch (local, June 2026):
+
+- `cargo test -p sengoo-compiler --lib` — compiler unit suite
+- `cargo test -p sgc match` — async/match native smoke
+- `cargo test -p sglsp` — LSP surface
+- `openspec validate --all --strict` — canonical specs
 
 Notes:
 

@@ -14,14 +14,72 @@ use crate::{
 #[cfg(not(windows))]
 use crate::{LINKER_AVAILABLE, LINKER_UNAVAILABLE, LLD_AVAILABILITY};
 
-fn runtime_object_cache_path(runtime_c_path: &Path, opt_level: u8) -> Result<PathBuf> {
-    let canonical =
+const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
+    "runtime_collections.c",
+    "runtime_json.c",
+    "runtime_process.c",
+    "runtime_string.c",
+];
+const RUNTIME_SHARED_HEADER: &str = "runtime_shared.h";
+
+pub(crate) fn runtime_source_bundle(runtime_c: &str) -> Result<Vec<PathBuf>> {
+    let runtime_c_path = Path::new(runtime_c);
+    let mut sources = Vec::new();
+    sources.push(runtime_c_path.to_path_buf());
+    let Some(runtime_dir) = runtime_c_path.parent() else {
+        return Ok(sources);
+    };
+    for sibling in RUNTIME_SPLIT_C_SOURCES {
+        let candidate = runtime_dir.join(sibling);
+        if candidate.exists() {
+            sources.push(candidate);
+        }
+    }
+    Ok(sources)
+}
+
+fn runtime_bundle_fingerprint_inputs(runtime_c: &str) -> Result<Vec<PathBuf>> {
+    let mut inputs = runtime_source_bundle(runtime_c)?;
+    if let Some(runtime_dir) = Path::new(runtime_c).parent() {
+        let header = runtime_dir.join(RUNTIME_SHARED_HEADER);
+        if header.exists() {
+            inputs.push(header);
+        }
+    }
+    Ok(inputs)
+}
+
+pub(crate) fn runtime_bundle_fingerprint(runtime_c: &str) -> Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    for input in runtime_bundle_fingerprint_inputs(runtime_c)? {
+        let canonical = fs::canonicalize(&input).unwrap_or_else(|_| input.clone());
+        canonical.to_string_lossy().hash(&mut hasher);
+        file_fingerprint(&canonical)?.hash(&mut hasher);
+    }
+    Ok(hasher.finish())
+}
+
+pub(crate) fn optional_runtime_bundle_fingerprint(runtime_c: Option<&str>) -> Result<Option<u64>> {
+    runtime_c.map(runtime_bundle_fingerprint).transpose()
+}
+
+fn runtime_object_cache_path(
+    runtime_source_path: &Path,
+    runtime_c_path: &Path,
+    runtime_bundle_fingerprint: u64,
+    opt_level: u8,
+) -> Result<PathBuf> {
+    let runtime_c_canonical =
         fs::canonicalize(runtime_c_path).unwrap_or_else(|_| runtime_c_path.to_path_buf());
-    let runtime_c_fingerprint = file_fingerprint(&canonical)?;
+    let canonical =
+        fs::canonicalize(runtime_source_path).unwrap_or_else(|_| runtime_source_path.to_path_buf());
+    let runtime_source_fingerprint = file_fingerprint(&canonical)?;
 
     let mut hasher = DefaultHasher::new();
+    runtime_c_canonical.to_string_lossy().hash(&mut hasher);
     canonical.to_string_lossy().hash(&mut hasher);
-    runtime_c_fingerprint.hash(&mut hasher);
+    runtime_bundle_fingerprint.hash(&mut hasher);
+    runtime_source_fingerprint.hash(&mut hasher);
     opt_level.hash(&mut hasher);
     if cfg!(windows) {
         "x86_64-pc-windows-msvc".hash(&mut hasher);
@@ -36,17 +94,12 @@ fn runtime_object_cache_path(runtime_c_path: &Path, opt_level: u8) -> Result<Pat
     Ok(cache_dir.join(format!("runtime-{}-O{}.{}", key, opt_level, ext)))
 }
 
-pub(crate) fn ensure_runtime_object(
+fn compile_runtime_source_to_object(
     clang_exe: &str,
-    runtime_c: &str,
+    runtime_source_path: &Path,
+    object_path: &Path,
     opt_level: u8,
-) -> Result<PathBuf> {
-    let runtime_c_path = Path::new(runtime_c);
-    let object_path = runtime_object_cache_path(runtime_c_path, opt_level)?;
-    if object_path.exists() {
-        return Ok(object_path);
-    }
-
+) -> Result<()> {
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
@@ -64,9 +117,9 @@ pub(crate) fn ensure_runtime_object(
 
     let status = command
         .arg("-c")
-        .arg(runtime_c_path)
+        .arg(runtime_source_path)
         .arg("-o")
-        .arg(&object_path)
+        .arg(object_path)
         .status()
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to invoke clang for runtime object: {}", e))?;
@@ -77,7 +130,27 @@ pub(crate) fn ensure_runtime_object(
         ));
     }
 
-    Ok(object_path)
+    Ok(())
+}
+
+pub(crate) fn ensure_runtime_objects(
+    clang_exe: &str,
+    runtime_c: &str,
+    opt_level: u8,
+) -> Result<Vec<PathBuf>> {
+    let runtime_c_path = Path::new(runtime_c);
+    let sources = runtime_source_bundle(runtime_c)?;
+    let bundle_fingerprint = runtime_bundle_fingerprint(runtime_c)?;
+    let mut object_paths = Vec::with_capacity(sources.len());
+    for source_path in sources {
+        let object_path =
+            runtime_object_cache_path(&source_path, runtime_c_path, bundle_fingerprint, opt_level)?;
+        if !object_path.exists() {
+            compile_runtime_source_to_object(clang_exe, &source_path, &object_path, opt_level)?;
+        }
+        object_paths.push(object_path);
+    }
+    Ok(object_paths)
 }
 
 fn compiled_workspace_root() -> PathBuf {
@@ -217,7 +290,7 @@ pub(crate) fn append_native_runtime_inputs(
     opt_level: u8,
 ) -> Result<()> {
     if let Some(runtime_c) = runtime_c {
-        object_paths.push(ensure_runtime_object(clang_exe, runtime_c, opt_level)?);
+        object_paths.extend(ensure_runtime_objects(clang_exe, runtime_c, opt_level)?);
     }
     object_paths.push(ensure_async_runtime_staticlib(opt_level)?);
     Ok(())
@@ -683,13 +756,17 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(&runtime_c, "aaaa").unwrap();
         let modified = fs::metadata(&runtime_c).unwrap().modified().unwrap();
-        let before = runtime_object_cache_path(&runtime_c, 1).unwrap();
+        let before_fingerprint = runtime_bundle_fingerprint(&runtime_c.to_string_lossy()).unwrap();
+        let before =
+            runtime_object_cache_path(&runtime_c, &runtime_c, before_fingerprint, 1).unwrap();
 
         fs::write(&runtime_c, "bbbb").unwrap();
         let file = fs::OpenOptions::new().write(true).open(&runtime_c).unwrap();
         file.set_times(fs::FileTimes::new().set_modified(modified))
             .unwrap();
-        let after = runtime_object_cache_path(&runtime_c, 1).unwrap();
+        let after_fingerprint = runtime_bundle_fingerprint(&runtime_c.to_string_lossy()).unwrap();
+        let after =
+            runtime_object_cache_path(&runtime_c, &runtime_c, after_fingerprint, 1).unwrap();
 
         assert_ne!(before, after);
         let _ = fs::remove_dir_all(&root);

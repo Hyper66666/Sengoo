@@ -1,0 +1,46 @@
+// examples/stdlib/18_json.sg
+//
+// Demonstrates: importing std::json runtime helpers for parse, query, build,
+// serialize, and parse diagnostics.
+//
+// Run: sgc run examples/stdlib/18_json.sg
+// Expected output: 18
+
+import std::json;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+
+    let parsed = json_parse("[null,false,1]").unwrap_or(JsonDoc { handle: 0 });
+    let root = parsed.root();
+    let array_len = root.array_len().unwrap_or(0);
+    let second = root.array_get(1).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
+    let second_value = second.bool_value().unwrap_or(true);
+
+    let built = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let serialized = built.serialize(buffer).unwrap_or(0);
+
+    let invalid = json_parse("{bad}").is_err();
+    let error_code = json_last_error_code();
+    let error_offset = json_last_error_offset();
+    let message_len = json_last_error_copy(buffer).unwrap_or(0);
+
+    let parsed_closed = parsed.close();
+    let built_closed = built.close();
+    buffer.free();
+
+    if array_len == 3
+        && !second_value
+        && serialized == 2
+        && invalid
+        && error_code == 10
+        && error_offset >= 0
+        && message_len > 0
+        && parsed_closed
+        && built_closed {
+        print(18);
+    } else {
+        print(0);
+    }
+    0
+}

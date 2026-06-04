@@ -16,19 +16,19 @@ def option_none_with<T>(placeholder: T) -> Option<T> {
 }
 
 def option_some_i64(value: i64) -> Option<i64> {
-    option_some(value)
+    Option { is_some: true, value: value }
 }
 
 def option_none_i64() -> Option<i64> {
-    option_none_with(0)
+    Option { is_some: false, value: 0 }
 }
 
 def option_some_bool(value: bool) -> Option<bool> {
-    option_some(value)
+    Option { is_some: true, value: value }
 }
 
 def option_none_bool() -> Option<bool> {
-    option_none_with(false)
+    Option { is_some: false, value: false }
 }
 
 impl<T> Option<T> {

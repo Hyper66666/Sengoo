@@ -251,9 +251,14 @@ impl Expr {
         )
     }
 
-    /// 创建 try 表达式
+    /// 创建 try 传播表达式 `expr?`
     pub fn try_expr(expr: Expr, span: Span) -> Self {
         Self::new(ExprKind::Try(Box::new(expr)), span)
+    }
+
+    /// 创建 `try { ... }` 块表达式
+    pub fn try_block(block: Block, span: Span) -> Self {
+        Self::new(ExprKind::TryBlock(block), span)
     }
 
     /// 创建类型转换表达式
@@ -426,8 +431,11 @@ pub enum ExprKind {
     /// Lambda 闭包 `|args| body`
     Lambda { params: Vec<Ident>, body: Box<Expr> },
 
-    /// Try 表达式 `expr?`
+    /// Try 传播 `expr?`
     Try(Box<Expr>),
+
+    /// `try { ... }` 作用域块（错误传播边界）
+    TryBlock(Block),
 
     /// 类型转换 `expr as Type`
     Cast { expr: Box<Expr>, ty: Type },

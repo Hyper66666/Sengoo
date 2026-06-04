@@ -65,7 +65,8 @@ fn collect_calls_in_expr(expr: &Expr, calls: &mut Vec<String>) {
         ExprKind::Block(block)
         | ExprKind::Loop(block)
         | ExprKind::AsyncBlock(block)
-        | ExprKind::ParallelBlock(block) => {
+        | ExprKind::ParallelBlock(block)
+        | ExprKind::TryBlock(block) => {
             for stmt in &block.stmts {
                 collect_calls_in_stmt(stmt, calls);
             }
