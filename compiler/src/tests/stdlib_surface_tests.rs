@@ -235,7 +235,7 @@ def main() -> i64 {
 #[test]
 fn time_module_imports_clock_and_sleep_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["time.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "time.sg"],
         r#"
 def main() -> i64 {
     let before = time_unix_ms();
@@ -759,6 +759,7 @@ fn stdlib_reflection_wrappers_accept_strings_without_raw_pointers() {
             "option.sg",
             "result.sg",
             "ffi.sg",
+            "status.sg",
             "db.sg",
             "lua54.sg",
             "net.sg",
@@ -835,7 +836,7 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_wrappers_accept_managed_buffers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "net.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(256).unwrap_or(Buffer { handle: 0 });
@@ -869,7 +870,7 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_http_server_wrappers_accept_strings() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "net.sg"],
+        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
         r#"
 def main() -> i64 {
     let server = http_server_bind("127.0.0.1", 0).unwrap_or(HttpServer { handle: 0 });

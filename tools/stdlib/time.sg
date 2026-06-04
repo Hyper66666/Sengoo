@@ -1,7 +1,10 @@
 extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_time_unix_seconds() -> i64;
     fn sengoo_time_unix_ms() -> i64;
     fn sengoo_time_sleep_ms(ms: i64) -> i64;
+    fn sengoo_time_format_unix_ms(unix_ms: i64, buffer_handle: i64, capacity: i64) -> i64;
+    fn sengoo_time_parse_unix_ms(text_ptr: i64, text_len: i64) -> i64;
 }
 
 def time_unix_seconds() -> i64 {
@@ -26,4 +29,22 @@ def time_elapsed_ms(start_ms: i64, end_ms: i64) -> i64 {
 
 def time_since_ms(start_ms: i64) -> i64 {
     time_elapsed_ms(start_ms, time_unix_ms())
+}
+
+def time_format_utc_ms(unix_ms: i64, buffer: Buffer) -> Result<i64, i64> {
+    let copied = sengoo_time_format_unix_ms(unix_ms, buffer.handle, buffer.len());
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+    }
+}
+
+def time_parse_utc_ms(text: &str) -> Result<i64, i64> {
+    let parsed = sengoo_time_parse_unix_ms(sengoo_stdlib_str_ptr(text), text.len());
+    if parsed >= 0 {
+        Result { is_ok: true, value: parsed, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(parsed) }
+    }
 }

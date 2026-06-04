@@ -13,14 +13,24 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
-- `error.sg`: pure-Sengoo assertion helpers for boolean, i64, string, and f64 checks.
+- `error.sg`: compatibility assertion helpers (prefer `assert.sg` for new code).
+- `assert.sg`: primary assertion helpers for boolean, i64, string, and f64 checks.
+- `fmt.sg`: primitive formatting into managed `Buffer` handles via `strconv` and `status`.
+- `regex.sg`: bounded regex compile/match helpers (`runtime_breadth.c`).
+- `log.sg`: level-based logging with deterministic test sink output.
+- `config.sg`: bounded INI/TOML subset parse/get helpers.
+- `hash.sg`: SHA-256 hex digest helpers.
+- `encoding.sg`: base64 and hex encode helpers for byte buffers.
+- `compress.sg`: gzip gunzip placeholders returning `STATUS_UNSUPPORTED` until wired.
+- `fs.sg`: glob listing, file copy/remove wrappers, and file-watch support detection.
+- `http.sg`: stable HTTP client surface over the existing runtime HTTP ABI.
 - `status.sg`: stable stdlib status categories plus category name/message copy helpers for fallible runtime APIs.
 - `json.sg`: runtime-backed JSON parse/query/build/serialize helpers using document/value handles and managed `Buffer` outputs.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, metadata, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
 - `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic listing, bounded recursive walking, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
-- `time.sg`: runtime-backed clock and sleep helpers: Unix seconds, Unix milliseconds, millisecond sleep, and elapsed/since calculations.
+- `time.sg`: runtime-backed clock and sleep helpers plus UTC `YYYY-MM-DDTHH:MM:SSZ` format/parse helpers.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
 - `path.sg`: runtime-backed path helpers for platform separator discovery, conservative absolute checks, joining, parent/file-name/stem/extension extraction, and lexical normalization into managed `Buffer` handles.
 - `process.sg`: runtime-backed process metadata helpers, synchronous shell-free fixed-arity child execution, and command-builder handles for dynamic argv, cwd/env overrides, output capture, and timeouts.
@@ -28,8 +38,9 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `db.sg`, `ffi.sg`, `lua54.sg`, `net.sg`, `proto.sg`: Sengoo-side wrappers over the runtime reflection drivers.
 - `runtime.c`: anchor/core C runtime support used by stdlib/runtime smoke
   paths. Large domain bridges live in sibling sources:
-  `runtime_collections.c`, `runtime_json.c`, and `runtime_process.c`, with
-  shared declarations in `runtime_shared.h`.
+  `runtime_breadth.c`, `runtime_collections.c`, `runtime_json.c`,
+  `runtime_process.c`, and `runtime_string.c`, with shared declarations in
+  `runtime_shared.h`.
 
 ## Source Imports
 
@@ -49,13 +60,17 @@ def main() -> i64 {
 For modules that use `Option<T>` or `Result<T, E>`, `sgc` also preloads the
 current source dependencies (`option.sg` and `result.sg`) automatically.
 Reflection modules can declare their own source dependencies as well. `import
-std::args`, `import std::collections`, `import std::db`, `import std::dir`,
-`import std::env`, `import std::file`, `import std::io`,
-`import std::json`, `import std::lua54`, `import std::net`,
+std::args`, `import std::collections`, `import std::compress`,
+`import std::config`, `import std::db`, `import std::dir`,
+`import std::encoding`, `import std::env`, `import std::file`,
+`import std::fmt`, `import std::fs`, `import std::hash`,
+`import std::http`, `import std::io`, `import std::json`,
+`import std::log`, `import std::lua54`, `import std::net`,
 `import std::path`, `import std::process`, `import std::proto`,
-`import std::status`, and `import std::strconv`
-preload the needed source dependencies so managed `Buffer` helpers and stable
-status categories are available for output payloads and error-shaped results.
+`import std::regex`, `import std::status`, `import std::strconv`, and
+`import std::time` preload the needed source dependencies so managed `Buffer`
+helpers and stable status categories are available for output payloads and
+error-shaped results.
 
 ## Status and Buffer Helpers
 
@@ -74,6 +89,10 @@ codes, negative `-STATUS_*` runtime returns, and positive status categories
 into the public positive namespace. Current stdlib fallible wrappers use this
 taxonomy for `Result.error`; host failures that cannot be classified portably
 map to `STATUS_UNKNOWN()`.
+
+Network helpers keep raw `net_last_error()` compatibility accessors, but
+fallible `std::net` and `std::http` wrappers map raw network/runtime bench
+errors into this taxonomy before filling `Result.error`.
 
 `Buffer.len()` remains the legacy capacity helper. New composable helpers make
 that explicit: `capacity()`, `used_len()`, `clear()`,
@@ -229,7 +248,7 @@ values to the existing raw-pointer driver calls.
 - `ffi.sg`: wraps `runtime/src/reflect/runtime_ffi.rs`. Lifecycle: `ffi_open`/`ffi_open_raw` returns `CLib`, callbacks use `CallbackToken.unbind`, buffers use `Buffer.free`. Error copy and buffer-to-buffer copy helpers accept managed `Buffer` handles. Fixed-arity `call_i64_0` through `call_i64_4` helpers cover common C calls without raw argument/result pointers; object constructors and methods have matching helpers. Example: `examples/reflection/ffi_load_call.sg`.
 - `lua54.sg`: wraps `runtime/src/reflect/runtime_lua54.rs`. Lifecycle: `lua54_open`/`lua54_open_raw` returns `Lua54`, then call `Lua54.close`. Error copy helpers accept managed `Buffer` handles, and `call_i64_0` through `call_i64_4` cover common calls without raw pointer slots. Native Lua 5.4 availability is runtime/feature-gated, so examples may exercise the diagnostic path when Lua is unavailable. Example: `examples/reflection/lua54_eval.sg`.
 - `proto.sg`: wraps `runtime/src/reflect/runtime_proto.rs` for the currently implemented `ProtoUserEvent` encode/decode shape. `proto_user_event` accepts a normal `&str` name, `proto_user_event_encode` writes into a managed `Buffer`, and `proto_user_event_decode(buffer, input_len)` returns a managed `ProtoDecodedUserEvent` handle with field readers plus `close`. Raw decode/output helpers remain available for explicit pointer handoff. Example: `examples/reflection/proto_encode_decode.sg`.
-- `net.sg`: wraps the public `runtime/src/net.rs` TCP/UDP/HTTP client/server/WS surface and `runtime/src/reflect/runtime_net_bench.rs`. Safe `&str` helpers cover hosts, URLs, text payloads, server routes, and required-header middleware; managed `Buffer` helpers cover receive/body/error/bench output; `_raw` helpers remain for explicit pointer/buffer handoff. Lifecycle: every nonzero handle is closed by its matching `close` method/function. Examples: `examples/reflection/net_tcp_echo.sg`, `examples/reflection/net_http_server.sg`.
+- `net.sg`: wraps the public `runtime/src/net.rs` TCP/UDP/HTTP client/server/WS surface and `runtime/src/reflect/runtime_net_bench.rs`. Safe `&str` helpers cover hosts, URLs, text payloads, server routes, and required-header middleware; managed `Buffer` helpers cover receive/body/error/bench output; `_raw` helpers remain for explicit pointer/buffer handoff. Lifecycle: every nonzero handle is closed by its matching `close` method/function. In native `sgc` stdlib builds where the Rust network runtime is not linked, fallback C symbols return stable unsupported or invalid-handle statuses rather than leaving optional network symbols unresolved. Examples: `examples/reflection/net_tcp_echo.sg`, `examples/reflection/net_http_server.sg`.
 
 Current source-level limitation: Sengoo FFI now accepts immutable `&str` C-string
 parameters, and the reflection wrappers expose normal string helpers for common

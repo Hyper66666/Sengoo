@@ -24,3 +24,7 @@ Run each file with `sgc run <path>`.
 | [`18_status_buffer.sg`](18_status_buffer.sg) | Importing `std::status` categories and composable Buffer text helpers | `18` |
 | [`18_json.sg`](18_json.sg) | Importing `std::json` helpers for parse/build status and parse diagnostics | `18` |
 | [`19_process_capture.sg`](19_process_capture.sg) | Importing `std::process` command builders for captured child output | `19` |
+| [`20_owned_string.sg`](20_owned_string.sg) | Importing `std::string` owned String helpers for copy, clone, append, and Buffer output | `20` |
+| [`21_assert.sg`](21_assert.sg) | Importing `std::assert` as the primary assertion helper module | `21` |
+| [`22_regex_log.sg`](22_regex_log.sg) | Importing `std::regex` and `std::log` helpers for bounded matching and log configuration | `22` |
+| [`23_config_hash.sg`](23_config_hash.sg) | Importing `std::config` and `std::hash` helpers with Buffer output | `23` |

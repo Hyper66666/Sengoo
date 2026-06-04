@@ -1,0 +1,22 @@
+extern "C" {
+    fn sengoo_encoding_base64_encode(data_ptr: i64, data_len: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_encoding_hex_encode(data_ptr: i64, data_len: i64, out_buffer: i64, out_capacity: i64) -> i64;
+}
+
+def encoding_base64_encode_buffer(buffer: Buffer, used_len: i64, out: Buffer) -> Result<i64, i64> {
+    let encoded_len = sengoo_encoding_base64_encode(buffer.ptr(), used_len, out.handle, out.len());
+    if encoded_len >= 0 {
+        Result { is_ok: true, value: encoded_len, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(encoded_len) }
+    }
+}
+
+def encoding_hex_encode_buffer(buffer: Buffer, used_len: i64, out: Buffer) -> Result<i64, i64> {
+    let encoded_len = sengoo_encoding_hex_encode(buffer.ptr(), used_len, out.handle, out.len());
+    if encoded_len >= 0 {
+        Result { is_ok: true, value: encoded_len, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(encoded_len) }
+    }
+}

@@ -195,6 +195,37 @@ long long sengoo_status_from_raw_ffi(long long code) {
     }
 }
 
+long long sengoo_status_from_net_error(long long code) {
+    switch (code) {
+        case 0: return SENGOO_STATUS_OK;
+        case 1: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case 2: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case 3: return SENGOO_STATUS_UNSUPPORTED;
+        case 4: return SENGOO_STATUS_IO;
+        case 5: return SENGOO_STATUS_IO;
+        case 6: return SENGOO_STATUS_IO;
+        case 7: return SENGOO_STATUS_TIMEOUT;
+        case 8: return SENGOO_STATUS_PARSE;
+        case 9: return SENGOO_STATUS_PARSE;
+        case 10: return SENGOO_STATUS_IO;
+        case 11: return SENGOO_STATUS_PARSE;
+        case 12: return SENGOO_STATUS_INVALID_HANDLE;
+        case 13: return SENGOO_STATUS_UNKNOWN;
+        case 14: return SENGOO_STATUS_IO;
+        default: return SENGOO_STATUS_UNKNOWN;
+    }
+}
+
+long long sengoo_status_from_net_bench_error(long long code) {
+    switch (code) {
+        case 0: return SENGOO_STATUS_OK;
+        case -2601: return SENGOO_STATUS_INVALID_ARGUMENT;
+        case -2602: return SENGOO_STATUS_IO;
+        case -2699: return SENGOO_STATUS_UNKNOWN;
+        default: return sengoo_status_from_raw_ffi(code);
+    }
+}
+
 static long long sengoo_copy_status_text(const char* text, long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0) {

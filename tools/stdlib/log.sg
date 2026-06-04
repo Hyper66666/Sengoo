@@ -1,0 +1,49 @@
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_log_set_level(level: i64) -> i64;
+    fn sengoo_log_level_get() -> i64;
+    fn sengoo_log_write(level: i64, message_ptr: i64, message_len: i64) -> i64;
+    fn sengoo_log_test_sink_clear() -> i64;
+    fn sengoo_log_test_sink_copy(buffer_handle: i64, capacity: i64) -> i64;
+}
+
+def LOG_TRACE() -> i64 { 0 }
+def LOG_DEBUG() -> i64 { 1 }
+def LOG_INFO() -> i64 { 2 }
+def LOG_WARN() -> i64 { 3 }
+def LOG_ERROR() -> i64 { 4 }
+
+def log_set_level(level: i64) -> Result<bool, i64> {
+    let status = sengoo_log_set_level(level);
+    if status >= 0 {
+        Result { is_ok: true, value: true, error: 0 }
+    } else {
+        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+    }
+}
+
+def log_level() -> i64 {
+    sengoo_log_level_get()
+}
+
+def log_write(level: i64, message: &str) -> Result<bool, i64> {
+    let status = sengoo_log_write(level, sengoo_stdlib_str_ptr(message), message.len());
+    if status >= 0 {
+        Result { is_ok: true, value: true, error: 0 }
+    } else {
+        Result { is_ok: false, value: false, error: status_from_raw_ffi(status) }
+    }
+}
+
+def log_test_sink_clear() -> bool {
+    sengoo_log_test_sink_clear() >= 0
+}
+
+def log_test_sink_copy(buffer: Buffer) -> Result<i64, i64> {
+    let copied = sengoo_log_test_sink_copy(buffer.handle, buffer.len());
+    if copied >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(copied) }
+    }
+}

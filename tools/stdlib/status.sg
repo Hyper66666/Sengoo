@@ -2,6 +2,8 @@ extern "C" {
     fn sengoo_status_name_copy(code: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_status_message_copy(code: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_status_from_raw_ffi(code: i64) -> i64;
+    fn sengoo_status_from_net_error(code: i64) -> i64;
+    fn sengoo_status_from_net_bench_error(code: i64) -> i64;
 }
 
 def STATUS_OK() -> i64 { 0 }
@@ -22,6 +24,14 @@ def STATUS_OUT_OF_MEMORY() -> i64 { 14 }
 
 def status_from_raw_ffi(code: i64) -> i64 {
     sengoo_status_from_raw_ffi(code)
+}
+
+def status_from_net_error(code: i64) -> i64 {
+    sengoo_status_from_net_error(code)
+}
+
+def status_from_net_bench_error(code: i64) -> i64 {
+    sengoo_status_from_net_bench_error(code)
 }
 
 def status_copy_result(value: i64) -> Result<i64, i64> {

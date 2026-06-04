@@ -1,4 +1,9 @@
-## ADDED Requirements
+## Purpose
+
+Define owned UTF-8 `String` semantics, explicit conversions to `Buffer` and `&str`
+workflows, and safe runtime handle lifetimes for stdlib text APIs.
+
+## Requirements
 
 ### Requirement: Owned String values SHALL have explicit UTF-8 ownership semantics
 

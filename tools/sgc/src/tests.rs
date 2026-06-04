@@ -1,6 +1,6 @@
 use super::{
-    bench_root_dir, build_cache_key, build_graph_v2_for_source, build_metadata_matches,
-    build_reflection_metadata, cache_key, cache_mismatch_reasons,
+    append_native_runtime_inputs, bench_root_dir, build_cache_key, build_graph_v2_for_source,
+    build_metadata_matches, build_reflection_metadata, cache_key, cache_mismatch_reasons,
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
@@ -501,6 +501,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
 
     for file in [
         "runtime.c",
+        "runtime_breadth.c",
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
@@ -521,6 +522,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
         file_names,
         vec![
             "runtime.c",
+            "runtime_breadth.c",
             "runtime_collections.c",
             "runtime_json.c",
             "runtime_process.c",
@@ -3709,6 +3711,10 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/18_status_buffer.sg",
         "examples/stdlib/18_json.sg",
         "examples/stdlib/19_process_capture.sg",
+        "examples/stdlib/20_owned_string.sg",
+        "examples/stdlib/21_assert.sg",
+        "examples/stdlib/22_regex_log.sg",
+        "examples/stdlib/23_config_hash.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -3977,6 +3983,66 @@ fn examples_smoke_stdlib_process_capture_import() {
         "examples/stdlib/19_process_capture.sg",
         "19",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_owned_string_import() {
+    assert_example_output(
+        "stdlib-owned-string",
+        "examples/stdlib/20_owned_string.sg",
+        "20",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_assert_import() {
+    assert_example_output("stdlib-assert", "examples/stdlib/21_assert.sg", "21");
+}
+
+#[test]
+fn examples_smoke_stdlib_regex_log_import() {
+    assert_example_output("stdlib-regex-log", "examples/stdlib/22_regex_log.sg", "22");
+}
+
+#[test]
+fn examples_smoke_stdlib_config_hash_import() {
+    assert_example_output(
+        "stdlib-config-hash",
+        "examples/stdlib/23_config_hash.sg",
+        "23",
+    );
+}
+
+#[test]
+fn stdlib_http_import_links_native_runtime_and_maps_errors() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "http-status",
+        r#"
+import std::http;
+
+def main() -> i64 {
+    let result = http_client_get("ftp://127.0.0.1/", 1);
+    if result.is_ok {
+        result.value.close();
+        99
+    } else if result.error == STATUS_UNSUPPORTED() {
+        0
+    } else {
+        result.error
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
@@ -5148,6 +5214,46 @@ fn compile_and_run_stdlib_import_program_with_stdin(
     let output = child
         .wait_with_output()
         .expect("stdlib binary should run to completion");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+    Some(output)
+}
+
+fn compile_and_run_stdlib_import_program_with_native_runtime(
+    tag: &str,
+    source: &str,
+) -> Option<std::process::Output> {
+    let source = expand_stdlib_imports_for_source(source)
+        .unwrap_or_else(|err| panic!("stdlib imports should expand: {err}"));
+    let llvm_ir = compile_source(&source, 1)
+        .unwrap_or_else(|err| panic!("stdlib source should compile: {err}"));
+
+    let clang = find_clang()?;
+    let runtime_c = find_runtime_c()?;
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return None;
+    }
+
+    let ll_path = temp_artifact(&format!("stdlib-import-native-runtime-{tag}"), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact(&format!("stdlib-import-native-runtime-{tag}-main"), obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
+
+    let exe_path = temp_artifact(
+        &format!("stdlib-import-native-runtime-{tag}"),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("stdlib binary should run");
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&main_obj);

@@ -61,6 +61,10 @@ def net_last_error() -> i64 {
     sengoo_net_last_error()
 }
 
+def net_last_status() -> i64 {
+    status_from_net_error(sengoo_net_last_error())
+}
+
 def net_clear_error() -> bool {
     sengoo_net_clear_error();
     true
@@ -71,7 +75,7 @@ def net_error_name_copy_raw(code: i64, buffer_ptr: i64, capacity: i64) -> Result
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: 0, error: net_last_status() }
     }
 }
 
@@ -84,7 +88,7 @@ def net_tcp_connect_raw(host_ptr: i64, port: i64, timeout_ms: i64) -> Result<Tcp
     if handle != 0 {
         Result { is_ok: true, value: TcpStream { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: TcpStream { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: TcpStream { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -102,7 +106,7 @@ impl TcpStream {
         if sent >= 0 {
             Result { is_ok: true, value: sent, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -115,7 +119,7 @@ impl TcpStream {
         if received >= 0 {
             Result { is_ok: true, value: received, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -129,7 +133,7 @@ def udp_bind_raw(host_ptr: i64, port: i64) -> Result<UdpSocket, i64> {
     if handle != 0 {
         Result { is_ok: true, value: UdpSocket { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: UdpSocket { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: UdpSocket { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -143,7 +147,7 @@ impl UdpSocket {
         if status != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -156,7 +160,7 @@ impl UdpSocket {
         if sent >= 0 {
             Result { is_ok: true, value: sent, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -169,7 +173,7 @@ impl UdpSocket {
         if received >= 0 {
             Result { is_ok: true, value: received, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -187,7 +191,7 @@ def http_get_raw(url_ptr: i64, timeout_ms: i64) -> Result<HttpClient, i64> {
     if handle != 0 {
         Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: HttpClient { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: HttpClient { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -200,7 +204,7 @@ def http_post_raw(url_ptr: i64, body_ptr: i64, len: i64, timeout_ms: i64) -> Res
     if handle != 0 {
         Result { is_ok: true, value: HttpClient { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: HttpClient { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: HttpClient { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -214,7 +218,7 @@ impl HttpClient {
         if status >= 0 {
             Result { is_ok: true, value: status, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -223,7 +227,7 @@ impl HttpClient {
         if len >= 0 {
             Result { is_ok: true, value: len, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -232,7 +236,7 @@ impl HttpClient {
         if copied >= 0 {
             Result { is_ok: true, value: copied, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -250,7 +254,7 @@ def http_server_bind_raw(host_ptr: i64, port: i64) -> Result<HttpServer, i64> {
     if handle != 0 {
         Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: HttpServer { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: HttpServer { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -264,7 +268,7 @@ impl HttpServer {
         if port >= 0 {
             Result { is_ok: true, value: port, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -273,7 +277,7 @@ impl HttpServer {
         if status != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -282,7 +286,7 @@ impl HttpServer {
         if added != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -295,7 +299,7 @@ impl HttpServer {
         if added != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -308,7 +312,7 @@ impl HttpServer {
         if added != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -323,7 +327,7 @@ impl HttpServer {
         } else if served == 0 {
             Result { is_ok: true, value: false, error: 0 }
         } else {
-            Result { is_ok: false, value: false, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: false, error: net_last_status() }
         }
     }
 
@@ -337,7 +341,7 @@ def ws_connect_raw(url_ptr: i64, timeout_ms: i64) -> Result<WsClient, i64> {
     if handle != 0 {
         Result { is_ok: true, value: WsClient { handle: handle }, error: 0 }
     } else {
-        Result { is_ok: false, value: WsClient { handle: 0 }, error: sengoo_net_last_error() }
+        Result { is_ok: false, value: WsClient { handle: 0 }, error: net_last_status() }
     }
 }
 
@@ -351,7 +355,7 @@ impl WsClient {
         if sent >= 0 {
             Result { is_ok: true, value: sent, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -364,7 +368,7 @@ impl WsClient {
         if received >= 0 {
             Result { is_ok: true, value: received, error: 0 }
         } else {
-            Result { is_ok: false, value: 0, error: sengoo_net_last_error() }
+            Result { is_ok: false, value: 0, error: net_last_status() }
         }
     }
 
@@ -390,7 +394,7 @@ def net_bench_last_error_copy_raw(buffer_ptr: i64, capacity: i64) -> Result<i64,
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_net_bench_last_error_code() }
+        Result { is_ok: false, value: 0, error: net_bench_last_status() }
     }
 }
 
@@ -402,12 +406,16 @@ def net_bench_last_error_clear() -> bool {
     sengoo_net_bench_last_error_clear() == 0
 }
 
+def net_bench_last_status() -> i64 {
+    status_from_net_bench_error(sengoo_net_bench_last_error_code())
+}
+
 def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report_buffer: i64, report_capacity: i64) -> Result<i64, i64> {
     let copied = sengoo_net_bench_run(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report_buffer, report_capacity);
     if copied >= 0 {
         Result { is_ok: true, value: copied, error: 0 }
     } else {
-        Result { is_ok: false, value: 0, error: sengoo_net_bench_last_error_code() }
+        Result { is_ok: false, value: 0, error: net_bench_last_status() }
     }
 }
 

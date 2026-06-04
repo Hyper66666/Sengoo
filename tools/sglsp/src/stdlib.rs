@@ -5,15 +5,24 @@ use tower_lsp::lsp_types::{Location, Url};
 
 const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("args", include_str!("../../stdlib/args.sg")),
+    ("assert", include_str!("../../stdlib/assert.sg")),
     ("collections", include_str!("../../stdlib/collections.sg")),
+    ("compress", include_str!("../../stdlib/compress.sg")),
+    ("config", include_str!("../../stdlib/config.sg")),
     ("db", include_str!("../../stdlib/db.sg")),
     ("dir", include_str!("../../stdlib/dir.sg")),
+    ("encoding", include_str!("../../stdlib/encoding.sg")),
     ("env", include_str!("../../stdlib/env.sg")),
     ("error", include_str!("../../stdlib/error.sg")),
     ("ffi", include_str!("../../stdlib/ffi.sg")),
     ("file", include_str!("../../stdlib/file.sg")),
+    ("fmt", include_str!("../../stdlib/fmt.sg")),
+    ("fs", include_str!("../../stdlib/fs.sg")),
+    ("hash", include_str!("../../stdlib/hash.sg")),
+    ("http", include_str!("../../stdlib/http.sg")),
     ("io", include_str!("../../stdlib/io.sg")),
     ("json", include_str!("../../stdlib/json.sg")),
+    ("log", include_str!("../../stdlib/log.sg")),
     ("lua54", include_str!("../../stdlib/lua54.sg")),
     ("math", include_str!("../../stdlib/math.sg")),
     ("net", include_str!("../../stdlib/net.sg")),
@@ -22,6 +31,7 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("process", include_str!("../../stdlib/process.sg")),
     ("proto", include_str!("../../stdlib/proto.sg")),
     ("random", include_str!("../../stdlib/random.sg")),
+    ("regex", include_str!("../../stdlib/regex.sg")),
     ("result", include_str!("../../stdlib/result.sg")),
     ("string", include_str!("../../stdlib/string.sg")),
     ("strconv", include_str!("../../stdlib/strconv.sg")),
@@ -43,8 +53,14 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "result" => &["option"],
         "ffi" => &["option", "result"],
         "json" | "status" => &["ffi"],
+        "fmt" => &["strconv", "status"],
+        "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" | "time" => {
+            &["status"]
+        }
+        "http" | "net" => &["ffi", "status"],
         "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["status"],
-        "db" | "lua54" | "net" | "proto" => &["ffi"],
+        "db" | "lua54" | "proto" => &["ffi"],
+        "assert" => &[],
         _ => &[],
     }
 }

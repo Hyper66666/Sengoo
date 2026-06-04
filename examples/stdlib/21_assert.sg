@@ -1,0 +1,17 @@
+// examples/stdlib/21_assert.sg
+//
+// Demonstrates: importing std::assert as the primary assertion helper module.
+//
+// Run: sgc run examples/stdlib/21_assert.sg
+// Expected output: 21
+
+import std::assert;
+
+def main() -> i64 {
+    if assert_eq_i64(40 + 2, 42) {
+        print(21);
+        0
+    } else {
+        1
+    }
+}

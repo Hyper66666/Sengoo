@@ -1,0 +1,17 @@
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_hash_sha256(data_ptr: i64, data_len: i64, out_buffer: i64, out_capacity: i64) -> i64;
+}
+
+def hash_sha256_bytes(data_ptr: i64, data_len: i64, out: Buffer) -> Result<i64, i64> {
+    let digest_len = sengoo_hash_sha256(data_ptr, data_len, out.handle, out.len());
+    if digest_len >= 0 {
+        Result { is_ok: true, value: digest_len, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: status_from_raw_ffi(digest_len) }
+    }
+}
+
+def hash_sha256_str(value: &str, out: Buffer) -> Result<i64, i64> {
+    hash_sha256_bytes(sengoo_stdlib_str_ptr(value), value.len(), out)
+}

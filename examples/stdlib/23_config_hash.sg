@@ -1,0 +1,27 @@
+// examples/stdlib/23_config_hash.sg
+//
+// Demonstrates: importing std::config and std::hash helpers with Buffer output.
+//
+// Run: sgc run examples/stdlib/23_config_hash.sg
+// Expected output: 23
+
+import std::config;
+import std::hash;
+import std::ffi;
+
+def main() -> i64 {
+    let doc = ini_parse("tool=sengoo");
+    if !doc.is_ok {
+        return 1;
+    }
+    let buffer = ffi_buffer_new(256).unwrap_or(Buffer { handle: 0 });
+    let digest = hash_sha256_str("sengoo", buffer);
+    doc.value.drop();
+    buffer.free();
+    if digest.is_ok && digest.value == 64 {
+        print(23);
+        0
+    } else {
+        1
+    }
+}

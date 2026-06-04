@@ -1,0 +1,15 @@
+def fmt_i64(value: i64, buffer: Buffer) -> Result<i64, i64> {
+    strconv_format_i64(value, buffer)
+}
+
+def fmt_bool(value: bool, buffer: Buffer) -> Result<i64, i64> {
+    if value {
+        buffer.copy_from_str("true")
+    } else {
+        buffer.copy_from_str("false")
+    }
+}
+
+def fmt_status_name(code: i64, buffer: Buffer) -> Result<i64, i64> {
+    status_name_copy(code, buffer)
+}

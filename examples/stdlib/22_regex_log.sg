@@ -1,0 +1,27 @@
+// examples/stdlib/22_regex_log.sg
+//
+// Demonstrates: importing std::regex and std::log helpers.
+//
+// Run: sgc run examples/stdlib/22_regex_log.sg
+// Expected output: 22
+
+import std::regex;
+import std::log;
+
+def main() -> i64 {
+    let level = log_set_level(2);
+    let re = regex_compile("^sengoo$");
+    if re.is_ok {
+        let pattern = re.value;
+        let matched = pattern.is_match("sengoo");
+        pattern.drop();
+        if level.is_ok && matched.is_ok && matched.value {
+            print(22);
+            0
+        } else {
+            1
+        }
+    } else {
+        1
+    }
+}

@@ -1,37 +1,46 @@
+// examples/stdlib/20_owned_string.sg
+//
+// Demonstrates: importing std::string owned String helpers.
+//
+// Run: sgc run examples/stdlib/20_owned_string.sg
+// Expected output: 20
+
 import std::string;
 import std::ffi;
 
 def main() -> i64 {
     let greeting = string_from_str("hello");
     if greeting.is_ok == false {
-        return 0;
+        return 1;
     }
     let owned = greeting.value;
     if owned.len() != 5 {
-        return 0;
+        return 1;
     }
     let appended = owned.push_str("!");
     if appended.is_ok == false {
-        return 0;
+        return 1;
     }
     if owned.len() != 6 {
-        return 0;
+        return 1;
     }
     let cloned = owned.clone();
     if cloned.is_ok == false {
-        return 0;
+        return 1;
     }
     let copy = cloned.value;
     let buffer_out = ffi_buffer_new(16);
     if buffer_out.is_ok == false {
-        return 0;
+        return 1;
     }
     let buffer = buffer_out.value;
     let copied = copy.copy_to_buffer(buffer);
     if copied.is_ok == false || copied.value != 6 {
-        return 0;
+        return 1;
     }
     owned.drop();
     copy.drop();
-    1
+    buffer.free();
+    print(20);
+    0
 }

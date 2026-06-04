@@ -15,6 +15,7 @@ use crate::{
 use crate::{LINKER_AVAILABLE, LINKER_UNAVAILABLE, LLD_AVAILABILITY};
 
 const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
+    "runtime_breadth.c",
     "runtime_collections.c",
     "runtime_json.c",
     "runtime_process.c",

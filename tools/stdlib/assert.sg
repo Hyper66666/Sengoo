@@ -1,6 +1,3 @@
-// Compatibility module: assertion helpers remain available here.
-// New examples should prefer `import std::assert`.
-
 extern "C" {
     fn sengoo_panic_option_unwrap_i64() -> i64;
     fn sengoo_f64_eq(lhs: f64, rhs: f64) -> i64;

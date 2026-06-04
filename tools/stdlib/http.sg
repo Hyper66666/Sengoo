@@ -1,0 +1,69 @@
+// Stable HTTP client surface. Low-level socket helpers remain in `std::net`.
+// Compatibility: `net_http_get` and `http_get` are equivalent entry points.
+
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_http_get(url: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_post(url: i64, body: i64, len: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_status(handle: i64) -> i64;
+    fn sengoo_http_body_len(handle: i64) -> i64;
+    fn sengoo_http_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_close(handle: i64) -> i64;
+    fn sengoo_net_last_error() -> i64;
+}
+
+struct HttpResponse {
+    handle: i64,
+}
+
+def http_client_get(url: &str, timeout_ms: i64) -> Result<HttpResponse, i64> {
+    let handle = sengoo_http_get(sengoo_stdlib_str_ptr(url), timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpResponse { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpResponse { handle: 0 }, error: status_from_net_error(sengoo_net_last_error()) }
+    }
+}
+
+def http_client_post(url: &str, body: &str, timeout_ms: i64) -> Result<HttpResponse, i64> {
+    let handle = sengoo_http_post(
+        sengoo_stdlib_str_ptr(url),
+        sengoo_stdlib_str_ptr(body),
+        body.len(),
+        timeout_ms
+    );
+    if handle != 0 {
+        Result { is_ok: true, value: HttpResponse { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpResponse { handle: 0 }, error: status_from_net_error(sengoo_net_last_error()) }
+    }
+}
+
+impl HttpResponse {
+    def status_code(self) -> Result<i64, i64> {
+        let status = sengoo_http_status(self.handle);
+        if status >= 0 {
+            Result { is_ok: true, value: status, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: status_from_net_error(sengoo_net_last_error()) }
+        }
+    }
+
+    def body_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        let copied = sengoo_http_body_copy(self.handle, buffer.ptr(), buffer.len());
+        if copied >= 0 {
+            Result { is_ok: true, value: copied, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: status_from_net_error(sengoo_net_last_error()) }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_http_close(self.handle) != 0
+    }
+}
+
+// Compatibility alias for older examples that used `http_get` naming.
+def http_get(url: &str, timeout_ms: i64) -> Result<HttpResponse, i64> {
+    http_client_get(url, timeout_ms)
+}

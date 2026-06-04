@@ -11,13 +11,22 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "math",
     "string",
     "error",
+    "assert",
     "ffi",
     "status",
     "collections",
     "json",
     "strconv",
+    "fmt",
+    "regex",
+    "log",
+    "config",
+    "hash",
+    "encoding",
+    "compress",
     "file",
     "dir",
+    "fs",
     "io",
     "env",
     "time",
@@ -28,6 +37,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "db",
     "lua54",
     "net",
+    "http",
     "proto",
 ];
 
@@ -53,6 +63,15 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "path"
             | "process"
             | "args"
+            | "fmt"
+            | "regex"
+            | "log"
+            | "config"
+            | "hash"
+            | "encoding"
+            | "compress"
+            | "fs"
+            | "http"
             | "lua54"
             | "net"
             | "proto"
@@ -62,8 +81,14 @@ fn source_module_needs_result_family(module: &str) -> bool {
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
         "collections" | "json" | "status" | "string" => &["ffi"],
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["status"],
-        "db" | "lua54" | "net" | "proto" => &["ffi"],
+        "fmt" => &["strconv", "status"],
+        "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
+        "http" | "net" => &["ffi", "status"],
+        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" | "time" => {
+            &["status"]
+        }
+        "db" | "lua54" | "proto" => &["ffi"],
+        "assert" => &[],
         _ => &[],
     }
 }
@@ -231,6 +256,26 @@ mod tests {
 
         assert!(expanded.contains("def time_unix_ms"));
         assert!(expanded.contains("def time_sleep_ms"));
+        assert!(expanded.contains("def time_format_utc_ms"));
+    }
+
+    #[test]
+    fn assert_import_expands_source_module() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::assert;\ndef main() -> i64 { 0 }\n")
+                .expect("assert stdlib import should expand");
+
+        assert!(expanded.contains("def assert_eq_i64"));
+    }
+
+    #[test]
+    fn regex_import_expands_status_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::regex;\ndef main() -> i64 { 0 }\n")
+                .expect("regex stdlib import should expand");
+
+        assert!(expanded.contains("def regex_compile"));
+        assert!(expanded.contains("def STATUS_PARSE()"));
     }
 
     #[test]
