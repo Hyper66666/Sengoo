@@ -106,6 +106,10 @@ fn compile_runtime_source_to_object(
         .arg("-Wno-override-module")
         .arg(format!("-O{}", opt_level));
 
+    if let Some(runtime_dir) = runtime_source_path.parent() {
+        command.arg("-I").arg(runtime_dir);
+    }
+
     #[cfg(windows)]
     {
         command
@@ -407,6 +411,14 @@ fn run_windows_link_command(
     })?;
     let mut link_cmd = Command::new(link_exe);
     link_cmd.arg("/NOLOGO");
+    let links_async_runtime = object_paths
+        .iter()
+        .any(|path| is_async_runtime_staticlib(path));
+    if links_async_runtime {
+        // Keep compiler-generated async dispatch symbols that are only referenced
+        // from the Rust async runtime static library.
+        link_cmd.arg("/OPT:NOREF");
+    }
     for lib_path in windows_link_lib_paths() {
         link_cmd.arg(format!("/LIBPATH:{}", lib_path.display()));
     }

@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use super::{
     clear_error, copy_bytes_to_buffer, next_handle, set_error, SENGOO_FFI_ERR_BUFFER,
     SENGOO_FFI_ERR_INTERNAL, SENGOO_FFI_ERR_INVALID_ARGUMENT, SENGOO_FFI_ERR_INVALID_HANDLE,
-    SENGOO_FFI_STATUS_OK,
+    SENGOO_FFI_STATUS_OK, SENGOO_RUNTIME_MAX_BUFFER_BYTES,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -21,6 +21,13 @@ fn ffi_buffers() -> &'static Mutex<HashMap<u64, FfiBuffer>> {
 #[no_mangle]
 pub extern "C" fn sengoo_ffi_buffer_new(capacity: usize) -> u64 {
     clear_error();
+    if capacity > SENGOO_RUNTIME_MAX_BUFFER_BYTES {
+        set_error(
+            SENGOO_FFI_ERR_INVALID_ARGUMENT,
+            "buffer capacity exceeds runtime limit",
+        );
+        return 0;
+    }
     let handle = next_handle();
     let buffer = FfiBuffer {
         bytes: vec![0u8; capacity],

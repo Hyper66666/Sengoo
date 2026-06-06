@@ -407,6 +407,12 @@ pub extern "C" fn sengoo_memcmp(s1: *const u8, s2: *const u8, count: usize) -> i
 // panic 处理
 // ============================================================================
 
+fn emit_optional_backtrace() {
+    if std::env::var_os("RUST_BACKTRACE").is_some() {
+        eprintln!("Backtrace:\n{}", std::backtrace::Backtrace::force_capture());
+    }
+}
+
 /// Panic 处理函数
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -418,6 +424,7 @@ pub extern "C" fn sengoo_panic(msg: *const u8, len: usize) -> ! {
     } else {
         eprintln!("Sengoo panic: <no message>");
     }
+    emit_optional_backtrace();
     std::process::exit(1);
 }
 
@@ -446,6 +453,7 @@ pub extern "C" fn sengoo_assert_fail(
         eprint!("unknown:{}", line);
     }
     eprintln!();
+    emit_optional_backtrace();
     std::process::exit(1);
 }
 

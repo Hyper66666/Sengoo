@@ -19,6 +19,9 @@ pub fn write_lockfile(graph: &Graph) -> Result<PathBuf> {
 pub fn check_lockfile(graph: &Graph) -> Result<PathBuf> {
     let root = root_package(graph)?;
     let lockfile_path = lockfile_path(root);
+    if lockfile_path.is_file() {
+        validate_lockfile_version(&lockfile_path)?;
+    }
     let expected = render_lockfile(graph, root)?;
     let actual = match fs::read_to_string(&lockfile_path) {
         Ok(actual) => actual,
@@ -46,6 +49,9 @@ pub fn write_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> 
 
 pub fn check_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Result<PathBuf> {
     let lockfile_path = workspace_lockfile_path(workspace_manifest)?;
+    if lockfile_path.is_file() {
+        validate_lockfile_version(&lockfile_path)?;
+    }
     let expected = render_workspace_lockfile(workspace_manifest, graphs)?;
     let actual = match fs::read_to_string(&lockfile_path) {
         Ok(actual) => actual,
@@ -297,9 +303,39 @@ fn replace_file(staging_path: &Path, lockfile_path: &Path) -> io::Result<()> {
     }
 }
 
+pub fn validate_lockfile_version(lockfile_path: &Path) -> Result<u32> {
+    let source = fs::read_to_string(lockfile_path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read {}", lockfile_path.display()))?;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("version = ") {
+            let version = value
+                .trim()
+                .trim_matches('"')
+                .parse::<u32>()
+                .into_diagnostic()
+                .with_context(|| {
+                    format!(
+                        "invalid Sengoo.lock schema version in {}",
+                        lockfile_path.display()
+                    )
+                })?;
+            if version != 1 {
+                miette::bail!(
+                    "incompatible Sengoo.lock schema version {}; expected 1",
+                    version
+                );
+            }
+            return Ok(version);
+        }
+    }
+    Ok(1)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::write_lockfile_content;
+    use super::{validate_lockfile_version, write_lockfile_content};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -312,6 +348,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sgpm_lockfile_{name}_{stamp}"));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn validate_lockfile_version_rejects_unknown_schema() {
+        let dir = temp_dir("schema");
+        let lockfile = dir.join("Sengoo.lock");
+        fs::write(&lockfile, "version = 99\n").unwrap();
+        let err = validate_lockfile_version(&lockfile).expect_err("unknown schema should fail");
+        assert!(err.to_string().contains("incompatible"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

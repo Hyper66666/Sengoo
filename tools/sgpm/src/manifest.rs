@@ -10,6 +10,7 @@ pub struct Manifest {
     pub package: PackageMeta,
     pub bin: Option<BinTarget>,
     pub lib: Option<LibTarget>,
+    pub test: Vec<TestTarget>,
     pub registries: BTreeMap<String, RegistryConfig>,
     pub dependencies: BTreeMap<String, Dependency>,
 }
@@ -42,6 +43,12 @@ pub struct BinTarget {
 #[serde(deny_unknown_fields)]
 pub struct LibTarget {
     #[serde(default = "default_lib_path")]
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestTarget {
     pub path: PathBuf,
 }
 
@@ -81,11 +88,15 @@ pub struct Dependency {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawManifest {
+    #[serde(default, rename = "sengoo-schema")]
+    sengoo_schema: Option<u32>,
     package: PackageMeta,
     #[serde(default)]
     bin: Option<BinTarget>,
     #[serde(default)]
     lib: Option<LibTarget>,
+    #[serde(default)]
+    test: Vec<TestTarget>,
     #[serde(default)]
     registries: BTreeMap<String, RegistryConfig>,
     #[serde(default)]
@@ -118,6 +129,14 @@ impl Manifest {
 
     pub fn parse(source: &str) -> Result<Self> {
         let raw: RawManifest = toml::from_str(source).into_diagnostic()?;
+        if let Some(version) = raw.sengoo_schema {
+            if version != 1 {
+                miette::bail!(
+                    "unsupported Sengoo.toml schema version {}; expected 1",
+                    version
+                );
+            }
+        }
         validate_package(&raw.package)?;
         if let Some(name) = raw.bin.as_ref().and_then(|bin| bin.name.as_deref()) {
             validate_name("binary name", name)?;
@@ -134,6 +153,7 @@ impl Manifest {
             package: raw.package,
             bin: raw.bin,
             lib: raw.lib,
+            test: raw.test,
             registries: raw.registries,
             dependencies,
         })
@@ -393,6 +413,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_unsupported_sengoo_schema_version() {
+        let source = "sengoo-schema = 99\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2026\"\n";
+        let err = Manifest::parse(source).expect_err("unsupported schema should fail");
+        assert!(err.to_string().contains("unsupported Sengoo.toml schema"));
+    }
+
+    #[test]
     fn parses_minimal_manifest() {
         let manifest = Manifest::parse(
             r#"
@@ -405,6 +432,24 @@ edition = "2026"
         .expect("manifest should parse");
         assert_eq!(manifest.package.name, "hello");
         assert_eq!(manifest.entry_path(), PathBuf::from("src/main.sg"));
+    }
+
+    #[test]
+    fn parses_manifest_test_targets() {
+        let manifest = Manifest::parse(
+            r#"
+sengoo-schema = 1
+[package]
+name = "hello"
+version = "0.1.0"
+edition = "2026"
+[[test]]
+path = "tests/custom.sg"
+"#,
+        )
+        .expect("manifest with test targets should parse");
+        assert_eq!(manifest.test.len(), 1);
+        assert_eq!(manifest.test[0].path, PathBuf::from("tests/custom.sg"));
     }
 
     #[test]

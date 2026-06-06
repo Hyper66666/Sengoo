@@ -423,12 +423,10 @@ async fn dispatch(command: Commands) -> Result<()> {
             nocapture,
             release,
             manifest_path,
-            locked: _locked,
+            locked,
         } => {
-            let root = resolve_test_root(
-                path.as_deref().map(Path::new),
-                manifest_path.as_deref().map(Path::new),
-            )?;
+            let manifest = manifest_path.as_deref().map(Path::new);
+            let root = resolve_test_root(path.as_deref().map(Path::new), manifest)?;
             cmd_test(TestOptions {
                 root: &root,
                 filter: filter.as_deref(),
@@ -436,6 +434,8 @@ async fn dispatch(command: Commands) -> Result<()> {
                 format,
                 nocapture,
                 release,
+                locked,
+                manifest_path: manifest,
             })
         }
         Commands::Doc { input, output } => cmd_doc(&input, &output).await,

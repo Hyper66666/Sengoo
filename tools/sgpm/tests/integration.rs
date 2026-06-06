@@ -1682,8 +1682,8 @@ fn sgpm_test_release_invokes_sgc_run_with_o2() {
     );
     let log = fs::read_to_string(record).unwrap().replace('\\', "/");
     assert!(
-        log.contains(":: run") && log.contains("-O 2"),
-        "test log should run tests with release optimization:\n{}",
+        log.contains(":: test") && log.contains("--release"),
+        "test log should delegate to sgc test with release profile:\n{}",
         log
     );
     let _ = fs::remove_dir_all(dir);
@@ -1719,8 +1719,8 @@ fn sgpm_test_debug_invokes_sgc_run_with_o0() {
     );
     let log = fs::read_to_string(record).unwrap().replace('\\', "/");
     assert!(
-        log.contains(":: run") && log.contains("-O 0"),
-        "test log should run tests with debug optimization:\n{}",
+        log.contains(":: test") && log.contains("Sengoo.toml"),
+        "test log should delegate to sgc test with manifest path:\n{}",
         log
     );
     let _ = fs::remove_dir_all(dir);

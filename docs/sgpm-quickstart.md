@@ -274,10 +274,10 @@ sgpm build --release
 # Build and execute the selected package binary.
 sgpm run -- arg1 arg2
 
-# Run every .sg file under tests/ for each package in the graph.
+# Run package tests through delegated `sgc test`.
 sgpm test
 
-# Run tests with the release profile (-O2).
+# Run tests with the release profile (`sgc test --release`).
 sgpm test --release
 
 # Format src/**/*.sg and tests/**/*.sg using sgfmt.
@@ -320,9 +320,21 @@ subdirectories when dependencies are documented alongside the root package.
 Pass `--output DIR` to choose a different output directory for a single
 package selection.
 
-`sgpm test` uses the debug profile by default (`sgc run -O 0`) and the release
-profile with `--release` (`sgc run -O 2`). Source discovery errors fail
-`sgpm test` and `sgpm fmt` instead of silently skipping unreadable `.sg` files.
+`sgpm test` delegates to `sgc test` for each package in the selected graph,
+passing `--manifest-path` and forwarding `SENGOO_MODULE_MAP` for library
+packages. The debug profile maps to `sgc test` without `--release` (`sgc run
+-O 0` per test), and `--release` adds `sgc test --release` (`sgc run -O 2`).
+
+Direct `sgc test` discovers `tests/**/*.sg` plus any `[[test]]` entries in
+`Sengoo.toml`. Use `--filter TEXT`, `--exact NAME`, `--format json`,
+`--nocapture`, `--manifest-path PATH`, and `--locked` (requires `sgpm` on
+`PATH` to run `sgpm update --check`). JSON output includes `schema_version`,
+`exit_status`, `capture`, and per-test `duration_ms`.
+
+Optional `sengoo-schema = 1` in `Sengoo.toml` and `version = 1` in
+`Sengoo.lock` are validated; unsupported values fail with an explicit
+incompatible-version error. Source discovery errors fail `sgpm test` and
+`sgpm fmt` instead of silently skipping unreadable `.sg` files.
 
 Git dependencies are cloned into `target/sgpm/git/` under the selected package.
 Remote registry dependencies are unpacked into `target/sgpm/registry/`.
