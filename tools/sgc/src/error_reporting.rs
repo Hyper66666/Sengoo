@@ -1,6 +1,6 @@
 use sengoo_compiler::error::{ParseError, TypeError};
 use sengoo_compiler::typeck::TypeckError;
-use sengoo_compiler::CompileError;
+use sengoo_compiler::{CompileError, Span};
 
 use super::{
     current_error_format, CompilerErrorJson, CompilerErrorLocationJson, CompilerErrorSpanJson,
@@ -29,12 +29,19 @@ fn diagnostic_code_from_message(message: &str) -> Option<String> {
 }
 
 fn compile_error_payload(
+    stage_override: Option<&'static str>,
     input: Option<&str>,
     raw: &str,
     location: Option<CompilerErrorLocationJson>,
 ) -> CompilerErrorJson {
-    let (stage, message) = split_compiler_error_stage(raw);
+    let (detected_stage, message) = split_compiler_error_stage(raw);
+    let stage = stage_override.unwrap_or(detected_stage);
     let code = diagnostic_code_from_message(&message);
+    let hint = match stage {
+        "import" => "check the import path, package module map, or supported stdlib module",
+        "io" => "check that the input path exists and is readable",
+        _ => "use --error-format text for human-friendly diagnostics",
+    };
     CompilerErrorJson {
         ok: false,
         kind: "compile_error",
@@ -42,7 +49,7 @@ fn compile_error_payload(
         message,
         code,
         input: input.map(str::to_owned),
-        hint: Some("use --error-format text for human-friendly diagnostics".to_string()),
+        hint: Some(hint.to_string()),
         details: compile_error_details(raw),
         location,
     }
@@ -53,7 +60,16 @@ pub(crate) fn render_compile_error_json_with_location(
     raw: &str,
     location: Option<CompilerErrorLocationJson>,
 ) -> String {
-    let payload = compile_error_payload(input, raw, location);
+    render_compile_error_json_for_stage(None, input, raw, location)
+}
+
+pub(crate) fn render_compile_error_json_for_stage(
+    stage: Option<&'static str>,
+    input: Option<&str>,
+    raw: &str,
+    location: Option<CompilerErrorLocationJson>,
+) -> String {
+    let payload = compile_error_payload(stage, input, raw, location);
     if let Ok(encoded) = serde_json::to_string_pretty(&payload) {
         return encoded;
     }
@@ -182,6 +198,18 @@ pub(super) fn location_from_compile_error(
     source_span_from_compile_error(error).map(|span| location_from_source_span(source, &span))
 }
 
+pub(crate) fn location_from_span(source: &str, span: Span) -> Option<CompilerErrorLocationJson> {
+    if span.is_empty() {
+        return None;
+    }
+    let lo = span.lo as usize;
+    let len = span.len() as usize;
+    Some(location_from_source_span(
+        source,
+        &miette::SourceSpan::new(lo.into(), len),
+    ))
+}
+
 pub(crate) fn emit_compile_error_with_location(
     input: Option<&str>,
     raw: &str,
@@ -203,4 +231,25 @@ pub(crate) fn emit_compile_error_with_location(
 
 pub(crate) fn emit_compile_error(input: Option<&str>, raw: &str) {
     emit_compile_error_with_location(input, raw, None)
+}
+
+pub(crate) fn emit_compile_error_for_stage(stage: &'static str, input: Option<&str>, raw: &str) {
+    emit_compile_error_for_stage_with_location(stage, input, raw, None);
+}
+
+pub(crate) fn emit_compile_error_for_stage_with_location(
+    stage: &'static str,
+    input: Option<&str>,
+    raw: &str,
+    location: Option<CompilerErrorLocationJson>,
+) {
+    match current_error_format() {
+        ErrorFormat::Text => eprintln!("{raw}"),
+        ErrorFormat::Json => {
+            eprintln!(
+                "{}",
+                render_compile_error_json_for_stage(Some(stage), input, raw, location)
+            );
+        }
+    }
 }

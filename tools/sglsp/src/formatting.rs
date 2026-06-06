@@ -132,6 +132,18 @@ mod tests {
     }
 
     #[test]
+    fn realworld_cli_json_audit_imports_format_with_keyword_logicals() {
+        let source = "import std::args;\nimport std::json;\nimport std::log;\nimport std::status;\n\ndef main()->i64{\nlet ok=true and not false;\nif ok and STATUS_OK()==0 {0}else{1}\n}";
+
+        let formatted = normalized_format(source);
+
+        assert_eq!(
+            formatted,
+            "import std::args;\n\nimport std::json;\n\nimport std::log;\n\nimport std::status;\n\ndef main() -> i64 {\n    let ok = true and not false;\n    if ok and STATUS_OK() == 0 { 0; } else { 1; };\n}"
+        );
+    }
+
+    #[test]
     fn range_format_edit_limits_replacement_to_requested_lines() {
         let source = "def first() -> i64 {\n    1\n}\n\ndef second()->i64{\nlet x=1+2\nx\n}";
         let range = Range {

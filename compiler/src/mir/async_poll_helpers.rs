@@ -6,9 +6,11 @@ use super::async_frame_helpers::{
     push_frame_load_typed, push_frame_store, push_frame_store_typed, push_i64_const,
     AsyncFrameLayout,
 };
-use crate::mir::{Instruction, Local, LocalKind, MIRType, MirFunction, Terminator, MIR_I64};
+use crate::mir::{
+    Instruction, Local, LocalKind, MIRType, MirConstant, MirFunction, Terminator, MIR_I64,
+};
 use crate::CompileError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn clone_local_kind(kind: LocalKind) -> LocalKind {
     match kind {
@@ -217,6 +219,106 @@ fn emit_ready_return(f: &mut MirFunction, block: usize) {
     f.basic_blocks[block].set_terminator(Terminator::Return(Some(ready)));
 }
 
+fn is_pointer_like_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Ref(_) | MIRType::Ptr(_))
+}
+
+pub(crate) fn collect_rebasable_pointer_locals(
+    mir_fn: &MirFunction,
+    spill_user_locals: &[(Local, MIRType)],
+) -> HashMap<Local, Local> {
+    let spilled = spill_user_locals
+        .iter()
+        .map(|(local, _)| *local)
+        .collect::<HashSet<_>>();
+    let mut zero_locals = HashSet::new();
+    let mut address_sources = HashMap::<Local, Local>::new();
+    let mut pointer_store_sources = HashMap::<Local, Option<Local>>::new();
+
+    for block in &mir_fn.basic_blocks {
+        for inst_id in &block.instructions {
+            match mir_fn.instruction(*inst_id) {
+                Instruction::Assign {
+                    destination,
+                    value: MirConstant::Int(0),
+                } => {
+                    zero_locals.insert(*destination);
+                }
+                Instruction::IndexAddr {
+                    destination,
+                    base,
+                    index,
+                } if zero_locals.contains(index) && base.kind == LocalKind::User => {
+                    address_sources.insert(*destination, *base);
+                }
+                Instruction::AddrOf {
+                    destination,
+                    source,
+                } if source.kind == LocalKind::User => {
+                    address_sources.insert(*destination, *source);
+                }
+                Instruction::Store { destination, value }
+                    if destination.kind == LocalKind::User
+                        && mir_fn
+                            .locals
+                            .get(destination.index())
+                            .is_some_and(|(_, ty)| is_pointer_like_type(ty))
+                        && spilled.contains(destination) =>
+                {
+                    let source = address_sources.get(value).copied();
+                    match pointer_store_sources.get_mut(destination) {
+                        Some(existing) if *existing == source => {}
+                        Some(existing) => *existing = None,
+                        None => {
+                            pointer_store_sources.insert(*destination, source);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pointer_store_sources
+        .into_iter()
+        .filter_map(|(pointer, source)| source.map(|source| (pointer, source)))
+        .collect()
+}
+
+fn add_rebase_source_slots(
+    live_user_slots: &mut HashMap<usize, Vec<LiveUserSlot>>,
+    spill_user_locals: &[(Local, MIRType)],
+    rebase_pointer_locals: &HashMap<Local, Local>,
+) {
+    let slot_map = spill_user_locals
+        .iter()
+        .enumerate()
+        .map(|(slot_index, (local, ty))| (*local, (slot_index, ty.clone())))
+        .collect::<HashMap<_, _>>();
+
+    for slots in live_user_slots.values_mut() {
+        let mut present = slots.iter().map(|slot| slot.local).collect::<HashSet<_>>();
+        let mut extra = Vec::new();
+        for slot in slots.iter() {
+            let Some(source) = rebase_pointer_locals.get(&slot.local).copied() else {
+                continue;
+            };
+            if !present.insert(source) {
+                continue;
+            }
+            if let Some((slot_index, ty)) = slot_map.get(&source) {
+                extra.push(LiveUserSlot {
+                    slot_index: *slot_index,
+                    local: source,
+                    ty: ty.clone(),
+                });
+            }
+        }
+        slots.extend(extra);
+        slots.sort_by_key(|slot| slot.slot_index);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_pending_return(
     f: &mut MirFunction,
@@ -228,21 +330,30 @@ fn emit_pending_return(
     await_slot_index: usize,
     live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
+    rebase_pointer_locals: &HashMap<Local, Local>,
 ) -> Result<(), CompileError> {
     for slot in live_user_slots {
+        if rebase_pointer_locals.contains_key(&slot.local) {
+            continue;
+        }
         let remapped = remap_local(slot.local, local_map)?;
-        let loaded = f.add_local(LocalKind::Temp, slot.ty.clone());
-        let load_inst = f.alloc_inst(Instruction::Load {
-            destination: loaded,
-            source: remapped,
-        });
-        f.basic_blocks[block].push(load_inst);
+        let value = if is_pointer_like_type(&slot.ty) {
+            remapped
+        } else {
+            let loaded = f.add_local(LocalKind::Temp, slot.ty.clone());
+            let load_inst = f.alloc_inst(Instruction::Load {
+                destination: loaded,
+                source: remapped,
+            });
+            f.basic_blocks[block].push(load_inst);
+            loaded
+        };
         push_frame_store_typed(
             f,
             block,
             handle,
             frame_user_slot(layout, slot.slot_index),
-            loaded,
+            value,
             &slot.ty,
         )?;
     }
@@ -277,6 +388,7 @@ fn emit_suspend_transition(
     await_slot_index: usize,
     live_user_slots: &[LiveUserSlot],
     local_map: &HashMap<Local, Local>,
+    rebase_pointer_locals: &HashMap<Local, Local>,
 ) -> Result<(), CompileError> {
     let poll_result = f.add_local(LocalKind::Temp, MIR_I64);
     let poll_call = f.alloc_inst(Instruction::Call {
@@ -301,6 +413,7 @@ fn emit_suspend_transition(
         await_slot_index,
         live_user_slots,
         local_map,
+        rebase_pointer_locals,
     )?;
     Ok(())
 }
@@ -317,7 +430,13 @@ pub(crate) fn synthesize_cfg_poll(
     let bb0 = f.start_block;
 
     let live_in = compute_live_in_user_locals(mir_fn, plan)?;
-    let live_user_slots = collect_live_user_slots(plan, spill_user_locals, &live_in);
+    let rebase_pointer_locals = collect_rebasable_pointer_locals(mir_fn, spill_user_locals);
+    let mut live_user_slots = collect_live_user_slots(plan, spill_user_locals, &live_in);
+    add_rebase_source_slots(
+        &mut live_user_slots,
+        spill_user_locals,
+        &rebase_pointer_locals,
+    );
     let mut local_map = HashMap::new();
     for (local, ty) in mir_fn.locals.iter().skip(1) {
         let remapped = f.add_local(clone_local_kind(local.kind), ty.clone());
@@ -329,10 +448,17 @@ pub(crate) fn synthesize_cfg_poll(
         translated_blocks.insert(*block, f.add_block());
     }
     let mut resume_blocks = HashMap::new();
-    let mut pending_blocks = HashMap::new();
+    let mut initial_pending_blocks = HashMap::new();
+    let mut resume_pending_blocks = HashMap::new();
+    let mut ready_handle_blocks = HashMap::new();
+    let mut ready_handle_locals = HashMap::new();
+    let mut ready_handle_initial_values = HashMap::new();
+    let mut ready_handle_resume_values = HashMap::new();
     for point in &plan.suspend_points {
         resume_blocks.insert(point.block, f.add_block());
-        pending_blocks.insert(point.block, f.add_block());
+        initial_pending_blocks.insert(point.block, f.add_block());
+        resume_pending_blocks.insert(point.block, f.add_block());
+        ready_handle_blocks.insert(point.block, f.add_block());
     }
     let completed_block = f.add_block();
 
@@ -363,12 +489,38 @@ pub(crate) fn synthesize_cfg_poll(
     });
     emit_ready_return(&mut f, completed_block);
 
+    let mut local_maps_by_block = HashMap::<usize, HashMap<Local, Local>>::new();
+    for block in &plan.ordered_blocks {
+        let mut block_local_map = local_map.clone();
+        for point in plan
+            .suspend_points
+            .iter()
+            .filter(|point| point.ready_block == *block)
+        {
+            let original_handle = point.future_handle;
+            let Some((_, ty)) = mir_fn.locals.get(original_handle.index()) else {
+                continue;
+            };
+            let phi_local = *ready_handle_locals
+                .entry(point.block)
+                .or_insert_with(|| f.add_local(LocalKind::Temp, ty.clone()));
+            block_local_map.insert(original_handle, phi_local);
+        }
+        local_maps_by_block.insert(*block, block_local_map);
+    }
+
     for block in &plan.ordered_blocks {
         let translated = translated_blocks[block];
         let original_block = &mir_fn.basic_blocks[*block];
+        let block_local_map = local_maps_by_block.get(block).ok_or_else(|| {
+            CompileError::MirLower(format!("missing local map for block {}", block))
+        })?;
         for inst_id in &original_block.instructions {
-            let cloned =
-                remap_instruction(mir_fn.instruction(*inst_id), &local_map, &translated_blocks)?;
+            let cloned = remap_instruction(
+                mir_fn.instruction(*inst_id),
+                block_local_map,
+                &translated_blocks,
+            )?;
             let new_id = f.alloc_inst(cloned);
             f.basic_blocks[translated].push(new_id);
         }
@@ -380,7 +532,7 @@ pub(crate) fn synthesize_cfg_poll(
         {
             Terminator::Return(value) => {
                 if let Some(value) = value {
-                    let remapped = remap_local(*value, &local_map)?;
+                    let remapped = remap_local(*value, block_local_map)?;
                     push_frame_store_typed(
                         &mut f,
                         translated,
@@ -405,7 +557,7 @@ pub(crate) fn synthesize_cfg_poll(
                 else_block,
             } => {
                 f.basic_blocks[translated].set_terminator(Terminator::If {
-                    cond: remap_local(*cond, &local_map)?,
+                    cond: remap_local(*cond, block_local_map)?,
                     then_block: translated_blocks[then_block],
                     else_block: translated_blocks[else_block],
                 });
@@ -416,7 +568,7 @@ pub(crate) fn synthesize_cfg_poll(
                 otherwise,
             } => {
                 f.basic_blocks[translated].set_terminator(Terminator::Switch {
-                    discr: remap_local(*discr, &local_map)?,
+                    discr: remap_local(*discr, block_local_map)?,
                     targets: targets
                         .iter()
                         .map(|(value, block)| (*value, translated_blocks[block]))
@@ -427,7 +579,6 @@ pub(crate) fn synthesize_cfg_poll(
             Terminator::Suspend {
                 poll_func,
                 future_handle,
-                ready_block,
                 ..
             } => {
                 let point = plan
@@ -440,7 +591,8 @@ pub(crate) fn synthesize_cfg_poll(
                             block
                         ))
                     })?;
-                let remapped_handle = remap_local(*future_handle, &local_map)?;
+                let remapped_handle = remap_local(*future_handle, block_local_map)?;
+                ready_handle_initial_values.insert(*block, remapped_handle);
                 emit_suspend_transition(
                     &mut f,
                     translated,
@@ -448,15 +600,16 @@ pub(crate) fn synthesize_cfg_poll(
                     handle,
                     poll_func,
                     remapped_handle,
-                    translated_blocks[ready_block],
-                    pending_blocks[block],
+                    ready_handle_blocks[block],
+                    initial_pending_blocks[block],
                     point.state_index,
                     point.state_index - 1,
                     live_user_slots
                         .get(block)
                         .map(|slots| slots.as_slice())
                         .unwrap_or(&[]),
-                    &local_map,
+                    block_local_map,
+                    &rebase_pointer_locals,
                 )?;
             }
             other => {
@@ -475,6 +628,9 @@ pub(crate) fn synthesize_cfg_poll(
             .map(|slots| slots.as_slice())
             .unwrap_or(&[])
         {
+            if rebase_pointer_locals.contains_key(&slot.local) {
+                continue;
+            }
             let restored = push_frame_load_typed(
                 &mut f,
                 resume_block,
@@ -489,6 +645,28 @@ pub(crate) fn synthesize_cfg_poll(
             });
             f.basic_blocks[resume_block].push(store_inst);
         }
+        for slot in live_user_slots
+            .get(&point.block)
+            .map(|slots| slots.as_slice())
+            .unwrap_or(&[])
+        {
+            let Some(source) = rebase_pointer_locals.get(&slot.local).copied() else {
+                continue;
+            };
+            let remapped_pointer = remap_local(slot.local, &local_map)?;
+            let remapped_source = remap_local(source, &local_map)?;
+            let pointer_value = f.add_local(LocalKind::Temp, slot.ty.clone());
+            let addr_inst = f.alloc_inst(Instruction::AddrOf {
+                destination: pointer_value,
+                source: remapped_source,
+            });
+            f.basic_blocks[resume_block].push(addr_inst);
+            let store_inst = f.alloc_inst(Instruction::Store {
+                destination: remapped_pointer,
+                value: pointer_value,
+            });
+            f.basic_blocks[resume_block].push(store_inst);
+        }
 
         let restored_handle = push_frame_load_typed(
             &mut f,
@@ -497,6 +675,13 @@ pub(crate) fn synthesize_cfg_poll(
             frame_await_slot(layout, point.state_index - 1),
             MIR_I64,
         )?;
+        ready_handle_resume_values.insert(point.block, restored_handle);
+        let resume_local_map = local_maps_by_block.get(&point.block).ok_or_else(|| {
+            CompileError::MirLower(format!(
+                "missing resume local map for block {}",
+                point.block
+            ))
+        })?;
         emit_suspend_transition(
             &mut f,
             resume_block,
@@ -504,16 +689,48 @@ pub(crate) fn synthesize_cfg_poll(
             handle,
             &point.poll_func,
             restored_handle,
-            translated_blocks[&point.ready_block],
-            pending_blocks[&point.block],
+            ready_handle_blocks[&point.block],
+            resume_pending_blocks[&point.block],
             point.state_index,
             point.state_index - 1,
             live_user_slots
                 .get(&point.block)
                 .map(|slots| slots.as_slice())
                 .unwrap_or(&[]),
-            &local_map,
+            resume_local_map,
+            &rebase_pointer_locals,
         )?;
+    }
+
+    for point in &plan.suspend_points {
+        let ready_handle_block = ready_handle_blocks[&point.block];
+        let initial_handle = ready_handle_initial_values
+            .get(&point.block)
+            .copied()
+            .ok_or_else(|| {
+                CompileError::MirLower("missing initial ready handle value".to_string())
+            })?;
+        let restored_handle = ready_handle_resume_values
+            .get(&point.block)
+            .copied()
+            .ok_or_else(|| {
+                CompileError::MirLower("missing resumed ready handle value".to_string())
+            })?;
+        let phi_local = *ready_handle_locals
+            .get(&point.block)
+            .ok_or_else(|| CompileError::MirLower("missing ready handle phi local".to_string()))?;
+        let phi_inst = f.alloc_inst(Instruction::Phi {
+            destination: phi_local,
+            incoming: vec![
+                (initial_handle, translated_blocks[&point.block]),
+                (restored_handle, resume_blocks[&point.block]),
+            ],
+        });
+        f.basic_blocks[ready_handle_block]
+            .instructions
+            .insert(0, phi_inst);
+        f.basic_blocks[ready_handle_block]
+            .set_terminator(Terminator::Goto(translated_blocks[&point.ready_block]));
     }
 
     Ok(f)

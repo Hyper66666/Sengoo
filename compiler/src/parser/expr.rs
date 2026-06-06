@@ -87,7 +87,7 @@ impl<'source> Parser<'source> {
                     self.advance();
                     ExprKind::Literal(Literal::Null)
                 }
-                TokenKind::Not => {
+                TokenKind::Not | TokenKind::NotKw => {
                     self.advance();
                     let operand = self.parse_simple_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
@@ -126,7 +126,25 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::LParen => {
                     self.advance();
+                    if self.consume(TokenKind::RParen).is_some() {
+                        return Ok(Expr::new(ExprKind::Tuple(Vec::new()), self.span_at(lo)));
+                    }
                     let expr = self.parse_simple_expr()?;
+                    if self.consume(TokenKind::Comma).is_some() {
+                        let mut elements = vec![expr];
+                        while !self.is_eof() {
+                            if self.consume(TokenKind::RParen).is_some() {
+                                break;
+                            }
+                            elements.push(self.parse_simple_expr()?);
+                            if self.consume(TokenKind::Comma).is_some() {
+                                continue;
+                            }
+                            self.expect(TokenKind::RParen)?;
+                            break;
+                        }
+                        return Ok(Expr::new(ExprKind::Tuple(elements), self.span_at(lo)));
+                    }
                     self.expect(TokenKind::RParen)?;
                     return Ok(Expr::new(ExprKind::Paren(Box::new(expr)), self.span_at(lo)));
                 }
@@ -225,7 +243,7 @@ impl<'source> Parser<'source> {
                         operand: Box::new(operand),
                     }
                 }
-                TokenKind::Not => {
+                TokenKind::Not | TokenKind::NotKw => {
                     self.advance();
                     let operand = self.parse_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
@@ -266,7 +284,25 @@ impl<'source> Parser<'source> {
                 // 解析括号表达式或元组表达式。
                 TokenKind::LParen => {
                     self.advance();
+                    if self.consume(TokenKind::RParen).is_some() {
+                        return Ok(Expr::new(ExprKind::Tuple(Vec::new()), self.span_at(lo)));
+                    }
                     let expr = self.parse_expr()?;
+                    if self.consume(TokenKind::Comma).is_some() {
+                        let mut elements = vec![expr];
+                        while !self.is_eof() {
+                            if self.consume(TokenKind::RParen).is_some() {
+                                break;
+                            }
+                            elements.push(self.parse_expr()?);
+                            if self.consume(TokenKind::Comma).is_some() {
+                                continue;
+                            }
+                            self.expect(TokenKind::RParen)?;
+                            break;
+                        }
+                        return Ok(Expr::new(ExprKind::Tuple(elements), self.span_at(lo)));
+                    }
                     self.expect(TokenKind::RParen)?;
                     return Ok(Expr::new(ExprKind::Paren(Box::new(expr)), self.span_at(lo)));
                 }
@@ -458,12 +494,12 @@ impl<'source> Parser<'source> {
                 left: Box::new(left),
                 right: Box::new(self.parse_expr_prec(precedence)?),
             },
-            TokenKind::And => ExprKind::Binary {
+            TokenKind::And | TokenKind::AndKw => ExprKind::Binary {
                 op: BinOp::And,
                 left: Box::new(left),
                 right: Box::new(self.parse_expr_prec(precedence)?),
             },
-            TokenKind::Or => ExprKind::Binary {
+            TokenKind::Or | TokenKind::OrKw => ExprKind::Binary {
                 op: BinOp::Or,
                 left: Box::new(left),
                 right: Box::new(self.parse_expr_prec(precedence)?),
@@ -565,7 +601,16 @@ impl<'source> Parser<'source> {
 
             // 解析成员访问或方法调用（点运算符）。
             TokenKind::Dot => {
-                let field = self.expect_ident()?;
+                let field = match self.current().cloned() {
+                    Some(token) => match token.kind {
+                        TokenKind::Int(Some(n)) if n >= 0 => {
+                            self.advance();
+                            self.intern_named_ident(n.to_string(), token.span)
+                        }
+                        _ => self.expect_ident()?,
+                    },
+                    None => self.expect_ident()?,
+                };
 
                 // 检查是否为方法调用（后跟括号）。
                 if self.check(TokenKind::LParen) {
@@ -627,8 +672,8 @@ impl<'source> Parser<'source> {
             | TokenKind::DivAssign
             | TokenKind::ModAssign => PREC_ASSIGN,
 
-            TokenKind::Or => PREC_OR,
-            TokenKind::And => PREC_AND,
+            TokenKind::Or | TokenKind::OrKw => PREC_OR,
+            TokenKind::And | TokenKind::AndKw => PREC_AND,
 
             TokenKind::Eq
             | TokenKind::NotEq
@@ -685,6 +730,7 @@ impl<'source> Parser<'source> {
                     | TokenKind::ParallelKw
                     | TokenKind::Minus
                     | TokenKind::Not
+                    | TokenKind::NotKw
                     | TokenKind::BitNot
                     | TokenKind::And
                     | TokenKind::Star

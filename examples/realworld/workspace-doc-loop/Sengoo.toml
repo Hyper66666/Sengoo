@@ -1,0 +1,11 @@
+[package]
+name = "workspace_doc_loop"
+version = "0.1.0"
+edition = "2026"
+description = "Dual-target package fixture for docs, tests, and process capture."
+
+[bin]
+path = "src/main.sg"
+
+[lib]
+path = "src/lib.sg"

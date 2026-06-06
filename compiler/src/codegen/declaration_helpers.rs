@@ -63,7 +63,7 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_async_frame_load(i64, i64)\n");
         self.declarations
-            .push_str("declare i64 @sengoo_async_run_main_i64(i64)\n");
+            .push_str("declare i64 @sengoo_async_run_main_i64()\n");
         self.declarations.push('\n');
 
         self.declare_user_extern_functions();

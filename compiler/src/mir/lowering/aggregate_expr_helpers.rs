@@ -20,6 +20,24 @@ pub(super) fn lower_array_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr])
     array_local
 }
 
+pub(super) fn lower_tuple_expr(ctx: &mut LoweringContext<'_>, elems: &[HIRExpr]) -> Local {
+    let elem_locals: Vec<Local> = elems.iter().map(|e| ctx.lower_expr(e)).collect();
+    let elem_tys = elem_locals
+        .iter()
+        .map(|local| ctx.get_local_type(*local).clone())
+        .collect::<Vec<_>>();
+    let tuple_ty = MIRType::Tuple(elem_tys);
+
+    let tuple_local = ctx.add_local(None, LocalKind::Temp, tuple_ty.clone());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: tuple_local,
+        fields: elem_locals,
+        ty: tuple_ty,
+    });
+
+    tuple_local
+}
+
 pub(super) fn lower_index_expr(
     ctx: &mut LoweringContext<'_>,
     base: &HIRExpr,
@@ -65,13 +83,7 @@ pub(super) fn lower_field_expr(
             .iter()
             .position(|(name, _)| name == field)
             .unwrap_or(0),
-        _ => match field {
-            "x" | "left" | "r" => 0,
-            "y" | "right" | "g" => 1,
-            "z" | "b" => 2,
-            "w" | "a" => 3,
-            _ => 0,
-        },
+        _ => tuple_field_index(field).unwrap_or(0),
     };
     let elem_ty = match base_ty {
         MIRType::Tuple(tys) if field_index < tys.len() => tys[field_index].clone(),
@@ -90,6 +102,17 @@ pub(super) fn lower_field_expr(
 
     result_local
 }
+
+fn tuple_field_index(field: &str) -> Option<usize> {
+    field.parse::<usize>().ok().or(match field {
+        "x" | "left" | "r" => Some(0),
+        "y" | "right" | "g" => Some(1),
+        "z" | "b" => Some(2),
+        "w" | "a" => Some(3),
+        _ => None,
+    })
+}
+
 pub(super) fn lower_struct_expr(
     ctx: &mut LoweringContext<'_>,
     name: &str,
@@ -199,6 +222,50 @@ mod tests {
 
         assert!(matches!(ctx.get_local_type(result), MIRType::Array(_, 2)));
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(inst, Instruction::Aggregate { destination, fields, .. } if *destination == result && fields.len() == 2)));
+    }
+
+    #[test]
+    fn lower_tuple_expr_emits_tuple_aggregate_with_element_types() {
+        let (
+            mut mir_fn,
+            mut lambda_counter,
+            known_functions,
+            function_sigs,
+            struct_defs,
+            inherent_templates,
+            trait_templates,
+        ) = make_ctx();
+        let start_block = mir_fn.start_block;
+        let mut ctx = LoweringContext::new(
+            &mut mir_fn,
+            &mut lambda_counter,
+            &known_functions,
+            &function_sigs,
+            &struct_defs,
+            ConcreteTypeRegistry::default(),
+            MirLowerOptions::default(),
+            &inherent_templates,
+            &trait_templates,
+        );
+        ctx.set_current_block(start_block);
+
+        let tuple = HIRExpr::Tuple(vec![
+            HIRExpr::Lit(HIRLiteral::Int(7)),
+            HIRExpr::Lit(HIRLiteral::Bool(true)),
+        ]);
+        let result = ctx.lower_expr(&tuple);
+
+        assert_eq!(
+            ctx.get_local_type(result),
+            &MIRType::Tuple(vec![MIR_I64, MIR_BOOL])
+        );
+        assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
+            inst,
+            Instruction::Aggregate { destination, fields, ty }
+                if *destination == result
+                    && fields.len() == 2
+                    && matches!(ty, MIRType::Tuple(items) if items.len() == 2)
+        )));
     }
 
     #[test]

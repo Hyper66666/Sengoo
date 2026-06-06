@@ -700,6 +700,45 @@ mod tests {
     }
 
     #[test]
+    fn realworld_missing_import_json_diagnostic_maps_to_lsp_range() {
+        let src = "import definitely_missing_realworld_module;\n\ndef main() -> i64 {\n    0\n}\n";
+        let lo = src
+            .find("definitely_missing_realworld_module")
+            .expect("fixture import should exist") as u32;
+        let hi = lo + "definitely_missing_realworld_module".len() as u32;
+        let stderr = format!(
+            r#"{{
+  "ok": false,
+  "kind": "compile_error",
+  "stage": "import",
+  "message": "unresolved source import 'definitely_missing_realworld_module' from main.sg",
+  "input": "main.sg",
+  "hint": "check the import path, package module map, or supported stdlib module",
+  "details": [],
+  "location": {{
+    "line": 1,
+    "column": 8,
+    "span": {{ "lo": {lo}, "hi": {hi} }}
+  }}
+}}"#
+        );
+
+        let diagnostics = diagnostics_from_failed_sgc_output(src, &stderr);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sgc"));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("import".to_string()))
+        );
+        assert_eq!(diagnostics[0].range.start.line, 0);
+        assert_eq!(diagnostics[0].range.start.character, 7);
+        assert!(diagnostics[0]
+            .message
+            .contains("definitely_missing_realworld_module"));
+    }
+
+    #[test]
     fn source_span_to_range_maps_offsets() {
         let src = "def main() -> i64 {\n    let x = 1;\n}\n";
         let span: miette::SourceSpan = (src.find('x').expect("x should exist"), 1).into();

@@ -318,6 +318,37 @@ fn git_head(root: &Path) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("sgpm crate should live under tools/sgpm")
+        .to_path_buf()
+}
+
+fn realworld_fixture(name: &str) -> PathBuf {
+    workspace_root().join("examples/realworld").join(name)
+}
+
+fn copy_dir_filtered(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let source_path = entry.path();
+        let file_name = entry.file_name();
+        let file_name_text = file_name.to_string_lossy();
+        if file_name_text == "target" || file_name_text == "build" {
+            continue;
+        }
+        let destination_path = destination.join(file_name);
+        if source_path.is_dir() {
+            copy_dir_filtered(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).unwrap();
+        }
+    }
+}
+
 #[cfg(windows)]
 fn fake_sgc(dir: &Path) -> PathBuf {
     let script = dir.join("sgc.cmd");
@@ -1682,8 +1713,8 @@ fn sgpm_test_release_invokes_sgc_run_with_o2() {
     );
     let log = fs::read_to_string(record).unwrap().replace('\\', "/");
     assert!(
-        log.contains(":: run") && log.contains("-O 2"),
-        "test log should run tests with release optimization:\n{}",
+        log.contains(":: test") && log.contains("--release"),
+        "test log should delegate to sgc test with release profile:\n{}",
         log
     );
     let _ = fs::remove_dir_all(dir);
@@ -1719,8 +1750,8 @@ fn sgpm_test_debug_invokes_sgc_run_with_o0() {
     );
     let log = fs::read_to_string(record).unwrap().replace('\\', "/");
     assert!(
-        log.contains(":: run") && log.contains("-O 0"),
-        "test log should run tests with debug optimization:\n{}",
+        log.contains(":: test") && log.contains("Sengoo.toml"),
+        "test log should delegate to sgc test with manifest path:\n{}",
         log
     );
     let _ = fs::remove_dir_all(dir);
@@ -2777,6 +2808,84 @@ fn update_check_reports_missing_lockfile() {
         stderr
     );
     assert!(!app.join("Sengoo.lock").exists());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn realworld_locked_project_loop_keeps_lockfiles_current() {
+    let dir = temp_dir("realworld_locked_loop");
+    let record = dir.join("record.txt");
+    let fake_sgc = fake_sgc(&dir);
+    let fake_sgfmt = fake_sgfmt(&dir);
+
+    for fixture in ["cli-json-audit", "http-client-status", "workspace-doc-loop"] {
+        let package = dir.join(fixture);
+        copy_dir_filtered(&realworld_fixture(fixture), &package);
+
+        let update = run_sgpm(&["update"], &package);
+        assert!(
+            update.status.success(),
+            "{} update stdout:\n{}\nstderr:\n{}",
+            fixture,
+            String::from_utf8_lossy(&update.stdout),
+            String::from_utf8_lossy(&update.stderr)
+        );
+
+        let lock_path = package.join("Sengoo.lock");
+        let before = fs::read_to_string(&lock_path).expect("lockfile should exist after update");
+
+        for args in [
+            vec!["check", "--locked"],
+            vec!["test", "--locked"],
+            vec!["fmt", "--check", "--locked"],
+            vec!["doc", "--locked"],
+            vec!["build", "--locked"],
+        ] {
+            let output = Command::new(sgpm())
+                .args(&args)
+                .current_dir(&package)
+                .env("SGPM_SGC", &fake_sgc)
+                .env("SGPM_SGFMT", &fake_sgfmt)
+                .env("SGPM_RECORD", &record)
+                .output()
+                .expect("run sgpm locked command");
+            assert!(
+                output.status.success(),
+                "{} sgpm {} stdout:\n{}\nstderr:\n{}",
+                fixture,
+                args.join(" "),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+
+            let after = fs::read_to_string(&lock_path).expect("lockfile should remain readable");
+            assert_eq!(
+                after,
+                before,
+                "{} sgpm {} should not rewrite Sengoo.lock",
+                fixture,
+                args.join(" ")
+            );
+        }
+    }
+
+    let log = fs::read_to_string(&record)
+        .unwrap_or_default()
+        .replace('\\', "/");
+    assert!(
+        log.contains("src/main.sg"),
+        "expected realworld src delegation:\n{log}"
+    );
+    assert!(
+        log.contains("tests/"),
+        "expected realworld test delegation:\n{log}"
+    );
+    assert!(
+        log.contains("--check"),
+        "expected fmt --check delegation:\n{log}"
+    );
+    assert!(log.contains("doc"), "expected doc delegation:\n{log}");
 
     let _ = fs::remove_dir_all(dir);
 }

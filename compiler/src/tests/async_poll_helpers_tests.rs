@@ -5,6 +5,8 @@ use crate::mir::async_cfg_helpers::{
 };
 use crate::mir::async_frame_helpers::build_async_frame_layout;
 use crate::mir::async_poll_helpers::synthesize_cfg_poll;
+use crate::mir::{Instruction, MirConstant, Terminator};
+use std::collections::HashSet;
 
 #[test]
 fn async_poll_helpers_synthesize_cfg_poll_for_simple_multi_await_body() {
@@ -42,4 +44,63 @@ async def main() -> i64 {
 
     assert_eq!(poll.name, "main__body__poll");
     assert!(poll.basic_blocks.len() > mir_fn.basic_blocks.len());
+}
+
+#[test]
+fn async_poll_helpers_uses_distinct_pending_blocks_for_initial_and_resume_polling() {
+    let src = r#"
+async def main() -> i64 {
+    await sleep(1);
+    42
+}
+"#;
+
+    let mir = compile_to_mir(src).expect("compile_to_mir should succeed");
+    let mir_fn = mir
+        .iter()
+        .find(|f| f.name == "main__body")
+        .expect("async main body should be preserved");
+
+    let user_locals = collect_user_locals(mir_fn);
+    let plan = build_async_cfg_plan(mir_fn).expect("cfg plan should build");
+    let live_in = compute_live_in_user_locals(mir_fn, &plan).expect("liveness should compute");
+    let spill_user_locals = collect_spill_user_locals(&plan, &user_locals, &live_in);
+    let layout = build_async_frame_layout(
+        mir_fn.name.clone(),
+        mir_fn.params.clone(),
+        mir_fn.return_type.clone(),
+        crate::mir::async_entry_helpers::count_await_points(mir_fn),
+        &spill_user_locals,
+    )
+    .expect("frame layout should build");
+
+    let poll = synthesize_cfg_poll(&layout, mir_fn, &plan, &spill_user_locals)
+        .expect("cfg poll synthesis should succeed");
+
+    let zero_locals = poll
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Assign {
+                destination,
+                value: MirConstant::Int(0),
+            } => Some(*destination),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+
+    let pending_return_blocks = poll
+        .basic_blocks
+        .iter()
+        .filter(|block| match block.terminator.as_ref() {
+            Some(Terminator::Return(Some(value))) => zero_locals.contains(value),
+            _ => false,
+        })
+        .count();
+
+    assert_eq!(
+        pending_return_blocks,
+        plan.suspend_points.len() * 2,
+        "each suspend point needs separate pending returns for first-entry and resume polling"
+    );
 }

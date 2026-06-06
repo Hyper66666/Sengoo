@@ -1,3 +1,6 @@
+#[path = "runtime_hardening_tests.rs"]
+mod runtime_hardening_tests;
+
 use super::{
     append_native_runtime_inputs, bench_root_dir, build_cache_key, build_graph_v2_for_source,
     build_metadata_matches, build_reflection_metadata, cache_key, cache_mismatch_reasons,

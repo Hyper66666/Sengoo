@@ -706,6 +706,8 @@ struct MetadataPackage {
     manifest: String,
     root: String,
     entry: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tests: Vec<String>,
     dependencies: Vec<String>,
 }
 
@@ -732,6 +734,12 @@ fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
                 manifest: slash_path(&node.manifest_path),
                 root: slash_path(&node.root_dir),
                 entry: slash_path(&node.entry_path),
+                tests: node
+                    .manifest
+                    .test
+                    .iter()
+                    .map(|target| slash_path(&target.path))
+                    .collect(),
                 dependencies: node.manifest.dependencies.keys().cloned().collect(),
             });
         }

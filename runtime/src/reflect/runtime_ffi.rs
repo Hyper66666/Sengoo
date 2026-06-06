@@ -37,7 +37,11 @@ pub const SENGOO_FFI_ERR_SYMBOL_NOT_FOUND: i32 = -2003;
 pub const SENGOO_FFI_ERR_CALL_FAILED: i32 = -2004;
 pub const SENGOO_FFI_ERR_PARSE: i32 = -2005;
 pub const SENGOO_FFI_ERR_BUFFER: i32 = -2006;
+#[allow(dead_code)]
+pub const SENGOO_FFI_ERR_UNSUPPORTED: i32 = -2007;
 pub const SENGOO_FFI_ERR_INTERNAL: i32 = -2099;
+
+pub const SENGOO_RUNTIME_MAX_BUFFER_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 struct FfiErrorState {
@@ -746,5 +750,72 @@ mod tests {
         );
         assert_eq!(sengoo_ffi_buffer_len(handle), 3);
         assert_eq!(sengoo_ffi_buffer_free(handle), SENGOO_FFI_STATUS_OK);
+    }
+
+    #[test]
+    fn ffi_buffer_rejects_oversized_capacity() {
+        let _guard = test_lock();
+        let oversized = SENGOO_RUNTIME_MAX_BUFFER_BYTES + 1;
+        let handle = sengoo_ffi_buffer_new(oversized);
+        assert_eq!(handle, 0);
+        assert_eq!(
+            sengoo_ffi_last_error_code(),
+            SENGOO_FFI_ERR_INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn ffi_buffer_double_free_returns_invalid_handle() {
+        let _guard = test_lock();
+        let handle = sengoo_ffi_buffer_new(4);
+        assert_ne!(handle, 0);
+        assert_eq!(sengoo_ffi_buffer_free(handle), SENGOO_FFI_STATUS_OK);
+        assert_eq!(
+            sengoo_ffi_buffer_free(handle),
+            SENGOO_FFI_ERR_INVALID_HANDLE
+        );
+    }
+
+    #[test]
+    fn ffi_buffer_use_after_free_returns_invalid_handle() {
+        let _guard = test_lock();
+        let handle = sengoo_ffi_buffer_new(4);
+        assert_ne!(handle, 0);
+        assert_eq!(sengoo_ffi_buffer_free(handle), SENGOO_FFI_STATUS_OK);
+        assert_eq!(
+            sengoo_ffi_buffer_len(handle),
+            SENGOO_FFI_ERR_INVALID_HANDLE as i64
+        );
+    }
+
+    #[test]
+    fn ffi_c_call_rejects_unsupported_arity() {
+        let _guard = test_lock();
+        let path = c_str("self://builtin");
+        let lib = sengoo_ffi_c_open(path.as_ptr());
+        assert_ne!(lib, 0);
+
+        let symbol = c_str("sengoo_ffi_builtin_add2");
+        let args = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+        let mut out = 0_i64;
+        let rc = sengoo_ffi_c_call_i64(
+            lib,
+            symbol.as_ptr(),
+            args.len(),
+            args.as_ptr(),
+            &mut out as *mut i64,
+        );
+        assert_eq!(rc, SENGOO_FFI_ERR_INVALID_ARGUMENT);
+
+        assert_eq!(sengoo_ffi_c_close(lib), SENGOO_FFI_STATUS_OK);
+    }
+
+    #[test]
+    fn ffi_callback_rejects_invalid_library_handle() {
+        let _guard = test_lock();
+        let symbol = c_str("sengoo_ffi_builtin_sum4");
+        let callback = sengoo_ffi_callback_bind_i64(999_999, symbol.as_ptr(), 4);
+        assert_eq!(callback, 0);
+        assert_eq!(sengoo_ffi_last_error_code(), SENGOO_FFI_ERR_INVALID_HANDLE);
     }
 }

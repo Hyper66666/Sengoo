@@ -1,0 +1,28 @@
+import std::http;
+
+import std::json;
+
+import std::log;
+
+import std::status;
+
+def http_status_score() -> i64 {
+    let log_level_set = log_set_level(LOG_INFO()).unwrap_or(false);
+    let log_cleared = log_test_sink_clear();
+    let log_written = log_write(LOG_INFO(), "http-client-status started").unwrap_or(false);
+    let result = http_client_get("ftp://127.0.0.1/", 1);
+    let response_closed = if result.is_ok { result.value.close(); } else { true; };
+    let unsupported = if result.is_ok { false; } else { result.error == STATUS_UNSUPPORTED(); };
+    let doc = json_doc_object().unwrap_or(JsonDoc { handle: 0 });
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let serialized = doc.serialize(buffer).unwrap_or(0);
+    let status_len = status_name_copy(STATUS_UNSUPPORTED(), buffer).unwrap_or(0);
+    let log_len = log_test_sink_copy(buffer).unwrap_or(0);
+    let closed = doc.close();
+    buffer.free();
+    if unsupported and response_closed and serialized == 2 and status_len > 0 and log_len > 0 and closed and log_level_set and log_cleared and log_written { 0; } else { 1; };
+}
+
+def main() -> i64 {
+    http_status_score();
+}

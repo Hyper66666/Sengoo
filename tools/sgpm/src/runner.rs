@@ -153,31 +153,27 @@ impl Toolchain {
     pub fn test(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         let mut ran = 0usize;
         for node in &graph.nodes {
-            let tests = discover_tests(&node.root_dir)?;
-            for test in tests {
-                let mut command = Command::new(&self.sgc);
-                command
-                    .current_dir(&node.root_dir)
-                    .arg("run")
-                    .arg(&test)
-                    .arg("-O")
-                    .arg(profile.opt_level());
-                configure_module_map(&mut command, graph, node, true)?;
-
-                if verbose {
-                    eprintln!("sgpm: {}", render_command(&command));
-                }
-
-                run_command(command, &format!("test failed: {}", test.display()))?;
-                println!("test ok {}", test.display());
-                ran += 1;
+            let mut command = Command::new(&self.sgc);
+            command
+                .current_dir(&node.root_dir)
+                .arg("test")
+                .arg("--manifest-path")
+                .arg(&node.manifest_path);
+            if matches!(profile, BuildProfile::Release) {
+                command.arg("--release");
             }
+            configure_module_map(&mut command, graph, node, true)?;
+
+            if verbose {
+                eprintln!("sgpm: {}", render_command(&command));
+            }
+
+            run_command(command, &format!("test failed for package '{}'", node.name))?;
+            ran += 1;
         }
 
         if ran == 0 {
-            println!("no Sengoo tests found");
-        } else {
-            println!("test result: {} passed", ran);
+            println!("no Sengoo packages found");
         }
 
         Ok(())
@@ -353,14 +349,6 @@ fn portable_path(path: &Path) -> String {
     path.to_string_lossy()
         .trim_start_matches(r"\\?\")
         .to_string()
-}
-
-fn discover_tests(root: &Path) -> Result<Vec<PathBuf>> {
-    let tests_dir = root.join("tests");
-    if !tests_dir.exists() {
-        return Ok(Vec::new());
-    }
-    collect_sg_files(&tests_dir)
 }
 
 fn discover_format_files(root: &Path) -> Result<Vec<PathBuf>> {

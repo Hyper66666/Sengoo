@@ -203,6 +203,179 @@ pub(super) fn stdlib_signatures_for_content(content: &str) -> Vec<FunctionSignat
 mod tests {
     use super::*;
 
+    fn assert_symbols_for_content(content: &str, expected: &[&str]) {
+        let symbols = stdlib_symbols_for_content(content);
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        for name in expected {
+            assert!(
+                names.contains(name),
+                "missing symbol {name}; symbols: {names:#?}"
+            );
+        }
+    }
+
+    fn assert_signatures_for_content(content: &str, expected: &[&str]) {
+        let signatures = stdlib_signatures_for_content(content);
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+
+        for label in expected {
+            assert!(
+                labels.contains(label),
+                "missing signature {label}; signatures: {labels:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn realworld_cli_json_audit_imports_expose_completion_and_signatures() {
+        let content = "\
+import std::args;
+import std::collections;
+import std::dir;
+import std::file;
+import std::json;
+import std::log;
+import std::status;
+";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "arg_exists",
+                "dir_create_all",
+                "file_read_into",
+                "file_write_str",
+                "JsonDoc",
+                "JsonValue",
+                "json_parse",
+                "LOG_INFO",
+                "log_write",
+                "STATUS_OK",
+                "status_name_copy",
+                "Vec",
+                "vec_new_i64",
+                "Buffer",
+                "Result",
+            ],
+        );
+        assert_signatures_for_content(
+            content,
+            &[
+                "def arg_copy(index: i64, buffer: Buffer) -> Result<i64, i64>",
+                "def dir_create_all(path: &str) -> Result<bool, i64>",
+                "def file_read_into(path: &str, buffer: Buffer) -> Result<i64, i64>",
+                "def file_write_str(path: &str, data: &str) -> Result<i64, i64>",
+                "def json_parse(text: &str) -> Result<JsonDoc, i64>",
+                "def number_i64(self) -> Result<i64, i64> [impl JsonValue]",
+                "def log_write(level: i64, message: &str) -> Result<bool, i64>",
+                "def status_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64>",
+                "def vec_new_i64() -> Vec<i64>",
+                "def push(self, value: i64) -> bool [impl Vec<i64>]",
+            ],
+        );
+    }
+
+    #[test]
+    fn realworld_http_client_status_imports_expose_completion_and_signatures() {
+        let content = "\
+import std::http;
+import std::json;
+import std::log;
+import std::status;
+";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "HttpResponse",
+                "http_client_get",
+                "json_doc_object",
+                "JsonDoc",
+                "LOG_INFO",
+                "log_test_sink_copy",
+                "STATUS_UNSUPPORTED",
+                "status_name_copy",
+                "Buffer",
+                "Result",
+            ],
+        );
+        assert_signatures_for_content(
+            content,
+            &[
+                "def http_client_get(url: &str, timeout_ms: i64) -> Result<HttpResponse, i64>",
+                "def close(self) -> bool [impl HttpResponse]",
+                "def json_doc_object() -> Result<JsonDoc, i64>",
+                "def serialize(self, buffer: Buffer) -> Result<i64, i64> [impl JsonDoc]",
+                "def log_test_sink_copy(buffer: Buffer) -> Result<i64, i64>",
+                "def STATUS_UNSUPPORTED() -> i64",
+                "def status_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64>",
+            ],
+        );
+    }
+
+    #[test]
+    fn realworld_workspace_doc_loop_imports_expose_completion_and_signatures() {
+        let content = "\
+import std::env;
+import std::process;
+";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "env_is_windows",
+                "process_current_dir_len",
+                "process_current_dir_copy",
+                "process_id",
+                "process_run_2",
+                "process_run_3",
+                "ProcessCommand",
+                "ProcessOutput",
+                "Buffer",
+                "Result",
+            ],
+        );
+        assert_signatures_for_content(
+            content,
+            &[
+                "def env_is_windows() -> bool",
+                "def process_current_dir_len() -> Result<i64, i64>",
+                "def process_current_dir_copy(buffer: Buffer) -> Result<i64, i64>",
+                "def process_id() -> i64",
+                "def process_run_2(executable: &str, arg0: &str, arg1: &str) -> Result<i64, i64>",
+                "def process_run_3(executable: &str, arg0: &str, arg1: &str, arg2: &str) -> Result<i64, i64>",
+            ],
+        );
+    }
+
+    #[test]
+    fn realworld_http_client_status_imports_expose_hover_detail_and_definition() {
+        let content = "\
+import std::http;
+import std::json;
+import std::log;
+import std::status;
+";
+
+        let symbol = stdlib_symbol_detail_for_content(content, "http_client_get")
+            .expect("realworld HTTP import set should expose hover detail");
+        assert_eq!(symbol.name, "http_client_get");
+        assert_eq!(symbol.detail, "function");
+
+        let definition = stdlib_definition_for_content(content, "http_client_get")
+            .expect("realworld HTTP import set should expose definition");
+        assert_eq!(definition.uri.scheme(), "sengoo-stdlib");
+        assert!(definition.uri.as_str().ends_with("/http.sg"));
+        assert!(definition.range.start.line > 0);
+    }
+
     #[test]
     fn stdlib_symbols_follow_imported_modules() {
         let symbols = stdlib_symbols_for_content("import std::option;\nimport std::result;\n");

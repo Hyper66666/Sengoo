@@ -1,0 +1,5 @@
+import workspace_doc_loop;
+
+def main() -> i64 {
+    if doc_loop_value() == 42 { 0; } else { 1; };
+}

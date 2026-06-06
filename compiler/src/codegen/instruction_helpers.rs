@@ -18,11 +18,17 @@ impl Codegen {
 
                 match value {
                     mir::MirConstant::Int(n) => {
-                        self.ir.push_str(&format!("{} = add i64 0, {}\n", dest, n));
+                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                        self.ir
+                            .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, n));
                     }
 
                     mir::MirConstant::Uint(n) => {
-                        self.ir.push_str(&format!("{} = add i64 0, {}\n", dest, n));
+                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                        self.ir
+                            .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, n));
                     }
 
                     mir::MirConstant::Bool(b) => {
@@ -34,13 +40,18 @@ impl Codegen {
                     }
 
                     mir::MirConstant::Float(f) => {
+                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
+                        let literal = Self::llvm_float_literal(*f);
                         self.ir
-                            .push_str(&format!("{} = fadd double 0.0, {}\n", dest, f));
+                            .push_str(&format!("{} = fadd {} 0.0, {}\n", dest, llvm_ty, literal));
                     }
 
                     mir::MirConstant::Char(c) => {
+                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
                         self.ir
-                            .push_str(&format!("{} = add i8 0, {}\n", dest, *c as i8));
+                            .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, *c as u32));
                     }
 
                     mir::MirConstant::String(s) => {
@@ -133,108 +144,63 @@ impl Codegen {
 
                 let right_val = self.operand_value(*right, mir_fn);
 
+                let left_ty = self.get_local_type(mir_fn, *left).clone();
+
+                let llvm_ty = self.mir_type_to_llvm_cached(&left_ty);
+
                 self.emit_indent();
 
                 match op {
-                    mir::MirBinOp::Add => {
-                        self.ir
-                            .push_str(&format!("{} = add i64 {}, {}\n", dest, left_val, right_val));
-                    }
-
-                    mir::MirBinOp::Sub => {
-                        self.ir
-                            .push_str(&format!("{} = sub i64 {}, {}\n", dest, left_val, right_val));
-                    }
-
-                    mir::MirBinOp::Mul => {
-                        self.ir
-                            .push_str(&format!("{} = mul i64 {}, {}\n", dest, left_val, right_val));
-                    }
-
-                    mir::MirBinOp::Div => {
+                    mir::MirBinOp::Add
+                    | mir::MirBinOp::Sub
+                    | mir::MirBinOp::Mul
+                    | mir::MirBinOp::Div
+                    | mir::MirBinOp::Rem
+                    | mir::MirBinOp::Eq
+                    | mir::MirBinOp::Ne
+                    | mir::MirBinOp::Lt
+                    | mir::MirBinOp::Le
+                    | mir::MirBinOp::Gt
+                    | mir::MirBinOp::Ge => {
+                        let opcode = common::binary_op_to_llvm(*op, &left_ty);
                         self.ir.push_str(&format!(
-                            "{} = sdiv i64 {}, {}\n",
-                            dest, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Rem => {
-                        self.ir.push_str(&format!(
-                            "{} = srem i64 {}, {}\n",
-                            dest, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Eq => {
-                        let left_ty = self.get_local_type(mir_fn, *left).clone();
-                        let cmp_ty = self.mir_type_to_llvm_cached(&left_ty);
-                        self.ir.push_str(&format!(
-                            "{} = icmp eq {} {}, {}\n",
-                            dest, cmp_ty, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Ne => {
-                        let left_ty = self.get_local_type(mir_fn, *left).clone();
-                        let cmp_ty = self.mir_type_to_llvm_cached(&left_ty);
-                        self.ir.push_str(&format!(
-                            "{} = icmp ne {} {}, {}\n",
-                            dest, cmp_ty, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Lt => {
-                        self.ir.push_str(&format!(
-                            "{} = icmp slt i64 {}, {}\n",
-                            dest, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Le => {
-                        self.ir.push_str(&format!(
-                            "{} = icmp sle i64 {}, {}\n",
-                            dest, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Gt => {
-                        self.ir.push_str(&format!(
-                            "{} = icmp sgt i64 {}, {}\n",
-                            dest, left_val, right_val
-                        ));
-                    }
-
-                    mir::MirBinOp::Ge => {
-                        self.ir.push_str(&format!(
-                            "{} = icmp sge i64 {}, {}\n",
-                            dest, left_val, right_val
+                            "{} = {} {} {}, {}\n",
+                            dest, opcode, llvm_ty, left_val, right_val
                         ));
                     }
 
                     mir::MirBinOp::BitAnd => {
-                        self.ir
-                            .push_str(&format!("{} = and i64 {}, {}\n", dest, left_val, right_val));
+                        self.ir.push_str(&format!(
+                            "{} = and {} {}, {}\n",
+                            dest, llvm_ty, left_val, right_val
+                        ));
                     }
 
                     mir::MirBinOp::BitOr => {
-                        self.ir
-                            .push_str(&format!("{} = or i64 {}, {}\n", dest, left_val, right_val));
+                        self.ir.push_str(&format!(
+                            "{} = or {} {}, {}\n",
+                            dest, llvm_ty, left_val, right_val
+                        ));
                     }
 
                     mir::MirBinOp::BitXor => {
-                        self.ir
-                            .push_str(&format!("{} = xor i64 {}, {}\n", dest, left_val, right_val));
+                        self.ir.push_str(&format!(
+                            "{} = xor {} {}, {}\n",
+                            dest, llvm_ty, left_val, right_val
+                        ));
                     }
 
                     mir::MirBinOp::Shl => {
-                        self.ir
-                            .push_str(&format!("{} = shl i64 {}, {}\n", dest, left_val, right_val));
+                        self.ir.push_str(&format!(
+                            "{} = shl {} {}, {}\n",
+                            dest, llvm_ty, left_val, right_val
+                        ));
                     }
 
                     mir::MirBinOp::Shr => {
                         self.ir.push_str(&format!(
-                            "{} = ashr i64 {}, {}\n",
-                            dest, left_val, right_val
+                            "{} = ashr {} {}, {}\n",
+                            dest, llvm_ty, left_val, right_val
                         ));
                     }
 
@@ -257,41 +223,46 @@ impl Codegen {
             } => {
                 let dest = self.local_name(*destination);
 
-                // Add one pointer level when storing into an alloca destination.
-
                 let (local_info, src_ty) = &mir_fn.locals[source.index()];
 
                 self.emit_indent();
 
-                // User locals and pointer-like sources need an explicit load before assignment.
-                // Other temporaries can be stored using their existing SSA/local name.
-                let needs_load = local_info.kind == LocalKind::User
-                    || matches!(src_ty, MIRType::Ptr(_) | MIRType::Ref(_));
+                let src = self.local_name(*source);
 
-                if needs_load {
-                    let src = self.local_name(*source);
-
-                    let llvm_ty = self.mir_type_to_llvm_cached(src_ty);
-
-                    // Select the load type from the source pointer or reference element type.
-                    let load_ty = match src_ty {
-                        MIRType::Ptr(inner) | MIRType::Ref(inner) => {
-                            self.mir_type_to_llvm_cached(inner)
-                        }
-
-                        _ => llvm_ty,
-                    };
-
-                    self.ir.push_str(&format!(
-                        "{} = load {}, {}* {}\n",
-                        dest, load_ty, load_ty, src
-                    ));
-                } else {
-                    // Materialize a move by forwarding the SSA name directly.
-                    let src = self.local_name(*source);
-
-                    self.ir
-                        .push_str(&format!("{} = add i64 0, {}\n", dest, src));
+                match (local_info.kind, src_ty) {
+                    (LocalKind::User, MIRType::Ptr(inner) | MIRType::Ref(inner)) => {
+                        let ptr_ty = self.mir_type_to_llvm_cached(src_ty);
+                        let elem_ty = self.mir_type_to_llvm_cached(inner);
+                        let ptr_value = format!("%ptr.load.{}", self.load_counter);
+                        self.load_counter += 1;
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            ptr_value, ptr_ty, ptr_ty, src
+                        ));
+                        self.emit_indent();
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            dest, elem_ty, elem_ty, ptr_value
+                        ));
+                    }
+                    (LocalKind::User, _) => {
+                        let llvm_ty = self.mir_type_to_llvm_cached(src_ty);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            dest, llvm_ty, llvm_ty, src
+                        ));
+                    }
+                    (_, MIRType::Ptr(inner) | MIRType::Ref(inner)) => {
+                        let load_ty = self.mir_type_to_llvm_cached(inner);
+                        self.ir.push_str(&format!(
+                            "{} = load {}, {}* {}\n",
+                            dest, load_ty, load_ty, src
+                        ));
+                    }
+                    _ => {
+                        let dst_ty = self.get_local_type(mir_fn, *destination).clone();
+                        self.emit_value_copy(&dest, &dst_ty, &src)?;
+                    }
                 }
             }
 
@@ -372,33 +343,54 @@ impl Codegen {
 
                 match ty {
                     MIRType::Array(elem_ty, _len) => {
-                        // Store each array element into its computed element slot.
                         let elem_llvm_ty = self.mir_type_to_llvm_cached(elem_ty);
+                        let local_kind = mir_fn.locals[destination.index()].0.kind;
 
-                        for (i, field_local) in fields.iter().enumerate() {
-                            // Compute the pointer for the current aggregate element.
-                            let elem_ptr = format!("{}.elem.{}", dest, i);
+                        if local_kind == LocalKind::User {
+                            for (i, field_local) in fields.iter().enumerate() {
+                                let elem_ptr = format!("{}.elem.{}", dest, i);
 
-                            self.emit_indent();
+                                self.emit_indent();
 
-                            self.ir.push_str(&format!(
-                                "{} = getelementptr {}, {}* {}, i64 {}\n",
-                                elem_ptr, elem_llvm_ty, elem_llvm_ty, dest, i
-                            ));
+                                self.ir.push_str(&format!(
+                                    "{} = getelementptr {}, {}* {}, i64 {}\n",
+                                    elem_ptr, elem_llvm_ty, elem_llvm_ty, dest, i
+                                ));
 
-                            // Evaluate each field value before storing it into the aggregate slot.
-                            let field_val = self.operand_value(*field_local, mir_fn);
+                                let field_val = self.operand_value(*field_local, mir_fn);
 
-                            self.emit_indent();
+                                self.emit_indent();
 
-                            self.ir.push_str(&format!(
-                                "store {} {}, {}* {}\n",
-                                elem_llvm_ty, field_val, elem_llvm_ty, elem_ptr
-                            ));
+                                self.ir.push_str(&format!(
+                                    "store {} {}, {}* {}\n",
+                                    elem_llvm_ty, field_val, elem_llvm_ty, elem_ptr
+                                ));
+                            }
+                        } else {
+                            let llvm_ty = self.mir_type_to_llvm_cached(ty);
+                            let mut current = "undef".to_string();
+
+                            for (i, field_local) in fields.iter().enumerate() {
+                                let field_val = self.operand_value(*field_local, mir_fn);
+                                let temp = if i < fields.len() - 1 {
+                                    format!("{}.f{}", dest, i)
+                                } else {
+                                    dest.clone()
+                                };
+
+                                self.emit_indent();
+
+                                self.ir.push_str(&format!(
+                                    "{} = insertvalue {} {}, {} {}, {}\n",
+                                    temp, llvm_ty, current, elem_llvm_ty, field_val, i
+                                ));
+
+                                current = temp;
+                            }
                         }
                     }
 
-                    MIRType::Struct { .. } => {
+                    MIRType::Struct { .. } | MIRType::Tuple(_) => {
                         // Build struct values incrementally with insertvalue.
                         let llvm_ty = self.mir_type_to_llvm_cached(ty);
 
@@ -474,15 +466,30 @@ impl Codegen {
 
                 source,
             } => {
-                // Bitcast keeps the same bits while changing only the LLVM view of the value.
                 let dest = self.local_name(*destination);
 
                 let src = self.local_name(*source);
+                let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                let source_ty = self.get_local_type(mir_fn, *source).clone();
+                let source_ptr_ty = format!("{}*", self.mir_type_to_llvm_cached(&source_ty));
+                let dest_llvm = self.mir_type_to_llvm_cached(&dest_ty);
 
                 self.emit_indent();
 
-                self.ir
-                    .push_str(&format!("{} = bitcast i64* {} to i64\n", dest, src));
+                match dest_ty {
+                    MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } => {
+                        self.emit_value_copy(&dest, &dest_ty, &src)?;
+                    }
+                    MIRType::Int(_) => {
+                        self.ir.push_str(&format!(
+                            "{} = ptrtoint {} {} to {}\n",
+                            dest, source_ptr_ty, src, dest_llvm
+                        ));
+                    }
+                    _ => {
+                        return Err(format!("cannot take address into LLVM type {}", dest_llvm));
+                    }
+                }
             }
 
             mir::Instruction::Call {
@@ -711,6 +718,28 @@ impl Codegen {
                             "{} = trunc {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
                         ));
+                    }
+
+                    (MIRType::Ptr(_), MIRType::Int(_))
+                    | (MIRType::Ref(_), MIRType::Int(_))
+                    | (MIRType::Fn { .. }, MIRType::Int(_)) => {
+                        self.ir.push_str(&format!(
+                            "{} = ptrtoint {} {} to {}\n",
+                            dest, src_llvm, src_val, dst_llvm
+                        ));
+                    }
+
+                    (MIRType::Int(_), MIRType::Ptr(_))
+                    | (MIRType::Int(_), MIRType::Ref(_))
+                    | (MIRType::Int(_), MIRType::Fn { .. }) => {
+                        self.ir.push_str(&format!(
+                            "{} = inttoptr {} {} to {}\n",
+                            dest, src_llvm, src_val, dst_llvm
+                        ));
+                    }
+
+                    _ if src_ty == to => {
+                        self.emit_value_copy(&dest, src_ty, &src_val)?;
                     }
 
                     // Same type or unsupported: bitcast as fallback
@@ -977,7 +1006,11 @@ impl Codegen {
                 let entries: Vec<String> = incoming
                     .iter()
                     .map(|(local, block_idx)| {
-                        let val = self.local_name(*local);
+                        let val = self
+                            .phi_incoming_values
+                            .get(&(destination.index(), *block_idx, local.index()))
+                            .cloned()
+                            .unwrap_or_else(|| self.local_name(*local));
 
                         format!("[ {}, %bb_{} ]", val, block_idx)
                     })

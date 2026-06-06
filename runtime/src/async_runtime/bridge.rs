@@ -197,7 +197,9 @@ pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
         let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
             return 0;
         };
-        scheduler.spawn(ForeignAsyncTask { kind, handle }) as i64
+        let task_id = scheduler.spawn(ForeignAsyncTask { kind, handle });
+        let _ = scheduler.tick();
+        task_id as i64
     })
 }
 

@@ -104,6 +104,8 @@ def ffi_status_from_raw(code: i64) -> i64 {
         3
     } else if code == -2006 {
         4
+    } else if code == -2007 {
+        8
     } else {
         1
     }
