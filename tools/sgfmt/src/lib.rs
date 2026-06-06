@@ -748,6 +748,15 @@ mod tests {
     }
 
     #[test]
+    fn formats_keyword_logical_operators_idempotently() {
+        let src = "def main() -> i64 {\nlet a = true;\nlet b = false;\nlet ok = a && !b || b;\nif ok { 0 } else { 1 }\n}";
+        let first = format_test_source(src, FormatOptions::default());
+        let second = format_test_source(&first, FormatOptions::default());
+        assert_eq!(first, second);
+        assert!(first.contains("a and not b or b"));
+    }
+
+    #[test]
     fn formats_decls_beyond_functions() {
         let src = "struct Pair(i64, i64);\nenum E { A, B(i64) }\ntype Id = i64;\nimport std::io;";
         let first = format_test_source(src, FormatOptions::default());

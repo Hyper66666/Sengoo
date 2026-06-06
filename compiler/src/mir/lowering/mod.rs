@@ -80,7 +80,7 @@ mod print_methods;
 mod try_expr_helpers;
 mod while_expr_helpers;
 use self::aggregate_expr_helpers::{
-    lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr,
+    lower_array_expr, lower_field_expr, lower_index_expr, lower_struct_expr, lower_tuple_expr,
 };
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};

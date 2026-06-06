@@ -199,6 +199,12 @@ impl TypeChecker {
         let base_ty = self.check_expr(base)?;
 
         match &base_ty.kind {
+            TyKind::Tuple(types) => tuple_field_index(&name.name)
+                .and_then(|index| types.get(index).cloned())
+                .ok_or_else(|| TypeckError::FieldNotFound {
+                    type_name: base_ty.kind.to_string(),
+                    field_name: name.name.clone(),
+                }),
             TyKind::Adt {
                 name: type_name,
                 args,
@@ -291,6 +297,16 @@ impl TypeChecker {
 
         Ok(self.env.fn_ty(param_tys, body_ty))
     }
+}
+
+fn tuple_field_index(field: &str) -> Option<usize> {
+    field.parse::<usize>().ok().or(match field {
+        "x" | "left" | "r" => Some(0),
+        "y" | "right" | "g" => Some(1),
+        "z" | "b" => Some(2),
+        "w" | "a" => Some(3),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

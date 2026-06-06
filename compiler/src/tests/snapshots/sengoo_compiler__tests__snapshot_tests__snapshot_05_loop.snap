@@ -27,7 +27,7 @@ declare i64 @sengoo_async_frame_alloc(i64)
 declare void @sengoo_async_frame_free(i64)
 declare void @sengoo_async_frame_store(i64, i64, i64)
 declare i64 @sengoo_async_frame_load(i64, i64)
-declare i64 @sengoo_async_run_main_i64(i64)
+declare i64 @sengoo_async_run_main_i64()
 
 
 ; Function: main

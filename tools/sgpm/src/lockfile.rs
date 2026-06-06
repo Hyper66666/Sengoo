@@ -100,6 +100,7 @@ fn render_lockfile(graph: &Graph, root: &PackageNode) -> Result<String> {
     for node in &graph.nodes {
         render_package_entry(&mut out, &root.root_dir, node);
     }
+    trim_trailing_blank_line(&mut out);
 
     Ok(out)
 }
@@ -131,8 +132,15 @@ fn render_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Res
             }
         }
     }
+    trim_trailing_blank_line(&mut out);
 
     Ok(out)
+}
+
+fn trim_trailing_blank_line(out: &mut String) {
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
 }
 
 fn render_package_entry(out: &mut String, base_dir: &Path, node: &PackageNode) {

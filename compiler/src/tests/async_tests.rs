@@ -1564,11 +1564,16 @@ async def main() -> i64 {
 }
 "#;
 
-    let result = compile_to_ir(source);
+    let ir = compile_to_ir(source).unwrap_or_else(|err| {
+        panic!("ref local crossing await should compile, got: {err:?}");
+    });
     assert!(
-        result.is_ok(),
-        "ref local crossing await should compile, got: {:?}",
-        result.err()
+        !ir.contains("ptrtoint i64 %"),
+        "ref live-slot spill should encode the pointer value, not an i64 payload:\n{ir}"
+    );
+    assert!(
+        ir.contains("load i64*, i64**"),
+        "deref of a spilled ref local should load the pointer value before reading the pointee:\n{ir}"
     );
 }
 

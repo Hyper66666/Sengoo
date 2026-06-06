@@ -55,6 +55,41 @@ Pass `--lib` to `sgpm new` or `sgpm init` to create a library package with
 sgpm new math_utils --lib
 ```
 
+## Realworld Package Loop
+
+Committed project-shaped fixtures live under
+[`examples/realworld`](../examples/realworld/README.md). They exercise tests,
+docs, formatting, lockfiles, package libraries, and mainstream stdlib imports
+without requiring a generated scratch package.
+
+Run the locked loop from the repository root by entering one fixture directory:
+
+```bash
+cd examples/realworld/cli-json-audit
+sgpm update
+sgpm check --locked
+sgpm test --locked
+sgpm fmt --check --locked
+sgpm doc --locked
+sgpm build --locked
+```
+
+The same sequence is supported from:
+
+```bash
+cd examples/realworld/http-client-status
+```
+
+```bash
+cd examples/realworld/workspace-doc-loop
+```
+
+`http-client-status` intentionally uses an unsupported `ftp://` URL so the
+runtime reports a stable `STATUS_UNSUPPORTED` path instead of depending on
+external network availability. Support and gap claims for async, process,
+HTTP/TLS, package diagnostics, and LSP coverage are centralized in
+[`examples/realworld/SUPPORT_MATRIX.md`](../examples/realworld/SUPPORT_MATRIX.md).
+
 ## Manifest
 
 The MVP manifest format is `Sengoo.toml`.

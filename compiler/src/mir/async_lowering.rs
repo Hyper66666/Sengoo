@@ -17,8 +17,9 @@ use super::async_dispatch_synthesis_helpers::{
     select_result_dispatch_name, select_runtime_declaration, select_runtime_function_name,
 };
 use super::async_dispatch_synthesis_helpers::{
-    select_result_runtime_suffix, synthesize_result_dispatch, synthesize_spawn_cancel_dispatch,
-    synthesize_spawn_drop_dispatch, synthesize_spawn_poll_dispatch,
+    select_result_runtime_suffix, select_winner_runtime_function_name, synthesize_result_dispatch,
+    synthesize_spawn_cancel_dispatch, synthesize_spawn_drop_dispatch,
+    synthesize_spawn_poll_dispatch,
 };
 use super::async_entry_helpers::{
     count_await_points, synthesize_async_main_wrapper, synthesize_result, synthesize_start,
@@ -26,15 +27,13 @@ use super::async_entry_helpers::{
 use super::async_frame_helpers::{
     build_async_frame_layout, push_frame_load_into_typed, push_frame_store_typed, AsyncFrameLayout,
 };
-use super::async_poll_helpers::synthesize_cfg_poll;
+use super::async_poll_helpers::{collect_rebasable_pointer_locals, synthesize_cfg_poll};
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirConstant, MirFunction, Terminator, MIR_BOOL,
     MIR_I64, MIR_UNIT,
 };
 use crate::CompileError;
-use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// Given a list of MIR functions, expand each async function into its original body
 /// plus three synthesized helpers. Returns additional functions to add.
@@ -72,7 +71,7 @@ pub fn expand_async_functions(
 
         let user_locals = collect_user_locals(mir_fn);
         let await_count = count_await_points(mir_fn);
-        let spill_user_locals = if await_count == 0 {
+        let mut spill_user_locals = if await_count == 0 {
             Vec::new()
         } else if let Ok(plan) = build_async_cfg_plan(mir_fn) {
             let live_in = compute_live_in_user_locals(mir_fn, &plan)?;
@@ -80,6 +79,22 @@ pub fn expand_async_functions(
         } else {
             Vec::new()
         };
+        if await_count != 0 {
+            let rebase_pointer_locals =
+                collect_rebasable_pointer_locals(mir_fn, &spill_user_locals);
+            if !rebase_pointer_locals.is_empty() {
+                let mut needed = spill_user_locals
+                    .iter()
+                    .map(|(local, _)| *local)
+                    .collect::<HashSet<_>>();
+                needed.extend(rebase_pointer_locals.values().copied());
+                spill_user_locals = user_locals
+                    .iter()
+                    .filter(|(local, _)| needed.contains(local))
+                    .cloned()
+                    .collect();
+            }
+        }
         let layout = build_async_frame_layout(
             body_name,
             mir_fn.params.clone(),
@@ -146,6 +161,31 @@ pub fn expand_async_functions(
         }
     }
 
+    let needs_select_runtime = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => {
+                func == select_winner_runtime_function_name()
+                    || func.starts_with("sengoo_async_select_")
+            }
+            _ => false,
+        })
+    });
+    if needs_select_runtime {
+        for (suffix, return_ty) in [
+            ("bool", MIR_BOOL),
+            ("i8", MIRType::Int(8)),
+            ("i16", MIRType::Int(16)),
+            ("i32", MIRType::Int(32)),
+            ("i64", MIR_I64),
+            ("f32", MIRType::Float(32)),
+            ("f64", MIRType::Float(64)),
+        ] {
+            result_dispatch_entries
+                .entry(suffix.to_string())
+                .or_insert_with(|| (return_ty, Vec::new()));
+        }
+    }
+
     for (_suffix, (return_ty, entries)) in result_dispatch_entries {
         new_fns.push(synthesize_result_dispatch(
             &dispatch_registry,
@@ -202,8 +242,13 @@ fn synthesize_poll(
         let body_block = f.add_block();
         let done_block = f.add_block();
 
-        // Jump to body
-        f.basic_blocks[bb0].set_terminator(Terminator::Goto(body_block));
+        // Fresh frames start at state 0 and execute the body. Completed frames
+        // should report ready without re-running no-await async bodies.
+        f.basic_blocks[bb0].set_terminator(Terminator::Switch {
+            discr: state,
+            targets: vec![(0, body_block)],
+            otherwise: done_block,
+        });
 
         // Body block: load params, call original, store result
         let result_val = f.add_local(LocalKind::Temp, result_storage_ty.clone());

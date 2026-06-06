@@ -219,6 +219,16 @@ impl<'source> Parser<'source> {
         let symbol = self.interner.intern(&name);
         crate::ast::Ident::with_symbol(name, symbol, span)
     }
+
+    pub(super) fn intern_named_ident(
+        &mut self,
+        name: impl Into<String>,
+        span: Span,
+    ) -> crate::ast::Ident {
+        let name = name.into();
+        let symbol = self.interner.intern(&name);
+        crate::ast::Ident::with_symbol(name, symbol, span)
+    }
 }
 
 /// 将 AST 的 Span 转换为 miette::SourceSpan。

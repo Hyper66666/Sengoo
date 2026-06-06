@@ -313,6 +313,11 @@ sgc daemon --addr 127.0.0.1:48765
 
 推荐入口：
 
+- [`examples/realworld/`](examples/realworld/README.md)：3 个 package 形状的
+  fixture，覆盖带锁文件的 `sgpm update`、`check`、`test`、
+  `fmt --check`、`doc`、`build` 闭环；支持与 gap 以
+  [`examples/realworld/SUPPORT_MATRIX.md`](examples/realworld/SUPPORT_MATRIX.md)
+  为准。
 - [`examples/async/`](examples/async/)：`sleep`、`spawn`、`select` 和任务生命周期 API
 - [`examples/generics/`](examples/generics/)：`Vec<i64>`、`Option<T>`、`Result<T, E>` 和 `std::collections` import 模式；stdlib smoke 测试也覆盖 runtime-backed `Vec<bool>` 和 `HashMap` mutators
 - [`examples/traits/`](examples/traits/)：trait 分发与泛型 trait 方法实例化
@@ -339,6 +344,23 @@ sgpm check
 sgpm build
 sgpm run
 ```
+
+如果要跑一个更接近真实项目的闭环（测试、文档、格式检查、锁文件和主流
+stdlib 使用），可以从仓库根目录进入任一 realworld fixture：
+
+```bash
+cd examples/realworld/cli-json-audit
+sgpm update
+sgpm check --locked
+sgpm test --locked
+sgpm fmt --check --locked
+sgpm doc --locked
+sgpm build --locked
+```
+
+同一套 locked 命令也适用于 `examples/realworld/http-client-status` 和
+`examples/realworld/workspace-doc-loop`；详见
+[`examples/realworld/README.md`](examples/realworld/README.md)。
 
 在已有目录中运行 `sgpm init`，可以保留无关文件并创建缺少的 Sengoo package
 脚手架。

@@ -2,7 +2,7 @@
 
 use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
-use sengoo_compiler::{compile_to_ir, Parser};
+use sengoo_compiler::{compile_to_ir, DeclKind, Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -66,8 +66,11 @@ pub(crate) use daemon::{
 #[cfg(test)]
 pub(crate) use daemon::{daemon_request_build, handle_daemon_client, send_daemon_request};
 use doc_rendering::{render_doc_index, render_doc_module, sanitize_doc_name};
-use error_reporting::location_from_compile_error;
-pub(crate) use error_reporting::{emit_compile_error, emit_compile_error_with_location};
+pub(crate) use error_reporting::{
+    emit_compile_error, emit_compile_error_for_stage, emit_compile_error_for_stage_with_location,
+    emit_compile_error_with_location,
+};
+use error_reporting::{location_from_compile_error, location_from_span};
 #[cfg(test)]
 pub(crate) use error_reporting::{
     render_compile_error_json, render_compile_error_json_with_location, split_compiler_error_stage,
@@ -498,10 +501,23 @@ fn canonical_or_lossy(path: &Path) -> String {
 async fn cmd_check(input: &str) -> Result<()> {
     println!("Checking: {}", input);
 
-    let source = fs::read_to_string(input)
-        .into_diagnostic()
-        .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
-    let source = expand_imports_for_source(Path::new(input), &source)?;
+    let source = match fs::read_to_string(input).into_diagnostic() {
+        Ok(source) => source,
+        Err(err) => {
+            let raw = format!("failed to read source {}: {}", input, err);
+            emit_compile_error_for_stage("io", Some(input), &raw);
+            return Err(miette::miette!("compile failed"));
+        }
+    };
+    let source = match expand_imports_for_source(Path::new(input), &source) {
+        Ok(source) => source,
+        Err(err) => {
+            let raw = err.to_string();
+            let location = import_error_location(&source, &raw);
+            emit_compile_error_for_stage_with_location("import", Some(input), &raw, location);
+            return Err(miette::miette!("compile failed"));
+        }
+    };
 
     match compile_to_ir(&source) {
         Ok(_) => {
@@ -515,6 +531,36 @@ async fn cmd_check(input: &str) -> Result<()> {
             Err(miette::miette!("compile failed"))
         }
     }
+}
+
+fn import_error_location(source: &str, raw: &str) -> Option<CompilerErrorLocationJson> {
+    let program = Parser::parse(source).ok()?;
+    let mut imports = program.decls.iter().filter_map(|decl| match &decl.kind {
+        DeclKind::Import(import_decl) => Some(import_decl),
+        _ => None,
+    });
+
+    let first_import = imports.next()?;
+    if raw.contains(&import_path_text(&first_import.path)) {
+        return location_from_span(source, first_import.path.span);
+    }
+
+    for import_decl in imports {
+        let path_text = import_path_text(&import_decl.path);
+        if raw.contains(&path_text) {
+            return location_from_span(source, import_decl.path.span);
+        }
+    }
+
+    location_from_span(source, first_import.path.span)
+}
+
+fn import_path_text(path: &sengoo_compiler::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 async fn cmd_repl() -> Result<()> {

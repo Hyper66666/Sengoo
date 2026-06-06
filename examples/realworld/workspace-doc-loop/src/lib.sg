@@ -1,0 +1,13 @@
+import std::env;
+
+import std::process;
+
+def doc_loop_value() -> i64 {
+    let cwd_len = process_current_dir_len().unwrap_or(0);
+    let buffer = ffi_buffer_new(cwd_len + 1).unwrap_or(Buffer { handle: 0 });
+    let copied_cwd = process_current_dir_copy(buffer).unwrap_or(0);
+    let pid = process_id();
+    let child_code = if env_is_windows() { process_run_3("cmd.exe", "/D", "/C", "exit /B 42").unwrap_or(-1); } else { process_run_2("sh", "-c", "exit 42").unwrap_or(-1); };
+    buffer.free();
+    if cwd_len > 0 and copied_cwd == cwd_len and pid > 0 and child_code == 42 { 42; } else { 0; };
+}

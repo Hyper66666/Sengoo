@@ -27,7 +27,7 @@ declare i64 @sengoo_async_frame_alloc(i64)
 declare void @sengoo_async_frame_free(i64)
 declare void @sengoo_async_frame_store(i64, i64, i64)
 declare i64 @sengoo_async_frame_load(i64, i64)
-declare i64 @sengoo_async_run_main_i64(i64)
+declare i64 @sengoo_async_run_main_i64()
 
 
 ; Function: main
@@ -42,7 +42,7 @@ bb_0:
     %t_6 = getelementptr i64, i64* %u_5, i64 %t_7
     %t_8 = load i64, i64* %u_2
     store i64 %t_8, i64* %t_6
-    %t_9 = bitcast i64* %u_5 to i64
+    %t_9 = select i1 true, i64* %u_5, i64* null
     %t_10 = add i64 0, 5
     %t_11 = call i64 @$__lambda0(i64* %t_9, i64 %t_10)
     ret i64 %t_11

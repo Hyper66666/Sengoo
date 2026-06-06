@@ -63,13 +63,29 @@ impl Codegen {
 
                 else_block,
             } => {
-                self.emit_indent();
-
                 let cond_reg = self.operand_value(*condition, mir_fn);
+                let cond_ty = self.get_local_type(mir_fn, *condition).clone();
+                let cond_value = if matches!(cond_ty, MIRType::Bool) {
+                    cond_reg
+                } else {
+                    let cond_llvm = self.mir_type_to_llvm_cached(&cond_ty);
+                    let cmp_reg = format!("{}.as_bool", cond_reg);
+                    let zero = Self::zero_literal_for_type(&cond_ty).ok_or_else(|| {
+                        format!("if condition has unsupported LLVM type {}", cond_llvm)
+                    })?;
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = icmp ne {} {}, {}\n",
+                        cmp_reg, cond_llvm, cond_reg, zero
+                    ));
+                    cmp_reg
+                };
+
+                self.emit_indent();
 
                 self.ir.push_str(&format!(
                     "br i1 {}, label %bb_{}, label %bb_{}\n",
-                    cond_reg, then_block, else_block
+                    cond_value, then_block, else_block
                 ));
             }
 

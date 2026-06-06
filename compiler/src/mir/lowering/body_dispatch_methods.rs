@@ -123,6 +123,7 @@ impl<'a> LoweringContext<'a> {
                 lower_assign_op_expr(self, target, op, value)
             }
             HIRExpr::Array(elems) => lower_array_expr(self, elems),
+            HIRExpr::Tuple(elems) => lower_tuple_expr(self, elems),
             HIRExpr::Index { base, index } => lower_index_expr(self, base, index),
             HIRExpr::Struct { name, fields } => lower_struct_expr(self, name, fields),
 

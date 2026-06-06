@@ -16,6 +16,13 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 #[derive(Debug, Clone)]
+struct PhiIncomingLoad {
+    name: String,
+    local: Local,
+    ty: MIRType,
+}
+
+#[derive(Debug, Clone)]
 
 pub struct ExternDecl {
     pub name: String,
@@ -71,6 +78,10 @@ pub struct Codegen {
 
     /// Whether this module needs an OS `main(argc, argv)` wrapper for `std::args`.
     emit_args_main_wrapper: bool,
+
+    phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
+
+    phi_incoming_values: HashMap<(usize, usize, usize), String>,
 }
 
 impl Codegen {
@@ -99,6 +110,10 @@ impl Codegen {
             load_counter: 0,
 
             emit_args_main_wrapper: false,
+
+            phi_incoming_loads_by_block: HashMap::new(),
+
+            phi_incoming_values: HashMap::new(),
         };
 
         cg.emit_header();
@@ -148,6 +163,8 @@ impl Codegen {
         // Pre-compute all local names for O(1) lookup
 
         self.build_name_cache(mir_fn);
+
+        self.prepare_phi_incoming_loads(mir_fn);
 
         // Reset load counter per function for clean SSA naming
 
@@ -237,11 +254,80 @@ impl Codegen {
             self.codegen_instruction(inst, mir_fn)?;
         }
 
+        self.emit_phi_incoming_loads_for_block(bb.id)?;
+
         if let Some(terminator) = &bb.terminator {
             self.codegen_terminator(terminator, mir_fn)?;
         }
 
         self.indent -= 1;
+
+        Ok(())
+    }
+
+    fn prepare_phi_incoming_loads(&mut self, mir_fn: &MirFunction) {
+        self.phi_incoming_loads_by_block.clear();
+        self.phi_incoming_values.clear();
+
+        for block in &mir_fn.basic_blocks {
+            for inst_id in &block.instructions {
+                let mir::Instruction::Phi {
+                    destination,
+                    incoming,
+                } = mir_fn.instruction(*inst_id)
+                else {
+                    continue;
+                };
+
+                for (local, predecessor) in incoming {
+                    let Some((local_info, ty)) = mir_fn.locals.get(local.index()) else {
+                        continue;
+                    };
+                    if local_info.kind != LocalKind::User {
+                        continue;
+                    }
+
+                    let name = format!(
+                        "%phi.load.{}.{}.{}",
+                        destination.index(),
+                        predecessor,
+                        local.index()
+                    );
+                    self.phi_incoming_values.insert(
+                        (destination.index(), *predecessor, local.index()),
+                        name.clone(),
+                    );
+                    self.phi_incoming_loads_by_block
+                        .entry(*predecessor)
+                        .or_default()
+                        .push(PhiIncomingLoad {
+                            name,
+                            local: *local,
+                            ty: ty.clone(),
+                        });
+                }
+            }
+        }
+    }
+
+    fn emit_phi_incoming_loads_for_block(&mut self, block_id: usize) -> Result<(), String> {
+        let loads = self
+            .phi_incoming_loads_by_block
+            .get(&block_id)
+            .cloned()
+            .unwrap_or_default();
+
+        for load in loads {
+            let llvm_ty = self.mir_type_to_llvm_cached(&load.ty);
+            self.emit_indent();
+            self.ir.push_str(&format!(
+                "{} = load {}, {}* {}\n",
+                load.name,
+                llvm_ty,
+                llvm_ty,
+                self.local_name(load.local)
+            ));
+        }
 
         Ok(())
     }
@@ -342,6 +428,49 @@ impl Codegen {
                 self.local_name(local)
             }
         }
+    }
+
+    fn llvm_float_literal(value: f64) -> String {
+        let mut rendered = value.to_string();
+        if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
+            rendered.push_str(".0");
+        }
+        rendered
+    }
+
+    fn zero_literal_for_type(ty: &MIRType) -> Option<&'static str> {
+        match ty {
+            MIRType::Bool => Some("false"),
+            MIRType::Int(_) | MIRType::Future(_) => Some("0"),
+            MIRType::Float(_) => Some("0.0"),
+            MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } => Some("null"),
+            _ => None,
+        }
+    }
+
+    fn emit_value_copy(&mut self, dest: &str, ty: &MIRType, value: &str) -> Result<(), String> {
+        let llvm_ty = self.mir_type_to_llvm_cached(ty);
+        match ty {
+            MIRType::Bool => self
+                .ir
+                .push_str(&format!("{dest} = xor i1 {value}, false\n")),
+            MIRType::Int(_) | MIRType::Future(_) => self
+                .ir
+                .push_str(&format!("{dest} = add {llvm_ty} 0, {value}\n")),
+            MIRType::Float(_) => self
+                .ir
+                .push_str(&format!("{dest} = fadd {llvm_ty} 0.0, {value}\n")),
+            MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } => self.ir.push_str(&format!(
+                "{dest} = select i1 true, {llvm_ty} {value}, {llvm_ty} null\n"
+            )),
+            _ => {
+                return Err(format!(
+                    "cannot materialize copy for LLVM aggregate type {}",
+                    llvm_ty
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

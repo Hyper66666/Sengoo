@@ -313,6 +313,11 @@ Curated runnable examples live in [`examples/`](examples/README.md). They cover 
 
 Useful entry points:
 
+- [`examples/realworld/`](examples/realworld/README.md) for three package-shaped
+  fixtures that run the locked `sgpm update`, `check`, `test`, `fmt --check`,
+  `doc`, and `build` loop. Use
+  [`examples/realworld/SUPPORT_MATRIX.md`](examples/realworld/SUPPORT_MATRIX.md)
+  as the support and gaps reference.
 - [`examples/async/`](examples/async/) for `sleep`, `spawn`, `select`, and task lifecycle APIs
 - [`examples/generics/`](examples/generics/) for `Vec<i64>`, `Option<T>`, `Result<T, E>`, and `std::collections` import patterns; stdlib smoke tests also cover runtime-backed `Vec<bool>` and `HashMap` mutators
 - [`examples/traits/`](examples/traits/) for trait dispatch and generic trait method instantiation
@@ -340,6 +345,24 @@ sgpm check
 sgpm build
 sgpm run
 ```
+
+For a project-shaped loop with tests, docs, formatting, lockfiles, and
+mainstream stdlib usage, run one of the committed realworld fixtures:
+
+```bash
+cd examples/realworld/cli-json-audit
+sgpm update
+sgpm check --locked
+sgpm test --locked
+sgpm fmt --check --locked
+sgpm doc --locked
+sgpm build --locked
+```
+
+The same locked sequence is supported from
+`examples/realworld/http-client-status` and
+`examples/realworld/workspace-doc-loop`; see
+[`examples/realworld/README.md`](examples/realworld/README.md).
 
 Use `sgpm init` inside an existing directory to preserve unrelated files while
 creating the missing Sengoo package scaffold.

@@ -170,7 +170,13 @@ impl<'source> Parser<'source> {
                         }
 
                         types.push(self.parse_type()?);
-                        self.consume(TokenKind::Comma);
+
+                        if self.consume(TokenKind::Comma).is_some() {
+                            continue;
+                        }
+
+                        self.expect(TokenKind::RParen)?;
+                        break;
                     }
 
                     TypeKind::Tuple(types)

@@ -1,0 +1,38 @@
+import std::collections;
+
+import std::dir;
+
+import std::file;
+
+import std::json;
+
+import std::log;
+
+import std::status;
+
+def main() -> i64 {
+    let log_level_set = log_set_level(LOG_INFO()).unwrap_or(false);
+    let log_cleared = log_test_sink_clear();
+    let log_written = log_write(LOG_INFO(), "audit smoke").unwrap_or(false);
+    let input = "data/sample.json";
+    let exists = file_exists(input);
+    let len = file_len(input).unwrap_or(0);
+    let out_dir = "target/realworld-audit-test";
+    let out_file = "target/realworld-audit-test/report.txt";
+    let made = dir_create_all(out_dir).unwrap_or(false);
+    let wrote = file_write_str(out_file, "ok").unwrap_or(0);
+    let removed = file_remove(out_file);
+    let doc = json_parse("[1,2,3]").unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+    let count = root.array_len().unwrap_or(0);
+    let closed = doc.close();
+    let scores = vec_new_i64();
+    scores.push(len);
+    scores.push(count);
+    let score_ok = scores.len() == 2 and scores.contains(3);
+    scores.free();
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let status_len = status_message_copy(STATUS_OK(), buffer).unwrap_or(0);
+    buffer.free();
+    if exists and len > 0 and made and wrote == 2 and removed and count == 3 and closed and score_ok and status_len > 0 and log_level_set and log_cleared and log_written { 0; } else { 1; };
+}

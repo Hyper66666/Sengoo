@@ -22,11 +22,19 @@ fn async_entry_helpers_count_await_points_counts_suspend_terminators() {
 }
 
 #[test]
-fn async_entry_helpers_main_wrapper_calls_start_poll_and_result() {
+fn async_entry_helpers_main_wrapper_calls_runtime_scheduler_entry() {
     let wrapper = synthesize_async_main_wrapper();
     assert_eq!(wrapper.name, "main");
     let entry = &wrapper.basic_blocks[wrapper.start_block];
-    assert!(entry.instructions.iter().any(|id| matches!(wrapper.instruction(*id), crate::mir::Instruction::Call { func, .. } if func == "main__start")));
-    assert!(wrapper.basic_blocks.iter().any(|bb| bb.instructions.iter().any(|id| matches!(wrapper.instruction(*id), crate::mir::Instruction::Call { func, .. } if func == "main__poll"))));
-    assert!(wrapper.basic_blocks.iter().any(|bb| bb.instructions.iter().any(|id| matches!(wrapper.instruction(*id), crate::mir::Instruction::Call { func, .. } if func == "main__result"))));
+    assert!(entry.instructions.iter().any(|id| {
+        matches!(
+            wrapper.instruction(*id),
+            crate::mir::Instruction::Call { func, args, .. }
+                if func == "sengoo_async_run_main_i64" && args.is_empty()
+        )
+    }));
+    assert!(matches!(
+        entry.terminator,
+        Some(Terminator::Return(Some(_)))
+    ));
 }

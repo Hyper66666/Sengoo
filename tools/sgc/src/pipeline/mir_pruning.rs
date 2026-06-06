@@ -29,6 +29,16 @@ pub(super) fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) ->
         "main__start",
         "main__poll",
         "main__result",
+        "sengoo_async_poll_dispatch",
+        "sengoo_async_cancel_dispatch",
+        "sengoo_async_drop_dispatch",
+        "sengoo_async_result_dispatch_i8",
+        "sengoo_async_result_dispatch_i16",
+        "sengoo_async_result_dispatch_i32",
+        "sengoo_async_result_dispatch_i64",
+        "sengoo_async_result_dispatch_bool",
+        "sengoo_async_result_dispatch_f32",
+        "sengoo_async_result_dispatch_f64",
     ] {
         if let Some(&idx) = index_by_name.get(root_async_helper) {
             stack.push(idx);

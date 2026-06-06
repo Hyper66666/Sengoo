@@ -108,6 +108,12 @@ fn compile_runtime_source_to_object(
 
     if let Some(runtime_dir) = runtime_source_path.parent() {
         command.arg("-I").arg(runtime_dir);
+        if !runtime_dir.join(RUNTIME_SHARED_HEADER).exists() {
+            let bundled_stdlib_dir = workspace_root().join("tools").join("stdlib");
+            if bundled_stdlib_dir.join(RUNTIME_SHARED_HEADER).exists() {
+                command.arg("-I").arg(bundled_stdlib_dir);
+            }
+        }
     }
 
     #[cfg(windows)]
