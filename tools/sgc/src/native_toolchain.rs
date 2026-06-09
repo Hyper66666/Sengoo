@@ -32,9 +32,12 @@ fn apply_clang_target_args(command: &mut Command, target: &NativeBuildTarget) ->
             for include in windows_cross_sdk_include_paths()? {
                 command.arg("-isystem").arg(include);
             }
-        } else if cfg!(windows) {
-            for include in windows_compile_include_paths()? {
-                command.arg("-isystem").arg(include);
+        } else {
+            #[cfg(windows)]
+            {
+                for include in windows_compile_include_paths()? {
+                    command.arg("-isystem").arg(include);
+                }
             }
         }
     }
@@ -1139,6 +1142,36 @@ mod tests {
         .unwrap();
 
         assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn windows_cross_target_uses_env_sdk_include_paths_on_non_windows_hosts() {
+        let root = temp_test_dir("windows-cross-sdk");
+        for leaf in ["ucrt", "um", "shared"] {
+            fs::create_dir_all(root.join(leaf)).unwrap();
+        }
+
+        std::env::set_var("SENGOO_WINDOWS_SDK_ROOT", &root);
+        let mut command = Command::new("clang");
+        let target =
+            NativeBuildTarget::resolve(Some(crate::cross_compile::REFERENCE_TARGET_WINDOWS_MSVC))
+                .unwrap();
+
+        apply_clang_target_args(&mut command, &target).unwrap();
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args.contains(&"--target=x86_64-pc-windows-msvc".to_string()));
+        assert!(args.contains(&"-fms-runtime-lib=dll".to_string()));
+        assert!(args.iter().any(|arg| arg.ends_with("/ucrt")));
+        assert!(args.iter().any(|arg| arg.ends_with("/um")));
+        assert!(args.iter().any(|arg| arg.ends_with("/shared")));
+
+        std::env::remove_var("SENGOO_WINDOWS_SDK_ROOT");
         let _ = fs::remove_dir_all(&root);
     }
 }
