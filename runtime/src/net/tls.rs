@@ -6,8 +6,10 @@ use super::NetErrorCode;
 #[cfg(windows)]
 use native_tls::{HandshakeError, TlsConnector};
 
+#[cfg(all(test, not(windows)))]
+use rustls::pki_types::CertificateDer;
 #[cfg(not(windows))]
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::ServerName;
 #[cfg(not(windows))]
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 #[cfg(all(test, not(windows)))]
@@ -170,9 +172,9 @@ fn build_rustls_config() -> Result<ClientConfig, NetErrorCode> {
         return Err(NetErrorCode::TlsUnavailable);
     }
 
-    ClientConfig::builder()
+    Ok(ClientConfig::builder()
         .with_root_certificates(root_store)
-        .with_no_client_auth()
+        .with_no_client_auth())
 }
 
 #[cfg(not(windows))]
