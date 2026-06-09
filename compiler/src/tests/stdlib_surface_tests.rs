@@ -23,7 +23,13 @@ fn load_stdlib_surface(modules: &[&str]) -> String {
 
 fn compile_with_stdlib(program: &str) -> String {
     compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "collections.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
         program,
     )
 }
@@ -286,7 +292,14 @@ def main() -> i64 {
 #[test]
 fn path_module_imports_cross_platform_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "path.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "string.sg",
+            "path.sg",
+        ],
         r#"
 def main() -> i64 {
     let joined = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
@@ -381,7 +394,14 @@ def main() -> i64 {
 #[test]
 fn dir_module_imports_directory_helpers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "dir.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "string.sg",
+            "dir.sg",
+        ],
         r#"
 def main() -> i64 {
     let root = "target/sengoo-stdlib-dir-surface";
@@ -420,6 +440,7 @@ fn file_and_dir_modules_import_metadata_and_recursive_walk_helpers() {
             "result.sg",
             "ffi.sg",
             "status.sg",
+            "string.sg",
             "file.sg",
             "dir.sg",
         ],
@@ -588,7 +609,7 @@ def main() -> i64 {
     );
 
     assert!(ir.contains("assert_eq_i64"));
-    assert!(ir.contains("sengoo_panic_option_unwrap_i64"));
+    assert!(ir.contains("sengoo_assert_failure_v1"));
 }
 
 #[test]

@@ -8,6 +8,7 @@ use std::time::Duration;
 mod http_client;
 mod http_server;
 mod tcp;
+mod tls;
 mod udp;
 mod websocket;
 pub use http_client::{
@@ -25,6 +26,7 @@ use http_server::{
     HttpServerMiddleware, HttpServerMiddlewareKind, HttpServerRoute, HttpServerRouteKind,
 };
 pub use tcp::{sengoo_tcp_close, sengoo_tcp_connect, sengoo_tcp_recv, sengoo_tcp_send};
+pub(crate) use tls::TlsStream;
 pub use udp::{
     sengoo_udp_bind, sengoo_udp_close, sengoo_udp_connect, sengoo_udp_recv, sengoo_udp_send,
 };
@@ -53,6 +55,10 @@ enum NetErrorCode {
     HandleNotFound = 12,
     InternalError = 13,
     RemoteClosed = 14,
+    TlsCertInvalid = 15,
+    TlsHostnameMismatch = 16,
+    TlsHandshake = 17,
+    TlsUnavailable = 18,
 }
 
 pub const SENGOO_NET_ERR_OK: i32 = NetErrorCode::Ok as i32;
@@ -70,6 +76,10 @@ pub const SENGOO_NET_ERR_WS_PROTOCOL: i32 = NetErrorCode::WebSocketProtocolError
 pub const SENGOO_NET_ERR_HANDLE_NOT_FOUND: i32 = NetErrorCode::HandleNotFound as i32;
 pub const SENGOO_NET_ERR_INTERNAL: i32 = NetErrorCode::InternalError as i32;
 pub const SENGOO_NET_ERR_REMOTE_CLOSED: i32 = NetErrorCode::RemoteClosed as i32;
+pub const SENGOO_NET_ERR_TLS_CERT_INVALID: i32 = NetErrorCode::TlsCertInvalid as i32;
+pub const SENGOO_NET_ERR_TLS_HOSTNAME_MISMATCH: i32 = NetErrorCode::TlsHostnameMismatch as i32;
+pub const SENGOO_NET_ERR_TLS_HANDSHAKE: i32 = NetErrorCode::TlsHandshake as i32;
+pub const SENGOO_NET_ERR_TLS_UNAVAILABLE: i32 = NetErrorCode::TlsUnavailable as i32;
 
 fn set_last_error(code: NetErrorCode) {
     LAST_NET_ERROR.store(code as i32, Ordering::Relaxed);
@@ -280,6 +290,10 @@ fn net_error_name(code: i32) -> &'static str {
         SENGOO_NET_ERR_HANDLE_NOT_FOUND => "handle_not_found",
         SENGOO_NET_ERR_INTERNAL => "internal_error",
         SENGOO_NET_ERR_REMOTE_CLOSED => "remote_closed",
+        SENGOO_NET_ERR_TLS_CERT_INVALID => "tls_cert_invalid",
+        SENGOO_NET_ERR_TLS_HOSTNAME_MISMATCH => "tls_hostname_mismatch",
+        SENGOO_NET_ERR_TLS_HANDSHAKE => "tls_handshake",
+        SENGOO_NET_ERR_TLS_UNAVAILABLE => "tls_unavailable",
         _ => "unknown_error",
     }
 }
@@ -842,6 +856,14 @@ mod tests {
         assert_eq!(handle, 0, "invalid chunk should fail request");
         assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_HTTP_CHUNKED);
         worker.join().expect("join worker");
+    }
+
+    #[test]
+    fn http_ftp_scheme_returns_unsupported() {
+        let url = c_string_bytes("ftp://127.0.0.1/");
+        let handle = sengoo_http_get(url.as_ptr(), 1_000);
+        assert_eq!(handle, 0, "ftp scheme should remain unsupported");
+        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
     }
 
     #[test]

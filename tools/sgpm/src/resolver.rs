@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use miette::{Context, IntoDiagnostic, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use semver::{Version, VersionReq};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -19,7 +19,15 @@ static REMOTE_REGISTRY_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 static GIT_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
+pub struct DependencyEdge {
+    pub from: String,
+    pub alias: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct PackageNode {
+    pub id: String,
     pub name: String,
     pub manifest_path: PathBuf,
     pub root_dir: PathBuf,
@@ -31,20 +39,36 @@ pub struct PackageNode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageSource {
     Path,
-    Git { url: String, rev: String },
-    Registry { registry: String, version: String },
+    Git {
+        url: String,
+        rev: String,
+    },
+    Registry {
+        registry: String,
+        version: String,
+        metadata: RegistryPackageMetadata,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryPackageMetadata {
+    pub yanked: bool,
+    pub yank_reason: Option<String>,
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Graph {
     pub root: PathBuf,
     pub nodes: Vec<PackageNode>,
+    pub edges: Vec<DependencyEdge>,
     pub registries: BTreeMap<String, RegistryConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ResolveOptions {
     pub refresh_git: bool,
+    pub allow_yanked: bool,
 }
 
 impl Graph {
@@ -82,10 +106,11 @@ impl Graph {
             registries,
             options,
         );
-        builder.visit(&root_manifest, PackageSource::Path)?;
+        builder.visit(&root_manifest, PackageSource::Path, None)?;
         Ok(Self {
             root: root_manifest,
             nodes: builder.nodes,
+            edges: builder.edges,
             registries: effective_registries,
         })
     }
@@ -95,6 +120,15 @@ impl Graph {
             .iter()
             .find(|node| node.manifest_path == self.root)
     }
+
+    #[cfg(test)]
+    pub fn requires_lockfile_v2(&self) -> bool {
+        graph_requires_lockfile_v2(self)
+    }
+
+    pub fn node_by_id(&self, id: &str) -> Option<&PackageNode> {
+        self.nodes.iter().find(|node| node.id == id)
+    }
 }
 
 struct GraphBuilder {
@@ -102,12 +136,12 @@ struct GraphBuilder {
     visited: BTreeSet<PathBuf>,
     stack: Vec<PathBuf>,
     nodes: Vec<PackageNode>,
+    edges: Vec<DependencyEdge>,
     git_cache_dir: PathBuf,
     registry_cache_dir: PathBuf,
     root_dir: PathBuf,
     registries: BTreeMap<String, RegistryConfig>,
-    registry_selections: BTreeMap<String, RegistrySelection>,
-    package_manifests: BTreeMap<String, PathBuf>,
+    package_ids: BTreeMap<String, PathBuf>,
     options: ResolveOptions,
 }
 
@@ -127,27 +161,25 @@ impl GraphBuilder {
             visited: BTreeSet::new(),
             stack: Vec::new(),
             nodes: Vec::new(),
+            edges: Vec::new(),
             git_cache_dir,
             registry_cache_dir,
             root_dir,
             registries,
-            registry_selections: BTreeMap::new(),
-            package_manifests: BTreeMap::new(),
+            package_ids: BTreeMap::new(),
             options,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-struct RegistrySelection {
-    registry: String,
-    version: Version,
-    requirement: String,
-    manifest_path: PathBuf,
-}
-
 impl GraphBuilder {
-    fn visit(&mut self, manifest_path: &Path, source: PackageSource) -> Result<()> {
+    fn visit(
+        &mut self,
+        manifest_path: &Path,
+        source: PackageSource,
+        parent_id: Option<&str>,
+    ) -> Result<()> {
+        let _ = parent_id;
         let key = canonicalize_existing(manifest_path)?;
         if self.visited.contains(&key) {
             return Ok(());
@@ -167,35 +199,66 @@ impl GraphBuilder {
         self.stack.push(key.clone());
 
         let manifest = Manifest::load(&key)?;
-        if let Some(existing) = self.package_manifests.get(&manifest.package.name) {
+        let root_dir = key
+            .parent()
+            .ok_or_else(|| miette::miette!("manifest has no parent directory: {}", key.display()))?
+            .to_path_buf();
+        let package_id = package_identity(
+            &manifest.package.name,
+            &manifest.package.version,
+            &canonical_source_key(&self.root_dir, &root_dir, &source, &manifest.package.name),
+        );
+        if let Some(existing) = self.package_ids.get(&package_id) {
             if existing != &key {
                 miette::bail!(
-                    "package '{}' resolves to multiple manifests: {} and {}; renamed or multi-version dependencies are not supported yet",
+                    "package '{}' version '{}' resolves to conflicting sources: {} and {}",
                     manifest.package.name,
+                    manifest.package.version,
                     existing.display(),
                     key.display()
                 );
             }
         } else {
-            self.package_manifests
-                .insert(manifest.package.name.clone(), key.clone());
+            self.package_ids.insert(package_id.clone(), key.clone());
         }
-        let root_dir = key
-            .parent()
-            .ok_or_else(|| miette::miette!("manifest has no parent directory: {}", key.display()))?
-            .to_path_buf();
         validate_package_entries(&root_dir, &manifest)?;
 
-        for dep in manifest.dependencies.values() {
+        for (alias, dep) in &manifest.dependencies {
             let (dep_manifest, dep_source) = self
                 .resolve_dependency_manifest(&root_dir, dep)
-                .with_context(|| format!("failed to resolve dependency '{}'", dep.name))?;
+                .with_context(|| format!("failed to resolve dependency '{}'", alias))?;
             validate_dependency_package_name(dep, &dep_manifest)?;
-            self.visit(&dep_manifest, dep_source)?;
+            let dep_manifest_data = Manifest::load(&dep_manifest)?;
+            let dep_root_dir = dep_manifest
+                .parent()
+                .ok_or_else(|| {
+                    miette::miette!(
+                        "manifest has no parent directory: {}",
+                        dep_manifest.display()
+                    )
+                })?
+                .to_path_buf();
+            let dep_id = package_identity(
+                &dep_manifest_data.package.name,
+                &dep_manifest_data.package.version,
+                &canonical_source_key(
+                    &self.root_dir,
+                    &dep_root_dir,
+                    &dep_source,
+                    &dep_manifest_data.package.name,
+                ),
+            );
+            self.edges.push(DependencyEdge {
+                from: package_id.clone(),
+                alias: alias.clone(),
+                to: dep_id.clone(),
+            });
+            self.visit(&dep_manifest, dep_source, Some(&package_id))?;
         }
 
         let entry_path = root_dir.join(manifest.entry_path());
         self.nodes.push(PackageNode {
+            id: package_id,
             name: manifest.package.name.clone(),
             manifest_path: key.clone(),
             root_dir,
@@ -247,27 +310,7 @@ impl GraphBuilder {
                 format!("invalid version requirement for dependency '{}'", dep.name)
             })?;
         let registry_name = dep.registry.as_deref().unwrap_or("default");
-
-        if let Some(selection) = self.registry_selections.get(&dep.name) {
-            if selection.registry == registry_name && req.matches(&selection.version) {
-                return Ok((
-                    selection.manifest_path.clone(),
-                    PackageSource::Registry {
-                        registry: selection.registry.clone(),
-                        version: selection.version.to_string(),
-                    },
-                ));
-            }
-            miette::bail!(
-                "version conflict for registry package '{}': selected {} from registry '{}' for constraint '{}', but new constraint '{}' from registry '{}' cannot use it",
-                dep.name,
-                selection.version,
-                selection.registry,
-                selection.requirement,
-                requirement,
-                registry_name
-            );
-        }
+        let package_name = dep.target_name();
 
         let config = self.registries.get(registry_name).ok_or_else(|| {
             miette::miette!(
@@ -277,39 +320,37 @@ impl GraphBuilder {
                 registry_name
             )
         })?;
-        let (version, manifest_path) = if let Some(registry_path) = config.path.as_ref() {
+        let (version, manifest_path, metadata) = if let Some(registry_path) = config.path.as_ref() {
             let registry_root = resolve_registry_path(&self.root_dir, registry_path)?;
-            let package_root =
-                canonicalize_existing(&registry_root.join(&dep.name)).with_context(|| {
-                    format!("registry '{}' has no package '{}'", registry_name, dep.name)
+            let package_root = canonicalize_existing(&registry_root.join(package_name))
+                .with_context(|| {
+                    format!(
+                        "registry '{}' has no package '{}'",
+                        registry_name, package_name
+                    )
                 })?;
-            select_registry_package_manifest(&package_root, &dep.name, &req, requirement)?
+            select_registry_package_manifest(&package_root, package_name, &req, requirement)?
         } else {
             fetch_remote_registry_package_manifest(
                 &self.registry_cache_dir,
                 registry_name,
                 config,
-                &dep.name,
+                package_name,
                 &req,
                 requirement,
+                self.options.allow_yanked,
             )?
         };
-
-        self.registry_selections.insert(
-            dep.name.clone(),
-            RegistrySelection {
-                registry: registry_name.to_string(),
-                version: version.clone(),
-                requirement: requirement.to_string(),
-                manifest_path: manifest_path.clone(),
-            },
-        );
+        if !self.options.allow_yanked {
+            reject_yanked_package(package_name, &version, &metadata)?;
+        }
 
         Ok((
             manifest_path,
             PackageSource::Registry {
                 registry: registry_name.to_string(),
                 version: version.to_string(),
+                metadata,
             },
         ))
     }
@@ -317,14 +358,118 @@ impl GraphBuilder {
 
 fn validate_dependency_package_name(dep: &Dependency, manifest_path: &Path) -> Result<()> {
     let manifest = Manifest::load(manifest_path)?;
-    if manifest.package.name != dep.name {
+    if manifest.package.name != dep.target_name() {
         miette::bail!(
-            "dependency '{}' resolves to package '{}'; dependency keys must match [package].name because renamed dependencies are not supported yet",
+            "dependency '{}' resolves to package '{}'; expected package '{}'",
             dep.name,
-            manifest.package.name
+            manifest.package.name,
+            dep.target_name()
         );
     }
     Ok(())
+}
+
+pub fn package_identity(name: &str, version: &str, source_key: &str) -> String {
+    format!("{}@{}+{}", name, version, source_key)
+}
+
+pub fn canonical_source_key(
+    base_dir: &Path,
+    package_root: &Path,
+    source: &PackageSource,
+    package_name: &str,
+) -> String {
+    match source {
+        PackageSource::Path => {
+            format!("path:{}", canonical_path_source(base_dir, package_root))
+        }
+        PackageSource::Git { url, rev } => format!("git+{}#{}", url, rev),
+        PackageSource::Registry {
+            registry, version, ..
+        } => {
+            format!("registry+{}/{}@{}", registry, package_name, version)
+        }
+    }
+}
+
+pub fn canonical_path_source(base_dir: &Path, package_root: &Path) -> String {
+    let path = relative_path(base_dir, package_root);
+    slash_path(&path)
+}
+
+pub fn graph_requires_lockfile_v2(graph: &Graph) -> bool {
+    for edge in &graph.edges {
+        if let Some(node) = graph.node_by_id(&edge.to) {
+            if edge.alias != node.name {
+                return true;
+            }
+        }
+    }
+    let mut seen = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for node in &graph.nodes {
+        seen.entry(node.name.as_str())
+            .or_default()
+            .insert(node.id.as_str());
+    }
+    seen.values().any(|ids| ids.len() > 1)
+}
+
+fn relative_path(from_dir: &Path, to: &Path) -> PathBuf {
+    if from_dir == to {
+        return PathBuf::from(".");
+    }
+
+    let from = path_parts(from_dir);
+    let target = path_parts(to);
+    if from.first() != target.first() {
+        return to.to_path_buf();
+    }
+
+    let common = from
+        .iter()
+        .zip(target.iter())
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    let mut result = PathBuf::new();
+    for _ in common..from.len() {
+        result.push("..");
+    }
+    for part in &target[common..] {
+        result.push(part);
+    }
+    if result.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        result
+    }
+}
+
+fn path_parts(path: &Path) -> Vec<String> {
+    use std::path::Component;
+    path.components()
+        .filter_map(|component| match component {
+            Component::Prefix(prefix) => Some(prefix.as_os_str().to_string_lossy().to_string()),
+            Component::RootDir => Some("/".to_string()),
+            Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            Component::ParentDir => Some("..".to_string()),
+            Component::CurDir => None,
+        })
+        .collect()
+}
+
+fn slash_path(path: &Path) -> String {
+    use std::path::Component;
+    path.components()
+        .map(|component| match component {
+            Component::Prefix(prefix) => prefix.as_os_str().to_string_lossy().to_string(),
+            Component::RootDir => "/".to_string(),
+            Component::Normal(part) => part.to_string_lossy().to_string(),
+            Component::ParentDir => "..".to_string(),
+            Component::CurDir => ".".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn validate_package_entries(root_dir: &Path, manifest: &Manifest) -> Result<()> {
@@ -422,7 +567,7 @@ fn select_registry_package_manifest(
     package_name: &str,
     req: &VersionReq,
     requirement: &str,
-) -> Result<(Version, PathBuf)> {
+) -> Result<(Version, PathBuf, RegistryPackageMetadata)> {
     let mut candidates = Vec::new();
     for entry in fs::read_dir(package_root)
         .into_diagnostic()
@@ -460,7 +605,8 @@ fn select_registry_package_manifest(
                 manifest.package.version
             );
         }
-        candidates.push((version, manifest_path));
+        let metadata = load_local_registry_metadata(&path)?;
+        candidates.push((version, manifest_path, metadata));
     }
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
     candidates.pop().ok_or_else(|| {
@@ -482,6 +628,12 @@ struct RemoteRegistryVersion {
     version: String,
     #[serde(default)]
     checksum: Option<String>,
+    #[serde(default)]
+    yanked: bool,
+    #[serde(default, alias = "reason")]
+    yank_reason: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_feature_names")]
+    features: Vec<String>,
 }
 
 fn fetch_remote_registry_package_manifest(
@@ -491,7 +643,8 @@ fn fetch_remote_registry_package_manifest(
     package_name: &str,
     req: &VersionReq,
     requirement: &str,
-) -> Result<(Version, PathBuf)> {
+    allow_yanked: bool,
+) -> Result<(Version, PathBuf, RegistryPackageMetadata)> {
     let url = config
         .url
         .as_deref()
@@ -507,8 +660,11 @@ fn fetch_remote_registry_package_manifest(
     let base_url = url.trim_end_matches('/');
     let index_url = format!("{}/api/v1/packages/{}", base_url, package_name);
     let index = fetch_remote_registry_index(registry_name, config, &index_url)?;
-    let (version, checksum) =
+    let (version, checksum, metadata) =
         select_remote_registry_version(&index, package_name, req, requirement)?;
+    if !allow_yanked {
+        reject_yanked_package(package_name, &version, &metadata)?;
+    }
     let manifest_path = cached_remote_manifest_path(
         registry_cache_dir,
         registry_name,
@@ -545,7 +701,7 @@ fn fetch_remote_registry_package_manifest(
         )?;
     }
     validate_registry_package_manifest(&manifest_path, package_name, &version)?;
-    Ok((version, manifest_path))
+    Ok((version, manifest_path, metadata))
 }
 
 fn fetch_remote_registry_index(
@@ -585,7 +741,7 @@ where
     Fut: std::future::Future<Output = Result<T>>,
     F: FnOnce(reqwest::Response) -> Fut,
 {
-    let headers = remote_registry_headers(registry_name, config)?;
+    let (headers, token_for_redaction) = remote_registry_headers(registry_name, config)?;
     let runtime = TokioRuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
@@ -605,6 +761,7 @@ where
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            let body = redact_token(&body, token_for_redaction.as_deref());
             miette::bail!(
                 "remote registry '{}' returned status {} for {}: {}",
                 registry_name,
@@ -617,8 +774,12 @@ where
     })
 }
 
-fn remote_registry_headers(registry_name: &str, config: &RegistryConfig) -> Result<HeaderMap> {
+fn remote_registry_headers(
+    registry_name: &str,
+    config: &RegistryConfig,
+) -> Result<(HeaderMap, Option<String>)> {
     let mut headers = HeaderMap::new();
+    let mut token_for_redaction = None;
     if let Some(token_env) = config.token_env.as_deref() {
         let token = env::var(token_env).into_diagnostic().with_context(|| {
             format!(
@@ -631,8 +792,16 @@ fn remote_registry_headers(registry_name: &str, config: &RegistryConfig) -> Resu
             AUTHORIZATION,
             HeaderValue::from_str(&auth).into_diagnostic()?,
         );
+        token_for_redaction = Some(token);
     }
-    Ok(headers)
+    Ok((headers, token_for_redaction))
+}
+
+fn redact_token(text: &str, token: Option<&str>) -> String {
+    match token.filter(|token| !token.is_empty()) {
+        Some(token) => text.replace(token, "<redacted>"),
+        None => text.to_string(),
+    }
 }
 
 fn select_remote_registry_version(
@@ -640,7 +809,7 @@ fn select_remote_registry_version(
     package_name: &str,
     req: &VersionReq,
     requirement: &str,
-) -> Result<(Version, Option<String>)> {
+) -> Result<(Version, Option<String>, RegistryPackageMetadata)> {
     let mut candidates = Vec::new();
     for entry in &index.versions {
         let version = Version::parse(&entry.version)
@@ -652,10 +821,18 @@ fn select_remote_registry_version(
                 )
             })?;
         if req.matches(&version) {
-            candidates.push((version, entry.checksum.clone()));
+            candidates.push((
+                version,
+                entry.checksum.clone(),
+                RegistryPackageMetadata {
+                    yanked: entry.yanked,
+                    yank_reason: entry.yank_reason.clone(),
+                    features: normalized_features(entry.features.clone()),
+                },
+            ));
         }
     }
-    candidates.sort_by(|(left, _), (right, _)| left.cmp(right));
+    candidates.sort_by(|(left, _, _), (right, _, _)| left.cmp(right));
     candidates.pop().ok_or_else(|| {
         miette::miette!(
             "no versions of remote registry package '{}' satisfy constraint '{}'",
@@ -663,6 +840,90 @@ fn select_remote_registry_version(
             requirement
         )
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalRegistryVersionMetadata {
+    #[serde(default)]
+    yanked: bool,
+    #[serde(default, alias = "reason")]
+    yank_reason: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_feature_names")]
+    features: Vec<String>,
+}
+
+fn load_local_registry_metadata(package_version_dir: &Path) -> Result<RegistryPackageMetadata> {
+    let metadata_path = package_version_dir.join("sgpm-index.toml");
+    if !metadata_path.exists() {
+        return Ok(RegistryPackageMetadata::default());
+    }
+    let source = fs::read_to_string(&metadata_path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read {}", metadata_path.display()))?;
+    let parsed: LocalRegistryVersionMetadata = toml::from_str(&source)
+        .into_diagnostic()
+        .with_context(|| format!("failed to parse {}", metadata_path.display()))?;
+    Ok(RegistryPackageMetadata {
+        yanked: parsed.yanked,
+        yank_reason: parsed
+            .yank_reason
+            .filter(|reason| !reason.trim().is_empty()),
+        features: normalized_features(parsed.features),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FeatureNames {
+    List(Vec<String>),
+    Map(BTreeMap<String, serde::de::IgnoredAny>),
+}
+
+fn deserialize_feature_names<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(features) = Option::<FeatureNames>::deserialize(deserializer)? else {
+        return Ok(Vec::new());
+    };
+    Ok(match features {
+        FeatureNames::List(features) => features,
+        FeatureNames::Map(features) => features.into_keys().collect(),
+    })
+}
+
+fn normalized_features(features: Vec<String>) -> Vec<String> {
+    let mut features = features
+        .into_iter()
+        .map(|feature| feature.trim().to_string())
+        .filter(|feature| !feature.is_empty())
+        .collect::<Vec<_>>();
+    features.sort();
+    features.dedup();
+    features
+}
+
+fn reject_yanked_package(
+    package_name: &str,
+    version: &Version,
+    metadata: &RegistryPackageMetadata,
+) -> Result<()> {
+    if !metadata.yanked {
+        return Ok(());
+    }
+    let reason = metadata
+        .yank_reason
+        .as_deref()
+        .filter(|reason| !reason.trim().is_empty())
+        .map(|reason| format!(": {}", reason))
+        .unwrap_or_default();
+    miette::bail!(
+        "registry package '{}' version {} is yanked{}; choose a non-yanked version or update the dependency constraint",
+        package_name,
+        version,
+        reason
+    )
 }
 
 fn cached_remote_manifest_path(
@@ -1145,7 +1406,77 @@ mod tests {
     }
 
     #[test]
-    fn rejects_path_dependency_key_that_differs_from_package_name() {
+    fn alias_dependency_resolves_with_package_field() {
+        let dir = temp_dir("alias_dep");
+        let app = dir.join("app");
+        let dep = dir.join("dep");
+        write_pkg(&dep, "actual_name", &[]);
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(app.join("src/main.sg"), "def main() -> i64 { 0 }\n").unwrap();
+        fs::write(
+            app.join("Sengoo.toml"),
+            "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../dep' }\n",
+        )
+        .unwrap();
+
+        let graph = Graph::from_root(&app.join("Sengoo.toml")).unwrap();
+        let names = graph
+            .nodes
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["actual_name", "app"]);
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].alias, "my_alias");
+        assert!(graph.requires_lockfile_v2());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn multiversion_graph_keeps_distinct_package_nodes() {
+        let dir = temp_dir("multiversion");
+        let app = dir.join("app");
+        let b = dir.join("b");
+        let c = dir.join("c");
+        let foo_one = dir.join("foo_one");
+        let foo_two = dir.join("foo_two");
+        write_pkg_version(&foo_one, "foo", "1.0.0", &[]);
+        write_pkg_version(&foo_two, "foo", "2.0.0", &[]);
+        write_pkg(&b, "b", &[("foo", "../foo_one")]);
+        write_pkg(&c, "c", &[("foo", "../foo_two")]);
+        write_pkg(&app, "app", &[("b", "../b"), ("c", "../c")]);
+
+        let graph = Graph::from_root(&app.join("Sengoo.toml")).unwrap();
+        let foo_versions = graph
+            .nodes
+            .iter()
+            .filter(|node| node.name == "foo")
+            .map(|node| node.manifest.package.version.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(foo_versions, BTreeSet::from(["1.0.0", "2.0.0"]));
+        assert!(graph.requires_lockfile_v2());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn write_pkg_version(root: &Path, name: &str, version: &str, deps: &[(&str, &str)]) {
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.sg"), "def main() -> i64 { 0 }\n").unwrap();
+        let mut text = format!("[package]\nname = '{}'\nversion = '{}'\n\n", name, version);
+        if !deps.is_empty() {
+            text.push_str("[dependencies]\n");
+            for (dep_name, dep_path) in deps {
+                text.push_str(&format!(
+                    "{} = {{ path = '{}' }}\n",
+                    dep_name,
+                    dep_path.replace('\\', "\\\\")
+                ));
+            }
+        }
+        fs::write(root.join("Sengoo.toml"), text).unwrap();
+    }
+
+    #[test]
+    fn rejects_path_dependency_key_that_differs_without_package_field() {
         let dir = temp_dir("path_name_mismatch");
         let app = dir.join("app");
         let dep = dir.join("dep");
@@ -1157,30 +1488,6 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("dependency 'alias' resolves to package 'actual_name'"),
-            "unexpected diagnostic: {err}"
-        );
-        let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn rejects_same_package_name_from_multiple_manifests() {
-        let dir = temp_dir("duplicate_package_name");
-        let app = dir.join("app");
-        let b = dir.join("b");
-        let c = dir.join("c");
-        let foo_one = dir.join("foo_one");
-        let foo_two = dir.join("foo_two");
-        write_pkg(&foo_one, "foo", &[]);
-        write_pkg(&foo_two, "foo", &[]);
-        write_pkg(&b, "b", &[("foo", "../foo_one")]);
-        write_pkg(&c, "c", &[("foo", "../foo_two")]);
-        write_pkg(&app, "app", &[("b", "../b"), ("c", "../c")]);
-
-        let err = Graph::from_root(&app.join("Sengoo.toml")).unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("package 'foo' resolves to multiple manifests"),
             "unexpected diagnostic: {err}"
         );
         let _ = fs::remove_dir_all(dir);

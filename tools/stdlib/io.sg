@@ -6,6 +6,8 @@ extern "C" {
     fn sengoo_io_stderr_write(data: i64, len: i64) -> i64;
     fn sengoo_io_stdout_flush() -> i64;
     fn sengoo_io_stderr_flush() -> i64;
+    fn sengoo_io_fd_read(fd: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_io_fd_write(fd: i64, data: i64, len: i64) -> i64;
 }
 
 def io_i64_result(value: i64) -> Result<i64, i64> {
@@ -62,4 +64,12 @@ def io_stdout_flush() -> Result<bool, i64> {
 
 def io_stderr_flush() -> Result<bool, i64> {
     io_bool_result(sengoo_io_stderr_flush())
+}
+
+def io_fd_read(fd: i64, buffer: Buffer) -> Result<i64, i64> {
+    io_i64_result(sengoo_io_fd_read(fd, buffer.ptr(), buffer.len()))
+}
+
+def io_fd_write(fd: i64, data: &str) -> Result<i64, i64> {
+    io_i64_result(sengoo_io_fd_write(fd, sengoo_stdlib_str_ptr(data), data.len()))
 }

@@ -258,6 +258,14 @@ static long long sengoo_owned_string_from_bytes(const char* bytes, size_t len) {
     return handle;
 }
 
+long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len) {
+    if (len < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    const char* bytes = (const char*)(intptr_t)bytes_ptr;
+    return sengoo_owned_string_from_bytes(bytes, (size_t)len);
+}
+
 long long sengoo_string_from_str_copy(long long value_ptr) {
     const char* value = (const char*)sengoo_handle_to_ptr(value_ptr);
     if (!value) {

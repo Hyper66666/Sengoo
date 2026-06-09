@@ -15,14 +15,15 @@ use super::{
     find_runtime_c, format_edit_impact_lines, generic_fingerprints_for_module,
     generic_instance_hit_ratio, handle_daemon_client, link_native_binary_from_objects,
     maybe_emit_reflection_sidecar, metadata_matches, module_dependency_levels,
-    module_fingerprints_for_source, module_invalidation_stats, parse_frontend_jobs_arg,
-    parse_linker_mode, reflection_options_from_cli, reflection_sidecar_path_for_artifact,
-    resolve_bench_suite_path, resolve_daemon_addr, resolve_engine, runtime_bundle_fingerprint,
-    runtime_source_bundle, select_reflection_i64_zero_arity_symbol, send_daemon_request,
-    signature_is_zero_arity_i64, validate_reflection_metadata, BuildCacheMetadata,
-    BuildGraphNodeV2, BuildGraphV2, BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode,
-    DaemonDispatchOutcome, EditClass, EditImpact, FrontendFallbackScope, FrontendJobs,
-    FrontendMemoryMode, FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
+    module_fingerprints_for_source, module_invalidation_stats, native_library_link_args,
+    parse_frontend_jobs_arg, parse_linker_mode, reflection_options_from_cli,
+    reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
+    resolve_engine, runtime_bundle_fingerprint, runtime_source_bundle,
+    select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
+    validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
+    BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode, DaemonDispatchOutcome,
+    EditClass, EditImpact, FrontendFallbackScope, FrontendJobs, FrontendMemoryMode,
+    FrontendProbeMode, FunctionFingerprint, GenericInstanceCacheEntry,
     GenericInstanceCacheMetadata, GenericInstanceFingerprint, GenericInstancePlanStats,
     GenericItemFingerprint, LinkerMode, ModuleFingerprint, ReflectionMetadata, ReflectionMode,
     RunCacheMetadata, RunEngine, RuntimeSourceIdentity, BUILD_GRAPH_SCHEMA_VERSION,
@@ -31,8 +32,9 @@ use super::{
     LOW_MEMORY_HINT_AVAILABLE_BYTES,
 };
 use crate::cli::Cli;
+use crate::cross_compile::NativeBuildTarget;
 use clap::Parser as _;
-use sengoo_compiler::compile_to_ir as compile_compiler_ir;
+use sengoo_compiler::{compile_to_ir as compile_compiler_ir, CompileWarning};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -616,7 +618,16 @@ def main() -> i64 {
         "runtime-bundle-link-full",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &full_exe, Some(&anchor_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &full_exe,
+        Some(&anchor_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
     let full_output = Command::new(&full_exe)
         .output()
         .expect("full runtime bundle executable should run");
@@ -624,14 +635,14 @@ def main() -> i64 {
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("runtime-bundle-link-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 1).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
     let inc_exe = temp_artifact(
         "runtime-bundle-link-objects",
         if cfg!(windows) { "exe" } else { "" },
     );
     let mut object_paths = vec![main_obj.clone()];
-    object_paths.extend(ensure_runtime_objects(&clang, &anchor_str, 1).unwrap());
-    link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
+    object_paths.extend(ensure_runtime_objects(&clang, &anchor_str, 1, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &inc_exe, None, None).unwrap();
     let inc_output = Command::new(&inc_exe)
         .output()
         .expect("object runtime bundle executable should run");
@@ -716,6 +727,7 @@ fn advanced_pipeline_memory_buckets_cover_100k_and_1000k() {
     let root = bench_root_dir();
     let script = fs::read_to_string(root.join("advanced_pipeline_bench.py")).unwrap();
     assert!(script.contains("MEMORY_LOC_BUCKETS = [10000, 100000, 1000000]"));
+    assert!(script.contains("LADDER_STRETCH_LOC = 2500000"));
 }
 
 #[test]
@@ -723,6 +735,15 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     let root = bench_root_dir();
     let gate = fs::read_to_string(root.join("scripts/advanced-kpi-gate.py")).unwrap();
     assert!(gate.contains("DEFAULT_REQUIRED_MEMORY_LOCS = (\"10000\", \"100000\", \"1000000\")"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_100K = 1.5"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_100K_PCT = 70.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_1000K = 1.8"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_PCT = 65.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_2500K = 2.0"));
+    assert!(gate.contains("DEFAULT_LADDER_STRETCH_LOC = \"2500000\""));
+    assert!(gate.contains("ladder_stretch"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0"));
 }
 
 #[test]
@@ -970,6 +991,41 @@ fn render_compile_error_json_extracts_stable_diagnostic_code() {
 }
 
 #[test]
+fn render_compile_error_json_extracts_attribute_code() {
+    let raw = "parse error: unsupported attribute: unsupported cfg predicate `target_arch`";
+    let json = super::render_compile_error_json(Some("tests/attrs.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["stage"], "parse");
+    assert_eq!(value["code"], "attributes::unsupported_attribute");
+    assert!(value["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("unsupported cfg predicate"));
+}
+
+#[test]
+fn render_compile_error_json_extracts_user_future_contract_code() {
+    for raw in [
+        "MIR lowering failed: Poll<T> must contain `is_ready: bool` followed by `value: T`",
+        "MIR lowering failed: Future<T>::poll must return Poll<T>",
+        "type check error: Future<T>::poll must use `&mut self` receiver",
+    ] {
+        let json = super::render_compile_error_json(Some("tests/async_future.sg"), raw);
+        let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+        assert_eq!(value["code"], "async::user_future_contract");
+        assert!(
+            value["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Future<T>")
+                || value["message"].as_str().unwrap_or("").contains("Poll<T>")
+        );
+    }
+}
+
+#[test]
 fn render_compile_error_json_keeps_multiline_details() {
     let raw = "parse failed: unexpected token\nline 1, col 8\nnote: expected `}`";
     let json = super::render_compile_error_json(Some("tests/broken.sg"), raw);
@@ -1004,6 +1060,19 @@ fn render_compile_error_json_with_location_serializes_structured_fields() {
     assert_eq!(value["location"]["column"], 9);
     assert_eq!(value["location"]["span"]["lo"], 24);
     assert_eq!(value["location"]["span"]["hi"], 25);
+}
+
+#[test]
+fn render_compile_warning_json_with_span_serializes_structured_location() {
+    let warning = CompileWarning::deprecated_use("fn", "old_main", None, Some((42, 50)));
+    let json = super::render_compile_warning_json(&warning);
+    let value: Value = serde_json::from_str(&json).expect("warning json should be valid");
+
+    assert_eq!(value["kind"], "compile_warning");
+    assert_eq!(value["severity"], "warning");
+    assert_eq!(value["code"], "attributes::deprecated_use");
+    assert_eq!(value["location"]["span"]["lo"], 42);
+    assert_eq!(value["location"]["span"]["hi"], 50);
 }
 
 #[test]
@@ -1048,14 +1117,14 @@ fn frontend_memory_mode_wire_supports_low_memory_aliases() {
 }
 
 #[test]
-fn frontend_memory_mode_auto_defaults_to_legacy_for_small_and_large_sources() {
+fn frontend_memory_mode_auto_uses_legacy_for_small_and_stream_for_large_sources() {
     assert_eq!(
         super::resolve_frontend_memory_mode(64),
         FrontendMemoryMode::Legacy
     );
     assert_eq!(
         super::resolve_frontend_memory_mode(FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES * 8),
-        FrontendMemoryMode::Legacy
+        FrontendMemoryMode::Stream
     );
 }
 
@@ -1538,6 +1607,8 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         FrontendJobs::Auto,
         false,
         super::ReflectionCliOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -1853,7 +1924,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-native-main", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -1862,6 +1933,340 @@ async def main() -> i64 {
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_awaits_user_future_impl() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct ImmediateFuture {
+    value: i64,
+}
+
+impl Future<i64> for ImmediateFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    let future = ImmediateFuture { value: 42 };
+    await future
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("user Future source should compile");
+    let ll_path = temp_artifact("async-user-future", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact("async-user-future", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("user Future executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_user_future_local_parameter_return_flow() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct ImmediateFuture {
+    value: i64,
+}
+
+impl Future<i64> for ImmediateFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+def make_future(value: i64) -> ImmediateFuture {
+    ImmediateFuture { value: value }
+}
+
+async def consume_future(future: ImmediateFuture) -> i64 {
+    await future
+}
+
+async def main() -> i64 {
+    let local_future = make_future(10);
+    let first = await local_future;
+    let second = await consume_future(make_future(20));
+    let returned_future = make_future(12);
+    let third = await returned_future;
+    first + second + third
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("user Future flow source should compile");
+    let ll_path = temp_artifact("async-user-future-flow", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-user-future-flow",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("user Future flow executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_does_not_repoll_user_future_after_ready() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-user-future-ready-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\n{}",
+            runtime_source,
+            r#"
+static long long sengoo_test_user_future_poll_calls = 0;
+
+long long sengoo_test_user_future_tick(void) {
+    sengoo_test_user_future_poll_calls += 1;
+    return sengoo_test_user_future_poll_calls;
+}
+
+long long sengoo_test_user_future_calls(void) {
+    return sengoo_test_user_future_poll_calls;
+}
+"#
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_test_user_future_calls() -> i64;
+}
+
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct ImmediateFuture {
+    value: i64,
+}
+
+impl Future<i64> for ImmediateFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        let calls = sengoo_test_user_future_tick();
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    let value = await ImmediateFuture { value: 40 };
+    value + sengoo_test_user_future_calls()
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("ready user Future source should compile");
+    let ll_path = temp_artifact("async-user-future-ready-once", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-user-future-ready-once",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("ready user Future executable should run");
+    assert_eq!(output.status.code(), Some(41));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
+fn async_native_runtime_preserves_inline_user_future_across_pending() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-user-future-pending-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\n{}",
+            runtime_source,
+            r#"
+long long sengoo_test_user_future_tick(void) {
+    static long long calls = 0;
+    calls += 1;
+    return calls;
+}
+"#
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_user_future_tick() -> i64;
+}
+
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct PendingOnceFuture {
+    value: i64,
+}
+
+impl Future<i64> for PendingOnceFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        let calls = sengoo_test_user_future_tick();
+        if calls < 2 {
+            Poll { is_ready: false, value: 0 }
+        } else {
+            Poll { is_ready: true, value: self.value }
+        }
+    }
+}
+
+async def main() -> i64 {
+    await PendingOnceFuture { value: 77 }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("pending user Future source should compile");
+    let ll_path = temp_artifact("async-user-future-pending", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-user-future-pending",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("pending user Future executable should run");
+    assert_eq!(output.status.code(), Some(77));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
 }
 
 #[test]
@@ -1894,7 +2299,7 @@ async def main() -> i64 {
         "async-block-capture",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -1931,7 +2336,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-sleep", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let run_start = SystemTime::now();
     let output = Command::new(&exe_path)
@@ -1978,7 +2383,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-spawn-sleep", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let run_start = SystemTime::now();
     let output = Command::new(&exe_path)
@@ -2033,7 +2438,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-timeout", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2083,7 +2488,7 @@ async def main() -> i64 {
         "async-timeout-ready",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2133,7 +2538,7 @@ async def main() -> i64 {
         "async-timeout-bound-fut",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2178,7 +2583,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-spawn", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2230,7 +2635,7 @@ async def main() -> i64 {
         "async-spawn-task-status",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2276,7 +2681,7 @@ async def main() -> i64 {
         "async-cancel-task-status",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2353,7 +2758,16 @@ async def main() -> i64 {
         "async-spawn-polling",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2428,7 +2842,16 @@ async def main() -> i64 {
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
 
     let exe_path = temp_artifact("async-join", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2495,7 +2918,16 @@ async def main() -> i64 {
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
 
     let exe_path = temp_artifact("async-select", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2540,7 +2972,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-select-bool", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
     let exe_path = temp_artifact("async-select-bool", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2584,7 +3016,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-select-f64", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
     let exe_path = temp_artifact("async-select-f64", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2642,7 +3074,7 @@ async def main() -> i64 {
         "async-select-struct",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2700,7 +3132,7 @@ async def main() -> i64 {
         "async-select-generic-struct",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2749,7 +3181,7 @@ async def main() -> i64 {
     let ll_path = temp_artifact("async-select-tuple", "ll");
     fs::write(&ll_path, llvm_ir).unwrap();
     let exe_path = temp_artifact("async-select-tuple", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2790,7 +3222,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-live-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2837,7 +3269,7 @@ async def main() -> i64 {
         "async-if-structured",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2880,7 +3312,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-loop-body", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2925,7 +3357,7 @@ async def main() -> i64 {
         "async-sleep-loop-body",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -2970,7 +3402,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-match-arms", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3012,7 +3444,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-bool-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3055,7 +3487,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-ref-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3097,7 +3529,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-f64-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3156,7 +3588,16 @@ async def main() -> i64 {
 
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
     let exe_path = temp_artifact("async-f32-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3213,7 +3654,16 @@ def main() -> i64 {
 
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
     let exe_path = temp_artifact("alloc-align", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3266,7 +3716,16 @@ def main() -> i64 {
 
     let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
     let exe_path = temp_artifact("async-frame-guard", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3327,7 +3786,16 @@ def main() -> i64 {
         "async-frame-free-guard",
         if cfg!(windows) { "exe" } else { "" },
     );
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&custom_runtime_c_str), 1).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3376,7 +3844,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-struct-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -3418,13 +3886,151 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
 
     let exe_path = temp_artifact("async-array-local", if cfg!(windows) { "exe" } else { "" });
-    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1).unwrap();
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
         .expect("async array executable should run");
     assert_eq!(output.status.code(), Some(42));
 
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_concurrent_thread_pool_and_spawn_blocking() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+def heavy() -> i64 { 55 }
+
+async def main() -> i64 {
+    let enabled = runtime_enable_thread_pool(2);
+    if !enabled.is_ok { return 0; }
+    let fut = spawn_blocking_future_i64(| | heavy());
+    await fut
+}
+"#
+    );
+
+    let llvm_ir =
+        compile_source(&source, 1).expect("concurrent spawn_blocking source should compile");
+    let ll_path = temp_artifact("async-concurrent-blocking", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-concurrent-blocking",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("executable should run");
+    assert_eq!(output.status.code(), Some(55));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_spawn_blocking_reports_unsupported_without_pool() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+def heavy() -> i64 { 1 }
+
+async def main() -> i64 {
+    let spawned = spawn_blocking_i64(| | heavy());
+    if spawned.is_ok { 0 } else { spawned.error }
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("unsupported spawn_blocking should compile");
+    let ll_path = temp_artifact("async-concurrent-unsupported", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-concurrent-unsupported",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("executable should run");
+    assert_eq!(output.status.code(), Some(8));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_concurrent_channel_round_trip() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+async def main() -> i64 {
+    let pair = channel_bounded(4);
+    if pair.is_ok {
+        let sender = channel_pair_sender(pair.value);
+        let receiver = channel_pair_receiver(pair.value);
+        let send_fut = channel_send_i64(sender, 17);
+        let send_outcome = await send_fut;
+        if send_outcome.is_ok {
+            let recv_fut = channel_recv_i64(receiver);
+            let recv_outcome = await recv_fut;
+            if recv_outcome.is_ok { recv_outcome.value } else { 12 }
+        } else {
+            11
+        }
+    } else {
+        10
+    }
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("concurrent channel source should compile");
+    let ll_path = temp_artifact("async-concurrent-channel", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-concurrent-channel",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("executable should run");
+    assert_eq!(output.status.code(), Some(17));
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
 }
@@ -3445,14 +4051,23 @@ fn incremental_link_output_matches_full_link_output() {
     let obj_path = temp_artifact("equiv-main", if cfg!(windows) { "obj" } else { "o" });
 
     let runtime_c = find_runtime_c();
-    compile_native_binary(&clang, &ll_path, &full_exe, runtime_c.as_deref(), 2).unwrap();
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &full_exe,
+        runtime_c.as_deref(),
+        2,
+        None,
+        None,
+    )
+    .unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
 
     let mut object_paths = vec![obj_path.clone()];
     if let Some(runtime_c) = runtime_c.as_deref() {
-        object_paths.extend(ensure_runtime_objects(&clang, runtime_c, 2).unwrap());
+        object_paths.extend(ensure_runtime_objects(&clang, runtime_c, 2, None).unwrap());
     }
-    link_native_binary_from_objects(&clang, &object_paths, &inc_exe).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &inc_exe, None, None).unwrap();
 
     let full_out = Command::new(&full_exe).output().unwrap();
     let inc_out = Command::new(&inc_exe).output().unwrap();
@@ -3468,12 +4083,23 @@ fn incremental_link_output_matches_full_link_output() {
 
 static STDLIB_RUNTIME_C_READY: OnceLock<bool> = OnceLock::new();
 fn stdlib_runtime_c_is_compilable(clang: &str, runtime_c: &Path) -> bool {
-    *STDLIB_RUNTIME_C_READY
-        .get_or_init(|| ensure_runtime_objects(clang, &runtime_c.to_string_lossy(), 2).is_ok())
+    *STDLIB_RUNTIME_C_READY.get_or_init(|| {
+        ensure_runtime_objects(clang, &runtime_c.to_string_lossy(), 2, None).is_ok()
+    })
 }
 
 fn load_stdlib_surface_source() -> String {
-    load_stdlib_modules(&["option.sg", "result.sg", "ffi.sg", "collections.sg"])
+    load_stdlib_modules(&[
+        "option.sg",
+        "result.sg",
+        "ffi.sg",
+        "string.sg",
+        "collections.sg",
+    ])
+}
+
+fn load_async_runtime_stdlib() -> String {
+    load_stdlib_modules(&["option.sg", "result.sg", "ffi.sg", "status.sg", "async.sg"])
 }
 
 fn load_stdlib_modules(modules: &[&str]) -> String {
@@ -3570,13 +4196,13 @@ fn compile_and_run_example_with_args(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("examples-smoke-{tag}-main"), obj_ext);
-    if compile_ir_to_object(&clang, &ll_path, &main_obj, 1).is_err() {
+    if compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).is_err() {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
         return None;
     }
 
-    let runtime_objects = match ensure_runtime_objects(&clang, &runtime_c, 1) {
+    let runtime_objects = match ensure_runtime_objects(&clang, &runtime_c, 1, None) {
         Ok(objects) => objects,
         Err(_) => {
             let _ = fs::remove_file(&ll_path);
@@ -3597,7 +4223,15 @@ fn compile_and_run_example_with_args(
             ),
             obj_ext,
         );
-        if compile_ir_to_object(&clang, &workspace_root.join(extra_input), &extra_obj, 1).is_err() {
+        if compile_ir_to_object(
+            &clang,
+            &workspace_root.join(extra_input),
+            &extra_obj,
+            1,
+            None,
+        )
+        .is_err()
+        {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
             for object in &extra_objects {
@@ -3613,7 +4247,7 @@ fn compile_and_run_example_with_args(
         &format!("examples-smoke-{tag}"),
         if cfg!(windows) { "exe" } else { "" },
     );
-    if link_native_binary_from_objects(&clang, &object_paths, &exe_path).is_err() {
+    if link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).is_err() {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
         for object in &extra_objects {
@@ -4024,14 +4658,15 @@ fn stdlib_http_import_links_native_runtime_and_maps_errors() {
 import std::http;
 
 def main() -> i64 {
-    let result = http_client_get("ftp://127.0.0.1/", 1);
-    if result.is_ok {
-        result.value.close();
-        99
-    } else if result.error == STATUS_UNSUPPORTED() {
+    let ftp_result = http_client_get("ftp://127.0.0.1/", 1);
+    let ftp_closed = if ftp_result.is_ok { ftp_result.value.close(); } else { true; };
+    let ftp_unsupported = if ftp_result.is_ok { false; } else { ftp_result.error == STATUS_UNSUPPORTED(); };
+    if ftp_unsupported and ftp_closed {
         0
+    } else if ftp_result.is_ok {
+        99
     } else {
-        result.error
+        ftp_result.error
     }
 }
 "#,
@@ -4041,7 +4676,8 @@ def main() -> i64 {
 
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -4521,6 +5157,23 @@ int main(int argc, char** argv) {
         return 5;
     }
 
+    if (strcmp(argv[1], "pipe-producer") == 0) {
+        fprintf(stdout, "789");
+        fflush(stdout);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "pipe-consumer") == 0) {
+        char input[16] = {0};
+        size_t read_count = fread(input, 1, sizeof(input) - 1, stdin);
+        if (read_count != 3 || strcmp(input, "789") != 0) {
+            return 40;
+        }
+        fprintf(stdout, "%s", input);
+        fflush(stdout);
+        return 0;
+    }
+
     return 91;
 }
 "#,
@@ -4610,6 +5263,21 @@ def main() -> i64 {{
     let timeout_output_closed = timeout_output.close();
     let timeout_command_closed = timeout.close();
 
+    let pipeline_buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let producer = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let producer_arg = producer.arg("pipe-producer").unwrap_or(false);
+    let consumer = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let consumer_arg = consumer.arg("pipe-consumer").unwrap_or(false);
+    let consumer_capture = consumer.capture_stdout(true).unwrap_or(false);
+    let pipeline = producer.pipe_stdout_to(consumer).unwrap_or(ProcessCommand {{ handle: 0 }});
+    let pipeline_output = pipeline.run().unwrap_or(ProcessOutput {{ handle: 0 }});
+    let pipeline_exit = pipeline_output.exit_code().unwrap_or(-1);
+    let pipeline_len = pipeline_output.stdout_len().unwrap_or(-1);
+    let pipeline_copied = pipeline_output.stdout_copy(pipeline_buffer).unwrap_or(-1);
+    let pipeline_value = strconv_parse_i64_buffer(pipeline_buffer, pipeline_copied).unwrap_or(-1);
+    let pipeline_output_closed = pipeline_output.close();
+    let pipeline_command_closed = pipeline.close();
+
     let ok =
         fixed == 7
         && inherited_arg
@@ -4657,15 +5325,33 @@ def main() -> i64 {{
         && timeout_stdout_value == 12
         && timeout_stderr_value == 34
         && timeout_output_closed
-        && timeout_command_closed;
+        && timeout_command_closed
+        && producer_arg
+        && consumer_arg
+        && consumer_capture
+        && pipeline_exit == 0
+        && pipeline_len == 3
+        && pipeline_copied == 3
+        && pipeline_value == 789
+        && pipeline_output_closed
+        && pipeline_command_closed;
 
     stdout_buffer.free();
     stderr_buffer.free();
     timeout_stdout.free();
     timeout_stderr.free();
+    pipeline_buffer.free();
 
     if ok {{
         0
+    }} else if !producer_arg || !consumer_arg || !consumer_capture {{
+        41
+    }} else if pipeline_exit != 0 {{
+        pipeline_exit
+    }} else if pipeline_len != 3 || pipeline_copied != 3 {{
+        43
+    }} else if pipeline_value != 789 {{
+        44
     }} else {{
         1
     }}
@@ -4683,7 +5369,8 @@ def main() -> i64 {{
     };
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -4785,6 +5472,195 @@ def main() -> i64 {
     assert!(
         output.status.success(),
         "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_compress_runtime_round_trips_gzip_buffers_and_maps_errors() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "compress-gzip-roundtrip",
+        r#"
+import std::compress;
+import std::io;
+import std::status;
+
+def main() -> i64 {
+    let input = ffi_buffer_from_bytes("[1,2,3]").unwrap_or(Buffer { handle: 0 });
+    let gzip_a = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let gzip_b = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let restored = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let tiny = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let invalid = ffi_buffer_from_bytes("not-gzip").unwrap_or(Buffer { handle: 0 });
+
+    let gzip_a_result = compress_gzip_buffer(input, input.used_len(), gzip_a);
+    let gzip_b_result = compress_gzip_buffer(input, input.used_len(), gzip_b);
+    let tiny_error = compress_gzip_buffer(input, input.used_len(), tiny).err().unwrap_or(0);
+    let restored_len = if gzip_a_result.is_ok {
+        decompress_gzip_buffer(gzip_a, gzip_a_result.value, restored).unwrap_or(0)
+    } else {
+        0
+    };
+    let truncated_error = if gzip_a_result.is_ok {
+        decompress_gzip_buffer(gzip_a, gzip_a_result.value - 1, restored).err().unwrap_or(0)
+    } else {
+        0
+    };
+    let invalid_error = decompress_gzip_buffer(invalid, invalid.used_len(), restored).err().unwrap_or(0);
+
+    let ok = gzip_a_result.is_ok
+        && gzip_b_result.is_ok
+        && gzip_a_result.value == gzip_b_result.value
+        && restored_len == input.used_len()
+        && tiny_error == STATUS_BUFFER_TOO_SMALL()
+        && truncated_error == STATUS_PARSE()
+        && invalid_error == STATUS_PARSE();
+
+    if ok {
+        print(gzip_a_result.value);
+        let _newline = io_stdout_write("\n").unwrap_or(0);
+        let _wrote_a = io_stdout_write_raw(gzip_a.ptr(), gzip_a_result.value).unwrap_or(0);
+        let _wrote_b = io_stdout_write_raw(gzip_b.ptr(), gzip_b_result.value).unwrap_or(0);
+        let _wrote_restored = io_stdout_write_raw(restored.ptr(), restored_len).unwrap_or(0);
+    }
+
+    invalid.free();
+    tiny.free();
+    restored.free();
+    gzip_b.free();
+    gzip_a.free();
+    input.free();
+
+    if ok { 0 } else { 1 }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout bytes:\n{:?}\nstderr:\n{}",
+        output.status,
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let newline = output
+        .stdout
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .expect("stdout should prefix gzip length");
+    let gzip_len = std::str::from_utf8(&output.stdout[..newline])
+        .expect("gzip length should be utf8")
+        .trim()
+        .parse::<usize>()
+        .expect("gzip length should parse");
+    let mut payload_start = newline + 1;
+    while payload_start < output.stdout.len() && output.stdout[payload_start].is_ascii_whitespace()
+    {
+        payload_start += 1;
+    }
+    let bytes = &output.stdout[payload_start..];
+    assert!(
+        bytes.len() >= gzip_len * 2,
+        "stdout should contain two gzip payloads and restored JSON, got {} bytes for gzip length {gzip_len}",
+        bytes.len()
+    );
+    let gzip_a = &bytes[..gzip_len];
+    let gzip_b = &bytes[gzip_len..gzip_len * 2];
+    let restored = &bytes[gzip_len * 2..];
+
+    assert_eq!(gzip_a, gzip_b, "gzip output should be deterministic");
+    assert!(gzip_a.starts_with(&[0x1f, 0x8b, 0x08, 0x00]));
+    assert_eq!(
+        &gzip_a[4..8],
+        &[0, 0, 0, 0],
+        "gzip mtime must be normalized"
+    );
+    assert_eq!(gzip_a[9], 255, "gzip OS byte must be normalized");
+    assert_eq!(restored, b"[1,2,3]");
+}
+
+#[test]
+fn stdlib_compress_runtime_enforces_v1_input_and_output_limits() {
+    let source = r#"
+import std::compress;
+import std::io;
+import std::status;
+
+def main() -> i64 {
+    let input = ffi_buffer_new(1048577).unwrap_or(Buffer { handle: 0 });
+    let read = io_stdin_read(input).unwrap_or(0);
+    let large_out = ffi_buffer_new(1100000).unwrap_or(Buffer { handle: 0 });
+    let restored = ffi_buffer_new(1048576).unwrap_or(Buffer { handle: 0 });
+    let tiny_out = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let too_large_gzip = ffi_buffer_new(1048680).unwrap_or(Buffer { handle: 0 });
+    let sample = ffi_buffer_from_bytes("small-buffer-check").unwrap_or(Buffer { handle: 0 });
+    let sample_gzip = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+
+    let exact_len = if read > 1048576 { 1048576 } else { read };
+    let exact = compress_gzip_buffer(input, exact_len, large_out);
+    let exact_roundtrip = if exact.is_ok {
+        decompress_gzip_buffer(large_out, exact.value, restored).unwrap_or(0)
+    } else {
+        0
+    };
+    let one_over = compress_gzip_buffer(input, 1048577, large_out).err().unwrap_or(0);
+    let gunzip_one_over = decompress_gzip_buffer(too_large_gzip, 1048680, large_out).err().unwrap_or(0);
+    let sample_exact = compress_gzip_buffer(sample, sample.used_len(), sample_gzip);
+    let small_out = if sample_exact.is_ok {
+        decompress_gzip_buffer(sample_gzip, sample_exact.value, tiny_out).err().unwrap_or(0)
+    } else {
+        0
+    };
+
+    sample_gzip.free();
+    sample.free();
+    too_large_gzip.free();
+    tiny_out.free();
+    restored.free();
+    large_out.free();
+    input.free();
+
+    let ok = exact.is_ok
+        && exact_roundtrip == exact_len
+        && one_over == STATUS_OVERFLOW()
+        && gunzip_one_over == STATUS_OVERFLOW()
+        && small_out == STATUS_BUFFER_TOO_SMALL();
+    if !ok {
+        print(read);
+        print(exact_len);
+        print(if exact.is_ok { exact.value } else { 0 });
+        print(exact_roundtrip);
+        print(one_over);
+        print(gunzip_one_over);
+        print(if sample_exact.is_ok { sample_exact.value } else { 0 });
+        print(small_out);
+    }
+
+    if ok {
+        0
+    } else {
+        1
+    }
+}
+"#;
+    let oversized_input = "a".repeat(1_048_577);
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "compress-gzip-limits",
+        source,
+        &oversized_input,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -4927,14 +5803,13 @@ def main() -> i64 {
 fn stdlib_json_runtime_reports_parse_errors_and_limits() {
     let too_deep = format!("{}0{}", "[".repeat(70), "]".repeat(70));
     let too_many_nodes = format!("[{}]", vec!["0"; 5000].join(","));
-    let too_large = format!("[{}]", vec!["0"; 20000].join(","));
     let too_deep = too_deep.replace('\\', "\\\\").replace('"', "\\\"");
     let too_many_nodes = too_many_nodes.replace('\\', "\\\\").replace('"', "\\\"");
-    let too_large = too_large.replace('\\', "\\\\").replace('"', "\\\"");
 
     let source = format!(
         r#"
 import std::json;
+import std::io;
 
 def main() -> i64 {{
     let message = ffi_buffer_new(128).unwrap_or(Buffer {{ handle: 0 }});
@@ -4947,8 +5822,11 @@ def main() -> i64 {{
     let deep_offset = json_last_error_offset();
     let too_many = json_parse("{too_many_nodes}").is_err();
     let too_many_code = json_last_error_code();
-    let too_big = json_parse("{too_large}").is_err();
+    let oversize_buf = ffi_buffer_new(2000000).unwrap_or(Buffer {{ handle: 0 }});
+    let oversize_len = io_stdin_read(oversize_buf).unwrap_or(0);
+    let too_big = json_parse_buffer(oversize_buf, oversize_len).is_err();
     let too_big_code = json_last_error_code();
+    oversize_buf.free();
     let empty_doc = JsonDoc {{ handle: 0 }};
     let empty_close = !empty_doc.close();
     message.free();
@@ -4984,7 +5862,9 @@ def main() -> i64 {{
 "#
     );
 
-    let Some(output) = compile_and_run_stdlib_import_program_with_stdin("json-errors", &source, "")
+    let oversized_json = format!("\"{}\"", "a".repeat(1_100_000));
+    let Some(output) =
+        compile_and_run_stdlib_import_program_with_stdin("json-errors", &source, &oversized_json)
     else {
         return;
     };
@@ -5079,6 +5959,92 @@ fn examples_smoke_ffi_sengoo_calls_c() {
 }
 
 #[test]
+fn native_link_metadata_reaches_linker_arguments() {
+    let source = r#"
+        #[link(name = "sample")]
+        extern "C" {
+            pub fn sample_ping() -> i64;
+        }
+
+        def main() -> i64 {
+            return sample_ping();
+        }
+    "#;
+    let llvm_ir = compile_source(source, 1).expect("native link metadata should compile");
+    assert!(llvm_ir.contains("declare i64 @sample_ping()"));
+
+    let target = NativeBuildTarget::host();
+    let args = native_library_link_args(&["sample".to_string()], &target, &[]);
+    if cfg!(windows) {
+        assert!(
+            args.iter().any(|arg| arg == "sample.lib"),
+            "expected sample.lib in linker args, got {:?}",
+            args
+        );
+    } else {
+        assert_eq!(args, vec!["-lsample".to_string()]);
+    }
+}
+
+#[test]
+fn native_link_graph_collection_unions_imported_modules() {
+    let root = std::env::temp_dir().join(format!(
+        "sengoo-sgc-native-link-graph-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("dep")).unwrap();
+    fs::write(
+        root.join("dep").join("ffi.sg"),
+        r#"
+            #[link(name = "sample")]
+            extern "C" {
+                pub fn sample_ping() -> i64;
+            }
+        "#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("main.sg"),
+        r#"
+            import dep::ffi;
+
+            def main() -> i64 {
+                return sample_ping();
+            }
+        "#,
+    )
+    .unwrap();
+
+    let main_source = fs::read_to_string(root.join("main.sg")).unwrap();
+    let libraries =
+        super::collect_native_link_libraries_for_graph(&root.join("main.sg"), &main_source)
+            .expect("native link graph collection should succeed");
+    assert_eq!(libraries, vec!["sample".to_string()]);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn package_native_c_sources_discovered_from_module_graph() {
+    let root = workspace_root_for_tests().join("packages/sgplatform");
+    if !root.join("Sengoo.toml").is_file() {
+        return;
+    }
+    let main_source = fs::read_to_string(root.join("tests/platform_smoke.sg")).unwrap();
+    let sources = super::collect_package_native_c_sources(
+        &root.join("tests/platform_smoke.sg"),
+        &main_source,
+    );
+    assert!(
+        sources.iter().any(
+            |path| path.file_name().and_then(|name| name.to_str()) == Some("sgplatform_shim.c")
+        ),
+        "expected sgplatform native shim in {:?}",
+        sources
+    );
+}
+
+#[test]
 fn examples_smoke_ffi_c_calls_sengoo_export() {
     let source = read_example_source("examples/ffi/sengoo_exports.sg");
     let llvm_ir = compile_source(&source, 1).expect("FFI export example should compile");
@@ -5098,16 +6064,23 @@ fn examples_smoke_ffi_c_calls_sengoo_export() {
         "examples-smoke-ffi-export",
         if cfg!(windows) { "exe" } else { "" },
     );
-    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1).is_err()
+    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1, None).is_err()
         || compile_ir_to_object(
             &clang,
             &workspace_root_for_tests().join("examples/ffi/c_calls_sengoo.c"),
             &c_obj,
             1,
+            None,
         )
         .is_err()
-        || link_native_binary_from_objects(&clang, &[sengoo_obj.clone(), c_obj.clone()], &exe_path)
-            .is_err()
+        || link_native_binary_from_objects(
+            &clang,
+            &[sengoo_obj.clone(), c_obj.clone()],
+            &exe_path,
+            None,
+            None,
+        )
+        .is_err()
     {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&sengoo_obj);
@@ -5144,7 +6117,7 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         &format!("stdlib-runtime-{}", tag),
         if cfg!(windows) { "obj" } else { "o" },
     );
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -5159,8 +6132,9 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         return None;
     }
     let mut object_paths = vec![obj_path.clone()];
-    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c.to_string_lossy(), 2).unwrap());
-    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
+    object_paths
+        .extend(ensure_runtime_objects(&clang, &runtime_c.to_string_lossy(), 2, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -5193,15 +6167,15 @@ fn compile_and_run_stdlib_import_program_with_stdin(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-runtime-{tag}"),
         if cfg!(windows) { "exe" } else { "" },
     );
     let mut object_paths = vec![main_obj.clone()];
-    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 2).unwrap());
-    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 2, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
 
     let mut child = Command::new(&exe_path)
         .stdin(Stdio::piped())
@@ -5244,15 +6218,15 @@ fn compile_and_run_stdlib_import_program_with_native_runtime(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-native-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-native-runtime-{tag}"),
         if cfg!(windows) { "exe" } else { "" },
     );
     let mut object_paths = vec![main_obj.clone()];
-    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2).unwrap();
-    link_native_binary_from_objects(&clang, &object_paths, &exe_path).unwrap();
+    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2, None).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
 
     let output = Command::new(&exe_path)
         .output()
@@ -5316,6 +6290,8 @@ def main() -> i64 {
         FrontendJobs::Fixed(1),
         false,
         super::ReflectionCliOptions::default(),
+        None,
+        None,
     )
     .await;
 

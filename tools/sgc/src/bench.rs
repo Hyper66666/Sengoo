@@ -218,6 +218,8 @@ fn link_ir_file_with_clang_ms(
         &exe_path,
         runtime_c,
         clang_opt_level,
+        None,
+        None,
     )?;
     let link_ms = link_start.elapsed().as_secs_f64() * 1000.0;
 

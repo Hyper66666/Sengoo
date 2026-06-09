@@ -701,7 +701,7 @@ impl<'source> Parser<'source> {
     }
 
     /// 检查当前token是否可以作为表达式的开始。
-    fn check_expr(&self) -> bool {
+    fn check_expr(&mut self) -> bool {
         if let Some(token) = self.current() {
             matches!(
                 &token.kind,
@@ -741,7 +741,7 @@ impl<'source> Parser<'source> {
     }
 
     /// 检查当前token是否可以作为范围结束表达式的开始。
-    fn check_range_end(&self) -> bool {
+    fn check_range_end(&mut self) -> bool {
         self.check_expr()
     }
 }

@@ -59,6 +59,8 @@ pub struct Codegen {
 
     declarations: String,
 
+    target_triple: Option<String>,
+
     ffi: FfiCodegenConfig,
 
     /// Collected string literals emitted for the current module.
@@ -90,12 +92,18 @@ impl Codegen {
     }
 
     pub fn with_ffi(ffi: FfiCodegenConfig) -> Self {
+        Self::with_ffi_and_target(ffi, None)
+    }
+
+    pub fn with_ffi_and_target(ffi: FfiCodegenConfig, target_triple: Option<String>) -> Self {
         let mut cg = Self {
             ir: String::new(),
 
             indent: 0,
 
             declarations: String::new(),
+
+            target_triple,
 
             ffi,
 

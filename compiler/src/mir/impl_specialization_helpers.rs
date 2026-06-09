@@ -210,6 +210,7 @@ pub(crate) fn expand_impl_variants(
         return vec![hir::HIRImpl {
             target_type: impl_item.target_type.clone(),
             trait_name: impl_item.trait_name.clone(),
+            trait_args: impl_item.trait_args.clone(),
             items: impl_item
                 .items
                 .iter()
@@ -240,6 +241,7 @@ pub(crate) fn expand_impl_variants(
                 variants.push(hir::HIRImpl {
                     target_type: concrete.clone(),
                     trait_name: impl_item.trait_name.clone(),
+                    trait_args: impl_item.trait_args.clone(),
                     items: impl_item
                         .items
                         .iter()

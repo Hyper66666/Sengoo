@@ -1,0 +1,60 @@
+import sgplatform;
+
+struct App {
+    title: &str,
+    width: i64,
+    height: i64,
+    platform: Platform,
+    window: Window,
+    renderer: Renderer,
+    is_running: bool,
+    clear_color: Color,
+}
+
+struct AppPoll {
+    app: App,
+    event: Event,
+}
+
+def app_new(title: &str, width: i64, height: i64) -> Result<App, i64> {
+    let platform = init().unwrap_or(Platform { alive: false });
+    if not platform.alive { Result { is_ok: false, value: App { title: title, width: width, height: height, platform: platform, window: Window { handle: 0, closed: true }, renderer: Renderer { handle: 0, destroyed: true }, is_running: false, clear_color: color_new(0, 0, 0, 255) }, error: STATUS_PLATFORM() }; } else { let window = platform.create_window(title, width, height).unwrap_or(Window { handle: 0, closed: true }); if window.handle == 0 { quit(platform); Result { is_ok: false, value: App { title: title, width: width, height: height, platform: platform, window: window, renderer: Renderer { handle: 0, destroyed: true }, is_running: false, clear_color: color_new(0, 0, 0, 255) }, error: STATUS_PLATFORM() }; } else { let renderer = window.create_renderer().unwrap_or(Renderer { handle: 0, destroyed: true }); if renderer.handle == 0 { window.close(); quit(platform); Result { is_ok: false, value: App { title: title, width: width, height: height, platform: platform, window: window, renderer: renderer, is_running: false, clear_color: color_new(0, 0, 0, 255) }, error: STATUS_PLATFORM() }; } else { Result { is_ok: true, value: App { title: title, width: width, height: height, platform: platform, window: window, renderer: renderer, is_running: true, clear_color: color_new(28, 32, 40, 255) }, error: 0 }; }; }; };
+}
+
+def app_with_running(app: App, running: bool) -> App {
+    App { title: app.title, width: app.width, height: app.height, platform: app.platform, window: app.window, renderer: app.renderer, is_running: running, clear_color: app.clear_color };
+}
+
+def app_poll(app: App) -> AppPoll {
+    let event = app.platform.poll_event();
+    let running = if event_is_quit(event) { false; } else { app.is_running; };
+    AppPoll { app: app_with_running(app, running), event: event };
+}
+
+def app_delay_ms(app: App, ms: i64) -> bool {
+    app.platform.delay_ms(ms);
+}
+
+impl App {
+    def begin_frame(self) -> Result<i64, i64> {
+        self.renderer.clear(self.clear_color);
+    }
+    def end_frame(self) -> Result<i64, i64> {
+        self.renderer.present();
+    }
+    def poll(self) -> AppPoll {
+        app_poll(self);
+    }
+    def running(self) -> bool {
+        self.is_running;
+    }
+    def renderer_ref(self) -> Renderer {
+        self.renderer;
+    }
+    def close(self) -> bool {
+        let renderer_ok = self.renderer.destroy();
+        let window_ok = self.window.close();
+        let platform_ok = quit(self.platform);
+        renderer_ok and window_ok and platform_ok;
+    }
+}

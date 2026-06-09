@@ -1,0 +1,47 @@
+import sgplatform;
+
+import std::assert;
+
+import std::env;
+
+import std::status;
+
+def graphics_smoke_enabled() -> bool {
+    not env_has_var("SGPLATFORM_SKIP_GRAPHICS");
+}
+
+def run_graphics_smoke() -> i64 {
+    if not graphics_smoke_enabled() { return 0; };
+    let platform = init().unwrap_or(Platform { alive: false });
+    if not platform.alive { return 0; };
+    let window = platform.create_window("sgplatform smoke", 320, 240).unwrap_or(Window { handle: 0, closed: true });
+    if window.handle == 0 { quit(platform); return 0; };
+    let renderer = window.create_renderer().unwrap_or(Renderer { handle: 0, destroyed: true });
+    if renderer.handle == 0 { window.close(); quit(platform); return 0; };
+    let bg = color_new(0, 0, 0, 255);
+    renderer.clear(bg);
+    renderer.present();
+    renderer.destroy();
+    window.close();
+    quit(platform);
+    0;
+}
+
+def main() -> i64 {
+    assert_eq_i64(EVENT_NONE(), 0);
+    assert_eq_i64(EVENT_QUIT(), 1);
+    assert_eq_i64(KEY_W(), 26);
+    assert_eq_i64(KEY_ESCAPE(), 41);
+    assert_eq_i64(STATUS_PLATFORM(), 19);
+    let a = rect_new(0, 0, 10, 10);
+    let b = rect_new(5, 5, 10, 10);
+    let c = rect_new(20, 20, 4, 4);
+    assert_true(rect_overlaps(a, b));
+    assert_true(not rect_overlaps(a, c));
+    assert_true(rect_contains_point(a, 5, 5));
+    assert_true(not rect_contains_point(a, 15, 15));
+    let quit_event = Event { kind: EVENT_QUIT(), key: 0, mouse_x: 0, mouse_y: 0, mouse_button: 0 };
+    assert_true(event_is_quit(quit_event));
+    assert_true(not event_is_key_down(quit_event));
+    run_graphics_smoke();
+}

@@ -38,6 +38,7 @@ def main() -> i64 {
 "#,
     );
     assert!(ir.contains("assert_eq_i64"));
+    assert!(ir.contains("sengoo_assert_failure_v1"));
 }
 
 #[test]

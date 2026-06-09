@@ -548,6 +548,21 @@ impl Codegen {
                 } else if ret_ty == "void" {
                     self.ir
                         .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
+                } else if self.uses_windows_sret_async_result(func, dest_ty) {
+                    let sret_slot = format!("{dest}.sret");
+                    self.ir
+                        .push_str(&format!("{sret_slot} = alloca {ret_ty}\n"));
+                    self.emit_indent();
+                    let mut sret_args =
+                        vec![format!("{ret_ty}* sret({ret_ty}) align 8 {sret_slot}")];
+                    sret_args.extend(arg_strs);
+                    self.ir
+                        .push_str(&format!("call void {}({})\n", callee, sret_args.join(", ")));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = load {}, {}* {}\n",
+                        dest, ret_ty, ret_ty, sret_slot
+                    ));
                 } else {
                     self.ir.push_str(&format!(
                         "{} = call {} {}({})\n",
@@ -1028,5 +1043,25 @@ impl Codegen {
         }
 
         Ok(())
+    }
+
+    pub(super) fn targets_windows_msvc(&self) -> bool {
+        self.target_triple
+            .as_deref()
+            .map_or(cfg!(target_os = "windows"), |triple| {
+                triple.contains("windows-msvc")
+            })
+    }
+
+    fn uses_windows_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
+        self.targets_windows_msvc()
+            && matches!(dest_ty, MIRType::Struct { .. })
+            && matches!(
+                func,
+                "sengoo_async_timeout_cancel_i64__result"
+                    | "sengoo_async_channel_send_i64__result"
+                    | "sengoo_async_channel_recv_i64__result"
+                    | "sengoo_async_mutex_lock_i64__result"
+            )
     }
 }

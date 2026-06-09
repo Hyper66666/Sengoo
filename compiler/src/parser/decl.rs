@@ -13,7 +13,7 @@ mod object_declarations;
 mod simple;
 
 impl<'source> Parser<'source> {
-    fn check_any(&self, kinds: &[TokenKind]) -> bool {
+    fn check_any(&mut self, kinds: &[TokenKind]) -> bool {
         kinds.iter().any(|kind| self.check(kind.clone()))
     }
 
@@ -87,7 +87,11 @@ impl<'source> Parser<'source> {
     ) -> Result<Expr> {
         let clause_start = keyword_span.hi as usize;
         let mut clause_end_index = self.pos;
-        while let Some(token) = self.tokens.get(clause_end_index) {
+        loop {
+            self.fill_to(clause_end_index.saturating_sub(self.pos));
+            let Some(token) = self.tokens.get(clause_end_index) else {
+                break;
+            };
             if matches!(
                 token.kind,
                 TokenKind::RequiresKw | TokenKind::EnsuresKw | TokenKind::LBrace
@@ -198,7 +202,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::StructKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on struct declarations".to_string(),
+                        "unsafe is not supported on struct declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -209,7 +213,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::EnumKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on enum declarations".to_string(),
+                        "unsafe is not supported on enum declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -220,7 +224,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::ClassKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on class declarations".to_string(),
+                        "unsafe is not supported on class declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -231,7 +235,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::TraitKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on trait declarations".to_string(),
+                        "unsafe is not supported on trait declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -242,7 +246,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::ImplKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on impl declarations".to_string(),
+                        "unsafe is not supported on impl declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -265,7 +269,7 @@ impl<'source> Parser<'source> {
             Some(TokenKind::ConstKw) => {
                 if leading_unsafe || attrs.has_any() {
                     return Err(CompileError::ParseError(ParseError::InvalidPattern(
-                        "attributes/unsafe are not supported on const declarations".to_string(),
+                        "unsafe is not supported on const declarations".to_string(),
                     )));
                 }
                 self.advance();
@@ -379,7 +383,7 @@ impl<'source> Parser<'source> {
     }
 
     /// 检查当前位置是否是 self 参数。
-    pub(super) fn check_self_param(&self) -> bool {
+    pub(super) fn check_self_param(&mut self) -> bool {
         if let Some(token) = self.current() {
             match &token.kind {
                 TokenKind::SelfLowerKw | TokenKind::MutKw => {

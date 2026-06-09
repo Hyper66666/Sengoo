@@ -1,0 +1,44 @@
+import sggui;
+
+import sgplatform;
+
+import std::assert;
+
+def counter_apply_click(count: i64, button: Button, event: Event) -> i64 {
+    if button.handle_event(event) { count + 1; } else { count; };
+}
+
+def main() -> i64 {
+    let bounds = rect_new(100, 100, 120, 40);
+    let button = button_new("Increment", bounds);
+    assert_true(button.hit_test(110, 110));
+    assert_true(button.hit_test(219, 139));
+    assert_true(not button.hit_test(99, 110));
+    assert_true(not button.hit_test(100, 99));
+    assert_true(not button.hit_test(221, 110));
+    assert_true(not button.hit_test(110, 141));
+    let inside = Event { kind: EVENT_MOUSE_BUTTON_DOWN(), key: 0, mouse_x: 150, mouse_y: 120, mouse_button: 1 };
+    let outside = Event { kind: EVENT_MOUSE_BUTTON_DOWN(), key: 0, mouse_x: 50, mouse_y: 50, mouse_button: 1 };
+    let key_only = Event { kind: EVENT_KEY_DOWN(), key: KEY_ESCAPE(), mouse_x: 150, mouse_y: 120, mouse_button: 0 };
+    assert_true(button.handle_event(inside));
+    assert_true(not button.handle_event(outside));
+    assert_true(not button.handle_event(key_only));
+    let count = 0;
+    count = counter_apply_click(count, button, outside);
+    assert_eq_i64(count, 0);
+    count = counter_apply_click(count, button, inside);
+    assert_eq_i64(count, 1);
+    count = counter_apply_click(count, button, inside);
+    assert_eq_i64(count, 2);
+    let label = label_set_value(label_new("Count", count, rect_new(0, 0, 200, 32)), count);
+    assert_eq_i64(label.value, 2);
+    label = label_increment(label);
+    assert_eq_i64(label.value, 3);
+    let bar = label_value_bar_width(3, 10, 8);
+    assert_eq_i64(bar, 24);
+    let row_a = panel_alloc_row(panel_new(rect_new(0, 0, 200, 200), 8), 32);
+    let row_b = panel_alloc_row(row_a.panel, 32);
+    assert_eq_i64(row_a.bounds.y, 0);
+    assert_eq_i64(row_b.bounds.y, 40);
+    0;
+}

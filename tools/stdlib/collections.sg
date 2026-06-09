@@ -58,6 +58,33 @@ extern "C" {
     fn sengoo_string_map_key_iter_next_copy(iter_handle: i64, out_buffer: i64) -> i64;
     fn sengoo_string_map_key_iter_reset_status(iter_handle: i64) -> i64;
     fn sengoo_string_map_key_iter_free_status(iter_handle: i64) -> i64;
+
+    fn sengoo_vec_new_string() -> i64;
+    fn sengoo_vec_string_len(handle: i64) -> i64;
+    fn sengoo_vec_string_clear_status(handle: i64) -> i64;
+    fn sengoo_vec_string_free_status(handle: i64) -> i64;
+    fn sengoo_vec_string_push(handle: i64, value: i64) -> i64;
+    fn sengoo_vec_string_get_clone(handle: i64, index: i64) -> i64;
+    fn sengoo_vec_string_remove_transfer(handle: i64, index: i64) -> i64;
+    fn sengoo_vec_string_iter_new(vec_handle: i64) -> i64;
+    fn sengoo_vec_string_iter_done(iter_handle: i64) -> i64;
+    fn sengoo_vec_string_iter_next_clone(iter_handle: i64) -> i64;
+    fn sengoo_vec_string_iter_reset_status(iter_handle: i64) -> i64;
+    fn sengoo_vec_string_iter_free_status(iter_handle: i64) -> i64;
+
+    fn sengoo_string_map_string_new() -> i64;
+    fn sengoo_string_map_string_len(handle: i64) -> i64;
+    fn sengoo_string_map_string_clear_status(handle: i64) -> i64;
+    fn sengoo_string_map_string_free_status(handle: i64) -> i64;
+    fn sengoo_string_map_string_insert(handle: i64, key: i64, value: i64) -> i64;
+    fn sengoo_string_map_string_contains(handle: i64, key: i64) -> i64;
+    fn sengoo_string_map_string_get_clone(handle: i64, key: i64) -> i64;
+    fn sengoo_string_map_string_remove_transfer(handle: i64, key: i64) -> i64;
+    fn sengoo_string_map_string_key_iter_new(map_handle: i64) -> i64;
+    fn sengoo_string_map_string_key_iter_done(iter_handle: i64) -> i64;
+    fn sengoo_string_map_string_key_iter_next_string(iter_handle: i64) -> i64;
+    fn sengoo_string_map_string_key_iter_reset_status(iter_handle: i64) -> i64;
+    fn sengoo_string_map_string_key_iter_free_status(iter_handle: i64) -> i64;
 }
 
 struct Vec<T> {
@@ -98,6 +125,18 @@ struct StringMapBool {
 }
 
 struct StringMapKeyIter {
+    handle: i64,
+}
+
+struct StringMapString {
+    handle: i64,
+}
+
+struct StringMapStringKeyIter {
+    handle: i64,
+}
+
+struct VecStringIter {
     handle: i64,
 }
 
@@ -150,6 +189,14 @@ def vec_new_i64() -> Vec<i64> {
 
 def vec_new_bool() -> Vec<bool> {
     Vec { handle: sengoo_vec_new_i64(), marker: false }
+}
+
+def vec_new_string() -> Vec<String> {
+    Vec { handle: sengoo_vec_new_string(), marker: String { handle: 0 } }
+}
+
+def string_map_string_new() -> StringMapString {
+    StringMapString { handle: sengoo_string_map_string_new() }
 }
 
 def hashmap_new_i64_i64() -> HashMap<i64, i64> {
@@ -811,5 +858,121 @@ impl StringMapKeyIter {
 
     def free(self) -> bool {
         sengoo_string_map_key_iter_free_status(self.handle) != 0
+    }
+}
+
+def collections_string_result(value: i64) -> Result<String, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: String { handle: value }, error: 0 }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: 0 - value }
+    }
+}
+
+impl Vec<String> {
+    def push(self, value: String) -> bool {
+        sengoo_vec_string_push(self.handle, value.handle) != 0
+    }
+
+    def get(self, index: i64) -> Result<String, i64> {
+        collections_string_result(sengoo_vec_string_get_clone(self.handle, index))
+    }
+
+    def remove(self, index: i64) -> Result<String, i64> {
+        collections_string_result(sengoo_vec_string_remove_transfer(self.handle, index))
+    }
+
+    def iter(self) -> VecStringIter {
+        VecStringIter { handle: sengoo_vec_string_iter_new(self.handle) }
+    }
+}
+
+impl VecStringIter {
+    def done(self) -> bool {
+        sengoo_vec_string_iter_done(self.handle) != 0
+    }
+
+    def next(self) -> Result<String, i64> {
+        collections_string_result(sengoo_vec_string_iter_next_clone(self.handle))
+    }
+
+    def reset(self) -> bool {
+        sengoo_vec_string_iter_reset_status(self.handle) != 0
+    }
+
+    def free(self) -> bool {
+        sengoo_vec_string_iter_free_status(self.handle) != 0
+    }
+}
+
+impl StringMapString {
+    def len(self) -> i64 {
+        sengoo_string_map_string_len(self.handle)
+    }
+
+    def is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    def clear(self) -> bool {
+        sengoo_string_map_string_clear_status(self.handle) != 0
+    }
+
+    def free(self) -> bool {
+        sengoo_string_map_string_free_status(self.handle) != 0
+    }
+
+    def insert_raw(self, key_ptr: i64, value: String) -> bool {
+        sengoo_string_map_string_insert(self.handle, key_ptr, value.handle) != 0
+    }
+
+    def insert(self, key: &str, value: String) -> bool {
+        self.insert_raw(sengoo_stdlib_str_ptr(key), value)
+    }
+
+    def contains_raw(self, key_ptr: i64) -> bool {
+        sengoo_string_map_string_contains(self.handle, key_ptr) != 0
+    }
+
+    def contains(self, key: &str) -> bool {
+        self.contains_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def get_raw(self, key_ptr: i64) -> Result<String, i64> {
+        collections_string_result(sengoo_string_map_string_get_clone(self.handle, key_ptr))
+    }
+
+    def get(self, key: &str) -> Result<String, i64> {
+        self.get_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def remove_raw(self, key_ptr: i64) -> Result<String, i64> {
+        collections_string_result(sengoo_string_map_string_remove_transfer(self.handle, key_ptr))
+    }
+
+    def remove(self, key: &str) -> Result<String, i64> {
+        self.remove_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def iter_keys(self) -> StringMapStringKeyIter {
+        StringMapStringKeyIter { handle: sengoo_string_map_string_key_iter_new(self.handle) }
+    }
+}
+
+impl StringMapStringKeyIter {
+    def done(self) -> bool {
+        sengoo_string_map_string_key_iter_done(self.handle) != 0
+    }
+
+    def next(self) -> Result<String, i64> {
+        collections_string_result(sengoo_string_map_string_key_iter_next_string(self.handle))
+    }
+
+    def reset(self) -> bool {
+        sengoo_string_map_string_key_iter_reset_status(self.handle) != 0
+    }
+
+    def free(self) -> bool {
+        sengoo_string_map_string_key_iter_free_status(self.handle) != 0
     }
 }

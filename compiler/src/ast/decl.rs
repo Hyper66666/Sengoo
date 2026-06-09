@@ -286,6 +286,7 @@ pub enum ExternItem {
 pub struct ExternFunction {
     pub vis: Visibility,
     pub name: Ident,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub is_unsafe: bool,
@@ -556,6 +557,7 @@ pub struct Impl {
     pub type_params: Vec<TypeParam>,
     pub target_type: Type,
     pub trait_path: Option<Path>,
+    pub trait_args: Vec<Type>,
     pub items: Vec<Function>,
     pub span: Span,
 }
@@ -567,6 +569,7 @@ impl Impl {
             type_params: Vec::new(),
             target_type,
             trait_path: None,
+            trait_args: Vec::new(),
             items: Vec::new(),
             span,
         }

@@ -1,3 +1,5 @@
+import std::assert;
+
 import std::collections;
 
 import std::dir;
@@ -29,10 +31,11 @@ def main() -> i64 {
     let scores = vec_new_i64();
     scores.push(len);
     scores.push(count);
-    let score_ok = scores.len() == 2 and scores.contains(3);
+    assert_eq_i64(scores.len(), 2);
+    assert_true(scores.contains(3));
     scores.free();
     let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
     let status_len = status_message_copy(STATUS_OK(), buffer).unwrap_or(0);
     buffer.free();
-    if exists and len > 0 and made and wrote == 2 and removed and count == 3 and closed and score_ok and status_len > 0 and log_level_set and log_cleared and log_written { 0; } else { 1; };
+    if exists and len > 0 and made and wrote == 2 and removed and count == 3 and closed and status_len > 0 and log_level_set and log_cleared and log_written { 0; } else { 1; };
 }

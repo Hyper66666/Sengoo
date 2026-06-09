@@ -3,7 +3,8 @@ use std::io::{Read, Write};
 use super::{
     classify_io_error, copy_bytes_to_buffer, decode_chunked_body, fail_bool, fail_handle, fail_i64,
     net_runtime, open_stream, parse_http_headers, parse_url, reset_last_error,
-    split_http_headers_and_body, HttpResponseEntry, NetErrorCode, NetRuntime, ParsedUrl,
+    split_http_headers_and_body, tls, HttpResponseEntry, NetErrorCode, NetRuntime, ParsedUrl,
+    TlsStream,
 };
 
 impl NetRuntime {
@@ -73,11 +74,16 @@ fn send_http_request(
     body: &[u8],
     timeout_ms: u32,
 ) -> Result<HttpResponseEntry, NetErrorCode> {
-    if url.scheme != "http" {
+    if url.scheme != "http" && url.scheme != "https" {
         return Err(NetErrorCode::UnsupportedScheme);
     }
 
-    let mut stream = open_stream(&url.host, url.port, timeout_ms)?;
+    let tcp = open_stream(&url.host, url.port, timeout_ms)?;
+    let mut stream: TlsStream = if url.scheme == "https" {
+        tls::connect_tls(tcp, &url.host)?
+    } else {
+        TlsStream::Plain(tcp)
+    };
     let mut req = format!(
         "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: sengoo-runtime/0.1\r\n",
         method, url.path, url.host

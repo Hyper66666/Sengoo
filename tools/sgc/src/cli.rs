@@ -91,6 +91,14 @@ pub(crate) enum Commands {
         /// Restrict reflection to selected symbols (repeatable).
         #[arg(long = "reflect-symbol")]
         reflect_symbol: Vec<String>,
+
+        /// Target triple for native builds (reference triples only).
+        #[arg(long)]
+        target: Option<String>,
+
+        /// Write schema-version-1 compile phase timings to PATH.
+        #[arg(long = "timings-json")]
+        timings_json: Option<String>,
     },
 
     /// Run a Sengoo source file.
@@ -325,6 +333,8 @@ async fn dispatch(command: Commands) -> Result<()> {
             reflect,
             reflect_module,
             reflect_symbol,
+            target,
+            timings_json,
         } => {
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
@@ -359,6 +369,8 @@ async fn dispatch(command: Commands) -> Result<()> {
                 frontend_jobs,
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+                target.as_deref(),
+                timings_json.as_deref(),
             )
             .await
         }

@@ -1,0 +1,10 @@
+import std::status;
+
+struct Texture {
+    handle: i64,
+}
+
+def load(path: &str) -> Result<Texture, i64> {
+    let _unused = path.len();
+    Result { is_ok: false, value: Texture { handle: 0 }, error: STATUS_UNSUPPORTED() };
+}

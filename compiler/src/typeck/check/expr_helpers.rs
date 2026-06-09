@@ -62,6 +62,16 @@ impl TypeChecker {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
 
+        if matches!(
+            op,
+            BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        ) && (Self::is_async_context_ty(&left_ty) || Self::is_async_context_ty(&right_ty))
+        {
+            return Err(TypeckError::Other(
+                "AsyncContext is poll-scoped and cannot be compared".to_string(),
+            ));
+        }
+
         let types_compatible = match (&left_ty.kind, &right_ty.kind) {
             _ if left_ty.kind == right_ty.kind => true,
             (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {

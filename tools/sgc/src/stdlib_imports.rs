@@ -39,6 +39,7 @@ const STDLIB_SOURCE_ORDER: &[&str] = &[
     "net",
     "http",
     "proto",
+    "async",
 ];
 
 fn is_virtual_stdlib_module(module: &str) -> bool {
@@ -75,18 +76,20 @@ fn source_module_needs_result_family(module: &str) -> bool {
             | "lua54"
             | "net"
             | "proto"
+            | "async"
     )
 }
 
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
-        "collections" | "json" | "status" | "string" => &["ffi"],
+        "collections" | "json" | "status" => &["ffi", "string"],
+        "string" => &["ffi"],
+        "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
+        "path" | "dir" => &["status", "string"],
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
+        "async" => &["status", "result"],
         "http" | "net" => &["ffi", "status"],
-        "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" | "time" => {
-            &["status"]
-        }
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],
@@ -266,6 +269,7 @@ mod tests {
                 .expect("assert stdlib import should expand");
 
         assert!(expanded.contains("def assert_eq_i64"));
+        assert!(expanded.contains("sengoo_assert_failure_v1"));
     }
 
     #[test]

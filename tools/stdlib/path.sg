@@ -8,6 +8,12 @@ extern "C" {
     fn sengoo_path_stem(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_path_extension(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_path_normalize(path: i64, out_buffer: i64, out_capacity: i64) -> i64;
+    fn sengoo_path_join_string(left: i64, right: i64) -> i64;
+    fn sengoo_path_parent_string(path: i64) -> i64;
+    fn sengoo_path_file_name_string(path: i64) -> i64;
+    fn sengoo_path_stem_string(path: i64) -> i64;
+    fn sengoo_path_extension_string(path: i64) -> i64;
+    fn sengoo_path_normalize_string(path: i64) -> i64;
 }
 
 def path_i64_result(value: i64) -> Result<i64, i64> {
@@ -76,4 +82,36 @@ def path_normalize_raw(path_ptr: i64, buffer_ptr: i64, capacity: i64) -> Result<
 
 def path_normalize(path: &str, buffer: Buffer) -> Result<i64, i64> {
     path_normalize_raw(sengoo_stdlib_str_ptr(path), buffer.ptr(), buffer.len())
+}
+
+def path_string_result(value: i64) -> Result<String, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: String { handle: value }, error: 0 }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(value) }
+    }
+}
+
+def path_join_string(left: &str, right: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_join_string(sengoo_stdlib_str_ptr(left), sengoo_stdlib_str_ptr(right)))
+}
+
+def path_parent_string(path: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_parent_string(sengoo_stdlib_str_ptr(path)))
+}
+
+def path_file_name_string(path: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_file_name_string(sengoo_stdlib_str_ptr(path)))
+}
+
+def path_stem_string(path: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_stem_string(sengoo_stdlib_str_ptr(path)))
+}
+
+def path_extension_string(path: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_extension_string(sengoo_stdlib_str_ptr(path)))
+}
+
+def path_normalize_string(path: &str) -> Result<String, i64> {
+    path_string_result(sengoo_path_normalize_string(sengoo_stdlib_str_ptr(path)))
 }

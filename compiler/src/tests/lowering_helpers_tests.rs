@@ -49,6 +49,7 @@ fn collect_named_symbols_in_body_visits_stmt_values_and_tail_expr() {
         value: Some(HIRExpr::Call {
             func: Box::new(var("callee", 11)),
             args: vec![var("result", 12)],
+            site_lo: None,
         }),
         is_mut: false,
     });

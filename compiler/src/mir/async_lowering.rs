@@ -11,21 +11,26 @@ use super::async_cfg_helpers::{
     build_async_cfg_plan, collect_spill_user_locals, collect_user_locals,
     compute_live_in_user_locals,
 };
-use super::async_dispatch_helpers::build_async_dispatch_registry;
+use super::async_dispatch_helpers::{
+    build_async_dispatch_registry, build_async_dispatch_registry_with_extras,
+    OPTIONAL_ASYNC_DISPATCH_NAMES,
+};
+use super::async_dispatch_synthesis_helpers::{
+    select_n_winner_runtime_function_name, select_result_runtime_suffix,
+    select_winner_runtime_function_name, synthesize_result_dispatch,
+    synthesize_spawn_cancel_dispatch, synthesize_spawn_drop_dispatch,
+    synthesize_spawn_poll_dispatch,
+};
 #[cfg(test)]
 use super::async_dispatch_synthesis_helpers::{
     select_result_dispatch_name, select_runtime_declaration, select_runtime_function_name,
-};
-use super::async_dispatch_synthesis_helpers::{
-    select_result_runtime_suffix, select_winner_runtime_function_name, synthesize_result_dispatch,
-    synthesize_spawn_cancel_dispatch, synthesize_spawn_drop_dispatch,
-    synthesize_spawn_poll_dispatch,
 };
 use super::async_entry_helpers::{
     count_await_points, synthesize_async_main_wrapper, synthesize_result, synthesize_start,
 };
 use super::async_frame_helpers::{
-    build_async_frame_layout, push_frame_load_into_typed, push_frame_store_typed, AsyncFrameLayout,
+    build_async_frame_layout, push_frame_load_into_or_value_typed, push_frame_store_typed,
+    AsyncFrameLayout,
 };
 use super::async_poll_helpers::{collect_rebasable_pointer_locals, synthesize_cfg_poll};
 use crate::mir::{
@@ -48,7 +53,22 @@ pub fn expand_async_functions(
         .filter(|f| f.is_async)
         .map(|f| f.name.clone())
         .collect();
-    let dispatch_registry = build_async_dispatch_registry(async_fn_names.iter().cloned());
+    let needs_optional_async_dispatch = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => OPTIONAL_ASYNC_DISPATCH_NAMES
+                .iter()
+                .any(|name| func == &format!("{name}__start")),
+            _ => false,
+        })
+    });
+    let dispatch_registry = if needs_optional_async_dispatch {
+        build_async_dispatch_registry_with_extras(
+            async_fn_names.iter().cloned(),
+            OPTIONAL_ASYNC_DISPATCH_NAMES,
+        )
+    } else {
+        build_async_dispatch_registry(async_fn_names.iter().cloned())
+    };
 
     let has_async_main = async_fn_names.iter().any(|n| n == "main");
 
@@ -165,6 +185,7 @@ pub fn expand_async_functions(
         mir_fn.instructions.iter().any(|inst| match inst {
             Instruction::Call { func, .. } => {
                 func == select_winner_runtime_function_name()
+                    || func == select_n_winner_runtime_function_name()
                     || func.starts_with("sengoo_async_select_")
             }
             _ => false,
@@ -257,7 +278,7 @@ fn synthesize_poll(
         let mut param_locals = Vec::new();
         for i in 0..layout.param_types.len() {
             let p = f.add_local(LocalKind::Temp, layout.param_types[i].clone());
-            push_frame_load_into_typed(
+            let loaded = push_frame_load_into_or_value_typed(
                 &mut f,
                 body_block,
                 handle,
@@ -265,7 +286,7 @@ fn synthesize_poll(
                 p,
                 &layout.param_types[i],
             )?;
-            param_locals.push(p);
+            param_locals.push(loaded);
         }
 
         let call_original = f.alloc_inst(Instruction::Call {

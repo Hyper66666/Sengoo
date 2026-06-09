@@ -109,6 +109,7 @@ pub struct ImplInfo {
     pub target_type: Ty,
     /// 实现的 Trait（None 表示固有 impl）
     pub trait_name: Option<String>,
+    pub trait_args: Vec<Ty>,
     /// 方法：(方法名, 函数类型)
     pub methods: HashMap<String, FunctionTy>,
     /// 关联常量
@@ -118,10 +119,11 @@ pub struct ImplInfo {
 }
 
 impl ImplInfo {
-    pub fn new(target_type: Ty, trait_name: Option<String>) -> Self {
+    pub fn new(target_type: Ty, trait_name: Option<String>, trait_args: Vec<Ty>) -> Self {
         Self {
             target_type,
             trait_name,
+            trait_args,
             methods: HashMap::new(),
             consts: HashMap::new(),
             assoc_types: HashMap::new(),
@@ -294,6 +296,12 @@ impl ImplRegistry {
             .unwrap_or(false)
     }
 
+    pub fn get_trait_impl(&self, trait_name: &str, type_key: &str) -> Option<&ImplInfo> {
+        self.trait_impls
+            .get(trait_name)
+            .and_then(|type_map| type_map.get(type_key))
+    }
+
     /// 获取类型的所有固有 impl
     pub fn get_inherent_impls(&self, type_key: &str) -> Vec<&ImplInfo> {
         self.inherent_impls
@@ -371,7 +379,7 @@ mod tests {
         let mut registry = ImplRegistry::new();
 
         let ty = Ty::new(0, TyKind::Int(IntKind::I32));
-        let impl_info = ImplInfo::new(ty.clone(), Some("Display".to_string()));
+        let impl_info = ImplInfo::new(ty.clone(), Some("Display".to_string()), Vec::new());
         registry.register_trait_impl("Display".to_string(), "i32".to_string(), impl_info);
 
         assert!(registry.implements_trait("Display", "i32"));

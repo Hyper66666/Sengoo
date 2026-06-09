@@ -19,7 +19,8 @@ impl<'a> LoweringContext<'a> {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        let async_dispatch_registry = build_async_dispatch_registry(async_names);
+        let async_dispatch_registry =
+            build_async_dispatch_registry_with_extras(async_names, OPTIONAL_ASYNC_DISPATCH_NAMES);
         Self {
             mir_fn,
             local_names: HashMap::new(),

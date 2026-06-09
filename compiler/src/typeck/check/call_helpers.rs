@@ -1,4 +1,32 @@
 use super::*;
+use crate::ast::ExprKind;
+use std::collections::HashSet;
+
+const ASSERT_HELPERS: &[&str] = &[
+    "assert",
+    "assert_true",
+    "assert_false",
+    "assert_eq_i64",
+    "assert_ne_i64",
+    "assert_eq_bool",
+    "assert_ne_bool",
+    "assert_eq_str",
+    "assert_ne_str",
+    "assert_eq_f64",
+    "assert_ne_f64",
+];
+
+fn is_assert_helper(name: &str) -> bool {
+    ASSERT_HELPERS.contains(&name)
+}
+
+fn assert_helper_allows_callsite_injection(
+    name: Option<&str>,
+    param_count: usize,
+    arg_count: usize,
+) -> bool {
+    name.is_some_and(is_assert_helper) && arg_count + 2 == param_count
+}
 
 impl TypeChecker {
     fn instantiate_method_function_ty(
@@ -97,6 +125,208 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn is_spawn_blocking_work_call(name: Option<&str>, path: Option<&[String]>) -> bool {
+        if matches!(
+            name,
+            Some("spawn_blocking_i64") | Some("spawn_blocking_future_i64")
+        ) {
+            return true;
+        }
+        path.is_some_and(|segments| {
+            segments.len() == 2
+                && segments[0] == "async"
+                && matches!(
+                    segments[1].as_str(),
+                    "spawn_blocking_i64" | "spawn_blocking_future_i64"
+                )
+        })
+    }
+
+    fn runtime_async_wrapper_future_ty(&mut self, func_name: &str) -> Option<Ty> {
+        match func_name {
+            "spawn_blocking_future_i64" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
+            "channel_send_i64" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                    name: "ChannelSendOutcome".to_string(),
+                    args: vec![],
+                }))),
+            )),
+            "channel_recv_i64" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                    name: "ChannelRecvOutcome".to_string(),
+                    args: vec![],
+                }))),
+            )),
+            "mutex_lock_async" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                    name: "MutexLockOutcome".to_string(),
+                    args: vec![],
+                }))),
+            )),
+            _ => None,
+        }
+    }
+
+    fn collect_lambda_capture_names(params: &[Ident], body: &Expr) -> Vec<String> {
+        let param_names = params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let mut captures = Vec::new();
+        let mut seen = HashSet::new();
+        Self::collect_capture_idents(body, &param_names, &mut captures, &mut seen);
+        captures
+    }
+
+    fn collect_capture_from_block(
+        block: &crate::ast::Block,
+        params: &HashSet<String>,
+        captures: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        for stmt in &block.stmts {
+            if let crate::ast::StmtKind::Expr(expr) = &stmt.kind {
+                Self::collect_capture_idents(expr, params, captures, seen);
+            }
+        }
+    }
+
+    fn collect_capture_idents(
+        expr: &Expr,
+        params: &HashSet<String>,
+        captures: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        match &expr.kind {
+            ExprKind::Ident(ident) if !params.contains(&ident.name) => {
+                if seen.insert(ident.name.clone()) {
+                    captures.push(ident.name.clone());
+                }
+            }
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                let name = path.segments[0].name.clone();
+                if !params.contains(&name) && seen.insert(name.clone()) {
+                    captures.push(name);
+                }
+            }
+            ExprKind::Lambda {
+                params: lambda_params,
+                body,
+            } => {
+                let mut nested_params = params.clone();
+                for param in lambda_params {
+                    nested_params.insert(param.name.clone());
+                }
+                Self::collect_capture_idents(body, &nested_params, captures, seen);
+            }
+            ExprKind::Binary { left, right, .. } => {
+                Self::collect_capture_idents(left, params, captures, seen);
+                Self::collect_capture_idents(right, params, captures, seen);
+            }
+            ExprKind::Unary { operand, .. } => {
+                Self::collect_capture_idents(operand, params, captures, seen);
+            }
+            ExprKind::Call { func, args, .. } => {
+                Self::collect_capture_idents(func, params, captures, seen);
+                for arg in args {
+                    Self::collect_capture_idents(arg, params, captures, seen);
+                }
+            }
+            ExprKind::Field { base, .. } => {
+                Self::collect_capture_idents(base, params, captures, seen);
+            }
+            ExprKind::Index { base, index, .. } => {
+                Self::collect_capture_idents(base, params, captures, seen);
+                Self::collect_capture_idents(index, params, captures, seen);
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_capture_idents(cond, params, captures, seen);
+                Self::collect_capture_from_block(then_branch, params, captures, seen);
+                if let Some(else_branch) = else_branch {
+                    Self::collect_capture_idents(else_branch, params, captures, seen);
+                }
+            }
+            ExprKind::Block(block) => {
+                Self::collect_capture_from_block(block, params, captures, seen);
+            }
+            ExprKind::While { cond, body } => {
+                Self::collect_capture_idents(cond, params, captures, seen);
+                Self::collect_capture_from_block(body, params, captures, seen);
+            }
+            ExprKind::For { iter, body, .. } => {
+                Self::collect_capture_idents(iter, params, captures, seen);
+                Self::collect_capture_from_block(body, params, captures, seen);
+            }
+            ExprKind::Loop(body)
+            | ExprKind::AsyncBlock(body)
+            | ExprKind::ParallelBlock(body)
+            | ExprKind::TryBlock(body) => {
+                Self::collect_capture_from_block(body, params, captures, seen);
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                Self::collect_capture_idents(scrutinee, params, captures, seen);
+                for arm in arms {
+                    Self::collect_capture_idents(&arm.body, params, captures, seen);
+                }
+            }
+            ExprKind::Tuple(items) | ExprKind::Array(items) => {
+                for item in items {
+                    Self::collect_capture_idents(item, params, captures, seen);
+                }
+            }
+            ExprKind::Struct { fields, base, .. } => {
+                for field in fields {
+                    Self::collect_capture_idents(&field.value, params, captures, seen);
+                }
+                if let Some(base) = base {
+                    Self::collect_capture_idents(base, params, captures, seen);
+                }
+            }
+            ExprKind::Await(inner) => {
+                Self::collect_capture_idents(inner, params, captures, seen);
+            }
+            _ => {}
+        }
+    }
+
+    fn check_spawn_blocking_i64_send_captures(&mut self, args: &[Expr]) -> TyResult<()> {
+        if args.len() != 1 {
+            return Ok(());
+        }
+        let arg = &args[0];
+        if let ExprKind::Lambda { params, body } = &arg.kind {
+            let captures = Self::collect_lambda_capture_names(params, body);
+            for capture in captures {
+                let Some(symbol) = self.env.lookup(&capture) else {
+                    continue;
+                };
+                let Some(ty) = symbol.get_ty() else {
+                    continue;
+                };
+                if !self.is_cross_thread_send_ty(ty) {
+                    return Err(Self::cross_thread_send_error(&capture));
+                }
+            }
+            return Ok(());
+        }
+
+        let arg_ty = self.check_expr(arg)?;
+        if !self.is_cross_thread_send_ty(&arg_ty) {
+            return Err(Self::cross_thread_send_error("argument"));
+        }
+        Ok(())
+    }
+
     pub(super) fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
         let builtin_name = match &func.kind {
             ExprKind::Ident(ident) => Some(ident.name.as_str()),
@@ -105,6 +335,64 @@ impl TypeChecker {
             }
             _ => None,
         };
+        let path_segments = match &func.kind {
+            ExprKind::Path(path) => Some(
+                path.segments
+                    .iter()
+                    .map(|segment| segment.name.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        };
+
+        if Self::is_spawn_blocking_work_call(builtin_name, path_segments.as_deref()) {
+            self.check_spawn_blocking_i64_send_captures(args)?;
+        }
+
+        if let Some(name) = builtin_name {
+            if let Some(future_ty) = self.runtime_async_wrapper_future_ty(name) {
+                if self.async_context_depth == 0 {
+                    return Err(TypeckError::Other(format!(
+                        "{name} is only allowed in async contexts"
+                    )));
+                }
+                match name {
+                    "spawn_blocking_future_i64" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
+                    "channel_send_i64" => {
+                        if args.len() != 2 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 2,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                        let value_ty = self.check_expr(&args[1])?;
+                        if !self.is_cross_thread_send_ty(&value_ty) {
+                            return Err(Self::cross_thread_send_error("value"));
+                        }
+                    }
+                    "channel_recv_i64" | "mutex_lock_async" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
+                    _ => {}
+                }
+                return Ok(future_ty);
+            }
+        }
 
         if builtin_name == Some("spawn") {
             if self.async_context_depth == 0 {
@@ -197,6 +485,40 @@ impl TypeChecker {
             return Ok(Ty::new(0, TyKind::Future(Box::new(self.env.bool_ty()))));
         }
 
+        if builtin_name == Some("timeout_cancel") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "timeout_cancel is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+
+            let future_ty = self.check_expr(&args[0])?;
+            let TyKind::Future(inner_ty) = &future_ty.kind else {
+                return Err(TypeckError::Other(
+                    "timeout_cancel requires a Future value".to_string(),
+                ));
+            };
+
+            let duration_ty = self.check_expr(&args[1])?;
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&duration_ty, &i64_ty)?;
+
+            let result_ty = Ty::new(
+                0,
+                TyKind::Adt {
+                    name: "Result".to_string(),
+                    args: vec![inner_ty.as_ref().clone(), i64_ty],
+                },
+            );
+            return Ok(Ty::new(0, TyKind::Future(Box::new(result_ty))));
+        }
+
         if builtin_name == Some("join") {
             if self.async_context_depth == 0 {
                 return Err(TypeckError::Other(
@@ -266,28 +588,31 @@ impl TypeChecker {
                     "select is only allowed in async contexts".to_string(),
                 ));
             }
-            if args.len() != 2 {
+            if !(2..=8).contains(&args.len()) {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: 2,
                     found: args.len(),
                 });
             }
 
-            let left_future = self.check_expr(&args[0])?;
-            let right_future = self.check_expr(&args[1])?;
-            let TyKind::Future(left_inner) = &left_future.kind else {
-                return Err(TypeckError::Other(
-                    "select requires Future values".to_string(),
-                ));
-            };
-            let TyKind::Future(right_inner) = &right_future.kind else {
-                return Err(TypeckError::Other(
-                    "select requires Future values".to_string(),
-                ));
-            };
+            let mut inner_ty = None;
+            for arg in args {
+                let future_ty = self.check_expr(arg)?;
+                let TyKind::Future(current_inner) = &future_ty.kind else {
+                    return Err(TypeckError::Other(
+                        "select requires Future values".to_string(),
+                    ));
+                };
+                if let Some(expected) = &inner_ty {
+                    self.infer.unify(expected, current_inner)?;
+                } else {
+                    inner_ty = Some(current_inner.as_ref().clone());
+                }
+            }
 
-            self.infer.unify(left_inner, right_inner)?;
-            return Ok(self.infer.apply_subst(left_inner));
+            return Ok(self
+                .infer
+                .apply_subst(&inner_ty.expect("select has at least two operands")));
         }
 
         // Special handling for `print` builtin function
@@ -326,16 +651,17 @@ impl TypeChecker {
 
         let mut generic_ctx: Option<(String, GenericFunctionMeta, HashMap<TyVarId, TyVarId>)> =
             None;
-        let func_ty = if let Some(name) = direct_fn_name {
-            match self.env.lookup(&name).cloned() {
+        let func_ty = if let Some(ref name) = direct_fn_name {
+            self.warn_deprecated_use(name, func.span());
+            match self.env.lookup(name).cloned() {
                 Some(Symbol {
                     kind: SymbolKind::Function { ty, .. },
                     ..
                 }) => {
-                    if let Some(meta) = self.generic_function_metas.get(&name).cloned() {
+                    if let Some(meta) = self.generic_function_metas.get(name).cloned() {
                         let (instantiated, var_map) =
                             self.infer.instantiate_with_fresh_vars_and_map(&ty);
-                        generic_ctx = Some((name, meta, var_map));
+                        generic_ctx = Some((name.clone(), meta, var_map));
                         instantiated
                     } else {
                         self.infer.instantiate_with_fresh_vars(&ty)
@@ -348,14 +674,17 @@ impl TypeChecker {
         };
 
         if let TyKind::Fn { params, ret, .. } = &func_ty.kind {
-            if params.len() != args.len() {
+            let direct_name = direct_fn_name.as_deref();
+            if params.len() != args.len()
+                && !assert_helper_allows_callsite_injection(direct_name, params.len(), args.len())
+            {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: params.len(),
                     found: args.len(),
                 });
             }
 
-            for (arg_ty, arg_expr) in params.iter().zip(args.iter()) {
+            for (arg_ty, arg_expr) in params.iter().take(args.len()).zip(args.iter()) {
                 let actual_ty = self.check_expr(arg_expr)?;
                 // Passing an unawaited Future as a function argument is an escape.
                 // The caller must `await` it at the call-site first.
@@ -364,6 +693,11 @@ impl TypeChecker {
                         "future values cannot be passed as arguments; await the async call first"
                             .to_string(),
                     ));
+                }
+                if matches!(arg_ty.kind, TyKind::Int(IntKind::I64))
+                    && matches!(actual_ty.kind, TyKind::Fn { .. })
+                {
+                    continue;
                 }
                 self.infer.unify(arg_ty, &actual_ty)?;
             }

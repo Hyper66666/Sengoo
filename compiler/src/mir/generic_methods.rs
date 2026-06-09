@@ -338,6 +338,7 @@ mod tests {
         let impl_item = hir::HIRImpl {
             target_type: i64_ty(),
             trait_name: Some("WrapValue".to_string()),
+            trait_args: Vec::new(),
             items: vec![hir::HIRFunction {
                 name: "i64_wrap".to_string(),
                 type_params: vec![HIRTypeParam {
@@ -477,6 +478,7 @@ mod tests {
         let impl_item = hir::HIRImpl {
             target_type: i64_ty(),
             trait_name: Some("WrapValue".to_string()),
+            trait_args: Vec::new(),
             items: vec![hir::HIRFunction {
                 name: "i64_id".to_string(),
                 type_params: Vec::new(),
@@ -565,6 +567,7 @@ mod tests {
         let impl_item = hir::HIRImpl {
             target_type: i64_ty(),
             trait_name: Some("WrapValue".to_string()),
+            trait_args: Vec::new(),
             items: vec![hir::HIRFunction {
                 name: "i64_id".to_string(),
                 type_params: Vec::new(),

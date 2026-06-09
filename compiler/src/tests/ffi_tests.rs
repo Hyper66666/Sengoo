@@ -1,5 +1,25 @@
 use crate::hir::{HIRExternItem, HIRItem};
+use crate::typeck::{typeck, TypeckError};
+use crate::CompileError;
 use crate::{compile_to_ir, lower_ast, parser::Parser, typeck::TypeChecker};
+
+fn typeck_error(source: &str) -> TypeckError {
+    let program = Parser::parse(source).expect("ffi negative fixture should parse");
+    match typeck(&program) {
+        Err(CompileError::TypeckError(err)) => err,
+        other => panic!("expected typeck failure, got {other:?}"),
+    }
+}
+
+fn assert_ffi_error(source: &str, expected_code: &str, expected_message: &str) {
+    let err = typeck_error(source);
+    assert_eq!(err.stable_code(), Some(expected_code));
+    assert!(
+        err.to_string().contains(expected_message),
+        "expected message to contain `{expected_message}`, got {err}"
+    );
+    assert!(err.span().is_some(), "expected FFI diagnostic span");
+}
 
 #[test]
 fn extern_block_lowers_into_hir() {
@@ -132,6 +152,62 @@ def main() -> i32 { 0 }
 }
 
 #[test]
+fn ffi_rejects_generic_extern_function_with_stable_code() {
+    let source = r#"
+extern "C" fn generic_identity<T>(value: T) -> T {
+    value
+}
+
+def main() -> i64 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::generic_extern", "generic extern functions");
+}
+
+#[test]
+fn ffi_rejects_aggregate_parameter_with_stable_code() {
+    let source = r#"
+struct Pair { x: i64 }
+
+extern "C" {
+    fn take_pair(pair: Pair) -> i64;
+}
+
+def main() -> i32 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::unsupported_type", "Pair");
+}
+
+#[test]
+fn ffi_rejects_owned_string_parameter_with_stable_code() {
+    let source = r#"
+struct String { handle: i64 }
+
+extern "C" {
+    fn take_string(value: String) -> i64;
+}
+
+def main() -> i32 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::unsupported_type", "String");
+}
+
+#[test]
+fn ffi_rejects_callback_parameter_with_stable_code() {
+    let source = r#"
+extern "C" {
+    fn register_callback(callback: fn(i64) -> i64) -> i64;
+}
+
+def main() -> i32 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::unsupported_type", "fn(i64) -> i64");
+}
+
+#[test]
 fn ffi_rejects_non_ffi_safe_types() {
     let source = r#"
 extern "C" {
@@ -151,6 +227,19 @@ def main() -> i32 { 0 }
 }
 
 #[test]
+fn ffi_rejects_mutable_reference_with_stable_code() {
+    let source = r#"
+extern "C" {
+    fn bad_mut_ref(arg: &mut str) -> i64;
+}
+
+def main() -> i32 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::unsupported_type", "&mut str");
+}
+
+#[test]
 fn ffi_requires_unsafe_boundary_for_raw_pointer_signatures() {
     let source = r#"
 extern "C" {
@@ -167,4 +256,17 @@ def main() -> i32 { 0 }
         "expected unsafe boundary diagnostic, got: {}",
         msg
     );
+}
+
+#[test]
+fn ffi_rejects_raw_pointer_without_unsafe_with_stable_code() {
+    let source = r#"
+extern "C" {
+    fn read_buffer(ptr: *mut u8, len: usize) -> i64;
+}
+
+def main() -> i32 { 0 }
+"#;
+
+    assert_ffi_error(source, "ffi::unsafe_boundary", "unsafe boundary");
 }

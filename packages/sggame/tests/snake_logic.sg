@@ -1,0 +1,24 @@
+import sggame::snake_logic;
+
+import std::assert;
+
+import sgplatform;
+
+def main() -> i64 {
+    let cell = 20;
+    let body = SnakeBody { head_x: 100, head_y: 100, length: 3 };
+    let moved = snake_step(body, 1, 0, cell);
+    assert_eq_i64(moved.head_x, 120);
+    assert_eq_i64(moved.head_y, 100);
+    let wall_hit = snake_hits_wall(moved, 640, 480, cell);
+    assert_true(not wall_hit);
+    let edge = SnakeBody { head_x: 620, head_y: 100, length: 3 };
+    let past_wall = snake_hits_wall(snake_step(edge, 1, 0, cell), 640, 480, cell);
+    assert_true(past_wall);
+    let food = Food { x: 120, y: 100 };
+    let ate = snake_eats_food(moved, food, cell);
+    assert_true(ate);
+    let grown = snake_grow(moved);
+    assert_eq_i64(grown.length, 4);
+    0;
+}

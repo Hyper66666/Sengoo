@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "real_incremental": {
+    "loop_body_change": {
+      "sengoo": { "before_avg_ms": 50.0, "after_avg_ms": 40.0 }
+    },
+    "function_signature_change": {
+      "sengoo": { "before_avg_ms": 50.0, "after_avg_ms": 40.0 }
+    },
+    "add_new_function": {
+      "sengoo": { "before_avg_ms": 50.0, "after_avg_ms": 40.0 }
+    }
+  },
+  "scale_curve": {
+    "1000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 10.0,
+        "codegen_obj_avg_ms": 5.0,
+        "link_avg_ms": 2.0,
+        "e2e_avg_ms": 17.0
+      }
+    },
+    "10000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 50.0,
+        "codegen_obj_avg_ms": 20.0,
+        "link_avg_ms": 10.0,
+        "e2e_avg_ms": 80.0
+      }
+    },
+    "100000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 153.87,
+        "codegen_obj_avg_ms": 90.61,
+        "link_avg_ms": 173.05,
+        "e2e_avg_ms": 417.53
+      }
+    },
+    "1000000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 1589.02,
+        "codegen_obj_avg_ms": 76.77,
+        "link_avg_ms": 162.04,
+        "e2e_avg_ms": 1827.84
+      }
+    }
+  },
+  "compile_memory_compare": {
+    "10000": {
+      "sengoo": { "peak_rss_mb_avg": 20.0 },
+      "cpp": { "peak_rss_mb_avg": 30.0 },
+      "rust": { "peak_rss_mb_avg": 25.0 },
+      "python": { "peak_rss_mb_avg": 15.0 }
+    },
+    "100000": {
+      "sengoo": { "peak_rss_mb_avg": 140.18 },
+      "cpp": { "peak_rss_mb_avg": 118.5 },
+      "rust": { "peak_rss_mb_avg": 200.0 },
+      "python": { "peak_rss_mb_avg": 180.0 }
+    },
+    "1000000": {
+      "sengoo": { "peak_rss_mb_avg": 1367.99 },
+      "cpp": { "peak_rss_mb_avg": 435.22 },
+      "rust": { "peak_rss_mb_avg": 2600.0 },
+      "python": { "peak_rss_mb_avg": 2500.0 }
+    }
+  },
+  "reachability_matrix": {
+    "all_reachable": {
+      "compile_frontend_llvm_avg_ms": 150.0,
+      "codegen_obj_avg_ms": 80.0,
+      "link_avg_ms": 120.0,
+      "e2e_avg_ms": 350.0
+    },
+    "half_reachable": {
+      "compile_frontend_llvm_avg_ms": 120.0,
+      "codegen_obj_avg_ms": 70.0,
+      "link_avg_ms": 100.0,
+      "e2e_avg_ms": 290.0
+    },
+    "library_entryless": {
+      "compile_frontend_llvm_avg_ms": 90.0,
+      "codegen_obj_avg_ms": 60.0,
+      "e2e_avg_ms": 150.0
+    },
+    "delta_vs_all_reachable_ms": {
+      "half_reachable": { "frontend_delta_ms": -30.0 }
+    }
+  }
+}

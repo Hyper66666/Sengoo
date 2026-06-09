@@ -11,7 +11,9 @@ use super::generic_methods::{
 use crate::hir::HIRTrait;
 use crate::hir::{self, HIRBody, HIRExpr, HIRItem, HIRLiteral, HIRStmt, HIRType};
 use crate::method_resolution::explicit_hir_method_param_count;
-use crate::mir::async_dispatch_helpers::{build_async_dispatch_registry, AsyncDispatchRegistry};
+use crate::mir::async_dispatch_helpers::{
+    build_async_dispatch_registry_with_extras, AsyncDispatchRegistry, OPTIONAL_ASYNC_DISPATCH_NAMES,
+};
 use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
@@ -44,6 +46,7 @@ use crate::type_naming::mir_type_instance_name as mir_type_to_instance_name;
 use std::collections::{HashMap, HashSet};
 
 mod aggregate_expr_helpers;
+mod assert_callsite_helpers;
 mod assignment_helpers;
 mod async_methods;
 mod block_async_expr_helpers;
@@ -104,7 +107,7 @@ use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};
-pub use options::MirLowerOptions;
+pub use options::{AssertCallsiteContext, MirLowerOptions};
 
 /// 循环上下文，记录 `break/continue` 目标基本块。
 #[derive(Debug, Clone, Copy)]

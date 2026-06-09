@@ -39,6 +39,10 @@ pub(super) enum I64NativeFn {
     Arity2(unsafe extern "C" fn(i64, i64) -> i64),
     Arity3(unsafe extern "C" fn(i64, i64, i64) -> i64),
     Arity4(unsafe extern "C" fn(i64, i64, i64, i64) -> i64),
+    Arity5(unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64),
+    Arity6(unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64),
+    Arity7(unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64),
+    Arity8(unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64),
 }
 
 impl I64NativeFn {
@@ -64,6 +68,40 @@ impl I64NativeFn {
             I64NativeFn::Arity4(func) => {
                 func(pick_i64(0)?, pick_i64(1)?, pick_i64(2)?, pick_i64(3)?)
             }
+            I64NativeFn::Arity5(func) => func(
+                pick_i64(0)?,
+                pick_i64(1)?,
+                pick_i64(2)?,
+                pick_i64(3)?,
+                pick_i64(4)?,
+            ),
+            I64NativeFn::Arity6(func) => func(
+                pick_i64(0)?,
+                pick_i64(1)?,
+                pick_i64(2)?,
+                pick_i64(3)?,
+                pick_i64(4)?,
+                pick_i64(5)?,
+            ),
+            I64NativeFn::Arity7(func) => func(
+                pick_i64(0)?,
+                pick_i64(1)?,
+                pick_i64(2)?,
+                pick_i64(3)?,
+                pick_i64(4)?,
+                pick_i64(5)?,
+                pick_i64(6)?,
+            ),
+            I64NativeFn::Arity8(func) => func(
+                pick_i64(0)?,
+                pick_i64(1)?,
+                pick_i64(2)?,
+                pick_i64(3)?,
+                pick_i64(4)?,
+                pick_i64(5)?,
+                pick_i64(6)?,
+                pick_i64(7)?,
+            ),
         };
         Ok(ReflectValue::I64(result))
     }
@@ -108,8 +146,31 @@ pub(super) unsafe fn load_i64_native_fn(
         4 => Ok(I64NativeFn::Arity4(unsafe {
             std::mem::transmute::<*mut c_void, unsafe extern "C" fn(i64, i64, i64, i64) -> i64>(raw)
         })),
+        5 => Ok(I64NativeFn::Arity5(unsafe {
+            std::mem::transmute::<*mut c_void, unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64>(
+                raw,
+            )
+        })),
+        6 => Ok(I64NativeFn::Arity6(unsafe {
+            std::mem::transmute::<
+                *mut c_void,
+                unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64,
+            >(raw)
+        })),
+        7 => Ok(I64NativeFn::Arity7(unsafe {
+            std::mem::transmute::<
+                *mut c_void,
+                unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(raw)
+        })),
+        8 => Ok(I64NativeFn::Arity8(unsafe {
+            std::mem::transmute::<
+                *mut c_void,
+                unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+            >(raw)
+        })),
         _ => Err(load_error(format!(
-            "unsupported i64 native arity {}; supported: 0..=4",
+            "unsupported i64 native arity {}; supported: 0..=8",
             arity
         ))),
     }

@@ -160,10 +160,13 @@ pub(crate) fn classify_async_frame_type(ty: &MIRType) -> Result<AsyncFrameValueK
         MIRType::Float(32) => Ok(AsyncFrameValueKind::Float32),
         MIRType::Float(64) => Ok(AsyncFrameValueKind::Float64),
         MIRType::Ref(_) | MIRType::Ptr(_) => Ok(AsyncFrameValueKind::PointerLike),
-        MIRType::Tuple(_) | MIRType::Struct { .. } | MIRType::Array(_, _) | MIRType::Enum { .. } => {
+        MIRType::Tuple(_) | MIRType::Struct { .. } | MIRType::Array(_, _) => {
+            Ok(AsyncFrameValueKind::I64)
+        }
+        MIRType::Enum { .. } => {
             Err(unsupported_async_frame_type(
                 ty,
-                "aggregate types (tuple/struct/array/enum) cannot cross await points yet",
+                "payload-carrying enum values cannot cross await points yet",
             ))
         }
         _ => Err(unsupported_async_frame_type(
@@ -429,6 +432,27 @@ pub(crate) fn push_frame_load_into_typed(
         },
     }
     Ok(())
+}
+
+pub(crate) fn push_frame_load_into_or_value_typed(
+    f: &mut MirFunction,
+    block: usize,
+    handle: Local,
+    offset: i64,
+    destination: Local,
+    ty: &MIRType,
+) -> Result<Local, CompileError> {
+    let storage_ty = frame_storage_ty(ty);
+    let is_aggregate = matches!(
+        storage_ty,
+        MIRType::Tuple(_) | MIRType::Array(_, _) | MIRType::Struct { .. } | MIRType::Enum { .. }
+    );
+    if is_aggregate && destination.kind != LocalKind::User {
+        return push_frame_load_typed(f, block, handle, offset, storage_ty);
+    }
+
+    push_frame_load_into_typed(f, block, handle, offset, destination, ty)?;
+    Ok(destination)
 }
 
 pub(crate) fn push_frame_load(

@@ -29,7 +29,8 @@ byte-length semantics.
 
 - **WHEN** a program clones a `String`
 - **THEN** mutations to the clone do not mutate the original
-- **AND** allocation failure returns `Result` with a stable negative status category
+- **AND** allocation failure returns `Result` with `STATUS_OUT_OF_MEMORY` in the
+  public positive status namespace
 
 #### Scenario: Owned text is not exposed as &str
 

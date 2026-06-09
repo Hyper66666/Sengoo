@@ -18,12 +18,20 @@ DEFAULT_MAX_LINK_100K_MS = 500.0
 DEFAULT_MAX_DAEMON_REGRESSION_MS = 50.0
 DEFAULT_MAX_SENGOO_RSS_100K_MB = 300.0
 DEFAULT_MAX_SENGOO_RSS_1000K_MB = 1800.0
-DEFAULT_MAX_FRONTEND_100K_REGRESSION_PCT = 12.0
-DEFAULT_MAX_FRONTEND_1000K_REGRESSION_PCT = 12.0
-DEFAULT_MAX_FULL_BUILD_100K_REGRESSION_PCT = 12.0
-DEFAULT_MAX_FULL_BUILD_1000K_REGRESSION_PCT = 12.0
-DEFAULT_MAX_RSS_100K_REGRESSION_PCT = 12.0
-DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 12.0
+DEFAULT_MAX_FRONTEND_100K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_FRONTEND_1000K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_FULL_BUILD_100K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_FULL_BUILD_1000K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_RSS_100K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0
+DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0
+DEFAULT_MAX_RSS_RATIO_100K = 1.5
+DEFAULT_MAX_FRONTEND_SHARE_100K_PCT = 70.0
+DEFAULT_MAX_RSS_RATIO_1000K = 1.8
+DEFAULT_MAX_FRONTEND_SHARE_1000K_PCT = 65.0
+DEFAULT_MAX_RSS_RATIO_2500K = 2.0
+DEFAULT_MAX_FRONTEND_SHARE_2500K_PCT = 70.0
+DEFAULT_LADDER_STRETCH_LOC = "2500000"
 DEFAULT_REQUIRED_REACHABILITY_PROFILES = (
     "all_reachable",
     "half_reachable",
@@ -36,6 +44,8 @@ DEFAULT_REQUIRED_INCREMENTAL_SCENARIOS = (
 )
 DEFAULT_REQUIRED_SCALE_LOCS = ("1000", "10000", "100000", "1000000")
 DEFAULT_REQUIRED_MEMORY_LOCS = ("10000", "100000", "1000000")
+DEFAULT_P0_REQUIRED_SCALE_LOCS = ("100000", "1000000")
+DEFAULT_P0_REQUIRED_MEMORY_LOCS = ("100000", "1000000")
 DEFAULT_BASELINE_PROFILE = (
     Path(__file__).resolve().parent.parent / "frontend-memory-baseline.json"
 )
@@ -57,6 +67,39 @@ def load_baseline_profile(path: Path) -> dict[str, Any]:
         raise RuntimeError(f"frontend baseline profile not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"failed to parse frontend baseline profile {path}: {exc}") from exc
+
+
+def frontend_share_pct(scale_curve: dict[str, Any], bucket: str) -> float | None:
+    loc_metrics = scale_curve.get(bucket)
+    if not isinstance(loc_metrics, dict):
+        return None
+    sengoo = loc_metrics.get("sengoo")
+    if not isinstance(sengoo, dict):
+        return None
+    frontend_ms = sengoo.get("compile_frontend_llvm_avg_ms")
+    e2e_ms = sengoo.get("e2e_avg_ms")
+    if not isinstance(frontend_ms, (int, float)) or not isinstance(e2e_ms, (int, float)):
+        return None
+    if float(e2e_ms) <= 0:
+        return None
+    return (float(frontend_ms) / float(e2e_ms)) * 100.0
+
+
+def rss_ratio_vs_cpp(compile_memory_compare: dict[str, Any], bucket: str) -> float | None:
+    loc_metrics = compile_memory_compare.get(bucket)
+    if not isinstance(loc_metrics, dict):
+        return None
+    sengoo = loc_metrics.get("sengoo")
+    cpp = loc_metrics.get("cpp")
+    if not isinstance(sengoo, dict) or not isinstance(cpp, dict):
+        return None
+    sengoo_rss = sengoo.get("peak_rss_mb_avg")
+    cpp_rss = cpp.get("peak_rss_mb_avg")
+    if not isinstance(sengoo_rss, (int, float)) or not isinstance(cpp_rss, (int, float)):
+        return None
+    if float(cpp_rss) <= 0:
+        return None
+    return float(sengoo_rss) / float(cpp_rss)
 
 
 def baseline_metric(
@@ -95,10 +138,22 @@ def evaluate_report(
     max_full_build_1000k_regression_pct: float,
     max_rss_100k_regression_pct: float,
     max_rss_1000k_regression_pct: float,
+    max_frontend_share_1000k_regression_pp: float,
+    max_rss_ratio_100k: float,
+    max_frontend_share_100k_pct: float,
+    max_rss_ratio_1000k: float,
+    max_frontend_share_1000k_pct: float,
+    max_rss_ratio_2500k: float,
+    max_frontend_share_2500k_pct: float,
+    enforce_1000k_absolute_targets: bool,
     require_phase_deltas: bool,
     require_daemon_comparison: bool,
     skip_memory_compare: bool,
     fail_fast: bool,
+    required_scale_locs: tuple[str, ...] = DEFAULT_REQUIRED_SCALE_LOCS,
+    required_memory_locs: tuple[str, ...] = DEFAULT_REQUIRED_MEMORY_LOCS,
+    require_real_incremental: bool = True,
+    require_reachability: bool = True,
 ) -> tuple[list[str], list[str], dict[str, Any]]:
     summaries: list[str] = []
     violations: list[str] = []
@@ -118,9 +173,24 @@ def evaluate_report(
                 "100000": float(max_rss_100k_regression_pct),
                 "1000000": float(max_rss_1000k_regression_pct),
             },
+            "frontend_share_regression_pp": {
+                "1000000": float(max_frontend_share_1000k_regression_pp),
+            },
             "full_build_budget_ms": {
                 "100000": float(max_full_build_100k_ms),
                 "1000000": float(max_full_build_1000k_ms),
+            },
+            "absolute_targets": {
+                "rss_ratio_vs_cpp_100000": float(max_rss_ratio_100k),
+                "frontend_share_pct_100000": float(max_frontend_share_100k_pct),
+                "rss_ratio_vs_cpp_1000000": float(max_rss_ratio_1000k),
+                "frontend_share_pct_1000000": float(max_frontend_share_1000k_pct),
+            },
+            "ladder_stretch_targets": {
+                "loc": DEFAULT_LADDER_STRETCH_LOC,
+                "rss_ratio_vs_cpp": float(max_rss_ratio_2500k),
+                "frontend_share_pct": float(max_frontend_share_2500k_pct),
+                "report_only": True,
             },
         },
         "comparisons": [],
@@ -129,6 +199,41 @@ def evaluate_report(
     def add_violation(message: str) -> bool:
         violations.append(message)
         return fail_fast
+
+    def check_frontend_share_regression_vs_baseline(
+        *,
+        bucket: str,
+        measured_share_pct: float,
+        max_regression_pp: float,
+    ) -> bool:
+        baseline_share = baseline_metric(baseline_profile, bucket, "frontend_share_pct")
+        if baseline_share is None:
+            return add_violation(f"missing baseline metrics/{bucket}/frontend_share_pct")
+
+        delta_pp = float(measured_share_pct) - float(baseline_share)
+        comparison = {
+            "bucket": bucket,
+            "metric": "frontend_share_pct",
+            "metric_label": "frontend_share",
+            "measured": float(measured_share_pct),
+            "baseline": float(baseline_share),
+            "delta_pp": float(delta_pp),
+            "max_regression_pp": float(max_regression_pp),
+            "pass": delta_pp <= max_regression_pp,
+        }
+        decision["comparisons"].append(comparison)
+        summaries.append(
+            f"frontend_share/{bucket}: measured={measured_share_pct:.2f}% "
+            f"baseline={baseline_share:.2f}% delta={delta_pp:+.2f}pp "
+            f"limit<={max_regression_pp:.2f}pp"
+        )
+        if delta_pp > max_regression_pp:
+            return add_violation(
+                f"frontend_share/{bucket} regression exceeded limit "
+                f"(measured={measured_share_pct:.2f}%, baseline={baseline_share:.2f}%, "
+                f"delta={delta_pp:+.2f}pp > {max_regression_pp:.2f}pp)"
+            )
+        return False
 
     def check_regression_vs_baseline(
         *,
@@ -172,47 +277,50 @@ def evaluate_report(
             )
         return False
 
-    real_incremental = report.get("real_incremental")
-    if not isinstance(real_incremental, dict) or not real_incremental:
-        if add_violation("missing real_incremental block"):
-            return summaries, violations, decision
-    else:
-        for scenario in DEFAULT_REQUIRED_INCREMENTAL_SCENARIOS:
-            if scenario not in real_incremental:
-                if add_violation(f"missing real_incremental/{scenario} block"):
-                    return summaries, violations, decision
+    if require_real_incremental:
+        real_incremental = report.get("real_incremental")
+        if not isinstance(real_incremental, dict) or not real_incremental:
+            if add_violation("missing real_incremental block"):
+                return summaries, violations, decision
+        else:
+            for scenario in DEFAULT_REQUIRED_INCREMENTAL_SCENARIOS:
+                if scenario not in real_incremental:
+                    if add_violation(f"missing real_incremental/{scenario} block"):
+                        return summaries, violations, decision
 
-        for scenario in sorted(real_incremental.keys()):
-            metrics = real_incremental.get(scenario)
-            if not isinstance(metrics, dict):
-                if add_violation(f"real_incremental/{scenario} is not an object"):
-                    return summaries, violations, decision
-                continue
-            sengoo = metrics.get("sengoo")
-            if not isinstance(sengoo, dict):
-                if add_violation(f"real_incremental/{scenario}/sengoo is missing"):
-                    return summaries, violations, decision
-                continue
-            after_avg = sengoo.get("after_avg_ms")
-            if not isinstance(after_avg, (int, float)):
-                if add_violation(f"real_incremental/{scenario}/sengoo/after_avg_ms is missing"):
-                    return summaries, violations, decision
-                continue
-            summaries.append(
-                f"real_incremental/{scenario}: after={after_avg:.2f}ms target<={max_real_incremental_ms:.2f}ms"
-            )
-            if float(after_avg) > max_real_incremental_ms:
-                if add_violation(
-                    f"real_incremental/{scenario} exceeded target ({after_avg:.2f}ms > {max_real_incremental_ms:.2f}ms)"
-                ):
-                    return summaries, violations, decision
+            for scenario in sorted(real_incremental.keys()):
+                metrics = real_incremental.get(scenario)
+                if not isinstance(metrics, dict):
+                    if add_violation(f"real_incremental/{scenario} is not an object"):
+                        return summaries, violations, decision
+                    continue
+                sengoo = metrics.get("sengoo")
+                if not isinstance(sengoo, dict):
+                    if add_violation(f"real_incremental/{scenario}/sengoo is missing"):
+                        return summaries, violations, decision
+                    continue
+                after_avg = sengoo.get("after_avg_ms")
+                if not isinstance(after_avg, (int, float)):
+                    if add_violation(f"real_incremental/{scenario}/sengoo/after_avg_ms is missing"):
+                        return summaries, violations, decision
+                    continue
+                summaries.append(
+                    f"real_incremental/{scenario}: after={after_avg:.2f}ms target<={max_real_incremental_ms:.2f}ms"
+                )
+                if float(after_avg) > max_real_incremental_ms:
+                    if add_violation(
+                        f"real_incremental/{scenario} exceeded target ({after_avg:.2f}ms > {max_real_incremental_ms:.2f}ms)"
+                    ):
+                        return summaries, violations, decision
+    else:
+        summaries.append("real_incremental: skipped by focused gate mode")
 
     scale_curve = report.get("scale_curve")
     if not isinstance(scale_curve, dict):
         if add_violation("missing scale_curve block"):
             return summaries, violations, decision
     else:
-        for loc in DEFAULT_REQUIRED_SCALE_LOCS:
+        for loc in required_scale_locs:
             loc_metrics = scale_curve.get(loc)
             if not isinstance(loc_metrics, dict):
                 if add_violation(f"missing scale_curve/{loc} block"):
@@ -222,6 +330,16 @@ def evaluate_report(
             sengoo = loc_metrics.get("sengoo")
             if not isinstance(sengoo, dict):
                 if add_violation(f"missing scale_curve/{loc}/sengoo block"):
+                    return summaries, violations, decision
+                continue
+            if bool(sengoo.get("timed_out")):
+                timeouts = sengoo.get("timeouts", "unknown")
+                timeout_stage = sengoo.get("timeout_stage", "unknown")
+                timeout_s = sengoo.get("timeout_s", "unknown")
+                if add_violation(
+                    f"scale_curve/{loc}/sengoo timed out at {timeout_stage} "
+                    f"({timeouts} timeout(s), timeout_s={timeout_s})"
+                ):
                     return summaries, violations, decision
                 continue
 
@@ -263,6 +381,27 @@ def evaluate_report(
                     max_regression_pct=max_frontend_1000k_regression_pct,
                 ):
                     return summaries, violations, decision
+                measured_share = frontend_share_pct(scale_curve, "1000000")
+                if measured_share is None:
+                    if add_violation("missing scale_curve/1000000 frontend share"):
+                        return summaries, violations, decision
+                else:
+                    summaries.append(
+                        f"scale/1000000/frontend_share: {measured_share:.2f}% "
+                        f"target<={max_frontend_share_1000k_pct:.2f}%"
+                    )
+                    if enforce_1000k_absolute_targets and measured_share > max_frontend_share_1000k_pct:
+                        if add_violation(
+                            "scale/1000000 frontend share exceeded absolute target "
+                            f"({measured_share:.2f}% > {max_frontend_share_1000k_pct:.2f}%)"
+                        ):
+                            return summaries, violations, decision
+                    if check_frontend_share_regression_vs_baseline(
+                        bucket="1000000",
+                        measured_share_pct=measured_share,
+                        max_regression_pp=max_frontend_share_1000k_regression_pp,
+                    ):
+                        return summaries, violations, decision
             if loc == "1000000" and isinstance(full_build, (int, float)):
                 summaries.append(
                     f"scale/1000000/full_build: e2e={float(full_build):.2f}ms target<={max_full_build_1000k_ms:.2f}ms"
@@ -322,6 +461,21 @@ def evaluate_report(
                     max_regression_pct=max_frontend_100k_regression_pct,
                 ):
                     return summaries, violations, decision
+                measured_share_100k = frontend_share_pct(scale_curve, "100000")
+                if measured_share_100k is None:
+                    if add_violation("missing scale_curve/100000 frontend share"):
+                        return summaries, violations, decision
+                else:
+                    summaries.append(
+                        f"scale/100000/frontend_share: {measured_share_100k:.2f}% "
+                        f"target<={max_frontend_share_100k_pct:.2f}%"
+                    )
+                    if measured_share_100k > max_frontend_share_100k_pct:
+                        if add_violation(
+                            "scale/100000 frontend share exceeded ladder target "
+                            f"({measured_share_100k:.2f}% > {max_frontend_share_100k_pct:.2f}%)"
+                        ):
+                            return summaries, violations, decision
 
             if isinstance(codegen_ms, (int, float)):
                 summaries.append(
@@ -349,7 +503,7 @@ def evaluate_report(
             if add_violation("missing compile_memory_compare block"):
                 return summaries, violations, decision
         else:
-            for loc in DEFAULT_REQUIRED_MEMORY_LOCS:
+            for loc in required_memory_locs:
                 loc_metrics = compile_memory_compare.get(loc)
                 if not isinstance(loc_metrics, dict):
                     if add_violation(f"missing compile_memory_compare/{loc} block"):
@@ -362,6 +516,12 @@ def evaluate_report(
                         if add_violation(f"missing compile_memory_compare/{loc}/{lang} block"):
                             return summaries, violations, decision
                         continue
+                    if bool(lang_metrics.get("timed_out")):
+                        timeouts = lang_metrics.get("timeouts", "unknown")
+                        if add_violation(
+                            f"compile_memory_compare/{loc}/{lang} timed out ({timeouts} sample(s))"
+                        ):
+                            return summaries, violations, decision
                     rss_mb = lang_metrics.get("peak_rss_mb_avg")
                     if not isinstance(rss_mb, (int, float)):
                         if add_violation(
@@ -399,6 +559,23 @@ def evaluate_report(
                         max_regression_pct=max_rss_100k_regression_pct,
                     ):
                         return summaries, violations, decision
+                    measured_ratio_100k = rss_ratio_vs_cpp(compile_memory_compare, "100000")
+                    if measured_ratio_100k is None:
+                        if add_violation(
+                            "missing compile_memory_compare/100000 rss ratio vs C++"
+                        ):
+                            return summaries, violations, decision
+                    else:
+                        summaries.append(
+                            f"memory/100000/rss_ratio_vs_cpp: {measured_ratio_100k:.2f}x "
+                            f"target<={max_rss_ratio_100k:.2f}x"
+                        )
+                        if measured_ratio_100k > max_rss_ratio_100k:
+                            if add_violation(
+                                "compile_memory_compare/100000 RSS ratio exceeded ladder target "
+                                f"({measured_ratio_100k:.2f}x > {max_rss_ratio_100k:.2f}x)"
+                            ):
+                                return summaries, violations, decision
 
                 if loc == "1000000":
                     summaries.append(
@@ -419,6 +596,23 @@ def evaluate_report(
                         max_regression_pct=max_rss_1000k_regression_pct,
                     ):
                         return summaries, violations, decision
+                    measured_ratio = rss_ratio_vs_cpp(compile_memory_compare, "1000000")
+                    if measured_ratio is None:
+                        if add_violation(
+                            "missing compile_memory_compare/1000000 rss ratio vs C++"
+                        ):
+                            return summaries, violations, decision
+                    else:
+                        summaries.append(
+                            f"memory/1000000/rss_ratio_vs_cpp: {measured_ratio:.2f}x "
+                            f"target<={max_rss_ratio_1000k:.2f}x"
+                        )
+                        if enforce_1000k_absolute_targets and measured_ratio > max_rss_ratio_1000k:
+                            if add_violation(
+                                "compile_memory_compare/1000000 RSS ratio exceeded absolute target "
+                                f"({measured_ratio:.2f}x > {max_rss_ratio_1000k:.2f}x)"
+                            ):
+                                return summaries, violations, decision
 
     if require_phase_deltas:
         phase_deltas = report.get("phase_deltas")
@@ -463,70 +657,130 @@ def evaluate_report(
                 ):
                     return summaries, violations, decision
 
-    reachability_matrix = report.get("reachability_matrix")
-    if not isinstance(reachability_matrix, dict):
-        if add_violation("missing reachability_matrix block"):
-            return summaries, violations, decision
-    else:
-        for profile in DEFAULT_REQUIRED_REACHABILITY_PROFILES:
-            metrics = reachability_matrix.get(profile)
-            if not isinstance(metrics, dict):
-                if add_violation(f"missing reachability_matrix/{profile} block"):
-                    return summaries, violations, decision
-                continue
-
-            frontend_ms = metrics.get("compile_frontend_llvm_avg_ms")
-            codegen_ms = metrics.get("codegen_obj_avg_ms")
-            e2e_ms = metrics.get("e2e_avg_ms")
-            link_ms = metrics.get("link_avg_ms")
-
-            if not isinstance(frontend_ms, (int, float)):
-                if add_violation(f"missing reachability_matrix/{profile}/compile_frontend_llvm_avg_ms"):
-                    return summaries, violations, decision
-                continue
-            if not isinstance(codegen_ms, (int, float)):
-                if add_violation(f"missing reachability_matrix/{profile}/codegen_obj_avg_ms"):
-                    return summaries, violations, decision
-                continue
-            if not isinstance(e2e_ms, (int, float)):
-                if add_violation(f"missing reachability_matrix/{profile}/e2e_avg_ms"):
-                    return summaries, violations, decision
-                continue
-
-            if profile != "library_entryless" and not isinstance(link_ms, (int, float)):
-                if add_violation(f"missing reachability_matrix/{profile}/link_avg_ms"):
-                    return summaries, violations, decision
-                continue
-
-            if profile == "library_entryless":
-                summaries.append(
-                    "reachability/library_entryless: "
-                    f"frontend={float(frontend_ms):.2f}ms codegen={float(codegen_ms):.2f}ms "
-                    f"e2e={float(e2e_ms):.2f}ms"
-                )
-            else:
-                summaries.append(
-                    f"reachability/{profile}: frontend={float(frontend_ms):.2f}ms "
-                    f"codegen={float(codegen_ms):.2f}ms link={float(link_ms):.2f}ms "
-                    f"e2e={float(e2e_ms):.2f}ms"
-                )
-
-            if profile == "all_reachable":
-                summaries.append(
-                    f"reachability/all_reachable frontend budget: {float(frontend_ms):.2f}ms "
-                    f"target<={max_frontend_100k_ms:.2f}ms"
-                )
-                if float(frontend_ms) > max_frontend_100k_ms:
-                    if add_violation(
-                        "reachability/all_reachable frontend exceeded target "
-                        f"({float(frontend_ms):.2f}ms > {max_frontend_100k_ms:.2f}ms)"
-                    ):
-                        return summaries, violations, decision
-
-        delta_block = reachability_matrix.get("delta_vs_all_reachable_ms")
-        if not isinstance(delta_block, dict):
-            if add_violation("missing reachability_matrix/delta_vs_all_reachable_ms block"):
+    if require_reachability:
+        reachability_matrix = report.get("reachability_matrix")
+        if not isinstance(reachability_matrix, dict):
+            if add_violation("missing reachability_matrix block"):
                 return summaries, violations, decision
+        else:
+            for profile in DEFAULT_REQUIRED_REACHABILITY_PROFILES:
+                metrics = reachability_matrix.get(profile)
+                if not isinstance(metrics, dict):
+                    if add_violation(f"missing reachability_matrix/{profile} block"):
+                        return summaries, violations, decision
+                    continue
+
+                frontend_ms = metrics.get("compile_frontend_llvm_avg_ms")
+                codegen_ms = metrics.get("codegen_obj_avg_ms")
+                e2e_ms = metrics.get("e2e_avg_ms")
+                link_ms = metrics.get("link_avg_ms")
+
+                if not isinstance(frontend_ms, (int, float)):
+                    if add_violation(f"missing reachability_matrix/{profile}/compile_frontend_llvm_avg_ms"):
+                        return summaries, violations, decision
+                    continue
+                if not isinstance(codegen_ms, (int, float)):
+                    if add_violation(f"missing reachability_matrix/{profile}/codegen_obj_avg_ms"):
+                        return summaries, violations, decision
+                    continue
+                if not isinstance(e2e_ms, (int, float)):
+                    if add_violation(f"missing reachability_matrix/{profile}/e2e_avg_ms"):
+                        return summaries, violations, decision
+                    continue
+
+                if profile != "library_entryless" and not isinstance(link_ms, (int, float)):
+                    if add_violation(f"missing reachability_matrix/{profile}/link_avg_ms"):
+                        return summaries, violations, decision
+                    continue
+
+                if profile == "library_entryless":
+                    summaries.append(
+                        "reachability/library_entryless: "
+                        f"frontend={float(frontend_ms):.2f}ms codegen={float(codegen_ms):.2f}ms "
+                        f"e2e={float(e2e_ms):.2f}ms"
+                    )
+                else:
+                    summaries.append(
+                        f"reachability/{profile}: frontend={float(frontend_ms):.2f}ms "
+                        f"codegen={float(codegen_ms):.2f}ms link={float(link_ms):.2f}ms "
+                        f"e2e={float(e2e_ms):.2f}ms"
+                    )
+
+                if profile == "all_reachable":
+                    summaries.append(
+                        f"reachability/all_reachable frontend budget: {float(frontend_ms):.2f}ms "
+                        f"target<={max_frontend_100k_ms:.2f}ms"
+                    )
+                    if float(frontend_ms) > max_frontend_100k_ms:
+                        if add_violation(
+                            "reachability/all_reachable frontend exceeded target "
+                            f"({float(frontend_ms):.2f}ms > {max_frontend_100k_ms:.2f}ms)"
+                        ):
+                            return summaries, violations, decision
+
+            delta_block = reachability_matrix.get("delta_vs_all_reachable_ms")
+            if not isinstance(delta_block, dict):
+                if add_violation("missing reachability_matrix/delta_vs_all_reachable_ms block"):
+                    return summaries, violations, decision
+    else:
+        summaries.append("reachability_matrix: skipped by focused gate mode")
+
+    stretch_loc = DEFAULT_LADDER_STRETCH_LOC
+    stretch_memory = (
+        report.get("compile_memory_compare", {}).get(stretch_loc)
+        if isinstance(report.get("compile_memory_compare"), dict)
+        else None
+    )
+    stretch_scale = (
+        report.get("scale_curve", {}).get(stretch_loc)
+        if isinstance(report.get("scale_curve"), dict)
+        else None
+    )
+    if isinstance(stretch_memory, dict) or isinstance(stretch_scale, dict):
+        stretch_report: dict[str, Any] = {"loc": stretch_loc, "report_only": True}
+        measured_stretch_ratio = (
+            rss_ratio_vs_cpp(report.get("compile_memory_compare", {}), stretch_loc)
+            if isinstance(report.get("compile_memory_compare"), dict)
+            else None
+        )
+        measured_stretch_share = (
+            frontend_share_pct(report.get("scale_curve", {}), stretch_loc)
+            if isinstance(report.get("scale_curve"), dict)
+            else None
+        )
+        if measured_stretch_ratio is not None:
+            stretch_report["rss_ratio_vs_cpp"] = float(measured_stretch_ratio)
+            stretch_report["rss_ratio_target"] = float(max_rss_ratio_2500k)
+            stretch_report["rss_ratio_pass"] = (
+                float(measured_stretch_ratio) <= max_rss_ratio_2500k
+            )
+            summaries.append(
+                f"ladder_stretch/{stretch_loc}/rss_ratio_vs_cpp: "
+                f"{measured_stretch_ratio:.2f}x stretch<={max_rss_ratio_2500k:.2f}x "
+                f"(report-only)"
+            )
+        if measured_stretch_share is not None:
+            stretch_report["frontend_share_pct"] = float(measured_stretch_share)
+            stretch_report["frontend_share_target"] = float(max_frontend_share_2500k_pct)
+            stretch_report["frontend_share_pass"] = (
+                float(measured_stretch_share) <= max_frontend_share_2500k_pct
+            )
+            summaries.append(
+                f"ladder_stretch/{stretch_loc}/frontend_share: "
+                f"{measured_stretch_share:.2f}% stretch<={max_frontend_share_2500k_pct:.2f}% "
+                f"(report-only)"
+            )
+        decision["ladder_stretch_report"] = stretch_report
+    else:
+        summaries.append(
+            f"ladder_stretch/{stretch_loc}: not measured (report-only; "
+            f"set SENGOO_BENCH_LADDER_STRETCH=1 to collect)"
+        )
+        decision["ladder_stretch_report"] = {
+            "loc": stretch_loc,
+            "report_only": True,
+            "measured": False,
+        }
 
     return summaries, violations, decision
 
@@ -633,6 +887,57 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MAX_RSS_1000K_REGRESSION_PCT,
     )
     parser.add_argument(
+        "--max-frontend-share-1000k-regression-pp",
+        type=float,
+        default=DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP,
+    )
+    parser.add_argument(
+        "--max-rss-ratio-100k",
+        type=float,
+        default=DEFAULT_MAX_RSS_RATIO_100K,
+        help="100k ladder peak RSS vs C++ ratio ceiling",
+    )
+    parser.add_argument(
+        "--max-frontend-share-100k-pct",
+        type=float,
+        default=DEFAULT_MAX_FRONTEND_SHARE_100K_PCT,
+        help="100k ladder frontend time share ceiling (percent of e2e)",
+    )
+    parser.add_argument(
+        "--max-rss-ratio-1000k",
+        type=float,
+        default=DEFAULT_MAX_RSS_RATIO_1000K,
+        help="absolute 1000k peak RSS vs C++ ratio ceiling",
+    )
+    parser.add_argument(
+        "--max-frontend-share-1000k-pct",
+        type=float,
+        default=DEFAULT_MAX_FRONTEND_SHARE_1000K_PCT,
+        help="absolute 1000k frontend time share ceiling (percent of e2e)",
+    )
+    parser.add_argument(
+        "--max-rss-ratio-2500k",
+        type=float,
+        default=DEFAULT_MAX_RSS_RATIO_2500K,
+        help="2500k stretch RSS vs C++ ratio (report-only; never fails gate)",
+    )
+    parser.add_argument(
+        "--max-frontend-share-2500k-pct",
+        type=float,
+        default=DEFAULT_MAX_FRONTEND_SHARE_2500K_PCT,
+        help="2500k stretch frontend share (report-only; never fails gate)",
+    )
+    parser.add_argument(
+        "--skip-1000k-absolute-targets",
+        action="store_true",
+        help="skip 1000k 1.8x RSS and 65%% frontend-share absolute target checks",
+    )
+    parser.add_argument(
+        "--skip-absolute-targets",
+        action="store_true",
+        help="alias for --skip-1000k-absolute-targets",
+    )
+    parser.add_argument(
         "--require-phase-deltas",
         action="store_true",
         help="require phase_deltas block in the report",
@@ -653,6 +958,15 @@ def parse_args() -> argparse.Namespace:
         help="skip compile_memory_compare validation",
     )
     parser.add_argument(
+        "--p0-evidence-only",
+        "--p0-only",
+        action="store_true",
+        help=(
+            "validate only compile-scale-production-gate P0 evidence: "
+            "100k/1000k scale and compile-memory blocks with absolute targets"
+        ),
+    )
+    parser.add_argument(
         "--decision-out",
         help="optional path for machine-readable gate decision json",
     )
@@ -661,6 +975,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.p0_evidence_only and args.skip_memory_compare:
+        raise RuntimeError("--p0-evidence-only requires compile_memory_compare validation")
     sample_path = Path(args.sample).expanduser().resolve()
     baseline_profile_path = Path(args.baseline_profile).expanduser().resolve()
     report = load_report(sample_path)
@@ -684,10 +1000,34 @@ def main() -> int:
         max_full_build_1000k_regression_pct=float(args.max_full_build_1000k_regression_pct),
         max_rss_100k_regression_pct=float(args.max_rss_100k_regression_pct),
         max_rss_1000k_regression_pct=float(args.max_rss_1000k_regression_pct),
+        max_frontend_share_1000k_regression_pp=float(
+            args.max_frontend_share_1000k_regression_pp
+        ),
+        max_rss_ratio_100k=float(args.max_rss_ratio_100k),
+        max_frontend_share_100k_pct=float(args.max_frontend_share_100k_pct),
+        max_rss_ratio_1000k=float(args.max_rss_ratio_1000k),
+        max_frontend_share_1000k_pct=float(args.max_frontend_share_1000k_pct),
+        max_rss_ratio_2500k=float(args.max_rss_ratio_2500k),
+        max_frontend_share_2500k_pct=float(args.max_frontend_share_2500k_pct),
+        enforce_1000k_absolute_targets=not (
+            bool(args.skip_1000k_absolute_targets) or bool(args.skip_absolute_targets)
+        ),
         require_phase_deltas=bool(args.require_phase_deltas),
         require_daemon_comparison=bool(args.require_daemon_comparison),
         skip_memory_compare=bool(args.skip_memory_compare),
         fail_fast=bool(args.fail_fast),
+        required_scale_locs=(
+            DEFAULT_P0_REQUIRED_SCALE_LOCS
+            if args.p0_evidence_only
+            else DEFAULT_REQUIRED_SCALE_LOCS
+        ),
+        required_memory_locs=(
+            DEFAULT_P0_REQUIRED_MEMORY_LOCS
+            if args.p0_evidence_only
+            else DEFAULT_REQUIRED_MEMORY_LOCS
+        ),
+        require_real_incremental=not bool(args.p0_evidence_only),
+        require_reachability=not bool(args.p0_evidence_only),
     )
 
     print(f"advanced-kpi-gate mode={args.mode} sample={sample_path}")
@@ -698,6 +1038,7 @@ def main() -> int:
     decision_payload = {
         "schema_version": 1,
         "mode": args.mode,
+        "p0_evidence_only": bool(args.p0_evidence_only),
         "sample": str(sample_path),
         "baseline_profile": str(baseline_profile_path),
         "baseline_report_id": decision.get("baseline_report_id"),

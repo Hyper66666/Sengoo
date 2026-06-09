@@ -40,7 +40,7 @@ pub(crate) use generic_methods::ConcreteTypeRegistry;
 pub(crate) use generic_methods::InherentMethodTemplate;
 pub(crate) use generic_methods::TraitMethodTemplate;
 pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
-pub use lowering::{lower_hir, lower_hir_with_options, MirLowerOptions};
+pub use lowering::{lower_hir, lower_hir_with_options, AssertCallsiteContext, MirLowerOptions};
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;

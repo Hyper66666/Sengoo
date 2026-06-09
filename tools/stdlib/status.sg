@@ -21,6 +21,10 @@ def STATUS_TIMEOUT() -> i64 { 11 }
 def STATUS_INTERRUPTED() -> i64 { 12 }
 def STATUS_OVERFLOW() -> i64 { 13 }
 def STATUS_OUT_OF_MEMORY() -> i64 { 14 }
+def STATUS_TLS_CERT_INVALID() -> i64 { 15 }
+def STATUS_TLS_HOSTNAME_MISMATCH() -> i64 { 16 }
+def STATUS_TLS_HANDSHAKE() -> i64 { 17 }
+def STATUS_TLS_UNAVAILABLE() -> i64 { 18 }
 
 def status_from_raw_ffi(code: i64) -> i64 {
     sengoo_status_from_raw_ffi(code)

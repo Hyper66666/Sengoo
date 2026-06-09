@@ -1,0 +1,17 @@
+[package]
+name = "sggame"
+version = "0.1.0"
+edition = "2026"
+description = "Pygame-inspired 2D game API on sgplatform (phase 1 subset)."
+
+[lib]
+path = "src/lib.sg"
+
+[dependencies]
+sgplatform = { path = "../sgplatform" }
+
+[[test]]
+path = "tests/snake_logic.sg"
+
+[[test]]
+path = "tests/init_smoke.sg"

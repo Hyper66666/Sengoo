@@ -148,12 +148,17 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             iter: Box::new(substitute_hir_expr(iter, subst)),
             body: Box::new(substitute_hir_body(body, subst)),
         },
-        HIRExpr::Call { func, args } => HIRExpr::Call {
+        HIRExpr::Call {
+            func,
+            args,
+            site_lo,
+        } => HIRExpr::Call {
             func: Box::new(substitute_hir_expr(func, subst)),
             args: args
                 .iter()
                 .map(|arg| substitute_hir_expr(arg, subst))
                 .collect(),
+            site_lo: *site_lo,
         },
         HIRExpr::MethodCall {
             receiver,

@@ -1,0 +1,89 @@
+import std::status;
+
+import sgplatform;
+
+extern "C" {
+    fn sggame_state_platform_alive_get() -> i64;
+    fn sggame_state_platform_alive_set(value: i64);
+    fn sggame_state_window_handle_get() -> i64;
+    fn sggame_state_window_handle_set(value: i64);
+    fn sggame_state_window_closed_get() -> i64;
+    fn sggame_state_window_closed_set(value: i64);
+    fn sggame_state_renderer_handle_get() -> i64;
+    fn sggame_state_renderer_handle_set(value: i64);
+    fn sggame_state_renderer_destroyed_get() -> i64;
+    fn sggame_state_renderer_destroyed_set(value: i64);
+    fn sggame_state_surface_w_get() -> i64;
+    fn sggame_state_surface_w_set(value: i64);
+    fn sggame_state_surface_h_get() -> i64;
+    fn sggame_state_surface_h_set(value: i64);
+    fn sggame_state_key_down_get(key: i64) -> i64;
+    fn sggame_state_key_down_set(key: i64, down: i64);
+    fn sggame_state_keys_clear();
+    fn sggame_state_reset();
+}
+
+def current_platform() -> Platform {
+    Platform { alive: sggame_state_platform_alive_get() != 0 };
+}
+
+def current_window() -> Window {
+    Window { handle: sggame_state_window_handle_get(), closed: sggame_state_window_closed_get() != 0 };
+}
+
+def current_renderer() -> Renderer {
+    Renderer { handle: sggame_state_renderer_handle_get(), destroyed: sggame_state_renderer_destroyed_get() != 0 };
+}
+
+def store_window(window: Window) -> i64 {
+    sggame_state_window_handle_set(window.handle);
+    if window.closed { sggame_state_window_closed_set(1); } else { sggame_state_window_closed_set(0); };
+    STATUS_OK();
+}
+
+def store_renderer(renderer: Renderer) -> i64 {
+    sggame_state_renderer_handle_set(renderer.handle);
+    if renderer.destroyed { sggame_state_renderer_destroyed_set(1); } else { sggame_state_renderer_destroyed_set(0); };
+    STATUS_OK();
+}
+
+def teardown_display() -> i64 {
+    let renderer = current_renderer();
+    if renderer.handle != 0 and not renderer.destroyed { let _renderer_closed = renderer.destroy(); };
+    sggame_state_renderer_handle_set(0);
+    sggame_state_renderer_destroyed_set(1);
+    let window = current_window();
+    if window.handle != 0 and not window.closed { let _window_closed = window.close(); };
+    sggame_state_window_handle_set(0);
+    sggame_state_window_closed_set(1);
+    sggame_state_surface_w_set(0);
+    sggame_state_surface_h_set(0);
+    STATUS_OK();
+}
+
+def platform_boot() -> Result<Platform, i64> {
+    let status = sgplatform_init();
+    if status == STATUS_OK() { Result { is_ok: true, value: Platform { alive: true }, error: 0 }; } else { Result { is_ok: false, value: Platform { alive: false }, error: platform_status_from_raw(status) }; };
+}
+
+def platform_shutdown(platform: Platform) -> bool {
+    if platform.alive { sgplatform_quit() == STATUS_OK(); } else { true; };
+}
+
+def boot_platform() -> Result<i64, i64> {
+    if sggame_state_platform_alive_get() != 0 { Result { is_ok: true, value: STATUS_OK(), error: 0 }; } else { let platform = platform_boot().unwrap_or(Platform { alive: false }); if platform.alive { sggame_state_platform_alive_set(1); Result { is_ok: true, value: STATUS_OK(), error: 0 }; } else { Result { is_ok: false, value: 0, error: STATUS_PLATFORM() }; }; };
+}
+
+def shutdown_platform() -> bool {
+    teardown_display();
+    if sggame_state_platform_alive_get() != 0 { let platform = current_platform(); let ok = platform_shutdown(platform); sggame_state_reset(); ok; } else { sggame_state_reset(); true; };
+}
+
+def record_key_event(event: Event) -> i64 {
+    if event.kind == EVENT_KEY_DOWN() { sggame_state_key_down_set(event.key, 1); } else if event.kind == EVENT_KEY_UP() { sggame_state_key_down_set(event.key, 0); };
+    STATUS_OK();
+}
+
+def key_is_pressed(key: i64) -> bool {
+    sggame_state_key_down_get(key) != 0;
+}

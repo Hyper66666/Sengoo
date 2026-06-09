@@ -99,7 +99,7 @@ pub(crate) fn collect_concrete_named_types_from_expr(
             collect_concrete_named_types_from_expr(iter, known_named_types, out);
             collect_concrete_named_types_from_body(body, known_named_types, out);
         }
-        HIRExpr::Call { func, args } => {
+        HIRExpr::Call { func, args, .. } => {
             collect_concrete_named_types_from_expr(func, known_named_types, out);
             for arg in args {
                 collect_concrete_named_types_from_expr(arg, known_named_types, out);

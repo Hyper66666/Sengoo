@@ -9,6 +9,9 @@ extern "C" {
     fn sengoo_dir_walk_new(root: i64, max_depth: i64) -> i64;
     fn sengoo_dir_walk_next(handle: i64, buffer: i64) -> i64;
     fn sengoo_dir_walk_close(handle: i64) -> i64;
+    fn sengoo_dir_entry_name_string(path: i64, index: i64) -> i64;
+    fn sengoo_dir_copy_tree(source: i64, destination: i64, max_depth: i64, max_entries: i64) -> i64;
+    fn sengoo_dir_remove_tree(path: i64, max_depth: i64, max_entries: i64) -> i64;
 }
 
 struct DirWalk {
@@ -95,6 +98,28 @@ def dir_entry_name_raw(path_ptr: i64, index: i64, buffer_ptr: i64, capacity: i64
 
 def dir_entry_name(path: &str, index: i64, buffer: Buffer) -> Result<i64, i64> {
     dir_entry_name_raw(sengoo_stdlib_str_ptr(path), index, buffer.ptr(), buffer.len())
+}
+
+def dir_entry_name_string(path: &str, index: i64) -> Result<String, i64> {
+    let value = sengoo_dir_entry_name_string(sengoo_stdlib_str_ptr(path), index);
+    if value >= 0 {
+        Result { is_ok: true, value: String { handle: value }, error: 0 }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(value) }
+    }
+}
+
+def dir_copy_tree(root: &str, destination: &str, max_depth: i64, max_entries: i64) -> Result<i64, i64> {
+    dir_i64_result(sengoo_dir_copy_tree(
+        sengoo_stdlib_str_ptr(root),
+        sengoo_stdlib_str_ptr(destination),
+        max_depth,
+        max_entries,
+    ))
+}
+
+def dir_remove_tree(root: &str, max_depth: i64, max_entries: i64) -> Result<i64, i64> {
+    dir_i64_result(sengoo_dir_remove_tree(sengoo_stdlib_str_ptr(root), max_depth, max_entries))
 }
 
 def dir_walk_raw(root_ptr: i64, max_depth: i64) -> Result<DirWalk, i64> {

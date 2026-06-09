@@ -25,6 +25,14 @@ extern long long sengoo_dir_entry_name(
 #define SENGOO_BREADTH_MAX_CONFIG_BYTES 65536
 #define SENGOO_BREADTH_MAX_LOG_BYTES 4096
 #define SENGOO_BREADTH_REGEX_STEPS 65536
+#define SENGOO_BREADTH_COMPRESS_MAX_INPUT (1024 * 1024)
+#define SENGOO_BREADTH_COMPRESS_MAX_OUTPUT (4 * 1024 * 1024)
+#define SENGOO_BREADTH_COMPRESS_STORED_BLOCK 65535
+#define SENGOO_BREADTH_COMPRESS_MAX_BLOCKS \
+    ((SENGOO_BREADTH_COMPRESS_MAX_INPUT + SENGOO_BREADTH_COMPRESS_STORED_BLOCK - 1) / \
+     SENGOO_BREADTH_COMPRESS_STORED_BLOCK)
+#define SENGOO_BREADTH_COMPRESS_MAX_GZIP_BYTES \
+    (10 + SENGOO_BREADTH_COMPRESS_MAX_INPUT + SENGOO_BREADTH_COMPRESS_MAX_BLOCKS * 5 + 8)
 
 static int sengoo_breadth_last_error = SENGOO_STATUS_OK;
 
@@ -594,20 +602,240 @@ long long sengoo_encoding_hex_encode(
     return (long long)data_len * 2;
 }
 
+static uint32_t sengoo_crc32(const uint8_t* data, size_t len) {
+    uint32_t crc = 0xffffffffu;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            uint32_t mask = 0u - (crc & 1u);
+            crc = (crc >> 1) ^ (0xedb88320u & mask);
+        }
+    }
+    return crc ^ 0xffffffffu;
+}
+
+static void sengoo_write_le16(uint8_t* out, uint16_t value) {
+    out[0] = (uint8_t)(value & 0xffu);
+    out[1] = (uint8_t)((value >> 8) & 0xffu);
+}
+
+static void sengoo_write_le32(uint8_t* out, uint32_t value) {
+    out[0] = (uint8_t)(value & 0xffu);
+    out[1] = (uint8_t)((value >> 8) & 0xffu);
+    out[2] = (uint8_t)((value >> 16) & 0xffu);
+    out[3] = (uint8_t)((value >> 24) & 0xffu);
+}
+
+static uint16_t sengoo_read_le16(const uint8_t* data) {
+    return (uint16_t)data[0] | (uint16_t)((uint16_t)data[1] << 8);
+}
+
+static uint32_t sengoo_read_le32(const uint8_t* data) {
+    return (uint32_t)data[0] | ((uint32_t)data[1] << 8) |
+           ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
+static long long sengoo_breadth_fail_from_copy(long long copied) {
+    if (copied < 0 && -copied > 0) {
+        return sengoo_breadth_fail(-copied);
+    }
+    return sengoo_breadth_fail(SENGOO_STATUS_UNKNOWN);
+}
+
+static int sengoo_compress_output_capacity(long long out_buffer, long long out_capacity, size_t* capacity) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(out_buffer);
+    if (!buffer) {
+        return SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (out_capacity < 0) {
+        return SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    *capacity = buffer->capacity;
+    if ((size_t)out_capacity < *capacity) {
+        *capacity = (size_t)out_capacity;
+    }
+    return SENGOO_STATUS_OK;
+}
+
 long long sengoo_compress_gzip(long long data_ptr, long long data_len, long long out_buffer, long long out_capacity) {
-    (void)data_ptr;
-    (void)data_len;
-    (void)out_buffer;
-    (void)out_capacity;
-    return sengoo_breadth_fail(SENGOO_STATUS_UNSUPPORTED);
+    const uint8_t* data = (const uint8_t*)(intptr_t)data_ptr;
+    if (data_len < 0 || (data_len > 0 && !data)) {
+        return sengoo_breadth_fail(SENGOO_STATUS_INVALID_ARGUMENT);
+    }
+    if (data_len > SENGOO_BREADTH_COMPRESS_MAX_INPUT) {
+        return sengoo_breadth_fail(SENGOO_STATUS_OVERFLOW);
+    }
+
+    size_t writable_capacity = 0;
+    int capacity_status = sengoo_compress_output_capacity(out_buffer, out_capacity, &writable_capacity);
+    if (capacity_status != SENGOO_STATUS_OK) {
+        return sengoo_breadth_fail(capacity_status);
+    }
+
+    size_t input_len = (size_t)data_len;
+    size_t block_count = input_len == 0
+        ? 1
+        : (input_len + SENGOO_BREADTH_COMPRESS_STORED_BLOCK - 1) /
+              SENGOO_BREADTH_COMPRESS_STORED_BLOCK;
+    size_t output_len = 10 + input_len + block_count * 5 + 8;
+    if (output_len > writable_capacity) {
+        return sengoo_breadth_fail(SENGOO_STATUS_BUFFER_TOO_SMALL);
+    }
+
+    uint8_t* scratch = (uint8_t*)malloc(output_len);
+    if (!scratch) {
+        return sengoo_breadth_fail(SENGOO_STATUS_OUT_OF_MEMORY);
+    }
+
+    size_t out = 0;
+    scratch[out++] = 0x1f;
+    scratch[out++] = 0x8b;
+    scratch[out++] = 0x08;
+    scratch[out++] = 0x00;
+    sengoo_write_le32(scratch + out, 0);
+    out += 4;
+    scratch[out++] = 0x00;
+    scratch[out++] = 0xff;
+
+    size_t input_offset = 0;
+    for (;;) {
+        size_t remaining = input_len - input_offset;
+        size_t chunk = remaining > SENGOO_BREADTH_COMPRESS_STORED_BLOCK
+            ? SENGOO_BREADTH_COMPRESS_STORED_BLOCK
+            : remaining;
+        int final = remaining <= SENGOO_BREADTH_COMPRESS_STORED_BLOCK;
+        uint16_t len = (uint16_t)chunk;
+        scratch[out++] = final ? 0x01 : 0x00;
+        sengoo_write_le16(scratch + out, len);
+        out += 2;
+        sengoo_write_le16(scratch + out, (uint16_t)~len);
+        out += 2;
+        if (chunk > 0) {
+            memcpy(scratch + out, data + input_offset, chunk);
+        }
+        out += chunk;
+        input_offset += chunk;
+        if (final) {
+            break;
+        }
+    }
+
+    sengoo_write_le32(scratch + out, sengoo_crc32(data, input_len));
+    out += 4;
+    sengoo_write_le32(scratch + out, (uint32_t)input_len);
+    out += 4;
+
+    long long copied = sengoo_copy_bytes_to_managed_buffer(out_buffer, (const char*)scratch, out);
+    free(scratch);
+    if (copied < 0) {
+        return sengoo_breadth_fail_from_copy(copied);
+    }
+    sengoo_breadth_last_error = SENGOO_STATUS_OK;
+    return (long long)out;
 }
 
 long long sengoo_compress_gunzip(long long data_ptr, long long data_len, long long out_buffer, long long out_capacity) {
-    (void)data_ptr;
-    (void)data_len;
-    (void)out_buffer;
-    (void)out_capacity;
-    return sengoo_breadth_fail(SENGOO_STATUS_UNSUPPORTED);
+    const uint8_t* data = (const uint8_t*)(intptr_t)data_ptr;
+    if (data_len < 0 || (data_len > 0 && !data)) {
+        return sengoo_breadth_fail(SENGOO_STATUS_INVALID_ARGUMENT);
+    }
+    if (data_len > SENGOO_BREADTH_COMPRESS_MAX_GZIP_BYTES) {
+        return sengoo_breadth_fail(SENGOO_STATUS_OVERFLOW);
+    }
+
+    size_t writable_capacity = 0;
+    int capacity_status = sengoo_compress_output_capacity(out_buffer, out_capacity, &writable_capacity);
+    if (capacity_status != SENGOO_STATUS_OK) {
+        return sengoo_breadth_fail(capacity_status);
+    }
+
+    size_t input_len = (size_t)data_len;
+    if (input_len < 23 || data[0] != 0x1f || data[1] != 0x8b) {
+        return sengoo_breadth_fail(SENGOO_STATUS_PARSE);
+    }
+    if (data[2] != 0x08) {
+        return sengoo_breadth_fail(SENGOO_STATUS_UNSUPPORTED);
+    }
+    if (data[3] != 0x00) {
+        return sengoo_breadth_fail(SENGOO_STATUS_UNSUPPORTED);
+    }
+
+    size_t ratio_limit = input_len * 4;
+    size_t output_limit = SENGOO_BREADTH_COMPRESS_MAX_OUTPUT;
+    if (ratio_limit < output_limit) {
+        output_limit = ratio_limit;
+    }
+    uint8_t* scratch = NULL;
+    if (output_limit > 0) {
+        scratch = (uint8_t*)malloc(output_limit);
+        if (!scratch) {
+            return sengoo_breadth_fail(SENGOO_STATUS_OUT_OF_MEMORY);
+        }
+    }
+
+    size_t pos = 10;
+    size_t trailer = input_len - 8;
+    size_t produced = 0;
+    int final = 0;
+    while (pos < trailer) {
+        uint8_t block = data[pos++];
+        if ((block & 0x06u) != 0 || (block & 0xf8u) != 0) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_UNSUPPORTED);
+        }
+        if (pos + 4 > trailer) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_PARSE);
+        }
+        uint16_t len = sengoo_read_le16(data + pos);
+        uint16_t nlen = sengoo_read_le16(data + pos + 2);
+        pos += 4;
+        if ((uint16_t)(len ^ nlen) != 0xffffu || pos + len > trailer) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_PARSE);
+        }
+        size_t next_produced = produced + (size_t)len;
+        if (next_produced < produced) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_OVERFLOW);
+        }
+        if (next_produced > writable_capacity) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_BUFFER_TOO_SMALL);
+        }
+        if (next_produced > output_limit) {
+            free(scratch);
+            return sengoo_breadth_fail(SENGOO_STATUS_OVERFLOW);
+        }
+        if (len > 0) {
+            memcpy(scratch + produced, data + pos, (size_t)len);
+        }
+        produced = next_produced;
+        pos += (size_t)len;
+        final = (block & 0x01u) != 0;
+        if (final) {
+            break;
+        }
+    }
+    if (!final || pos != trailer) {
+        free(scratch);
+        return sengoo_breadth_fail(SENGOO_STATUS_PARSE);
+    }
+
+    uint32_t expected_crc = sengoo_read_le32(data + trailer);
+    uint32_t expected_size = sengoo_read_le32(data + trailer + 4);
+    if ((uint32_t)produced != expected_size || sengoo_crc32(scratch, produced) != expected_crc) {
+        free(scratch);
+        return sengoo_breadth_fail(SENGOO_STATUS_PARSE);
+    }
+
+    long long copied = sengoo_copy_bytes_to_managed_buffer(out_buffer, (const char*)scratch, produced);
+    free(scratch);
+    if (copied < 0) {
+        return sengoo_breadth_fail_from_copy(copied);
+    }
+    sengoo_breadth_last_error = SENGOO_STATUS_OK;
+    return (long long)produced;
 }
 
 /* --- INI subset --- */
@@ -752,7 +980,11 @@ enum {
     SENGOO_NET_ERR_WS_PROTOCOL = 11,
     SENGOO_NET_ERR_HANDLE_NOT_FOUND = 12,
     SENGOO_NET_ERR_INTERNAL = 13,
-    SENGOO_NET_ERR_REMOTE_CLOSED = 14
+    SENGOO_NET_ERR_REMOTE_CLOSED = 14,
+    SENGOO_NET_ERR_TLS_CERT_INVALID = 15,
+    SENGOO_NET_ERR_TLS_HOSTNAME_MISMATCH = 16,
+    SENGOO_NET_ERR_TLS_HANDSHAKE = 17,
+    SENGOO_NET_ERR_TLS_UNAVAILABLE = 18
 };
 
 static int sengoo_net_fallback_last_error = SENGOO_NET_ERR_OK;
@@ -790,8 +1022,33 @@ static const char* sengoo_net_fallback_error_name(long long code) {
         case SENGOO_NET_ERR_HANDLE_NOT_FOUND: return "handle_not_found";
         case SENGOO_NET_ERR_INTERNAL: return "internal_error";
         case SENGOO_NET_ERR_REMOTE_CLOSED: return "remote_closed";
+        case SENGOO_NET_ERR_TLS_CERT_INVALID: return "tls_cert_invalid";
+        case SENGOO_NET_ERR_TLS_HOSTNAME_MISMATCH: return "tls_hostname_mismatch";
+        case SENGOO_NET_ERR_TLS_HANDSHAKE: return "tls_handshake";
+        case SENGOO_NET_ERR_TLS_UNAVAILABLE: return "tls_unavailable";
         default: return "unknown_error";
     }
+}
+
+static char sengoo_net_fallback_ascii_lower(char value) {
+    if (value >= 'A' && value <= 'Z') {
+        return (char)(value - 'A' + 'a');
+    }
+    return value;
+}
+
+static int sengoo_net_fallback_url_has_scheme(long long url, const char* scheme) {
+    const char* text = (const char*)(intptr_t)url;
+    if (!text || !scheme) {
+        return 0;
+    }
+    size_t scheme_len = strlen(scheme);
+    for (size_t i = 0; i < scheme_len; ++i) {
+        if (text[i] == '\0' || sengoo_net_fallback_ascii_lower(text[i]) != scheme[i]) {
+            return 0;
+        }
+    }
+    return text[scheme_len] == ':' && text[scheme_len + 1] == '/' && text[scheme_len + 2] == '/';
 }
 
 static long long sengoo_copy_to_raw_buffer(const char* text, long long buffer, long long capacity) {
@@ -879,16 +1136,26 @@ long long sengoo_udp_close(long long handle) {
 }
 
 long long sengoo_http_get(long long url, long long timeout_ms) {
-    (void)url;
     (void)timeout_ms;
+    if (url == 0) {
+        return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_INVALID_ARGUMENT);
+    }
+    if (sengoo_net_fallback_url_has_scheme(url, "https")) {
+        return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_TLS_UNAVAILABLE);
+    }
     return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
 }
 
 long long sengoo_http_post(long long url, long long body, long long len, long long timeout_ms) {
-    (void)url;
     (void)body;
     (void)len;
     (void)timeout_ms;
+    if (url == 0) {
+        return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_INVALID_ARGUMENT);
+    }
+    if (sengoo_net_fallback_url_has_scheme(url, "https")) {
+        return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_TLS_UNAVAILABLE);
+    }
     return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
 }
 

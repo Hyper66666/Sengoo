@@ -61,6 +61,8 @@ pub enum HIRExpr {
     Call {
         func: Box<HIRExpr>,
         args: Vec<HIRExpr>,
+        /// Byte offset of the call expression in the lowered source text.
+        site_lo: Option<u32>,
     },
 
     /// 方法调用

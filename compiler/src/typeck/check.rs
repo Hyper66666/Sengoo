@@ -34,6 +34,7 @@ mod try_helpers;
 #[derive(Debug, Clone)]
 struct ClassDeclInfo {
     parent: Option<String>,
+    header_traits: Vec<String>,
     fields: Vec<(String, Type)>,
     methods: Vec<Function>,
 }
@@ -77,9 +78,16 @@ pub struct TypeChecker {
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
     try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
+    warnings: Vec<crate::error::CompileWarning>,
+    deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
+    trait_default_methods: HashMap<String, HashMap<String, Function>>,
 }
 
 impl TypeChecker {
+    fn is_async_context_ty(ty: &Ty) -> bool {
+        matches!(&ty.kind, TyKind::Adt { name, .. } if name == "AsyncContext")
+    }
+
     pub fn new() -> Self {
         let env = TypeEnv::new();
         let infer = TypeInfer::with_env(env.clone());
@@ -99,7 +107,33 @@ impl TypeChecker {
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
             try_block_mode_stack: Vec::new(),
+            warnings: Vec::new(),
+            deprecated_decls: HashMap::new(),
+            trait_default_methods: HashMap::new(),
         }
+    }
+
+    pub fn warnings(&self) -> &[crate::error::CompileWarning] {
+        &self.warnings
+    }
+
+    fn load_deprecated_decls(&mut self) {
+        for decl in crate::parser::take_deprecated_decls() {
+            self.deprecated_decls.insert(decl.name.clone(), decl);
+        }
+    }
+
+    pub(super) fn warn_deprecated_use(&mut self, name: &str, span: crate::lexer::Span) {
+        let Some(info) = self.deprecated_decls.get(name).cloned() else {
+            return;
+        };
+        self.warnings
+            .push(crate::error::CompileWarning::deprecated_use(
+                info.kind,
+                info.name,
+                info.message,
+                Some((span.lo, span.hi)),
+            ));
     }
 
     pub fn async_function_names(&self) -> &HashSet<String> {
@@ -143,6 +177,7 @@ impl TypeChecker {
 
     /// Type check a full program, including declarations and function bodies.
     pub fn check_program(&mut self, program: &Program) -> Result<()> {
+        self.load_deprecated_decls();
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
         for decl in &program.decls {
@@ -185,6 +220,15 @@ impl TypeChecker {
                 let name = fn_decl.name.name.clone();
 
                 if fn_decl.abi.is_some() {
+                    if !fn_decl.type_params.is_empty() {
+                        return Err(CompileError::from(TypeckError::ffi_signature(
+                            "ffi::generic_extern",
+                            "generic extern functions are not supported in FFI MVP",
+                            fn_decl.span.lo,
+                            fn_decl.span.hi,
+                        )));
+                    }
+
                     let mut param_types = Vec::new();
                     for param in &fn_decl.params {
                         let ty = self.check_type(&param.ty)?;
@@ -779,9 +823,19 @@ impl TypeChecker {
                 let inner_ty = self.check_expr(expr)?;
                 match &inner_ty.kind {
                     TyKind::Future(result_ty) => Ok(result_ty.as_ref().clone()),
-                    _ => Err(TypeckError::Other(
-                        "await requires a Future value (call to an async function)".to_string(),
-                    )),
+                    _ => {
+                        let type_key = crate::typeck::r#trait::type_key(&inner_ty);
+                        self.impl_registry
+                            .get_trait_impl("Future", &type_key)
+                            .and_then(|info| info.trait_args.first())
+                            .cloned()
+                            .ok_or_else(|| {
+                                TypeckError::Other(
+                                    "await requires a Future value or a type implementing Future<T>"
+                                        .to_string(),
+                                )
+                            })
+                    }
                 }
             }
             ExprKind::AsyncBlock(block) => {
@@ -796,6 +850,11 @@ impl TypeChecker {
                     .as_simple()
                     .map(|ident| ident.name.clone())
                     .unwrap_or_default();
+                if name == "AsyncContext" {
+                    return Err(TypeckError::Other(
+                        "AsyncContext is opaque and cannot be constructed by user code".to_string(),
+                    ));
+                }
 
                 let field_defs = self
                     .struct_field_defs
@@ -1000,6 +1059,52 @@ impl TypeChecker {
             TyKind::Adt { args, .. } => args.iter().any(Self::ty_contains_future_escape),
             _ => false,
         }
+    }
+
+    pub(super) fn is_cross_thread_send_ty(&self, ty: &Ty) -> bool {
+        let resolved = self.infer.apply_subst(ty);
+        self.ty_is_cross_thread_send(&resolved)
+    }
+
+    fn ty_is_cross_thread_send(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Unit | TyKind::Str => true,
+            TyKind::Tuple(types) => types
+                .iter()
+                .all(|inner| self.ty_is_cross_thread_send(inner)),
+            TyKind::Array(elem, _) | TyKind::Slice(elem) => self.ty_is_cross_thread_send(elem),
+            TyKind::Adt { name, args } => {
+                if Self::is_non_send_runtime_adt(name) {
+                    return false;
+                }
+                args.iter().all(|inner| self.ty_is_cross_thread_send(inner))
+            }
+            TyKind::Future(_) | TyKind::Ref(_, _) | TyKind::Ptr(_) => false,
+            TyKind::Fn { .. } => true,
+            _ => false,
+        }
+    }
+
+    fn is_non_send_runtime_adt(name: &str) -> bool {
+        matches!(
+            name,
+            "Buffer"
+                | "AsyncContext"
+                | "JsonValue"
+                | "ProcessHandle"
+                | "ProcessCommand"
+                | "ProcessOutput"
+                | "DirHandle"
+                | "FileHandle"
+                | "FfiLibrary"
+                | "FfiSymbol"
+        )
+    }
+
+    pub(super) fn cross_thread_send_error(binding: &str) -> TypeckError {
+        TypeckError::Other(format!(
+            "cross-thread spawn_blocking_i64 capture `{binding}` is not Send"
+        ))
     }
 }
 

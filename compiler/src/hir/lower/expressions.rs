@@ -194,6 +194,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                 .iter()
                 .filter_map(|a| lower_expr(a, type_env).ok())
                 .collect(),
+            site_lo: Some(expr.span.lo),
         },
         ast::ExprKind::MethodCall {
             receiver,

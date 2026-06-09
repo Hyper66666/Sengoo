@@ -1,6 +1,6 @@
 use crate::formatting::full_document_range;
 use sengoo_compiler::error::{ParseError, TypeError};
-use sengoo_compiler::{compile_to_ir, CompileError};
+use sengoo_compiler::{collect_compile_warnings, compile_to_ir, CompileError, CompileWarning};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -35,9 +35,20 @@ struct SgcErrorPayload {
     #[allow(dead_code)]
     kind: Option<String>,
     stage: Option<String>,
+    code: Option<String>,
     message: Option<String>,
     #[serde(default)]
     details: Vec<String>,
+    #[serde(default)]
+    location: Option<SgcErrorLocationPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SgcWarningPayload {
+    kind: Option<String>,
+    severity: Option<String>,
+    code: Option<String>,
+    message: Option<String>,
     #[serde(default)]
     location: Option<SgcErrorLocationPayload>,
 }
@@ -288,7 +299,8 @@ fn diagnostic_range_from_parse_error(content: &str, error: &ParseError) -> Optio
         | ParseError::UnclosedParen(span)
         | ParseError::InvalidStructField { span, .. }
         | ParseError::InvalidStructFieldShorthand { span }
-        | ParseError::InvalidPatternAt { span, .. } => source_span_to_range(content, span),
+        | ParseError::InvalidPatternAt { span, .. }
+        | ParseError::UnsupportedAttribute { span, .. } => source_span_to_range(content, span),
         ParseError::InvalidPattern(_)
         | ParseError::DuplicateParam(_)
         | ParseError::UnexpectedEof => None,
@@ -314,6 +326,46 @@ fn diagnostic_range_from_compile_error(content: &str, error: &CompileError) -> O
     }
 }
 
+fn bracketed_diagnostic_code(message: &str) -> Option<String> {
+    let start = message.find('[')? + 1;
+    let rest = &message[start..];
+    let end = rest.find(']')?;
+    let code = &rest[..end];
+    (!code.is_empty()).then(|| code.to_string())
+}
+
+fn async_user_future_diagnostic_code(message: &str) -> Option<String> {
+    if message.contains("Poll<T> must contain `is_ready: bool` followed by `value: T`")
+        || message.contains("Future<T>::poll must return Poll<T>")
+        || message.contains("Future<T>::poll must use `&mut self` receiver")
+    {
+        Some("async::user_future_contract".to_string())
+    } else {
+        None
+    }
+}
+
+fn diagnostic_code_from_compile_error(error: &CompileError) -> Option<String> {
+    match error {
+        CompileError::ParseError(ParseError::UnsupportedAttribute { .. }) => {
+            Some("attributes::unsupported_attribute".to_string())
+        }
+        CompileError::TypeckError(error) => error
+            .stable_code()
+            .map(str::to_string)
+            .or_else(|| async_user_future_diagnostic_code(&error.to_string()))
+            .or_else(|| bracketed_diagnostic_code(&error.to_string())),
+        CompileError::MirLower(message)
+        | CompileError::HirLower(message)
+        | CompileError::Codegen(message) => async_user_future_diagnostic_code(message)
+            .or_else(|| bracketed_diagnostic_code(message)),
+        CompileError::AsyncUnsupportedType { .. } => {
+            Some("async::unsupported_frame_type".to_string())
+        }
+        _ => bracketed_diagnostic_code(&error.to_string()),
+    }
+}
+
 fn fallback_diagnostic_range_from_compiler(content: &str) -> Option<Range> {
     compile_to_ir(content)
         .err()
@@ -334,22 +386,53 @@ fn compile_error_stage(error: &CompileError) -> &'static str {
 }
 
 fn embedded_compiler_diagnostics(content: &str) -> Vec<Diagnostic> {
-    let Err(error) = compile_to_ir(content) else {
-        return Vec::new();
-    };
-    let range = diagnostic_range_from_compile_error(content, &error)
-        .unwrap_or_else(|| full_document_range(content));
+    match compile_to_ir(content) {
+        Ok(_) => collect_compile_warnings(content)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|warning| diagnostic_from_compile_warning(content, warning))
+            .collect(),
+        Err(error) => {
+            let range = diagnostic_range_from_compile_error(content, &error)
+                .unwrap_or_else(|| full_document_range(content));
 
-    vec![Diagnostic {
+            vec![Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String(
+                    diagnostic_code_from_compile_error(&error)
+                        .unwrap_or_else(|| compile_error_stage(&error).to_string()),
+                )),
+                source: Some("sengoo-compiler".to_string()),
+                message: error.to_string(),
+                ..Default::default()
+            }]
+        }
+    }
+}
+
+fn warning_subject_range(content: &str, message: &str) -> Option<Range> {
+    let name = message.split('`').nth(1)?;
+    let lo = content.find(name)? as u32;
+    Some(range_from_byte_span(content, lo, lo + name.len() as u32))
+}
+
+fn diagnostic_from_compile_warning(content: &str, warning: CompileWarning) -> Diagnostic {
+    let message = warning.to_string();
+    let range = warning
+        .span()
+        .filter(|(lo, hi)| hi > lo)
+        .map(|(lo, hi)| range_from_byte_span(content, lo, hi))
+        .or_else(|| warning_subject_range(content, &message))
+        .unwrap_or_else(|| full_document_range(content));
+    Diagnostic {
         range,
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: Some(NumberOrString::String(
-            compile_error_stage(&error).to_string(),
-        )),
+        severity: Some(DiagnosticSeverity::WARNING),
+        code: Some(NumberOrString::String(warning.code().to_string())),
         source: Some("sengoo-compiler".to_string()),
-        message: error.to_string(),
+        message,
         ..Default::default()
-    }]
+    }
 }
 
 fn temporary_source_path(uri: &Url) -> PathBuf {
@@ -395,6 +478,16 @@ fn diagnostics_from_failed_sgc_output(content: &str, stderr: &str) -> Vec<Diagno
     let range = diagnostic_range_from_payload(content, &payload)
         .or_else(|| fallback_diagnostic_range_from_compiler(content))
         .unwrap_or_else(|| full_document_range(content));
+    let code = payload
+        .code
+        .clone()
+        .or_else(|| {
+            payload
+                .message
+                .as_deref()
+                .and_then(async_user_future_diagnostic_code)
+        })
+        .or_else(|| payload.stage.clone());
     let mut message = payload
         .message
         .unwrap_or_else(|| "compilation failed".to_string());
@@ -406,11 +499,41 @@ fn diagnostics_from_failed_sgc_output(content: &str, stderr: &str) -> Vec<Diagno
     vec![Diagnostic {
         range,
         severity: Some(DiagnosticSeverity::ERROR),
-        code: payload.stage.map(NumberOrString::String),
+        code: code.map(NumberOrString::String),
         source: Some("sgc".to_string()),
         message,
         ..Default::default()
     }]
+}
+
+fn diagnostics_from_successful_sgc_output(content: &str, stderr: &str) -> Vec<Diagnostic> {
+    stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str::<SgcWarningPayload>(line.trim()).ok())
+        .filter(|payload| {
+            payload.kind.as_deref() == Some("compile_warning")
+                && payload.severity.as_deref() == Some("warning")
+        })
+        .map(|payload| {
+            let message = payload
+                .message
+                .unwrap_or_else(|| "compiler warning".to_string());
+            let range = payload
+                .location
+                .as_ref()
+                .and_then(|location| diagnostic_range_from_location(content, location))
+                .or_else(|| warning_subject_range(content, &message))
+                .unwrap_or_else(|| full_document_range(content));
+            Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: payload.code.map(NumberOrString::String),
+                source: Some("sgc".to_string()),
+                message,
+                ..Default::default()
+            }
+        })
+        .collect()
 }
 
 fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> Vec<Diagnostic> {
@@ -432,7 +555,10 @@ fn compiler_diagnostics_from_sgc_tool(tool: &str, uri: &Url, content: &str) -> V
         return embedded_compiler_diagnostics(content);
     };
     if output.status.success() {
-        return Vec::new();
+        return diagnostics_from_successful_sgc_output(
+            content,
+            &String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -666,6 +792,7 @@ mod tests {
             ok: Some(false),
             kind: Some("compile_error".to_string()),
             stage: Some("parse".to_string()),
+            code: None,
             message: Some("unexpected token".to_string()),
             details: vec!["line 2, col 5".to_string()],
             location: None,
@@ -685,6 +812,7 @@ mod tests {
             ok: Some(false),
             kind: Some("compile_error".to_string()),
             stage: Some("parse".to_string()),
+            code: None,
             message: Some("unexpected token".to_string()),
             details: vec!["line 1, col 1".to_string()],
             location: Some(SgcErrorLocationPayload {
@@ -736,6 +864,152 @@ mod tests {
         assert!(diagnostics[0]
             .message
             .contains("definitely_missing_realworld_module"));
+    }
+
+    #[test]
+    fn sgc_json_diagnostic_code_is_preserved_for_lsp() {
+        let src = "async def main() -> i64 { 0 }\n";
+        let stderr = r#"{
+  "ok": false,
+  "kind": "compile_error",
+  "stage": "mir_lower",
+  "code": "async::user_future_contract",
+  "message": "Poll<T> must contain `is_ready: bool` followed by `value: T`",
+  "details": []
+}"#;
+
+        let diagnostics = diagnostics_from_failed_sgc_output(src, stderr);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String(
+                "async::user_future_contract".to_string()
+            ))
+        );
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sgc"));
+    }
+
+    fn assert_embedded_user_future_contract_code(src: &str, expected_message: &str) {
+        let diagnostics = embedded_compiler_diagnostics(src);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sengoo-compiler"));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String(
+                "async::user_future_contract".to_string()
+            ))
+        );
+        assert!(
+            diagnostics[0].message.contains(expected_message),
+            "diagnostic should contain `{expected_message}`, got {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn embedded_compiler_reports_user_future_contract_codes() {
+        assert_embedded_user_future_contract_code(
+            r#"
+struct Poll<T> {
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { value: 0 }
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#,
+            "Poll<T> must contain",
+        );
+
+        assert_embedded_user_future_contract_code(
+            r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> i64 {
+        0
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(&mut self, ctx: AsyncContext) -> i64 {
+        self.value
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#,
+            "Future<T>::poll must return Poll<T>",
+        );
+
+        assert_embedded_user_future_contract_code(
+            r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#,
+            "Future<T>::poll must use `&mut self` receiver",
+        );
     }
 
     #[test]
@@ -798,6 +1072,92 @@ mod tests {
             "message should include embedded compiler error: {}",
             diagnostics[0].message
         );
+    }
+
+    #[test]
+    fn deprecated_warning_from_sgc_json_maps_to_lsp_warning() {
+        let src = r#"
+#[deprecated("use new_main instead")]
+def old_main() -> i64 { 1 }
+
+def main() -> i64 {
+    old_main()
+}
+"#;
+        let lo = src.rfind("old_main").expect("call site should exist") as u32;
+        let hi = lo + "old_main".len() as u32;
+        let stderr = format!(
+            r#"{{"ok":true,"kind":"compile_warning","severity":"warning","code":"attributes::deprecated_use","message":"use of deprecated fn `old_main`: use new_main instead","location":{{"span":{{"lo":{lo},"hi":{hi}}}}}}}"#
+        );
+
+        let diagnostics = diagnostics_from_successful_sgc_output(src, &stderr);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String(
+                "attributes::deprecated_use".to_string()
+            ))
+        );
+        assert!(diagnostics[0].message.contains("old_main"));
+        assert_eq!(diagnostics[0].range.start.line, 5);
+        assert_eq!(diagnostics[0].range.start.character, 4);
+    }
+
+    #[test]
+    fn embedded_deprecated_warning_prefers_compiler_span_over_text_search() {
+        let src = r#"
+#[deprecated("use new_main instead")]
+def old_main() -> i64 { 1 }
+
+def main() -> i64 {
+    old_main()
+}
+"#;
+        let lo = src.rfind("old_main").expect("call site should exist") as u32;
+        let warning = CompileWarning::deprecated_use(
+            "fn",
+            "old_main",
+            Some("use new_main instead".to_string()),
+            Some((lo, lo + "old_main".len() as u32)),
+        );
+
+        let diagnostic = diagnostic_from_compile_warning(src, warning);
+
+        assert_eq!(diagnostic.source.as_deref(), Some("sengoo-compiler"));
+        assert_eq!(diagnostic.range.start.line, 5);
+        assert_eq!(diagnostic.range.start.character, 4);
+    }
+
+    #[test]
+    fn cfg_false_declaration_produces_no_embedded_diagnostic() {
+        let other_os = if cfg!(target_os = "windows") {
+            "linux"
+        } else {
+            "windows"
+        };
+        let src = format!(
+            r#"
+#[cfg(target_os = "{other_os}")]
+def hidden() -> i64 {{ missing_name }}
+
+def main() -> i64 {{ 0 }}
+"#
+        );
+
+        assert!(embedded_compiler_diagnostics(&src).is_empty());
+    }
+
+    #[test]
+    fn unsupported_attribute_maps_to_its_source_range() {
+        let src = "#[must_use]\nstruct Bad {}\n";
+        let diagnostics = embedded_compiler_diagnostics(src);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 0);
+        assert_eq!(diagnostics[0].range.start.character, 2);
+        assert!(diagnostics[0].message.contains("unsupported attribute"));
     }
 
     #[test]

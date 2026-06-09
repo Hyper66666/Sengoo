@@ -1,0 +1,16 @@
+// Canonical async future surface for user-defined awaitables.
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+// Opaque poll-scoped context; valid only for the dynamic extent of one `poll` call.
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}

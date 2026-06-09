@@ -2,9 +2,10 @@ use miette::{IntoDiagnostic, Result};
 use sengoo_compiler::hir::HIRItem;
 use sengoo_compiler::mir::MirFunction;
 use sengoo_compiler::{
-    collect_ffi_codegen_config, lower_ast, lower_hir_with_options, Codegen, FfiCodegenConfig,
-    MirLowerOptions, MirOptLevel, Parser, TypeChecker,
+    collect_ffi_codegen_config, lower_ast, lower_hir_with_options, AssertCallsiteContext, Codegen,
+    FfiCodegenConfig, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
 };
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::BufWriter;
@@ -17,17 +18,18 @@ use crate::{resolve_frontend_memory_mode, FrontendMemoryMode};
 mod ast_pruning;
 mod hir_pruning;
 mod mir_pruning;
+mod source_pruning;
 
 use ast_pruning::{
-    prune_ast_functions_by_name_set, prune_unreachable_ast_functions, reachable_ast_function_names,
-    should_filter_typecheck_function_bodies_in_default_mode,
+    prune_unreachable_ast_functions, should_filter_typecheck_function_bodies_in_default_mode,
     should_prune_unreachable_ast_in_default_mode,
 };
 use hir_pruning::prune_unreachable_hir_functions;
 use mir_pruning::prune_unreachable_mir_functions;
+use source_pruning::prune_unreachable_plain_source_functions;
 
 const DEFAULT_HIR_PRUNE_MIN_FUNCTIONS: usize = 20_000;
-const DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS: usize = 120_000;
+const DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS: usize = DEFAULT_HIR_PRUNE_MIN_FUNCTIONS;
 const LARGE_PROJECT_MODE_AUTO: i8 = 0;
 const LARGE_PROJECT_MODE_ENABLED: i8 = 1;
 const LARGE_PROJECT_MODE_DISABLED: i8 = -1;
@@ -181,6 +183,7 @@ pub(crate) fn compile_source_with_phase_timings(
         source,
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
+        None,
     )?;
 
     let codegen_start = Instant::now();
@@ -206,10 +209,15 @@ pub(crate) fn compile_source_with_phase_timings(
     Ok((llvm_ir, phases))
 }
 
-fn compile_frontend_to_mir_with_phase_timings(
-    source: &str,
+pub(crate) fn user_source_base_offset(expanded_source: &str, root_source: &str) -> u32 {
+    expanded_source.rfind(root_source).unwrap_or(0) as u32
+}
+
+fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
+    source: S,
     opt_level: u8,
     low_memory_mode: bool,
+    assert_callsite: Option<AssertCallsiteContext>,
 ) -> Result<(Vec<MirFunction>, FfiCodegenConfig, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
 
@@ -222,14 +230,43 @@ fn compile_frontend_to_mir_with_phase_timings(
         ast_prune_ms,
         ast_pruned_count,
         ast_prune_applied,
+        source_prune_ms,
+        source_pruned_count,
+        source_prune_applied,
         hir_prune_ms,
         hir_pruned_count,
         hir_prune_applied,
     ) = {
+        let source_ref = source.as_ref();
+        let mut source_prune_ms = 0.0;
+        let mut source_pruned_count = 0usize;
+        let mut source_prune_applied = false;
+        let mut pruned_source = None;
+        if large_project_optimization_enabled() {
+            let source_prune_start = Instant::now();
+            if let Some(result) =
+                prune_unreachable_plain_source_functions(source_ref, typeck_filter_min_functions())
+            {
+                source_prune_ms = source_prune_start.elapsed().as_secs_f64() * 1000.0;
+                source_pruned_count = result.removed_functions;
+                source_prune_applied = true;
+                pruned_source = Some(result.source);
+            } else {
+                source_prune_ms = source_prune_start.elapsed().as_secs_f64() * 1000.0;
+            }
+        }
+        let parse_input = pruned_source
+            .as_deref()
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Borrowed(source_ref));
         let parse_start = Instant::now();
-        let mut program =
-            Some(Parser::parse(source).map_err(|e| miette::miette!("parse failed: {}", e))?);
+        let mut program = Some(
+            Parser::parse(parse_input.as_ref())
+                .map_err(|e| miette::miette!("parse failed: {}", e))?,
+        );
         let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+        drop(parse_input);
+        drop(source);
 
         let mut ast_prune_ms = 0.0;
         let mut ast_pruned_count = 0usize;
@@ -242,26 +279,16 @@ fn compile_frontend_to_mir_with_phase_timings(
             ast_prune_applied = true;
         }
 
-        let reachable_typecheck_bodies = if !low_memory_mode
+        if !low_memory_mode
             && should_filter_typecheck_function_bodies_in_default_mode(
                 program.as_ref().expect("program present before typecheck"),
-            ) {
-            reachable_ast_function_names(
-                program.as_ref().expect("program present before typecheck"),
             )
-        } else {
-            None
-        };
-
-        if let Some(reachable) = reachable_typecheck_bodies.as_ref() {
+        {
             let ast_prune_start = Instant::now();
-            let removed = prune_ast_functions_by_name_set(
-                program.as_mut().expect("program present"),
-                reachable,
-            );
+            ast_pruned_count =
+                prune_unreachable_ast_functions(program.as_mut().expect("program present"));
             ast_prune_ms += ast_prune_start.elapsed().as_secs_f64() * 1000.0;
-            ast_pruned_count += removed;
-            ast_prune_applied = ast_prune_applied || removed > 0;
+            ast_prune_applied = ast_prune_applied || ast_pruned_count > 0;
         }
 
         let typeck_start = Instant::now();
@@ -272,7 +299,8 @@ fn compile_frontend_to_mir_with_phase_timings(
         let async_functions = checker.async_function_names().clone();
         let mut type_env = Some(checker.into_env());
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
-        if !low_memory_mode
+        if !ast_prune_applied
+            && !low_memory_mode
             && should_prune_unreachable_ast_in_default_mode(
                 program.as_ref().expect("program present after typeck"),
             )
@@ -313,11 +341,13 @@ fn compile_frontend_to_mir_with_phase_timings(
         }
         let ffi_codegen = collect_ffi_codegen_config(&hir_module);
         let mir_lower_start = Instant::now();
-        let mut mir_fns = lower_hir_with_options(
-            &hir_module.items,
-            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone()),
-        )
-        .map_err(|e| miette::miette!("{}", e))?;
+        let mut mir_options =
+            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone());
+        if let Some(context) = assert_callsite {
+            mir_options = mir_options.with_assert_callsite_context(context);
+        }
+        let mut mir_fns = lower_hir_with_options(&hir_module.items, mir_options)
+            .map_err(|e| miette::miette!("{}", e))?;
 
         // Expand async functions into frame-backed __start/__poll/__result helpers
         if !async_functions.is_empty() {
@@ -365,6 +395,9 @@ fn compile_frontend_to_mir_with_phase_timings(
             ast_prune_ms,
             ast_pruned_count,
             ast_prune_applied,
+            source_prune_ms,
+            source_pruned_count,
+            source_prune_applied,
             hir_prune_ms,
             hir_pruned_count,
             hir_prune_applied,
@@ -372,6 +405,13 @@ fn compile_frontend_to_mir_with_phase_timings(
     };
 
     phases.insert("parse".to_string(), parse_ms);
+    if source_prune_applied {
+        phases.insert("source_prune".to_string(), source_prune_ms);
+        phases.insert(
+            "source_prune_removed".to_string(),
+            source_pruned_count as f64,
+        );
+    }
     phases.insert("typeck".to_string(), typeck_ms);
     if ast_prune_applied {
         phases.insert("ast_prune".to_string(), ast_prune_ms);
@@ -398,23 +438,29 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
     opt_level: u8,
     llvm_path: &Path,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
-    compile_source_to_llvm_file_with_phase_timings_with_mode(source, opt_level, llvm_path, None)
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source, opt_level, llvm_path, None, None, None,
+    )
 }
 
-pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
-    source: &str,
+pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<str>>(
+    source: S,
     opt_level: u8,
     llvm_path: &Path,
     forced_memory_mode: Option<FrontendMemoryMode>,
+    assert_callsite: Option<AssertCallsiteContext>,
+    target_triple: Option<&str>,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
     let resolved_memory_mode =
-        forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.len()));
+        forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.as_ref().len()));
     let (mir_fns, ffi_codegen, mut phases) = compile_frontend_to_mir_with_phase_timings(
         source,
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
+        assert_callsite,
     )?;
 
+    let codegen_target = target_triple.map(str::to_string);
     let codegen_start = Instant::now();
     let mut effective_mode = resolved_memory_mode;
     let stream_result = if matches!(
@@ -429,7 +475,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
             )
         })?;
         let mut writer = BufWriter::new(file);
-        let mut codegen = Codegen::with_ffi(ffi_codegen.clone());
+        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen.clone(), codegen_target.clone());
         codegen
             .codegen_to_writer(&mir_fns, &mut writer)
             .map_err(|e| miette::miette!("codegen failed: {}", e))
@@ -439,7 +485,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
 
     if let Err(_err) = stream_result {
         effective_mode = FrontendMemoryMode::Legacy;
-        let mut codegen = Codegen::with_ffi(ffi_codegen.clone());
+        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen.clone(), codegen_target.clone());
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;
@@ -447,7 +493,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode(
             .into_diagnostic()
             .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
     } else if matches!(resolved_memory_mode, FrontendMemoryMode::Legacy) {
-        let mut codegen = Codegen::with_ffi(ffi_codegen);
+        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen, codegen_target);
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;
@@ -496,7 +542,8 @@ pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
     }
 
     // Time-valued phases, in pipeline execution order.
-    const TIME_PHASES: [&str; 8] = [
+    const TIME_PHASES: [&str; 9] = [
+        "source_prune",
         "parse",
         "typeck",
         "ast_prune",
@@ -507,7 +554,8 @@ pub(crate) fn maybe_print_phase_timings(phases: &BTreeMap<String, f64>) {
         "link",
     ];
     // Frontend = everything before object codegen.
-    const FRONTEND_PHASES: [&str; 6] = [
+    const FRONTEND_PHASES: [&str; 7] = [
+        "source_prune",
         "parse",
         "typeck",
         "ast_prune",
@@ -667,6 +715,21 @@ mod tests {
         Parser::parse(source).expect("parse should succeed")
     }
 
+    #[test]
+    fn default_typeck_filter_threshold_covers_100k_scale_bucket() {
+        // `advanced_pipeline_bench.py::make_scale_source_sengoo(100000)` emits
+        // max(50, loc / 4) functions. Keep the default filter threshold low
+        // enough that the 100k production gate bucket avoids full cold-body
+        // typechecking for unreachable functions.
+        assert_eq!(
+            super::DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS,
+            super::DEFAULT_HIR_PRUNE_MIN_FUNCTIONS
+        );
+        const {
+            assert!(super::DEFAULT_TYPECK_FILTER_MIN_FUNCTIONS <= 25_000);
+        }
+    }
+
     fn ast_function_names(program: &AstProgram) -> HashSet<String> {
         program
             .decls
@@ -701,6 +764,34 @@ def main() -> i64 {
         assert_eq!(removed, 1);
         assert!(names.contains("main"));
         assert!(names.contains("keep"));
+        assert!(!names.contains("dead"));
+    }
+
+    #[test]
+    fn prune_unreachable_hir_functions_keeps_contract_reachable_helpers() {
+        let source = r#"
+def helper() -> bool {
+    true
+}
+
+def dead() -> bool {
+    true
+}
+
+def main() -> i64
+requires helper()
+{
+    1
+}
+"#;
+        let mut items = lower_source_to_hir_items(source);
+
+        let removed = prune_unreachable_hir_functions(&mut items);
+        let names = function_names(&items);
+
+        assert_eq!(removed, 1);
+        assert!(names.contains("main"));
+        assert!(names.contains("helper"));
         assert!(!names.contains("dead"));
     }
 
@@ -748,6 +839,34 @@ def main() -> i64 {
         assert_eq!(removed, 1);
         assert!(names.contains("main"));
         assert!(names.contains("keep"));
+        assert!(!names.contains("dead"));
+    }
+
+    #[test]
+    fn prune_unreachable_ast_functions_keeps_contract_reachable_helpers() {
+        let source = r#"
+def helper() -> bool {
+    true
+}
+
+def dead() -> bool {
+    true
+}
+
+def main() -> i64
+requires helper()
+{
+    1
+}
+"#;
+        let mut program = lower_source_to_ast(source);
+
+        let removed = prune_unreachable_ast_functions(&mut program);
+        let names = ast_function_names(&program);
+
+        assert_eq!(removed, 1);
+        assert!(names.contains("main"));
+        assert!(names.contains("helper"));
         assert!(!names.contains("dead"));
     }
 

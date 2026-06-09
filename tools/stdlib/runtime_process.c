@@ -37,6 +37,7 @@ typedef struct {
     int capture_stdout;
     int capture_stderr;
     long long timeout_ms;
+    long long pipe_stdout_upstream_handle;
     int closed;
 } SengooProcessCommand;
 
@@ -505,7 +506,13 @@ static int sengoo_process_windows_pipe_read_available(HANDLE handle, char** data
     return 1;
 }
 
-static long long sengoo_process_command_run_platform(SengooProcessCommand* command) {
+static long long sengoo_process_command_run_platform_with_stdin(
+    SengooProcessCommand* command,
+    const char* stdin_data,
+    size_t stdin_len) {
+    if (stdin_len > 0 && !stdin_data) {
+        return 0;
+    }
     char* command_line = sengoo_windows_process_command_line_dyn(command);
     if (!command_line) {
         return 0;
@@ -520,9 +527,23 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     HANDLE stdout_write = NULL;
     HANDLE stderr_read = NULL;
     HANDLE stderr_write = NULL;
+    HANDLE stdin_read = NULL;
+    HANDLE stdin_write = NULL;
+    int provide_stdin = stdin_data != NULL;
+    if (provide_stdin) {
+        if (!CreatePipe(&stdin_read, &stdin_write, &security, 0)
+            || !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0)) {
+            if (stdin_read) CloseHandle(stdin_read);
+            if (stdin_write) CloseHandle(stdin_write);
+            free(command_line);
+            return 0;
+        }
+    }
     if (command->capture_stdout) {
         if (!CreatePipe(&stdout_read, &stdout_write, &security, 0)
             || !SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0)) {
+            if (stdin_read) CloseHandle(stdin_read);
+            if (stdin_write) CloseHandle(stdin_write);
             free(command_line);
             return 0;
         }
@@ -532,6 +553,8 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
             || !SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0)) {
             if (stdout_read) CloseHandle(stdout_read);
             if (stdout_write) CloseHandle(stdout_write);
+            if (stdin_read) CloseHandle(stdin_read);
+            if (stdin_write) CloseHandle(stdin_write);
             free(command_line);
             return 0;
         }
@@ -544,7 +567,7 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     memset(&process_info, 0, sizeof(process_info));
     startup_info.cb = sizeof(startup_info);
     startup_info.dwFlags = STARTF_USESTDHANDLES;
-    startup_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup_info.hStdInput = provide_stdin ? stdin_read : GetStdHandle(STD_INPUT_HANDLE);
     startup_info.hStdOutput = command->capture_stdout ? stdout_write : GetStdHandle(STD_OUTPUT_HANDLE);
     startup_info.hStdError = command->capture_stderr ? stderr_write : GetStdHandle(STD_ERROR_HANDLE);
 
@@ -568,10 +591,30 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (stderr_write) {
         CloseHandle(stderr_write);
     }
+    if (stdin_read) {
+        CloseHandle(stdin_read);
+    }
     if (!created) {
         if (stdout_read) CloseHandle(stdout_read);
         if (stderr_read) CloseHandle(stderr_read);
+        if (stdin_write) CloseHandle(stdin_write);
         return 0;
+    }
+
+    if (stdin_write) {
+        size_t offset = 0;
+        while (offset < stdin_len) {
+            DWORD chunk = (DWORD)((stdin_len - offset) > (size_t)MAXDWORD
+                ? MAXDWORD
+                : (stdin_len - offset));
+            DWORD written = 0;
+            if (!WriteFile(stdin_write, stdin_data + offset, chunk, &written, NULL)
+                || written == 0) {
+                break;
+            }
+            offset += (size_t)written;
+        }
+        CloseHandle(stdin_write);
     }
 
     SengooProcessOutput* output = sengoo_process_output_new();
@@ -714,7 +757,13 @@ static int sengoo_process_read_available_fd(int fd, char** data, size_t* len, si
     }
 }
 
-static long long sengoo_process_command_run_platform(SengooProcessCommand* command) {
+static long long sengoo_process_command_run_platform_with_stdin(
+    SengooProcessCommand* command,
+    const char* stdin_data,
+    size_t stdin_len) {
+    if (stdin_len > 0 && !stdin_data) {
+        return 0;
+    }
     char** argv = sengoo_process_build_argv(command);
     if (!argv) {
         return 0;
@@ -726,9 +775,18 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     }
 
     int startup_pipe[2] = {-1, -1};
+    int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
     if (pipe(startup_pipe) != 0) {
+        free(argv);
+        sengoo_process_free_envp(clear_envp);
+        return 0;
+    }
+    int provide_stdin = stdin_data != NULL;
+    if (provide_stdin && pipe(stdin_pipe) != 0) {
+        close(startup_pipe[0]);
+        close(startup_pipe[1]);
         free(argv);
         sengoo_process_free_envp(clear_envp);
         return 0;
@@ -737,6 +795,8 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (flags < 0 || fcntl(startup_pipe[1], F_SETFD, flags | FD_CLOEXEC) != 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
+        if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+        if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
         free(argv);
         sengoo_process_free_envp(clear_envp);
         return 0;
@@ -744,6 +804,8 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (command->capture_stdout && pipe(stdout_pipe) != 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
+        if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+        if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
         free(argv);
         sengoo_process_free_envp(clear_envp);
         return 0;
@@ -751,6 +813,8 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (command->capture_stderr && pipe(stderr_pipe) != 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
+        if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+        if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
         if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
         if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
         free(argv);
@@ -762,6 +826,8 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (pid < 0) {
         close(startup_pipe[0]);
         close(startup_pipe[1]);
+        if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+        if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
         if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
         if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
         if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
@@ -773,6 +839,11 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
 
     if (pid == 0) {
         close(startup_pipe[0]);
+        if (provide_stdin) {
+            close(stdin_pipe[1]);
+            dup2(stdin_pipe[0], STDIN_FILENO);
+            close(stdin_pipe[0]);
+        }
         if (command->capture_stdout) {
             close(stdout_pipe[0]);
             dup2(stdout_pipe[1], STDOUT_FILENO);
@@ -806,6 +877,7 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     }
 
     close(startup_pipe[1]);
+    if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
     if (stdout_pipe[1] >= 0) close(stdout_pipe[1]);
     if (stderr_pipe[1] >= 0) close(stderr_pipe[1]);
     sengoo_process_make_nonblocking(stdout_pipe[0]);
@@ -820,11 +892,39 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
     if (startup_read != 0) {
         int status = 0;
         waitpid(pid, &status, 0);
+        if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
         if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
         if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
         free(argv);
         sengoo_process_free_envp(clear_envp);
         return 0;
+    }
+
+    if (stdin_pipe[1] >= 0) {
+        size_t offset = 0;
+        int write_ok = 1;
+        while (offset < stdin_len) {
+            ssize_t written = write(stdin_pipe[1], stdin_data + offset, stdin_len - offset);
+            if (written > 0) {
+                offset += (size_t)written;
+                continue;
+            }
+            if (written < 0 && errno == EINTR) {
+                continue;
+            }
+            write_ok = 0;
+            break;
+        }
+        close(stdin_pipe[1]);
+        if (!write_ok) {
+            kill(pid, SIGKILL);
+            waitpid(pid, NULL, 0);
+            if (stdout_pipe[0] >= 0) close(stdout_pipe[0]);
+            if (stderr_pipe[0] >= 0) close(stderr_pipe[0]);
+            free(argv);
+            sengoo_process_free_envp(clear_envp);
+            return 0;
+        }
     }
 
     SengooProcessOutput* output = sengoo_process_output_new();
@@ -887,10 +987,19 @@ static long long sengoo_process_command_run_platform(SengooProcessCommand* comma
 }
 #endif
 
+static long long sengoo_process_command_run_platform(SengooProcessCommand* command) {
+    return sengoo_process_command_run_platform_with_stdin(command, NULL, 0);
+}
+
+static long long sengoo_process_command_run_pipeline(SengooProcessCommand* final_command);
+
 long long sengoo_process_command_run(long long handle) {
     SengooProcessCommand* command = sengoo_process_command_from_handle(handle);
     if (!sengoo_process_command_is_live(command)) {
         return 0;
+    }
+    if (command->pipe_stdout_upstream_handle != 0) {
+        return sengoo_process_command_run_pipeline(command);
     }
     return sengoo_process_command_run_platform(command);
 }
@@ -899,6 +1008,14 @@ long long sengoo_process_command_close(long long handle) {
     SengooProcessCommand* command = sengoo_process_command_from_handle(handle);
     if (!command || command->closed) {
         return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    long long upstream_handle = command->pipe_stdout_upstream_handle;
+    command->pipe_stdout_upstream_handle = 0;
+    if (upstream_handle != 0 && upstream_handle != handle) {
+        SengooProcessCommand* upstream = sengoo_process_command_from_handle(upstream_handle);
+        if (upstream && !upstream->closed) {
+            (void)sengoo_process_command_close(upstream_handle);
+        }
     }
     sengoo_process_command_free_fields(command);
     command->closed = 1;
@@ -979,5 +1096,352 @@ long long sengoo_process_output_close(long long handle) {
     output->stdout_len = 0;
     output->stderr_len = 0;
     output->closed = 1;
+    return 0;
+}
+
+typedef struct {
+#ifdef _WIN32
+    HANDLE process;
+    HANDLE thread;
+#else
+    pid_t pid;
+#endif
+    int completed;
+    int timed_out;
+    long long exit_code;
+} SengooProcessHandleState;
+
+typedef struct {
+    SengooProcessHandleState* state;
+    uint32_t generation;
+    unsigned char alive;
+} SengooProcessHandleSlot;
+
+static SengooProcessHandleSlot* g_process_handle_slots = NULL;
+static size_t g_process_handle_slot_count = 0;
+static size_t g_process_handle_slot_capacity = 0;
+
+static int sengoo_process_handle_slot_ensure_capacity(size_t min_slots) {
+    if (g_process_handle_slot_capacity >= min_slots) {
+        return 1;
+    }
+    size_t new_cap = g_process_handle_slot_capacity == 0 ? 8 : g_process_handle_slot_capacity;
+    while (new_cap < min_slots) {
+        if (new_cap > (SIZE_MAX / 2)) {
+            return 0;
+        }
+        new_cap *= 2;
+    }
+    SengooProcessHandleSlot* next = (SengooProcessHandleSlot*)realloc(
+        g_process_handle_slots,
+        new_cap * sizeof(SengooProcessHandleSlot));
+    if (!next) {
+        return 0;
+    }
+    if (new_cap > g_process_handle_slot_capacity) {
+        memset(
+            next + g_process_handle_slot_capacity,
+            0,
+            (new_cap - g_process_handle_slot_capacity) * sizeof(SengooProcessHandleSlot));
+    }
+    g_process_handle_slots = next;
+    g_process_handle_slot_capacity = new_cap;
+    return 1;
+}
+
+static long long sengoo_process_handle_alloc(SengooProcessHandleState* state) {
+    size_t index = 0;
+    for (; index < g_process_handle_slot_count; ++index) {
+        if (!g_process_handle_slots[index].alive) {
+            break;
+        }
+    }
+    if (index == g_process_handle_slot_count) {
+        if (!sengoo_process_handle_slot_ensure_capacity(g_process_handle_slot_count + 1)) {
+            return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+        }
+        g_process_handle_slot_count += 1;
+    }
+    SengooProcessHandleSlot* slot = &g_process_handle_slots[index];
+    slot->state = state;
+    slot->alive = 1;
+    slot->generation += 1;
+    if (slot->generation == 0) {
+        slot->generation = 1;
+    }
+    return ((long long)slot->generation << 32) | (long long)(index + 1);
+}
+
+static SengooProcessHandleState* sengoo_process_handle_resolve(long long handle) {
+    if (handle <= 0) {
+        return NULL;
+    }
+    size_t index = ((size_t)handle & 0xFFFFFFFFu) - 1;
+    uint32_t generation = (uint32_t)((unsigned long long)handle >> 32);
+    if (index >= g_process_handle_slot_count) {
+        return NULL;
+    }
+    SengooProcessHandleSlot* slot = &g_process_handle_slots[index];
+    if (!slot->alive || slot->generation != generation || !slot->state) {
+        return NULL;
+    }
+    return slot->state;
+}
+
+static void sengoo_process_handle_state_destroy(SengooProcessHandleState* state) {
+    if (!state) {
+        return;
+    }
+#ifdef _WIN32
+    if (state->process) {
+        CloseHandle(state->process);
+    }
+    if (state->thread) {
+        CloseHandle(state->thread);
+    }
+#else
+    (void)state;
+#endif
+    free(state);
+}
+
+long long sengoo_process_command_pipe_stdout_to(long long upstream_handle, long long downstream_handle) {
+    SengooProcessCommand* upstream = sengoo_process_command_from_handle(upstream_handle);
+    SengooProcessCommand* downstream = sengoo_process_command_from_handle(downstream_handle);
+    if (!upstream || !downstream || downstream->pipe_stdout_upstream_handle != 0) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!upstream->executable || upstream->executable[0] == '\0' || !downstream->executable || downstream->executable[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    downstream->pipe_stdout_upstream_handle = upstream_handle;
+    return downstream_handle;
+}
+
+static long long sengoo_process_command_run_with_stdin_data(
+    SengooProcessCommand* command,
+    const char* stdin_data,
+    size_t stdin_len) {
+    if (!sengoo_process_command_is_live(command)) {
+        return 0;
+    }
+    command->capture_stdout = 1;
+    return sengoo_process_command_run_platform_with_stdin(command, stdin_data, stdin_len);
+}
+
+static long long sengoo_process_command_run_pipeline(SengooProcessCommand* final_command) {
+    SengooProcessCommand* upstream = sengoo_process_command_from_handle(final_command->pipe_stdout_upstream_handle);
+    if (!upstream || !upstream->executable) {
+        return 0;
+    }
+    upstream->capture_stdout = 1;
+    long long upstream_output_handle = sengoo_process_command_run_platform(upstream);
+    (void)sengoo_process_command_close(final_command->pipe_stdout_upstream_handle);
+    final_command->pipe_stdout_upstream_handle = 0;
+    if (upstream_output_handle == 0) {
+        return 0;
+    }
+    SengooProcessOutput* upstream_output = sengoo_process_output_from_handle(upstream_output_handle);
+    if (!upstream_output) {
+        return 0;
+    }
+    long long final_output_handle = sengoo_process_command_run_with_stdin_data(
+        final_command,
+        upstream_output->stdout_data ? upstream_output->stdout_data : "",
+        upstream_output->stdout_len);
+    sengoo_process_output_close(upstream_output_handle);
+    return final_output_handle;
+}
+
+#ifdef _WIN32
+static long long sengoo_process_command_spawn_platform(SengooProcessCommand* command) {
+    char* command_line = sengoo_windows_process_command_line_dyn(command);
+    if (!command_line) {
+        return 0;
+    }
+    char* env_block = sengoo_process_build_windows_env_block(command);
+    STARTUPINFOA startup_info;
+    PROCESS_INFORMATION process_info;
+    memset(&startup_info, 0, sizeof(startup_info));
+    memset(&process_info, 0, sizeof(process_info));
+    startup_info.cb = sizeof(startup_info);
+    BOOL created = CreateProcessA(
+        NULL,
+        command_line,
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        env_block,
+        command->cwd,
+        &startup_info,
+        &process_info);
+    free(command_line);
+    free(env_block);
+    if (!created) {
+        return 0;
+    }
+    SengooProcessHandleState* state = (SengooProcessHandleState*)calloc(1, sizeof(SengooProcessHandleState));
+    if (!state) {
+        TerminateProcess(process_info.hProcess, 1);
+        CloseHandle(process_info.hThread);
+        CloseHandle(process_info.hProcess);
+        return 0;
+    }
+    state->process = process_info.hProcess;
+    state->thread = process_info.hThread;
+    state->completed = 0;
+    state->timed_out = 0;
+    state->exit_code = -1;
+    return sengoo_process_handle_alloc(state);
+}
+#else
+static long long sengoo_process_command_spawn_platform(SengooProcessCommand* command) {
+    char** argv = sengoo_process_build_argv(command);
+    if (!argv) {
+        return 0;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        free(argv);
+        return 0;
+    }
+    if (pid == 0) {
+        if (command->cwd && chdir(command->cwd) != 0) {
+            _exit(127);
+        }
+        for (size_t i = 0; i < command->env_len; ++i) {
+            if (command->env[i].remove) {
+                unsetenv(command->env[i].name);
+            } else {
+                setenv(command->env[i].name, command->env[i].value, 1);
+            }
+        }
+        execvp(command->executable, argv);
+        _exit(127);
+    }
+    free(argv);
+    SengooProcessHandleState* state = (SengooProcessHandleState*)calloc(1, sizeof(SengooProcessHandleState));
+    if (!state) {
+        return 0;
+    }
+    state->pid = pid;
+    state->completed = 0;
+    state->timed_out = 0;
+    state->exit_code = -1;
+    return sengoo_process_handle_alloc(state);
+}
+#endif
+
+long long sengoo_process_command_spawn(long long handle) {
+    SengooProcessCommand* command = sengoo_process_command_from_handle(handle);
+    if (!sengoo_process_command_is_live(command)) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    long long spawned = sengoo_process_command_spawn_platform(command);
+    if (spawned <= 0) {
+        return -SENGOO_STATUS_IO;
+    }
+    command->closed = 1;
+    return spawned;
+}
+
+long long sengoo_process_handle_wait(long long handle, long long timeout_ms) {
+    SengooProcessHandleState* state = sengoo_process_handle_resolve(handle);
+    if (!state) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (state->completed) {
+        return state->timed_out ? -SENGOO_STATUS_TIMEOUT : state->exit_code;
+    }
+    long long start_ms = sengoo_process_now_ms();
+#ifdef _WIN32
+    for (;;) {
+        DWORD wait = WaitForSingleObject(state->process, 0);
+        if (wait == WAIT_OBJECT_0) {
+            DWORD code = 1;
+            if (GetExitCodeProcess(state->process, &code)) {
+                state->exit_code = (long long)code;
+            }
+            state->completed = 1;
+            return state->exit_code;
+        }
+        if (timeout_ms >= 0 && sengoo_process_now_ms() - start_ms >= timeout_ms) {
+            state->timed_out = 1;
+            state->completed = 1;
+            return -SENGOO_STATUS_TIMEOUT;
+        }
+        sengoo_process_sleep_short();
+    }
+#else
+    for (;;) {
+        int status = 0;
+        pid_t waited = waitpid(state->pid, &status, WNOHANG);
+        if (waited == state->pid) {
+            if (WIFEXITED(status)) {
+                state->exit_code = (long long)WEXITSTATUS(status);
+            } else if (WIFSIGNALED(status)) {
+                state->exit_code = 128 + WTERMSIG(status);
+            } else {
+                state->exit_code = -1;
+            }
+            state->completed = 1;
+            return state->exit_code;
+        }
+        if (waited < 0 && errno != EINTR) {
+            return -SENGOO_STATUS_IO;
+        }
+        if (timeout_ms >= 0 && sengoo_process_now_ms() - start_ms >= timeout_ms) {
+            state->timed_out = 1;
+            state->completed = 1;
+            return -SENGOO_STATUS_TIMEOUT;
+        }
+        sengoo_process_sleep_short();
+    }
+#endif
+}
+
+long long sengoo_process_handle_kill(long long handle) {
+    SengooProcessHandleState* state = sengoo_process_handle_resolve(handle);
+    if (!state) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+#ifdef _WIN32
+    return TerminateProcess(state->process, 1) ? 1 : -SENGOO_STATUS_IO;
+#else
+    return kill(state->pid, SIGKILL) == 0 ? 1 : -SENGOO_STATUS_IO;
+#endif
+}
+
+long long sengoo_process_handle_exit_code(long long handle) {
+    SengooProcessHandleState* state = sengoo_process_handle_resolve(handle);
+    if (!state) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!state->completed) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (state->timed_out) {
+        return -SENGOO_STATUS_TIMEOUT;
+    }
+    return state->exit_code;
+}
+
+long long sengoo_process_handle_close(long long handle) {
+    if (handle <= 0) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    size_t index = ((size_t)handle & 0xFFFFFFFFu) - 1;
+    uint32_t generation = (uint32_t)((unsigned long long)handle >> 32);
+    if (index >= g_process_handle_slot_count) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    SengooProcessHandleSlot* slot = &g_process_handle_slots[index];
+    if (!slot->alive || slot->generation != generation || !slot->state) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    sengoo_process_handle_state_destroy(slot->state);
+    slot->state = NULL;
+    slot->alive = 0;
     return 0;
 }

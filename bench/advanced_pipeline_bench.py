@@ -16,6 +16,7 @@ from typing import Any
 
 INCREMENTAL_ITERS = 3
 SCALE_LOC_BUCKETS = [1000, 10000, 100000, 1000000]
+P0_REQUIRED_LOC_BUCKETS = [100000, 1000000]
 SCALE_ITERS_BY_LOC = {
     1000: 3,
     10000: 2,
@@ -45,18 +46,112 @@ TARGET_CODEGEN_100K_MS = 1500.0
 TARGET_LINK_100K_MS = 500.0
 DEFAULT_DAEMON_ADDR = "127.0.0.1:48768"
 MEMORY_LOC_BUCKETS = [10000, 100000, 1000000]
+LADDER_STRETCH_LOC = 2500000
+LADDER_STRETCH_ITERS_BY_LOC = {
+    LADDER_STRETCH_LOC: 1,
+}
 MEMORY_ITERS_BY_LOC = {
     10000: 3,
     100000: 2,
     1000000: 1,
 }
 MEMORY_SAMPLE_INTERVAL_S = 0.01
+DEFAULT_P0_SCALE_COMMAND_TIMEOUT_S = 300.0
+DEFAULT_P0_MEMORY_COMMAND_TIMEOUT_S = 900.0
 BYTES_PER_MB = 1024.0 * 1024.0
 FRONTEND_BASELINE_PROFILE = "frontend-memory-baseline.json"
-ROLLBACK_MAX_FRONTEND_100K_REGRESSION_PCT = 12.0
-ROLLBACK_MAX_FRONTEND_1000K_REGRESSION_PCT = 12.0
-ROLLBACK_MAX_RSS_100K_REGRESSION_PCT = 12.0
-ROLLBACK_MAX_RSS_1000K_REGRESSION_PCT = 12.0
+SENGOO_CORE_RUNTIME_SOURCES = ("runtime.c", "runtime_string.c")
+ROLLBACK_MAX_FRONTEND_100K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_FRONTEND_1000K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_RSS_100K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_RSS_1000K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_E2E_100K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_E2E_1000K_REGRESSION_PCT = 10.0
+ROLLBACK_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0
+
+
+def ladder_stretch_enabled() -> bool:
+    value = os.environ.get("SENGOO_BENCH_LADDER_STRETCH", "").strip().lower()
+    return value in ("1", "true", "yes")
+
+
+def effective_memory_loc_buckets() -> list[int]:
+    buckets = list(MEMORY_LOC_BUCKETS)
+    if ladder_stretch_enabled() and LADDER_STRETCH_LOC not in buckets:
+        buckets.append(LADDER_STRETCH_LOC)
+    return buckets
+
+
+def effective_scale_loc_buckets() -> list[int]:
+    buckets = list(SCALE_LOC_BUCKETS)
+    if ladder_stretch_enabled() and LADDER_STRETCH_LOC not in buckets:
+        buckets.append(LADDER_STRETCH_LOC)
+    return buckets
+
+
+def selected_scale_loc_buckets(p0_evidence_only: bool) -> list[int]:
+    if p0_evidence_only:
+        return list(P0_REQUIRED_LOC_BUCKETS)
+    return effective_scale_loc_buckets()
+
+
+def selected_memory_loc_buckets(p0_evidence_only: bool) -> list[int]:
+    if p0_evidence_only:
+        return list(P0_REQUIRED_LOC_BUCKETS)
+    return effective_memory_loc_buckets()
+
+
+def memory_iters_for_loc(loc: int) -> int:
+    if loc == LADDER_STRETCH_LOC:
+        return LADDER_STRETCH_ITERS_BY_LOC.get(loc, 1)
+    return MEMORY_ITERS_BY_LOC.get(loc, 1)
+
+
+def scale_iters_for_loc(loc: int) -> int:
+    if loc == LADDER_STRETCH_LOC:
+        return LADDER_STRETCH_ITERS_BY_LOC.get(loc, 1)
+    return SCALE_ITERS_BY_LOC.get(loc, 1)
+
+
+def selected_memory_command_timeout_s(p0_evidence_only: bool) -> float | None:
+    raw = os.environ.get("SENGOO_BENCH_MEMORY_TIMEOUT_S")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"invalid SENGOO_BENCH_MEMORY_TIMEOUT_S value: {raw}") from exc
+        return value if value > 0.0 else None
+    if p0_evidence_only:
+        return DEFAULT_P0_MEMORY_COMMAND_TIMEOUT_S
+    return None
+
+
+def selected_scale_command_timeout_s(p0_evidence_only: bool) -> float | None:
+    raw = os.environ.get("SENGOO_BENCH_SCALE_TIMEOUT_S")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"invalid SENGOO_BENCH_SCALE_TIMEOUT_S value: {raw}") from exc
+        return value if value > 0.0 else None
+    if p0_evidence_only:
+        return DEFAULT_P0_SCALE_COMMAND_TIMEOUT_S
+    return None
+
+
+class BenchmarkCommandTimeout(RuntimeError):
+    def __init__(
+        self,
+        cmd: list[str],
+        timeout_s: float,
+        stdout: str | bytes | None = None,
+        stderr: str | bytes | None = None,
+    ) -> None:
+        self.cmd = cmd
+        self.timeout_s = timeout_s
+        self.stdout = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else (stdout or "")
+        self.stderr = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+        super().__init__(f"command timed out after {timeout_s:.2f}s: {' '.join(cmd)}")
 
 
 def now_unix_ms() -> int:
@@ -77,6 +172,12 @@ def average(values: list[float]) -> float | None:
     return sum(values) / len(values)
 
 
+def fmt_float(value: Any, digits: int = 2) -> str:
+    if not isinstance(value, (int, float)):
+        return "n/a"
+    return f"{float(value):.{digits}f}"
+
+
 def require_tool(name: str) -> str:
     resolved = shutil.which(name)
     if not resolved:
@@ -88,19 +189,24 @@ def run_checked(
     cmd: list[str],
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
+    timeout_s: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        env=merged_env,
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            env=merged_env,
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BenchmarkCommandTimeout(cmd, float(timeout_s or 0.0), exc.stdout, exc.stderr) from exc
     if proc.returncode != 0:
         raise RuntimeError(
             f"command failed ({proc.returncode}): {' '.join(cmd)}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -112,9 +218,10 @@ def measure_command_ms(
     cmd: list[str],
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
+    timeout_s: float | None = None,
 ) -> float:
     started = time.perf_counter()
-    run_checked(cmd, cwd=cwd, env=env)
+    run_checked(cmd, cwd=cwd, env=env, timeout_s=timeout_s)
     return (time.perf_counter() - started) * 1000.0
 
 
@@ -244,7 +351,8 @@ def measure_command_peak_memory(
     cmd: list[str],
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
-) -> dict[str, float | None]:
+    timeout_s: float | None = None,
+) -> dict[str, float | int | bool | str | None]:
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
@@ -263,6 +371,7 @@ def measure_command_peak_memory(
     peak_rss = 0
     peak_private = 0
     saw_private = False
+    timed_out = False
 
     while True:
         rss_bytes, private_bytes = read_process_memory_bytes(proc.pid)
@@ -275,10 +384,23 @@ def measure_command_peak_memory(
 
         if proc.poll() is not None:
             break
+        if timeout_s is not None and (time.perf_counter() - started) >= timeout_s:
+            timed_out = True
+            proc.kill()
+            break
         time.sleep(MEMORY_SAMPLE_INTERVAL_S)
 
     stdout, stderr = proc.communicate()
     elapsed_ms = (time.perf_counter() - started) * 1000.0
+    if timed_out:
+        return {
+            "elapsed_ms": elapsed_ms,
+            "peak_rss_bytes": float(peak_rss) if peak_rss > 0 else None,
+            "peak_private_bytes": float(peak_private) if saw_private else None,
+            "timed_out": True,
+            "timeout_s": float(timeout_s or 0.0),
+            "returncode": proc.returncode,
+        }
     if proc.returncode != 0:
         raise RuntimeError(
             f"command failed ({proc.returncode}): {' '.join(cmd)}\nstdout:\n{stdout}\nstderr:\n{stderr}"
@@ -288,6 +410,8 @@ def measure_command_peak_memory(
         "elapsed_ms": elapsed_ms,
         "peak_rss_bytes": float(peak_rss) if peak_rss > 0 else None,
         "peak_private_bytes": float(peak_private) if saw_private else None,
+        "timed_out": False,
+        "returncode": proc.returncode,
     }
 
 
@@ -378,6 +502,25 @@ def clang_link_cmd(clangpp: str, objects: list[Path | str], output: Path | str) 
     return cmd
 
 
+def compile_sengoo_core_runtime_objects(
+    sengoo_root: Path,
+    work: Path,
+    clangpp: str,
+) -> list[Path]:
+    runtime_objects: list[Path] = []
+    for source_name in SENGOO_CORE_RUNTIME_SOURCES:
+        runtime_source = sengoo_root / "tools" / "stdlib" / source_name
+        if not runtime_source.exists():
+            raise RuntimeError(f"runtime source not found: {runtime_source}")
+        runtime_obj = work / f"sengoo_{Path(source_name).stem}.obj"
+        run_checked(
+            [clangpp, "-O2", "-x", "c", "-c", str(runtime_source), "-o", str(runtime_obj)],
+            cwd=sengoo_root,
+        )
+        runtime_objects.append(runtime_obj)
+    return runtime_objects
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -399,6 +542,14 @@ def parse_args() -> argparse.Namespace:
         "--skip-memory-compare",
         action="store_true",
         help="skip compile-memory comparison block",
+    )
+    parser.add_argument(
+        "--p0-evidence-only",
+        action="store_true",
+        help=(
+            "run only the required 100k and 1000k scale/memory evidence for "
+            "compile-scale-production-gate P0; skips incremental, reachability, and daemon blocks"
+        ),
     )
     return parser.parse_args()
 
@@ -1267,6 +1418,28 @@ def make_scale_source_python(target_loc: int) -> str:
     return "\n".join(lines)
 
 
+def scale_timeout_metrics(
+    exc: BenchmarkCommandTimeout,
+    *,
+    iters: int,
+    compile_mode: str,
+    stage: str,
+) -> dict[str, Any]:
+    return {
+        "compile_frontend_llvm_avg_ms": None,
+        "codegen_obj_avg_ms": None,
+        "link_avg_ms": None,
+        "e2e_avg_ms": None,
+        "iters": iters,
+        "timed_out": True,
+        "timeouts": 1,
+        "timeout_s": float(exc.timeout_s),
+        "timeout_stage": stage,
+        "compile_mode": compile_mode,
+        "stderr_tail": exc.stderr[-2000:],
+    }
+
+
 def measure_scale_curve(
     bench_root: Path,
     sgc_bin: Path,
@@ -1275,6 +1448,8 @@ def measure_scale_curve(
     py: str,
     sengoo_root: Path,
     *,
+    loc_buckets: list[int] | None = None,
+    command_timeout_s: float | None = None,
     sengoo_daemon_addr: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     work = bench_root / ".advanced-work" / "scale-curve"
@@ -1284,14 +1459,10 @@ def measure_scale_curve(
     rust_env = {
         "CARGO_INCREMENTAL": "1",
     }
-    runtime_c = sengoo_root / "tools" / "stdlib" / "runtime.c"
-    if not runtime_c.exists():
-        raise RuntimeError(f"runtime source not found: {runtime_c}")
-    runtime_obj = work / "sengoo_runtime.obj"
-    run_checked([clangpp, "-O2", "-x", "c", "-c", str(runtime_c), "-o", str(runtime_obj)], cwd=sengoo_root)
+    runtime_objects = compile_sengoo_core_runtime_objects(sengoo_root, work, clangpp)
 
-    for loc in SCALE_LOC_BUCKETS:
-        iters = SCALE_ITERS_BY_LOC.get(loc, 1)
+    for loc in loc_buckets or effective_scale_loc_buckets():
+        iters = scale_iters_for_loc(loc)
         loc_key = str(loc)
         results[loc_key] = {}
 
@@ -1303,49 +1474,69 @@ def measure_scale_curve(
         backend_samples: list[float] = []
         link_samples: list[float] = []
         e2e_samples: list[float] = []
-        # Warm once to avoid counting cold cache/bootstrap overhead in steady-state samples.
-        ll = sg_dir / "main.ll"
-        run_checked(
-            sengoo_build_cmd(
-                sgc_bin,
-                sg_dir / "main.sg",
-                2,
-                True,
-                emit_llvm=True,
-                output=ll,
-                daemon_addr=sengoo_daemon_addr,
-            ),
-            cwd=sengoo_root,
-        )
-        for _ in range(iters):
+        try:
+            # Warm once to avoid counting cold cache/bootstrap overhead in steady-state samples.
             ll = sg_dir / "main.ll"
-            obj = sg_dir / "main.obj"
-            exe = sg_dir / exe_name("main")
-            front_ms = measure_command_ms(
+            run_checked(
                 sengoo_build_cmd(
                     sgc_bin,
                     sg_dir / "main.sg",
                     2,
-                    False,
+                    True,
                     emit_llvm=True,
                     output=ll,
                     daemon_addr=sengoo_daemon_addr,
                 ),
                 cwd=sengoo_root,
+                timeout_s=command_timeout_s,
             )
-            backend_ms = measure_command_ms([clangpp, "-O2", "-x", "ir", "-c", str(ll), "-o", str(obj)], cwd=sg_dir)
-            link_ms = measure_command_ms(clang_link_cmd(clangpp, [obj, runtime_obj], exe), cwd=sg_dir)
-            front_samples.append(front_ms)
-            backend_samples.append(backend_ms)
-            link_samples.append(link_ms)
-            e2e_samples.append(front_ms + backend_ms + link_ms)
-        results[loc_key]["sengoo"] = {
-            "compile_frontend_llvm_avg_ms": average(front_samples),
-            "codegen_obj_avg_ms": average(backend_samples),
-            "link_avg_ms": average(link_samples),
-            "e2e_avg_ms": average(e2e_samples),
-            "e2e_p50_ms": percentile(e2e_samples, 0.50),
-        }
+            for _ in range(iters):
+                ll = sg_dir / "main.ll"
+                obj = sg_dir / "main.obj"
+                exe = sg_dir / exe_name("main")
+                front_ms = measure_command_ms(
+                    sengoo_build_cmd(
+                        sgc_bin,
+                        sg_dir / "main.sg",
+                        2,
+                        False,
+                        emit_llvm=True,
+                        output=ll,
+                        daemon_addr=sengoo_daemon_addr,
+                    ),
+                    cwd=sengoo_root,
+                    timeout_s=command_timeout_s,
+                )
+                backend_ms = measure_command_ms(
+                    [clangpp, "-O2", "-x", "ir", "-c", str(ll), "-o", str(obj)],
+                    cwd=sg_dir,
+                    timeout_s=command_timeout_s,
+                )
+                link_ms = measure_command_ms(
+                    clang_link_cmd(clangpp, [obj, *runtime_objects], exe),
+                    cwd=sg_dir,
+                    timeout_s=command_timeout_s,
+                )
+                front_samples.append(front_ms)
+                backend_samples.append(backend_ms)
+                link_samples.append(link_ms)
+                e2e_samples.append(front_ms + backend_ms + link_ms)
+            results[loc_key]["sengoo"] = {
+                "compile_frontend_llvm_avg_ms": average(front_samples),
+                "codegen_obj_avg_ms": average(backend_samples),
+                "link_avg_ms": average(link_samples),
+                "e2e_avg_ms": average(e2e_samples),
+                "e2e_p50_ms": percentile(e2e_samples, 0.50),
+                "timed_out": False,
+                "timeouts": 0,
+            }
+        except BenchmarkCommandTimeout as exc:
+            results[loc_key]["sengoo"] = scale_timeout_metrics(
+                exc,
+                iters=iters,
+                compile_mode="frontend_llvm_emit",
+                stage="sengoo_scale",
+            )
 
         # C++ with PCH (compile obj + link)
         cpp_dir = work / "cpp" / loc_key
@@ -1438,24 +1629,30 @@ def measure_compile_memory_compare(
     py: str,
     sengoo_root: Path,
     *,
+    loc_buckets: list[int] | None = None,
+    command_timeout_s: float | None = None,
     sengoo_daemon_addr: str | None = None,
 ) -> dict[str, Any]:
     work = bench_root / ".advanced-work" / "compile-memory-compare"
     clear_dir(work)
     rustc = resolve_rustc_binary()
 
+    memory_buckets = loc_buckets or effective_memory_loc_buckets()
     out: dict[str, Any] = {
         "_meta": {
-            "loc_buckets": MEMORY_LOC_BUCKETS,
-            "iters_by_loc": MEMORY_ITERS_BY_LOC,
+            "loc_buckets": memory_buckets,
+            "iters_by_loc": {
+                str(loc): memory_iters_for_loc(loc) for loc in memory_buckets
+            },
             "sample_interval_ms": int(MEMORY_SAMPLE_INTERVAL_S * 1000),
+            "command_timeout_s": command_timeout_s,
             "note": "peak_rss_mb_* is available on all platforms; peak_private_mb_* depends on OS support.",
         }
     }
 
-    for loc in MEMORY_LOC_BUCKETS:
+    for loc in memory_buckets:
         loc_key = str(loc)
-        iters = MEMORY_ITERS_BY_LOC.get(loc, 1)
+        iters = memory_iters_for_loc(loc)
         out[loc_key] = {}
 
         # Sengoo (front-end compile only: emit LLVM IR).
@@ -1465,6 +1662,7 @@ def measure_compile_memory_compare(
         sg_elapsed: list[float] = []
         sg_rss: list[int] = []
         sg_private: list[int] = []
+        sg_timeouts = 0
         for _ in range(iters):
             ll = sg_dir / "main.ll"
             sample = measure_command_peak_memory(
@@ -1478,7 +1676,10 @@ def measure_compile_memory_compare(
                     daemon_addr=sengoo_daemon_addr,
                 ),
                 cwd=sengoo_root,
+                timeout_s=command_timeout_s,
             )
+            if bool(sample.get("timed_out")):
+                sg_timeouts += 1
             sg_elapsed.append(float(sample["elapsed_ms"] or 0.0))
             if isinstance(sample["peak_rss_bytes"], float):
                 sg_rss.append(int(sample["peak_rss_bytes"]))
@@ -1491,6 +1692,8 @@ def measure_compile_memory_compare(
             "peak_private_mb_avg": average_bytes_as_mb(sg_private),
             "peak_private_mb_p50": percentile_bytes_as_mb(sg_private, 0.50),
             "iters": iters,
+            "timeouts": sg_timeouts,
+            "timed_out": sg_timeouts > 0,
             "compile_mode": "frontend_llvm_emit",
         }
 
@@ -1512,6 +1715,7 @@ def measure_compile_memory_compare(
         cpp_elapsed: list[float] = []
         cpp_rss: list[int] = []
         cpp_private: list[int] = []
+        cpp_timeouts = 0
         for _ in range(iters):
             obj = cpp_dir / "main.obj"
             sample = measure_command_peak_memory(
@@ -1527,7 +1731,10 @@ def measure_compile_memory_compare(
                     str(obj),
                 ],
                 cwd=cpp_dir,
+                timeout_s=command_timeout_s,
             )
+            if bool(sample.get("timed_out")):
+                cpp_timeouts += 1
             cpp_elapsed.append(float(sample["elapsed_ms"] or 0.0))
             if isinstance(sample["peak_rss_bytes"], float):
                 cpp_rss.append(int(sample["peak_rss_bytes"]))
@@ -1540,6 +1747,8 @@ def measure_compile_memory_compare(
             "peak_private_mb_avg": average_bytes_as_mb(cpp_private),
             "peak_private_mb_p50": percentile_bytes_as_mb(cpp_private, 0.50),
             "iters": iters,
+            "timeouts": cpp_timeouts,
+            "timed_out": cpp_timeouts > 0,
             "fairness": {"pch_enabled": True},
             "compile_mode": "compile_obj_only",
         }
@@ -1551,12 +1760,16 @@ def measure_compile_memory_compare(
         rust_elapsed: list[float] = []
         rust_rss: list[int] = []
         rust_private: list[int] = []
+        rust_timeouts = 0
         for _ in range(iters):
             obj = rust_dir / "main.o"
             sample = measure_command_peak_memory(
                 [rustc, "-O", "-Awarnings", "--emit=obj", str(rust_dir / "main.rs"), "-o", str(obj)],
                 cwd=rust_dir,
+                timeout_s=command_timeout_s,
             )
+            if bool(sample.get("timed_out")):
+                rust_timeouts += 1
             rust_elapsed.append(float(sample["elapsed_ms"] or 0.0))
             if isinstance(sample["peak_rss_bytes"], float):
                 rust_rss.append(int(sample["peak_rss_bytes"]))
@@ -1569,6 +1782,8 @@ def measure_compile_memory_compare(
             "peak_private_mb_avg": average_bytes_as_mb(rust_private),
             "peak_private_mb_p50": percentile_bytes_as_mb(rust_private, 0.50),
             "iters": iters,
+            "timeouts": rust_timeouts,
+            "timed_out": rust_timeouts > 0,
             "fairness": {"rustc_direct": True},
             "compile_mode": "compile_obj_only",
         }
@@ -1580,9 +1795,16 @@ def measure_compile_memory_compare(
         py_elapsed: list[float] = []
         py_rss: list[int] = []
         py_private: list[int] = []
+        py_timeouts = 0
         for _ in range(iters):
             clear_pycache(py_dir)
-            sample = measure_command_peak_memory([py, "-m", "py_compile", str(py_dir / "main.py")], cwd=py_dir)
+            sample = measure_command_peak_memory(
+                [py, "-m", "py_compile", str(py_dir / "main.py")],
+                cwd=py_dir,
+                timeout_s=command_timeout_s,
+            )
+            if bool(sample.get("timed_out")):
+                py_timeouts += 1
             py_elapsed.append(float(sample["elapsed_ms"] or 0.0))
             if isinstance(sample["peak_rss_bytes"], float):
                 py_rss.append(int(sample["peak_rss_bytes"]))
@@ -1595,6 +1817,8 @@ def measure_compile_memory_compare(
             "peak_private_mb_avg": average_bytes_as_mb(py_private),
             "peak_private_mb_p50": percentile_bytes_as_mb(py_private, 0.50),
             "iters": iters,
+            "timeouts": py_timeouts,
+            "timed_out": py_timeouts > 0,
             "compile_mode": "py_compile",
             "note": "python benchmark has no native link stage",
         }
@@ -1614,11 +1838,7 @@ def measure_reachability_matrix(
     clear_dir(work)
     results: dict[str, Any] = {}
 
-    runtime_c = sengoo_root / "tools" / "stdlib" / "runtime.c"
-    if not runtime_c.exists():
-        raise RuntimeError(f"runtime source not found: {runtime_c}")
-    runtime_obj = work / "sengoo_runtime.obj"
-    run_checked([clangpp, "-O2", "-x", "c", "-c", str(runtime_c), "-o", str(runtime_obj)], cwd=sengoo_root)
+    runtime_objects = compile_sengoo_core_runtime_objects(sengoo_root, work, clangpp)
 
     for profile in REACHABILITY_PROFILES:
         profile_dir = work / profile
@@ -1669,7 +1889,10 @@ def measure_reachability_matrix(
             if profile == "library_entryless":
                 e2e_samples.append(front_ms + backend_ms)
             else:
-                link_ms = measure_command_ms(clang_link_cmd(clangpp, [obj, runtime_obj], exe), cwd=profile_dir)
+                link_ms = measure_command_ms(
+                    clang_link_cmd(clangpp, [obj, *runtime_objects], exe),
+                    cwd=profile_dir,
+                )
                 link_samples.append(link_ms)
                 e2e_samples.append(front_ms + backend_ms + link_ms)
 
@@ -1715,41 +1938,60 @@ def print_incremental_tables(real_incremental: dict[str, dict[str, Any]]) -> Non
 
 def print_scale_tables(scale_curve: dict[str, dict[str, Any]]) -> None:
     langs = ["sengoo", "cpp", "rust", "python"]
+    loc_keys = sorted(
+        (key for key in scale_curve.keys() if key.isdigit()),
+        key=lambda value: int(value),
+    )
     print("")
     print("Scale Curve: E2E Build Time (includes link where applicable)")
     print("| LOC | Sengoo (ms) | C++ (ms) | Rust (ms) | Python (ms) |")
     print("|---:|---:|---:|---:|---:|")
-    for loc_key in [str(x) for x in SCALE_LOC_BUCKETS]:
+    for loc_key in loc_keys:
         row = []
         for lang in langs:
-            row.append(f"{scale_curve[loc_key][lang]['e2e_avg_ms']:.2f}")
+            row.append(fmt_float(scale_curve[loc_key][lang].get("e2e_avg_ms")))
         print(f"| {loc_key} | {' | '.join(row)} |")
 
     print("")
     print("Link Share (Sengoo/C++)")
     print("| LOC | Sengoo link share (%) | C++ link share (%) |")
     print("|---:|---:|---:|")
-    for loc_key in [str(x) for x in SCALE_LOC_BUCKETS]:
+    for loc_key in loc_keys:
         sg = scale_curve[loc_key]["sengoo"]
         cpp = scale_curve[loc_key]["cpp"]
-        sg_share = (sg["link_avg_ms"] / sg["e2e_avg_ms"] * 100.0) if sg["e2e_avg_ms"] else 0.0
-        cpp_share = (cpp["link_avg_ms"] / cpp["e2e_avg_ms"] * 100.0) if cpp["e2e_avg_ms"] else 0.0
-        print(f"| {loc_key} | {sg_share:.2f} | {cpp_share:.2f} |")
+        sg_e2e = sg.get("e2e_avg_ms")
+        sg_link = sg.get("link_avg_ms")
+        cpp_e2e = cpp.get("e2e_avg_ms")
+        cpp_link = cpp.get("link_avg_ms")
+        sg_share = (
+            float(sg_link) / float(sg_e2e) * 100.0
+            if isinstance(sg_link, (int, float)) and isinstance(sg_e2e, (int, float)) and sg_e2e
+            else None
+        )
+        cpp_share = (
+            float(cpp_link) / float(cpp_e2e) * 100.0
+            if isinstance(cpp_link, (int, float)) and isinstance(cpp_e2e, (int, float)) and cpp_e2e
+            else None
+        )
+        print(f"| {loc_key} | {fmt_float(sg_share)} | {fmt_float(cpp_share)} |")
 
     print("")
     print("Frontend Share (Sengoo)")
     print("| LOC | Frontend share (%) |")
     print("|---:|---:|")
     frontend_share_by_loc: dict[str, float] = {}
-    for loc_key in [str(x) for x in SCALE_LOC_BUCKETS]:
+    for loc_key in loc_keys:
         sg = scale_curve[loc_key]["sengoo"]
+        frontend = sg.get("compile_frontend_llvm_avg_ms")
+        e2e = sg.get("e2e_avg_ms")
         share = (
-            (float(sg["compile_frontend_llvm_avg_ms"]) / float(sg["e2e_avg_ms"]) * 100.0)
-            if sg["e2e_avg_ms"]
-            else 0.0
+            (float(frontend) / float(e2e) * 100.0)
+            if isinstance(frontend, (int, float)) and isinstance(e2e, (int, float)) and e2e
+            else None
         )
-        frontend_share_by_loc[loc_key] = share
-        print(f"| {loc_key} | {share:.2f} |")
+        if share is not None:
+            frontend_share_by_loc[loc_key] = share
+        print(f"| {loc_key} | {fmt_float(share)} |")
 
     share_100k = frontend_share_by_loc.get("100000", 0.0)
     share_1000k = frontend_share_by_loc.get("1000000", 0.0)
@@ -1766,11 +2008,15 @@ def print_scale_tables(scale_curve: dict[str, dict[str, Any]]) -> None:
 
 
 def print_compile_memory_compare(compile_memory_compare: dict[str, Any]) -> None:
+    loc_keys = sorted(
+        (key for key in compile_memory_compare.keys() if key.isdigit()),
+        key=lambda value: int(value),
+    )
     print("")
     print("Compile Peak Memory (RSS MB, lower is better)")
     print("| LOC | Sengoo RSS | C++ RSS | Rust RSS | Python RSS |")
     print("|---:|---:|---:|---:|---:|")
-    for loc_key in [str(x) for x in MEMORY_LOC_BUCKETS]:
+    for loc_key in loc_keys:
         loc_metrics = compile_memory_compare.get(loc_key, {})
         row: list[str] = []
         for lang in ("sengoo", "cpp", "rust", "python"):
@@ -1783,7 +2029,7 @@ def print_compile_memory_compare(compile_memory_compare: dict[str, Any]) -> None
     print("Compile Peak Memory (private MB, when available)")
     print("| LOC | Sengoo Private | C++ Private | Rust Private | Python Private |")
     print("|---:|---:|---:|---:|---:|")
-    for loc_key in [str(x) for x in MEMORY_LOC_BUCKETS]:
+    for loc_key in loc_keys:
         loc_metrics = compile_memory_compare.get(loc_key, {})
         row: list[str] = []
         for lang in ("sengoo", "cpp", "rust", "python"):
@@ -2020,6 +2266,13 @@ def compute_rollback_evidence(
                 "100000": ROLLBACK_MAX_RSS_100K_REGRESSION_PCT,
                 "1000000": ROLLBACK_MAX_RSS_1000K_REGRESSION_PCT,
             },
+            "e2e_regression_pct": {
+                "100000": ROLLBACK_MAX_E2E_100K_REGRESSION_PCT,
+                "1000000": ROLLBACK_MAX_E2E_1000K_REGRESSION_PCT,
+            },
+            "frontend_share_regression_pp": {
+                "1000000": ROLLBACK_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP,
+            },
         },
         "comparisons": [],
         "gate_decision": "pass",
@@ -2048,6 +2301,7 @@ def compute_rollback_evidence(
             else {}
         )
         measured_frontend = sengoo_scale.get("compile_frontend_llvm_avg_ms")
+        measured_e2e = sengoo_scale.get("e2e_avg_ms")
         baseline_frontend = baseline_metric(
             baseline_profile,
             bucket,
@@ -2078,6 +2332,64 @@ def compute_rollback_evidence(
                 )
         else:
             evidence["reasons"].append(f"frontend_time/{bucket} missing measured/baseline value")
+
+        baseline_e2e = baseline_metric(baseline_profile, bucket, "e2e_avg_ms")
+        if isinstance(measured_e2e, (int, float)) and baseline_e2e and baseline_e2e > 0:
+            threshold = (
+                ROLLBACK_MAX_E2E_100K_REGRESSION_PCT
+                if bucket == "100000"
+                else ROLLBACK_MAX_E2E_1000K_REGRESSION_PCT
+            )
+            delta_pct = ((float(measured_e2e) - baseline_e2e) / baseline_e2e) * 100.0
+            passed = delta_pct <= threshold
+            evidence["comparisons"].append(
+                {
+                    "bucket": bucket,
+                    "metric": "e2e_avg_ms",
+                    "measured": float(measured_e2e),
+                    "baseline": float(baseline_e2e),
+                    "delta_pct": float(delta_pct),
+                    "max_regression_pct": float(threshold),
+                    "pass": passed,
+                }
+            )
+            if not passed:
+                evidence["reasons"].append(
+                    f"e2e_time/{bucket} regression {delta_pct:+.2f}% exceeds {threshold:.2f}%"
+                )
+        else:
+            evidence["reasons"].append(f"e2e_time/{bucket} missing measured/baseline value")
+
+        if bucket == "1000000" and isinstance(measured_frontend, (int, float)) and isinstance(
+            measured_e2e, (int, float)
+        ) and float(measured_e2e) > 0:
+            measured_share = (float(measured_frontend) / float(measured_e2e)) * 100.0
+            baseline_share = baseline_metric(baseline_profile, bucket, "frontend_share_pct")
+            if baseline_share is not None:
+                delta_pp = measured_share - baseline_share
+                passed = delta_pp <= ROLLBACK_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP
+                evidence["comparisons"].append(
+                    {
+                        "bucket": bucket,
+                        "metric": "frontend_share_pct",
+                        "measured": float(measured_share),
+                        "baseline": float(baseline_share),
+                        "delta_pp": float(delta_pp),
+                        "max_regression_pp": float(
+                            ROLLBACK_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP
+                        ),
+                        "pass": passed,
+                    }
+                )
+                if not passed:
+                    evidence["reasons"].append(
+                        f"frontend_share/{bucket} regression {delta_pp:+.2f}pp exceeds "
+                        f"{ROLLBACK_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP:.2f}pp"
+                    )
+            else:
+                evidence["reasons"].append(
+                    f"frontend_share/{bucket} missing baseline frontend_share_pct"
+                )
 
         if memory_available:
             sengoo_mem = compile_memory_compare.get(bucket, {}).get("sengoo", {})
@@ -2203,13 +2515,32 @@ def main() -> int:
     clangpp = require_tool("clang++")
     cargo = require_tool("cargo")
     py = sys.executable
+    if args.p0_evidence_only and args.daemon_compare:
+        raise RuntimeError("--p0-evidence-only skips daemon comparison; do not combine it with --daemon-compare")
+    if args.p0_evidence_only and args.skip_memory_compare:
+        raise RuntimeError("--p0-evidence-only requires compile-memory evidence; do not combine it with --skip-memory-compare")
     if args.daemon_compare and not supports_daemon_subcommand(sgc_bin):
         raise RuntimeError(
             f"selected sgc binary does not support daemon mode: {sgc_bin} (rebuild sgc)"
         )
 
-    real_incremental = measure_real_incremental(bench_root, sgc_bin, clangpp, cargo, py, sengoo_root)
-    scale_curve = measure_scale_curve(bench_root, sgc_bin, clangpp, cargo, py, sengoo_root)
+    scale_loc_buckets = selected_scale_loc_buckets(args.p0_evidence_only)
+    memory_loc_buckets = selected_memory_loc_buckets(args.p0_evidence_only)
+    scale_command_timeout_s = selected_scale_command_timeout_s(args.p0_evidence_only)
+    memory_command_timeout_s = selected_memory_command_timeout_s(args.p0_evidence_only)
+    real_incremental: dict[str, dict[str, Any]] = {}
+    if not args.p0_evidence_only:
+        real_incremental = measure_real_incremental(bench_root, sgc_bin, clangpp, cargo, py, sengoo_root)
+    scale_curve = measure_scale_curve(
+        bench_root,
+        sgc_bin,
+        clangpp,
+        cargo,
+        py,
+        sengoo_root,
+        loc_buckets=scale_loc_buckets,
+        command_timeout_s=scale_command_timeout_s,
+    )
     compile_memory_compare: dict[str, Any] | None = None
     if not args.skip_memory_compare:
         compile_memory_compare = measure_compile_memory_compare(
@@ -2218,8 +2549,12 @@ def main() -> int:
             clangpp,
             py,
             sengoo_root,
+            loc_buckets=memory_loc_buckets,
+            command_timeout_s=memory_command_timeout_s,
         )
-    reachability_matrix = measure_reachability_matrix(bench_root, sgc_bin, clangpp, sengoo_root)
+    reachability_matrix: dict[str, Any] = {}
+    if not args.p0_evidence_only:
+        reachability_matrix = measure_reachability_matrix(bench_root, sgc_bin, clangpp, sengoo_root)
     phase_deltas = compute_phase_deltas(real_incremental, scale_curve)
 
     daemon_comparison: dict[str, Any] | None = None
@@ -2246,10 +2581,21 @@ def main() -> int:
         "generated_at_unix_ms": now_unix_ms(),
         "config": {
             "incremental_iterations": INCREMENTAL_ITERS,
-            "scale_loc_buckets": SCALE_LOC_BUCKETS,
-            "scale_iterations_by_loc": SCALE_ITERS_BY_LOC,
-            "memory_loc_buckets": MEMORY_LOC_BUCKETS,
-            "memory_iters_by_loc": MEMORY_ITERS_BY_LOC,
+            "p0_evidence_only": bool(args.p0_evidence_only),
+            "scale_loc_buckets": scale_loc_buckets,
+            "scale_iterations_by_loc": {
+                str(loc): scale_iters_for_loc(loc)
+                for loc in scale_loc_buckets
+            },
+            "memory_loc_buckets": memory_loc_buckets,
+            "memory_iters_by_loc": {
+                str(loc): memory_iters_for_loc(loc)
+                for loc in memory_loc_buckets
+            },
+            "memory_command_timeout_s": memory_command_timeout_s,
+            "scale_command_timeout_s": scale_command_timeout_s,
+            "ladder_stretch_enabled": ladder_stretch_enabled(),
+            "ladder_stretch_loc": LADDER_STRETCH_LOC,
             "reachability_loc": REACHABILITY_LOC,
             "reachability_iters": REACHABILITY_ITERS,
             "reachability_profiles": REACHABILITY_PROFILES,
@@ -2291,11 +2637,13 @@ def main() -> int:
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8", newline="\n")
 
     print(f"Advanced bench report: {out_path}")
-    print_incremental_tables(real_incremental)
+    if real_incremental:
+        print_incremental_tables(real_incremental)
     print_scale_tables(scale_curve)
     if compile_memory_compare is not None:
         print_compile_memory_compare(compile_memory_compare)
-    print_reachability_matrix(reachability_matrix)
+    if reachability_matrix:
+        print_reachability_matrix(reachability_matrix)
     print_phase_delta_summary(phase_deltas)
     if daemon_comparison is not None:
         print_daemon_comparison(daemon_comparison)
@@ -2305,4 +2653,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

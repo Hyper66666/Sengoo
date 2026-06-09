@@ -21,6 +21,12 @@ extern "C" {
     fn sengoo_process_output_stdout_copy(handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_process_output_stderr_copy(handle: i64, out_buffer: i64, out_capacity: i64) -> i64;
     fn sengoo_process_output_close(handle: i64) -> i64;
+    fn sengoo_process_command_pipe_stdout_to(upstream: i64, downstream: i64) -> i64;
+    fn sengoo_process_command_spawn(handle: i64) -> i64;
+    fn sengoo_process_handle_wait(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_process_handle_kill(handle: i64) -> i64;
+    fn sengoo_process_handle_exit_code(handle: i64) -> i64;
+    fn sengoo_process_handle_close(handle: i64) -> i64;
 }
 
 struct ProcessCommand {
@@ -28,6 +34,10 @@ struct ProcessCommand {
 }
 
 struct ProcessOutput {
+    handle: i64,
+}
+
+struct ProcessHandle {
     handle: i64,
 }
 
@@ -132,6 +142,16 @@ def process_output_handle_result(handle: i64) -> Result<ProcessOutput, i64> {
     }
 }
 
+def process_handle_result(handle: i64) -> Result<ProcessHandle, i64> {
+    if handle > 0 {
+        Result { is_ok: true, value: ProcessHandle { handle: handle }, error: 0 }
+    } else if handle < 0 {
+        Result { is_ok: false, value: ProcessHandle { handle: 0 }, error: status_from_raw_ffi(handle) }
+    } else {
+        Result { is_ok: false, value: ProcessHandle { handle: 0 }, error: STATUS_UNKNOWN() }
+    }
+}
+
 impl ProcessCommand {
     def arg_raw(self, arg_ptr: i64) -> Result<bool, i64> {
         process_status_bool_result(sengoo_process_command_arg(self.handle, arg_ptr))
@@ -185,8 +205,41 @@ impl ProcessCommand {
         process_output_handle_result(sengoo_process_command_run(self.handle))
     }
 
+    def pipe_stdout_to(self, child: ProcessCommand) -> Result<ProcessCommand, i64> {
+        let merged = sengoo_process_command_pipe_stdout_to(self.handle, child.handle);
+        if merged > 0 {
+            Result { is_ok: true, value: ProcessCommand { handle: merged }, error: 0 }
+        } else if merged < 0 {
+            Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: status_from_raw_ffi(merged) }
+        } else {
+            Result { is_ok: false, value: ProcessCommand { handle: 0 }, error: STATUS_UNKNOWN() }
+        }
+    }
+
+    def spawn(self) -> Result<ProcessHandle, i64> {
+        process_handle_result(sengoo_process_command_spawn(self.handle))
+    }
+
     def close(self) -> bool {
         sengoo_process_command_close(self.handle) == 0
+    }
+}
+
+impl ProcessHandle {
+    def wait(self, timeout_ms: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_wait(self.handle, timeout_ms))
+    }
+
+    def kill(self) -> Result<bool, i64> {
+        process_status_bool_result(sengoo_process_handle_kill(self.handle))
+    }
+
+    def exit_code(self) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_exit_code(self.handle))
+    }
+
+    def close(self) -> bool {
+        sengoo_process_handle_close(self.handle) == 0
     }
 }
 

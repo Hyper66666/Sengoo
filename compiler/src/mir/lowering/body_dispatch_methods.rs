@@ -113,7 +113,11 @@ impl<'a> LoweringContext<'a> {
                 body,
                 ..
             } => lower_for_expr(self, var_name, iter, body),
-            HIRExpr::Call { func, args } => lower_call_expr(self, func, args),
+            HIRExpr::Call {
+                func,
+                args,
+                site_lo,
+            } => lower_call_expr(self, func, args, *site_lo),
             HIRExpr::And(left, right) => lower_logical_and_expr(self, left, right),
             HIRExpr::Or(left, right) => lower_logical_or_expr(self, left, right),
             HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),

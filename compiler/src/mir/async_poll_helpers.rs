@@ -2,7 +2,7 @@ use super::async_cfg_helpers::{
     collect_live_user_slots, compute_live_in_user_locals, AsyncCfgPlan, LiveUserSlot,
 };
 use super::async_frame_helpers::{
-    frame_await_slot, frame_user_slot, push_frame_load_into, push_frame_load_into_typed,
+    frame_await_slot, frame_user_slot, push_frame_load_into, push_frame_load_into_or_value_typed,
     push_frame_load_typed, push_frame_store, push_frame_store_typed, push_i64_const,
     AsyncFrameLayout,
 };
@@ -468,7 +468,7 @@ pub(crate) fn synthesize_cfg_poll(
     for i in 0..layout.param_types.len() {
         let original = Local::new(i + 1, LocalKind::Param);
         let remapped = remap_local(original, &local_map)?;
-        push_frame_load_into_typed(
+        let restored = push_frame_load_into_or_value_typed(
             &mut f,
             bb0,
             handle,
@@ -476,6 +476,7 @@ pub(crate) fn synthesize_cfg_poll(
             remapped,
             &layout.param_types[i],
         )?;
+        local_map.insert(original, restored);
     }
 
     let mut targets = vec![(0, translated_blocks[&mir_fn.start_block])];

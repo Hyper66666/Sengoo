@@ -1,0 +1,49 @@
+name: perf-smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/**
+
+jobs:
+  compile-scale-production-gate:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build sgc (release)
+        run: cargo build -p sgc --release
+
+      - name: Run advanced pipeline benchmark
+        env:
+          CI: "true"
+          SENGOO_ROOT: ${{ github.workspace }}
+        run: python bench/advanced_pipeline_bench.py
+
+      - name: Enforce ladder + regression gates (100k hard, 1000k regression)
+        shell: pwsh
+        run: |
+          pwsh ./scripts/frontend-1000k-perf-gate.ps1 -Mode hard -SkipAbsoluteTargets
+
+      - name: Report 1000k absolute target status (informational until targets met)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          pwsh ./scripts/frontend-1000k-perf-gate.ps1 -Mode soft
+
+      - name: Report 2500k stretch ladder (informational, report-only)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $latest = Get-ChildItem -LiteralPath bench/results -Filter "*-advanced-pipeline.json" -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if ($null -eq $latest) { exit 0 }
+          python bench/scripts/advanced-kpi-gate.py --mode soft --sample $latest.FullName |
+            Select-String -Pattern "ladder_stretch"

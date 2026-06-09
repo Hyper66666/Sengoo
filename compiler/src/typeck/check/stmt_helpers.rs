@@ -39,6 +39,11 @@ impl TypeChecker {
                     Some(v) => self.check_expr(v)?,
                     None => self.env.unit_ty(),
                 };
+                if Self::is_async_context_ty(&value_ty) {
+                    return Err(TypeckError::Other(
+                        "AsyncContext is poll-scoped and cannot be stored".to_string(),
+                    ));
+                }
                 self.infer.unify(&var_ty, &value_ty)?;
 
                 self.env.insert_var(name.name.clone(), var_ty);
@@ -47,6 +52,11 @@ impl TypeChecker {
             StmtKind::Const { name, ty, value } => {
                 let var_ty = self.check_type(ty)?;
                 let value_ty = self.check_expr(value)?;
+                if Self::is_async_context_ty(&value_ty) {
+                    return Err(TypeckError::Other(
+                        "AsyncContext is poll-scoped and cannot be stored".to_string(),
+                    ));
+                }
                 self.infer.unify(&var_ty, &value_ty)?;
                 self.env.insert_var(name.name.clone(), var_ty);
                 Ok(None)
@@ -162,6 +172,11 @@ impl TypeChecker {
     pub(super) fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         if let Some(v) = value {
             let ty = self.check_expr(v)?;
+            if Self::is_async_context_ty(&ty) {
+                return Err(TypeckError::Other(
+                    "AsyncContext is poll-scoped and cannot be returned".to_string(),
+                ));
+            }
             if self.contains_future_escape_ty(&ty) {
                 return Err(Self::future_escape_error());
             }

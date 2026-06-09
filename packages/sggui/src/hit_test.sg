@@ -1,0 +1,17 @@
+import sgplatform;
+
+def hit_test_point(bounds: Rect, x: i64, y: i64) -> bool {
+    rect_contains_point(bounds, x, y);
+}
+
+def event_is_mouse_button_down(event: Event) -> bool {
+    event.kind == EVENT_MOUSE_BUTTON_DOWN();
+}
+
+def event_is_mouse_button_up(event: Event) -> bool {
+    event.kind == EVENT_MOUSE_BUTTON_UP();
+}
+
+def event_mouse_down_at(event: Event, bounds: Rect) -> bool {
+    event_is_mouse_button_down(event) and hit_test_point(bounds, event.mouse_x, event.mouse_y);
+}

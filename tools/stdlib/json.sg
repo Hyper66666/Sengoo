@@ -19,6 +19,7 @@ extern "C" {
     fn sengoo_json_array_get(doc_handle: i64, node_id: i64, index: i64) -> i64;
     fn sengoo_json_array_push(doc_handle: i64, node_id: i64, value_doc_handle: i64, value_node_id: i64) -> i64;
     fn sengoo_json_string_copy(doc_handle: i64, node_id: i64, buffer: i64) -> i64;
+    fn sengoo_json_string_value(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_bool_value(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_number_i64(doc_handle: i64, node_id: i64) -> i64;
     fn sengoo_json_number_f64(doc_handle: i64, node_id: i64) -> f64;
@@ -82,6 +83,18 @@ def json_count_result(value: i64) -> Result<i64, i64> {
     } else {
         Result { is_ok: false, value: 0, error: 0 - value }
     }
+}
+
+def json_string_result(value: i64) -> Result<String, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: String { handle: value }, error: 0 }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: json_error_or_unknown() }
+    }
+}
+
+def json_value_as_string(value: JsonValue) -> Result<String, i64> {
+    json_string_result(sengoo_json_string_value(value.doc_handle, value.node_id))
 }
 
 def json_bool_status_result(value: i64) -> Result<bool, i64> {
@@ -210,6 +223,10 @@ impl JsonValue {
 
     def string_copy(self, buffer: Buffer) -> Result<i64, i64> {
         json_count_result(sengoo_json_string_copy(self.doc_handle, self.node_id, buffer.handle))
+    }
+
+    def string_value(self) -> Result<String, i64> {
+        json_value_as_string(self)
     }
 
     def bool_value(self) -> Result<bool, i64> {

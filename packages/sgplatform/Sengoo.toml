@@ -1,0 +1,11 @@
+[package]
+name = "sgplatform"
+version = "0.1.0"
+edition = "2026"
+description = "SDL2-backed windowing, input, and 2D rendering for Sengoo games and GUI."
+
+[lib]
+path = "src/lib.sg"
+
+[[test]]
+path = "tests/platform_smoke.sg"

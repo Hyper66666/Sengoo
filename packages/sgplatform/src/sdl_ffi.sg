@@ -1,0 +1,26 @@
+extern "C" {
+    fn sgplatform_init() -> i64;
+    fn sgplatform_quit() -> i64;
+    fn sgplatform_create_window(title_ptr: i64, width: i64, height: i64) -> i64;
+    fn sgplatform_destroy_window(window: i64) -> i64;
+    fn sgplatform_create_renderer(window: i64) -> i64;
+    fn sgplatform_destroy_renderer(renderer: i64) -> i64;
+    fn sgplatform_poll_event() -> i64;
+    fn sgplatform_last_event_key() -> i64;
+    fn sgplatform_last_event_mouse_x() -> i64;
+    fn sgplatform_last_event_mouse_y() -> i64;
+    fn sgplatform_last_event_mouse_button() -> i64;
+    fn sgplatform_ticks_ms() -> i64;
+    fn sgplatform_delay_ms(ms: i64) -> i64;
+    fn sgplatform_renderer_clear(renderer: i64, r: i64, g: i64, b: i64, a: i64) -> i64;
+    fn sgplatform_renderer_present(renderer: i64) -> i64;
+    fn sgplatform_renderer_draw_rect(renderer: i64, x: i64, y: i64, w: i64, h: i64, r: i64, g: i64, b: i64, a: i64) -> i64;
+    fn sgplatform_renderer_fill_rect(renderer: i64, x: i64, y: i64, w: i64, h: i64, r: i64, g: i64, b: i64, a: i64) -> i64;
+    fn sgplatform_renderer_draw_line(renderer: i64, x1: i64, y1: i64, x2: i64, y2: i64, r: i64, g: i64, b: i64, a: i64) -> i64;
+}
+
+#[link(name = "SDL2")]
+extern "C" {
+    fn SDL_Init(flags: i64) -> i64;
+    fn SDL_GetError() -> i64;
+}

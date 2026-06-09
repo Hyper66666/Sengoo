@@ -24,6 +24,21 @@ Some FFI examples need `clang` and are driven by `make`; see
 | [`ffi/`](ffi/) | Sengoo calling C and C calling exported Sengoo symbols |
 | [`reflection/`](reflection/) | Runtime wrapper demos for DB, Lua, proto, net, and FFI reflection paths |
 
+## Graphics / packages
+
+Interactive graphics (windowing, games, GUI) ship as **sgpm packages** under
+[`packages/`](../packages/), not as top-level `examples/` demos. This section
+satisfies OpenSpec task **6.1** (repository doc entry points). Start here:
+
+| Resource | What it covers |
+| --- | --- |
+| [`packages/README.md`](../packages/README.md) | Index of `sgplatform`, `sggame`, and `sggui` |
+| [`docs/sgplatform.md`](../docs/sgplatform.md) | SDL2 install, linking env vars, `blank_window` run steps |
+| [`packages/GRAPHICS_SUPPORT_MATRIX.md`](../packages/GRAPHICS_SUPPORT_MATRIX.md) | Supported vs deferred capabilities and CI skip policy |
+
+Required package examples (once packages land): `blank_window`, `snake`, and
+`counter` under `packages/sgplatform`, `packages/sggame`, and `packages/sggui`.
+
 ## Basic Syntax
 
 | File | Expected result |

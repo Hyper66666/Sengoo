@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::{
     WorkspaceEdit,
 };
 
+use super::dependency_sources::dependency_roots_for_workspace_roots;
 use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
 use super::symbols::{
     collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
@@ -151,7 +152,15 @@ pub(crate) fn workspace_documents_for_roots_and_open_documents(
 ) -> HashMap<Url, String> {
     let mut documents = HashMap::new();
     let mut files = Vec::new();
-    for root in roots {
+    let mut search_roots = roots.to_vec();
+    for dependency_root in dependency_roots_for_workspace_roots(roots) {
+        if !search_roots.iter().any(|root| root == &dependency_root) {
+            search_roots.push(dependency_root);
+        }
+    }
+    search_roots.sort();
+    search_roots.dedup();
+    for root in &search_roots {
         collect_sengoo_files(root, &mut files);
     }
     files.sort();

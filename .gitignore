@@ -23,7 +23,11 @@ desktop.ini
 
 # Temporary or scratch files
 _tmp_*
+/.tmp/
+/target-json-red/
+/$source
 *.rcgu.o
+/tools/stdlib/*.o
 *.pdb
 
 # Generated / vendored

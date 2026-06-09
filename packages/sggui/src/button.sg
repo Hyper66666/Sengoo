@@ -1,0 +1,25 @@
+import sgplatform;
+
+import hit_test;
+
+struct Button {
+    text: &str,
+    bounds: Rect,
+}
+
+def button_new(text: &str, bounds: Rect) -> Button {
+    Button { text: text, bounds: bounds };
+}
+
+impl Button {
+    def hit_test(self, x: i64, y: i64) -> bool {
+        hit_test_point(self.bounds, x, y);
+    }
+    def handle_event(self, event: Event) -> bool {
+        event_mouse_down_at(event, self.bounds);
+    }
+    def draw(self, renderer: Renderer, fill: Color, border: Color) -> Result<i64, i64> {
+        let filled = renderer.fill_rect(self.bounds, fill);
+        if not filled.is_ok { filled; } else { renderer.draw_rect(self.bounds, border); };
+    }
+}
