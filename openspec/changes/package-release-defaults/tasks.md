@@ -71,15 +71,14 @@
 
 ## Archive Gate
 
-- [ ] Deterministic package archive and checksum tests pass on Windows and
-  Ubuntu or record evidenced host-specific skips. Windows/local evidence passed;
-  Ubuntu/reference-host evidence remains pending CI or a separate host run.
-  This Windows workspace cannot execute an Ubuntu reference run locally: `wsl -l
-  -v` reports no installed Linux distribution and `docker` is not available in
-  PATH. `.github/workflows/realworld-e2e.yml` contains an `ubuntu-latest` matrix
-  lane with dedicated `cargo test -p sgpm publish -- --nocapture` and
-  `cargo test -p sgpm metadata -- --nocapture` steps, but no remote job output
-  is available in this workspace to cite as passing evidence.
+- [x] Deterministic package archive and checksum tests pass on Windows and
+  Ubuntu or record evidenced host-specific skips. Reference-host evidence:
+  GitHub Actions `realworld-e2e` run `27208468092`, job
+  `realworld locked loop (real binaries) (ubuntu-latest)` / `80330586960`,
+  completed successfully on 2026-06-09. Its `Verify package release defaults`
+  step ran `cargo test -p sgpm publish -- --nocapture` and
+  `cargo test -p sgpm metadata -- --nocapture`; the Windows matrix job
+  `80330587064` completed the same step successfully.
 - [x] Local and remote publish tests cover success, duplicate/error, auth/token
   redaction, checksum, cache refresh/repair, and metadata JSON.
 - [x] A realworld package-release fixture proves the default workflow through

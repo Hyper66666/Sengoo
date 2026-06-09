@@ -13,7 +13,7 @@
 ## 3. Verification
 
 - [x] 3.1 Windows host: `cargo test -p sengoo-runtime net::tls -- --nocapture` covers untrusted certificate and backend-unavailable/no-roots behavior.
-- [ ] 3.1b POSIX/reference host: `cargo test -p sengoo-runtime net::tls -- --nocapture` covers trusted success, hostname mismatch, untrusted certificate, and HTTPS runtime roundtrip (`#[cfg(not(windows))]` tests).
+- [x] 3.1b POSIX/reference host: `cargo test -p sengoo-runtime net::tls -- --nocapture` covers trusted success, hostname mismatch, untrusted certificate, and HTTPS runtime roundtrip (`#[cfg(not(windows))]` tests).
   - [x] Test structure exists for `tls_success_with_test_ca_root`,
     `tls_hostname_mismatch_maps_to_hostname_error`,
     `tls_untrusted_certificate_maps_to_cert_invalid`, and
@@ -22,10 +22,21 @@
   - [x] POSIX rustls `connect_tls` completes the handshake before returning so
     certificate/hostname failures map to `STATUS_TLS_*` instead of later HTTP
     request I/O.
-  - [ ] Run the command on a POSIX/reference host and paste host triple/backend
-    evidence before archive.
-- [ ] 3.1c Record the POSIX host triple, TLS backend, trust-store source, and
-  command output summary in this change or the support matrix.
+  - [x] Run the command on a POSIX/reference host and paste host triple/backend
+    evidence before archive. GitHub Actions `realworld-e2e` run `27208468092`,
+    job `realworld locked loop (real binaries) (ubuntu-latest)` / `80330586960`,
+    completed successfully on 2026-06-09 and ran
+    `cargo test -p sengoo-runtime net::tls -- --nocapture`.
+- [x] 3.1c Record the POSIX host triple, TLS backend, trust-store source, and
+  command output summary in this change or the support matrix. Evidence:
+  `ubuntu-latest` GitHub Actions runner (Linux x86_64 GNU host), rustls POSIX
+  backend, native trust roots via `rustls-native-certs` plus injected rcgen test
+  CA roots for fixture success. The successful step covered
+  `tls_success_with_test_ca_root`,
+  `tls_hostname_mismatch_maps_to_hostname_error`,
+  `tls_untrusted_certificate_maps_to_cert_invalid`,
+  `tls_unavailable_when_no_trust_roots`, and
+  `https_get_runtime_roundtrip_smoke`.
 - [x] 3.1d If POSIX proof is skipped, record the exact missing host capability
   and keep HTTPS as `Platform-specific`; do not substitute fake TLS or
   verification-disabled success. Current Windows workstation cannot execute
@@ -33,10 +44,9 @@
   x86_64-unknown-linux-gnu` is blocked by missing Linux C toolchain/sysroot for
   `ring` (`x86_64-linux-gnu-gcc`; clang attempt fails on missing Linux
   `assert.h`). `examples/realworld/SUPPORT_MATRIX.md` keeps HTTPS
-  `Platform-specific` pending the reference-host run. `.github/workflows/realworld-e2e.yml`
-  includes a Linux-only `cargo test -p sengoo-runtime net::tls -- --nocapture`
-  step so CI can provide the missing POSIX evidence, but this workspace has no
-  remote job output to cite yet.
+  `Platform-specific` for host-policy clarity; the reference-host run is now
+  supplied by `.github/workflows/realworld-e2e.yml` run `27208468092`, job
+  `80330586960`.
 - [x] 3.2 `cargo test -p sgc stdlib_http` - passes after cold `sengoo-runtime` TLS staticlib build (first run may compile `native-tls`).
 - [x] 3.3 `cargo test -p sglsp stdlib` covers http import signatures.
 - [x] 3.4 `cargo test -p sgpm realworld_locked_loop_uses_real_toolchain_binaries --test realworld_e2e -- --nocapture` proves the realworld HTTPS/status fixture still passes or records an evidenced network/TLS skip.
@@ -44,7 +54,10 @@
 ## Archive Gate
 
 - [x] `openspec validate stdlib-https-tls --strict` passes.
-- [ ] HTTPS client success works on reference host or documents evidenced skip.
-- [ ] TLS success tests use real certificate/hostname verification; no `verify=false` or fake TLS stubs. Test structure is present; pending POSIX/reference-host execution on this Windows workstation.
+- [x] HTTPS client success works on reference host or documents evidenced skip.
+  See 3.1b/3.1c for Ubuntu reference-host evidence.
+- [x] TLS success tests use real certificate/hostname verification; no
+  `verify=false` or fake TLS stubs. Test structure and POSIX execution evidence
+  are recorded in 3.1b/3.1c.
 - [x] New `STATUS_TLS_*` categories are documented and exposed through `std::status`.
 - [x] Plain `http://` behavior unchanged.
