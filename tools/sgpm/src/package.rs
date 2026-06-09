@@ -1,6 +1,7 @@
 use crate::resolver::Graph;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::GzBuilder;
 use miette::{Context, IntoDiagnostic, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use sha2::{Digest, Sha256};
@@ -11,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tar::Builder;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 static PUBLISH_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -20,6 +21,8 @@ pub struct PackageArtifact {
     pub archive_path: PathBuf,
     pub checksum_path: PathBuf,
     pub checksum: String,
+    pub included_file_count: usize,
+    pub excluded_file_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -53,28 +56,23 @@ pub fn publish_dry_run(graph: &Graph, output_dir: Option<&Path>) -> Result<Packa
     fs::create_dir_all(&output_dir)
         .into_diagnostic()
         .with_context(|| format!("failed to create {}", output_dir.display()))?;
-    let files = package_files(&root.root_dir, std::slice::from_ref(&output_dir))?;
+    let mut excluded_dirs = vec![output_dir.clone()];
+    excluded_dirs.extend(configured_local_registry_dirs(graph, &root.root_dir));
+    let selection = package_file_selection(&root.root_dir, &excluded_dirs)?;
 
     let archive_path = output_dir.join(&package_name);
     let archive_file = File::create(&archive_path)
         .into_diagnostic()
         .with_context(|| format!("failed to create {}", archive_path.display()))?;
-    let encoder = GzEncoder::new(archive_file, Compression::default());
+    let encoder = GzBuilder::new()
+        .mtime(0)
+        .write(archive_file, Compression::default());
     let mut builder = Builder::new(encoder);
 
-    for file in files {
+    for file in &selection.files {
         let rel = file.strip_prefix(&root.root_dir).into_diagnostic()?;
         let package_path = package_path(rel);
-        builder
-            .append_path_with_name(&file, &package_path)
-            .into_diagnostic()
-            .with_context(|| {
-                format!(
-                    "failed to add {} as {}",
-                    file.display(),
-                    package_path.display()
-                )
-            })?;
+        append_deterministic_file(&mut builder, file, &package_path)?;
     }
 
     let encoder = builder
@@ -100,7 +98,41 @@ pub fn publish_dry_run(graph: &Graph, output_dir: Option<&Path>) -> Result<Packa
         archive_path,
         checksum_path,
         checksum,
+        included_file_count: selection.files.len(),
+        excluded_file_count: selection.excluded_file_count,
     })
+}
+
+fn append_deterministic_file(
+    builder: &mut Builder<GzEncoder<File>>,
+    file: &Path,
+    package_path: &Path,
+) -> Result<()> {
+    let mut source = File::open(file)
+        .into_diagnostic()
+        .with_context(|| format!("failed to open {}", file.display()))?;
+    let metadata = source
+        .metadata()
+        .into_diagnostic()
+        .with_context(|| format!("failed to read metadata for {}", file.display()))?;
+    let mut header = tar::Header::new_gnu();
+    header.set_size(metadata.len());
+    header.set_mode(0o644);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, package_path, &mut source)
+        .into_diagnostic()
+        .with_context(|| {
+            format!(
+                "failed to add {} as {}",
+                file.display(),
+                package_path.display()
+            )
+        })?;
+    Ok(())
 }
 
 fn resolve_output_dir(root_dir: &Path, output_dir: Option<&Path>) -> PathBuf {
@@ -157,8 +189,8 @@ pub fn publish_to_local_registry(graph: &Graph, registry_name: &str) -> Result<R
     } else {
         Vec::new()
     };
-    let files = package_files(&root.root_dir, &exclusions)?;
-    publish_local_files(&root.root_dir, &target_dir, &files)?;
+    let selection = package_file_selection(&root.root_dir, &exclusions)?;
+    publish_local_files(&root.root_dir, &target_dir, &selection.files)?;
 
     Ok(RegistryPublish {
         name: root.name.clone(),
@@ -302,6 +334,7 @@ pub fn publish_to_remote_registry(
         "x-sengoo-checksum",
         HeaderValue::from_str(&artifact.checksum).into_diagnostic()?,
     );
+    let mut token_for_redaction = None;
     if let Some(token_env) = registry.token_env.as_deref() {
         let token = env::var(token_env).into_diagnostic().with_context(|| {
             format!(
@@ -314,6 +347,7 @@ pub fn publish_to_remote_registry(
             AUTHORIZATION,
             HeaderValue::from_str(&auth).into_diagnostic()?,
         );
+        token_for_redaction = Some(token);
     }
 
     let runtime = TokioRuntimeBuilder::new_current_thread()
@@ -336,6 +370,7 @@ pub fn publish_to_remote_registry(
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            let body = redact_token(&body, token_for_redaction.as_deref());
             miette::bail!(
                 "remote registry '{}' rejected package {} v{} with status {}: {}",
                 registry_name,
@@ -364,38 +399,79 @@ fn resolve_registry_dir(root_dir: &Path, registry_path: &Path) -> PathBuf {
     }
 }
 
-fn package_files(root_dir: &Path, excluded_dirs: &[PathBuf]) -> Result<Vec<PathBuf>> {
+fn configured_local_registry_dirs(graph: &Graph, root_dir: &Path) -> Vec<PathBuf> {
+    graph
+        .registries
+        .values()
+        .filter_map(|registry| registry.path.as_deref())
+        .map(|path| resolve_registry_dir(root_dir, path))
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+struct PackageFileSelection {
+    files: Vec<PathBuf>,
+    excluded_file_count: usize,
+}
+
+fn package_file_selection(
+    root_dir: &Path,
+    excluded_dirs: &[PathBuf],
+) -> Result<PackageFileSelection> {
     let excluded_dirs = excluded_dirs
         .iter()
         .filter_map(|path| fs::canonicalize(path).ok())
         .filter(|path| path.starts_with(root_dir))
         .collect::<Vec<_>>();
-    let mut files = WalkDir::new(root_dir)
-        .into_iter()
-        .filter_entry(|entry| keep_package_entry(entry, &excluded_dirs))
-        .map(|entry| entry.into_diagnostic())
-        .collect::<Result<Vec<_>>>()
-        .with_context(|| format!("failed to enumerate package {}", root_dir.display()))?
-        .into_iter()
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .collect::<Vec<_>>();
-    files.sort();
-    Ok(files)
+    let mut files = Vec::new();
+    let mut excluded_file_count = 0;
+    for entry in WalkDir::new(root_dir) {
+        let entry = entry
+            .into_diagnostic()
+            .with_context(|| format!("failed to enumerate package {}", root_dir.display()))?;
+        if entry.depth() == 0 || !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(root_dir).into_diagnostic()?;
+        if should_exclude_file(entry.path(), rel, &excluded_dirs) {
+            excluded_file_count += 1;
+        } else {
+            files.push(entry.into_path());
+        }
+    }
+    files.sort_by(|left, right| {
+        package_path_for_sort(root_dir, left).cmp(&package_path_for_sort(root_dir, right))
+    });
+    Ok(PackageFileSelection {
+        files,
+        excluded_file_count,
+    })
 }
 
-fn keep_package_entry(entry: &DirEntry, excluded_dirs: &[PathBuf]) -> bool {
+fn should_exclude_file(path: &Path, rel: &Path, excluded_dirs: &[PathBuf]) -> bool {
     if excluded_dirs
         .iter()
-        .any(|path| entry.path() == path || entry.path().starts_with(path))
+        .any(|dir| path == dir || path.starts_with(dir))
     {
-        return false;
-    }
-    if entry.depth() == 0 || !entry.file_type().is_dir() {
         return true;
     }
-    let name = entry.file_name().to_string_lossy();
-    name != ".git" && name != "target"
+    if rel.components().any(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        matches!(name.as_ref(), ".git" | ".hg" | ".svn" | "target" | "build")
+            || name.contains(".sgpm-publish-")
+            || name.contains(".sgpm-fetch-")
+    }) {
+        return true;
+    }
+    let file_name = rel
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    file_name == ".DS_Store"
+        || file_name == "Thumbs.db"
+        || file_name.ends_with('~')
+        || file_name.ends_with(".tmp")
+        || file_name.ends_with(".swp")
 }
 
 fn package_path(path: &Path) -> PathBuf {
@@ -404,6 +480,19 @@ fn package_path(path: &Path) -> PathBuf {
         .collect::<Vec<_>>()
         .join("/")
         .into()
+}
+
+fn package_path_for_sort(root_dir: &Path, path: &Path) -> PathBuf {
+    path.strip_prefix(root_dir)
+        .map(package_path)
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn redact_token(text: &str, token: Option<&str>) -> String {
+    match token.filter(|token| !token.is_empty()) {
+        Some(token) => text.replace(token, "<redacted>"),
+        None => text.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -451,7 +540,7 @@ mod tests {
     #[test]
     fn package_files_rejects_missing_root() {
         let root = temp_dir("missing_root");
-        let err = package_files(&root, &[]).unwrap_err();
+        let err = package_file_selection(&root, &[]).unwrap_err();
         assert!(err.to_string().contains("failed to enumerate package"));
     }
 }

@@ -2,56 +2,137 @@
 // New examples should prefer `import std::assert`.
 
 extern "C" {
-    fn sengoo_panic_option_unwrap_i64() -> i64;
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_assert_failure_v1(
+        kind: i64,
+        file_ptr: i64,
+        file_len: i64,
+        line: i64,
+        i64_a: i64,
+        i64_b: i64,
+        str_a_ptr: i64,
+        str_b_ptr: i64,
+        f64_a: f64,
+        f64_b: f64,
+    ) -> i64;
     fn sengoo_f64_eq(lhs: f64, rhs: f64) -> i64;
     fn sengoo_f64_ne(lhs: f64, rhs: f64) -> i64;
 }
 
-def assert(cond: bool) -> bool {
+def assert_fail_impl(
+    kind: i64,
+    file: &str,
+    line: i64,
+    i64_a: i64,
+    i64_b: i64,
+    str_a: &str,
+    str_b: &str,
+    f64_a: f64,
+    f64_b: f64,
+) -> bool {
+    sengoo_assert_failure_v1(
+        kind,
+        sengoo_stdlib_str_ptr(file),
+        file.len(),
+        line,
+        i64_a,
+        i64_b,
+        sengoo_stdlib_str_ptr(str_a),
+        sengoo_stdlib_str_ptr(str_b),
+        f64_a,
+        f64_b,
+    );
+    false
+}
+
+def assert(cond: bool, file: &str, line: i64) -> bool {
     if cond {
         true
     } else {
-        sengoo_panic_option_unwrap_i64();
-        false
+        assert_fail_impl(0, file, line, 0, 0, "", "", 0.0, 0.0)
     }
 }
 
-def assert_true(cond: bool) -> bool {
-    assert(cond)
+def assert_true(cond: bool, file: &str, line: i64) -> bool {
+    if cond {
+        true
+    } else {
+        assert_fail_impl(1, file, line, 0, 0, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_false(cond: bool) -> bool {
-    assert(!cond)
+def assert_false(cond: bool, file: &str, line: i64) -> bool {
+    if !cond {
+        true
+    } else {
+        assert_fail_impl(2, file, line, 0, 0, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_eq_i64(lhs: i64, rhs: i64) -> bool {
-    assert(lhs == rhs)
+def assert_eq_i64(lhs: i64, rhs: i64, file: &str, line: i64) -> bool {
+    if lhs == rhs {
+        true
+    } else {
+        assert_fail_impl(3, file, line, lhs, rhs, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_ne_i64(lhs: i64, rhs: i64) -> bool {
-    assert(lhs != rhs)
+def assert_ne_i64(lhs: i64, rhs: i64, file: &str, line: i64) -> bool {
+    if lhs != rhs {
+        true
+    } else {
+        assert_fail_impl(4, file, line, lhs, rhs, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_eq_bool(lhs: bool, rhs: bool) -> bool {
-    assert(lhs == rhs)
+def assert_eq_bool(lhs: bool, rhs: bool, file: &str, line: i64) -> bool {
+    if lhs == rhs {
+        true
+    } else {
+        let lhs_i = if lhs { 1 } else { 0 };
+        let rhs_i = if rhs { 1 } else { 0 };
+        assert_fail_impl(5, file, line, lhs_i, rhs_i, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_ne_bool(lhs: bool, rhs: bool) -> bool {
-    assert(lhs != rhs)
+def assert_ne_bool(lhs: bool, rhs: bool, file: &str, line: i64) -> bool {
+    if lhs != rhs {
+        true
+    } else {
+        let lhs_i = if lhs { 1 } else { 0 };
+        let rhs_i = if rhs { 1 } else { 0 };
+        assert_fail_impl(6, file, line, lhs_i, rhs_i, "", "", 0.0, 0.0)
+    }
 }
 
-def assert_eq_str(lhs: &str, rhs: &str) -> bool {
-    assert(lhs == rhs)
+def assert_eq_str(lhs: &str, rhs: &str, file: &str, line: i64) -> bool {
+    if lhs == rhs {
+        true
+    } else {
+        assert_fail_impl(7, file, line, 0, 0, lhs, rhs, 0.0, 0.0)
+    }
 }
 
-def assert_ne_str(lhs: &str, rhs: &str) -> bool {
-    assert(lhs != rhs)
+def assert_ne_str(lhs: &str, rhs: &str, file: &str, line: i64) -> bool {
+    if lhs != rhs {
+        true
+    } else {
+        assert_fail_impl(8, file, line, 0, 0, lhs, rhs, 0.0, 0.0)
+    }
 }
 
-def assert_eq_f64(lhs: f64, rhs: f64) -> bool {
-    assert(sengoo_f64_eq(lhs, rhs) != 0)
+def assert_eq_f64(lhs: f64, rhs: f64, file: &str, line: i64) -> bool {
+    if sengoo_f64_eq(lhs, rhs) != 0 {
+        true
+    } else {
+        assert_fail_impl(9, file, line, 0, 0, "", "", lhs, rhs)
+    }
 }
 
-def assert_ne_f64(lhs: f64, rhs: f64) -> bool {
-    assert(sengoo_f64_ne(lhs, rhs) != 0)
+def assert_ne_f64(lhs: f64, rhs: f64, file: &str, line: i64) -> bool {
+    if sengoo_f64_ne(lhs, rhs) != 0 {
+        true
+    } else {
+        assert_fail_impl(10, file, line, 0, 0, "", "", lhs, rhs)
+    }
 }

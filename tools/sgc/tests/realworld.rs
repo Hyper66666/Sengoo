@@ -48,7 +48,12 @@ fn assert_sgc_check(path: &Path, module_map: Option<String>) {
 
 #[test]
 fn realworld_sources_check_through_sgc_command() {
+    assert_sgc_check(&realworld("async-channel-smoke").join("src/main.sg"), None);
     assert_sgc_check(&realworld("cli-json-audit").join("src/main.sg"), None);
+    assert_sgc_check(
+        &realworld("compressed-json-artifact").join("src/main.sg"),
+        None,
+    );
     assert_sgc_check(&realworld("http-client-status").join("src/main.sg"), None);
 
     let workspace_doc_loop = realworld("workspace-doc-loop");

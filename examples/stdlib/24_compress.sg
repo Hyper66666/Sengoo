@@ -1,0 +1,56 @@
+// examples/stdlib/24_compress.sg
+//
+// Demonstrates: importing std::compress gzip Buffer helpers for JSON bytes.
+//
+// Run: sgc run examples/stdlib/24_compress.sg
+// Expected output: 24
+
+import std::compress;
+
+import std::json;
+
+import std::status;
+
+def main() -> i64 {
+    let source = ffi_buffer_from_bytes("[1,2,3]").unwrap_or(Buffer { handle: 0 });
+    let compressed = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let restored = ffi_buffer_new(128).unwrap_or(Buffer { handle: 0 });
+    let tiny = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+
+    let compressed_result = compress_gzip_buffer(source, source.used_len(), compressed);
+    let restored_result = if compressed_result.is_ok {
+        decompress_gzip_buffer(compressed, compressed_result.value, restored)
+    } else {
+        Result { is_ok: false, value: 0, error: STATUS_UNKNOWN() }
+    };
+    let doc_result = if restored_result.is_ok {
+        json_parse_buffer(restored, restored_result.value)
+    } else {
+        Result { is_ok: false, value: JsonDoc { handle: 0 }, error: STATUS_PARSE() }
+    };
+    let count = if doc_result.is_ok {
+        let doc = doc_result.value;
+        let root = doc.root();
+        let len = root.array_len().unwrap_or(0);
+        doc.close();
+        len;
+    } else {
+        0;
+    };
+    let too_small = compress_gzip_buffer(source, source.used_len(), tiny).err().unwrap_or(0);
+
+    tiny.free();
+    restored.free();
+    compressed.free();
+    source.free();
+
+    if compressed_result.is_ok
+        and restored_result.is_ok
+        and count == 3
+        and too_small == STATUS_BUFFER_TOO_SMALL() {
+        print(24);
+    } else {
+        print(0);
+    }
+    0
+}

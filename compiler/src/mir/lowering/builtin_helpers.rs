@@ -12,6 +12,7 @@ impl<'a> LoweringContext<'a> {
             "spawn_task" => Some(self.lower_builtin_spawn_task(arg_locals)),
             "sleep" => Some(self.lower_builtin_sleep(arg_locals)),
             "timeout" => Some(self.lower_builtin_timeout(arg_locals)),
+            "timeout_cancel" => Some(self.lower_builtin_timeout_cancel(arg_locals)),
             "join" => Some(self.lower_builtin_join(arg_locals)),
             "cancel_task" => Some(self.lower_builtin_cancel_task(arg_locals)),
             "task_status" => Some(self.lower_builtin_task_status(arg_locals)),
@@ -173,6 +174,67 @@ impl<'a> LoweringContext<'a> {
         future_local
     }
 
+    pub(super) fn lower_builtin_timeout_cancel(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 2 {
+            self.errors.push(format!(
+                "timeout_cancel expects exactly two arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let future_handle = arg_locals[0];
+        let duration_local = arg_locals[1];
+        let base_name = self.resolve_async_base_name(future_handle);
+        if base_name == "unknown" {
+            self.errors.push(
+                "timeout_cancel requires a future produced by an async function or async block"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let result_ty = self.async_await_result_type(future_handle);
+        if result_ty != MIR_I64 {
+            self.errors.push(
+                "timeout_cancel currently supports i64 inner futures during MIR lowering"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let Some(kind_id) = self.async_dispatch_kind_id(&base_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        };
+        let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: kind_local,
+            value: MirConstant::Int(kind_id),
+        });
+
+        let result_struct = MIRType::Struct {
+            name: "Result".to_string(),
+            fields: vec![
+                ("is_ok".to_string(), MIR_BOOL),
+                ("value".to_string(), MIR_I64),
+                ("error".to_string(), MIR_I64),
+            ],
+        };
+        let future_local = self.add_local(
+            None,
+            LocalKind::Temp,
+            MIRType::Future(Box::new(result_struct)),
+        );
+        self.push_inst(Instruction::Call {
+            destination: future_local,
+            func: "sengoo_async_timeout_cancel_i64__start".to_string(),
+            args: vec![kind_local, future_handle, duration_local],
+        });
+        self.future_origins
+            .insert(future_local, "sengoo_async_timeout_cancel_i64".to_string());
+        future_local
+    }
+
     pub(super) fn async_await_result_type(&self, future_handle: Local) -> MIRType {
         match self.get_local_type(future_handle) {
             MIRType::Future(inner) => (**inner).clone(),
@@ -265,97 +327,125 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn lower_builtin_select(&mut self, arg_locals: &[Local]) -> Local {
-        if arg_locals.len() != 2 {
+        if !(2..=8).contains(&arg_locals.len()) {
             self.errors.push(format!(
-                "select expects exactly two arguments, got {}",
+                "select expects between two and eight arguments, got {}",
                 arg_locals.len()
             ));
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
         }
 
-        let first_handle = arg_locals[0];
-        let second_handle = arg_locals[1];
-        let first_name = self.resolve_async_base_name(first_handle);
-        let second_name = self.resolve_async_base_name(second_handle);
-        if first_name == "unknown" || second_name == "unknown" {
-            self.errors.push(
-                "select requires futures produced by async functions or async blocks".to_string(),
-            );
-            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        let mut operand_names = Vec::with_capacity(arg_locals.len());
+        for handle in arg_locals {
+            let name = self.resolve_async_base_name(*handle);
+            if name == "unknown" {
+                self.errors.push(
+                    "select requires futures produced by async functions or async blocks"
+                        .to_string(),
+                );
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
+            operand_names.push(name);
         }
 
-        let result_ty = self.async_await_result_type(first_handle);
-        let second_result_ty = self.async_await_result_type(second_handle);
-        if second_result_ty != result_ty {
-            self.errors.push(
-                "select requires futures with matching result types during MIR lowering"
-                    .to_string(),
-            );
-            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        let result_ty = self.async_await_result_type(arg_locals[0]);
+        for handle in &arg_locals[1..] {
+            if self.async_await_result_type(*handle) != result_ty {
+                self.errors.push(
+                    "select requires futures with matching result types during MIR lowering"
+                        .to_string(),
+                );
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
         }
 
-        let Some(first_kind_id) = self.async_dispatch_kind_id(&first_name) else {
-            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-        };
-        let first_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
-        self.push_inst(Instruction::Assign {
-            destination: first_kind,
-            value: MirConstant::Int(first_kind_id),
-        });
+        let mut kind_locals = Vec::with_capacity(arg_locals.len());
+        for name in &operand_names {
+            let Some(kind_id) = self.async_dispatch_kind_id(name) else {
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            };
+            let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+            self.push_inst(Instruction::Assign {
+                destination: kind_local,
+                value: MirConstant::Int(kind_id),
+            });
+            kind_locals.push(kind_local);
+        }
 
-        let Some(second_kind_id) = self.async_dispatch_kind_id(&second_name) else {
-            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
-        };
-        let second_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
-        self.push_inst(Instruction::Assign {
-            destination: second_kind,
-            value: MirConstant::Int(second_kind_id),
-        });
-
+        let entry_block = self.current_block();
         let winner = self.add_local(None, LocalKind::Temp, MIR_I64);
+        let winner_args = if arg_locals.len() == 2 {
+            vec![kind_locals[0], arg_locals[0], kind_locals[1], arg_locals[1]]
+        } else {
+            let mut args = Vec::with_capacity(17);
+            let count_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+            self.push_inst(Instruction::Assign {
+                destination: count_local,
+                value: MirConstant::Int(arg_locals.len() as i64),
+            });
+            args.push(count_local);
+            for index in 0..8 {
+                if index < arg_locals.len() {
+                    args.push(kind_locals[index]);
+                    args.push(arg_locals[index]);
+                } else {
+                    let zero_kind = self.add_local(None, LocalKind::Temp, MIR_I64);
+                    self.push_inst(Instruction::Assign {
+                        destination: zero_kind,
+                        value: MirConstant::Int(0),
+                    });
+                    let zero_handle = self.add_local(None, LocalKind::Temp, MIR_I64);
+                    self.push_inst(Instruction::Assign {
+                        destination: zero_handle,
+                        value: MirConstant::Int(0),
+                    });
+                    args.push(zero_kind);
+                    args.push(zero_handle);
+                }
+            }
+            args
+        };
+        let winner_fn = if arg_locals.len() == 2 {
+            crate::mir::async_dispatch_synthesis_helpers::select_winner_runtime_function_name()
+        } else {
+            crate::mir::async_dispatch_synthesis_helpers::select_n_winner_runtime_function_name()
+        };
         self.push_inst(Instruction::Call {
             destination: winner,
-            func:
-                crate::mir::async_dispatch_synthesis_helpers::select_winner_runtime_function_name()
-                    .to_string(),
-            args: vec![first_kind, first_handle, second_kind, second_handle],
+            func: winner_fn.to_string(),
+            args: winner_args,
         });
 
-        let first_ready = self.new_block();
-        let second_ready = self.new_block();
         let join_block = self.new_block();
-        self.set_terminator(Terminator::If {
-            cond: winner,
-            then_block: second_ready,
-            else_block: first_ready,
-        });
+        let mut ready_blocks = Vec::with_capacity(arg_locals.len());
+        let mut branch_results = Vec::with_capacity(arg_locals.len());
 
-        self.set_current_block(first_ready);
-        let first_result = self.add_local(None, LocalKind::Temp, result_ty.clone());
-        self.push_inst(Instruction::Call {
-            destination: first_result,
-            func: format!("{first_name}__result"),
-            args: vec![first_handle],
-        });
-        self.set_terminator(Terminator::Goto(join_block));
-        let first_end = self.current_block();
+        for (handle, name) in arg_locals.iter().zip(operand_names.iter()) {
+            let ready_block = self.new_block();
+            ready_blocks.push(ready_block);
+            self.set_current_block(ready_block);
+            let branch_result = self.add_local(None, LocalKind::Temp, result_ty.clone());
+            self.push_inst(Instruction::Call {
+                destination: branch_result,
+                func: format!("{name}__result"),
+                args: vec![*handle],
+            });
+            self.set_terminator(Terminator::Goto(join_block));
+            branch_results.push((branch_result, self.current_block()));
+        }
 
-        self.set_current_block(second_ready);
-        let second_result = self.add_local(None, LocalKind::Temp, result_ty.clone());
-        self.push_inst(Instruction::Call {
-            destination: second_result,
-            func: format!("{second_name}__result"),
-            args: vec![second_handle],
-        });
-        self.set_terminator(Terminator::Goto(join_block));
-        let second_end = self.current_block();
+        self.set_current_block(entry_block);
+        self.emit_select_winner_switch(winner, &ready_blocks);
 
         self.set_current_block(join_block);
         if is_void_like(&result_ty) {
             self.add_local(None, LocalKind::Temp, MIR_UNIT)
         } else {
             let result_local = self.add_local(None, LocalKind::Temp, result_ty);
-            let incoming = vec![(first_result, first_end), (second_result, second_end)];
+            let incoming: Vec<(Local, usize)> = branch_results
+                .iter()
+                .map(|(local, block)| (*local, *block))
+                .collect();
             self.push_inst(Instruction::Phi {
                 destination: result_local,
                 incoming: incoming.clone(),
@@ -363,6 +453,32 @@ impl<'a> LoweringContext<'a> {
             self.propagate_future_origin_through_phi(result_local, &incoming);
             result_local
         }
+    }
+
+    fn emit_select_winner_switch(&mut self, winner: Local, ready_blocks: &[usize]) {
+        if ready_blocks.len() == 2 {
+            self.set_terminator(Terminator::If {
+                cond: winner,
+                then_block: ready_blocks[1],
+                else_block: ready_blocks[0],
+            });
+            return;
+        }
+
+        let targets = ready_blocks
+            .iter()
+            .enumerate()
+            .take(ready_blocks.len().saturating_sub(1))
+            .map(|(index, &block)| (index as u32, block))
+            .collect();
+        let otherwise = *ready_blocks
+            .last()
+            .expect("select has at least two operands");
+        self.set_terminator(Terminator::Switch {
+            discr: winner,
+            targets,
+            otherwise,
+        });
     }
 }
 

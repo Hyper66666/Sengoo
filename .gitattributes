@@ -1,0 +1,8 @@
+.gitattributes text eol=lf
+*.sg text eol=lf
+Sengoo.toml text eol=lf
+Sengoo.lock text eol=lf
+sgpm-index.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

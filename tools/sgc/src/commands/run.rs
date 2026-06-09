@@ -1,7 +1,9 @@
 use crate::*;
 use miette::{IntoDiagnostic, Result};
+use sengoo_compiler::AssertCallsiteContext;
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
 
 use super::shared::{
     contract_checks_mode_label, resolve_contract_checks_enabled, ContractChecksOverrideGuard,
@@ -65,6 +67,13 @@ pub(crate) async fn cmd_run(
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
     let source = expand_imports_for_source(input_path, &root_source)?;
+    let native_link_libraries = collect_native_link_libraries_for_graph(input_path, &root_source)?;
+    if !native_link_libraries.is_empty() {
+        println!(
+            "native link libraries: {}",
+            native_link_libraries.join(", ")
+        );
+    }
     if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
         println!("{}", hint);
     }
@@ -207,7 +216,7 @@ pub(crate) async fn cmd_run(
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
     let lli_extra_objects = if matches!(resolved_engine, RunEngine::Lli) {
         if let (Some(clang), Some(runtime_c)) = (clang_exe.as_deref(), runtime_c.as_deref()) {
-            ensure_runtime_objects(clang, runtime_c, opt_level)?
+            ensure_runtime_objects(clang, runtime_c, opt_level, None)?
         } else {
             Vec::new()
         }
@@ -275,7 +284,9 @@ pub(crate) async fn cmd_run(
                             &reflection,
                             Some(Path::new(&metadata.llvm_ir_path)),
                         )?;
-                        run_native_binary_with_args(Path::new(exe), args)
+                        let exit_code = run_native_binary_with_args(Path::new(exe), args)?;
+                        propagate_run_exit_code(exit_code)?;
+                        Ok(())
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
@@ -392,7 +403,7 @@ pub(crate) async fn cmd_run(
                         let exe = previous.executable_path.as_deref().ok_or_else(|| {
                             miette::miette!("cache corrupted: missing native executable path")
                         })?;
-                        run_native_binary_with_args(Path::new(exe), args)
+                        propagate_run_exit_code(run_native_binary_with_args(Path::new(exe), args)?)
                     }
                     RunEngine::Lli => {
                         let lli = lli_exe.as_deref().ok_or_else(|| {
@@ -423,6 +434,7 @@ pub(crate) async fn cmd_run(
                                 &executable_path,
                                 runtime_c.as_deref(),
                                 opt_level,
+                                Some(&native_link_libraries),
                             ) {
                                 Ok(recovery) => {
                                     let label = match recovery {
@@ -434,7 +446,10 @@ pub(crate) async fn cmd_run(
                                         }
                                     };
                                     println!("run workset plan: {}", label);
-                                    return run_native_binary_with_args(&executable_path, args);
+                                    return propagate_run_exit_code(run_native_binary_with_args(
+                                        &executable_path,
+                                        args,
+                                    )?);
                                 }
                                 Err(err) => {
                                     println!("run workset fallback: {}", err);
@@ -459,6 +474,11 @@ pub(crate) async fn cmd_run(
         println!("run workset plan: full rebuild");
     }
 
+    let assert_callsite = AssertCallsiteContext {
+        source_file: Some(input_path.to_string_lossy().replace('\\', "/").into()),
+        source_text: Some(Rc::from(source.as_str())),
+        user_base_offset: user_source_base_offset(&source, &root_source),
+    };
     let (phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings_with_mode(
         &source,
         opt_level,
@@ -468,6 +488,8 @@ pub(crate) async fn cmd_run(
         } else {
             None
         },
+        Some(assert_callsite),
+        None,
     )
     .map_err(|e| {
         emit_compile_error(Some(input), &e.to_string());
@@ -480,6 +502,7 @@ pub(crate) async fn cmd_run(
     );
     drop(source);
     let llvm_ir_hash = file_fingerprint(&llvm_ir_path)?;
+    let mut native_exit_code = 0i32;
 
     match resolved_engine {
         RunEngine::Native => {
@@ -533,10 +556,10 @@ pub(crate) async fn cmd_run(
                             println!("  - {}", line);
                         }
                     }
-                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level)?;
+                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level, None)?;
                 }
                 None => {
-                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level)?;
+                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level, None)?;
                 }
             }
 
@@ -546,9 +569,25 @@ pub(crate) async fn cmd_run(
                 &mut object_paths,
                 runtime_c.as_deref(),
                 opt_level,
+                None,
             )?;
-            link_native_binary_from_objects(clang, &object_paths, &executable_path)?;
-            run_native_binary_with_args(&executable_path, args)?;
+            append_package_native_inputs(
+                clang,
+                &mut object_paths,
+                input_path,
+                &root_source,
+                &build_dir,
+                opt_level,
+                None,
+            )?;
+            link_native_binary_from_objects(
+                clang,
+                &object_paths,
+                &executable_path,
+                None,
+                Some(&native_link_libraries),
+            )?;
+            native_exit_code = run_native_binary_with_args(&executable_path, args)?;
         }
         RunEngine::Lli => {
             let lli = lli_exe
@@ -609,5 +648,6 @@ pub(crate) async fn cmd_run(
         }
     }
 
+    propagate_run_exit_code(native_exit_code)?;
     Ok(())
 }

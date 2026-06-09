@@ -22,7 +22,13 @@ pub(crate) async fn cmd_build(
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
     reflection: ReflectionCliOptions,
+    target: Option<&str>,
+    timings_json: Option<&str>,
 ) -> Result<()> {
+    let build_target = NativeBuildTarget::resolve(target)?;
+    if build_target.is_cross() {
+        println!("cross-compile target: {}", build_target.triple);
+    }
     println!("Building: {}", input);
 
     let input_path = Path::new(input);
@@ -35,6 +41,13 @@ pub(crate) async fn cmd_build(
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
     let source = expand_imports_for_source(input_path, &root_source)?;
+    let native_link_libraries = collect_native_link_libraries_for_graph(input_path, &root_source)?;
+    if !native_link_libraries.is_empty() {
+        println!(
+            "native link libraries: {}",
+            native_link_libraries.join(", ")
+        );
+    }
     if let Some(hint) = maybe_low_memory_mode_hint(source.len(), low_memory) {
         println!("{}", hint);
     }
@@ -179,9 +192,8 @@ pub(crate) async fn cmd_build(
             .to_string_lossy()
             .to_string()
     } else {
-        let ext = if cfg!(windows) { ".exe" } else { "" };
         build_dir
-            .join(format!("{}{}", stem, ext))
+            .join(build_target.default_output_basename(&stem))
             .to_string_lossy()
             .to_string()
     };
@@ -194,7 +206,7 @@ pub(crate) async fn cmd_build(
     let object_path = if emit_llvm {
         None
     } else {
-        Some(build_dir.join(format!("{}.{}", stem, object_file_extension())))
+        Some(build_dir.join(format!("{}.{}", stem, build_target.object_extension())))
     };
     let graph_v2 = if low_memory {
         crate::graph_builder::build_graph_v2_for_source(
@@ -392,6 +404,7 @@ pub(crate) async fn cmd_build(
                                     output_path,
                                     runtime_c.as_deref(),
                                     opt_level,
+                                    Some(&native_link_libraries),
                                 ) {
                                     Ok(recovery) => {
                                         let label = match recovery {
@@ -445,12 +458,17 @@ pub(crate) async fn cmd_build(
         } else {
             None
         },
+        None,
+        Some(&build_target.triple),
     )
     .map_err(|e| {
         emit_compile_error(Some(input), &e.to_string());
         miette::miette!("compile failed")
     })?;
     crate::maybe_print_phase_timings(&phases);
+    if let Some(path) = timings_json {
+        write_timings_json_v1(Path::new(path), &phases)?;
+    }
     println!(
         "frontend memory mode: {}",
         frontend_memory_mode_label(effective_memory_mode)
@@ -548,10 +566,22 @@ pub(crate) async fn cmd_build(
                     println!("  - {}", line);
                 }
             }
-            compile_ir_to_object(&clang_exe, &llvm_ir_path, &object_path, opt_level)?;
+            compile_ir_to_object(
+                &clang_exe,
+                &llvm_ir_path,
+                &object_path,
+                opt_level,
+                Some(&build_target),
+            )?;
         }
         None => {
-            compile_ir_to_object(&clang_exe, &llvm_ir_path, &object_path, opt_level)?;
+            compile_ir_to_object(
+                &clang_exe,
+                &llvm_ir_path,
+                &object_path,
+                opt_level,
+                Some(&build_target),
+            )?;
         }
     }
 
@@ -561,8 +591,24 @@ pub(crate) async fn cmd_build(
         &mut object_paths,
         runtime_c.as_deref(),
         opt_level,
+        Some(&build_target),
     )?;
-    link_native_binary_from_objects(&clang_exe, &object_paths, output_path)?;
+    append_package_native_inputs(
+        &clang_exe,
+        &mut object_paths,
+        input_path,
+        &root_source,
+        &build_dir,
+        opt_level,
+        Some(&build_target),
+    )?;
+    link_native_binary_from_objects(
+        &clang_exe,
+        &object_paths,
+        output_path,
+        Some(&build_target),
+        Some(&native_link_libraries),
+    )?;
     maybe_emit_reflection_sidecar(
         Path::new(&output_file),
         &graph_v2,

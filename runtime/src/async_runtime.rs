@@ -14,9 +14,15 @@ use std::time::Instant;
 #[cfg(feature = "native-bridge")]
 mod bridge;
 #[cfg(feature = "native-bridge")]
+mod concurrent;
+#[cfg(feature = "native-bridge")]
 mod futures;
 #[cfg(feature = "native-bridge")]
+mod reactor;
+#[cfg(feature = "native-bridge")]
 mod select;
+#[cfg(feature = "native-bridge")]
+mod thread_pool;
 
 #[cfg(all(test, feature = "native-bridge"))]
 use bridge::{scheduler_mut, ForeignAsyncTask, CURRENT_SCHEDULER};
@@ -26,20 +32,51 @@ pub use bridge::{
     sengoo_async_scheduler_free, sengoo_async_scheduler_new, sengoo_async_scheduler_run_until_idle,
     sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_task_status,
 };
-#[cfg(all(test, feature = "native-bridge"))]
-use futures::SleepFutureState;
+#[cfg(feature = "native-bridge")]
+pub use concurrent::{
+    sengoo_async_channel_bounded_i64, sengoo_async_channel_pair_free,
+    sengoo_async_channel_pair_receiver, sengoo_async_channel_pair_sender,
+    sengoo_async_channel_recv_i64__cancel, sengoo_async_channel_recv_i64__drop,
+    sengoo_async_channel_recv_i64__poll, sengoo_async_channel_recv_i64__result,
+    sengoo_async_channel_recv_i64__start, sengoo_async_channel_send_i64__cancel,
+    sengoo_async_channel_send_i64__drop, sengoo_async_channel_send_i64__poll,
+    sengoo_async_channel_send_i64__result, sengoo_async_channel_send_i64__start,
+    sengoo_async_channel_sender_clone, sengoo_async_channel_sender_close,
+    sengoo_async_channel_sender_drop, sengoo_async_mutex_close, sengoo_async_mutex_drop,
+    sengoo_async_mutex_lock_i64__cancel, sengoo_async_mutex_lock_i64__drop,
+    sengoo_async_mutex_lock_i64__poll, sengoo_async_mutex_lock_i64__result,
+    sengoo_async_mutex_lock_i64__start, sengoo_async_mutex_new_i64, sengoo_async_mutex_unlock_i64,
+    sengoo_async_runtime_enable_thread_pool, sengoo_async_runtime_thread_pool_enabled,
+    sengoo_async_spawn_blocking_i64__cancel, sengoo_async_spawn_blocking_i64__drop,
+    sengoo_async_spawn_blocking_i64__poll, sengoo_async_spawn_blocking_i64__result,
+    sengoo_async_spawn_blocking_i64__start, ChannelRecvI64Result, ChannelSendI64Result,
+    MutexLockI64Result,
+};
 #[cfg(feature = "native-bridge")]
 pub use futures::{
     sengoo_async_sleep__cancel, sengoo_async_sleep__drop, sengoo_async_sleep__poll,
     sengoo_async_sleep__result, sengoo_async_sleep__start, sengoo_async_timeout_bool__cancel,
     sengoo_async_timeout_bool__drop, sengoo_async_timeout_bool__poll,
     sengoo_async_timeout_bool__result, sengoo_async_timeout_bool__start,
+    sengoo_async_timeout_cancel_i64__cancel, sengoo_async_timeout_cancel_i64__drop,
+    sengoo_async_timeout_cancel_i64__poll, sengoo_async_timeout_cancel_i64__result,
+    sengoo_async_timeout_cancel_i64__start, TimeoutCancelI64Result,
+};
+#[cfg(all(test, feature = "native-bridge"))]
+use futures::{PollLifecycle, SleepFutureState, POLL_ERROR_COMPLETED, POLL_ERROR_REENTRANT};
+#[cfg(feature = "native-bridge")]
+pub use reactor::{
+    sengoo_async_reactor_fd_readable_register, sengoo_async_reactor_tcp_readable_register,
+    sengoo_async_reactor_timer_register, sengoo_async_reactor_unregister,
+    sengoo_async_reactor_wait__cancel, sengoo_async_reactor_wait__drop,
+    sengoo_async_reactor_wait__poll, sengoo_async_reactor_wait__result,
+    sengoo_async_reactor_wait__start,
 };
 #[cfg(feature = "native-bridge")]
 pub use select::{
     sengoo_async_select_bool, sengoo_async_select_f32, sengoo_async_select_f64,
     sengoo_async_select_i16, sengoo_async_select_i32, sengoo_async_select_i64,
-    sengoo_async_select_i8, sengoo_async_select_winner,
+    sengoo_async_select_i8, sengoo_async_select_n_winner, sengoo_async_select_winner,
 };
 
 pub type TaskId = u64;
@@ -222,6 +259,11 @@ impl CoroutineScheduler {
     }
 
     fn sleep_until_next_wakeup(&self) {
+        #[cfg(feature = "native-bridge")]
+        if thread_pool::take_cross_thread_wakeup() {
+            return;
+        }
+
         let now = Instant::now();
         let mut earliest = None;
 
@@ -239,7 +281,11 @@ impl CoroutineScheduler {
         }
 
         if let Some(deadline) = earliest {
-            std::thread::sleep(deadline.saturating_duration_since(now));
+            let sleep_for = deadline.saturating_duration_since(now);
+            #[cfg(feature = "native-bridge")]
+            thread_pool::wait_for_cross_thread_wakeup(sleep_for);
+            #[cfg(not(feature = "native-bridge"))]
+            std::thread::sleep(sleep_for);
         }
     }
 }
@@ -393,6 +439,7 @@ mod tests {
         let updated_deadline = initial_deadline + Duration::from_millis(2);
         let handle = Box::into_raw(Box::new(SleepFutureState {
             deadline: initial_deadline,
+            lifecycle: PollLifecycle::default(),
         })) as i64;
 
         let state = unsafe { handle_ref::<SleepFutureState>(handle) }
@@ -419,6 +466,26 @@ mod tests {
 
         let merged_without_child = merge_wakeup_hint_with_deadline(None, deadline);
         assert_eq!(merged_without_child, deadline);
+    }
+
+    #[test]
+    fn poll_lifecycle_rejects_reentrant_and_completed_polls() {
+        let lifecycle = PollLifecycle::default();
+        let active = lifecycle.enter().expect("first poll should enter");
+        assert_eq!(lifecycle.enter().err(), Some(POLL_ERROR_REENTRANT));
+        active.mark_ready();
+        assert_eq!(lifecycle.enter().err(), Some(POLL_ERROR_COMPLETED));
+    }
+
+    #[test]
+    fn sleep_future_poll_after_ready_returns_stable_error() {
+        let handle = sengoo_async_sleep__start(0);
+        assert_eq!(unsafe { sengoo_async_sleep__poll(handle) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_sleep__poll(handle) },
+            POLL_ERROR_COMPLETED
+        );
+        unsafe { sengoo_async_sleep__result(handle) };
     }
 
     #[test]
@@ -542,6 +609,11 @@ mod tests {
 
     define_test_result_dispatch!(sengoo_async_result_dispatch_f32, f32, 3.5);
     define_test_result_dispatch!(sengoo_async_result_dispatch_f64, f64, 3.5);
+
+    #[no_mangle]
+    pub extern "C" fn sengoo_tcp_poll_readable(_handle: u64) -> i64 {
+        0
+    }
 
     struct CountDownTask(u8);
 
@@ -719,6 +791,127 @@ mod tests {
         std::thread::sleep(Duration::from_millis(8));
         assert_eq!(unsafe { sengoo_async_sleep__poll(handle) }, 1);
         unsafe { sengoo_async_sleep__result(handle) };
+    }
+
+    #[test]
+    fn select_n_winner_returns_first_ready_operand_with_rotation() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let a = sengoo_async_sleep__start(15);
+        let b = sengoo_async_sleep__start(0);
+        let c = sengoo_async_sleep__start(20);
+
+        let winner = sengoo_async_select_n_winner(
+            3,
+            async_spawn_kind_id_for_tests(),
+            a,
+            async_select_hint_kind_id_for_tests(),
+            b,
+            async_spawn_kind_id_for_tests(),
+            c,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        );
+
+        assert_eq!(winner, 1);
+        unsafe {
+            sengoo_async_sleep__result(b);
+            sengoo_async_sleep__result(a);
+            sengoo_async_sleep__result(c);
+        }
+    }
+
+    #[test]
+    fn timeout_cancel_i64_returns_status_timeout_after_deadline() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let child = sengoo_async_sleep__start(50);
+        let handle =
+            sengoo_async_timeout_cancel_i64__start(async_spawn_kind_id_for_tests(), child, 1);
+        assert_eq!(unsafe { sengoo_async_timeout_cancel_i64__poll(handle) }, 0);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(unsafe { sengoo_async_timeout_cancel_i64__poll(handle) }, 1);
+        let result = unsafe { sengoo_async_timeout_cancel_i64__result(handle) };
+        assert!(!result.is_ok);
+        assert_eq!(result.error, 11);
+    }
+
+    #[test]
+    fn reactor_timer_registration_unblocks_wait_future() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let interest = sengoo_async_reactor_timer_register(1);
+        let child = sengoo_async_sleep__start(50);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 0);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
+        unsafe {
+            sengoo_async_reactor_wait__result(handle);
+            sengoo_async_sleep__result(child);
+        }
+    }
+
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn pipe(fds: *mut i32) -> i32;
+        fn write(fd: i32, data: *const core::ffi::c_void, len: usize) -> isize;
+        fn close(fd: i32) -> i32;
+    }
+
+    #[cfg(windows)]
+    unsafe extern "C" {
+        fn _pipe(fds: *mut i32, size: u32, mode: i32) -> i32;
+        fn _write(fd: i32, data: *const core::ffi::c_void, len: u32) -> i32;
+        fn _close(fd: i32) -> i32;
+    }
+
+    #[test]
+    fn reactor_owned_fd_registration_observes_pipe_readiness() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut fds = [-1i32; 2];
+        #[cfg(unix)]
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        #[cfg(windows)]
+        assert_eq!(unsafe { _pipe(fds.as_mut_ptr(), 4096, 0x8000) }, 0);
+
+        let interest = sengoo_async_reactor_fd_readable_register(i64::from(fds[0]));
+        let child = sengoo_async_sleep__start(50);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 0);
+
+        let byte = [b'x'];
+        #[cfg(unix)]
+        assert_eq!(
+            unsafe { write(fds[1], byte.as_ptr().cast(), byte.len()) },
+            1
+        );
+        #[cfg(windows)]
+        assert_eq!(unsafe { _write(fds[1], byte.as_ptr().cast(), 1) }, 1);
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
+        unsafe {
+            sengoo_async_reactor_wait__result(handle);
+            sengoo_async_sleep__result(child);
+        }
+
+        #[cfg(unix)]
+        unsafe {
+            close(fds[0]);
+            close(fds[1]);
+        }
+        #[cfg(windows)]
+        unsafe {
+            _close(fds[0]);
+            _close(fds[1]);
+        }
     }
 
     #[test]
@@ -902,5 +1095,129 @@ mod tests {
 
     fn async_select_hint_kind_id_for_tests() -> i64 {
         99
+    }
+
+    #[test]
+    fn concurrent_thread_pool_rejects_invalid_worker_count() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(
+            sengoo_async_runtime_enable_thread_pool(0),
+            -thread_pool::STATUS_INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn concurrent_spawn_blocking_runs_on_worker_thread() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(2), 1);
+        static WORKER_FLAG: AtomicI64 = AtomicI64::new(0);
+
+        extern "C" fn worker() -> i64 {
+            WORKER_FLAG.store(1, Ordering::SeqCst);
+            77
+        }
+
+        let handle = sengoo_async_spawn_blocking_i64__start(worker);
+        assert_ne!(handle, 0);
+        while unsafe { sengoo_async_spawn_blocking_i64__poll(handle) } == 0 {
+            std::thread::yield_now();
+        }
+        let value = unsafe { sengoo_async_spawn_blocking_i64__result(handle) };
+        assert_eq!(value, 77);
+        assert_eq!(WORKER_FLAG.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_spawn_blocking_start_fails_without_pool() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        extern "C" fn worker() -> i64 {
+            1
+        }
+        assert_eq!(sengoo_async_spawn_blocking_i64__start(worker), 0);
+    }
+
+    #[test]
+    fn concurrent_channel_send_recv_round_trip() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        let pair = sengoo_async_channel_bounded_i64(2);
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let send_handle = sengoo_async_channel_send_i64__start(sender, 41);
+        while unsafe { sengoo_async_channel_send_i64__poll(send_handle) } == 0 {}
+        let send_result = unsafe { sengoo_async_channel_send_i64__result(send_handle) };
+        assert!(send_result.is_ok);
+
+        let recv_handle = sengoo_async_channel_recv_i64__start(receiver);
+        while unsafe { sengoo_async_channel_recv_i64__poll(recv_handle) } == 0 {}
+        let recv_result = unsafe { sengoo_async_channel_recv_i64__result(recv_handle) };
+        assert!(recv_result.is_ok);
+        assert_eq!(recv_result.value, 41);
+
+        unsafe { sengoo_async_channel_pair_free(pair) };
+    }
+
+    #[test]
+    fn concurrent_channel_close_wakes_pending_receiver() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        let pair = sengoo_async_channel_bounded_i64(1);
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let recv_handle = sengoo_async_channel_recv_i64__start(receiver);
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv_i64__poll(recv_handle) },
+            0
+        );
+        unsafe { sengoo_async_channel_sender_close(sender) };
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv_i64__poll(recv_handle) },
+            1
+        );
+        let recv_result = unsafe { sengoo_async_channel_recv_i64__result(recv_handle) };
+        assert!(!recv_result.is_ok);
+        assert_eq!(recv_result.error, concurrent::STATUS_INVALID_HANDLE);
+
+        unsafe { sengoo_async_channel_pair_free(pair) };
+    }
+
+    #[test]
+    fn concurrent_mutex_lock_and_unlock_round_trip() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        let mutex = sengoo_async_mutex_new_i64(5);
+        let lock_handle = sengoo_async_mutex_lock_i64__start(mutex);
+        while unsafe { sengoo_async_mutex_lock_i64__poll(lock_handle) } == 0 {}
+        let lock_result = unsafe { sengoo_async_mutex_lock_i64__result(lock_handle) };
+        assert!(lock_result.is_ok);
+        assert_eq!(lock_result.value, 5);
+        assert_eq!(unsafe { sengoo_async_mutex_unlock_i64(mutex, 9) }, 0);
+        unsafe { sengoo_async_mutex_drop(mutex) };
+    }
+
+    #[test]
+    fn concurrent_canceled_blocking_future_discards_worker_result() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(1), 1);
+
+        extern "C" fn slow_worker() -> i64 {
+            std::thread::sleep(Duration::from_millis(30));
+            99
+        }
+
+        let handle = sengoo_async_spawn_blocking_i64__start(slow_worker);
+        assert_ne!(handle, 0);
+        let canceled = unsafe { sengoo_async_spawn_blocking_i64__cancel(handle) };
+        assert!(
+            canceled,
+            "blocking future cancel should consume pending handle"
+        );
+        std::thread::sleep(Duration::from_millis(40));
     }
 }

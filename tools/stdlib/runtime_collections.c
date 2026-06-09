@@ -477,3 +477,433 @@ long long sengoo_string_map_key_iter_free_status(long long iter_handle) {
     }
     return 1;
 }
+
+extern long long sengoo_string_free_status(long long handle);
+extern long long sengoo_string_clone_status(long long handle);
+extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
+
+typedef struct {
+    long long* items;
+    size_t len;
+    size_t cap;
+} SengooStringVec;
+
+typedef struct {
+    SengooStringVec* vec;
+    size_t index;
+} SengooStringVecIter;
+
+static SengooStringVec* sengoo_string_vec_from_handle(long long handle) {
+    return (SengooStringVec*)sengoo_handle_to_ptr(handle);
+}
+
+static SengooStringVecIter* sengoo_string_vec_iter_from_handle(long long handle) {
+    return (SengooStringVecIter*)sengoo_handle_to_ptr(handle);
+}
+
+static int sengoo_string_vec_reserve(SengooStringVec* vec, size_t min_cap) {
+    if (!vec) {
+        return 0;
+    }
+    if (vec->cap >= min_cap) {
+        return 1;
+    }
+    size_t next = vec->cap == 0 ? 8 : vec->cap;
+    while (next < min_cap) {
+        if (next > SIZE_MAX / 2) {
+            return 0;
+        }
+        next *= 2;
+    }
+    long long* items = (long long*)realloc(vec->items, next * sizeof(long long));
+    if (!items) {
+        return 0;
+    }
+    vec->items = items;
+    vec->cap = next;
+    return 1;
+}
+
+static void sengoo_string_vec_clear_items(SengooStringVec* vec) {
+    if (!vec) {
+        return;
+    }
+    for (size_t i = 0; i < vec->len; ++i) {
+        sengoo_string_free_status(vec->items[i]);
+        vec->items[i] = 0;
+    }
+    vec->len = 0;
+}
+
+long long sengoo_vec_new_string(void) {
+    SengooStringVec* vec = (SengooStringVec*)calloc(1, sizeof(SengooStringVec));
+    if (!vec) {
+        return 0;
+    }
+    return sengoo_ptr_to_handle(vec);
+}
+
+long long sengoo_vec_string_len(long long handle) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    return vec ? (long long)vec->len : 0;
+}
+
+long long sengoo_vec_string_clear_status(long long handle) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    if (!vec) {
+        return 0;
+    }
+    sengoo_string_vec_clear_items(vec);
+    return 1;
+}
+
+long long sengoo_vec_string_free_status(long long handle) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    if (!vec) {
+        return 1;
+    }
+    sengoo_string_vec_clear_items(vec);
+    free(vec->items);
+    free(vec);
+    return 1;
+}
+
+long long sengoo_vec_string_push(long long handle, long long value_handle) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    if (!vec || value_handle <= 0) {
+        return 0;
+    }
+    if (!sengoo_string_vec_reserve(vec, vec->len + 1)) {
+        return 0;
+    }
+    vec->items[vec->len++] = value_handle;
+    return 1;
+}
+
+long long sengoo_vec_string_get_clone(long long handle, long long index) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    if (!vec) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (index < 0 || (size_t)index >= vec->len) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    return sengoo_string_clone_status(vec->items[(size_t)index]);
+}
+
+long long sengoo_vec_string_remove_transfer(long long handle, long long index) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    if (!vec) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (index < 0 || (size_t)index >= vec->len) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    size_t idx = (size_t)index;
+    long long value = vec->items[idx];
+    for (size_t i = idx + 1; i < vec->len; ++i) {
+        vec->items[i - 1] = vec->items[i];
+    }
+    vec->len -= 1;
+    return value;
+}
+
+long long sengoo_vec_string_iter_new(long long vec_handle) {
+    SengooStringVec* vec = sengoo_string_vec_from_handle(vec_handle);
+    if (!vec) {
+        return 0;
+    }
+    SengooStringVecIter* iter = (SengooStringVecIter*)calloc(1, sizeof(SengooStringVecIter));
+    if (!iter) {
+        return 0;
+    }
+    iter->vec = vec;
+    iter->index = 0;
+    return sengoo_ptr_to_handle(iter);
+}
+
+long long sengoo_vec_string_iter_done(long long iter_handle) {
+    SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
+    return (!iter || !iter->vec || iter->index >= iter->vec->len) ? 1 : 0;
+}
+
+long long sengoo_vec_string_iter_next_clone(long long iter_handle) {
+    SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
+    if (!iter || !iter->vec) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (iter->index >= iter->vec->len) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    long long cloned = sengoo_string_clone_status(iter->vec->items[iter->index]);
+    if (cloned >= 0) {
+        iter->index += 1;
+    }
+    return cloned;
+}
+
+long long sengoo_vec_string_iter_reset_status(long long iter_handle) {
+    SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
+    if (!iter) {
+        return 0;
+    }
+    iter->index = 0;
+    return 1;
+}
+
+long long sengoo_vec_string_iter_free_status(long long iter_handle) {
+    SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
+    if (iter) {
+        free(iter);
+    }
+    return 1;
+}
+
+typedef struct {
+    char* key;
+    long long value_handle;
+} SengooStringMapStringEntry;
+
+typedef struct {
+    SengooStringMapStringEntry* entries;
+    size_t len;
+    size_t cap;
+} SengooStringMapString;
+
+typedef struct {
+    SengooStringMapString* map;
+    size_t index;
+} SengooStringMapStringKeyIter;
+
+static SengooStringMapString* sengoo_string_map_string_from_handle(long long handle) {
+    return (SengooStringMapString*)sengoo_handle_to_ptr(handle);
+}
+
+static SengooStringMapStringKeyIter* sengoo_string_map_string_key_iter_from_handle(long long handle) {
+    return (SengooStringMapStringKeyIter*)sengoo_handle_to_ptr(handle);
+}
+
+static int sengoo_string_map_string_reserve(SengooStringMapString* map, size_t min_cap) {
+    if (!map) {
+        return 0;
+    }
+    if (map->cap >= min_cap) {
+        return 1;
+    }
+    size_t next = map->cap == 0 ? 8 : map->cap;
+    while (next < min_cap) {
+        if (next > SIZE_MAX / 2) {
+            return 0;
+        }
+        next *= 2;
+    }
+    SengooStringMapStringEntry* entries = (SengooStringMapStringEntry*)realloc(
+        map->entries,
+        next * sizeof(SengooStringMapStringEntry));
+    if (!entries) {
+        return 0;
+    }
+    map->entries = entries;
+    map->cap = next;
+    return 1;
+}
+
+static size_t sengoo_string_map_string_find_index(SengooStringMapString* map, const char* key, int* found) {
+    size_t low = 0;
+    size_t high = map ? map->len : 0;
+    if (found) {
+        *found = 0;
+    }
+    while (low < high) {
+        size_t mid = low + ((high - low) / 2);
+        int cmp = strcmp(map->entries[mid].key, key);
+        if (cmp == 0) {
+            if (found) {
+                *found = 1;
+            }
+            return mid;
+        }
+        if (cmp < 0) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
+
+static void sengoo_string_map_string_clear_entries(SengooStringMapString* map) {
+    if (!map) {
+        return;
+    }
+    for (size_t i = 0; i < map->len; ++i) {
+        free(map->entries[i].key);
+        sengoo_string_free_status(map->entries[i].value_handle);
+        map->entries[i].key = NULL;
+        map->entries[i].value_handle = 0;
+    }
+    map->len = 0;
+}
+
+long long sengoo_string_map_string_new(void) {
+    SengooStringMapString* map = (SengooStringMapString*)calloc(1, sizeof(SengooStringMapString));
+    if (!map) {
+        return 0;
+    }
+    return sengoo_ptr_to_handle(map);
+}
+
+long long sengoo_string_map_string_len(long long handle) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    return map ? (long long)map->len : 0;
+}
+
+long long sengoo_string_map_string_clear_status(long long handle) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    if (!map) {
+        return 0;
+    }
+    sengoo_string_map_string_clear_entries(map);
+    return 1;
+}
+
+long long sengoo_string_map_string_free_status(long long handle) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    if (!map) {
+        return 1;
+    }
+    sengoo_string_map_string_clear_entries(map);
+    free(map->entries);
+    free(map);
+    return 1;
+}
+
+long long sengoo_string_map_string_insert(long long handle, long long key_ptr, long long value_handle) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    const char* key = (const char*)(intptr_t)key_ptr;
+    if (!map || !key || value_handle <= 0) {
+        return 0;
+    }
+    int found = 0;
+    size_t index = sengoo_string_map_string_find_index(map, key, &found);
+    if (found) {
+        sengoo_string_free_status(map->entries[index].value_handle);
+        map->entries[index].value_handle = value_handle;
+        return 1;
+    }
+    char* key_copy = sengoo_copy_cstr_from_handle(key_ptr);
+    if (!key_copy || !sengoo_string_map_string_reserve(map, map->len + 1)) {
+        free(key_copy);
+        return 0;
+    }
+    for (size_t i = map->len; i > index; --i) {
+        map->entries[i] = map->entries[i - 1];
+    }
+    map->entries[index].key = key_copy;
+    map->entries[index].value_handle = value_handle;
+    map->len += 1;
+    return 1;
+}
+
+long long sengoo_string_map_string_contains(long long handle, long long key_ptr) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    const char* key = (const char*)(intptr_t)key_ptr;
+    if (!map || !key) {
+        return 0;
+    }
+    int found = 0;
+    sengoo_string_map_string_find_index(map, key, &found);
+    return found ? 1 : 0;
+}
+
+long long sengoo_string_map_string_get_clone(long long handle, long long key_ptr) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    const char* key = (const char*)(intptr_t)key_ptr;
+    if (!map) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!key) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    int found = 0;
+    size_t index = sengoo_string_map_string_find_index(map, key, &found);
+    if (!found) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    return sengoo_string_clone_status(map->entries[index].value_handle);
+}
+
+long long sengoo_string_map_string_remove_transfer(long long handle, long long key_ptr) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    const char* key = (const char*)(intptr_t)key_ptr;
+    if (!map) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!key) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    int found = 0;
+    size_t index = sengoo_string_map_string_find_index(map, key, &found);
+    if (!found) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    long long value = map->entries[index].value_handle;
+    free(map->entries[index].key);
+    for (size_t i = index + 1; i < map->len; ++i) {
+        map->entries[i - 1] = map->entries[i];
+    }
+    map->len -= 1;
+    return value;
+}
+
+long long sengoo_string_map_string_key_iter_new(long long map_handle) {
+    SengooStringMapString* map = sengoo_string_map_string_from_handle(map_handle);
+    if (!map) {
+        return 0;
+    }
+    SengooStringMapStringKeyIter* iter = (SengooStringMapStringKeyIter*)calloc(1, sizeof(SengooStringMapStringKeyIter));
+    if (!iter) {
+        return 0;
+    }
+    iter->map = map;
+    iter->index = 0;
+    return sengoo_ptr_to_handle(iter);
+}
+
+long long sengoo_string_map_string_key_iter_done(long long iter_handle) {
+    SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
+    return (!iter || !iter->map || iter->index >= iter->map->len) ? 1 : 0;
+}
+
+long long sengoo_string_map_string_key_iter_next_string(long long iter_handle) {
+    SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
+    if (!iter || !iter->map) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (iter->index >= iter->map->len) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    const char* key = iter->map->entries[iter->index].key;
+    long long cloned = sengoo_string_from_bytes_copy((long long)(intptr_t)key, (long long)strlen(key));
+    if (cloned >= 0) {
+        iter->index += 1;
+    }
+    return cloned;
+}
+
+long long sengoo_string_map_string_key_iter_reset_status(long long iter_handle) {
+    SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
+    if (!iter) {
+        return 0;
+    }
+    iter->index = 0;
+    return 1;
+}
+
+long long sengoo_string_map_string_key_iter_free_status(long long iter_handle) {
+    SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
+    if (iter) {
+        free(iter);
+    }
+    return 1;
+}

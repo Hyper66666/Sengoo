@@ -8,6 +8,9 @@ use crate::CompileError;
 const ASYNC_SELECT_WINNER_FUNCTION: &str = "sengoo_async_select_winner";
 const ASYNC_SELECT_WINNER_DECLARATION: &str =
     "declare i64 @sengoo_async_select_winner(i64, i64, i64, i64)\n";
+const ASYNC_SELECT_N_WINNER_FUNCTION: &str = "sengoo_async_select_n_winner";
+const ASYNC_SELECT_N_WINNER_DECLARATION: &str =
+    "declare i64 @sengoo_async_select_n_winner(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n";
 
 pub fn select_winner_runtime_function_name() -> &'static str {
     ASYNC_SELECT_WINNER_FUNCTION
@@ -15,6 +18,14 @@ pub fn select_winner_runtime_function_name() -> &'static str {
 
 pub fn select_winner_runtime_declaration() -> &'static str {
     ASYNC_SELECT_WINNER_DECLARATION
+}
+
+pub fn select_n_winner_runtime_function_name() -> &'static str {
+    ASYNC_SELECT_N_WINNER_FUNCTION
+}
+
+pub fn select_n_winner_runtime_declaration() -> &'static str {
+    ASYNC_SELECT_N_WINNER_DECLARATION
 }
 
 pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {
@@ -155,6 +166,28 @@ pub fn synthesize_spawn_poll_dispatch(
         ));
     }
 
+    if registry
+        .kind_id("sengoo_async_timeout_cancel_i64")
+        .is_some()
+        && !entries
+            .iter()
+            .any(|(base_name, _)| base_name == "sengoo_async_timeout_cancel_i64")
+    {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_I64);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_timeout_cancel_i64__poll".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_timeout_cancel_i64")?,
+            case_block,
+        ));
+    }
+
     f.basic_blocks[bb0].set_terminator(Terminator::Switch {
         discr: kind_local,
         targets,
@@ -245,6 +278,28 @@ pub fn synthesize_spawn_cancel_dispatch(
         ));
     }
 
+    if registry
+        .kind_id("sengoo_async_timeout_cancel_i64")
+        .is_some()
+        && !entries
+            .iter()
+            .any(|(base_name, _)| base_name == "sengoo_async_timeout_cancel_i64")
+    {
+        let case_block = f.add_block();
+        let result_local = f.add_local(LocalKind::Temp, MIR_BOOL);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: result_local,
+            func: "sengoo_async_timeout_cancel_i64__cancel".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(Some(result_local)));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_timeout_cancel_i64")?,
+            case_block,
+        ));
+    }
+
     f.basic_blocks[bb0].set_terminator(Terminator::Switch {
         discr: kind_local,
         targets,
@@ -325,6 +380,28 @@ pub fn synthesize_spawn_drop_dispatch(
         f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
         targets.push((
             dispatch_switch_key(registry, "sengoo_async_timeout_bool")?,
+            case_block,
+        ));
+    }
+
+    if registry
+        .kind_id("sengoo_async_timeout_cancel_i64")
+        .is_some()
+        && !entries
+            .iter()
+            .any(|(base_name, _)| base_name == "sengoo_async_timeout_cancel_i64")
+    {
+        let case_block = f.add_block();
+        let unit_local = f.add_local(LocalKind::Temp, MIR_UNIT);
+        let call_inst = f.alloc_inst(Instruction::Call {
+            destination: unit_local,
+            func: "sengoo_async_timeout_cancel_i64__drop".to_string(),
+            args: vec![handle_local],
+        });
+        f.basic_blocks[case_block].push(call_inst);
+        f.basic_blocks[case_block].set_terminator(Terminator::Return(None));
+        targets.push((
+            dispatch_switch_key(registry, "sengoo_async_timeout_cancel_i64")?,
             case_block,
         ));
     }

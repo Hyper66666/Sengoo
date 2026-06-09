@@ -115,79 +115,14 @@ pub(super) fn prune_ast_functions_by_name_set(
 }
 
 pub(super) fn prune_unreachable_ast_functions(program: &mut AstProgram) -> usize {
-    let functions: Vec<_> = program
-        .decls
-        .iter()
-        .filter_map(|decl| match &decl.kind {
-            AstDeclKind::Function(fn_decl) => Some(fn_decl),
-            _ => None,
-        })
-        .collect();
-    if functions.len() <= 1 {
+    if ast_function_count(program) <= 1 {
         return 0;
     }
 
-    let mut index_by_name = HashMap::new();
-    for (idx, fn_decl) in functions.iter().enumerate() {
-        index_by_name.insert(fn_decl.name.name.clone(), idx);
-    }
-
-    let Some(&main_index) = index_by_name.get("main") else {
+    let Some(keep_names) = reachable_ast_function_names(program) else {
         return 0;
     };
-
-    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
-    for (idx, fn_decl) in functions.iter().enumerate() {
-        edges[idx] = collect_ast_call_targets_from_block(&fn_decl.body, &index_by_name);
-    }
-
-    let mut reachable = vec![false; functions.len()];
-    let mut stack = vec![main_index];
-    for root_async_helper in [
-        "main__async_body",
-        "main__start",
-        "main__poll",
-        "main__result",
-    ] {
-        if let Some(&idx) = index_by_name.get(root_async_helper) {
-            stack.push(idx);
-        }
-    }
-    while let Some(idx) = stack.pop() {
-        if reachable[idx] {
-            continue;
-        }
-        reachable[idx] = true;
-        for &target in &edges[idx] {
-            if !reachable[target] {
-                stack.push(target);
-            }
-        }
-    }
-
-    let mut removed = 0usize;
-    let mut kept = Vec::with_capacity(program.decls.len());
-    for decl in std::mem::take(&mut program.decls) {
-        match decl.kind {
-            AstDeclKind::Function(fn_decl) => {
-                let is_reachable = index_by_name
-                    .get(&fn_decl.name.name)
-                    .map(|&idx| reachable[idx])
-                    .unwrap_or(true);
-                if is_reachable {
-                    kept.push(AstDecl {
-                        kind: AstDeclKind::Function(fn_decl),
-                        span: decl.span,
-                    });
-                } else {
-                    removed += 1;
-                }
-            }
-            _ => kept.push(decl),
-        }
-    }
-    program.decls = kept;
-    removed
+    prune_ast_functions_by_name_set(program, &keep_names)
 }
 
 fn collect_ast_call_targets_from_block(

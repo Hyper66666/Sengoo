@@ -2,7 +2,7 @@
 
 use clap::ValueEnum;
 use miette::{IntoDiagnostic, Result};
-use sengoo_compiler::{compile_to_ir, DeclKind, Parser};
+use sengoo_compiler::{collect_compile_warnings, compile_to_ir, DeclKind, Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -19,6 +19,7 @@ mod cli;
 mod commands;
 #[cfg_attr(not(test), allow(dead_code))]
 mod cranelift_fast_jit;
+mod cross_compile;
 mod daemon;
 mod doc_rendering;
 mod error_reporting;
@@ -30,6 +31,7 @@ mod graph_builder;
 mod impact;
 mod interface;
 mod module_graph;
+mod native_link;
 mod native_toolchain;
 mod pipeline;
 mod reflection;
@@ -38,6 +40,7 @@ mod reflection_sidecar;
 mod source_imports;
 mod stdlib_imports;
 mod symbol_intern;
+mod timings_export;
 mod toolchain_discovery;
 mod workset;
 #[cfg(test)]
@@ -59,6 +62,7 @@ pub(crate) use cache::{
     frontend_session_store_path, load_build_cache, load_frontend_session_store, load_run_cache,
     save_build_cache, save_frontend_session_store, save_run_cache,
 };
+pub(crate) use cross_compile::NativeBuildTarget;
 pub(crate) use daemon::{
     cmd_daemon, dispatch_build_via_daemon, dispatch_run_via_daemon, resolve_daemon_addr,
     DaemonDispatchOutcome,
@@ -68,12 +72,13 @@ pub(crate) use daemon::{daemon_request_build, handle_daemon_client, send_daemon_
 use doc_rendering::{render_doc_index, render_doc_module, sanitize_doc_name};
 pub(crate) use error_reporting::{
     emit_compile_error, emit_compile_error_for_stage, emit_compile_error_for_stage_with_location,
-    emit_compile_error_with_location,
+    emit_compile_error_with_location, emit_compile_warning,
 };
 use error_reporting::{location_from_compile_error, location_from_span};
 #[cfg(test)]
 pub(crate) use error_reporting::{
-    render_compile_error_json, render_compile_error_json_with_location, split_compiler_error_stage,
+    render_compile_error_json, render_compile_error_json_with_location,
+    render_compile_warning_json, split_compiler_error_stage,
 };
 pub(crate) use fingerprint::{
     file_fingerprint, implementation_fingerprint, implementation_fingerprint_from_normalized,
@@ -105,10 +110,16 @@ pub(crate) use interface::{
     generic_fingerprints_for_program, interface_fingerprint_from_program,
 };
 pub(crate) use module_graph::{collect_module_sources_with_edges, module_dependency_levels};
+pub(crate) use native_link::collect_native_link_libraries_for_graph;
+#[cfg(test)]
+pub(crate) use native_link::native_library_link_args;
+#[cfg(test)]
+pub(crate) use native_toolchain::collect_package_native_c_sources;
 pub(crate) use native_toolchain::{
-    append_native_runtime_inputs, artifact_exists, build_artifact_exists, compile_ir_to_object,
-    compile_native_binary, default_build_output_path_for_case, ensure_runtime_objects,
-    link_native_binary_from_objects, linker_mode_from_env, optional_runtime_bundle_fingerprint,
+    append_native_runtime_inputs, append_package_native_inputs, artifact_exists,
+    build_artifact_exists, compile_ir_to_object, compile_native_binary,
+    default_build_output_path_for_case, ensure_runtime_objects, link_native_binary_from_objects,
+    linker_mode_from_env, optional_runtime_bundle_fingerprint, propagate_run_exit_code,
     recover_native_output_from_cached_artifacts, run_native_binary_with_args, run_with_lli_args,
 };
 #[cfg(test)]
@@ -120,7 +131,7 @@ pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
     compile_source_to_llvm_file_with_phase_timings,
     compile_source_to_llvm_file_with_phase_timings_with_mode, maybe_print_phase_timings,
-    set_contract_runtime_checks_override, set_large_project_mode_override,
+    set_contract_runtime_checks_override, set_large_project_mode_override, user_source_base_offset,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;
@@ -143,6 +154,7 @@ pub(crate) use reflection_sidecar::{
 };
 pub(crate) use source_imports::expand_imports_for_source;
 pub(crate) use stdlib_imports::expand_stdlib_imports_for_source;
+pub(crate) use timings_export::write_timings_json_v1;
 pub(crate) use toolchain_discovery::{find_clang, find_lli, find_runtime_c, find_stdlib_root};
 pub(crate) use workset::{
     build_cache_key, build_cache_mismatch_reasons, build_metadata_matches, cache_key,
@@ -273,9 +285,14 @@ fn frontend_memory_mode_from_env() -> Option<FrontendMemoryMode> {
 }
 
 fn resolve_frontend_memory_mode(source_len_bytes: usize) -> FrontendMemoryMode {
-    let _ = source_len_bytes;
     match frontend_memory_mode_from_env().unwrap_or(FrontendMemoryMode::Auto) {
-        FrontendMemoryMode::Auto => FrontendMemoryMode::Legacy,
+        FrontendMemoryMode::Auto => {
+            if source_len_bytes >= FRONTEND_MEMORY_STREAM_THRESHOLD_BYTES {
+                FrontendMemoryMode::Stream
+            } else {
+                FrontendMemoryMode::Legacy
+            }
+        }
         other => other,
     }
 }
@@ -521,6 +538,11 @@ async fn cmd_check(input: &str) -> Result<()> {
 
     match compile_to_ir(&source) {
         Ok(_) => {
+            for warning in collect_compile_warnings(&source)
+                .map_err(|error| miette::miette!("warning collection failed: {error}"))?
+            {
+                emit_compile_warning(&warning);
+            }
             println!("Type check passed");
             Ok(())
         }

@@ -31,7 +31,7 @@ impl<'source> Lexer<'source> {
         let mut lexer = TokenKind::lexer(source);
         // 预留容量以避免大文件下 token 向量反复扩容/搬迁。
         // 经验估计：平均每个 token 约占 4 字节源码，宁可略多于反复 realloc。
-        let mut tokens = Vec::with_capacity(source.len() / 4 + 16);
+        let mut tokens = Vec::with_capacity(estimated_token_capacity(source.len()));
 
         while let Some(result) = lexer.next() {
             if let Ok(kind) = result {
@@ -42,6 +42,11 @@ impl<'source> Lexer<'source> {
 
         tokens
     }
+}
+
+fn estimated_token_capacity(source_len: usize) -> usize {
+    let margin = (source_len / 64).clamp(1024, 65_536);
+    source_len / 3 + margin + 16
 }
 
 impl<'source> Iterator for Lexer<'source> {
@@ -168,5 +173,14 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::Lt);
         assert_eq!(tokens[3].kind, TokenKind::Gt);
         assert_eq!(tokens[4].kind, TokenKind::Le);
+    }
+
+    #[test]
+    fn test_large_source_token_capacity_avoids_scale_realloc() {
+        // `advanced_pipeline_bench.py::make_scale_source_sengoo(1_000_000)`
+        // emits about 250k tiny functions: roughly 10.4 MB and 3.5M tokens.
+        // Keep the lexer estimate above that token count so the production
+        // scale gate avoids a Vec growth that doubles token storage.
+        assert!(estimated_token_capacity(10_389_039) >= 3_500_042);
     }
 }

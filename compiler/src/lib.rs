@@ -15,11 +15,11 @@ pub mod typeck;
 
 pub use ast::*;
 pub use codegen::{jit::JITCodegen, Codegen, FfiCodegenConfig};
-pub use error::{CompileError, Result};
+pub use error::{CompileError, CompileWarning, Result};
 pub use hir::lower_ast;
 pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};
 pub use mir::opt::MirOptLevel;
-pub use mir::{lower_hir, lower_hir_with_options, MirLowerOptions};
+pub use mir::{lower_hir, lower_hir_with_options, AssertCallsiteContext, MirLowerOptions};
 pub use parser::Parser;
 pub use symbol::{SymbolId, SymbolInterner};
 pub use typeck::TypeChecker;
@@ -91,6 +91,24 @@ pub fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodeg
     config
 }
 
+/// Collect unique native library names from `#[link(name = "...")]` extern blocks.
+pub fn collect_native_link_libraries(hir_module: &hir::Module) -> Vec<String> {
+    let mut libraries = Vec::new();
+    for item in &hir_module.items {
+        let hir::HIRItem::ExternBlock(block) = item else {
+            continue;
+        };
+        let Some(name) = block.link_name.as_deref().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        if libraries.iter().any(|existing| existing == name) {
+            continue;
+        }
+        libraries.push(name.to_string());
+    }
+    libraries
+}
+
 /// Compile Sengoo source to LLVM IR using explicit options.
 pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Result<String> {
     // 1. Parse source code.
@@ -140,6 +158,14 @@ pub fn compile_to_ir(source: &str) -> Result<String> {
     compile_to_ir_with_options(source, CompileOptions::default())
 }
 
+/// Parse and type-check source, returning non-fatal diagnostics.
+pub fn collect_compile_warnings(source: &str) -> Result<Vec<CompileWarning>> {
+    let program = Parser::parse(source)?;
+    let mut checker = TypeChecker::new();
+    checker.check_program(&program)?;
+    Ok(checker.warnings().to_vec())
+}
+
 /// Compile Sengoo source to MIR functions (without code generation).
 pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     // 1. Parse source code.
@@ -173,3 +199,38 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod native_link_tests {
+    use super::*;
+    use crate::{lower_ast, Parser, TypeChecker};
+
+    #[test]
+    fn collect_native_link_libraries_dedupes_extern_blocks() {
+        let source = r#"
+            #[link(name = "sample")]
+            extern "C" {
+                fn foo();
+            }
+
+            #[link(name = "sample")]
+            extern "C" {
+                fn bar();
+            }
+
+            #[link(name = "other")]
+            extern "C" {
+                fn baz();
+            }
+        "#;
+        let program = Parser::parse(source).unwrap();
+        let mut checker = TypeChecker::new();
+        checker.check_program(&program).unwrap();
+        let type_env = checker.into_env();
+        let hir_module = lower_ast(&program, &type_env);
+        assert_eq!(
+            collect_native_link_libraries(&hir_module),
+            vec!["sample".to_string(), "other".to_string()]
+        );
+    }
+}

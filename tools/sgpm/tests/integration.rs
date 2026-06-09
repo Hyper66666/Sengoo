@@ -914,9 +914,17 @@ fn metadata_json_reports_resolved_package_graph() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("metadata should be valid json");
     assert_eq!(json["root"], "app");
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["packages"][0]["name"], "dep");
     assert_eq!(json["packages"][1]["name"], "app");
-    assert_eq!(json["packages"][1]["dependencies"][0], "dep");
+    assert_eq!(json["dependencies"][0]["alias"], "dep");
+    assert!(
+        json["packages"][0]["id"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("dep@"),
+        "package identity should include id:\n{json:#}"
+    );
     assert!(
         json["packages"][0]["manifest"]
             .as_str()
@@ -961,6 +969,7 @@ fn metadata_json_reports_all_workspace_members() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("metadata should be valid json");
     assert_eq!(json["workspace"], true);
+    assert_eq!(json["schema_version"], 2);
     assert_eq!(json["roots"][0], "app");
     assert_eq!(json["roots"][1], "cli");
     assert_eq!(json["packages"][0]["name"], "app");
@@ -1344,19 +1353,23 @@ fn update_writes_lockfile_for_local_registry_dependency() {
     let lockfile = fs::read_to_string(app.join("Sengoo.lock"))
         .unwrap()
         .replace('\\', "/");
+    assert!(
+        lockfile.contains("version = \"2\"") || lockfile.contains("version = 2"),
+        "{lockfile}"
+    );
     assert!(lockfile.contains("name = \"foo\""), "{lockfile}");
     assert!(lockfile.contains("version = \"1.2.0\""), "{lockfile}");
     assert!(
-        lockfile.contains("source = \"registry+local/foo@1.2.0\""),
-        "lockfile should record selected registry source:\n{lockfile}"
+        lockfile.contains("source.kind = \"registry\""),
+        "lockfile should record structured registry source:\n{lockfile}"
     );
 
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn registry_dependency_version_conflict_reports_constraints() {
-    let dir = temp_dir("registry_conflict");
+fn registry_dependency_multiversion_keeps_both_selected_versions() {
+    let dir = temp_dir("registry_multiversion");
     let registry = dir.join("registry");
     write_pkg_version(&registry.join("foo/1.5.0"), "foo", "1.5.0", &[]);
     write_pkg_version(&registry.join("foo/2.1.0"), "foo", "2.1.0", &[]);
@@ -1382,19 +1395,26 @@ fn registry_dependency_version_conflict_reports_constraints() {
 
     let output = run_sgpm(
         &[
-            "tree",
+            "update",
             "--manifest-path",
             app.join("Sengoo.toml").to_str().unwrap(),
         ],
         &dir,
     );
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("version conflict"), "stderr:\n{stderr}");
-    assert!(stderr.contains("foo"), "stderr:\n{stderr}");
-    assert!(stderr.contains(">=1.0.0, <2.0.0"), "stderr:\n{stderr}");
-    assert!(stderr.contains(">=2.0.0, <3.0.0"), "stderr:\n{stderr}");
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lockfile = fs::read_to_string(app.join("Sengoo.lock"))
+        .unwrap()
+        .replace('\\', "/");
+    assert!(lockfile.contains("version = 2"), "{lockfile}");
+    assert!(lockfile.contains("name = \"foo\""), "{lockfile}");
+    assert!(lockfile.contains("version = \"1.5.0\""), "{lockfile}");
+    assert!(lockfile.contains("version = \"2.1.0\""), "{lockfile}");
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -2350,14 +2370,16 @@ fn update_writes_lockfile_for_path_dependency_graph() {
     let lockfile = app.join("Sengoo.lock");
     assert!(lockfile.exists(), "missing {}", lockfile.display());
     let text = fs::read_to_string(lockfile).unwrap().replace('\\', "/");
-    assert!(text.contains("version = 1"), "{text}");
+    assert!(text.contains("version = 2"), "{text}");
     assert!(text.contains("root = \"app\""), "{text}");
     assert!(text.contains("name = \"dep\""), "{text}");
-    assert!(text.contains("source = \"path+../dep\""), "{text}");
+    assert!(text.contains("source.kind = \"path\""), "{text}");
+    assert!(text.contains("source.path = \"../dep\""), "{text}");
     assert!(text.contains("manifest = \"../dep/Sengoo.toml\""), "{text}");
     assert!(text.contains("name = \"app\""), "{text}");
-    assert!(text.contains("source = \"path+.\""), "{text}");
-    assert!(text.contains("dependencies = [\"dep\"]"), "{text}");
+    assert!(text.contains("source.path = \".\""), "{text}");
+    assert!(text.contains("[[dependency]]"), "{text}");
+    assert!(text.contains("alias = \"dep\""), "{text}");
 
     let dep_pos = text.find("name = \"dep\"").expect("dep package");
     let app_pos = text.find("name = \"app\"").expect("app package");
@@ -2414,8 +2436,18 @@ fn update_writes_lockfile_for_git_dependency_with_resolved_rev() {
         .unwrap()
         .replace('\\', "/");
     assert!(
-        lockfile.contains(&format!("source = \"git+{}#{}\"", dep_url, commit)),
-        "lockfile should record git source and resolved commit:\n{}",
+        lockfile.contains("source.kind = \"git\""),
+        "lockfile should record git source:\n{}",
+        lockfile
+    );
+    assert!(
+        lockfile.contains(&format!("source.url = \"{}\"", dep_url)),
+        "lockfile should record git url:\n{}",
+        lockfile
+    );
+    assert!(
+        lockfile.contains(&format!("source.rev = \"{}\"", commit)),
+        "lockfile should record resolved commit:\n{}",
         lockfile
     );
 
@@ -2922,6 +2954,157 @@ fn build_locked_rejects_stale_lockfile_before_invoking_sgc() {
     assert!(
         !record.exists(),
         "locked build should fail before invoking sgc"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn alias_update_writes_lockfile_v2_with_dependency_edge() {
+    let dir = temp_dir("alias_lockfile");
+    let dep = dir.join("dep");
+    let app = dir.join("app");
+    write_pkg(&dep, "actual_name", &[]);
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../dep' }\n",
+    )
+    .unwrap();
+
+    let output = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let lockfile = fs::read_to_string(app.join("Sengoo.lock"))
+        .unwrap()
+        .replace('\\', "/");
+    assert!(lockfile.contains("version = 2"), "{lockfile}");
+    assert!(lockfile.contains("alias = \"my_alias\""), "{lockfile}");
+    assert!(lockfile.contains("name = \"actual_name\""), "{lockfile}");
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn update_migrates_compatible_v1_lockfile_to_v2() {
+    let dir = temp_dir("lockfile_v1_migration");
+    let dep = dir.join("dep");
+    let app = dir.join("app");
+    write_pkg(&dep, "dep", &[]);
+    write_pkg(&app, "app", &[("dep", "../dep")]);
+    fs::write(
+        app.join("Sengoo.lock"),
+        "version = 1\nroot = \"app\"\n\n[[package]]\nname = \"dep\"\nversion = \"0.1.0\"\nsource = \"path+../dep\"\nmanifest = \"../dep/Sengoo.toml\"\n\n[[package]]\nname = \"app\"\nversion = \"0.1.0\"\nsource = \"path+.\"\nmanifest = \"Sengoo.toml\"\ndependencies = [\"dep\"]\n",
+    )
+    .unwrap();
+
+    let output = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lockfile = fs::read_to_string(app.join("Sengoo.lock"))
+        .unwrap()
+        .replace('\\', "/");
+    assert!(lockfile.contains("version = 2"), "{lockfile}");
+    assert!(lockfile.contains("[[dependency]]"), "{lockfile}");
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn lockfile_incompatible_v1_graph_fails_locked_check_with_update_hint() {
+    let dir = temp_dir("lockfile_incompatible_v1");
+    let dep = dir.join("dep");
+    let app = dir.join("app");
+    write_pkg(&dep, "actual_name", &[]);
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../dep' }\n",
+    )
+    .unwrap();
+    fs::write(app.join("Sengoo.lock"), "version = 1\nroot = \"app\"\n").unwrap();
+
+    let output = run_sgpm(
+        &[
+            "check",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot represent the current dependency graph"),
+        "stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("sgpm update"), "stderr:\n{stderr}");
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn metadata_json_alias_lists_dependency_edges_separately() {
+    let dir = temp_dir("metadata_alias_json");
+    let dep = dir.join("dep");
+    let app = dir.join("app");
+    write_pkg(&dep, "actual_name", &[]);
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../dep' }\n",
+    )
+    .unwrap();
+
+    let output = run_sgpm(
+        &[
+            "metadata",
+            "--format",
+            "json",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("metadata should be valid json");
+    assert_eq!(json["dependencies"][0]["alias"], "my_alias");
+    assert!(
+        json["dependencies"][0]["to"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("actual_name@"),
+        "dependency edge should use lockfile identity:\n{json:#}"
     );
 
     let _ = fs::remove_dir_all(dir);

@@ -1,0 +1,150 @@
+extern "C" {
+    fn sengoo_async_runtime_enable_thread_pool(worker_count: i64) -> i64;
+    fn sengoo_async_runtime_thread_pool_enabled() -> bool;
+    fn sengoo_async_spawn_blocking_i64__start(work_ptr: i64) -> i64;
+
+    fn sengoo_async_channel_bounded_i64(capacity: i64) -> i64;
+    fn sengoo_async_channel_pair_sender(pair_handle: i64) -> i64;
+    fn sengoo_async_channel_pair_receiver(pair_handle: i64) -> i64;
+    fn sengoo_async_channel_pair_free(pair_handle: i64);
+    fn sengoo_async_channel_sender_clone(sender_handle: i64) -> i64;
+    fn sengoo_async_channel_sender_close(sender_handle: i64);
+    fn sengoo_async_channel_sender_drop(sender_handle: i64);
+    fn sengoo_async_channel_send_i64__start(sender_handle: i64, value: i64) -> i64;
+    fn sengoo_async_channel_recv_i64__start(receiver_handle: i64) -> i64;
+
+    fn sengoo_async_mutex_new_i64(value: i64) -> i64;
+    fn sengoo_async_mutex_close(mutex_handle: i64);
+    fn sengoo_async_mutex_drop(mutex_handle: i64);
+    fn sengoo_async_mutex_lock_i64__start(mutex_handle: i64) -> i64;
+    fn sengoo_async_mutex_unlock_i64(mutex_handle: i64, value: i64) -> i64;
+}
+
+struct ChannelSendOutcome {
+    is_ok: bool,
+    error: i64,
+}
+
+struct ChannelRecvOutcome {
+    is_ok: bool,
+    value: i64,
+    error: i64,
+}
+
+struct MutexLockOutcome {
+    is_ok: bool,
+    value: i64,
+    error: i64,
+}
+
+struct ChannelPairI64 {
+    handle: i64,
+}
+
+struct ChannelSenderI64 {
+    handle: i64,
+}
+
+struct ChannelReceiverI64 {
+    handle: i64,
+}
+
+struct MutexI64 {
+    handle: i64,
+}
+
+def runtime_enable_thread_pool(worker_count: i64) -> Result<i64, i64> {
+    let raw = sengoo_async_runtime_enable_thread_pool(worker_count);
+    if raw >= 0 {
+        Result { is_ok: true, value: raw, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    }
+}
+
+def spawn_blocking_future_i64(work: fn() -> i64) -> i64 {
+    sengoo_async_spawn_blocking_i64__start(work)
+}
+
+def spawn_blocking_i64(work: fn() -> i64) -> Result<i64, i64> {
+    if !sengoo_async_runtime_thread_pool_enabled() {
+        Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
+    } else {
+        let handle = sengoo_async_spawn_blocking_i64__start(work);
+        if handle == 0 {
+            Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
+        } else {
+            Result { is_ok: true, value: handle, error: 0 }
+        }
+    }
+}
+
+def channel_bounded(capacity: i64) -> Result<ChannelPairI64, i64> {
+    channel_bounded_i64(capacity)
+}
+
+def channel_bounded_i64(capacity: i64) -> Result<ChannelPairI64, i64> {
+    let pair = sengoo_async_channel_bounded_i64(capacity);
+    if pair == 0 {
+        Result { is_ok: false, value: ChannelPairI64 { handle: 0 }, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: ChannelPairI64 { handle: pair }, error: 0 }
+    }
+}
+
+def channel_pair_sender(pair: ChannelPairI64) -> ChannelSenderI64 {
+    ChannelSenderI64 { handle: sengoo_async_channel_pair_sender(pair.handle) }
+}
+
+def channel_pair_receiver(pair: ChannelPairI64) -> ChannelReceiverI64 {
+    ChannelReceiverI64 { handle: sengoo_async_channel_pair_receiver(pair.handle) }
+}
+
+def channel_pair_drop(pair: ChannelPairI64) {
+    sengoo_async_channel_pair_free(pair.handle);
+}
+
+def channel_sender_clone(sender: ChannelSenderI64) -> ChannelSenderI64 {
+    ChannelSenderI64 { handle: sengoo_async_channel_sender_clone(sender.handle) }
+}
+
+def channel_sender_close(sender: ChannelSenderI64) {
+    sengoo_async_channel_sender_close(sender.handle);
+}
+
+def channel_sender_drop(sender: ChannelSenderI64) {
+    sengoo_async_channel_sender_drop(sender.handle);
+}
+
+def channel_send_i64(sender: ChannelSenderI64, value: i64) -> i64 {
+    sengoo_async_channel_send_i64__start(sender.handle, value)
+}
+
+def channel_recv_i64(receiver: ChannelReceiverI64) -> i64 {
+    sengoo_async_channel_recv_i64__start(receiver.handle)
+}
+
+def mutex_new_i64(value: i64) -> MutexI64 {
+    MutexI64 { handle: sengoo_async_mutex_new_i64(value) }
+}
+
+def mutex_close(mutex: MutexI64) {
+    sengoo_async_mutex_close(mutex.handle);
+}
+
+def mutex_drop(mutex: MutexI64) {
+    sengoo_async_mutex_drop(mutex.handle);
+}
+
+def mutex_lock_async(mutex: MutexI64) -> i64 {
+    sengoo_async_mutex_lock_i64__start(mutex.handle)
+}
+
+def mutex_unlock_i64(mutex: MutexI64, value: i64) -> Result<i64, i64> {
+    let raw = sengoo_async_mutex_unlock_i64(mutex.handle, value);
+    if raw >= 0 {
+        Result { is_ok: true, value: raw, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+    }
+}

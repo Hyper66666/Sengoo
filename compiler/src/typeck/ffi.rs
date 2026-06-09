@@ -6,11 +6,16 @@ pub fn validate_abi(abi: &str) -> Result<(), TypeckError> {
     if SUPPORTED_ABIS.contains(&abi) {
         Ok(())
     } else {
-        Err(TypeckError::Other(format!(
-            "unsupported ABI `{}` for FFI (supported: {})",
-            abi,
-            SUPPORTED_ABIS.join(", ")
-        )))
+        Err(TypeckError::ffi_signature(
+            "ffi::unsupported_abi",
+            format!(
+                "unsupported ABI `{}` for FFI (supported: {})",
+                abi,
+                SUPPORTED_ABIS.join(", ")
+            ),
+            0,
+            0,
+        ))
     }
 }
 
@@ -28,9 +33,12 @@ pub fn validate_signature(
 
     let has_raw_pointer = params.iter().any(contains_raw_pointer) || contains_raw_pointer(ret);
     if has_raw_pointer && !is_unsafe {
-        return Err(TypeckError::Other(
+        return Err(TypeckError::ffi_signature(
+            "ffi::unsafe_boundary",
             "unsafe boundary violation: raw-pointer FFI signatures must be marked `unsafe`"
                 .to_string(),
+            0,
+            0,
         ));
     }
 
@@ -47,14 +55,21 @@ pub fn validate_ffi_type(ty: &Ty) -> Result<(), TypeckError> {
         | TyKind::Float(_) => Ok(()),
         TyKind::Ptr(inner) => validate_ffi_type(inner),
         TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str) => Ok(()),
-        TyKind::Ref(_, _) => Err(TypeckError::Other(format!(
-            "FFI type is not supported: only immutable &str references are FFI-safe (`{}`)",
-            ty
-        ))),
-        _ => Err(TypeckError::Other(format!(
-            "FFI type is not supported in C ABI signatures: `{}`",
-            ty
-        ))),
+        TyKind::Ref(_, _) => Err(TypeckError::ffi_signature(
+            "ffi::unsupported_type",
+            format!(
+                "FFI type is not supported: only immutable &str references are FFI-safe (`{}`)",
+                ty
+            ),
+            0,
+            0,
+        )),
+        _ => Err(TypeckError::ffi_signature(
+            "ffi::unsupported_type",
+            format!("FFI type is not supported in C ABI signatures: `{}`", ty),
+            0,
+            0,
+        )),
     }
 }
 

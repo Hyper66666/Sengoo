@@ -112,6 +112,11 @@ impl TypeChecker {
         } else {
             self.env.unit_ty()
         };
+        if Self::is_async_context_ty(&ret_ty) {
+            return Err(CompileError::from(TypeckError::Other(
+                "AsyncContext is poll-scoped and cannot be returned".to_string(),
+            )));
+        }
         self.validate_contracts_for_function(fn_decl, &ret_ty)?;
         self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
 
@@ -171,8 +176,11 @@ impl TypeChecker {
         }
 
         if !fn_decl.type_params.is_empty() {
-            return Err(CompileError::from(TypeckError::Other(
-                "generic extern functions are not supported in FFI MVP".to_string(),
+            return Err(CompileError::from(TypeckError::ffi_signature(
+                "ffi::generic_extern",
+                "generic extern functions are not supported in FFI MVP",
+                fn_decl.span.lo,
+                fn_decl.span.hi,
             )));
         }
 
@@ -280,7 +288,12 @@ impl TypeChecker {
         self.bind_type_params_with_meta(&struct_decl.type_params)?;
 
         for field in &struct_decl.fields {
-            self.check_type(&field.ty)?;
+            let field_ty = self.check_type(&field.ty)?;
+            if Self::is_async_context_ty(&field_ty) {
+                return Err(CompileError::from(TypeckError::Other(
+                    "AsyncContext is poll-scoped and cannot be stored in a field".to_string(),
+                )));
+            }
         }
 
         self.env.pop_scope();

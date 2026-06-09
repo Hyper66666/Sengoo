@@ -137,16 +137,17 @@ Supported fields:
   git dependencies written as `{ git = "...", rev = "..." }`, or registry
   dependencies written as a version string for `[registries.default]` or as
   `{ version = "...", registry = "..." }`. `rev` is optional and may be a
-  commit, branch, or tag accepted by `git checkout`. Dependency keys currently
-  must match the target package's `[package].name`; renamed dependency aliases
-  are not supported yet. A package name must also resolve to one manifest
-  across the graph until renamed or multi-version dependencies are supported.
+  commit, branch, or tag accepted by `git checkout`. Dependency keys may differ
+  from the target package's `[package].name` when the dependency table includes
+  `package = "actual_name"`. Multiple resolved versions of the same package
+  name may coexist when manifest and source constraints permit distinct paths.
 
 Supported dependency forms:
 
 ```toml
 [dependencies]
 local_utils = { path = "../local_utils" }
+my_alias = { package = "actual_name", path = "../actual_name" }
 baz = { git = "../baz.git" }              # cached under target/sgpm/git
 qux = { git = "../qux.git", rev = "a1b2c3d4" }
 foo = { version = ">=1.0.0, <2.0.0", registry = "local" }
@@ -366,10 +367,14 @@ Direct `sgc test` discovers `tests/**/*.sg` plus any `[[test]]` entries in
 `PATH` to run `sgpm update --check`). JSON output includes `schema_version`,
 `exit_status`, `capture`, and per-test `duration_ms`.
 
-Optional `sengoo-schema = 1` in `Sengoo.toml` and `version = 1` in
-`Sengoo.lock` are validated; unsupported values fail with an explicit
-incompatible-version error. Source discovery errors fail `sgpm test` and
-`sgpm fmt` instead of silently skipping unreadable `.sg` files.
+Optional `sengoo-schema = 1` in `Sengoo.toml` is validated; unsupported values
+fail with an explicit incompatible-version error. `Sengoo.lock` uses
+`version = 2` for new lockfiles. `version = 1` lockfiles remain readable for
+compatible graphs without dependency aliases or multiple versions of the same
+package name; run `sgpm update` to migrate to version 2. Locked commands fail
+with an actionable diagnostic when a version 1 lockfile cannot represent the
+selected graph. Source discovery errors fail `sgpm test` and `sgpm fmt` instead
+of silently skipping unreadable `.sg` files.
 
 Git dependencies are cloned into `target/sgpm/git/` under the selected package.
 Remote registry dependencies are unpacked into `target/sgpm/registry/`.
@@ -393,11 +398,12 @@ command touches normal build artifacts.
 
 `sgpm update` writes `Sengoo.lock` next to the selected package manifest.
 `sgpm update --workspace` writes one `Sengoo.lock` next to the workspace
-manifest. The lockfile is a generated TOML snapshot containing the selected
-root package name or workspace member names, dependency-first package entries,
-package versions, local `path+...` sources, `git+...#<commit>` sources,
-`registry+<registry>/<package>@<version>` sources, manifest paths, and direct
-dependency names for the currently resolved package graph. Use
+manifest. The lockfile is a generated TOML snapshot using schema version 2.
+It records package identity as `id = "<name>@<version>+<source-key>"`,
+structured `source.kind` fields, manifest paths, and `[[dependency]]` edges with
+`from`, `alias`, and `to` using the same identity format. Source keys use `/`
+separators for paths, `git+<url>#<rev>` for git dependencies, and
+`registry+<registry>/<package>@<version>` for registry packages. Use
 `sgpm update --check` or `sgpm update --workspace --check` in CI to fail when
 the lockfile is missing or stale without rewriting it. Lockfile updates stage
 the generated snapshot beside the final path before replacement, so a failed
@@ -434,6 +440,40 @@ token_env = "SENGOO_REGISTRY_TOKEN"
 the environment variable is sent as a bearer token. `sgpm publish --registry
 <name>` uses the same remote path when the named registry is configured with
 `url`.
+
+## Public registry publish checklist
+
+Use this checklist before uploading a package to a default remote registry. It
+covers authentication, lockfile freshness, and post-publish verification.
+
+1. **Authenticate**
+   - Export the token named by `[registries.default].token_env` (for example
+     `export SENGOO_REGISTRY_TOKEN=...`).
+   - Confirm the registry URL in `Sengoo.toml` points at the intended server.
+
+2. **Refresh the lockfile**
+   - Run `sgpm update` (or `sgpm update --workspace` for workspaces).
+   - Run `sgpm update --check` in CI to ensure `Sengoo.lock` is current.
+
+3. **Validate locally**
+   - Run `sgpm check --locked` and `sgpm test --locked`.
+   - Run `sgpm publish --dry-run` and inspect `target/package/<name>-<version>.tar.gz`
+     plus the `.sha256` sidecar.
+
+4. **Publish**
+   - Run `sgpm publish` (remote default registry) or
+     `sgpm publish --registry <name>` for a named registry.
+   - Publishing refuses to overwrite an existing version; bump
+     `[package].version` before republishing.
+
+5. **Verify metadata after upload**
+   - Run `sgpm metadata --format json` against a consumer manifest that depends on
+     the published package.
+   - Confirm the JSON lists the new package `id`, `source.kind = "registry"`,
+     `source.registry`, and `source.version` for the uploaded version.
+   - Confirm registry metadata includes the current `yanked` and `features`
+     fields on the resolved version entry, and that yanked versions are not newly
+     selected by `sgpm update`.
 
 ## Tool Discovery
 

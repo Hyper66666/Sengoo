@@ -1,0 +1,13 @@
+import state;
+
+def key_pressed(key: i64) -> bool {
+    key_is_pressed(key);
+}
+
+def mouse_x() -> i64 {
+    0;
+}
+
+def mouse_y() -> i64 {
+    0;
+}

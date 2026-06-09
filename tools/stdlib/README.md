@@ -21,7 +21,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `config.sg`: bounded INI/TOML subset parse/get helpers.
 - `hash.sg`: SHA-256 hex digest helpers.
 - `encoding.sg`: base64 and hex encode helpers for byte buffers.
-- `compress.sg`: gzip gunzip placeholders returning `STATUS_UNSUPPORTED` until wired.
+- `compress.sg`: deterministic one-shot gzip/gunzip Buffer helpers backed by a bounded stored-deflate subset.
 - `fs.sg`: glob listing, file copy/remove wrappers, and file-watch support detection.
 - `http.sg`: stable HTTP client surface over the existing runtime HTTP ABI.
 - `status.sg`: stable stdlib status categories plus category name/message copy helpers for fallible runtime APIs.
@@ -141,8 +141,26 @@ document. `JsonDoc.serialize(buffer)` writes compact valid JSON, and
 `JsonDoc.close()` releases runtime-owned handles. Parser diagnostics are
 available through `json_last_error_code()`, `json_last_error_offset()`, and
 `json_last_error_copy(buffer)`. The current runtime enforces conservative
-limits of 16 KiB input bytes, 64 nesting levels, and 4096 nodes; failed parses
+limits of 1 MiB input bytes, 64 nesting levels, and 4096 nodes; failed parses
 return no closeable partial document handle.
+
+## Compression Helpers
+
+`std::compress` provides one-shot gzip Buffer helpers for CLI/config artifacts.
+`compress_gzip_buffer(input, input_len, out)` accepts at most 1 MiB of input and
+emits deterministic gzip bytes using stored deflate blocks, `mtime=0`, no
+original filename/comment/extra fields, and `OS=255`. The compressed output is
+limited by the output Buffer capacity.
+
+`decompress_gzip_buffer(input, input_len, out)` validates gzip magic, method,
+stored block length/complement pairs, CRC32, and ISIZE. It accepts v1 stored
+gzip inputs up to 1,048,679 bytes, which is the largest stream this encoder can
+produce for a 1 MiB input. Decompressed output is capped at
+`min(out.capacity(), 4 MiB, 4x compressed input length)`. Corrupt or truncated
+data returns `STATUS_PARSE()`, unsupported gzip metadata or non-stored deflate
+blocks return `STATUS_UNSUPPORTED()`, oversized input returns
+`STATUS_OVERFLOW()`, and small output Buffers return
+`STATUS_BUFFER_TOO_SMALL()`.
 
 ## Directory Helpers
 

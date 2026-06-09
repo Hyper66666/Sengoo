@@ -2,6 +2,8 @@
 
 #include "runtime_shared.h"
 
+extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
+
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -11,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SENGOO_JSON_MAX_BYTES 16384
+#define SENGOO_JSON_MAX_BYTES SENGOO_RUNTIME_MAX_JSON_BYTES
 #define SENGOO_JSON_MAX_DEPTH 64
 #define SENGOO_JSON_MAX_NODES 4096
 
@@ -964,6 +966,20 @@ long long sengoo_json_string_copy(long long doc_handle, long long node_id, long 
         sengoo_json_set_error(-copied, -1, "json string output buffer too small");
     }
     return copied;
+}
+
+long long sengoo_json_string_value(long long doc_handle, long long node_id) {
+    sengoo_json_clear_error();
+    SengooJsonNode* node = sengoo_json_node_from_id(sengoo_json_doc_from_handle(doc_handle), node_id);
+    if (!node || node->kind != SENGOO_JSON_KIND_STRING || !node->string_value) {
+        return sengoo_json_set_error(SENGOO_STATUS_INVALID_ARGUMENT, -1, "json value is not a string");
+    }
+    size_t len = strlen(node->string_value);
+    long long handle = sengoo_string_from_bytes_copy((long long)(intptr_t)node->string_value, (long long)len);
+    if (handle < 0) {
+        sengoo_json_set_error(-handle, -1, "json string allocation failed");
+    }
+    return handle;
 }
 
 long long sengoo_json_bool_value(long long doc_handle, long long node_id) {

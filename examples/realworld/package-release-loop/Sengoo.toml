@@ -1,0 +1,16 @@
+[package]
+name = "package_release_loop"
+version = "0.1.0"
+edition = "2026"
+description = "Package release loop fixture for deterministic publish defaults."
+
+[bin]
+path = "src/main.sg"
+
+[registries.local]
+path = "registry"
+
+[dependencies]
+release_alias = { package = "release_helper", path = "packages/release-helper" }
+foo1_user = { path = "packages/foo1-user" }
+foo2_user = { path = "packages/foo2-user" }

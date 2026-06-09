@@ -6,6 +6,10 @@
 enum {
     SENGOO_RUNTIME_MAX_BUFFER_BYTES = 64 * 1024 * 1024,
     SENGOO_RUNTIME_MAX_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024,
+    SENGOO_RUNTIME_MAX_JSON_BYTES = 1024 * 1024,
+    SENGOO_RUNTIME_MAX_PATH_BYTES = 32 * 1024,
+    SENGOO_RUNTIME_MAX_DIR_DEPTH = 64,
+    SENGOO_RUNTIME_MAX_DIR_ENTRIES = 100000,
 
     SENGOO_STATUS_OK = 0,
     SENGOO_STATUS_UNKNOWN = 1,
@@ -21,7 +25,11 @@ enum {
     SENGOO_STATUS_TIMEOUT = 11,
     SENGOO_STATUS_INTERRUPTED = 12,
     SENGOO_STATUS_OVERFLOW = 13,
-    SENGOO_STATUS_OUT_OF_MEMORY = 14
+    SENGOO_STATUS_OUT_OF_MEMORY = 14,
+    SENGOO_STATUS_TLS_CERT_INVALID = 15,
+    SENGOO_STATUS_TLS_HOSTNAME_MISMATCH = 16,
+    SENGOO_STATUS_TLS_HANDSHAKE = 17,
+    SENGOO_STATUS_TLS_UNAVAILABLE = 18
 };
 
 typedef struct {
@@ -36,6 +44,7 @@ SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle);
 long long sengoo_copy_bytes_to_managed_buffer(long long buffer_handle, const char* bytes, size_t len);
 char* sengoo_copy_cstr_from_handle(long long value_ptr);
 char* sengoo_strdup_bytes(const char* value);
+long long sengoo_time_unix_ms(void);
 
 #ifdef _WIN32
 int sengoo_size_add(size_t* total, size_t value);

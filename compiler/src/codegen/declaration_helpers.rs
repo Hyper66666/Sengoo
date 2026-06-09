@@ -1,5 +1,6 @@
 use super::*;
 use crate::mir::async_dispatch_synthesis_helpers::{
+    select_n_winner_runtime_declaration, select_n_winner_runtime_function_name,
     select_runtime_declaration, select_winner_runtime_declaration,
     select_winner_runtime_function_name,
 };
@@ -146,6 +147,20 @@ impl Codegen {
             self.declarations.push_str(winner_decl);
         }
 
+        let n_winner_decl = select_n_winner_runtime_declaration();
+        let needs_n_winner = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. }
+                        if func == select_n_winner_runtime_function_name()
+                )
+            })
+        });
+        if needs_n_winner && !self.declarations.contains(n_winner_decl) {
+            self.declarations.push_str(n_winner_decl);
+        }
+
         let mut needed = std::collections::BTreeSet::new();
         for mir_fn in mir_fns {
             for inst in &mir_fn.instructions {
@@ -273,6 +288,263 @@ impl Codegen {
             .push_str("declare i1 @sengoo_async_timeout_bool__cancel(i64)\n");
         self.declarations
             .push_str("declare void @sengoo_async_timeout_bool__drop(i64)\n");
+    }
+
+    pub(super) fn maybe_declare_timeout_cancel_runtime_functions(
+        &mut self,
+        mir_fns: &[MirFunction],
+    ) {
+        let needs_timeout_cancel = mir_fns.iter().any(|mir_fn| {
+            let has_call = mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => {
+                    matches!(
+                        func.as_str(),
+                        "sengoo_async_timeout_cancel_i64__start"
+                            | "sengoo_async_timeout_cancel_i64__poll"
+                            | "sengoo_async_timeout_cancel_i64__result"
+                            | "sengoo_async_timeout_cancel_i64__cancel"
+                            | "sengoo_async_timeout_cancel_i64__drop"
+                    )
+                }
+                _ => false,
+            });
+            let has_suspend = mir_fn.basic_blocks.iter().any(|bb| match &bb.terminator {
+                Some(mir::Terminator::Suspend { poll_func, .. }) => {
+                    poll_func == "sengoo_async_timeout_cancel_i64__poll"
+                }
+                _ => false,
+            });
+            has_call || has_suspend
+        });
+
+        if !needs_timeout_cancel
+            || self
+                .declarations
+                .contains("declare i64 @sengoo_async_timeout_cancel_i64__start(i64, i64, i64)\n")
+        {
+            return;
+        }
+
+        self.declarations
+            .push_str("declare i64 @sengoo_async_timeout_cancel_i64__start(i64, i64, i64)\n");
+        self.declarations
+            .push_str("declare i64 @sengoo_async_timeout_cancel_i64__poll(i64)\n");
+        self.declarations.push_str(Self::sret_or_direct_decl(
+            self.targets_windows_msvc(),
+            "sengoo_async_timeout_cancel_i64__result",
+            "{ i1, i64, i64 }",
+        ));
+        self.declarations
+            .push_str("declare i1 @sengoo_async_timeout_cancel_i64__cancel(i64)\n");
+        self.declarations
+            .push_str("declare void @sengoo_async_timeout_cancel_i64__drop(i64)\n");
+    }
+
+    fn mir_uses_async_origin(mir_fns: &[MirFunction], origin: &str) -> bool {
+        mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func.contains(origin),
+                _ => false,
+            }) || mir_fn.basic_blocks.iter().any(|bb| match &bb.terminator {
+                Some(mir::Terminator::Suspend { poll_func, .. }) => poll_func.contains(origin),
+                Some(mir::Terminator::Call { func, .. }) => func.contains(origin),
+                _ => false,
+            })
+        })
+    }
+
+    fn mir_uses_concurrent_async_runtime(mir_fns: &[MirFunction]) -> bool {
+        const MARKERS: &[&str] = &[
+            "sengoo_async_runtime_enable_thread_pool",
+            "sengoo_async_spawn_blocking_i64",
+            "sengoo_async_channel_bounded_i64",
+            "sengoo_async_channel_send_i64",
+            "sengoo_async_channel_recv_i64",
+            "sengoo_async_mutex_lock_i64",
+        ];
+        mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => {
+                    MARKERS.iter().any(|marker| func.contains(marker))
+                }
+                _ => false,
+            })
+        })
+    }
+
+    pub(super) fn maybe_declare_concurrent_async_runtime_functions(
+        &mut self,
+        mir_fns: &[MirFunction],
+    ) {
+        if !Self::mir_uses_concurrent_async_runtime(mir_fns)
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_spawn_blocking_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_mutex_lock_i64")
+        {
+            return;
+        }
+
+        let targets_windows_msvc = self.targets_windows_msvc();
+
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_spawn_blocking_i64",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_spawn_blocking_i64__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_spawn_blocking_i64__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_spawn_blocking_i64__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_spawn_blocking_i64__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_channel_send_i64",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_channel_send_i64__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        targets_windows_msvc,
+                        "sengoo_async_channel_send_i64__result",
+                        "{ i1, i64 }",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_channel_send_i64__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_channel_send_i64__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_channel_recv_i64",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_channel_recv_i64__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        targets_windows_msvc,
+                        "sengoo_async_channel_recv_i64__result",
+                        "{ i1, i64, i64 }",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_channel_recv_i64__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_channel_recv_i64__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_mutex_lock_i64",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_mutex_lock_i64__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        targets_windows_msvc,
+                        "sengoo_async_mutex_lock_i64__result",
+                        "{ i1, i64, i64 }",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_mutex_lock_i64__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_mutex_lock_i64__drop(i64)\n",
+                ),
+            ],
+        );
+    }
+
+    fn maybe_declare_async_runtime_lifecycle(
+        declarations: &mut String,
+        mir_fns: &[MirFunction],
+        origin: &str,
+        lifecycle_decls: &[(&str, &str)],
+    ) {
+        if !Self::mir_uses_async_origin(mir_fns, origin)
+            && !Self::mir_uses_concurrent_async_runtime(mir_fns)
+        {
+            return;
+        }
+        for (_, decl) in lifecycle_decls {
+            if !declarations.contains(decl) {
+                declarations.push_str(decl);
+            }
+        }
+    }
+
+    fn sret_or_direct_decl(use_sret: bool, func: &str, ret_ty: &str) -> &'static str {
+        if !use_sret {
+            return match func {
+                "sengoo_async_timeout_cancel_i64__result" => {
+                    "declare { i1, i64, i64 } @sengoo_async_timeout_cancel_i64__result(i64)\n"
+                }
+                "sengoo_async_channel_send_i64__result" => {
+                    "declare { i1, i64 } @sengoo_async_channel_send_i64__result(i64)\n"
+                }
+                "sengoo_async_channel_recv_i64__result" => {
+                    "declare { i1, i64, i64 } @sengoo_async_channel_recv_i64__result(i64)\n"
+                }
+                "sengoo_async_mutex_lock_i64__result" => {
+                    "declare { i1, i64, i64 } @sengoo_async_mutex_lock_i64__result(i64)\n"
+                }
+                _ => unreachable!("unsupported async result declaration"),
+            };
+        }
+
+        match (func, ret_ty) {
+            ("sengoo_async_channel_send_i64__result", "{ i1, i64 }") => {
+                "declare void @sengoo_async_channel_send_i64__result({ i1, i64 }* sret({ i1, i64 }) align 8, i64)\n"
+            }
+            ("sengoo_async_timeout_cancel_i64__result", "{ i1, i64, i64 }") => {
+                "declare void @sengoo_async_timeout_cancel_i64__result({ i1, i64, i64 }* sret({ i1, i64, i64 }) align 8, i64)\n"
+            }
+            ("sengoo_async_channel_recv_i64__result", "{ i1, i64, i64 }") => {
+                "declare void @sengoo_async_channel_recv_i64__result({ i1, i64, i64 }* sret({ i1, i64, i64 }) align 8, i64)\n"
+            }
+            ("sengoo_async_mutex_lock_i64__result", "{ i1, i64, i64 }") => {
+                "declare void @sengoo_async_mutex_lock_i64__result({ i1, i64, i64 }* sret({ i1, i64, i64 }) align 8, i64)\n"
+            }
+            _ => unreachable!("unsupported async result declaration"),
+        }
     }
 
     pub(super) fn maybe_declare_async_task_runtime_functions(&mut self, mir_fns: &[MirFunction]) {

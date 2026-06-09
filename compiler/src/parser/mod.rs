@@ -2,6 +2,7 @@
 //!
 //! 将 Token 流解析为 AST。
 
+mod attribute_expander;
 mod decl;
 mod derive_expander;
 mod expr;
@@ -16,12 +17,17 @@ use crate::symbol::SymbolInterner;
 use crate::Result;
 use miette::SourceSpan;
 
+pub use attribute_expander::{take_deprecated_decls, with_cfg_features, DeprecatedDecl};
+
 /// Parser 结构。
 pub struct Parser<'source> {
     /// Token 列表。
     tokens: Vec<Token>,
     /// 当前游标位置。
     pos: usize,
+    lexer: Lexer<'source>,
+    exhausted: bool,
+    last_span_end: u32,
     /// 原始源码。
     source: &'source str,
     /// 解析过程中收集的错误。
@@ -36,10 +42,12 @@ pub struct Parser<'source> {
 impl<'source> Parser<'source> {
     /// 从源码创建解析器。
     pub fn new(source: &'source str) -> Self {
-        let tokens = Lexer::tokenize(source);
         Self {
-            tokens,
+            tokens: Vec::with_capacity(64),
             pos: 0,
+            lexer: Lexer::new(source),
+            exhausted: false,
+            last_span_end: 0,
             source,
             errors: Vec::new(),
             in_condition_context: false,
@@ -51,7 +59,9 @@ impl<'source> Parser<'source> {
     /// 解析源码并返回 AST。
     pub fn parse(source: &str) -> Result<Program> {
         let macro_expanded = macro_expander::expand_declarative_macros(source)?;
-        let expanded_source = derive_expander::expand_derive_macros(macro_expanded.as_ref())?;
+        let attr_filtered =
+            attribute_expander::process_surface_attributes(macro_expanded.as_ref())?;
+        let expanded_source = derive_expander::expand_derive_macros(attr_filtered.as_ref())?;
         let mut parser = Parser::new(expanded_source.as_ref());
         let program = parser.parse_program()?;
         if !parser.errors.is_empty() {
@@ -68,8 +78,8 @@ impl<'source> Parser<'source> {
             match self.parse_decl() {
                 Ok(decl) => decls.push(decl),
                 Err(CompileError::ParseError(e)) => {
-                    self.errors
-                        .push(e.with_span(source_span(self.current_span())));
+                    let span = source_span(self.current_span());
+                    self.errors.push(e.with_span(span));
                     self.recover_to_decl();
                 }
                 Err(_) => break,
@@ -90,29 +100,35 @@ impl<'source> Parser<'source> {
     }
 
     /// 当前 Token。
-    fn current(&self) -> Option<&Token> {
+    fn current(&mut self) -> Option<&Token> {
+        self.fill_to(0);
         self.tokens.get(self.pos)
     }
 
     /// 向前查看第 n 个 Token。
-    fn peek(&self, n: usize) -> Option<&Token> {
+    fn peek(&mut self, n: usize) -> Option<&Token> {
+        self.fill_to(n);
         self.tokens.get(self.pos + n)
     }
 
     /// 消费当前 Token。
     fn advance(&mut self) -> Option<Token> {
+        self.fill_to(0);
         let token = self.tokens.get(self.pos).cloned();
-        self.pos += 1;
+        if token.is_some() {
+            self.pos += 1;
+            self.compact_consumed_tokens();
+        }
         token
     }
 
     /// 检查当前 Token 是否匹配。
-    fn check(&self, kind: TokenKind) -> bool {
+    fn check(&mut self, kind: TokenKind) -> bool {
         self.current().map(|t| t.kind == kind).unwrap_or(false)
     }
 
     /// 检查下一个 Token 是否匹配。
-    fn check_peek(&self, kind: TokenKind) -> bool {
+    fn check_peek(&mut self, kind: TokenKind) -> bool {
         self.peek(1).map(|t| t.kind == kind).unwrap_or(false)
     }
 
@@ -148,24 +164,45 @@ impl<'source> Parser<'source> {
     }
 
     /// 是否到达 Token 流末尾。
-    fn is_eof(&self) -> bool {
+    fn is_eof(&mut self) -> bool {
+        self.fill_to(0);
         self.pos >= self.tokens.len()
     }
 
     /// 当前 Token 的 span。
-    fn current_span(&self) -> Span {
+    fn current_span(&mut self) -> Span {
         self.current().map(|t| t.span).unwrap_or_else(|| {
             self.tokens
                 .last()
                 .map(|t| Span::new(t.span.hi, t.span.hi))
-                .unwrap_or_else(|| Span::new(0, 0))
+                .unwrap_or_else(|| Span::new(self.last_span_end, self.last_span_end))
         })
     }
 
     /// 以给定起点和当前位置构造 span。
     /// 常用于为已消费前缀补全结束位置。
-    fn span_at(&self, lo: u32) -> Span {
+    fn span_at(&mut self, lo: u32) -> Span {
         Span::new(lo, self.current_span().hi)
+    }
+
+    fn fill_to(&mut self, lookahead: usize) {
+        let target = self.pos.saturating_add(lookahead);
+        while !self.exhausted && target >= self.tokens.len() {
+            if let Some(token) = self.lexer.next() {
+                self.last_span_end = token.span.hi;
+                self.tokens.push(token);
+            } else {
+                self.exhausted = true;
+            }
+        }
+    }
+
+    fn compact_consumed_tokens(&mut self) {
+        if self.pos < 65_536 {
+            return;
+        }
+        self.tokens.drain(..self.pos);
+        self.pos = 0;
     }
 
     /// 发生错误后恢复到下一个声明起点。

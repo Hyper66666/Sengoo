@@ -1,12 +1,21 @@
 use super::*;
-use crate::typeck::r#trait::{type_key, FunctionTy};
+use crate::typeck::r#trait::{type_key, FunctionTy, ImplInfo};
 
 impl TypeChecker {
     pub(super) fn prepare_class_hierarchy(&mut self, program: &Program) -> Result<()> {
         self.class_decls.clear();
         self.collect_class_decls(program)?;
+
+        for decl in program.decls.iter() {
+            if let DeclKind::Trait(trait_decl) = &decl.kind {
+                self.check_trait_decl(trait_decl)?;
+            }
+        }
+
+        self.resolve_class_headers(program)?;
         self.validate_class_parent_targets()?;
         self.validate_class_cycles()?;
+        self.register_class_header_traits(program)?;
 
         let mut class_names: Vec<String> = self.class_decls.keys().cloned().collect();
         class_names.sort();
@@ -39,7 +48,8 @@ impl TypeChecker {
                     })
                 });
 
-            let mut impl_info = crate::typeck::r#trait::ImplInfo::new(target_ty.clone(), None);
+            let mut impl_info =
+                crate::typeck::r#trait::ImplInfo::new(target_ty.clone(), None, Vec::new());
             let mut method_names: Vec<String> = methods.keys().cloned().collect();
             method_names.sort();
 
@@ -90,14 +100,169 @@ impl TypeChecker {
                 }
             }
 
+            let header_traits = class_decl
+                .implements
+                .iter()
+                .filter_map(|bound| bound.path.as_simple().map(|ident| ident.name.clone()))
+                .collect::<Vec<_>>();
+
             self.class_decls.insert(
                 class_decl.name.name.clone(),
                 ClassDeclInfo {
                     parent,
+                    header_traits,
                     fields,
                     methods,
                 },
             );
+        }
+
+        Ok(())
+    }
+
+    fn is_known_trait_name(&self, name: &str) -> bool {
+        if self.trait_registry.get(name).is_some() {
+            return true;
+        }
+        self.env
+            .lookup(name)
+            .is_some_and(|symbol| matches!(symbol.kind, SymbolKind::Trait { .. }))
+    }
+
+    fn path_simple_name(path: &crate::ast::Path) -> Option<String> {
+        path.as_simple()
+            .map(|ident| ident.name.clone())
+            .or_else(|| path.segments.last().map(|ident| ident.name.clone()))
+    }
+
+    fn resolve_class_headers(&mut self, program: &Program) -> Result<()> {
+        for decl in &program.decls {
+            let DeclKind::Class(class_decl) = &decl.kind else {
+                continue;
+            };
+
+            let class_name = class_decl.name.name.clone();
+            let mut paths = Vec::new();
+            if let Some(path) = &class_decl.extends {
+                if let Some(name) = Self::path_simple_name(path) {
+                    paths.push(name);
+                }
+            }
+            paths.extend(
+                class_decl
+                    .implements
+                    .iter()
+                    .filter_map(|bound| Self::path_simple_name(&bound.path)),
+            );
+
+            if paths.is_empty() {
+                continue;
+            }
+
+            let first = paths[0].clone();
+            let first_is_trait = self.is_known_trait_name(&first);
+            let first_is_class = self.class_decls.contains_key(&first);
+
+            if !first_is_trait && !first_is_class {
+                return Err(CompileError::TypeckError(TypeckError::Other(format!(
+                    "invalid class header: `{first}` is not a known class or trait"
+                ))));
+            }
+
+            let (parent, traits) = if first_is_trait {
+                for path in &paths {
+                    if self.class_decls.contains_key(path) {
+                        return Err(CompileError::TypeckError(TypeckError::Other(
+                            "invalid class header: class base must come before traits".to_string(),
+                        )));
+                    }
+                    if !self.is_known_trait_name(path) {
+                        return Err(CompileError::TypeckError(TypeckError::Other(format!(
+                            "invalid class header: `{path}` is not a known trait"
+                        ))));
+                    }
+                }
+                (None, paths)
+            } else {
+                let mut traits = Vec::new();
+                for path in paths.iter().skip(1) {
+                    if self.class_decls.contains_key(path) {
+                        return Err(CompileError::TypeckError(TypeckError::Other(format!(
+                            "invalid class header: only one class base is allowed (`{path}`)"
+                        ))));
+                    }
+                    if !self.is_known_trait_name(path) {
+                        return Err(CompileError::TypeckError(TypeckError::Other(format!(
+                            "invalid class header: `{path}` is not a known trait"
+                        ))));
+                    }
+                    traits.push(path.clone());
+                }
+                (Some(first), traits)
+            };
+
+            if let Some(info) = self.class_decls.get_mut(&class_name) {
+                info.parent = parent;
+                info.header_traits = traits;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn register_class_header_traits(&mut self, program: &Program) -> Result<()> {
+        for decl in &program.decls {
+            let DeclKind::Class(class_decl) = &decl.kind else {
+                continue;
+            };
+
+            let class_name = class_decl.name.name.clone();
+            let Some(class_info) = self.class_decls.get(&class_name).cloned() else {
+                continue;
+            };
+
+            let target_ty = self
+                .env
+                .lookup(&class_name)
+                .and_then(|symbol| symbol.get_ty())
+                .cloned()
+                .unwrap_or_else(|| {
+                    self.env.new_ty(TyKind::Adt {
+                        name: class_name.clone(),
+                        args: vec![],
+                    })
+                });
+            let target_key = type_key(&target_ty);
+
+            for trait_name in &class_info.header_traits {
+                if self.impl_registry.implements_trait(trait_name, &target_key) {
+                    continue;
+                }
+
+                let mut impl_info =
+                    ImplInfo::new(target_ty.clone(), Some(trait_name.clone()), Vec::new());
+                if let Some(trait_info) = self.trait_registry.get(trait_name) {
+                    for (method_name, method_sig) in &trait_info.methods {
+                        if method_sig.has_default {
+                            impl_info.add_method(
+                                method_name.clone(),
+                                FunctionTy::with_generic_params(
+                                    method_sig.has_self,
+                                    method_sig.param_types.clone(),
+                                    method_sig.return_type.clone(),
+                                    method_sig.generic_params.clone(),
+                                ),
+                            );
+                        }
+                    }
+                }
+
+                self.impl_registry.register_trait_impl(
+                    trait_name.clone(),
+                    target_key.clone(),
+                    impl_info,
+                );
+            }
         }
 
         Ok(())
@@ -262,6 +427,16 @@ impl TypeChecker {
             resolved.insert(method_name, method.clone());
         }
 
+        for trait_name in &class_info.header_traits {
+            if let Some(defaults) = self.trait_default_methods.get(trait_name) {
+                for (method_name, method) in defaults {
+                    resolved
+                        .entry(method_name.clone())
+                        .or_insert_with(|| method.clone());
+                }
+            }
+        }
+
         stack.remove(class_name);
         cache.insert(class_name.to_string(), resolved.clone());
         Ok(resolved)
@@ -302,6 +477,7 @@ mod tests {
             "A".to_string(),
             ClassDeclInfo {
                 parent: Some("B".to_string()),
+                header_traits: Vec::new(),
                 fields: Vec::new(),
                 methods: Vec::new(),
             },
@@ -310,6 +486,7 @@ mod tests {
             "B".to_string(),
             ClassDeclInfo {
                 parent: Some("A".to_string()),
+                header_traits: Vec::new(),
                 fields: Vec::new(),
                 methods: Vec::new(),
             },

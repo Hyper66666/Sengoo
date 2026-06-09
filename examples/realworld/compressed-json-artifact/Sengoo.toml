@@ -1,0 +1,8 @@
+[package]
+name = "compressed-json-artifact"
+version = "0.1.0"
+edition = "2026"
+description = "Realworld compressed JSON artifact fixture using public std::compress helpers."
+
+[bin]
+path = "src/main.sg"

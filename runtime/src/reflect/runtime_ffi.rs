@@ -275,9 +275,53 @@ unsafe fn ffi_invoke_native_i64(
             };
             Ok(unsafe { f(args[0], args[1], args[2], args[3]) })
         }
+        5 => {
+            let f: unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64 = unsafe {
+                std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(i64, i64, i64, i64, i64) -> i64,
+                >(raw)
+            };
+            Ok(unsafe { f(args[0], args[1], args[2], args[3], args[4]) })
+        }
+        6 => {
+            let f: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 = unsafe {
+                std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64,
+                >(raw)
+            };
+            Ok(unsafe { f(args[0], args[1], args[2], args[3], args[4], args[5]) })
+        }
+        7 => {
+            let f: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64 = unsafe {
+                std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64,
+                >(raw)
+            };
+            Ok(unsafe {
+                f(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6],
+                )
+            })
+        }
+        8 => {
+            let f: unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64 = unsafe {
+                std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+                >(raw)
+            };
+            Ok(unsafe {
+                f(
+                    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+                )
+            })
+        }
         arity => Err(set_error(
             SENGOO_FFI_ERR_INVALID_ARGUMENT,
-            format!("unsupported native call arity {arity}, supported 0..=4"),
+            format!("unsupported native call arity {arity}, supported 0..=8"),
         )),
     }
 }
@@ -796,7 +840,9 @@ mod tests {
         assert_ne!(lib, 0);
 
         let symbol = c_str("sengoo_ffi_builtin_add2");
-        let args = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+        let args = [
+            1_i64, 2_i64, 3_i64, 4_i64, 5_i64, 6_i64, 7_i64, 8_i64, 9_i64,
+        ];
         let mut out = 0_i64;
         let rc = sengoo_ffi_c_call_i64(
             lib,

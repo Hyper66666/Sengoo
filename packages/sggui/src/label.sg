@@ -1,0 +1,30 @@
+import sgplatform;
+
+struct Label {
+    text: &str,
+    value: i64,
+    bounds: Rect,
+}
+
+def label_new(text: &str, value: i64, bounds: Rect) -> Label {
+    Label { text: text, value: value, bounds: bounds };
+}
+
+def label_set_value(label: Label, value: i64) -> Label {
+    Label { text: label.text, value: value, bounds: label.bounds };
+}
+
+def label_increment(label: Label) -> Label {
+    label_set_value(label, label.value + 1);
+}
+
+def label_value_bar_width(value: i64, max_units: i64, unit_pixels: i64) -> i64 {
+    if value <= 0 { 0; } else if value >= max_units { max_units * unit_pixels; } else { value * unit_pixels; };
+}
+
+impl Label {
+    def draw(self, renderer: Renderer, background: Color, accent: Color, unit_pixels: i64) -> Result<i64, i64> {
+        let filled = renderer.fill_rect(self.bounds, background);
+        if not filled.is_ok { filled; } else { let bar_w = label_value_bar_width(self.value, self.bounds.w / unit_pixels, unit_pixels); if bar_w > 0 { let bar = rect_new(self.bounds.x + 4, self.bounds.y + 4, bar_w, self.bounds.h - 8); renderer.fill_rect(bar, accent); } else { filled; }; };
+    }
+}

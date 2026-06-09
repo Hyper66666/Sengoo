@@ -1,0 +1,31 @@
+import sgplatform;
+
+import layout;
+
+struct Panel {
+    bounds: Rect,
+    spacing: i64,
+    cursor_y: i64,
+}
+
+struct PanelRow {
+    panel: Panel,
+    bounds: Rect,
+}
+
+def panel_new(bounds: Rect, spacing: i64) -> Panel {
+    Panel { bounds: bounds, spacing: spacing, cursor_y: bounds.y };
+}
+
+def panel_alloc_row(panel: Panel, height: i64) -> PanelRow {
+    let bounds = rect_new(panel.bounds.x, panel.cursor_y, panel.bounds.w, height);
+    let next_y = layout_stack_y(panel.cursor_y, height, panel.spacing);
+    PanelRow { panel: Panel { bounds: panel.bounds, spacing: panel.spacing, cursor_y: next_y }, bounds: bounds };
+}
+
+impl Panel {
+    def draw(self, renderer: Renderer, background: Color, border: Color) -> Result<i64, i64> {
+        let filled = renderer.fill_rect(self.bounds, background);
+        if not filled.is_ok { filled; } else { renderer.draw_rect(self.bounds, border); };
+    }
+}

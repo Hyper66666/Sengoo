@@ -1,28 +1,64 @@
 {
-  "schema_version": 1,
-  "frozen_on": "2026-02-18",
-  "baseline_report_id": "1771352687788-advanced-pipeline",
-  "baseline_report_path": "bench/results/1771352687788-advanced-pipeline.json",
+  "schema_version": 2,
+  "frozen_on": "2026-06-09",
+  "change": "compile-scale-production-gate",
+  "supersedes": "frontend-1000k-perf-gate",
+  "baseline_report_id": "1780946346830-advanced-pipeline",
+  "baseline_report_path": "bench/results/1780946346830-advanced-pipeline.json",
+  "host_profile": {
+    "os": "windows-10",
+    "generator": "advanced_pipeline_bench.py::make_scale_source_sengoo",
+    "sgc_command": "sgc build main.sg -O 2 --emit-llvm",
+    "cpp_command": "clang++ -O2 with PCH"
+  },
   "metrics": {
     "100000": {
-      "compile_frontend_llvm_avg_ms": 481.39090000040596,
-      "e2e_avg_ms": 1578.1615666674043,
-      "peak_rss_mb_avg": 142.021484375
+      "compile_frontend_llvm_avg_ms": 97.17246666938688,
+      "e2e_avg_ms": 574.9168666467691,
+      "peak_rss_mb_avg": 8.431640625,
+      "cpp_peak_rss_mb_avg": 90.70703125,
+      "rss_ratio_vs_cpp": 0.09295465311571423,
+      "frontend_share_pct": 16.902003108058054
     },
     "1000000": {
-      "compile_frontend_llvm_avg_ms": 4325.07540000006,
-      "e2e_avg_ms": 5487.357500000144,
-      "peak_rss_mb_avg": 1387.8671875
+      "compile_frontend_llvm_avg_ms": 197.02819996746257,
+      "e2e_avg_ms": 619.0896999905817,
+      "peak_rss_mb_avg": 41.8515625,
+      "cpp_peak_rss_mb_avg": 369.7265625,
+      "rss_ratio_vs_cpp": 0.1131959852086635,
+      "frontend_share_pct": 31.825468905468785
     }
   },
   "thresholds": {
-    "max_frontend_regression_pct": {
-      "100000": 12.0,
-      "1000000": 12.0
+    "max_frontend_time_regression_pct": {
+      "100000": 10.0,
+      "1000000": 10.0
     },
     "max_rss_regression_pct": {
-      "100000": 12.0,
-      "1000000": 12.0
+      "100000": 10.0,
+      "1000000": 10.0
+    },
+    "max_e2e_regression_pct": {
+      "100000": 10.0,
+      "1000000": 10.0
+    },
+    "max_frontend_share_regression_pp": {
+      "1000000": 5.0
+    },
+    "max_rss_ratio_vs_cpp": {
+      "100000": 1.5,
+      "1000000": 1.8
+    },
+    "max_frontend_share_pct": {
+      "100000": 70.0,
+      "1000000": 65.0
+    },
+    "ladder_stretch": {
+      "2500000": {
+        "max_rss_ratio_vs_cpp": 2.0,
+        "max_frontend_share_pct": 70.0,
+        "report_only": true
+      }
     }
   }
 }

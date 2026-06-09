@@ -40,8 +40,51 @@ future without exposing lifecycle ids.
   deadline, `false` if the deadline elapsed first.
 - When `false`, the inner future may still be running; callers should not
   assume it was stopped.
-- Stdlib/async builtins surface timeout waits through the native bridge; they do
-  not currently map to `STATUS_TIMEOUT` at the language layer.
+
+## Timeout cancel (`timeout_cancel(future, ms)`)
+
+- Returns `Future<Result<T, i64>>` and **consumes** the inner future.
+- When the deadline elapses first, the runtime cancels/drops the inner future
+  and the awaited result carries `STATUS_TIMEOUT` (`11`) in the error field.
+- When the inner future completes first, the result is `Ok(value)`.
+
+## Select (`select(f0, .., fn)`)
+
+- Accepts **2..8** homogeneous `Future<T>` operands.
+- Each blocking `select` call rotates its first-polled operand between internal
+  poll rounds; the first ready operand in the current order wins.
+- Losing operands are **not** canceled; they are dropped through normal future
+  cleanup when their handles go out of scope.
+
+## Reactor
+
+- `CoroutineScheduler` remains cooperative; a reactor layer registers timer, TCP
+  readable, and owned-fd interests that feed scheduler wakeup deadlines.
+- `sengoo_async_reactor_*` helpers bridge readiness into poll wakeup hints.
+- Owned-fd readiness is platform-specific in the current supported subset:
+  POSIX hosts use `poll(2)` for poll-backed fds; Windows maps CRT fds to OS
+  handles and supports disk files plus named/anonymous pipes. Unsupported hosts
+  or file kinds do not claim readiness support; all-host owned-fd readiness
+  remains Deferred.
+
+## User `Future` surface
+
+- `tools/stdlib/async_futures.sg` defines `Poll<T>`, opaque `AsyncContext`, and
+  the `Future<T>` trait contract for user-defined awaitables.
+- Awaiting a user future calls `poll(&mut self, ctx)`. `Poll { is_ready:
+  false, .. }` keeps the same future slot alive for the next poll; `Poll {
+  is_ready: true, value }` completes the await with `value` and is not polled
+  again by that await operation.
+- `AsyncContext` is poll-scoped and opaque: user code cannot construct, store,
+  return, compare, or capture it into `spawn_blocking_i64` /
+  `spawn_blocking_future_i64`.
+- The accepted v1 subset covers same-thread cooperative user futures, including
+  immediate Ready and Pending-then-Ready native execution. Reentrant/concurrent
+  poll and poll-after-Ready user-source diagnostics remain follow-up work.
+  Malformed `Poll<T>` layout, non-`Poll<T>` return, and non-`&mut self`
+  receiver errors use the stable `async::user_future_contract` diagnostic family
+  in compiler, `sgc` JSON, and `sglsp` representative coverage; exhaustive
+  snapshots for every rejected user-future shape remain follow-up work.
 
 ## Sleep
 
@@ -57,12 +100,42 @@ future without exposing lifecycle ids.
 | Timed out (inner still pending) | Timeout future dropped; inner future dropped when last handle released |
 | Scheduler dropped | All pending tasks receive `on_scheduler_drop` |
 
+## Concurrent runtime (`std::async`, opt-in)
+
+- **Default:** unchanged cooperative single-thread scheduler; programs that do
+  not call `runtime_enable_thread_pool` behave as before.
+- **Thread pool:** `runtime_enable_thread_pool(n)` with `n >= 1` enables bounded
+  worker threads. Invalid counts return `STATUS_INVALID_ARGUMENT`.
+- **Blocking offload:** `spawn_blocking_i64(work: fn() -> i64)` returns
+  `Err(STATUS_UNSUPPORTED)` until the pool is enabled. Worker threads complete
+  host work; the scheduler resumes awaiters. Dropping/canceling the blocking
+  future does not kill the host thread; results are discarded.
+- **Send:** `spawn_blocking_i64` cross-thread captures must be primitive/unit or
+  sendable aggregates. Runtime handles, references, pointers, `AsyncContext`, and
+  `Future` values are rejected at compile time.
+- **Channels:** `channel_bounded(cap)` provides async `channel_send_i64` /
+  `channel_recv_i64`. A full channel leaves send pending; runtime-level close
+  and drop paths wake receivers with `STATUS_INVALID_HANDLE`.
+- **Mutex:** `mutex_new_i64` + `mutex_lock_async` polls pending under contention;
+  runtime-level close/drop paths wake waiters with `STATUS_INVALID_HANDLE`.
+- **Cleanup wrappers:** public `channel_pair_drop`, `channel_sender_drop`, and
+  `mutex_drop` lower as void cleanup calls in package-shaped async programs.
+- **Realworld smoke:** `examples/realworld/async-channel-smoke` exercises the
+  public `std::async` channel/mutex create, send/receive, lock/unlock helpers
+  and cleanup wrappers in a package loop. It does not claim all-host owned-fd
+  readiness, complete user-future rejected-shape diagnostics, or cancellation
+  semantics beyond the documented task/status APIs.
+
+`select`, `timeout`, and `timeout_cancel` semantics are unchanged when the pool
+is enabled.
+
 ## Unsupported (stable `STATUS_UNSUPPORTED` or compile error)
 
-- IO/async networking wakeups
-- `select` with more than two operands
-- User-defined `Future` trait implementations
-- General timer wheel beyond `sleep` / `timeout`
+- Full owned-fd readiness polling on all hosts (TCP timer paths are supported)
+- Concurrent/reentrant poll of the same user future, source-level poll after
+  `Ready`, and rejected-shape `sgc` JSON / `sglsp` snapshots for every user
+  future diagnostic
+- Generic `spawn_blocking<T>` beyond the pinned `i64` worker ABI
 
 Native binaries link `sengoo-runtime` with `native-bridge`; missing optional
 async symbols must not cause link failures.

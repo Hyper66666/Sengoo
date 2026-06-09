@@ -1,0 +1,202 @@
+import std::status;
+
+import sdl_ffi;
+
+struct Platform {
+    alive: bool,
+}
+
+struct Window {
+    handle: i64,
+    closed: bool,
+}
+
+struct Renderer {
+    handle: i64,
+    destroyed: bool,
+}
+
+struct Rect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+
+struct Color {
+    r: i64,
+    g: i64,
+    b: i64,
+    a: i64,
+}
+
+struct Event {
+    kind: i64,
+    key: i64,
+    mouse_x: i64,
+    mouse_y: i64,
+    mouse_button: i64,
+}
+
+def EVENT_NONE() -> i64 {
+    0;
+}
+
+def EVENT_QUIT() -> i64 {
+    1;
+}
+
+def EVENT_KEY_DOWN() -> i64 {
+    2;
+}
+
+def EVENT_KEY_UP() -> i64 {
+    3;
+}
+
+def EVENT_MOUSE_BUTTON_DOWN() -> i64 {
+    4;
+}
+
+def EVENT_MOUSE_BUTTON_UP() -> i64 {
+    5;
+}
+
+def KEY_LEFT() -> i64 {
+    80;
+}
+
+def KEY_RIGHT() -> i64 {
+    79;
+}
+
+def KEY_UP() -> i64 {
+    82;
+}
+
+def KEY_DOWN() -> i64 {
+    81;
+}
+
+def KEY_W() -> i64 {
+    26;
+}
+
+def KEY_A() -> i64 {
+    4;
+}
+
+def KEY_S() -> i64 {
+    22;
+}
+
+def KEY_D() -> i64 {
+    7;
+}
+
+def KEY_ESCAPE() -> i64 {
+    41;
+}
+
+def STATUS_PLATFORM() -> i64 {
+    19;
+}
+
+def platform_status_from_raw(code: i64) -> i64 {
+    if code == STATUS_OK() { STATUS_OK(); } else if code == STATUS_INVALID_ARGUMENT() { STATUS_INVALID_ARGUMENT(); } else if code == STATUS_INVALID_HANDLE() { STATUS_INVALID_HANDLE(); } else if code == STATUS_UNSUPPORTED() { STATUS_UNSUPPORTED(); } else if code == STATUS_IO() { STATUS_IO(); } else if code == STATUS_PLATFORM() { STATUS_PLATFORM(); } else { status_from_raw_ffi(code); };
+}
+
+def platform_i64_result(code: i64) -> Result<i64, i64> {
+    if code == STATUS_OK() { Result { is_ok: true, value: code, error: 0 }; } else { Result { is_ok: false, value: 0, error: platform_status_from_raw(code) }; };
+}
+
+def platform_handle_result(handle: i64) -> Result<i64, i64> {
+    if handle != 0 { Result { is_ok: true, value: handle, error: 0 }; } else { Result { is_ok: false, value: 0, error: STATUS_PLATFORM() }; };
+}
+
+def init() -> Result<Platform, i64> {
+    let status = sgplatform_init();
+    if status == STATUS_OK() { Result { is_ok: true, value: Platform { alive: true }, error: 0 }; } else { Result { is_ok: false, value: Platform { alive: false }, error: platform_status_from_raw(status) }; };
+}
+
+def quit(platform: Platform) -> bool {
+    if platform.alive { sgplatform_quit() == STATUS_OK(); } else { true; };
+}
+
+def color_new(r: i64, g: i64, b: i64, a: i64) -> Color {
+    Color { r: r, g: g, b: b, a: a };
+}
+
+def rect_new(x: i64, y: i64, w: i64, h: i64) -> Rect {
+    Rect { x: x, y: y, w: w, h: h };
+}
+
+def rect_overlaps(a: Rect, b: Rect) -> bool {
+    let a_right = a.x + a.w;
+    let a_bottom = a.y + a.h;
+    let b_right = b.x + b.w;
+    let b_bottom = b.y + b.h;
+    if a.w <= 0 or a.h <= 0 or b.w <= 0 or b.h <= 0 { false; } else if a_right <= b.x or b_right <= a.x or a_bottom <= b.y or b_bottom <= a.y { false; } else { true; };
+}
+
+def rect_contains_point(rect: Rect, x: i64, y: i64) -> bool {
+    if rect.w <= 0 or rect.h <= 0 { false; } else if x < rect.x or y < rect.y { false; } else if x >= rect.x + rect.w or y >= rect.y + rect.h { false; } else { true; };
+}
+
+def event_is_quit(event: Event) -> bool {
+    event.kind == EVENT_QUIT();
+}
+
+def event_is_key_down(event: Event) -> bool {
+    event.kind == EVENT_KEY_DOWN();
+}
+
+impl Platform {
+    def create_window(self, title: &str, width: i64, height: i64) -> Result<Window, i64> {
+        if not self.alive { Result { is_ok: false, value: Window { handle: 0, closed: true }, error: STATUS_INVALID_HANDLE() }; } else { let created = platform_handle_result(sgplatform_create_window(sengoo_stdlib_str_ptr(title), width, height)); if created.is_ok { Result { is_ok: true, value: Window { handle: created.value, closed: false }, error: 0 }; } else { Result { is_ok: false, value: Window { handle: 0, closed: false }, error: created.error }; }; };
+    }
+    def poll_event(self) -> Event {
+        let kind = sgplatform_poll_event();
+        Event { kind: kind, key: sgplatform_last_event_key(), mouse_x: sgplatform_last_event_mouse_x(), mouse_y: sgplatform_last_event_mouse_y(), mouse_button: sgplatform_last_event_mouse_button() };
+    }
+    def ticks_ms(self) -> i64 {
+        sgplatform_ticks_ms();
+    }
+    def delay_ms(self, ms: i64) -> bool {
+        sgplatform_delay_ms(ms) == STATUS_OK();
+    }
+}
+
+impl Window {
+    def create_renderer(self) -> Result<Renderer, i64> {
+        if self.closed or self.handle == 0 { Result { is_ok: false, value: Renderer { handle: 0, destroyed: true }, error: STATUS_INVALID_HANDLE() }; } else { let created = platform_handle_result(sgplatform_create_renderer(self.handle)); if created.is_ok { Result { is_ok: true, value: Renderer { handle: created.value, destroyed: false }, error: 0 }; } else { Result { is_ok: false, value: Renderer { handle: 0, destroyed: false }, error: created.error }; }; };
+    }
+    def close(self) -> bool {
+        if not self.closed and self.handle != 0 { sgplatform_destroy_window(self.handle) == STATUS_OK(); } else { true; };
+    }
+}
+
+impl Renderer {
+    def clear(self, color: Color) -> Result<i64, i64> {
+        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_clear(self.handle, color.r, color.g, color.b, color.a)); };
+    }
+    def present(self) -> Result<i64, i64> {
+        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_present(self.handle)); };
+    }
+    def draw_rect(self, rect: Rect, color: Color) -> Result<i64, i64> {
+        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_draw_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
+    }
+    def fill_rect(self, rect: Rect, color: Color) -> Result<i64, i64> {
+        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_fill_rect(self.handle, rect.x, rect.y, rect.w, rect.h, color.r, color.g, color.b, color.a)); };
+    }
+    def draw_line(self, x1: i64, y1: i64, x2: i64, y2: i64, color: Color) -> Result<i64, i64> {
+        if self.destroyed or self.handle == 0 { Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }; } else { platform_i64_result(sgplatform_renderer_draw_line(self.handle, x1, y1, x2, y2, color.r, color.g, color.b, color.a)); };
+    }
+    def destroy(self) -> bool {
+        if not self.destroyed and self.handle != 0 { sgplatform_destroy_renderer(self.handle) == STATUS_OK(); } else { true; };
+    }
+}
+
+extern "C" {
+    fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+}

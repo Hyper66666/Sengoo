@@ -1,0 +1,10 @@
+[package]
+name = "foo1_user"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "src/lib.sg"
+
+[dependencies]
+shared_v1 = { package = "shared_core", version = ">=1.0.0, <2.0.0", registry = "local" }

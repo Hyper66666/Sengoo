@@ -395,6 +395,8 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 parse_frontend_jobs_wire(&frontend_jobs),
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+                None,
+                None,
             )
             .await
         }

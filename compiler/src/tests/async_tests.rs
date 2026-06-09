@@ -1,5 +1,6 @@
 use crate::ast::DeclKind;
 use crate::mir::{Instruction, LocalKind};
+use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
 #[test]
@@ -88,6 +89,31 @@ async def main() -> i64 {
         "async/await function should compile, got: {:?}",
         result.err()
     );
+}
+
+#[test]
+fn async_frame_rejects_payload_enum_local_crossing_await_before_codegen() {
+    let source = r#"
+enum Maybe { Val(i64) }
+
+async def one() -> i64 { 1 }
+
+async def main(value: Maybe) -> i64 {
+    let waited = await one();
+    match value {
+        Maybe::Val(inner) => inner + waited,
+    }
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("payload enum crossing await should be deferred");
+    match &err {
+        CompileError::AsyncUnsupportedType { reason, .. } => {
+            assert!(reason.contains("payload-carrying enum values cannot cross await points yet"));
+        }
+        other => panic!("expected async unsupported type diagnostic, got {other:?}"),
+    }
+    assert!(err.to_string().contains("[async::unsupported_frame_type]"));
 }
 
 #[test]
@@ -1731,6 +1757,490 @@ async def main() -> f64 {
         ir.contains("bitcast double") && ir.contains("bitcast i64"),
         "async float frame round-trip should use bitcast in generated IR, got:\n{}",
         &ir[..ir.len().min(4000)]
+    );
+}
+
+#[test]
+fn select_three_operands_compiles() {
+    let source = r#"
+async def a() -> i64 { 1 }
+async def b() -> i64 { 2 }
+async def c() -> i64 { 3 }
+async def main() -> i64 {
+    let first = spawn(a());
+    let second = spawn(b());
+    let third = spawn(c());
+    select(first, second, third)
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "three-operand select should compile, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn select_three_operands_lowering_emits_n_winner_runtime_call() {
+    let source = r#"
+async def a() -> i64 { 1 }
+async def b() -> i64 { 2 }
+async def c() -> i64 { 3 }
+async def main() -> i64 {
+    let first = spawn(a());
+    let second = spawn(b());
+    let third = spawn(c());
+    select(first, second, third)
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("three-operand select should lower to MIR");
+    let has_n_winner = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_select_n_winner",
+            _ => false,
+        })
+    });
+    assert!(
+        has_n_winner,
+        "three-operand select should call the N-way winner runtime"
+    );
+}
+
+#[test]
+fn select_rejects_single_operand() {
+    let source = r#"
+async def a() -> i64 { 1 }
+async def main() -> i64 {
+    let first = spawn(a());
+    select(first)
+}
+"#;
+
+    let err = compile_to_ir(source).expect_err("single-operand select should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            || msg.contains("ArgumentCountMismatch")
+            || msg.contains("argument")
+            || msg.contains("参数数量")
+            || msg.contains("类型不匹配"),
+        "unexpected single-operand select diagnostic: {msg}"
+    );
+}
+
+#[test]
+fn timeout_cancel_compiles_for_i64_future() {
+    let source = r#"
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+async def worker() -> i64 { 42 }
+async def main() -> i64 {
+    let outcome = await timeout_cancel(worker(), 5);
+    if outcome.is_ok { outcome.value } else { outcome.error }
+}
+"#;
+
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "timeout_cancel should compile for i64 futures, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn timeout_cancel_lowering_emits_runtime_start_call() {
+    let source = r#"
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+async def worker() -> i64 { 42 }
+async def main() -> i64 {
+    let outcome = await timeout_cancel(worker(), 5);
+    if outcome.is_ok { outcome.value } else { 0 }
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("timeout_cancel source should lower to MIR");
+    let has_start = mir_fns.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| match inst {
+            Instruction::Call { func, .. } => func == "sengoo_async_timeout_cancel_i64__start",
+            _ => false,
+        })
+    });
+    assert!(
+        has_start,
+        "timeout_cancel lowering should emit a runtime start call"
+    );
+}
+
+#[test]
+fn unit_cleanup_wrapper_returns_void_not_i8() {
+    let source = r#"
+extern "C" {
+    fn cleanup_runtime(handle: i64);
+}
+
+struct Handle {
+    handle: i64,
+}
+
+def cleanup(handle: Handle) {
+    cleanup_runtime(handle.handle);
+}
+
+def main() -> i64 {
+    cleanup(Handle { handle: 1 });
+    0
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("unit cleanup wrapper should compile");
+    assert!(
+        !ir.contains("ret i8"),
+        "unit-returning cleanup wrappers must emit LLVM void returns:\n{ir}"
+    );
+}
+
+#[test]
+fn poll_and_async_context_surface_parse_in_stdlib_module() {
+    let source = include_str!("../../../tools/stdlib/async_futures.sg");
+    let result = Parser::parse(source);
+    assert!(
+        result.is_ok(),
+        "Poll/Future/AsyncContext surface should parse, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn user_future_impl_can_be_awaited_and_lowers_poll_loop() {
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct ImmediateFuture {
+    value: i64,
+}
+
+impl Future<i64> for ImmediateFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    let future = ImmediateFuture { value: 42 };
+    await future
+}
+"#;
+
+    let mir = compile_to_mir(source).expect("user Future<T> await should lower");
+    let call_names = mir
+        .iter()
+        .flat_map(|function| function.instructions.iter())
+        .filter_map(|instruction| match instruction {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        call_names.contains(&"ImmediateFuture_Future_poll"),
+        "user Future await should call the trait poll implementation: {call_names:?}"
+    );
+    assert!(
+        mir.iter().any(
+            |function| function.instructions.iter().any(|instruction| matches!(
+                instruction,
+                Instruction::Call { func, .. } if func == "sengoo_async_sleep__start"
+            ))
+        ),
+        "Pending should yield through a reactor-backed retry tick"
+    );
+    compile_to_ir(source).expect("user Future<T> await should reach LLVM IR");
+}
+
+#[test]
+fn user_future_supports_local_parameter_return_and_multiple_await_flow() {
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct ImmediateFuture {
+    value: i64,
+}
+
+impl Future<i64> for ImmediateFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+def make_future(value: i64) -> ImmediateFuture {
+    ImmediateFuture { value: value }
+}
+
+async def consume_future(future: ImmediateFuture) -> i64 {
+    await future
+}
+
+async def main() -> i64 {
+    let local_future = make_future(10);
+    let first = await local_future;
+    let second = await consume_future(make_future(20));
+    let returned_future = make_future(12);
+    let third = await returned_future;
+    first + second + third
+}
+"#;
+
+    let mir = compile_to_mir(source).expect("user Future flow should lower to MIR");
+    let call_names = mir
+        .iter()
+        .flat_map(|function| function.instructions.iter())
+        .filter_map(|instruction| match instruction {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let poll_calls = call_names
+        .iter()
+        .filter(|name| **name == "ImmediateFuture_Future_poll")
+        .count();
+    assert!(
+        poll_calls >= 2,
+        "multiple user Future await points should call the user poll implementation, got calls: {call_names:?}"
+    );
+    compile_to_ir(source).expect("user Future local/parameter/return flow should reach LLVM IR");
+}
+
+#[test]
+fn user_future_rejects_malformed_poll_layout() {
+    let source = r#"
+struct Poll<T> {
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { value: 0 }
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("malformed Poll<T> layout must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("Poll<T> must contain `is_ready: bool` followed by `value: T`"),
+        "unexpected malformed Poll<T> diagnostic: {error}"
+    );
+}
+
+#[test]
+fn user_future_rejects_poll_returning_non_poll_value() {
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> i64 {
+        0
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(&mut self, ctx: AsyncContext) -> i64 {
+        self.value
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("poll returning non-Poll value must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("Future<T>::poll must return Poll<T>"),
+        "unexpected poll return diagnostic: {error}"
+    );
+}
+
+#[test]
+fn user_future_rejects_poll_with_non_mut_borrow_receiver() {
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct BadFuture {
+    value: i64,
+}
+
+impl Future<i64> for BadFuture {
+    def poll(self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture { value: 1 }
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("Future<T>::poll must require &mut self");
+    assert!(
+        error
+            .to_string()
+            .contains("Future<T>::poll must use `&mut self` receiver"),
+        "unexpected poll receiver diagnostic: {error}"
+    );
+}
+
+#[test]
+fn async_context_cannot_be_constructed_stored_or_returned() {
+    let constructed = r#"
+struct AsyncContext { handle: i64 }
+def main() -> i64 {
+    let ctx = AsyncContext { handle: 0 };
+    0
+}
+"#;
+    let error = compile_to_ir(constructed).expect_err("AsyncContext construction must fail");
+    assert!(error.to_string().contains("cannot be constructed"));
+
+    let stored = r#"
+struct AsyncContext { handle: i64 }
+def stash(ctx: AsyncContext) -> i64 {
+    let saved = ctx;
+    0
+}
+def main() -> i64 { 0 }
+"#;
+    let error = compile_to_ir(stored).expect_err("AsyncContext storage must fail");
+    assert!(error.to_string().contains("cannot be stored"));
+
+    let returned = r#"
+struct AsyncContext { handle: i64 }
+def leak(ctx: AsyncContext) -> AsyncContext { ctx }
+def main() -> i64 { 0 }
+"#;
+    let error = compile_to_ir(returned).expect_err("AsyncContext return must fail");
+    assert!(error.to_string().contains("cannot be returned"));
+}
+
+#[test]
+fn async_context_cannot_be_compared() {
+    let source = r#"
+struct Poll<T> {
+    is_ready: bool,
+    value: T,
+}
+
+struct AsyncContext {
+    handle: i64,
+}
+
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct BadFuture {}
+
+impl Future<i64> for BadFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        let same = ctx == ctx;
+        Poll { is_ready: same, value: 1 }
+    }
+}
+
+async def main() -> i64 {
+    await BadFuture {}
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("AsyncContext comparison must fail");
+    assert!(
+        error.to_string().contains("cannot be compared"),
+        "unexpected AsyncContext comparison diagnostic: {error}"
     );
 }
 

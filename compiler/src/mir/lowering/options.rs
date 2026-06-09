@@ -4,6 +4,14 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+/// Source metadata used to inject optional assertion callsite fields.
+#[derive(Debug, Clone, Default)]
+pub struct AssertCallsiteContext {
+    pub source_file: Option<Rc<str>>,
+    pub source_text: Option<Rc<str>>,
+    pub user_base_offset: u32,
+}
+
 /// MirLowerOptions用于配置HIR到MIR的降级过程的选项。
 #[derive(Debug, Clone)]
 pub struct MirLowerOptions {
@@ -12,6 +20,7 @@ pub struct MirLowerOptions {
     pub async_functions: Rc<RefCell<HashSet<String>>>,
     pub(crate) generic_function_templates: Rc<HashMap<String, hir::HIRFunction>>,
     pub(crate) enum_defs: Rc<EnumDefMap>,
+    pub(crate) assert_callsite: Rc<AssertCallsiteContext>,
 }
 
 impl Default for MirLowerOptions {
@@ -22,6 +31,7 @@ impl Default for MirLowerOptions {
             async_functions: Rc::new(RefCell::new(HashSet::new())),
             generic_function_templates: Rc::new(HashMap::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
+            assert_callsite: Rc::new(AssertCallsiteContext::default()),
         }
     }
 }
@@ -45,7 +55,13 @@ impl MirLowerOptions {
             async_functions: Rc::new(RefCell::new(async_functions)),
             generic_function_templates: Rc::new(HashMap::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
+            assert_callsite: Rc::new(AssertCallsiteContext::default()),
         }
+    }
+
+    pub fn with_assert_callsite_context(mut self, context: AssertCallsiteContext) -> Self {
+        self.assert_callsite = Rc::new(context);
+        self
     }
 
     pub fn with_async_functions(mut self, async_functions: HashSet<String>) -> Self {

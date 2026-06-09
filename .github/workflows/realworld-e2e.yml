@@ -1,0 +1,98 @@
+name: realworld-e2e
+
+on:
+  push:
+    branches: [main, codex/**]
+  pull_request:
+
+jobs:
+  realworld-e2e:
+    name: realworld locked loop (real binaries)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM clang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Install LLVM clang (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+
+      - name: Build toolchain binaries
+        run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp
+
+      - name: Run realworld integration tests
+        run: cargo test -p sgpm realworld -- --nocapture
+
+      - name: Verify package release defaults
+        run: |
+          cargo test -p sgpm publish -- --nocapture
+          cargo test -p sgpm metadata -- --nocapture
+
+      - name: Run LSP realworld diagnostics
+        run: cargo test -p sglsp realworld -- --nocapture
+
+      - name: Verify POSIX TLS runtime
+        if: runner.os == 'Linux'
+        run: cargo test -p sengoo-runtime net::tls -- --nocapture
+
+      - name: Validate OpenSpec child change
+        run: npx --yes openspec validate package-release-defaults --strict
+        continue-on-error: true
+
+  graphics-package-smoke:
+    name: graphics package smoke (stub mode)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      SGPLATFORM_SKIP_GRAPHICS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM clang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Install LLVM clang (Windows)
+        if: runner.os == 'Windows'
+        run: choco install llvm -y
+
+      - name: Build package tools
+        run: cargo build -p sgc -p sgpm
+
+      - name: Verify sgplatform package
+        shell: pwsh
+        run: |
+          cargo run -p sgpm -- update --check --manifest-path packages/sgplatform/Sengoo.toml
+          cargo run -p sgpm -- test --locked --manifest-path packages/sgplatform/Sengoo.toml
+          cargo run -p sgpm -- build --locked --manifest-path packages/sgplatform/Sengoo.toml
+          cargo run -p sgpm -- doc --locked --manifest-path packages/sgplatform/Sengoo.toml
+
+      - name: Verify sggame package
+        shell: pwsh
+        run: |
+          cargo run -p sgpm -- update --check --manifest-path packages/sggame/Sengoo.toml
+          cargo run -p sgpm -- test --locked --manifest-path packages/sggame/Sengoo.toml
+          cargo run -p sgpm -- build --locked --manifest-path packages/sggame/Sengoo.toml
+          cargo run -p sgpm -- doc --locked --manifest-path packages/sggame/Sengoo.toml
+
+      - name: Verify sggui package
+        shell: pwsh
+        run: |
+          cargo run -p sgpm -- update --check --manifest-path packages/sggui/Sengoo.toml
+          cargo run -p sgpm -- test --locked --manifest-path packages/sggui/Sengoo.toml
+          cargo run -p sgpm -- build --locked --manifest-path packages/sggui/Sengoo.toml
+          cargo run -p sgpm -- doc --locked --manifest-path packages/sggui/Sengoo.toml

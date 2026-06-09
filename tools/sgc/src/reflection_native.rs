@@ -196,10 +196,12 @@ fn compile_reflection_shared_library(
     export_symbols: &[String],
 ) -> Result<()> {
     let object_path = shared_library_path.with_extension(object_file_extension());
-    compile_ir_to_object(clang_exe, llvm_ir_path, &object_path, opt_level)?;
+    compile_ir_to_object(clang_exe, llvm_ir_path, &object_path, opt_level, None)?;
     let mut object_paths = vec![object_path];
     if let Some(runtime_c) = runtime_c {
-        object_paths.extend(ensure_runtime_objects(clang_exe, runtime_c, opt_level)?);
+        object_paths.extend(ensure_runtime_objects(
+            clang_exe, runtime_c, opt_level, None,
+        )?);
     }
     link_shared_library_from_objects(
         clang_exe,

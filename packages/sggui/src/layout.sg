@@ -1,0 +1,19 @@
+import sgplatform;
+
+def layout_rect(x: i64, y: i64, w: i64, h: i64) -> Rect {
+    rect_new(x, y, w, h);
+}
+
+def layout_stack_y(origin_y: i64, item_height: i64, spacing: i64) -> i64 {
+    origin_y + item_height + spacing;
+}
+
+def layout_centered_x(container: Rect, item_width: i64) -> i64 {
+    container.x + (container.w - item_width) / 2;
+}
+
+def layout_inset(container: Rect, padding: i64) -> Rect {
+    let inner_w = container.w - padding * 2;
+    let inner_h = container.h - padding * 2;
+    if inner_w < 0 or inner_h < 0 { rect_new(container.x, container.y, 0, 0); } else { rect_new(container.x + padding, container.y + padding, inner_w, inner_h); };
+}

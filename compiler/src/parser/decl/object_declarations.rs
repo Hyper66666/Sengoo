@@ -19,31 +19,23 @@ impl<'source> Parser<'source> {
             Vec::new()
         };
 
-        // 解析继承列表。
-        let extends = if self.consume(TokenKind::Colon).is_some() {
-            let parent = self.parse_path()?;
-
-            if self.consume(TokenKind::Colon).is_some() {
-                return Err(CompileError::ParseError(
-                    ParseError::invalid_class_header_form(),
-                ));
+        // 解析继承/实现列表：`class Child: Base, TraitA` 或 `class Service: TraitA`.
+        let (extends, implements) = if self.consume(TokenKind::Colon).is_some() {
+            let first = self.parse_path()?;
+            let mut extra_paths = Vec::new();
+            while self.consume(TokenKind::Comma).is_some() {
+                extra_paths.push(self.parse_path()?);
             }
-
-            if self.check(TokenKind::Comma) {
-                return Err(CompileError::ParseError(
-                    ParseError::class_header_trait_list_not_supported(),
-                ));
-            }
-
-            Some(parent)
+            let implements = extra_paths
+                .into_iter()
+                .map(crate::ast::TraitBound::new)
+                .collect::<Vec<_>>();
+            (Some(first), implements)
         } else {
-            None
+            (None, Vec::new())
         };
 
         self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
-
-        // V1 中 trait 适配通过 `impl Trait for Type` 表达。
-        let implements = Vec::new();
 
         self.expect(TokenKind::LBrace)?;
 
@@ -294,23 +286,23 @@ impl<'source> Parser<'source> {
         // 真正的目标类型在 `for` 之后。
         let first_type = self.parse_type()?;
 
-        let (target_type, trait_path) = if self.consume(TokenKind::ForKw).is_some() {
+        let (target_type, trait_path, trait_args) = if self.consume(TokenKind::ForKw).is_some() {
             // `impl Trait for Type` 中，`first_type` 实际上是 trait 路径。
             let actual_target = self.parse_type()?;
             // 从第一个类型里提取 trait 路径。
-            let trait_path = match first_type.kind {
-                TypeKind::Path(path) => path,
-                TypeKind::PathWithArgs { path, args } if args.is_empty() => path,
+            let (trait_path, trait_args) = match first_type.kind {
+                TypeKind::Path(path) => (path, Vec::new()),
+                TypeKind::PathWithArgs { path, args } => (path, args),
                 _ => {
                     return Err(CompileError::ParseError(
                         ParseError::expected_trait_path_in_impl(),
                     ));
                 }
             };
-            (actual_target, Some(trait_path))
+            (actual_target, Some(trait_path), trait_args)
         } else {
             // `impl Type` 表示固有 impl，不带 trait。
-            (first_type, None)
+            (first_type, None, Vec::new())
         };
 
         self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
@@ -391,6 +383,7 @@ impl<'source> Parser<'source> {
             type_params,
             target_type,
             trait_path,
+            trait_args,
             items,
             span: self.current_span(),
         }))

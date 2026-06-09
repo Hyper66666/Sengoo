@@ -45,8 +45,8 @@ pub enum CompileError {
     #[diagnostic(code(codegen::error))]
     Codegen(String),
 
-    #[error("async frame lowering does not yet support `{ty}`: {reason}")]
-    #[diagnostic(code(async_unsupported_type))]
+    #[error("[async::unsupported_frame_type] async frame lowering does not yet support `{ty}`: {reason}")]
+    #[diagnostic(code(async_frame::unsupported_type))]
     AsyncUnsupportedType { ty: String, reason: String },
 }
 
@@ -139,6 +139,59 @@ pub enum ParseError {
     #[error("unexpected end of input")]
     #[diagnostic(code(parser::unexpected_eof))]
     UnexpectedEof,
+
+    #[error("unsupported attribute: {message}")]
+    #[diagnostic(code(attributes::unsupported_attribute))]
+    UnsupportedAttribute {
+        message: String,
+        #[label("attribute")]
+        span: SourceSpan,
+    },
+}
+
+/// Non-fatal compiler warnings surfaced by `sgc` and `sglsp`.
+#[derive(Debug, Clone, Diagnostic, Error)]
+pub enum CompileWarning {
+    #[error("use of deprecated {kind} `{name}`{detail}")]
+    #[diagnostic(code(attributes::deprecated_use))]
+    DeprecatedUse {
+        kind: String,
+        name: String,
+        detail: String,
+        span: Option<(u32, u32)>,
+    },
+}
+
+impl CompileWarning {
+    pub fn deprecated_use(
+        kind: impl Into<String>,
+        name: impl Into<String>,
+        message: Option<String>,
+        span: Option<(u32, u32)>,
+    ) -> Self {
+        let detail = message
+            .as_ref()
+            .map(|msg| format!(": {msg}"))
+            .unwrap_or_default();
+        Self::DeprecatedUse {
+            kind: kind.into(),
+            name: name.into(),
+            detail,
+            span,
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::DeprecatedUse { .. } => "attributes::deprecated_use",
+        }
+    }
+
+    pub fn span(&self) -> Option<(u32, u32)> {
+        match self {
+            Self::DeprecatedUse { span, .. } => *span,
+        }
+    }
 }
 
 impl ParseError {
@@ -169,8 +222,16 @@ impl ParseError {
         Self::invalid_pattern("invalid class header: expected `class Child: Parent { ... }`")
     }
 
-    pub fn class_header_trait_list_not_supported() -> Self {
-        Self::invalid_pattern("class header trait list is not supported; use `impl Trait for Type`")
+    pub fn class_header_invalid_ordering() -> Self {
+        Self::invalid_pattern(
+            "invalid class header: class base must come first and only one base is allowed",
+        )
+    }
+
+    pub fn class_header_unknown_path(name: &str) -> Self {
+        Self::InvalidPattern(format!(
+            "invalid class header: `{name}` is not a known class or trait"
+        ))
     }
 
     pub fn unexpected_token_in_expression() -> Self {

@@ -1,0 +1,213 @@
+import sggame;
+
+import sggame::display;
+
+import sggame::draw;
+
+import sggame::event;
+
+import sggame::input;
+
+import sggame::time;
+
+import sgplatform;
+
+struct Direction {
+    x: i64,
+    y: i64,
+}
+
+def direction_from_input() -> Direction {
+    if key_pressed(KEY_RIGHT()) || key_pressed(KEY_D()) {
+        Direction { x: 1, y: 0 }
+    } else if key_pressed(KEY_LEFT()) || key_pressed(KEY_A()) {
+        Direction { x: -1, y: 0 }
+    } else if key_pressed(KEY_UP()) || key_pressed(KEY_W()) {
+        Direction { x: 0, y: -1 }
+    } else if key_pressed(KEY_DOWN()) || key_pressed(KEY_S()) {
+        Direction { x: 0, y: 1 }
+    } else {
+        Direction { x: 0, y: 0 }
+    }
+}
+
+def direction_blocks_reverse(current: Direction, requested: Direction) -> bool {
+    requested.x == -current.x && requested.y == -current.y
+}
+
+def draw_grid(surface: Surface, cell: i64, color: Color) -> bool {
+    let x = 0;
+    let x_limit = surface.width;
+    let mut_x = 0;
+    let mut_x_run = true;
+    while mut_x_run {
+        if mut_x > x_limit {
+            mut_x_run = false;
+        } else {
+            let _grid_v = line(color, mut_x, 0, mut_x, surface.height);
+            mut_x = mut_x + cell;
+        }
+    }
+    let mut_y = 0;
+    let mut_y_run = true;
+    while mut_y_run {
+        if mut_y > surface.height {
+            mut_y_run = false;
+        } else {
+            let _grid_h = line(color, 0, mut_y, surface.width, mut_y);
+            mut_y = mut_y + cell;
+        }
+    }
+    true
+}
+
+def main() -> i64 {
+    let boot = sggame_init();
+    if !boot.is_ok {
+        return 1;
+    }
+
+    let surface_result = set_mode(640, 480, "sggame snake");
+    if !surface_result.is_ok {
+        sggame_quit();
+        return 1;
+    }
+
+    let surface = surface_result.value;
+    if surface.width == 0 {
+        sggame_quit();
+        return 1;
+    }
+
+    let cell = 20;
+    let head_x_start = 200;
+    let head_y_start = 200;
+    let dir_start = Direction { x: 1, y: 0 };
+    let length_start = 3;
+    let food_x_start = 400;
+    let food_y_start = 200;
+    let score_start = 0;
+
+    let bg = color_new(16, 20, 28, 255);
+    let snake_color = color_new(74, 222, 128, 255);
+    let food_color = color_new(248, 113, 113, 255);
+    let grid_color = color_new(40, 48, 64, 255);
+
+    let clock_start = clock_new();
+    let running_start = true;
+
+    let head_loop = head_x_start;
+    let head_y_loop = head_y_start;
+    let dir_loop = dir_start;
+    let length_loop = length_start;
+    let food_x_loop = food_x_start;
+    let food_y_loop = food_y_start;
+    let score_loop = score_start;
+    let clock_loop = clock_start;
+    let running_loop = running_start;
+
+    while running_loop {
+        pump();
+
+        let event = poll();
+        let still_running = if event_is_quit(event) || key_pressed(KEY_ESCAPE()) {
+            false
+        } else {
+            running_loop
+        };
+
+        let requested = direction_from_input();
+        let dir_after_input = if direction_blocks_reverse(dir_loop, requested) {
+            dir_loop
+        } else if requested.x != 0 || requested.y != 0 {
+            requested
+        } else {
+            dir_loop
+        };
+
+        let ticked = clock_tick(clock_loop, 12);
+        let clock_after = ticked.clock;
+
+        let head_after_x = head_loop + dir_after_input.x * cell;
+        let head_after_y = head_y_loop + dir_after_input.y * cell;
+
+        let hit_wall = if head_after_x < 0 || head_after_y < 0 {
+            true
+        } else if head_after_x + cell > surface.width || head_after_y + cell > surface.height {
+            true
+        } else {
+            false
+        };
+
+        let head_rect = rect_new(head_after_x, head_after_y, cell, cell);
+        let food_rect = rect_new(food_x_loop, food_y_loop, cell, cell);
+        let ate_food = rect_overlaps(head_rect, food_rect);
+
+        let length_after = if ate_food {
+            length_loop + 1
+        } else {
+            length_loop
+        };
+
+        let score_after = if ate_food {
+            score_loop + 1
+        } else {
+            score_loop
+        };
+
+        let food_x_after = if ate_food {
+            let next_food = food_x_loop + cell * 3;
+            if next_food + cell > surface.width {
+                cell
+            } else {
+                next_food
+            }
+        } else {
+            food_x_loop
+        };
+
+        let still_running_after = if hit_wall {
+            false
+        } else {
+            still_running
+        };
+
+        let cleared = clear(bg);
+        if cleared.is_ok {
+            draw_grid(surface, cell, grid_color);
+
+            let segment = 0;
+            let mut_segment = 0;
+            let mut_segment_run = true;
+            while mut_segment_run {
+                if mut_segment >= length_after {
+                    mut_segment_run = false;
+                } else {
+                    let seg_x = head_after_x - mut_segment * cell * dir_after_input.x;
+                    let seg_y = head_after_y - mut_segment * cell * dir_after_input.y;
+                    let seg_rect = rect_new(seg_x, seg_y, cell, cell);
+                    let _seg = rect(snake_color, seg_rect);
+                    mut_segment = mut_segment + 1;
+                }
+            }
+
+            let _food = rect(food_color, food_rect);
+            let _presented = flip();
+        }
+
+        head_loop = if hit_wall { head_loop } else { head_after_x };
+        head_y_loop = if hit_wall { head_y_loop } else { head_after_y };
+        dir_loop = dir_after_input;
+        length_loop = length_after;
+        food_x_loop = food_x_after;
+        score_loop = score_after;
+        clock_loop = clock_after;
+        running_loop = still_running_after;
+    }
+
+    if sggame_quit() {
+        0
+    } else {
+        1
+    }
+}

@@ -27,26 +27,91 @@ def main() -> i64 {
 }
 
 #[test]
-fn class_header_trait_list_is_rejected_with_migration_hint() {
+fn class_header_base_and_traits_compile() {
     let source = r#"
-class Animal {}
+class Animal {
+    age: i64;
+}
+
 trait Runner {
     def run(self) -> i64 {
         1
     }
 }
+
 class Dog: Animal, Runner {}
-def main() -> i64 { 0 }
+
+def main() -> i64 {
+    let d = Dog { age: 3 };
+    d.age + d.run()
+}
 "#;
     let result = compile_to_ir(source);
     assert!(
-        result.is_err(),
-        "trait list in class header should be rejected"
+        result.is_ok(),
+        "class header with base and traits should compile, got {:?}",
+        result.err()
     );
+}
+
+#[test]
+fn trait_only_class_header_compiles() {
+    let source = r#"
+trait Service {
+    def ping(self) -> i64 {
+        42
+    }
+}
+
+class Worker: Service {}
+
+def main() -> i64 {
+    let w = Worker {};
+    w.ping()
+}
+"#;
+    let result = compile_to_ir(source);
+    assert!(
+        result.is_ok(),
+        "trait-only class header should compile, got {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn class_after_trait_in_header_is_rejected() {
+    let source = r#"
+class Animal {}
+trait Runner {
+    def run(self) -> i64 { 1 }
+}
+class Dog: Runner, Animal {}
+def main() -> i64 { 0 }
+"#;
+    let result = compile_to_ir(source);
+    assert!(result.is_err(), "class path after trait should fail");
     let err = result.unwrap_err().to_string();
     assert!(
-        err.contains("impl Trait for Type") || err.contains("class header"),
-        "error should include migration hint, got: {}",
+        err.contains("class header") || err.contains("class base"),
+        "error should mention invalid header ordering, got: {}",
+        err
+    );
+}
+
+#[test]
+fn second_class_base_in_header_is_rejected() {
+    let source = r#"
+class A {}
+class B {}
+class C: A, B {}
+def main() -> i64 { 0 }
+"#;
+    let result = compile_to_ir(source);
+    assert!(result.is_err(), "second class base should fail");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("class header") || err.contains("one class base"),
+        "error should mention duplicate class base, got: {}",
         err
     );
 }

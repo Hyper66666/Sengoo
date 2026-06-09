@@ -3,7 +3,7 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    main__poll, main__result, main__start, sengoo_async_cancel_dispatch,
+    concurrent, main__poll, main__result, main__start, sengoo_async_cancel_dispatch,
     sengoo_async_drop_dispatch, sengoo_async_poll_dispatch, CoroutineScheduler, CoroutineTask,
     TaskId, TaskLifecycleStatus, TaskState,
 };
@@ -205,6 +205,7 @@ pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
 
 #[no_mangle]
 pub extern "C" fn sengoo_async_run_main_i64() -> i64 {
+    concurrent::retain_native_bridge_exports_for_linker();
     let result = Arc::new(Mutex::new(None));
     let mut scheduler = CoroutineScheduler::new();
     scheduler.spawn(RootAsyncMainI64Task::new(result.clone()));

@@ -214,7 +214,7 @@ fn collect_hir_call_targets_from_expr(
                     }
                 });
         }
-        HIRExpr::Call { func, args } => {
+        HIRExpr::Call { func, args, .. } => {
             collect_hir_call_targets_from_expr(func, index_by_name, targets, seen);
             for arg in args {
                 collect_hir_call_targets_from_expr(arg, index_by_name, targets, seen);

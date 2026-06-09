@@ -1,0 +1,27 @@
+import sgplatform;
+
+import state;
+
+struct Clock {
+    last_ms: i64,
+}
+
+struct ClockTick {
+    clock: Clock,
+    elapsed_ms: i64,
+}
+
+def clock_new() -> Clock {
+    Clock { last_ms: 0 };
+}
+
+def clock_tick(clock: Clock, fps: i64) -> ClockTick {
+    let platform = current_platform();
+    if not platform.alive { ClockTick { clock: clock, elapsed_ms: 0 }; } else { let now = platform.ticks_ms(); let elapsed = if clock.last_ms == 0 { 0; } else if now >= clock.last_ms { now - clock.last_ms; } else { 0; }; let updated = Clock { last_ms: now }; if fps > 0 { let frame_ms = 1000 / fps; if frame_ms > elapsed { let _delayed = platform.delay_ms(frame_ms - elapsed); }; }; ClockTick { clock: updated, elapsed_ms: elapsed }; };
+}
+
+impl Clock {
+    def tick(self, fps: i64) -> ClockTick {
+        clock_tick(self, fps);
+    }
+}

@@ -7,10 +7,47 @@ use std::process::Command;
 #[cfg(not(windows))]
 use std::sync::atomic::Ordering;
 
-use crate::{
-    file_fingerprint, object_file_extension, BuildCacheMetadata, CachedNativeRecoveryPlan,
-    LinkerMode, RunCacheMetadata, RunEngine,
+use crate::cross_compile::{linux_sysroot_from_env, windows_cross_sdk_include_paths};
+use crate::module_graph::collect_module_sources_with_edges;
+use crate::native_link::{
+    append_native_library_link_args, format_native_link_failure_message,
+    native_library_search_paths_from_env, sgplatform_graphics_skip_enabled, SDL2_INCLUDE_DIR_ENV,
+    SDL2_LIB_DIR_ENV,
 };
+use crate::{
+    file_fingerprint, BuildCacheMetadata, CachedNativeRecoveryPlan, LinkerMode, NativeBuildTarget,
+    RunCacheMetadata, RunEngine,
+};
+
+fn effective_target(target: Option<&NativeBuildTarget>) -> NativeBuildTarget {
+    target.cloned().unwrap_or_else(NativeBuildTarget::host)
+}
+
+fn apply_clang_target_args(command: &mut Command, target: &NativeBuildTarget) -> Result<()> {
+    command.arg(format!("--target={}", target.triple));
+
+    if target.is_windows_msvc() {
+        command.arg("-fms-runtime-lib=dll");
+        if target.is_cross() {
+            for include in windows_cross_sdk_include_paths()? {
+                command.arg("-isystem").arg(include);
+            }
+        } else {
+            #[cfg(windows)]
+            {
+                for include in windows_compile_include_paths()? {
+                    command.arg("-isystem").arg(include);
+                }
+            }
+        }
+    }
+
+    if target.is_linux_gnu() && target.is_cross() {
+        let sysroot = linux_sysroot_from_env()?;
+        command.arg(format!("--sysroot={sysroot}"));
+    }
+    Ok(())
+}
 #[cfg(not(windows))]
 use crate::{LINKER_AVAILABLE, LINKER_UNAVAILABLE, LLD_AVAILABILITY};
 
@@ -23,17 +60,38 @@ const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
 ];
 const RUNTIME_SHARED_HEADER: &str = "runtime_shared.h";
 
-pub(crate) fn runtime_source_bundle(runtime_c: &str) -> Result<Vec<PathBuf>> {
-    let runtime_c_path = Path::new(runtime_c);
-    let mut sources = Vec::new();
-    sources.push(runtime_c_path.to_path_buf());
-    let Some(runtime_dir) = runtime_c_path.parent() else {
-        return Ok(sources);
-    };
+fn push_existing_split_sources(sources: &mut Vec<PathBuf>, runtime_dir: &Path) {
     for sibling in RUNTIME_SPLIT_C_SOURCES {
         let candidate = runtime_dir.join(sibling);
-        if candidate.exists() {
+        if candidate.exists() && !sources.iter().any(|existing| existing == &candidate) {
             sources.push(candidate);
+        }
+    }
+}
+
+fn canonical_stdlib_runtime_dir() -> Option<PathBuf> {
+    let dir = workspace_root().join("tools").join("stdlib");
+    if dir.join("runtime.c").is_file() {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn runtime_source_bundle(runtime_c: &str) -> Result<Vec<PathBuf>> {
+    let runtime_c_path = Path::new(runtime_c);
+    let mut sources = vec![runtime_c_path.to_path_buf()];
+    let mut local_splits = Vec::new();
+    if let Some(runtime_dir) = runtime_c_path.parent() {
+        push_existing_split_sources(&mut local_splits, runtime_dir);
+    }
+    sources.extend(local_splits.iter().cloned());
+
+    // Temp copies of runtime.c (async/native tests) live outside tools/stdlib and ship
+    // without split siblings; link the canonical split objects in that case only.
+    if local_splits.is_empty() {
+        if let Some(canonical_dir) = canonical_stdlib_runtime_dir() {
+            push_existing_split_sources(&mut sources, &canonical_dir);
         }
     }
     Ok(sources)
@@ -69,6 +127,7 @@ fn runtime_object_cache_path(
     runtime_c_path: &Path,
     runtime_bundle_fingerprint: u64,
     opt_level: u8,
+    target: &NativeBuildTarget,
 ) -> Result<PathBuf> {
     let runtime_c_canonical =
         fs::canonicalize(runtime_c_path).unwrap_or_else(|_| runtime_c_path.to_path_buf());
@@ -82,12 +141,10 @@ fn runtime_object_cache_path(
     runtime_bundle_fingerprint.hash(&mut hasher);
     runtime_source_fingerprint.hash(&mut hasher);
     opt_level.hash(&mut hasher);
-    if cfg!(windows) {
-        "x86_64-pc-windows-msvc".hash(&mut hasher);
-    }
+    target.triple.hash(&mut hasher);
     let key = hasher.finish();
 
-    let ext = if cfg!(windows) { "obj" } else { "o" };
+    let ext = target.object_extension();
     let cache_dir = std::env::temp_dir()
         .join("sengoo")
         .join("runtime-obj-cache");
@@ -100,6 +157,7 @@ fn compile_runtime_source_to_object(
     runtime_source_path: &Path,
     object_path: &Path,
     opt_level: u8,
+    target: &NativeBuildTarget,
 ) -> Result<()> {
     let mut command = Command::new(clang_exe);
     command
@@ -116,15 +174,7 @@ fn compile_runtime_source_to_object(
         }
     }
 
-    #[cfg(windows)]
-    {
-        command
-            .arg("--target=x86_64-pc-windows-msvc")
-            .arg("-fms-runtime-lib=dll");
-        for include in windows_compile_include_paths()? {
-            command.arg("-isystem").arg(include);
-        }
-    }
+    apply_clang_target_args(&mut command, target)?;
 
     let status = command
         .arg("-c")
@@ -148,16 +198,29 @@ pub(crate) fn ensure_runtime_objects(
     clang_exe: &str,
     runtime_c: &str,
     opt_level: u8,
+    target: Option<&NativeBuildTarget>,
 ) -> Result<Vec<PathBuf>> {
+    let target = effective_target(target);
     let runtime_c_path = Path::new(runtime_c);
     let sources = runtime_source_bundle(runtime_c)?;
     let bundle_fingerprint = runtime_bundle_fingerprint(runtime_c)?;
     let mut object_paths = Vec::with_capacity(sources.len());
     for source_path in sources {
-        let object_path =
-            runtime_object_cache_path(&source_path, runtime_c_path, bundle_fingerprint, opt_level)?;
+        let object_path = runtime_object_cache_path(
+            &source_path,
+            runtime_c_path,
+            bundle_fingerprint,
+            opt_level,
+            &target,
+        )?;
         if !object_path.exists() {
-            compile_runtime_source_to_object(clang_exe, &source_path, &object_path, opt_level)?;
+            compile_runtime_source_to_object(
+                clang_exe,
+                &source_path,
+                &object_path,
+                opt_level,
+                &target,
+            )?;
         }
         object_paths.push(object_path);
     }
@@ -271,7 +334,8 @@ pub(crate) fn ensure_async_runtime_staticlib(opt_level: u8) -> Result<PathBuf> {
         .arg("sengoo-runtime")
         .arg("--lib")
         .arg("--features")
-        .arg("native-bridge");
+        .arg("native-bridge")
+        .env("RUSTFLAGS", "-C link-dead-code");
     if profile == "release" {
         command.arg("--release");
     }
@@ -299,11 +363,51 @@ pub(crate) fn append_native_runtime_inputs(
     object_paths: &mut Vec<PathBuf>,
     runtime_c: Option<&str>,
     opt_level: u8,
+    target: Option<&NativeBuildTarget>,
 ) -> Result<()> {
     if let Some(runtime_c) = runtime_c {
-        object_paths.extend(ensure_runtime_objects(clang_exe, runtime_c, opt_level)?);
+        object_paths.extend(ensure_runtime_objects(
+            clang_exe, runtime_c, opt_level, target,
+        )?);
     }
     object_paths.push(ensure_async_runtime_staticlib(opt_level)?);
+    Ok(())
+}
+
+fn link_cross_target(
+    clang_exe: &str,
+    object_paths: &[PathBuf],
+    executable_path: &Path,
+    target: &NativeBuildTarget,
+    native_link_libraries: &[String],
+) -> Result<()> {
+    let search_paths = native_library_search_paths_from_env();
+    let mut command = Command::new(clang_exe);
+    command.arg("-Wno-override-module");
+    apply_clang_target_args(&mut command, target)?;
+    if target.is_linux_gnu() {
+        command.arg("-fuse-ld=lld");
+    }
+    for object in object_paths {
+        command.arg(object);
+    }
+    append_native_library_link_args(&mut command, native_link_libraries, target, &search_paths);
+    command.arg("-o").arg(executable_path);
+    let status = command
+        .status()
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to invoke clang cross linker: {}", e))?;
+    if !status.success() {
+        if native_link_libraries.is_empty() {
+            return Err(miette::miette!(
+                "cross-compile link failed for target {}; verify SDK/sysroot env vars documented in docs/cross-compilation.md",
+                target.triple
+            ));
+        }
+        return Err(miette::miette!(format_native_link_failure_message(
+            native_link_libraries
+        )));
+    }
     Ok(())
 }
 
@@ -411,10 +515,13 @@ fn windows_compile_include_paths() -> Result<Vec<PathBuf>> {
 fn run_windows_link_command(
     object_paths: &[PathBuf],
     executable_path: &Path,
+    native_link_libraries: &[String],
 ) -> Result<std::process::ExitStatus> {
     let link_exe = find_msvc_link_exe().ok_or_else(|| {
         miette::miette!("failed to locate MSVC link.exe for native async linking")
     })?;
+    let target = NativeBuildTarget::host();
+    let search_paths = native_library_search_paths_from_env();
     let mut link_cmd = Command::new(link_exe);
     link_cmd.arg("/NOLOGO");
     let links_async_runtime = object_paths
@@ -428,6 +535,7 @@ fn run_windows_link_command(
     for lib_path in windows_link_lib_paths() {
         link_cmd.arg(format!("/LIBPATH:{}", lib_path.display()));
     }
+    append_native_library_link_args(&mut link_cmd, native_link_libraries, &target, &search_paths);
     for object in object_paths {
         link_cmd.arg(object);
     }
@@ -453,21 +561,184 @@ fn run_windows_link_command(
         .map_err(|e| miette::miette!("failed to invoke MSVC linker: {}", e))
 }
 
+fn find_package_root(path: &Path) -> Option<PathBuf> {
+    let mut dir = if path.is_file() {
+        path.parent()?.to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    loop {
+        if dir.join("Sengoo.toml").is_file() {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+}
+
+pub(crate) fn collect_package_native_c_sources(
+    input_path: &Path,
+    root_source: &str,
+) -> Vec<PathBuf> {
+    use std::collections::BTreeSet;
+
+    let module_sources = collect_module_sources_with_edges(input_path, root_source);
+    let mut package_roots = BTreeSet::new();
+    for module_key in module_sources.keys() {
+        if let Some(root) = find_package_root(Path::new(module_key)) {
+            package_roots.insert(fs::canonicalize(&root).unwrap_or(root));
+        }
+    }
+    if let Some(root) = find_package_root(input_path) {
+        package_roots.insert(fs::canonicalize(&root).unwrap_or(root));
+    }
+
+    let mut sources = Vec::new();
+    for root in package_roots {
+        let native_dir = root.join("native");
+        if !native_dir.is_dir() {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&native_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("c") {
+                sources.push(fs::canonicalize(&path).unwrap_or(path));
+            }
+        }
+    }
+    sources.sort();
+    sources.dedup();
+    sources
+}
+
+fn native_c_compile_include_args() -> Vec<String> {
+    let mut args = Vec::new();
+    if let Ok(dir) = std::env::var(SDL2_INCLUDE_DIR_ENV) {
+        if !dir.trim().is_empty() {
+            args.push("-I".to_string());
+            args.push(dir);
+        }
+    }
+    args
+}
+
+fn is_sgplatform_shim_source(source_path: &Path) -> bool {
+    source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "sgplatform_shim.c")
+}
+
+fn native_c_compile_defines(source_path: &Path) -> Vec<&'static str> {
+    if !sgplatform_graphics_skip_enabled() {
+        return Vec::new();
+    }
+    if is_sgplatform_shim_source(source_path) {
+        vec!["-DSGPLATFORM_STUB=1"]
+    } else {
+        Vec::new()
+    }
+}
+
+fn package_native_object_fingerprint(source_path: &Path) -> Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    file_fingerprint(source_path)?.hash(&mut hasher);
+    if is_sgplatform_shim_source(source_path) {
+        sgplatform_graphics_skip_enabled().hash(&mut hasher);
+    }
+    Ok(hasher.finish())
+}
+
+pub(crate) fn compile_c_to_object(
+    clang_exe: &str,
+    source_path: &Path,
+    object_path: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<()> {
+    let target = effective_target(target);
+    let mut command = Command::new(clang_exe);
+    command
+        .arg("-Wno-override-module")
+        .arg(format!("-O{}", opt_level));
+    apply_clang_target_args(&mut command, &target)?;
+    for arg in native_c_compile_include_args() {
+        command.arg(arg);
+    }
+    for arg in native_c_compile_defines(source_path) {
+        command.arg(arg);
+    }
+    let status = command
+        .arg("-c")
+        .arg(source_path)
+        .arg("-o")
+        .arg(object_path)
+        .status()
+        .into_diagnostic()
+        .map_err(|e| miette::miette!("failed to invoke clang for C compilation: {}", e))?;
+    if !status.success() {
+        let mut message = format!(
+            "failed to compile native package source {}",
+            source_path.display()
+        );
+        if source_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.contains("sgplatform") || name.contains("sdl"))
+        {
+            message.push_str(&format!(
+                "\nHint: install SDL2 development headers and set {SDL2_INCLUDE_DIR_ENV} (and {SDL2_LIB_DIR_ENV} for linking). See docs/sgplatform.md."
+            ));
+        }
+        return Err(miette::miette!(message));
+    }
+    Ok(())
+}
+
+pub(crate) fn append_package_native_inputs(
+    clang_exe: &str,
+    object_paths: &mut Vec<PathBuf>,
+    input_path: &Path,
+    root_source: &str,
+    build_dir: &Path,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<()> {
+    let target = effective_target(target);
+    for source in collect_package_native_c_sources(input_path, root_source) {
+        let stem = source
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("native");
+        let hash = package_native_object_fingerprint(&source)?;
+        let object_path =
+            build_dir.join(format!("{}-{:x}.{}", stem, hash, target.object_extension()));
+        if !object_path.is_file() {
+            if let Some(parent) = object_path.parent() {
+                fs::create_dir_all(parent).into_diagnostic()?;
+            }
+            compile_c_to_object(clang_exe, &source, &object_path, opt_level, Some(&target))?;
+        }
+        object_paths.push(object_path);
+    }
+    Ok(())
+}
+
 pub(crate) fn compile_ir_to_object(
     clang_exe: &str,
     llvm_ir_path: &Path,
     object_path: &Path,
     opt_level: u8,
+    target: Option<&NativeBuildTarget>,
 ) -> Result<()> {
+    let target = effective_target(target);
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
         .arg(format!("-O{}", opt_level));
-
-    #[cfg(windows)]
-    {
-        command.arg("--target=x86_64-pc-windows-msvc");
-    }
+    apply_clang_target_args(&mut command, &target)?;
 
     let status = command
         .arg("-c")
@@ -505,7 +776,10 @@ fn run_link_command(
     object_paths: &[PathBuf],
     executable_path: &Path,
     use_lld: bool,
+    native_link_libraries: &[String],
+    target: &NativeBuildTarget,
 ) -> Result<std::process::ExitStatus> {
+    let search_paths = native_library_search_paths_from_env();
     let mut clang_cmd = Command::new(clang_exe);
     clang_cmd.arg("-Wno-override-module");
     if use_lld {
@@ -514,6 +788,7 @@ fn run_link_command(
     for object in object_paths {
         clang_cmd.arg(object);
     }
+    append_native_library_link_args(&mut clang_cmd, native_link_libraries, target, &search_paths);
     clang_cmd.arg("-o").arg(executable_path);
     clang_cmd
         .status()
@@ -526,11 +801,20 @@ pub(crate) fn link_native_binary_from_objects(
     clang_exe: &str,
     object_paths: &[PathBuf],
     executable_path: &Path,
+    target: Option<&NativeBuildTarget>,
+    native_link_libraries: Option<&[String]>,
 ) -> Result<()> {
+    let target = effective_target(target);
+    let libraries = native_link_libraries.unwrap_or(&[]);
+    if target.is_cross() {
+        return link_cross_target(clang_exe, object_paths, executable_path, &target, libraries);
+    }
     let _ = clang_exe;
-    let status = run_windows_link_command(object_paths, executable_path)?;
+    let status = run_windows_link_command(object_paths, executable_path, libraries)?;
     if !status.success() {
-        return Err(miette::miette!("compile failed"));
+        return Err(miette::miette!(format_native_link_failure_message(
+            libraries
+        )));
     }
     Ok(())
 }
@@ -540,7 +824,14 @@ pub(crate) fn link_native_binary_from_objects(
     clang_exe: &str,
     object_paths: &[PathBuf],
     executable_path: &Path,
+    target: Option<&NativeBuildTarget>,
+    native_link_libraries: Option<&[String]>,
 ) -> Result<()> {
+    let target = effective_target(target);
+    let libraries = native_link_libraries.unwrap_or(&[]);
+    if target.is_cross() {
+        return link_cross_target(clang_exe, object_paths, executable_path, &target, libraries);
+    }
     let mode = linker_mode_from_env();
     let lld_state = LLD_AVAILABILITY.load(Ordering::Relaxed);
     let try_lld_first = match mode {
@@ -550,7 +841,14 @@ pub(crate) fn link_native_binary_from_objects(
     };
 
     if try_lld_first {
-        let lld_status = run_link_command(clang_exe, object_paths, executable_path, true)?;
+        let lld_status = run_link_command(
+            clang_exe,
+            object_paths,
+            executable_path,
+            true,
+            libraries,
+            &target,
+        )?;
         if lld_status.success() {
             if matches!(mode, LinkerMode::Auto) {
                 LLD_AVAILABILITY.store(LINKER_AVAILABLE, Ordering::Relaxed);
@@ -558,15 +856,26 @@ pub(crate) fn link_native_binary_from_objects(
             return Ok(());
         }
         if matches!(mode, LinkerMode::Lld) {
-            return Err(miette::miette!("compile failed (lld linker mode)"));
+            return Err(miette::miette!(format_native_link_failure_message(
+                libraries
+            )));
         }
         LLD_AVAILABILITY.store(LINKER_UNAVAILABLE, Ordering::Relaxed);
         println!("link fallback: lld unavailable, retrying with system linker");
     }
 
-    let status = run_link_command(clang_exe, object_paths, executable_path, false)?;
+    let status = run_link_command(
+        clang_exe,
+        object_paths,
+        executable_path,
+        false,
+        libraries,
+        &target,
+    )?;
     if !status.success() {
-        return Err(miette::miette!("compile failed"));
+        return Err(miette::miette!(format_native_link_failure_message(
+            libraries
+        )));
     }
     Ok(())
 }
@@ -577,16 +886,37 @@ pub(crate) fn compile_native_binary(
     executable_path: &Path,
     runtime_c: Option<&str>,
     opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    native_link_libraries: Option<&[String]>,
 ) -> Result<()> {
-    let object_path = executable_path.with_extension(object_file_extension());
-    compile_ir_to_object(clang_exe, llvm_ir_path, &object_path, opt_level)?;
+    let target = effective_target(target);
+    let object_path = executable_path.with_extension(target.object_extension());
+    compile_ir_to_object(
+        clang_exe,
+        llvm_ir_path,
+        &object_path,
+        opt_level,
+        Some(&target),
+    )?;
     let mut object_paths = vec![object_path];
-    append_native_runtime_inputs(clang_exe, &mut object_paths, runtime_c, opt_level)?;
-    link_native_binary_from_objects(clang_exe, &object_paths, executable_path)?;
+    append_native_runtime_inputs(
+        clang_exe,
+        &mut object_paths,
+        runtime_c,
+        opt_level,
+        Some(&target),
+    )?;
+    link_native_binary_from_objects(
+        clang_exe,
+        &object_paths,
+        executable_path,
+        Some(&target),
+        native_link_libraries,
+    )?;
     Ok(())
 }
 
-pub(crate) fn run_native_binary_with_args(executable_path: &Path, args: &[String]) -> Result<()> {
+pub(crate) fn run_native_binary_with_args(executable_path: &Path, args: &[String]) -> Result<i32> {
     let run_output = Command::new(executable_path)
         .args(args)
         .output()
@@ -603,10 +933,15 @@ pub(crate) fn run_native_binary_with_args(executable_path: &Path, args: &[String
         eprint!("{}", stderr);
     }
 
-    if let Some(code) = run_output.status.code() {
-        println!("exit code: {}", code);
-    }
+    let exit_code = run_output.status.code().unwrap_or(1);
+    println!("exit code: {}", exit_code);
+    Ok(exit_code)
+}
 
+pub(crate) fn propagate_run_exit_code(exit_code: i32) -> Result<()> {
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
     Ok(())
 }
 
@@ -683,6 +1018,7 @@ pub(crate) fn recover_native_output_from_cached_artifacts(
     output_path: &Path,
     runtime_c: Option<&str>,
     opt_level: u8,
+    native_link_libraries: Option<&[String]>,
 ) -> Result<CachedNativeRecoveryPlan> {
     let recovery_plan =
         derive_cached_native_recovery_plan(llvm_ir_path.exists(), object_path.exists())
@@ -692,12 +1028,18 @@ pub(crate) fn recover_native_output_from_cached_artifacts(
         recovery_plan,
         CachedNativeRecoveryPlan::RebuildObjectFromCachedIr
     ) {
-        compile_ir_to_object(clang_exe, llvm_ir_path, object_path, opt_level)?;
+        compile_ir_to_object(clang_exe, llvm_ir_path, object_path, opt_level, None)?;
     }
 
     let mut object_paths = vec![object_path.to_path_buf()];
-    append_native_runtime_inputs(clang_exe, &mut object_paths, runtime_c, opt_level)?;
-    link_native_binary_from_objects(clang_exe, &object_paths, output_path)?;
+    append_native_runtime_inputs(clang_exe, &mut object_paths, runtime_c, opt_level, None)?;
+    link_native_binary_from_objects(
+        clang_exe,
+        &object_paths,
+        output_path,
+        None,
+        native_link_libraries,
+    )?;
 
     Ok(recovery_plan)
 }
@@ -776,18 +1118,60 @@ mod tests {
         fs::write(&runtime_c, "aaaa").unwrap();
         let modified = fs::metadata(&runtime_c).unwrap().modified().unwrap();
         let before_fingerprint = runtime_bundle_fingerprint(&runtime_c.to_string_lossy()).unwrap();
-        let before =
-            runtime_object_cache_path(&runtime_c, &runtime_c, before_fingerprint, 1).unwrap();
+        let before = runtime_object_cache_path(
+            &runtime_c,
+            &runtime_c,
+            before_fingerprint,
+            1,
+            &NativeBuildTarget::host(),
+        )
+        .unwrap();
 
         fs::write(&runtime_c, "bbbb").unwrap();
         let file = fs::OpenOptions::new().write(true).open(&runtime_c).unwrap();
         file.set_times(fs::FileTimes::new().set_modified(modified))
             .unwrap();
         let after_fingerprint = runtime_bundle_fingerprint(&runtime_c.to_string_lossy()).unwrap();
-        let after =
-            runtime_object_cache_path(&runtime_c, &runtime_c, after_fingerprint, 1).unwrap();
+        let after = runtime_object_cache_path(
+            &runtime_c,
+            &runtime_c,
+            after_fingerprint,
+            1,
+            &NativeBuildTarget::host(),
+        )
+        .unwrap();
 
         assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn windows_cross_target_uses_env_sdk_include_paths_on_non_windows_hosts() {
+        let root = temp_test_dir("windows-cross-sdk");
+        for leaf in ["ucrt", "um", "shared"] {
+            fs::create_dir_all(root.join(leaf)).unwrap();
+        }
+
+        std::env::set_var("SENGOO_WINDOWS_SDK_ROOT", &root);
+        let mut command = Command::new("clang");
+        let target =
+            NativeBuildTarget::resolve(Some(crate::cross_compile::REFERENCE_TARGET_WINDOWS_MSVC))
+                .unwrap();
+
+        apply_clang_target_args(&mut command, &target).unwrap();
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args.contains(&"--target=x86_64-pc-windows-msvc".to_string()));
+        assert!(args.contains(&"-fms-runtime-lib=dll".to_string()));
+        assert!(args.iter().any(|arg| arg.ends_with("/ucrt")));
+        assert!(args.iter().any(|arg| arg.ends_with("/um")));
+        assert!(args.iter().any(|arg| arg.ends_with("/shared")));
+
+        std::env::remove_var("SENGOO_WINDOWS_SDK_ROOT");
         let _ = fs::remove_dir_all(&root);
     }
 }

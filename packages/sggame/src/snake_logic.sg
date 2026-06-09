@@ -1,0 +1,30 @@
+import sgplatform;
+
+struct SnakeBody {
+    head_x: i64,
+    head_y: i64,
+    length: i64,
+}
+
+struct Food {
+    x: i64,
+    y: i64,
+}
+
+def snake_step(body: SnakeBody, dx: i64, dy: i64, cell: i64) -> SnakeBody {
+    SnakeBody { head_x: body.head_x + dx * cell, head_y: body.head_y + dy * cell, length: body.length };
+}
+
+def snake_hits_wall(body: SnakeBody, width: i64, height: i64, cell: i64) -> bool {
+    if body.head_x < 0 or body.head_y < 0 { true; } else if body.head_x + cell > width or body.head_y + cell > height { true; } else { false; };
+}
+
+def snake_eats_food(body: SnakeBody, food: Food, cell: i64) -> bool {
+    let bite = rect_new(body.head_x, body.head_y, cell, cell);
+    let meal = rect_new(food.x, food.y, cell, cell);
+    rect_overlaps(bite, meal);
+}
+
+def snake_grow(body: SnakeBody) -> SnakeBody {
+    SnakeBody { head_x: body.head_x, head_y: body.head_y, length: body.length + 1 };
+}

@@ -1,0 +1,7 @@
+[package]
+name = "release_helper"
+version = "0.1.0"
+edition = "2026"
+
+[lib]
+path = "src/lib.sg"

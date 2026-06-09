@@ -8,6 +8,7 @@ use tower_lsp::jsonrpc::Result as LspResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+mod dependency_sources;
 mod diagnostics;
 mod formatting;
 mod semantic;
@@ -957,6 +958,152 @@ def main() -> i64 { 0 }
             }
             other => panic!("expected scalar definition, got {other:?}"),
         }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn goto_definition_reaches_path_dependency_module() {
+        let root = std::env::temp_dir().join(format!(
+            "sglsp_goto_dep_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = root.join("app");
+        let dep = root.join("dep");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::create_dir_all(dep.join("src")).unwrap();
+        fs::write(dep.join("src/lib.sg"), "def dep_answer() -> i64 { 7 }\n").unwrap();
+        fs::write(
+            app.join("src/main.sg"),
+            "import dep;\ndef main() -> i64 {\n    dep_answer()\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("Sengoo.lock"),
+            r#"version = 1
+root = "app"
+
+[[package]]
+name = "dep"
+version = "0.1.0"
+source = "path+../dep"
+manifest = "../dep/Sengoo.toml"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = "path+."
+manifest = "Sengoo.toml"
+"#,
+        )
+        .unwrap();
+
+        let dep_lib = dep.join("src/lib.sg");
+        let dep_uri = Url::from_file_path(&dep_lib).unwrap();
+        let main_uri = Url::from_file_path(app.join("src/main.sg")).unwrap();
+        let documents = workspace_documents_for_roots_and_open_documents(
+            std::slice::from_ref(&app),
+            &HashMap::new(),
+        );
+
+        let definition = goto_definition_in_documents(
+            &main_uri,
+            Position {
+                line: 2,
+                character: 4,
+            },
+            &documents,
+        )
+        .expect("definition should resolve into path dependency sources");
+
+        match definition {
+            GotoDefinitionResponse::Scalar(location) => {
+                assert_eq!(location.uri, dep_uri);
+            }
+            other => panic!("expected scalar definition, got {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn completion_symbols_include_graphics_path_dependency_modules() {
+        let root = std::env::temp_dir().join(format!(
+            "sglsp_graphics_deps_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let app = root.join("app");
+        let sggame = root.join("sggame");
+        let sggui = root.join("sggui");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::create_dir_all(sggame.join("src")).unwrap();
+        fs::create_dir_all(sggui.join("src")).unwrap();
+        fs::write(
+            app.join("src/main.sg"),
+            "import sggame;\nimport sggui;\ndef main() -> i64 {\n    0\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            sggame.join("src/lib.sg"),
+            "def sggame_ready_symbol() -> i64 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            sggui.join("src/lib.sg"),
+            "def sggui_ready_symbol() -> i64 { 2 }\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("Sengoo.lock"),
+            r#"version = 1
+root = "app"
+
+[[package]]
+name = "sggame"
+version = "0.1.0"
+source = "path+../sggame"
+manifest = "../sggame/Sengoo.toml"
+
+[[package]]
+name = "sggui"
+version = "0.1.0"
+source = "path+../sggui"
+manifest = "../sggui/Sengoo.toml"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = "path+."
+manifest = "Sengoo.toml"
+"#,
+        )
+        .unwrap();
+
+        let main_uri = Url::from_file_path(app.join("src/main.sg")).unwrap();
+        let documents = workspace_documents_for_roots_and_open_documents(
+            std::slice::from_ref(&app),
+            &HashMap::new(),
+        );
+        let symbols = completion_symbols_for_documents(&main_uri, &documents);
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(
+            names.contains(&"sggame_ready_symbol"),
+            "expected sggame completion symbol, got {names:?}"
+        );
+        assert!(
+            names.contains(&"sggui_ready_symbol"),
+            "expected sggui completion symbol, got {names:?}"
+        );
 
         let _ = fs::remove_dir_all(root);
     }

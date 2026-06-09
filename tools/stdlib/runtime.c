@@ -13,8 +13,11 @@
 
 #include "runtime_shared.h"
 
+extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
+
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #include <windows.h>
 #else
 #include <dirent.h>
@@ -132,6 +135,10 @@ static const char* sengoo_status_name(long long code) {
         case SENGOO_STATUS_INTERRUPTED: return "interrupted";
         case SENGOO_STATUS_OVERFLOW: return "overflow";
         case SENGOO_STATUS_OUT_OF_MEMORY: return "out_of_memory";
+        case SENGOO_STATUS_TLS_CERT_INVALID: return "tls_cert_invalid";
+        case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return "tls_hostname_mismatch";
+        case SENGOO_STATUS_TLS_HANDSHAKE: return "tls_handshake";
+        case SENGOO_STATUS_TLS_UNAVAILABLE: return "tls_unavailable";
         default: return "unknown";
     }
 }
@@ -153,6 +160,10 @@ static const char* sengoo_status_message(long long code) {
         case SENGOO_STATUS_INTERRUPTED: return "operation interrupted";
         case SENGOO_STATUS_OVERFLOW: return "numeric overflow";
         case SENGOO_STATUS_OUT_OF_MEMORY: return "out of memory";
+        case SENGOO_STATUS_TLS_CERT_INVALID: return "TLS certificate invalid or untrusted";
+        case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return "TLS certificate hostname mismatch";
+        case SENGOO_STATUS_TLS_HANDSHAKE: return "TLS handshake failed";
+        case SENGOO_STATUS_TLS_UNAVAILABLE: return "TLS backend unavailable";
         default: return "unknown failure";
     }
 }
@@ -179,6 +190,10 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case -SENGOO_STATUS_INTERRUPTED: return SENGOO_STATUS_INTERRUPTED;
         case -SENGOO_STATUS_OVERFLOW: return SENGOO_STATUS_OVERFLOW;
         case -SENGOO_STATUS_OUT_OF_MEMORY: return SENGOO_STATUS_OUT_OF_MEMORY;
+        case -SENGOO_STATUS_TLS_CERT_INVALID: return SENGOO_STATUS_TLS_CERT_INVALID;
+        case -SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return SENGOO_STATUS_TLS_HOSTNAME_MISMATCH;
+        case -SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
+        case -SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
         case SENGOO_STATUS_UNKNOWN: return SENGOO_STATUS_UNKNOWN;
         case SENGOO_STATUS_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
         case SENGOO_STATUS_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
@@ -193,6 +208,10 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case SENGOO_STATUS_INTERRUPTED: return SENGOO_STATUS_INTERRUPTED;
         case SENGOO_STATUS_OVERFLOW: return SENGOO_STATUS_OVERFLOW;
         case SENGOO_STATUS_OUT_OF_MEMORY: return SENGOO_STATUS_OUT_OF_MEMORY;
+        case SENGOO_STATUS_TLS_CERT_INVALID: return SENGOO_STATUS_TLS_CERT_INVALID;
+        case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return SENGOO_STATUS_TLS_HOSTNAME_MISMATCH;
+        case SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
+        case SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
         default: return SENGOO_STATUS_UNKNOWN;
     }
 }
@@ -214,6 +233,10 @@ long long sengoo_status_from_net_error(long long code) {
         case 12: return SENGOO_STATUS_INVALID_HANDLE;
         case 13: return SENGOO_STATUS_UNKNOWN;
         case 14: return SENGOO_STATUS_IO;
+        case 15: return SENGOO_STATUS_TLS_CERT_INVALID;
+        case 16: return SENGOO_STATUS_TLS_HOSTNAME_MISMATCH;
+        case 17: return SENGOO_STATUS_TLS_HANDSHAKE;
+        case 18: return SENGOO_STATUS_TLS_UNAVAILABLE;
         default: return SENGOO_STATUS_UNKNOWN;
     }
 }
@@ -1841,6 +1864,98 @@ long long sengoo_path_normalize(long long path_ptr, long long out_buffer, long l
     return copied;
 }
 
+static long long sengoo_path_result_to_string(long long copied, char* temp) {
+    if (copied < 0) {
+        return copied;
+    }
+    return sengoo_string_from_bytes_copy((long long)(intptr_t)temp, copied);
+}
+
+long long sengoo_path_join_string(long long left_ptr, long long right_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_join(
+        left_ptr,
+        right_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
+long long sengoo_path_parent_string(long long path_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_parent(
+        path_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
+long long sengoo_path_file_name_string(long long path_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_file_name(
+        path_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
+long long sengoo_path_stem_string(long long path_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_stem(
+        path_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
+long long sengoo_path_extension_string(long long path_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_extension(
+        path_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
+long long sengoo_path_normalize_string(long long path_ptr) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_path_normalize(
+        path_ptr,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
 static int sengoo_dir_exists_cstr(const char* path) {
     if (!path || path[0] == '\0') {
         return 0;
@@ -2121,6 +2236,21 @@ long long sengoo_dir_entry_name(long long path_ptr, long long index, long long o
     return (long long)len;
 }
 
+long long sengoo_dir_entry_name_string(long long path_ptr, long long index) {
+    char* temp = (char*)malloc(SENGOO_RUNTIME_MAX_PATH_BYTES);
+    if (!temp) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    long long copied = sengoo_dir_entry_name(
+        path_ptr,
+        index,
+        (long long)(intptr_t)temp,
+        (long long)SENGOO_RUNTIME_MAX_PATH_BYTES);
+    long long handle = sengoo_path_result_to_string(copied, temp);
+    free(temp);
+    return handle;
+}
+
 typedef struct {
     char** paths;
     size_t len;
@@ -2325,6 +2455,202 @@ long long sengoo_dir_walk_close(long long handle) {
     return 0;
 }
 
+static int sengoo_path_is_symlink_nofollow(const char* path) {
+    if (!path || path[0] == '\0') {
+        return 0;
+    }
+#ifdef _WIN32
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ? 1 : 0;
+#else
+    struct stat info;
+    return lstat(path, &info) == 0 && S_ISLNK(info.st_mode) ? 1 : 0;
+#endif
+}
+
+typedef struct {
+    size_t entries;
+    long long max_entries;
+    long long max_depth;
+    long long error;
+} SengooDirTreeLimits;
+
+static long long sengoo_dir_tree_resolve_limit(long long value, long long fallback) {
+    return value > 0 ? value : fallback;
+}
+
+static int sengoo_dir_tree_consume_entry(SengooDirTreeLimits* limits) {
+    if (!limits) {
+        return 0;
+    }
+    limits->entries += 1;
+    if ((long long)limits->entries > limits->max_entries) {
+        limits->error = SENGOO_STATUS_OVERFLOW;
+        return 0;
+    }
+    return 1;
+}
+
+static int sengoo_dir_remove_tree_recursive(const char* path, long long depth, SengooDirTreeLimits* limits) {
+    if (!path || !limits || limits->error != SENGOO_STATUS_OK) {
+        return 0;
+    }
+    if (depth > limits->max_depth) {
+        limits->error = SENGOO_STATUS_OVERFLOW;
+        return 0;
+    }
+    if (!sengoo_dir_tree_consume_entry(limits)) {
+        return 0;
+    }
+    if (sengoo_path_is_symlink_nofollow(path)) {
+        return remove(path) == 0 ? 1 : 0;
+    }
+    if (!sengoo_path_is_dir_nofollow(path)) {
+        return remove(path) == 0 ? 1 : 0;
+    }
+
+    SengooDirEntryList entries;
+    if (sengoo_dir_collect_entries(path, &entries) != 0) {
+        limits->error = SENGOO_STATUS_IO;
+        return 0;
+    }
+
+    char* child_full = NULL;
+    for (size_t i = 0; i < entries.len; ++i) {
+        child_full = sengoo_dir_join_full_path(path, entries.names[i]);
+        if (!child_full) {
+            limits->error = SENGOO_STATUS_OUT_OF_MEMORY;
+            break;
+        }
+        if (!sengoo_dir_remove_tree_recursive(child_full, depth + 1, limits)) {
+            free(child_full);
+            break;
+        }
+        free(child_full);
+        child_full = NULL;
+        if (limits->error != SENGOO_STATUS_OK) {
+            break;
+        }
+    }
+    sengoo_dir_entry_list_free(&entries);
+    if (limits->error != SENGOO_STATUS_OK) {
+        return 0;
+    }
+    return sengoo_dir_remove((long long)(intptr_t)path) == 0 ? 1 : 0;
+}
+
+long long sengoo_dir_remove_tree(long long path_ptr, long long max_depth, long long max_entries) {
+    const char* path = (const char*)(intptr_t)path_ptr;
+    if (!path || path[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (!sengoo_dir_exists_cstr(path)) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    SengooDirTreeLimits limits;
+    limits.entries = 0;
+    limits.max_depth = sengoo_dir_tree_resolve_limit(max_depth, SENGOO_RUNTIME_MAX_DIR_DEPTH);
+    limits.max_entries = sengoo_dir_tree_resolve_limit(max_entries, SENGOO_RUNTIME_MAX_DIR_ENTRIES);
+    limits.error = SENGOO_STATUS_OK;
+    if (!sengoo_dir_remove_tree_recursive(path, 0, &limits)) {
+        return limits.error == SENGOO_STATUS_OK ? -SENGOO_STATUS_IO : -(long long)limits.error;
+    }
+    return (long long)limits.entries;
+}
+
+static int sengoo_dir_copy_tree_recursive(
+    const char* source,
+    const char* destination,
+    long long depth,
+    SengooDirTreeLimits* limits) {
+    if (!source || !destination || !limits || limits->error != SENGOO_STATUS_OK) {
+        return 0;
+    }
+    if (depth > limits->max_depth) {
+        limits->error = SENGOO_STATUS_OVERFLOW;
+        return 0;
+    }
+    if (!sengoo_dir_tree_consume_entry(limits)) {
+        return 0;
+    }
+    if (sengoo_path_is_symlink_nofollow(source)) {
+        return 1;
+    }
+    if (sengoo_path_is_dir_nofollow(source)) {
+        if (sengoo_dir_create_all((long long)(intptr_t)destination) != 0) {
+            limits->error = SENGOO_STATUS_IO;
+            return 0;
+        }
+        SengooDirEntryList entries;
+        if (sengoo_dir_collect_entries(source, &entries) != 0) {
+            limits->error = SENGOO_STATUS_IO;
+            return 0;
+        }
+        char* child_src = NULL;
+        char* child_dst = NULL;
+        for (size_t i = 0; i < entries.len; ++i) {
+            child_src = sengoo_dir_join_full_path(source, entries.names[i]);
+            child_dst = sengoo_dir_join_full_path(destination, entries.names[i]);
+            if (!child_src || !child_dst) {
+                limits->error = SENGOO_STATUS_OUT_OF_MEMORY;
+                free(child_src);
+                free(child_dst);
+                break;
+            }
+            if (!sengoo_dir_copy_tree_recursive(child_src, child_dst, depth + 1, limits)) {
+                free(child_src);
+                free(child_dst);
+                break;
+            }
+            free(child_src);
+            free(child_dst);
+            child_src = NULL;
+            child_dst = NULL;
+            if (limits->error != SENGOO_STATUS_OK) {
+                break;
+            }
+        }
+        sengoo_dir_entry_list_free(&entries);
+        return limits->error == SENGOO_STATUS_OK ? 1 : 0;
+    }
+    if (sengoo_path_is_regular_file_cstr(source)) {
+        long long copied = sengoo_file_copy(
+            (long long)(intptr_t)source,
+            (long long)(intptr_t)destination,
+            1);
+        if (copied < 0) {
+            limits->error = (int)(-copied);
+            return 0;
+        }
+        return 1;
+    }
+    return 1;
+}
+
+long long sengoo_dir_copy_tree(
+    long long source_ptr,
+    long long destination_ptr,
+    long long max_depth,
+    long long max_entries) {
+    const char* source = (const char*)(intptr_t)source_ptr;
+    const char* destination = (const char*)(intptr_t)destination_ptr;
+    if (!source || source[0] == '\0' || !destination || destination[0] == '\0') {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (!sengoo_path_entry_exists_cstr(source)) {
+        return -SENGOO_STATUS_NOT_FOUND;
+    }
+    SengooDirTreeLimits limits;
+    limits.entries = 0;
+    limits.max_depth = sengoo_dir_tree_resolve_limit(max_depth, SENGOO_RUNTIME_MAX_DIR_DEPTH);
+    limits.max_entries = sengoo_dir_tree_resolve_limit(max_entries, SENGOO_RUNTIME_MAX_DIR_ENTRIES);
+    limits.error = SENGOO_STATUS_OK;
+    if (!sengoo_dir_copy_tree_recursive(source, destination, 0, &limits)) {
+        return limits.error == SENGOO_STATUS_OK ? -SENGOO_STATUS_IO : -(long long)limits.error;
+    }
+    return (long long)limits.entries;
+}
+
 long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0 || (out_capacity > 0 && !out)) {
@@ -2396,6 +2722,57 @@ long long sengoo_io_stdout_flush(void) {
 
 long long sengoo_io_stderr_flush(void) {
     return fflush(stderr) == 0 ? 0 : -SENGOO_STATUS_IO;
+}
+
+long long sengoo_io_fd_read(long long fd, long long out_buffer, long long out_capacity) {
+    char* out = (char*)(intptr_t)out_buffer;
+    if (fd < 0 || out_capacity < 0 || (out_capacity > 0 && !out)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (out_capacity == 0) {
+        return 0;
+    }
+#ifdef _WIN32
+    HANDLE handle = (HANDLE)_get_osfhandle((int)fd);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    DWORD read = 0;
+    if (!ReadFile(handle, out, (DWORD)out_capacity, &read, NULL)) {
+        return -SENGOO_STATUS_IO;
+    }
+    return (long long)read;
+#else
+    ssize_t nread = read((int)fd, out, (size_t)out_capacity);
+    if (nread < 0) {
+        return -SENGOO_STATUS_IO;
+    }
+    return (long long)nread;
+#endif
+}
+
+long long sengoo_io_fd_write(long long fd, long long data_ptr, long long len) {
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (fd < 0 || len < 0 || (len > 0 && !data)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+#ifdef _WIN32
+    HANDLE handle = (HANDLE)_get_osfhandle((int)fd);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    DWORD wrote = 0;
+    if (len > 0 && !WriteFile(handle, data, (DWORD)len, &wrote, NULL)) {
+        return -SENGOO_STATUS_IO;
+    }
+    return (long long)wrote;
+#else
+    ssize_t nwrote = write((int)fd, data, (size_t)len);
+    if (nwrote < 0) {
+        return -SENGOO_STATUS_IO;
+    }
+    return (long long)nwrote;
+#endif
 }
 
 long long sengoo_process_id(void) {
@@ -2758,6 +3135,350 @@ long long sengoo_arg_copy(long long index, long long out_buffer, long long out_c
         memcpy(out, arg, len);
     }
     return (long long)len;
+}
+
+#define SENGOO_ASSERT_ENVELOPE_MAX 65536
+
+typedef enum {
+    SENGOO_ASSERT_KIND_BOOL = 0,
+    SENGOO_ASSERT_KIND_TRUE = 1,
+    SENGOO_ASSERT_KIND_FALSE = 2,
+    SENGOO_ASSERT_KIND_EQ_I64 = 3,
+    SENGOO_ASSERT_KIND_NE_I64 = 4,
+    SENGOO_ASSERT_KIND_EQ_BOOL = 5,
+    SENGOO_ASSERT_KIND_NE_BOOL = 6,
+    SENGOO_ASSERT_KIND_EQ_STR = 7,
+    SENGOO_ASSERT_KIND_NE_STR = 8,
+    SENGOO_ASSERT_KIND_EQ_F64 = 9,
+    SENGOO_ASSERT_KIND_NE_F64 = 10,
+} SengooAssertKind;
+
+static void sengoo_assert_append_json_string(char* out, size_t out_cap, size_t* used, const char* value) {
+    size_t pos = *used;
+    if (pos >= out_cap) {
+        return;
+    }
+    out[pos++] = '"';
+    for (const unsigned char* cursor = (const unsigned char*)(value ? value : ""); *cursor && pos + 2 < out_cap; ++cursor) {
+        unsigned char ch = *cursor;
+        if (ch == '"' || ch == '\\') {
+            if (pos + 2 >= out_cap) {
+                break;
+            }
+            out[pos++] = '\\';
+            out[pos++] = (char)ch;
+            continue;
+        }
+        if (ch < 0x20) {
+            if (pos + 6 >= out_cap) {
+                break;
+            }
+            snprintf(out + pos, out_cap - pos, "\\u%04x", ch);
+            pos += 6;
+            continue;
+        }
+        out[pos++] = (char)ch;
+    }
+    if (pos < out_cap) {
+        out[pos++] = '"';
+        out[pos] = '\0';
+        *used = pos;
+    }
+}
+
+static void sengoo_assert_append_json_field_string(
+    char* out,
+    size_t out_cap,
+    size_t* used,
+    const char* key,
+    const char* value
+) {
+    size_t pos = *used;
+    if (pos >= out_cap) {
+        return;
+    }
+    if (pos > 1) {
+        out[pos++] = ',';
+    }
+    snprintf(out + pos, out_cap - pos, "\"%s\":", key);
+    pos = strlen(out);
+    sengoo_assert_append_json_string(out, out_cap, &pos, value);
+    *used = pos;
+}
+
+static void sengoo_assert_append_json_field_u64(
+    char* out,
+    size_t out_cap,
+    size_t* used,
+    const char* key,
+    unsigned long long value
+) {
+    size_t pos = *used;
+    if (pos >= out_cap) {
+        return;
+    }
+    if (pos > 1) {
+        out[pos++] = ',';
+    }
+    snprintf(out + pos, out_cap - pos, "\"%s\":%llu", key, value);
+    *used = strlen(out);
+}
+
+static void sengoo_assert_format_i64(long long value, char* out, size_t out_cap) {
+    if (!out || out_cap == 0) {
+        return;
+    }
+    snprintf(out, out_cap, "%lld", value);
+}
+
+static void sengoo_assert_format_bool(long long value, char* out, size_t out_cap) {
+    if (!out || out_cap == 0) {
+        return;
+    }
+    snprintf(out, out_cap, "%s", value ? "true" : "false");
+}
+
+static void sengoo_assert_format_f64(double value, char* out, size_t out_cap) {
+    if (!out || out_cap == 0) {
+        return;
+    }
+    snprintf(out, out_cap, "%g", value);
+}
+
+static const char* sengoo_assert_helper_name(SengooAssertKind kind) {
+    switch (kind) {
+        case SENGOO_ASSERT_KIND_BOOL:
+            return "assert";
+        case SENGOO_ASSERT_KIND_TRUE:
+            return "assert_true";
+        case SENGOO_ASSERT_KIND_FALSE:
+            return "assert_false";
+        case SENGOO_ASSERT_KIND_EQ_I64:
+            return "assert_eq_i64";
+        case SENGOO_ASSERT_KIND_NE_I64:
+            return "assert_ne_i64";
+        case SENGOO_ASSERT_KIND_EQ_BOOL:
+            return "assert_eq_bool";
+        case SENGOO_ASSERT_KIND_NE_BOOL:
+            return "assert_ne_bool";
+        case SENGOO_ASSERT_KIND_EQ_STR:
+            return "assert_eq_str";
+        case SENGOO_ASSERT_KIND_NE_STR:
+            return "assert_ne_str";
+        case SENGOO_ASSERT_KIND_EQ_F64:
+            return "assert_eq_f64";
+        case SENGOO_ASSERT_KIND_NE_F64:
+            return "assert_ne_f64";
+        default:
+            return "assert";
+    }
+}
+
+static void sengoo_assert_build_message(
+    SengooAssertKind kind,
+    long long i64_a,
+    long long i64_b,
+    const char* str_a,
+    const char* str_b,
+    double f64_a,
+    double f64_b,
+    char* message,
+    size_t message_cap,
+    char* expected,
+    size_t expected_cap,
+    char* actual,
+    size_t actual_cap
+) {
+    if (!message || message_cap == 0) {
+        return;
+    }
+    message[0] = '\0';
+    if (expected && expected_cap > 0) {
+        expected[0] = '\0';
+    }
+    if (actual && actual_cap > 0) {
+        actual[0] = '\0';
+    }
+
+    switch (kind) {
+        case SENGOO_ASSERT_KIND_BOOL:
+            snprintf(message, message_cap, "assertion failed");
+            break;
+        case SENGOO_ASSERT_KIND_TRUE:
+            snprintf(message, message_cap, "expected true, got false");
+            break;
+        case SENGOO_ASSERT_KIND_FALSE:
+            snprintf(message, message_cap, "expected false, got true");
+            break;
+        case SENGOO_ASSERT_KIND_EQ_I64:
+        case SENGOO_ASSERT_KIND_NE_I64:
+            sengoo_assert_format_i64(i64_a, expected, expected_cap);
+            sengoo_assert_format_i64(i64_b, actual, actual_cap);
+            snprintf(message, message_cap, "expected %s, got %s", expected, actual);
+            break;
+        case SENGOO_ASSERT_KIND_EQ_BOOL:
+        case SENGOO_ASSERT_KIND_NE_BOOL:
+            sengoo_assert_format_bool(i64_a, expected, expected_cap);
+            sengoo_assert_format_bool(i64_b, actual, actual_cap);
+            snprintf(message, message_cap, "expected %s, got %s", expected, actual);
+            break;
+        case SENGOO_ASSERT_KIND_EQ_STR:
+        case SENGOO_ASSERT_KIND_NE_STR:
+            if (str_a) {
+                strncpy(expected, str_a, expected_cap - 1);
+                expected[expected_cap - 1] = '\0';
+            }
+            if (str_b) {
+                strncpy(actual, str_b, actual_cap - 1);
+                actual[actual_cap - 1] = '\0';
+            }
+            snprintf(message, message_cap, "expected %s, got %s", expected, actual);
+            break;
+        case SENGOO_ASSERT_KIND_EQ_F64:
+        case SENGOO_ASSERT_KIND_NE_F64:
+            sengoo_assert_format_f64(f64_a, expected, expected_cap);
+            sengoo_assert_format_f64(f64_b, actual, actual_cap);
+            snprintf(message, message_cap, "expected %s, got %s", expected, actual);
+            break;
+        default:
+            snprintf(message, message_cap, "assertion failed");
+            break;
+    }
+}
+
+static int sengoo_assert_has_typed_operands(SengooAssertKind kind) {
+    return kind >= SENGOO_ASSERT_KIND_EQ_I64;
+}
+
+static void sengoo_assert_write_envelope(
+    const char* report_path,
+    SengooAssertKind kind,
+    const char* file,
+    long long file_len,
+    long long line,
+    long long i64_a,
+    long long i64_b,
+    const char* str_a,
+    const char* str_b,
+    double f64_a,
+    double f64_b
+) {
+    char message[256];
+    char expected[128];
+    char actual[128];
+    const char* helper = sengoo_assert_helper_name(kind);
+    sengoo_assert_build_message(
+        kind,
+        i64_a,
+        i64_b,
+        str_a,
+        str_b,
+        f64_a,
+        f64_b,
+        message,
+        sizeof(message),
+        expected,
+        sizeof(expected),
+        actual,
+        sizeof(actual)
+    );
+
+    char envelope[SENGOO_ASSERT_ENVELOPE_MAX];
+    size_t used = 0;
+    envelope[0] = '{';
+    used = 1;
+    sengoo_assert_append_json_field_u64(envelope, sizeof(envelope), &used, "schema_version", 1);
+    sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "kind", "assertion_failure");
+    sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "helper", helper);
+    sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "message", message);
+    if (file && file_len > 0) {
+        char file_buf[512];
+        size_t copy_len = (size_t)file_len;
+        if (copy_len >= sizeof(file_buf)) {
+            copy_len = sizeof(file_buf) - 1;
+        }
+        memcpy(file_buf, file, copy_len);
+        file_buf[copy_len] = '\0';
+        sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "file", file_buf);
+    }
+    if (line > 0) {
+        sengoo_assert_append_json_field_u64(envelope, sizeof(envelope), &used, "line", (unsigned long long)line);
+    }
+    if (sengoo_assert_has_typed_operands(kind)) {
+        sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "expected", expected);
+        sengoo_assert_append_json_field_string(envelope, sizeof(envelope), &used, "actual", actual);
+    }
+    if (used + 2 < sizeof(envelope)) {
+        envelope[used++] = '}';
+        envelope[used++] = '\n';
+        envelope[used] = '\0';
+    }
+
+    FILE* out = fopen(report_path, "wb");
+    if (out) {
+        fwrite(envelope, 1, used, out);
+        fclose(out);
+    }
+}
+
+long long sengoo_assert_failure_v1(
+    long long kind,
+    long long file_ptr,
+    long long file_len,
+    long long line,
+    long long i64_a,
+    long long i64_b,
+    long long str_a_ptr,
+    long long str_b_ptr,
+    double f64_a,
+    double f64_b
+) {
+    const char* file = file_ptr ? (const char*)(intptr_t)file_ptr : NULL;
+    const char* str_a = str_a_ptr ? (const char*)(intptr_t)str_a_ptr : NULL;
+    const char* str_b = str_b_ptr ? (const char*)(intptr_t)str_b_ptr : NULL;
+    const char* helper = sengoo_assert_helper_name((SengooAssertKind)kind);
+    char message[256];
+    char expected[128];
+    char actual[128];
+    sengoo_assert_build_message(
+        (SengooAssertKind)kind,
+        i64_a,
+        i64_b,
+        str_a,
+        str_b,
+        f64_a,
+        f64_b,
+        message,
+        sizeof(message),
+        expected,
+        sizeof(expected),
+        actual,
+        sizeof(actual)
+    );
+
+    const char* report_path = getenv("SENGOO_ASSERT_REPORT");
+    if (report_path && report_path[0] != '\0') {
+        sengoo_assert_write_envelope(
+            report_path,
+            (SengooAssertKind)kind,
+            file,
+            file_len,
+            line,
+            i64_a,
+            i64_b,
+            str_a,
+            str_b,
+            f64_a,
+            f64_b
+        );
+    } else {
+        fprintf(stderr, "Assertion failed (%s): %s", helper, message);
+        if (file && file_len > 0) {
+            fprintf(stderr, " at %.*s:%lld", (int)file_len, file, line);
+        }
+        fprintf(stderr, "\n");
+    }
+    exit(1);
 }
 
 long long sengoo_panic_option_unwrap_i64(void) {

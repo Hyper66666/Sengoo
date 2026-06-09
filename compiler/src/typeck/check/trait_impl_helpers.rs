@@ -2,6 +2,20 @@ use super::*;
 use crate::typeck::r#trait::{type_key, FunctionTy, ImplInfo, MethodSig, TraitInfo};
 
 impl TypeChecker {
+    fn validate_future_poll_contract(method: &Function) -> Result<()> {
+        if method.name.name != "poll" {
+            return Ok(());
+        }
+
+        if !matches!(method.self_param, Some(SelfParam::BorrowedMut)) {
+            return Err(CompileError::from(TypeckError::Other(
+                "Future<T>::poll must use `&mut self` receiver".to_string(),
+            )));
+        }
+
+        Ok(())
+    }
+
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&trait_decl.type_params)?;
@@ -19,6 +33,10 @@ impl TypeChecker {
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
+                    if trait_decl.name.name == "Future" {
+                        Self::validate_future_poll_contract(method)?;
+                    }
+
                     self.env.push_scope();
                     let method_generic_meta =
                         self.bind_type_params_with_meta(&method.type_params)?;
@@ -41,6 +59,12 @@ impl TypeChecker {
                     };
 
                     let has_default = !method.body.stmts.is_empty();
+                    if has_default {
+                        self.trait_default_methods
+                            .entry(trait_decl.name.name.clone())
+                            .or_default()
+                            .insert(method.name.name.clone(), method.clone());
+                    }
                     let sig = if has_default {
                         MethodSig::with_default(
                             has_self,
@@ -87,10 +111,20 @@ impl TypeChecker {
             .as_ref()
             .and_then(|p| p.as_simple())
             .map(|s| s.name.clone());
+        let trait_args = impl_decl
+            .trait_args
+            .iter()
+            .map(|arg| self.check_type(arg))
+            .collect::<TyResult<Vec<_>>>()?;
+        let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
 
-        let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name);
+        let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 
         for item in &impl_decl.items {
+            if is_future_impl {
+                Self::validate_future_poll_contract(item)?;
+            }
+
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
             let mut param_types = Vec::new();

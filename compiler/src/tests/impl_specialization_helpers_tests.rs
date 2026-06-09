@@ -97,6 +97,7 @@ fn expand_impl_variants_instantiates_methods_for_concrete_named_targets() {
             vec![HIRType::named("T".to_string(), vec![])],
         ),
         trait_name: None,
+        trait_args: Vec::new(),
         items: vec![method("vec_len")],
     };
 

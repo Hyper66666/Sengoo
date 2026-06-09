@@ -1,6 +1,6 @@
 use sengoo_compiler::error::{ParseError, TypeError};
 use sengoo_compiler::typeck::TypeckError;
-use sengoo_compiler::{CompileError, Span};
+use sengoo_compiler::{CompileError, CompileWarning, Span};
 
 use super::{
     current_error_format, CompilerErrorJson, CompilerErrorLocationJson, CompilerErrorSpanJson,
@@ -17,15 +17,31 @@ fn compile_error_details(raw: &str) -> Vec<String> {
 }
 
 fn diagnostic_code_from_message(message: &str) -> Option<String> {
-    let start = message.find("[")? + 1;
-    let rest = &message[start..];
-    let end = rest.find(']')?;
-    let code = &rest[..end];
-    if code.is_empty() {
-        None
-    } else {
-        Some(code.to_string())
+    if let Some(start) = message.find('[') {
+        let rest = &message[start + 1..];
+        if let Some(end) = rest.find(']') {
+            let code = &rest[..end];
+            if !code.is_empty() {
+                return Some(code.to_string());
+            }
+        }
     }
+
+    if message.contains("unsupported attribute:")
+        || message.contains("unsupported cfg predicate")
+        || message.contains("unsupported deprecated attribute")
+    {
+        return Some("attributes::unsupported_attribute".to_string());
+    }
+
+    if message.contains("Poll<T> must contain `is_ready: bool` followed by `value: T`")
+        || message.contains("Future<T>::poll must return Poll<T>")
+        || message.contains("Future<T>::poll must use `&mut self` receiver")
+    {
+        return Some("async::user_future_contract".to_string());
+    }
+
+    None
 }
 
 fn compile_error_payload(
@@ -118,7 +134,8 @@ fn source_span_from_parse_error(error: &ParseError) -> Option<&miette::SourceSpa
         | ParseError::UnclosedParen(span)
         | ParseError::InvalidStructField { span, .. }
         | ParseError::InvalidStructFieldShorthand { span }
-        | ParseError::InvalidPatternAt { span, .. } => Some(span),
+        | ParseError::InvalidPatternAt { span, .. }
+        | ParseError::UnsupportedAttribute { span, .. } => Some(span),
         ParseError::InvalidPattern(_)
         | ParseError::DuplicateParam(_)
         | ParseError::UnexpectedEof => None,
@@ -231,6 +248,36 @@ pub(crate) fn emit_compile_error_with_location(
 
 pub(crate) fn emit_compile_error(input: Option<&str>, raw: &str) {
     emit_compile_error_with_location(input, raw, None)
+}
+
+pub(crate) fn emit_compile_warning(warning: &CompileWarning) {
+    match current_error_format() {
+        ErrorFormat::Text => eprintln!("warning[{}]: {}", warning.code(), warning),
+        ErrorFormat::Json => {
+            eprintln!("{}", render_compile_warning_json(warning));
+        }
+    }
+}
+
+pub(crate) fn render_compile_warning_json(warning: &CompileWarning) -> String {
+    let mut payload = serde_json::json!({
+        "ok": true,
+        "kind": "compile_warning",
+        "severity": "warning",
+        "code": warning.code(),
+        "message": warning.to_string(),
+    });
+    if let Some((lo, hi)) = warning.span().filter(|(lo, hi)| hi > lo) {
+        let location = CompilerErrorLocationJson {
+            line: None,
+            column: None,
+            span: Some(CompilerErrorSpanJson { lo, hi }),
+        };
+        if let Ok(location) = serde_json::to_value(location) {
+            payload["location"] = location;
+        }
+    }
+    payload.to_string()
 }
 
 pub(crate) fn emit_compile_error_for_stage(stage: &'static str, input: Option<&str>, raw: &str) {

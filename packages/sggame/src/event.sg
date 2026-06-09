@@ -1,0 +1,13 @@
+import sgplatform;
+
+import state;
+
+def poll() -> Event {
+    let platform = current_platform();
+    if not platform.alive { Event { kind: EVENT_NONE(), key: 0, mouse_x: 0, mouse_y: 0, mouse_button: 0 }; } else { let event = platform.poll_event(); record_key_event(event); event; };
+}
+
+def pump() -> bool {
+    let platform = current_platform();
+    if not platform.alive { false; } else { let mut_running = true; while mut_running { let event = platform.poll_event(); record_key_event(event); if event.kind == EVENT_NONE() { mut_running = false; }; }; true; };
+}

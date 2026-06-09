@@ -146,16 +146,25 @@ impl<'source> Parser<'source> {
         let lo = self.current_span().lo;
         let mut segments = Vec::new();
 
-        while let Some(token) = self.current() {
-            if matches!(token.kind, TokenKind::Ident) {
-                let span = token.span;
-                self.advance();
-                segments.push(self.intern_ident(span));
-
-                if self.consume(TokenKind::ColonColon).is_none() {
-                    break;
+        loop {
+            let Some(token) = self.current() else {
+                break;
+            };
+            let segment = match token.kind {
+                TokenKind::Ident => {
+                    let span = token.span;
+                    self.advance();
+                    self.intern_ident(span)
                 }
-            } else {
+                TokenKind::AsyncKw => {
+                    let span = token.span;
+                    self.advance();
+                    self.intern_named_ident("async", span)
+                }
+                _ => break,
+            };
+            segments.push(segment);
+            if self.consume(TokenKind::ColonColon).is_none() {
                 break;
             }
         }

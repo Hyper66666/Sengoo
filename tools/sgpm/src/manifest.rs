@@ -78,11 +78,18 @@ pub struct WorkspaceManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
     pub name: String,
+    pub package: Option<String>,
     pub path: Option<PathBuf>,
     pub git: Option<String>,
     pub rev: Option<String>,
     pub version_req: Option<String>,
     pub registry: Option<String>,
+}
+
+impl Dependency {
+    pub fn target_name(&self) -> &str {
+        self.package.as_deref().unwrap_or(&self.name)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,6 +307,7 @@ fn parse_dependency(name: &str, value: toml::Value) -> Result<Dependency> {
                 })?;
             Ok(Dependency {
                 name: name.to_string(),
+                package: None,
                 path: None,
                 git: None,
                 rev: None,
@@ -324,7 +332,7 @@ fn parse_table_dependency(
         .filter(|key| {
             !matches!(
                 key.as_str(),
-                "path" | "git" | "rev" | "version" | "registry"
+                "path" | "git" | "rev" | "version" | "registry" | "package"
             )
         })
         .cloned()
@@ -337,6 +345,7 @@ fn parse_table_dependency(
         );
     }
 
+    let package = table.get("package").and_then(toml::Value::as_str);
     let path = table.get("path").and_then(toml::Value::as_str);
     let git = table.get("git").and_then(toml::Value::as_str);
     let rev = table.get("rev").and_then(toml::Value::as_str);
@@ -366,10 +375,17 @@ fn parse_table_dependency(
         miette::bail!("dependency '{}' uses registry without version", name);
     }
 
+    let package = package.map(str::trim).filter(|value| !value.is_empty());
     let path = path.map(str::trim).filter(|value| !value.is_empty());
     let git = git.map(str::trim).filter(|value| !value.is_empty());
     let version = version.map(str::trim).filter(|value| !value.is_empty());
     let registry = registry.map(str::trim).filter(|value| !value.is_empty());
+    if table.contains_key("package") && package.is_none() {
+        miette::bail!("dependency '{}' package must not be empty", name);
+    }
+    if let Some(package) = package {
+        validate_name("dependency package", package)?;
+    }
     if table.contains_key("path") && path.is_none() {
         miette::bail!("dependency '{}' path must not be empty", name);
     }
@@ -400,6 +416,7 @@ fn parse_table_dependency(
 
     Ok(Dependency {
         name: name.to_string(),
+        package: package.map(str::to_string),
         path: path.map(PathBuf::from),
         git: git.map(str::to_string),
         rev: rev.map(str::to_string),
@@ -604,6 +621,18 @@ path = "tests/custom.sg"
         )
         .unwrap_err();
         assert!(err.to_string().contains("git URL must not be empty"));
+    }
+
+    #[test]
+    fn parses_dependency_package_alias_field() {
+        let manifest = Manifest::parse(
+            "[package]\nname = 'x'\nversion = '0.1.0'\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../actual_name' }\n",
+        )
+        .expect("manifest should parse");
+        let dep = manifest.dependencies.get("my_alias").expect("alias dep");
+        assert_eq!(dep.name, "my_alias");
+        assert_eq!(dep.package.as_deref(), Some("actual_name"));
+        assert_eq!(dep.target_name(), "actual_name");
     }
 
     #[test]

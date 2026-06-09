@@ -57,7 +57,7 @@ pub(crate) fn collect_direct_calls_in_expr(expr: &HIRExpr, out: &mut HashSet<Str
             collect_direct_calls_in_expr(iter, out);
             collect_direct_calls_in_body(body, out);
         }
-        HIRExpr::Call { func, args } => {
+        HIRExpr::Call { func, args, .. } => {
             if let HIRExpr::Var { name, .. } = func.as_ref() {
                 out.insert(name.clone());
             }

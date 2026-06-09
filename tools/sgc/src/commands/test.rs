@@ -1,13 +1,15 @@
 use miette::{IntoDiagnostic, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const MODULE_MAP_ENV: &str = "SENGOO_MODULE_MAP";
+pub(crate) const ASSERT_REPORT_ENV: &str = "SENGOO_ASSERT_REPORT";
+const MAX_ASSERT_ENVELOPE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum TestOutputFormat {
@@ -26,6 +28,28 @@ struct TestReportJson<'a> {
     tests: Vec<TestCaseJson<'a>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct AssertionEnvelope {
+    pub schema_version: u32,
+    pub kind: String,
+    pub helper: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AssertionEnvelopeRead {
+    Valid(AssertionEnvelope),
+    Missing,
+}
+
 #[derive(Debug, Serialize)]
 struct TestCaseJson<'a> {
     name: &'a str,
@@ -38,6 +62,10 @@ struct TestCaseJson<'a> {
     stdout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stderr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assertion: Option<AssertionEnvelope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assertion_transport: Option<String>,
 }
 
 struct TestCase {
@@ -92,13 +120,15 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
 
     for test in &tests {
         let started = Instant::now();
+        let assert_report_path = create_assert_report_path()?;
         let mut command = Command::new(&sgc);
         command
             .current_dir(options.root)
             .arg("run")
             .arg(&test.path)
             .arg("-O")
-            .arg(opt_level);
+            .arg(opt_level)
+            .env(ASSERT_REPORT_ENV, &assert_report_path);
         apply_module_map_env(&mut command, std::env::var_os(MODULE_MAP_ENV).as_deref());
 
         let display = test.path.display();
@@ -121,6 +151,12 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
             (ok, exit_code, stdout, stderr)
         };
         let duration_ms = started.elapsed().as_millis();
+        let (assertion, assertion_transport) = if ok {
+            let _ = fs::remove_file(&assert_report_path);
+            (None, None)
+        } else {
+            read_assertion_envelope(&assert_report_path)
+        };
 
         if ok {
             passed += 1;
@@ -137,11 +173,21 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
                         .map(|code| code.to_string())
                         .unwrap_or_else(|| "unknown".to_string())
                 );
+                if let Some(AssertionEnvelopeRead::Valid(envelope)) = assertion.as_ref() {
+                    println!("assertion: {}", envelope.message);
+                }
+                if let Some(diagnostic) = assertion_transport.as_ref() {
+                    println!("assertion transport: {diagnostic}");
+                }
                 emit_captured_stream("stdout", stdout.as_deref());
                 emit_captured_stream("stderr", stderr.as_deref());
             }
         }
 
+        let assertion_json = assertion.as_ref().and_then(|read| match read {
+            AssertionEnvelopeRead::Valid(envelope) => Some(envelope.clone()),
+            _ => None,
+        });
         if matches!(options.format, TestOutputFormat::Json) {
             json_cases.push(TestCaseJson {
                 name: &test.name,
@@ -151,6 +197,8 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
                 exit_code,
                 stdout: if ok { None } else { stdout },
                 stderr: if ok { None } else { stderr },
+                assertion: assertion_json,
+                assertion_transport: assertion_transport.clone(),
             });
         }
     }
@@ -380,6 +428,87 @@ fn lossy_output(bytes: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
+fn create_assert_report_path() -> Result<PathBuf> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .into_diagnostic()?
+        .as_nanos();
+    Ok(std::env::temp_dir().join(format!("sengoo_assert_report_{stamp}.json")))
+}
+
+pub(crate) fn read_assertion_envelope(
+    report_path: &Path,
+) -> (Option<AssertionEnvelopeRead>, Option<String>) {
+    let metadata = match fs::metadata(report_path) {
+        Ok(metadata) => metadata,
+        Err(_) => return (Some(AssertionEnvelopeRead::Missing), None),
+    };
+    if metadata.len() as usize > MAX_ASSERT_ENVELOPE_BYTES {
+        let _ = fs::remove_file(report_path);
+        return (
+            None,
+            Some("assertion envelope exceeded 64 KiB limit".to_string()),
+        );
+    }
+
+    let bytes = match fs::read(report_path) {
+        Ok(bytes) => bytes,
+        Err(_) => return (Some(AssertionEnvelopeRead::Missing), None),
+    };
+    let _ = fs::remove_file(report_path);
+
+    if bytes.is_empty() {
+        return (Some(AssertionEnvelopeRead::Missing), None);
+    }
+
+    let line = match std::str::from_utf8(bytes.split(|byte| *byte == b'\n').next().unwrap_or(&[])) {
+        Ok(line) => line.trim(),
+        Err(_) => {
+            return (
+                None,
+                Some("assertion envelope is not valid UTF-8".to_string()),
+            );
+        }
+    };
+
+    let value: serde_json::Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(_) => {
+            return (
+                None,
+                Some("assertion envelope is not valid JSON".to_string()),
+            );
+        }
+    };
+
+    let schema_version = value
+        .get("schema_version")
+        .and_then(|field| field.as_u64())
+        .unwrap_or(0) as u32;
+    if schema_version != 1 {
+        return (
+            None,
+            Some(format!(
+                "unsupported assertion envelope schema_version {schema_version}"
+            )),
+        );
+    }
+
+    match serde_json::from_value::<AssertionEnvelope>(value) {
+        Ok(envelope) if envelope.kind == "assertion_failure" && !envelope.helper.is_empty() => {
+            (Some(AssertionEnvelopeRead::Valid(envelope)), None)
+        }
+        Ok(_) => (
+            None,
+            Some("assertion envelope failed validation".to_string()),
+        ),
+        Err(_) => (
+            None,
+            Some("assertion envelope failed validation".to_string()),
+        ),
+    }
+}
+
 fn emit_captured_stream(label: &str, content: Option<&str>) {
     let Some(content) = content.filter(|value| !value.is_empty()) else {
         return;
@@ -403,6 +532,7 @@ pub(crate) fn apply_module_map_env(command: &mut Command, module_map: Option<&Os
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -449,6 +579,8 @@ mod tests {
                 exit_code: Some(0),
                 stdout: None,
                 stderr: None,
+                assertion: None,
+                assertion_transport: None,
             }],
         })
         .unwrap();
@@ -461,5 +593,99 @@ mod tests {
     fn lossy_output_preserves_non_empty_streams() {
         assert_eq!(lossy_output(b"hello"), Some("hello".to_string()));
         assert_eq!(lossy_output(b""), None);
+    }
+
+    #[test]
+    fn read_assertion_envelope_accepts_schema_v1() {
+        let dir = temp_dir("assert_envelope_valid");
+        let path = dir.join("report.json");
+        fs::write(
+            &path,
+            r#"{"schema_version":1,"kind":"assertion_failure","helper":"assert_eq_i64","message":"expected 7, got 9","file":"tests/smoke.sg","line":12,"expected":"7","actual":"9"}"#,
+        )
+        .unwrap();
+        let (read, diagnostic) = read_assertion_envelope(&path);
+        assert_eq!(diagnostic, None);
+        assert_eq!(
+            read,
+            Some(AssertionEnvelopeRead::Valid(AssertionEnvelope {
+                schema_version: 1,
+                kind: "assertion_failure".to_string(),
+                helper: "assert_eq_i64".to_string(),
+                message: "expected 7, got 9".to_string(),
+                file: Some("tests/smoke.sg".to_string()),
+                line: Some(12),
+                expected: Some("7".to_string()),
+                actual: Some("9".to_string()),
+            }))
+        );
+        assert!(!path.exists(), "report file should be removed after read");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_assertion_envelope_missing_file_is_not_fatal() {
+        let dir = temp_dir("assert_envelope_missing");
+        let path = dir.join("missing.json");
+        let (read, diagnostic) = read_assertion_envelope(&path);
+        assert_eq!(read, Some(AssertionEnvelopeRead::Missing));
+        assert_eq!(diagnostic, None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_assertion_envelope_rejects_malformed_json() {
+        let dir = temp_dir("assert_envelope_malformed");
+        let path = dir.join("report.json");
+        fs::write(&path, "{not-json").unwrap();
+        let (read, diagnostic) = read_assertion_envelope(&path);
+        assert_eq!(read, None);
+        assert_eq!(
+            diagnostic,
+            Some("assertion envelope is not valid JSON".to_string())
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_assertion_envelope_rejects_unsupported_schema_version() {
+        let dir = temp_dir("assert_envelope_version");
+        let path = dir.join("report.json");
+        fs::write(
+            &path,
+            r#"{"schema_version":2,"kind":"assertion_failure","helper":"assert","message":"fail"}"#,
+        )
+        .unwrap();
+        let (read, diagnostic) = read_assertion_envelope(&path);
+        assert_eq!(read, None);
+        assert_eq!(
+            diagnostic,
+            Some("unsupported assertion envelope schema_version 2".to_string())
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_assertion_envelope_rejects_oversized_payload() {
+        let dir = temp_dir("assert_envelope_oversized");
+        let path = dir.join("report.json");
+        let mut file = fs::File::create(&path).unwrap();
+        write!(file, "{{\"schema_version\":1,\"kind\":\"assertion_failure\",\"helper\":\"assert\",\"message\":\"")
+            .unwrap();
+        write!(file, "{}", "x".repeat(MAX_ASSERT_ENVELOPE_BYTES)).unwrap();
+        write!(file, "\"}}").unwrap();
+        let (read, diagnostic) = read_assertion_envelope(&path);
+        assert_eq!(read, None);
+        assert_eq!(
+            diagnostic,
+            Some("assertion envelope exceeded 64 KiB limit".to_string())
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn create_assert_report_path_returns_absolute_path() {
+        let path = create_assert_report_path().expect("assert report path");
+        assert!(path.is_absolute());
     }
 }

@@ -1,0 +1,3 @@
+def release_helper_value() -> i64 {
+    7;
+}

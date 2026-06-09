@@ -2,15 +2,61 @@ use super::named_call_helpers::lower_named_call;
 use super::non_named_call_helpers::lower_non_named_call;
 use super::*;
 
+fn is_spawn_blocking_call(name: &str) -> bool {
+    matches!(name, "spawn_blocking_i64" | "spawn_blocking_future_i64")
+}
+
+fn async_context_capture_name(ctx: &LoweringContext<'_>, arg: &HIRExpr) -> Option<String> {
+    let HIRExpr::Lambda { params, body } = arg else {
+        return None;
+    };
+
+    ctx.collect_free_vars(params, body)
+        .into_iter()
+        .find_map(|(name, local)| {
+            if matches!(
+                ctx.get_local_type(local),
+                MIRType::Struct { name: ty_name, .. } if ty_name == "AsyncContext"
+            ) {
+                Some(name)
+            } else {
+                None
+            }
+        })
+}
+
 pub(super) fn lower_call_expr(
     ctx: &mut LoweringContext<'_>,
     func: &HIRExpr,
     args: &[HIRExpr],
+    site_lo: Option<u32>,
 ) -> Local {
-    let arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
+    if let HIRExpr::Var { name, .. } = func {
+        if is_spawn_blocking_call(name) {
+            if let Some(capture) = args
+                .first()
+                .and_then(|arg| async_context_capture_name(ctx, arg))
+            {
+                ctx.errors.push(format!(
+                    "cross-thread {name} capture `{capture}` is not Send because AsyncContext is poll-scoped"
+                ));
+                return ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            }
+        }
+    }
+
+    let mut arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
 
     match func {
-        HIRExpr::Var { name, .. } => lower_named_call(ctx, name, &arg_locals),
+        HIRExpr::Var { name, .. } => {
+            super::assert_callsite_helpers::append_assert_callsite_args(
+                ctx,
+                name,
+                site_lo,
+                &mut arg_locals,
+            );
+            lower_named_call(ctx, name, &arg_locals)
+        }
         _ => lower_non_named_call(ctx, &arg_locals),
     }
 }
@@ -56,7 +102,7 @@ mod tests {
             name: "worker".to_string(),
             symbol: SymbolId::new(1),
         };
-        let result = lower_call_expr(&mut ctx, &func, &[]);
+        let result = lower_call_expr(&mut ctx, &func, &[], None);
 
         assert_eq!(
             ctx.get_local_type(result),

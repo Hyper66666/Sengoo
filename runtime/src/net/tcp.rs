@@ -98,6 +98,25 @@ impl NetRuntime {
             Err(NetErrorCode::HandleNotFound)
         }
     }
+
+    pub(crate) fn tcp_poll_readable(&self, handle: u64) -> bool {
+        let mut table = match self.tcp_streams.lock() {
+            Ok(table) => table,
+            Err(_) => return false,
+        };
+        let Some(stream) = table.get_mut(&handle) else {
+            return false;
+        };
+        let _ = stream.set_nonblocking(true);
+        let mut buf = [0u8; 1];
+        match stream.peek(&mut buf) {
+            Ok(0) => true,
+            Ok(_) => true,
+            Err(err) if err.kind() == ErrorKind::WouldBlock => false,
+            Err(err) if err.kind() == ErrorKind::TimedOut => false,
+            Err(_) => true,
+        }
+    }
 }
 
 #[no_mangle]
@@ -154,4 +173,13 @@ pub unsafe extern "C" fn sengoo_tcp_recv(
 pub extern "C" fn sengoo_tcp_close(handle: u64) -> i64 {
     reset_last_error();
     net_runtime().tcp_close(handle).unwrap_or_else(fail_bool)
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_tcp_poll_readable(handle: u64) -> i64 {
+    if net_runtime().tcp_poll_readable(handle) {
+        1
+    } else {
+        0
+    }
 }

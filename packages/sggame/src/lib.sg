@@ -1,0 +1,21 @@
+import state;
+
+import display;
+
+import event;
+
+import time;
+
+import draw;
+
+import image;
+
+import input;
+
+def sggame_init() -> Result<i64, i64> {
+    boot_platform();
+}
+
+def sggame_quit() -> bool {
+    shutdown_platform();
+}

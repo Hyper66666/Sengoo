@@ -1,0 +1,53 @@
+import sgplatform;
+
+def main() -> i64 {
+    let platform = init().unwrap_or(Platform { alive: false });
+    if !platform.alive {
+        return 1;
+    }
+
+    let window = platform.create_window("sgplatform blank window", 640, 480).unwrap_or(Window { handle: 0, closed: true });
+    if window.handle == 0 {
+        quit(platform);
+        return 1;
+    }
+
+    let renderer = window.create_renderer().unwrap_or(Renderer { handle: 0, destroyed: true });
+    if renderer.handle == 0 {
+        window.close();
+        quit(platform);
+        return 1;
+    }
+
+    let bg = color_new(24, 28, 36, 255);
+    let accent = color_new(96, 165, 250, 255);
+    let frame_rect = rect_new(80, 80, 200, 120);
+
+    let cleared = renderer.clear(bg).unwrap_or(0);
+    let filled = renderer.fill_rect(frame_rect, accent).unwrap_or(0);
+    let lined = renderer.draw_line(80, 80, 280, 200, accent).unwrap_or(0);
+    let presented = renderer.present().unwrap_or(0);
+
+    let start = platform.ticks_ms();
+    let running = true;
+    while running {
+        let event = platform.poll_event();
+        if event_is_quit(event) {
+            running = false;
+        }
+        if platform.ticks_ms() - start > 500 {
+            running = false;
+        }
+        platform.delay_ms(16);
+    }
+
+    renderer.destroy();
+    window.close();
+    quit(platform);
+
+    if cleared == STATUS_OK() && filled == STATUS_OK() && lined == STATUS_OK() && presented == STATUS_OK() {
+        0
+    } else {
+        1
+    }
+}

@@ -44,6 +44,11 @@ pub(super) fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) ->
             stack.push(idx);
         }
     }
+    for (idx, mir_fn) in mir_fns.iter().enumerate() {
+        if mir_fn.name.starts_with("$__lambda") {
+            stack.push(idx);
+        }
+    }
     while let Some(idx) = stack.pop() {
         if reachable[idx] {
             continue;

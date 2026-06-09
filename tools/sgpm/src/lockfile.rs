@@ -1,4 +1,4 @@
-use crate::resolver::{Graph, PackageNode, PackageSource};
+use crate::resolver::{graph_requires_lockfile_v2, Graph, PackageNode, PackageSource};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeSet;
 use std::fs;
@@ -8,10 +8,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static LOCKFILE_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+pub const LOCKFILE_VERSION_V1: u32 = 1;
+pub const LOCKFILE_VERSION_V2: u32 = 2;
+
 pub fn write_lockfile(graph: &Graph) -> Result<PathBuf> {
     let root = root_package(graph)?;
     let lockfile_path = lockfile_path(root);
-    let content = render_lockfile(graph, root)?;
+    let content = render_lockfile_v2(graph, root)?;
     write_lockfile_content(&lockfile_path, &content)?;
     Ok(lockfile_path)
 }
@@ -19,21 +22,23 @@ pub fn write_lockfile(graph: &Graph) -> Result<PathBuf> {
 pub fn check_lockfile(graph: &Graph) -> Result<PathBuf> {
     let root = root_package(graph)?;
     let lockfile_path = lockfile_path(root);
-    if lockfile_path.is_file() {
-        validate_lockfile_version(&lockfile_path)?;
+    if !lockfile_path.is_file() {
+        miette::bail!("Sengoo.lock is out of date; run sgpm update");
     }
-    let expected = render_lockfile(graph, root)?;
-    let actual = match fs::read_to_string(&lockfile_path) {
-        Ok(actual) => actual,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            miette::bail!("Sengoo.lock is out of date; run sgpm update")
-        }
-        Err(err) => {
-            return Err(err)
-                .into_diagnostic()
-                .with_context(|| format!("failed to read {}", lockfile_path.display()));
-        }
+    let version = validate_lockfile_version(&lockfile_path)?;
+    if version == LOCKFILE_VERSION_V1 && graph_requires_lockfile_v2(graph) {
+        miette::bail!(
+            "Sengoo.lock version 1 cannot represent the current dependency graph (dependency aliases or multiple package versions); run sgpm update"
+        );
+    }
+    let expected = if version == LOCKFILE_VERSION_V1 {
+        render_lockfile_v1(graph, root)?
+    } else {
+        render_lockfile_v2(graph, root)?
     };
+    let actual = fs::read_to_string(&lockfile_path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read {}", lockfile_path.display()))?;
     if actual != expected {
         miette::bail!("Sengoo.lock is out of date; run sgpm update");
     }
@@ -42,28 +47,31 @@ pub fn check_lockfile(graph: &Graph) -> Result<PathBuf> {
 
 pub fn write_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Result<PathBuf> {
     let lockfile_path = workspace_lockfile_path(workspace_manifest)?;
-    let content = render_workspace_lockfile(workspace_manifest, graphs)?;
+    let content = render_workspace_lockfile_v2(workspace_manifest, graphs)?;
     write_lockfile_content(&lockfile_path, &content)?;
     Ok(lockfile_path)
 }
 
 pub fn check_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Result<PathBuf> {
     let lockfile_path = workspace_lockfile_path(workspace_manifest)?;
-    if lockfile_path.is_file() {
-        validate_lockfile_version(&lockfile_path)?;
+    if !lockfile_path.is_file() {
+        miette::bail!("Sengoo.lock is out of date; run sgpm update --workspace");
     }
-    let expected = render_workspace_lockfile(workspace_manifest, graphs)?;
-    let actual = match fs::read_to_string(&lockfile_path) {
-        Ok(actual) => actual,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            miette::bail!("Sengoo.lock is out of date; run sgpm update --workspace")
-        }
-        Err(err) => {
-            return Err(err)
-                .into_diagnostic()
-                .with_context(|| format!("failed to read {}", lockfile_path.display()));
-        }
+    let version = validate_lockfile_version(&lockfile_path)?;
+    let requires_v2 = graphs.iter().any(graph_requires_lockfile_v2);
+    if version == LOCKFILE_VERSION_V1 && requires_v2 {
+        miette::bail!(
+            "Sengoo.lock version 1 cannot represent the current workspace dependency graph (dependency aliases or multiple package versions); run sgpm update --workspace"
+        );
+    }
+    let expected = if version == LOCKFILE_VERSION_V1 {
+        render_workspace_lockfile_v1(workspace_manifest, graphs)?
+    } else {
+        render_workspace_lockfile_v2(workspace_manifest, graphs)?
     };
+    let actual = fs::read_to_string(&lockfile_path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read {}", lockfile_path.display()))?;
     if actual != expected {
         miette::bail!("Sengoo.lock is out of date; run sgpm update --workspace");
     }
@@ -91,21 +99,38 @@ fn workspace_lockfile_path(workspace_manifest: &Path) -> Result<PathBuf> {
     Ok(workspace_dir.join("Sengoo.lock"))
 }
 
-fn render_lockfile(graph: &Graph, root: &PackageNode) -> Result<String> {
+fn render_lockfile_v1(graph: &Graph, root: &PackageNode) -> Result<String> {
     let mut out = String::new();
     out.push_str("# This file is generated by sgpm update.\n");
     out.push_str("version = 1\n");
     out.push_str(&format!("root = \"{}\"\n\n", escape(&root.name)));
 
     for node in &graph.nodes {
-        render_package_entry(&mut out, &root.root_dir, node);
+        render_package_entry_v1(&mut out, &root.root_dir, node);
     }
     trim_trailing_blank_line(&mut out);
 
     Ok(out)
 }
 
-fn render_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Result<String> {
+fn render_lockfile_v2(graph: &Graph, root: &PackageNode) -> Result<String> {
+    let mut out = String::new();
+    out.push_str("# This file is generated by sgpm update.\n");
+    out.push_str("version = 2\n");
+    out.push_str(&format!("root = \"{}\"\n\n", escape(&root.name)));
+
+    for node in &graph.nodes {
+        render_package_entry_v2(&mut out, &root.root_dir, node);
+    }
+    for edge in &graph.edges {
+        render_dependency_entry_v2(&mut out, edge);
+    }
+    trim_trailing_blank_line(&mut out);
+
+    Ok(out)
+}
+
+fn render_workspace_lockfile_v1(workspace_manifest: &Path, graphs: &[Graph]) -> Result<String> {
     let workspace_dir = workspace_manifest.parent().ok_or_else(|| {
         miette::miette!(
             "workspace manifest has no parent directory: {}",
@@ -128,7 +153,45 @@ fn render_workspace_lockfile(workspace_manifest: &Path, graphs: &[Graph]) -> Res
     for graph in graphs {
         for node in &graph.nodes {
             if seen.insert(node.manifest_path.clone()) {
-                render_package_entry(&mut out, workspace_dir, node);
+                render_package_entry_v1(&mut out, workspace_dir, node);
+            }
+        }
+    }
+    trim_trailing_blank_line(&mut out);
+
+    Ok(out)
+}
+
+fn render_workspace_lockfile_v2(workspace_manifest: &Path, graphs: &[Graph]) -> Result<String> {
+    let workspace_dir = workspace_manifest.parent().ok_or_else(|| {
+        miette::miette!(
+            "workspace manifest has no parent directory: {}",
+            workspace_manifest.display()
+        )
+    })?;
+    let mut out = String::new();
+    out.push_str("# This file is generated by sgpm update.\n");
+    out.push_str("version = 2\n");
+    out.push_str("workspace = true\n");
+    let members = graphs
+        .iter()
+        .filter_map(Graph::root_package)
+        .map(|root| format!("\"{}\"", escape(&root.name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!("members = [{}]\n\n", members));
+
+    let mut seen_nodes = BTreeSet::new();
+    let mut seen_edges = BTreeSet::new();
+    for graph in graphs {
+        for node in &graph.nodes {
+            if seen_nodes.insert(node.manifest_path.clone()) {
+                render_package_entry_v2(&mut out, workspace_dir, node);
+            }
+        }
+        for edge in &graph.edges {
+            if seen_edges.insert((edge.from.clone(), edge.alias.clone(), edge.to.clone())) {
+                render_dependency_entry_v2(&mut out, edge);
             }
         }
     }
@@ -143,7 +206,7 @@ fn trim_trailing_blank_line(out: &mut String) {
     }
 }
 
-fn render_package_entry(out: &mut String, base_dir: &Path, node: &PackageNode) {
+fn render_package_entry_v1(out: &mut String, base_dir: &Path, node: &PackageNode) {
     let manifest_path = relative_path(base_dir, &node.manifest_path);
     out.push_str("[[package]]\n");
     out.push_str(&format!("name = \"{}\"\n", escape(&node.name)));
@@ -153,7 +216,7 @@ fn render_package_entry(out: &mut String, base_dir: &Path, node: &PackageNode) {
     ));
     out.push_str(&format!(
         "source = \"{}\"\n",
-        escape(&package_source(base_dir, node))
+        escape(&legacy_source_string(base_dir, node))
     ));
     out.push_str(&format!(
         "manifest = \"{}\"\n",
@@ -172,14 +235,62 @@ fn render_package_entry(out: &mut String, base_dir: &Path, node: &PackageNode) {
     out.push('\n');
 }
 
-fn package_source(base_dir: &Path, node: &PackageNode) -> String {
+fn render_package_entry_v2(out: &mut String, base_dir: &Path, node: &PackageNode) {
+    let manifest_path = relative_path(base_dir, &node.manifest_path);
+    out.push_str("[[package]]\n");
+    out.push_str(&format!("id = \"{}\"\n", escape(&node.id)));
+    out.push_str(&format!("name = \"{}\"\n", escape(&node.name)));
+    out.push_str(&format!(
+        "version = \"{}\"\n",
+        escape(&node.manifest.package.version)
+    ));
+    match &node.source {
+        PackageSource::Path => {
+            let source_path = relative_path(base_dir, &node.root_dir);
+            out.push_str("source.kind = \"path\"\n");
+            out.push_str(&format!(
+                "source.path = \"{}\"\n",
+                escape(&slash_path(&source_path))
+            ));
+        }
+        PackageSource::Git { url, rev } => {
+            out.push_str("source.kind = \"git\"\n");
+            out.push_str(&format!("source.url = \"{}\"\n", escape(url)));
+            out.push_str(&format!("source.rev = \"{}\"\n", escape(rev)));
+        }
+        PackageSource::Registry {
+            registry, version, ..
+        } => {
+            out.push_str("source.kind = \"registry\"\n");
+            out.push_str(&format!("source.registry = \"{}\"\n", escape(registry)));
+            out.push_str(&format!("source.version = \"{}\"\n", escape(version)));
+        }
+    }
+    out.push_str(&format!(
+        "manifest = \"{}\"\n",
+        escape(&slash_path(&manifest_path))
+    ));
+    out.push('\n');
+}
+
+fn render_dependency_entry_v2(out: &mut String, edge: &crate::resolver::DependencyEdge) {
+    out.push_str("[[dependency]]\n");
+    out.push_str(&format!("from = \"{}\"\n", escape(&edge.from)));
+    out.push_str(&format!("alias = \"{}\"\n", escape(&edge.alias)));
+    out.push_str(&format!("to = \"{}\"\n", escape(&edge.to)));
+    out.push('\n');
+}
+
+fn legacy_source_string(base_dir: &Path, node: &PackageNode) -> String {
     match &node.source {
         PackageSource::Path => {
             let source_path = relative_path(base_dir, &node.root_dir);
             format!("path+{}", slash_path(&source_path))
         }
         PackageSource::Git { url, rev } => format!("git+{}#{}", url, rev),
-        PackageSource::Registry { registry, version } => {
+        PackageSource::Registry {
+            registry, version, ..
+        } => {
             format!("registry+{}/{}@{}", registry, node.name, version)
         }
     }
@@ -329,23 +440,30 @@ pub fn validate_lockfile_version(lockfile_path: &Path) -> Result<u32> {
                         lockfile_path.display()
                     )
                 })?;
-            if version != 1 {
+            if version != LOCKFILE_VERSION_V1 && version != LOCKFILE_VERSION_V2 {
                 miette::bail!(
-                    "incompatible Sengoo.lock schema version {}; expected 1",
+                    "incompatible Sengoo.lock schema version {}; expected 1 or 2",
                     version
                 );
             }
             return Ok(version);
         }
     }
-    Ok(1)
+    Ok(LOCKFILE_VERSION_V1)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_lockfile_version, write_lockfile_content};
+    use super::{
+        render_lockfile_v1, render_lockfile_v2, validate_lockfile_version, write_lockfile_content,
+        LOCKFILE_VERSION_V1, LOCKFILE_VERSION_V2,
+    };
+    use crate::manifest::Manifest;
+    use crate::resolver::{
+        canonical_source_key, package_identity, DependencyEdge, Graph, PackageNode, PackageSource,
+    };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -358,9 +476,216 @@ mod tests {
         dir
     }
 
+    fn sample_node(
+        base: &Path,
+        name: &str,
+        version: &str,
+        source: PackageSource,
+        manifest_path: PathBuf,
+    ) -> PackageNode {
+        sample_node_with_manifest(
+            base,
+            name,
+            version,
+            source,
+            manifest_path,
+            &format!("[package]\nname = '{name}'\nversion = '{version}'\n"),
+        )
+    }
+
+    fn sample_node_with_manifest(
+        base: &Path,
+        name: &str,
+        version: &str,
+        source: PackageSource,
+        manifest_path: PathBuf,
+        manifest_source: &str,
+    ) -> PackageNode {
+        let root_dir = manifest_path.parent().unwrap().to_path_buf();
+        let source_key = canonical_source_key(base, &root_dir, &source, name);
+        let id = package_identity(name, version, &source_key);
+        PackageNode {
+            id,
+            name: name.to_string(),
+            manifest_path,
+            root_dir: root_dir.clone(),
+            entry_path: root_dir.join("src/main.sg"),
+            manifest: Manifest::parse(manifest_source).unwrap(),
+            source,
+        }
+    }
+
+    #[test]
+    fn lockfile_v1_read_renders_compatible_graph_snapshot() {
+        let dir = temp_dir("v1_read");
+        let app = dir.join("app");
+        let dep = dir.join("dep");
+        fs::create_dir_all(dep.join("src")).unwrap();
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(
+            dep.join("Sengoo.toml"),
+            "[package]\nname = 'dep'\nversion = '0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(app.join("Sengoo.toml"), "[package]\nname = 'app'\nversion = '0.1.0'\n[dependencies]\ndep = { path = '../dep' }\n").unwrap();
+
+        let dep_node = sample_node(
+            &app,
+            "dep",
+            "0.1.0",
+            PackageSource::Path,
+            dep.join("Sengoo.toml"),
+        );
+        let app_node = sample_node_with_manifest(
+            &app,
+            "app",
+            "0.1.0",
+            PackageSource::Path,
+            app.join("Sengoo.toml"),
+            "[package]\nname = 'app'\nversion = '0.1.0'\n[dependencies]\ndep = { path = '../dep' }\n",
+        );
+        let graph = Graph {
+            root: app.join("Sengoo.toml"),
+            nodes: vec![dep_node.clone(), app_node.clone()],
+            edges: vec![DependencyEdge {
+                from: app_node.id.clone(),
+                alias: "dep".to_string(),
+                to: dep_node.id.clone(),
+            }],
+            registries: Default::default(),
+        };
+
+        let rendered = render_lockfile_v1(&graph, &app_node).unwrap();
+        assert!(rendered.contains("version = 1"), "{rendered}");
+        assert!(rendered.contains("dependencies = [\"dep\"]"), "{rendered}");
+        assert!(!rendered.contains("[[dependency]]"), "{rendered}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn lockfile_v2_write_records_package_ids_and_alias_edges() {
+        let dir = temp_dir("v2_write");
+        let app = dir.join("app");
+        let dep = dir.join("dep");
+        fs::create_dir_all(dep.join("src")).unwrap();
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(
+            dep.join("Sengoo.toml"),
+            "[package]\nname = 'actual_name'\nversion = '0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("Sengoo.toml"),
+            "[package]\nname = 'app'\nversion = '0.1.0'\n[dependencies]\nmy_alias = { package = 'actual_name', path = '../dep' }\n",
+        )
+        .unwrap();
+
+        let dep_node = sample_node(
+            &app,
+            "actual_name",
+            "0.1.0",
+            PackageSource::Path,
+            dep.join("Sengoo.toml"),
+        );
+        let app_node = sample_node(
+            &app,
+            "app",
+            "0.1.0",
+            PackageSource::Path,
+            app.join("Sengoo.toml"),
+        );
+        let graph = Graph {
+            root: app.join("Sengoo.toml"),
+            nodes: vec![dep_node.clone(), app_node.clone()],
+            edges: vec![DependencyEdge {
+                from: app_node.id.clone(),
+                alias: "my_alias".to_string(),
+                to: dep_node.id.clone(),
+            }],
+            registries: Default::default(),
+        };
+
+        let rendered = render_lockfile_v2(&graph, &app_node).unwrap();
+        assert!(rendered.contains("version = 2"), "{rendered}");
+        assert!(
+            rendered.contains(&format!("id = \"{}\"", app_node.id)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("[[dependency]]"),
+            "expected alias edge section:\n{rendered}"
+        );
+        assert!(rendered.contains("alias = \"my_alias\""), "{rendered}");
+        assert!(
+            rendered.contains(&format!("to = \"{}\"", dep_node.id)),
+            "{rendered}"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn lockfile_incompatible_v1_graph_diagnostic_names_update() {
+        let dir = temp_dir("incompatible_v1");
+        let app = dir.join("app");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(
+            app.join("Sengoo.toml"),
+            "[package]\nname = 'app'\nversion = '0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(app.join("Sengoo.lock"), "version = 1\nroot = \"app\"\n").unwrap();
+
+        let app_node = sample_node(
+            &app,
+            "app",
+            "0.1.0",
+            PackageSource::Path,
+            app.join("Sengoo.toml"),
+        );
+        let dep_node = sample_node(
+            &app,
+            "actual_name",
+            "0.1.0",
+            PackageSource::Path,
+            dir.join("dep/Sengoo.toml"),
+        );
+        let graph = Graph {
+            root: app.join("Sengoo.toml"),
+            nodes: vec![dep_node, app_node.clone()],
+            edges: vec![DependencyEdge {
+                from: app_node.id.clone(),
+                alias: "my_alias".to_string(),
+                to: "actual_name@0.1.0+path:../dep".to_string(),
+            }],
+            registries: Default::default(),
+        };
+
+        let err =
+            super::check_lockfile(&graph).expect_err("v1 lockfile should reject aliased graph");
+        assert!(
+            err.to_string()
+                .contains("cannot represent the current dependency graph"),
+            "unexpected diagnostic: {err}"
+        );
+        assert!(err.to_string().contains("sgpm update"), "{err}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn validate_lockfile_version_accepts_v1_and_v2() {
+        let dir = temp_dir("schema");
+        let v1 = dir.join("v1.lock");
+        let v2 = dir.join("v2.lock");
+        fs::write(&v1, "version = 1\n").unwrap();
+        fs::write(&v2, "version = 2\n").unwrap();
+        assert_eq!(validate_lockfile_version(&v1).unwrap(), LOCKFILE_VERSION_V1);
+        assert_eq!(validate_lockfile_version(&v2).unwrap(), LOCKFILE_VERSION_V2);
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn validate_lockfile_version_rejects_unknown_schema() {
-        let dir = temp_dir("schema");
+        let dir = temp_dir("schema_reject");
         let lockfile = dir.join("Sengoo.lock");
         fs::write(&lockfile, "version = 99\n").unwrap();
         let err = validate_lockfile_version(&lockfile).expect_err("unknown schema should fail");

@@ -23,12 +23,13 @@ pub fn lower_ast(program: &Program, type_env: &TypeEnv) -> Module {
 fn lower_ast_inner(program: &Program, type_env: &TypeEnv) -> Module {
     let mut module = Module::new("main".to_string());
     let class_index = build_class_index(program);
+    let trait_index = build_trait_index(program);
 
     for decl in &program.decls {
         match &decl.kind {
             ast::DeclKind::Class(class_decl) => {
                 if let Ok((class_struct, class_impl)) =
-                    lower_class_bundle(class_decl, &class_index, type_env)
+                    lower_class_bundle(class_decl, &class_index, &trait_index, type_env)
                 {
                     module.add_item(HIRItem::Struct(class_struct));
                     if let Some(impl_item) = class_impl {
@@ -56,6 +57,22 @@ fn build_class_index(program: &Program) -> HashMap<String, &ast::Class> {
         }
     }
     index
+}
+
+fn build_trait_index(program: &Program) -> HashMap<String, &ast::Trait> {
+    let mut index = HashMap::new();
+    for decl in &program.decls {
+        if let ast::DeclKind::Trait(trait_decl) = &decl.kind {
+            index.insert(trait_decl.name.name.clone(), trait_decl);
+        }
+    }
+    index
+}
+
+fn path_simple_name(path: &ast::Path) -> Option<String> {
+    path.as_simple()
+        .map(|ident| ident.name.clone())
+        .or_else(|| path.segments.last().map(|ident| ident.name.clone()))
 }
 
 /// 降低 AST 声明到 HIR 项
@@ -353,12 +370,38 @@ fn lower_variant(variant: &ast::EnumVariant, type_env: &TypeEnv) -> HIRVariant {
 }
 
 /// 降低类声明（作为结构体处理）
-fn class_parent_name(class_decl: &ast::Class) -> Option<String> {
+fn class_parent_name(
+    class_decl: &ast::Class,
+    class_index: &HashMap<String, &ast::Class>,
+) -> Option<String> {
     class_decl.extends.as_ref().and_then(|path| {
-        path.as_simple()
-            .map(|ident| ident.name.clone())
-            .or_else(|| path.segments.last().map(|ident| ident.name.clone()))
+        let parent = path_simple_name(path)?;
+        if class_index.contains_key(&parent) {
+            Some(parent)
+        } else {
+            None
+        }
     })
+}
+
+fn class_header_trait_paths(
+    class_decl: &ast::Class,
+    class_index: &HashMap<String, &ast::Class>,
+) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(path) = &class_decl.extends {
+        if let Some(name) = path_simple_name(path) {
+            if !class_index.contains_key(&name) {
+                paths.push(name);
+            }
+        }
+    }
+    for bound in &class_decl.implements {
+        if let Some(name) = path_simple_name(&bound.path) {
+            paths.push(name);
+        }
+    }
+    paths
 }
 
 struct EffectiveClassField<'a> {
@@ -382,7 +425,7 @@ fn resolve_effective_class_fields<'a>(
     let mut merged_fields = Vec::new();
     let mut seen_names = HashSet::new();
 
-    if let Some(parent_name) = class_parent_name(class_decl) {
+    if let Some(parent_name) = class_parent_name(class_decl, class_index) {
         let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
             format!(
                 "class `{}` extends unknown parent `{}`",
@@ -427,6 +470,7 @@ fn resolve_effective_class_fields<'a>(
 fn resolve_effective_class_methods<'a>(
     class_decl: &'a ast::Class,
     class_index: &HashMap<String, &'a ast::Class>,
+    trait_index: &HashMap<String, &'a ast::Trait>,
     visiting: &mut HashSet<&'a str>,
 ) -> Result<Vec<&'a ast::Function>, String> {
     let class_name: &str = &class_decl.name.name;
@@ -437,14 +481,15 @@ fn resolve_effective_class_methods<'a>(
         ));
     }
 
-    let mut resolved_methods = if let Some(parent_name) = class_parent_name(class_decl) {
+    let mut resolved_methods = if let Some(parent_name) = class_parent_name(class_decl, class_index)
+    {
         let parent_decl = class_index.get(&parent_name).ok_or_else(|| {
             format!(
                 "class `{}` extends unknown parent `{}`",
                 class_name, parent_name
             )
         })?;
-        resolve_effective_class_methods(parent_decl, class_index, visiting)?
+        resolve_effective_class_methods(parent_decl, class_index, trait_index, visiting)?
     } else {
         Vec::new()
     };
@@ -477,6 +522,26 @@ fn resolve_effective_class_methods<'a>(
         }
     }
 
+    for trait_name in class_header_trait_paths(class_decl, class_index) {
+        let Some(trait_decl) = trait_index.get(&trait_name) else {
+            continue;
+        };
+        for item in &trait_decl.items {
+            let ast::TraitItem::Function(method) = item else {
+                continue;
+            };
+            if method.body.stmts.is_empty() {
+                continue;
+            }
+            let method_name = method.name.name.as_str();
+            if index_by_name.contains_key(method_name) {
+                continue;
+            }
+            index_by_name.insert(method_name, resolved_methods.len());
+            resolved_methods.push(method);
+        }
+    }
+
     visiting.remove(class_name);
     Ok(resolved_methods)
 }
@@ -484,6 +549,7 @@ fn resolve_effective_class_methods<'a>(
 fn lower_class_bundle<'a>(
     class_decl: &'a ast::Class,
     class_index: &HashMap<String, &'a ast::Class>,
+    trait_index: &HashMap<String, &'a ast::Trait>,
     type_env: &TypeEnv,
 ) -> Result<(HIRStruct, Option<HIRImpl>), String> {
     let name = class_decl.name.name.clone();
@@ -514,8 +580,12 @@ fn lower_class_bundle<'a>(
     };
 
     let mut method_visiting = HashSet::new();
-    let effective_methods =
-        resolve_effective_class_methods(class_decl, class_index, &mut method_visiting)?;
+    let effective_methods = resolve_effective_class_methods(
+        class_decl,
+        class_index,
+        trait_index,
+        &mut method_visiting,
+    )?;
     let self_ty = HIRType::named(name.clone(), vec![]);
     let impl_items = effective_methods
         .iter()
@@ -531,6 +601,7 @@ fn lower_class_bundle<'a>(
         Some(HIRImpl {
             target_type: self_ty,
             trait_name: None,
+            trait_args: Vec::new(),
             items: impl_items,
         })
     };
@@ -541,7 +612,8 @@ fn lower_class_bundle<'a>(
 fn lower_class(class_decl: &ast::Class, type_env: &TypeEnv) -> Result<HIRStruct, String> {
     let mut class_index = HashMap::new();
     class_index.insert(class_decl.name.name.clone(), class_decl);
-    let (class_struct, _) = lower_class_bundle(class_decl, &class_index, type_env)?;
+    let trait_index = HashMap::new();
+    let (class_struct, _) = lower_class_bundle(class_decl, &class_index, &trait_index, type_env)?;
     Ok(class_struct)
 }
 
@@ -587,6 +659,11 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
         .as_ref()
         .and_then(|p| p.as_simple())
         .map(|ident| ident.name.clone());
+    let trait_args = impl_decl
+        .trait_args
+        .iter()
+        .map(|arg| lower_type(arg, type_env))
+        .collect();
 
     // 生成类型前缀（用于函数名修饰）
     let type_prefix = Some(hir_type_to_prefix(&target_type));
@@ -608,6 +685,7 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
     Ok(HIRImpl {
         target_type,
         trait_name,
+        trait_args,
         items,
     })
 }

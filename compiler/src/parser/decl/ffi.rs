@@ -154,8 +154,16 @@ impl<'source> Parser<'source> {
                 )));
             }
 
-            if self.consume(TokenKind::FnKw).is_some() {
+            if self.check(TokenKind::FnKw) {
+                let item_lo = self.expect(TokenKind::FnKw)?.span.lo;
                 let name = self.expect_ident()?;
+                let type_params = if self.consume(TokenKind::Lt).is_some() {
+                    let params = self.parse_type_params()?;
+                    self.expect(TokenKind::Gt)?;
+                    params
+                } else {
+                    Vec::new()
+                };
                 self.expect(TokenKind::LParen)?;
                 let mut params = Vec::new();
                 while !self.is_eof() {
@@ -174,10 +182,11 @@ impl<'source> Parser<'source> {
                 items.push(ExternItem::Function(ExternFunction {
                     vis: item_vis,
                     name,
+                    type_params,
                     params,
                     return_type,
                     is_unsafe: item_is_unsafe,
-                    span: self.current_span(),
+                    span: self.span_at(item_lo),
                 }));
                 continue;
             }
@@ -224,12 +233,20 @@ impl<'source> Parser<'source> {
             )));
         }
 
+        let lo = self.current_span().lo;
         let mut is_unsafe = leading_unsafe;
         if self.consume(TokenKind::UnsafeKw).is_some() {
             is_unsafe = true;
         }
         self.expect(TokenKind::FnKw)?;
         let name = self.expect_ident()?;
+        let mut type_params = if self.consume(TokenKind::Lt).is_some() {
+            let params = self.parse_type_params()?;
+            self.expect(TokenKind::Gt)?;
+            params
+        } else {
+            Vec::new()
+        };
         self.expect(TokenKind::LParen)?;
 
         let mut params = Vec::new();
@@ -246,12 +263,13 @@ impl<'source> Parser<'source> {
         } else {
             None
         };
+        self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
         let body = self.parse_block()?;
 
         Ok(DeclKind::Function(Function {
             vis,
             name,
-            type_params: Vec::new(),
+            type_params,
             params,
             self_param: None,
             return_type,
@@ -263,7 +281,7 @@ impl<'source> Parser<'source> {
             is_unsafe,
             no_mangle: attrs.no_mangle,
             export_name: attrs.export_name,
-            span: self.current_span(),
+            span: self.span_at(lo),
         }))
     }
 }

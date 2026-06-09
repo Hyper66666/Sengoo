@@ -43,18 +43,22 @@ fn collect_direct_calls_in_expr_finds_nested_direct_calls_only() {
         scrutinee: Box::new(HIRExpr::Call {
             func: Box::new(var("scrutinee_fn", 1)),
             args: vec![],
+            site_lo: None,
         }),
         arms: vec![HIRMatchArm {
             pat: HIRPattern::Wild,
             guard: Some(Box::new(HIRExpr::Call {
+                site_lo: None,
                 func: Box::new(var("guard_fn", 2)),
                 args: vec![],
             })),
             body: Box::new(HIRExpr::AsyncBlock(Box::new(HIRBody::with_expr(
                 HIRExpr::Call {
+                    site_lo: None,
                     func: Box::new(var("body_fn", 3)),
                     args: vec![
                         HIRExpr::Call {
+                            site_lo: None,
                             func: Box::new(HIRExpr::Field {
                                 base: Box::new(var("obj", 4)),
                                 field: "method".to_string(),
@@ -87,6 +91,7 @@ fn collect_direct_call_names_accumulates_function_and_impl_bodies() {
         "main",
         HIRBody {
             stmts: vec![HIRStmt::Expr(HIRExpr::Call {
+                site_lo: None,
                 func: Box::new(var("free_fn", 10)),
                 args: vec![],
             })],
@@ -97,9 +102,11 @@ fn collect_direct_call_names_accumulates_function_and_impl_bodies() {
     let impl_item = HIRItem::Impl(HIRImpl {
         target_type: HIRType::named("Point".to_string(), vec![]),
         trait_name: None,
+        trait_args: Vec::new(),
         items: vec![empty_function(
             "sum",
             HIRBody::with_expr(HIRExpr::Call {
+                site_lo: None,
                 func: Box::new(var("helper_fn", 11)),
                 args: vec![],
             }),
@@ -121,12 +128,14 @@ fn collect_direct_calls_in_body_visits_stmt_values_and_tail_expression() {
             symbol: SymbolId::new(12),
             ty: HIRType::int(IntKind::I64),
             value: Some(HIRExpr::Call {
+                site_lo: None,
                 func: Box::new(var("stmt_fn", 13)),
                 args: vec![],
             }),
             is_mut: false,
         }],
         expr: Some(Box::new(HIRExpr::Call {
+            site_lo: None,
             func: Box::new(var("tail_fn", 14)),
             args: vec![],
         })),

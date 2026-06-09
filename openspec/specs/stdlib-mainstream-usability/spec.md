@@ -4,13 +4,25 @@
 Defines portable standard-library APIs and toolchain wiring requirements for common scripting, CLI, filesystem, and process workflows.
 ## Requirements
 ### Requirement: Standard library modules SHALL be wired through compiler, CLI, LSP, docs, and examples
-Every new source-level standard-library module SHALL be available through `sgc` stdlib import expansion, `sglsp` stdlib symbol/signature discovery, stdlib docs, and a runnable example.
+
+Every new or stabilized source-level standard-library module SHALL be available
+through `sgc` stdlib import expansion, `sglsp` stdlib symbol/signature
+discovery, stdlib docs, and a runnable example. Stabilizing an existing partial
+module such as `std::net` SHALL include compatibility notes for old names that
+remain supported but are not the preferred public surface.
 
 #### Scenario: A new stdlib module is imported by a program
+
 - **WHEN** a Sengoo program imports `std::<module>`
 - **THEN** `sgc check`, `sgc build`, and `sgc run` preload the module and its declared source dependencies
 - **AND** `sglsp` exposes the module's public symbols and signatures when the import is present
 - **AND** `examples/stdlib` contains a runnable example for the module
+
+#### Scenario: An existing partial module is stabilized
+
+- **WHEN** this change stabilizes an existing partial module such as `std::net`
+- **THEN** docs identify stable public names and compatibility-only names
+- **AND** examples use stable public names
 
 ### Requirement: Path utilities SHALL support common cross-platform path operations
 The standard library SHALL provide `std::path` helpers for path separator discovery, absolute-path checks, joining, file-name/stem/extension extraction, parent extraction, and lexical normalization.
@@ -36,12 +48,17 @@ The standard library SHALL provide `std::path` helpers for path separator discov
 - **AND** it does not prefix the base path
 
 ### Requirement: Runtime-produced string outputs SHALL use managed Buffer handles
-Until Sengoo has a specified owned-string return ABI, stdlib runtime helpers that produce string-like output SHALL copy into managed `Buffer` handles and report byte counts.
 
-#### Scenario: A helper produces a string-like result
-- **WHEN** a stdlib helper such as `path_join`, `path_parent`, or `path_extension` needs to return text
-- **THEN** it accepts a managed `Buffer`
-- **AND** it returns `Result<i64, i64>` indicating bytes written or an error code
+Stdlib helpers that already accept caller-supplied `Buffer` outputs SHALL keep
+their current names and `Result<i64, i64>` byte-count contracts. This change adds
+parallel owned-`String` helpers rather than replacing Buffer workflows.
+
+#### Scenario: Legacy Buffer helpers remain source-compatible
+
+- **WHEN** a program calls existing helpers such as `path_join`, `path_parent`, or
+  `path_extension` with a managed `Buffer`
+- **THEN** behavior and signatures remain unchanged from the canonical baseline
+- **AND** examples that use Buffer workflows continue to compile
 
 ### Requirement: Standard-library status errors SHALL expose stable categories and messages
 Fallible stdlib APIs SHALL expose stable numeric status categories through `std::status` while keeping source-level `Result<T, i64>` shapes compatible.
@@ -80,15 +97,26 @@ The standard library SHALL provide `std::process` helpers for process ID, curren
 - **AND** `process_exit_code(false, failure_code)` returns `failure_code`
 
 ### Requirement: Later process and data-format extensions SHALL remain gated by explicit follow-up design
-The `stdlib-next-usability-wave` change satisfies the follow-up design gate for handle-based `std::json` and shell-free process command/output helpers. Later process or data-format expansions beyond those accepted APIs SHALL NOT be added opportunistically.
 
-#### Scenario: A later phase proposes process or JSON extensions
-- **WHEN** a future implementation needs streaming JSON, JSON5, schema validation, dynamic Sengoo object mapping, implicit shell commands, pipes, background tasks, signals, cancellation, or async process execution
+This requirement SHALL keep later process and data-format extensions gated by
+explicit follow-up design. The `stdlib-next-usability-wave` change satisfies the
+follow-up design gate for handle-based `std::json` and shell-free process
+command/output helpers. This
+`stdlib-breadth-mainstream` change separately satisfies the gate for bounded
+TOML/INI config helpers, regex helpers, encoding/compression helpers, and the
+stabilized HTTP/network APIs described here. Later expansions beyond these
+accepted APIs SHALL NOT be added opportunistically.
+
+#### Scenario: This breadth wave proposes additional data helpers
+
+- **WHEN** implementation agents add TOML, INI, regex, encoding, compression, or stabilized HTTP/network helpers
+- **THEN** they follow this change's API shape, portability constraints, resource constraints, lifecycle semantics, and tests
+- **AND** they do not add streaming parsers, schema validation, shell execution, background tasks, async network execution, or implicit TLS guarantees without another OpenSpec update
+
+#### Scenario: A future phase proposes additional process or data-format features
+
+- **WHEN** a future implementation needs streaming JSON, JSON5, schema validation, dynamic Sengoo object mapping, implicit shell commands, pipes, background tasks, signals, cancellation, async process execution, async network execution, or unbounded watchers
 - **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, lifecycle semantics, and tests
-
-#### Scenario: A later phase proposes additional process or entry ABI features
-- **WHEN** a future implementation needs process execution, environment mutation, or a command-line surface beyond `std::args`
-- **THEN** it first updates OpenSpec with API shape, portability constraints, security constraints, ABI changes, and tests
 
 ### Requirement: Command-line arguments SHALL be available through an opt-in stdlib module
 The standard library SHALL provide `std::args` helpers for counting user-supplied command-line arguments and copying individual argument text into managed `Buffer` handles.
@@ -378,3 +406,165 @@ The C runtime bridge SHALL keep `runtime.c` as the anchor/core source while larg
 #### Scenario: A program uses split runtime symbols
 - **WHEN** a program imports stdlib APIs implemented outside `runtime.c`
 - **THEN** native build, run, reflection native linking, and stdlib runtime tests include the required sibling runtime object files
+
+### Requirement: Stdlib SHALL expose additive owned-text production helpers
+
+Sengoo SHALL add the following additive helpers without renaming existing
+Buffer-based APIs:
+
+| Helper | Result |
+| --- | --- |
+| `path_join_string`, `path_normalize_string`, `path_parent_string`, `path_file_name_string`, `path_stem_string`, `path_extension_string`, `dir_entry_name_string` | `Result<String, i64>` |
+| `JsonValue.string_value()`, `json_value_as_string(value)` | `Result<String, i64>` |
+| `vec_new_string()`, `Vec<String>`, `StringMapString` | owned collection semantics below |
+| `dir_walk`, `dir_copy_tree`, `dir_remove_tree` | bounded recursive IO |
+| `ProcessCommand.pipe_stdout_to(child)`, `ProcessCommand.spawn()`, `ProcessHandle` | shell-free process semantics below |
+| `io_fd_read(fd, buffer)`, `io_fd_write(fd, data)` | sync fd subset |
+
+Existing `json_parse(text: &str)` and `json_parse_buffer(buffer, input_len)` remain
+the canonical JSON input APIs. This change does not add a redundant
+`json_parse_string` alias.
+
+#### Scenario: Owned path helpers return String without a caller Buffer
+
+- **WHEN** a program calls `path_join_string` or `dir_entry_name_string`
+- **THEN** success returns `Result<String, i64>`
+- **AND** invalid UTF-8 or host failures map to `STATUS_INVALID_ARGUMENT` or `STATUS_IO`
+
+#### Scenario: String collections use move-in and clone-on-read semantics
+
+- **WHEN** a program uses `Vec<String>` or `StringMapString`
+- **THEN** `push`/`insert` move owned values in, `get` returns clones, and `remove`
+  transfers the stored value out
+- **AND** invalid handles return `STATUS_INVALID_HANDLE`
+
+#### Scenario: JSON input cap increases to at least 1 MiB
+
+- **WHEN** a program parses JSON up to the new default cap of at least 1 MiB
+- **THEN** valid documents parse successfully
+- **AND** oversize input returns a stable oversize status without crashing
+
+#### Scenario: Recursive directory helpers are bounded and do not follow symlinks by default
+
+- **WHEN** a program calls `dir_walk`, `dir_copy_tree`, or `dir_remove_tree`
+- **THEN** default limits are max depth 64 and max entries 100000 unless the caller
+  supplies stricter limits
+- **AND** symlinks are not followed by default
+
+#### Scenario: Process pipes and background handles remain shell-free
+
+- **WHEN** a program uses `ProcessCommand.pipe_stdout_to(child)`
+- **THEN** success consumes both command values and returns the final command owning
+  the pipeline chain
+- **AND** `run()` reports the final stage `ProcessOutput`
+- **WHEN** a program uses `ProcessCommand.spawn()`
+- **THEN** `ProcessHandle.wait(timeout_ms)` returns the exit code or `STATUS_TIMEOUT`,
+  `kill()` returns `Result<bool, i64>`, `exit_code()` is valid only after completion,
+  and `close()` releases the handle
+- **AND** behavior is verified on Windows and POSIX CI hosts
+
+### Requirement: Assertion helpers SHALL migrate to std::assert without breaking std::error
+
+The standard library SHALL expose `std::assert` as the primary assertion-helper
+module while preserving existing `std::error` assertion helper behavior during a
+compatibility period.
+
+#### Scenario: A new example imports assertions
+
+- **WHEN** a new stdlib or tutorial example needs assertion helpers
+- **THEN** it imports `std::assert`
+- **AND** `std::error` examples that already use assertion helpers continue to compile
+
+#### Scenario: Runtime status helpers are needed
+
+- **WHEN** a program needs stable runtime status names or messages
+- **THEN** it imports `std::status`
+- **AND** `std::error` is not extended with runtime status-classification responsibilities
+
+### Requirement: String and formatting utilities SHALL support mainstream text workflows
+
+The standard library SHALL provide bounded `std::string` and `std::fmt` helpers
+for construction, split, join, trim, replace, primitive formatting, and explicit
+byte/Unicode boundary behavior.
+
+#### Scenario: A program formats primitive values
+
+- **WHEN** a program formats integers, booleans, status names, or byte-stable text
+- **THEN** it can produce output through an owned `String` when available or a managed `Buffer` otherwise
+- **AND** formatting failure returns a status-category error rather than panicking
+
+#### Scenario: Unicode-sensitive behavior is requested
+
+- **WHEN** a future implementation needs grapheme clusters, normalization, locale-aware formatting, or collation
+- **THEN** it first updates OpenSpec with API shape, portability constraints, and tests
+
+### Requirement: Regex utilities SHALL provide bounded matching and captures
+
+The standard library SHALL provide regex compile, match, capture extraction, and
+replace helpers with documented pattern/input limits and deterministic error
+categories.
+
+#### Scenario: A program extracts captures
+
+- **WHEN** a program compiles a regex and matches text with capture groups
+- **THEN** it can copy the full match and indexed or named captures into accepted text outputs
+- **AND** missing captures return `STATUS_NOT_FOUND`
+
+#### Scenario: A regex exceeds limits
+
+- **WHEN** a pattern, input, capture count, or replacement output exceeds documented limits
+- **THEN** the helper returns a stable resource or unsupported status
+- **AND** it does not enter unbounded catastrophic backtracking
+
+### Requirement: Logging and time utilities SHALL support common CLI and service output
+
+The standard library SHALL provide `std::log` and `std::time` helpers for
+level-based logging, deterministic testable sinks, monotonic durations, and
+date/time formatting and parsing with explicit timezone rules.
+
+#### Scenario: A program logs at a configured level
+
+- **WHEN** a program emits log records below and above the configured level
+- **THEN** records below the level are skipped
+- **AND** records at or above the level are written to the configured supported sink
+
+#### Scenario: A program parses a date/time string
+
+- **WHEN** a program parses a date/time string through `std::time`
+- **THEN** accepted formats, timezone assumptions, and invalid-input behavior are documented
+- **AND** parse failure returns `STATUS_PARSE`
+
+### Requirement: Filesystem, config, hash, encoding, compression, and HTTP helpers SHALL be practical and bounded
+
+The standard library SHALL provide bounded helpers for glob, file watch support
+detection, recursive copy/delete policies, TOML/INI config data, SHA-style
+hashing, base64/hex encoding, gzip/zlib-class compression, and HTTP workflows
+with explicit support limits.
+
+#### Scenario: A program uses config and encoding helpers
+
+- **WHEN** a program parses TOML or INI, hashes bytes, encodes base64 or hex, or compresses/decompresses data
+- **THEN** each helper documents input/output limits and copies diagnostics where applicable
+- **AND** invalid input returns `STATUS_PARSE`, `STATUS_INVALID_ARGUMENT`, or another stable category
+
+#### Scenario: A program uses filesystem policy helpers
+
+- **WHEN** a program glob-lists paths, recursively copies, recursively deletes, or requests file-watch behavior
+- **THEN** ordering, symlink policy, overwrite/delete flags, and unsupported-platform behavior are explicit and tested
+
+### Requirement: Network helpers SHALL stabilize the existing std::net baseline before expansion
+
+The standard library SHALL inventory and stabilize the existing `std::net` and
+HTTP runtime baseline before adding broader client or server APIs.
+
+#### Scenario: Existing net helpers are classified
+
+- **WHEN** implementation begins this lane
+- **THEN** each existing `std::net` or HTTP helper is classified as stable public API, compatibility-only API, or internal bridge
+- **AND** docs and examples use only stable public API names
+
+#### Scenario: A network feature is unsupported
+
+- **WHEN** TLS, DNS, bind, listen, connect, or socket behavior is unsupported on the host
+- **THEN** the helper returns `STATUS_UNSUPPORTED` or a more specific stable status
+- **AND** native linking does not fail because of unresolved optional network symbols

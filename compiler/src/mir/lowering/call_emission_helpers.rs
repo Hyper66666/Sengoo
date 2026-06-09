@@ -1,17 +1,73 @@
 use super::call_invocation_helpers::CallInvocationPlan;
 use super::*;
 
+fn runtime_async_wrapper_origin(func_name: &str) -> Option<&'static str> {
+    match func_name {
+        "spawn_blocking_future_i64" => Some("sengoo_async_spawn_blocking_i64"),
+        "channel_send_i64" => Some("sengoo_async_channel_send_i64"),
+        "channel_recv_i64" => Some("sengoo_async_channel_recv_i64"),
+        "mutex_lock_async" => Some("sengoo_async_mutex_lock_i64"),
+        _ => None,
+    }
+}
+
+fn runtime_async_wrapper_future_ty(func_name: &str) -> Option<MIRType> {
+    match func_name {
+        "spawn_blocking_future_i64" => Some(MIRType::Future(Box::new(MIR_I64))),
+        "channel_send_i64" => Some(MIRType::Future(Box::new(MIRType::Struct {
+            name: "ChannelSendOutcome".to_string(),
+            fields: vec![
+                ("is_ok".to_string(), MIR_BOOL),
+                ("error".to_string(), MIR_I64),
+            ],
+        }))),
+        "channel_recv_i64" => Some(MIRType::Future(Box::new(MIRType::Struct {
+            name: "ChannelRecvOutcome".to_string(),
+            fields: vec![
+                ("is_ok".to_string(), MIR_BOOL),
+                ("value".to_string(), MIR_I64),
+                ("error".to_string(), MIR_I64),
+            ],
+        }))),
+        "mutex_lock_async" => Some(MIRType::Future(Box::new(MIRType::Struct {
+            name: "MutexLockOutcome".to_string(),
+            fields: vec![
+                ("is_ok".to_string(), MIR_BOOL),
+                ("value".to_string(), MIR_I64),
+                ("error".to_string(), MIR_I64),
+            ],
+        }))),
+        _ => None,
+    }
+}
+
+fn runtime_async_start_origin(func_name: &str) -> Option<String> {
+    func_name
+        .strip_suffix("__start")
+        .filter(|name| name.starts_with("sengoo_async_"))
+        .map(|name| name.to_string())
+}
+
 pub(super) fn emit_call_from_plan(
     ctx: &mut LoweringContext<'_>,
     plan: CallInvocationPlan,
 ) -> Local {
     let CallInvocationPlan {
         actual_func,
-        local_ty,
+        mut local_ty,
         final_args,
-        future_origin,
+        mut future_origin,
         struct_type_name,
     } = plan;
+
+    if let Some(origin) = runtime_async_wrapper_origin(&actual_func) {
+        future_origin = Some(origin.to_string());
+        if let Some(future_ty) = runtime_async_wrapper_future_ty(&actual_func) {
+            local_ty = future_ty;
+        }
+    } else if let Some(origin) = runtime_async_start_origin(&actual_func) {
+        future_origin = Some(origin);
+    }
 
     let local = ctx.add_local(None, LocalKind::Temp, local_ty);
     if let Some(type_name) = struct_type_name {

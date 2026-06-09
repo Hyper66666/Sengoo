@@ -11,7 +11,7 @@ mod workspace;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use miette::{Context, Result};
-use resolver::{Graph, ResolveOptions};
+use resolver::{Graph, PackageSource, RegistryPackageMetadata, ResolveOptions};
 use runner::{BuildProfile, Toolchain};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -327,9 +327,19 @@ struct PublishArgs {
     #[arg(long)]
     output: Option<PathBuf>,
 
+    /// Output format.
+    #[arg(long, value_enum, default_value_t = PublishFormat::Human)]
+    format: PublishFormat,
+
     /// Require Sengoo.lock to be current before packaging.
     #[arg(long)]
     locked: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PublishFormat {
+    Human,
+    Json,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -459,9 +469,13 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::Metadata(args) => {
-            let graphs = load_graphs(
+            let graphs = load_graphs_with_options(
                 &args.manifest_path,
                 args.locked,
+                ResolveOptions {
+                    allow_yanked: true,
+                    ..ResolveOptions::default()
+                },
                 args.package.as_deref(),
                 args.workspace,
             )?;
@@ -491,12 +505,28 @@ fn main() -> Result<()> {
                     miette::bail!("--dry-run cannot be combined with --registry");
                 }
                 let artifact = package::publish_dry_run(&graph, args.output.as_deref())?;
-                println!("packaged {}", artifact.archive_path.display());
-                println!(
-                    "checksum {} {}",
-                    artifact.checksum,
-                    artifact.checksum_path.display()
-                );
+                match args.format {
+                    PublishFormat::Human => {
+                        println!("packaged {}", artifact.archive_path.display());
+                        println!(
+                            "checksum {} {}",
+                            artifact.checksum,
+                            artifact.checksum_path.display()
+                        );
+                    }
+                    PublishFormat::Json => {
+                        println!(
+                            "{}",
+                            render_publish_metadata_json(
+                                &graph,
+                                &artifact,
+                                None,
+                                args.package.as_deref(),
+                                args.locked
+                            )?
+                        );
+                    }
+                }
                 return Ok(());
             }
 
@@ -505,23 +535,60 @@ fn main() -> Result<()> {
             }
 
             let registry = args.registry.as_deref().unwrap_or("default");
+            let artifact = if matches!(args.format, PublishFormat::Json) {
+                Some(package::publish_dry_run(&graph, None)?)
+            } else {
+                None
+            };
             match package::publish_to_registry(&graph, registry)? {
-                package::RegistryPublishResult::Local(publish) => {
-                    println!(
-                        "published {} v{} to {} registry at {}",
-                        publish.name,
-                        publish.version,
-                        registry,
-                        publish.target_dir.display()
-                    );
-                }
-                package::RegistryPublishResult::Remote(publish) => {
-                    println!(
-                        "published {} v{} to remote registry {}",
-                        publish.name, publish.version, publish.endpoint
-                    );
-                    println!("checksum {}", publish.checksum);
-                }
+                package::RegistryPublishResult::Local(publish) => match args.format {
+                    PublishFormat::Human => {
+                        println!(
+                            "published {} v{} to {} registry at {}",
+                            publish.name,
+                            publish.version,
+                            registry,
+                            publish.target_dir.display()
+                        );
+                    }
+                    PublishFormat::Json => {
+                        println!(
+                            "{}",
+                            render_publish_metadata_json(
+                                &graph,
+                                artifact
+                                    .as_ref()
+                                    .expect("json publish should have artifact"),
+                                Some(registry),
+                                args.package.as_deref(),
+                                args.locked
+                            )?
+                        );
+                    }
+                },
+                package::RegistryPublishResult::Remote(publish) => match args.format {
+                    PublishFormat::Human => {
+                        println!(
+                            "published {} v{} to remote registry {}",
+                            publish.name, publish.version, publish.endpoint
+                        );
+                        println!("checksum {}", publish.checksum);
+                    }
+                    PublishFormat::Json => {
+                        println!(
+                            "{}",
+                            render_publish_metadata_json(
+                                &graph,
+                                artifact
+                                    .as_ref()
+                                    .expect("json publish should have artifact"),
+                                Some(registry),
+                                args.package.as_deref(),
+                                args.locked
+                            )?
+                        );
+                    }
+                },
             }
             Ok(())
         }
@@ -531,6 +598,7 @@ fn main() -> Result<()> {
                 false,
                 ResolveOptions {
                     refresh_git: args.refresh,
+                    ..ResolveOptions::default()
                 },
                 args.package.as_deref(),
                 args.workspace,
@@ -630,10 +698,13 @@ fn load_graphs(
 fn load_graphs_with_options(
     manifest_path: &Path,
     locked: bool,
-    options: ResolveOptions,
+    mut options: ResolveOptions,
     package: Option<&str>,
     workspace_all: bool,
 ) -> Result<Vec<Graph>> {
+    if locked {
+        options.allow_yanked = true;
+    }
     let selections = workspace::select_manifests(manifest_path, package, workspace_all)
         .with_context(|| format!("failed to select package from {}", manifest_path.display()))?;
     let mut graphs = Vec::new();
@@ -643,6 +714,9 @@ fn load_graphs_with_options(
     if locked && workspace_all {
         let workspace_manifest = resolver::resolve_manifest_path(manifest_path)?;
         lockfile::check_workspace_lockfile(&workspace_manifest, &graphs)?;
+        for graph in &graphs {
+            warn_locked_yanked_packages(graph);
+        }
     }
     Ok(graphs)
 }
@@ -650,10 +724,13 @@ fn load_graphs_with_options(
 fn resolve_graph(
     selection: workspace::SelectedManifest,
     locked: bool,
-    options: ResolveOptions,
+    mut options: ResolveOptions,
 ) -> Result<Graph> {
     let selected_manifest_path = selection.manifest_path;
     let inherited_registries = selection.inherited_registries;
+    if locked {
+        options.allow_yanked = true;
+    }
     let graph = if inherited_registries.is_empty() {
         Graph::from_root_with_options(&selected_manifest_path, options)
     } else {
@@ -667,8 +744,35 @@ fn resolve_graph(
     })?;
     if locked {
         lockfile::check_lockfile(&graph)?;
+        warn_locked_yanked_packages(&graph);
     }
     Ok(graph)
+}
+
+fn warn_locked_yanked_packages(graph: &Graph) {
+    for node in &graph.nodes {
+        let PackageSource::Registry {
+            registry,
+            version,
+            metadata,
+        } = &node.source
+        else {
+            continue;
+        };
+        if !metadata.yanked {
+            continue;
+        }
+        let reason = metadata
+            .yank_reason
+            .as_deref()
+            .filter(|reason| !reason.trim().is_empty())
+            .map(|reason| format!(": {}", reason))
+            .unwrap_or_default();
+        eprintln!(
+            "warning: locked registry package '{}' version {} from registry '{}' is yanked{}; run sgpm update after adjusting the dependency constraint",
+            node.name, version, registry, reason
+        );
+    }
 }
 
 fn print_graphs(graphs: &[Graph]) {
@@ -696,19 +800,76 @@ struct MetadataPayload {
     root: Option<String>,
     roots: Vec<String>,
     packages: Vec<MetadataPackage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dependencies: Vec<MetadataDependency>,
 }
 
 #[derive(Serialize)]
 struct MetadataPackage {
+    id: String,
     name: String,
     version: String,
-    source: String,
+    source: MetadataSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    yanked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    yank_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    features: Option<Vec<String>>,
     manifest: String,
     root: String,
     entry: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tests: Vec<String>,
-    dependencies: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct MetadataSource {
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rev: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registry: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MetadataDependency {
+    from: String,
+    alias: String,
+    to: String,
+}
+
+#[derive(Serialize)]
+struct PublishMetadataPayload {
+    schema_version: u32,
+    package: PublishPackageIdentity,
+    manifest: String,
+    archive_path: String,
+    checksum_path: String,
+    sha256: String,
+    included_file_count: usize,
+    excluded_file_count: usize,
+    lockfile: PublishLockfileStatus,
+    registry: Option<String>,
+    workspace_package: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PublishPackageIdentity {
+    name: String,
+    version: String,
+}
+
+#[derive(Serialize)]
+struct PublishLockfileStatus {
+    path: String,
+    status: String,
 }
 
 fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
@@ -718,6 +879,8 @@ fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
     let mut roots = Vec::new();
     let mut seen = BTreeSet::new();
     let mut packages = Vec::new();
+    let mut dependencies = Vec::new();
+    let mut seen_edges = BTreeSet::new();
     for graph in graphs {
         let root = graph
             .root_package()
@@ -728,9 +891,14 @@ fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
                 continue;
             }
             packages.push(MetadataPackage {
+                id: node.id.clone(),
                 name: node.name.clone(),
                 version: node.manifest.package.version.clone(),
-                source: metadata_source(node),
+                source: metadata_source(&root.root_dir, node),
+                yanked: registry_metadata(node).map(|metadata| metadata.yanked),
+                yank_reason: registry_metadata(node)
+                    .and_then(|metadata| metadata.yank_reason.clone()),
+                features: registry_metadata(node).map(|metadata| metadata.features.clone()),
                 manifest: slash_path(&node.manifest_path),
                 root: slash_path(&node.root_dir),
                 entry: slash_path(&node.entry_path),
@@ -740,12 +908,20 @@ fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
                     .iter()
                     .map(|target| slash_path(&target.path))
                     .collect(),
-                dependencies: node.manifest.dependencies.keys().cloned().collect(),
             });
+        }
+        for edge in &graph.edges {
+            if seen_edges.insert((edge.from.clone(), edge.alias.clone(), edge.to.clone())) {
+                dependencies.push(MetadataDependency {
+                    from: edge.from.clone(),
+                    alias: edge.alias.clone(),
+                    to: edge.to.clone(),
+                });
+            }
         }
     }
     let payload = MetadataPayload {
-        schema_version: 1,
+        schema_version: 2,
         workspace: graphs.len() > 1,
         root: if graphs.len() == 1 {
             roots.first().cloned()
@@ -754,18 +930,81 @@ fn render_metadata_json(graphs: &[Graph]) -> Result<String> {
         },
         roots,
         packages,
+        dependencies,
     };
     serde_json::to_string_pretty(&payload)
         .map_err(|err| miette::miette!("failed to encode metadata json: {}", err))
 }
 
-fn metadata_source(node: &resolver::PackageNode) -> String {
+fn render_publish_metadata_json(
+    graph: &Graph,
+    artifact: &package::PackageArtifact,
+    registry: Option<&str>,
+    workspace_package: Option<&str>,
+    locked: bool,
+) -> Result<String> {
+    let root = graph
+        .root_package()
+        .ok_or_else(|| miette::miette!("dependency graph has no root package"))?;
+    let lockfile_path = root.root_dir.join("Sengoo.lock");
+    let payload = PublishMetadataPayload {
+        schema_version: 1,
+        package: PublishPackageIdentity {
+            name: root.name.clone(),
+            version: root.manifest.package.version.clone(),
+        },
+        manifest: slash_path(&root.manifest_path),
+        archive_path: slash_path(&artifact.archive_path),
+        checksum_path: slash_path(&artifact.checksum_path),
+        sha256: artifact.checksum.clone(),
+        included_file_count: artifact.included_file_count,
+        excluded_file_count: artifact.excluded_file_count,
+        lockfile: PublishLockfileStatus {
+            path: slash_path(&lockfile_path),
+            status: if locked { "current" } else { "unchecked" }.to_string(),
+        },
+        registry: registry.map(str::to_string),
+        workspace_package: workspace_package.map(str::to_string),
+    };
+    serde_json::to_string_pretty(&payload)
+        .map_err(|err| miette::miette!("failed to encode publish metadata json: {}", err))
+}
+
+fn metadata_source(base_dir: &Path, node: &resolver::PackageNode) -> MetadataSource {
     match &node.source {
-        resolver::PackageSource::Path => "path".to_string(),
-        resolver::PackageSource::Git { url, rev } => format!("git+{}#{}", url, rev),
-        resolver::PackageSource::Registry { registry, version } => {
-            format!("registry+{}/{}@{}", registry, node.name, version)
-        }
+        resolver::PackageSource::Path => MetadataSource {
+            kind: "path".to_string(),
+            path: Some(resolver::canonical_path_source(base_dir, &node.root_dir)),
+            url: None,
+            rev: None,
+            registry: None,
+            version: None,
+        },
+        resolver::PackageSource::Git { url, rev } => MetadataSource {
+            kind: "git".to_string(),
+            path: None,
+            url: Some(url.clone()),
+            rev: Some(rev.clone()),
+            registry: None,
+            version: None,
+        },
+        resolver::PackageSource::Registry {
+            registry, version, ..
+        } => MetadataSource {
+            kind: "registry".to_string(),
+            path: None,
+            url: None,
+            rev: None,
+            registry: Some(registry.clone()),
+            version: Some(version.clone()),
+        },
+    }
+}
+
+fn registry_metadata(node: &resolver::PackageNode) -> Option<&RegistryPackageMetadata> {
+    match &node.source {
+        resolver::PackageSource::Registry { metadata, .. } => Some(metadata),
+        _ => None,
     }
 }
 

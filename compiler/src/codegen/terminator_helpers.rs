@@ -21,16 +21,15 @@ impl Codegen {
                         self.emit_indent();
 
                         self.ir.push_str("ret i64 0\n");
+                    } else if matches!(mir_fn.return_type, MIRType::Unit | MIRType::Never) {
+                        self.emit_indent();
+
+                        self.ir.push_str("ret void\n");
                     } else {
                         // Non-unit returns use operand_value to resolve the return register.
                         let reg = self.operand_value(*v, mir_fn);
 
-                        // Unit values are represented as i8 0 instead of LLVM void here.
-                        let llvm_ty = if matches!(ty, MIRType::Unit) {
-                            "i8".to_string()
-                        } else {
-                            self.mir_type_to_llvm_cached(ty)
-                        };
+                        let llvm_ty = self.mir_type_to_llvm_cached(ty);
 
                         self.emit_indent();
 

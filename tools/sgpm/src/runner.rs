@@ -321,21 +321,32 @@ fn module_map_value(
     node: &PackageNode,
     include_current: bool,
 ) -> Result<Option<OsString>> {
-    let entries = graph
-        .nodes
-        .iter()
-        .take_while(|candidate| candidate.manifest_path != node.manifest_path)
-        .chain(include_current.then_some(node))
-        .filter_map(|candidate| {
-            let lib = candidate.manifest.lib.as_ref()?;
-            PathBuf::from(format!(
+    let mut entries = Vec::new();
+    for edge in &graph.edges {
+        if edge.from != node.id {
+            continue;
+        }
+        let Some(dep) = graph.node_by_id(&edge.to) else {
+            continue;
+        };
+        let Some(lib) = dep.manifest.lib.as_ref() else {
+            continue;
+        };
+        entries.push(format!(
+            "{}={}",
+            edge.alias,
+            portable_path(&dep.root_dir.join(&lib.path))
+        ));
+    }
+    if include_current {
+        if let Some(lib) = node.manifest.lib.as_ref() {
+            entries.push(format!(
                 "{}={}",
-                candidate.name,
-                portable_path(&candidate.root_dir.join(&lib.path))
-            ))
-            .into()
-        })
-        .collect::<Vec<_>>();
+                node.name,
+                portable_path(&node.root_dir.join(&lib.path))
+            ));
+        }
+    }
     if entries.is_empty() {
         return Ok(None);
     }
@@ -503,6 +514,7 @@ mod tests {
     #[test]
     fn package_output_uses_profile_directory() {
         let node = PackageNode {
+            id: "demo@0.1.0+path:.".to_string(),
             name: "demo".to_string(),
             manifest_path: PathBuf::from("Sengoo.toml"),
             root_dir: PathBuf::from("pkg"),

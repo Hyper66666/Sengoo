@@ -12,12 +12,26 @@ crate-type = ["rlib", "staticlib"]
 # 错误处理
 thiserror = { workspace = true }
 
-# Python 互操作
+# Python 互操作 (optional; enabled by `python` feature)
 pyo3 = { workspace = true, optional = true }
 
 # 序列化
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# TLS (platform-specific backends; see openspec/changes/stdlib-https-tls/design.md)
+[target.'cfg(windows)'.dependencies]
+native-tls = "0.2"
+
+[target.'cfg(not(windows))'.dependencies]
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+rustls-native-certs = "0.8"
+rustls-pki-types = "1"
+
+[dev-dependencies]
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+rustls-pki-types = "1"
 
 [features]
 default = []

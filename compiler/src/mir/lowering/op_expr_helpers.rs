@@ -4,6 +4,10 @@ fn is_string_ptr(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
 }
 
+fn is_async_context_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Struct { name, .. } if name == "AsyncContext")
+}
+
 pub(super) fn lower_unary_expr(
     ctx: &mut LoweringContext<'_>,
     op: &hir::HIRUnaryOp,
@@ -125,6 +129,14 @@ pub(super) fn lower_binary_expr(
 
     let (left_local, right_local) = ctx.reconcile_binary_operand_types(left_local, right_local);
     let operand_ty = ctx.get_local_type(left_local).clone();
+    if mir_op.is_comparison()
+        && (is_async_context_type(ctx.get_local_type(left_local))
+            || is_async_context_type(ctx.get_local_type(right_local)))
+    {
+        ctx.errors
+            .push("AsyncContext is poll-scoped and cannot be compared".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    }
     let result_ty = match mir_op {
         MirBinOp::Eq
         | MirBinOp::Ne
