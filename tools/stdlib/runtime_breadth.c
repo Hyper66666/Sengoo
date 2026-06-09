@@ -1102,6 +1102,11 @@ long long sengoo_tcp_close(long long handle) {
     return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
 }
 
+long long sengoo_tcp_poll_readable(long long handle) {
+    (void)handle;
+    return 0;
+}
+
 long long sengoo_udp_bind(long long host, long long port) {
     (void)host;
     (void)port;

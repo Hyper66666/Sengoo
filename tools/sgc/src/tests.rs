@@ -656,6 +656,53 @@ def main() -> i64 {
 }
 
 #[test]
+fn native_runtime_bundle_exports_tcp_readiness_fallback_for_async_runtime() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+extern "C" {
+    fn sengoo_tcp_poll_readable(handle: i64) -> i64;
+}
+
+def main() -> i64 {
+    sengoo_tcp_poll_readable(0)
+}
+"#;
+    let llvm_ir = compile_source(source, 1).expect("tcp readiness probe should compile");
+    let ll_path = temp_artifact("runtime-tcp-readiness-fallback", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("runtime-tcp-readiness-fallback-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
+
+    let exe_path = temp_artifact(
+        "runtime-tcp-readiness-fallback",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 1, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("tcp readiness fallback probe should run");
+    assert_eq!(output.status.code(), Some(0));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn openspec_acceptance_scripts_target_real_test_filters() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
