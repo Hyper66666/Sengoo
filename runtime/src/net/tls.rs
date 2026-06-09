@@ -311,6 +311,8 @@ mod tests {
                 let _ = tls.read(&mut req);
                 let _ = tls.write_all(response);
                 let _ = tls.flush();
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
             }
         });
 
@@ -391,7 +393,7 @@ mod tests {
         let _guard = tls_test_guard();
         use crate::net::{
             sengoo_http_body_copy, sengoo_http_body_len, sengoo_http_close, sengoo_http_get,
-            sengoo_http_status,
+            sengoo_http_status, sengoo_net_last_error,
         };
 
         let bundle = build_test_cert_bundle();
@@ -402,7 +404,8 @@ mod tests {
         let handle = sengoo_http_get(url.as_ptr(), 5_000);
         assert!(
             handle != 0,
-            "https get should succeed against trusted fixture"
+            "https get should succeed against trusted fixture, last_error={}",
+            sengoo_net_last_error()
         );
         assert_eq!(sengoo_http_status(handle), 200);
         assert_eq!(sengoo_http_body_len(handle), 5);
