@@ -610,11 +610,6 @@ mod tests {
     define_test_result_dispatch!(sengoo_async_result_dispatch_f32, f32, 3.5);
     define_test_result_dispatch!(sengoo_async_result_dispatch_f64, f64, 3.5);
 
-    #[no_mangle]
-    pub extern "C" fn sengoo_tcp_poll_readable(_handle: u64) -> i64 {
-        0
-    }
-
     struct CountDownTask(u8);
 
     impl CoroutineTask for CountDownTask {

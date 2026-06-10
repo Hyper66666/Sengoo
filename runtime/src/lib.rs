@@ -4,8 +4,13 @@
 
 pub mod async_runtime;
 pub mod error;
-#[cfg(not(feature = "native-bridge"))]
+// `net` stays available in every build (including the `native-bridge`
+// staticlib linked by `sgc`) so compiled Sengoo programs get the real
+// network/HTTP server implementation instead of the C fallback stubs.
 pub mod net;
+// `reflect` ships C implementations in `tools/stdlib/runtime.c` for the sgc
+// link path, so the Rust twin stays out of the `native-bridge` staticlib to
+// avoid duplicate-symbol clashes.
 #[cfg(not(feature = "native-bridge"))]
 pub mod reflect;
 

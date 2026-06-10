@@ -1,0 +1,23 @@
+import std::net;
+
+import std::status;
+
+def echo_one(server: HttpServer) -> bool {
+    let request_result = server.next_request(5000);
+    let timed_out = if request_result.is_ok { false; } else { request_result.error == STATUS_TIMEOUT(); };
+    let buffer = ffi_buffer_new(1024).unwrap_or(Buffer { handle: 0 });
+    let request = request_result.value;
+    let copied = if request_result.is_ok { request.body_copy(buffer).unwrap_or(0); } else { 0; };
+    let answered = if request_result.is_ok { request.respond_raw(200, buffer.ptr(), copied).unwrap_or(false); } else { false; };
+    buffer.free();
+    answered or timed_out;
+}
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
+    let served = if bind_result.is_ok { echo_one(bind_result.value); } else { false; };
+    let closed = if bind_result.is_ok { bind_result.value.close(); } else { true; };
+    let healthy = served and closed;
+    if healthy or unsupported_host { 0; } else { 1; };
+}

@@ -26,6 +26,22 @@ extern "C" {
     fn sengoo_http_server_add_ws_echo_route(handle: i64, path_pattern: i64) -> i64;
     fn sengoo_http_server_serve_once(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_http_server_close(handle: i64) -> i64;
+    fn sengoo_http_server_next_request(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_request_method_len(handle: i64) -> i64;
+    fn sengoo_http_request_method_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_path_len(handle: i64) -> i64;
+    fn sengoo_http_request_path_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_query_len(handle: i64) -> i64;
+    fn sengoo_http_request_query_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_version_len(handle: i64) -> i64;
+    fn sengoo_http_request_version_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_header_len(handle: i64, name: i64) -> i64;
+    fn sengoo_http_request_header_copy(handle: i64, name: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_body_len(handle: i64) -> i64;
+    fn sengoo_http_request_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
+    fn sengoo_http_request_respond(handle: i64, status: i64, body: i64, body_len: i64) -> i64;
+    fn sengoo_http_request_respond_with_content_type(handle: i64, status: i64, content_type: i64, body: i64, body_len: i64) -> i64;
+    fn sengoo_http_request_close(handle: i64) -> i64;
     fn sengoo_ws_connect(url: i64, timeout_ms: i64) -> i64;
     fn sengoo_ws_send_text(handle: i64, data: i64, len: i64) -> i64;
     fn sengoo_ws_recv_text(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
@@ -50,6 +66,10 @@ struct HttpClient {
 }
 
 struct HttpServer {
+    handle: i64,
+}
+
+struct HttpServerRequest {
     handle: i64,
 }
 
@@ -331,8 +351,252 @@ impl HttpServer {
         }
     }
 
+    // Pull the next dynamic request. Static routes, ws-echo routes, and
+    // require-header middleware are answered inline before anything surfaces
+    // here; timeout expiry maps to STATUS_TIMEOUT.
+    def next_request(self, timeout_ms: i64) -> Result<HttpServerRequest, i64> {
+        let handle = sengoo_http_server_next_request(self.handle, timeout_ms);
+        if handle != 0 {
+            Result { is_ok: true, value: HttpServerRequest { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
+        }
+    }
+
     def close(self) -> bool {
         sengoo_http_server_close(self.handle) != 0
+    }
+}
+
+def http_request_i64_result(value: i64) -> Result<i64, i64> {
+    if value >= 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: net_last_status() }
+    }
+}
+
+impl HttpServerRequest {
+    def method_len(self) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_method_len(self.handle))
+    }
+
+    def method_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    def method_string(self) -> Result<String, i64> {
+        let len = sengoo_http_request_method_len(self.handle);
+        if len < 0 {
+            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+        } else {
+            let buffer_result = ffi_buffer_new(len + 1);
+            if buffer_result.is_ok {
+                let buffer = buffer_result.value;
+                let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
+                if copied >= 0 {
+                    let owned = string_from_buffer(buffer, copied);
+                    buffer.free();
+                    owned
+                } else {
+                    buffer.free();
+                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            }
+        }
+    }
+
+    def path_len(self) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_path_len(self.handle))
+    }
+
+    def path_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    def path_string(self) -> Result<String, i64> {
+        let len = sengoo_http_request_path_len(self.handle);
+        if len < 0 {
+            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+        } else {
+            let buffer_result = ffi_buffer_new(len + 1);
+            if buffer_result.is_ok {
+                let buffer = buffer_result.value;
+                let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
+                if copied >= 0 {
+                    let owned = string_from_buffer(buffer, copied);
+                    buffer.free();
+                    owned
+                } else {
+                    buffer.free();
+                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            }
+        }
+    }
+
+    def query_len(self) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_query_len(self.handle))
+    }
+
+    def query_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    def query_string(self) -> Result<String, i64> {
+        let len = sengoo_http_request_query_len(self.handle);
+        if len < 0 {
+            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+        } else {
+            let buffer_result = ffi_buffer_new(len + 1);
+            if buffer_result.is_ok {
+                let buffer = buffer_result.value;
+                let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
+                if copied >= 0 {
+                    let owned = string_from_buffer(buffer, copied);
+                    buffer.free();
+                    owned
+                } else {
+                    buffer.free();
+                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            }
+        }
+    }
+
+    def version_len(self) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_version_len(self.handle))
+    }
+
+    def version_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    def version_string(self) -> Result<String, i64> {
+        let len = sengoo_http_request_version_len(self.handle);
+        if len < 0 {
+            Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+        } else {
+            let buffer_result = ffi_buffer_new(len + 1);
+            if buffer_result.is_ok {
+                let buffer = buffer_result.value;
+                let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
+                if copied >= 0 {
+                    let owned = string_from_buffer(buffer, copied);
+                    buffer.free();
+                    owned
+                } else {
+                    buffer.free();
+                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            }
+        }
+    }
+
+    // Absent headers map to STATUS_NOT_FOUND; an empty value is Ok with len 0.
+    def header_len(self, name: &str) -> Result<i64, i64> {
+        let len = sengoo_http_request_header_len(self.handle, sengoo_stdlib_str_ptr(name));
+        if len >= 0 {
+            Result { is_ok: true, value: len, error: 0 }
+        } else if net_last_error() == 0 {
+            Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }
+        } else {
+            Result { is_ok: false, value: 0, error: net_last_status() }
+        }
+    }
+
+    def header_copy(self, name: &str, buffer: Buffer) -> Result<i64, i64> {
+        let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
+        if copied >= 0 {
+            Result { is_ok: true, value: copied, error: 0 }
+        } else if net_last_error() == 0 {
+            Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }
+        } else {
+            Result { is_ok: false, value: 0, error: net_last_status() }
+        }
+    }
+
+    def header_string(self, name: &str) -> Result<String, i64> {
+        let len = sengoo_http_request_header_len(self.handle, sengoo_stdlib_str_ptr(name));
+        if len < 0 {
+            if net_last_error() == 0 {
+                Result { is_ok: false, value: String { handle: 0 }, error: STATUS_NOT_FOUND() }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+            }
+        } else {
+            let buffer_result = ffi_buffer_new(len + 1);
+            if buffer_result.is_ok {
+                let buffer = buffer_result.value;
+                let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
+                if copied >= 0 {
+                    let owned = string_from_buffer(buffer, copied);
+                    buffer.free();
+                    owned
+                } else {
+                    buffer.free();
+                    Result { is_ok: false, value: String { handle: 0 }, error: net_last_status() }
+                }
+            } else {
+                Result { is_ok: false, value: String { handle: 0 }, error: buffer_result.error }
+            }
+        }
+    }
+
+    def body_len(self) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_body_len(self.handle))
+    }
+
+    def body_copy(self, buffer: Buffer) -> Result<i64, i64> {
+        http_request_i64_result(sengoo_http_request_body_copy(self.handle, buffer.ptr(), buffer.len()))
+    }
+
+    // Answers the request exactly once: writes the response, closes the
+    // connection, and invalidates this handle.
+    def respond(self, status: i64, body: &str) -> Result<bool, i64> {
+        let written = sengoo_http_request_respond(self.handle, status, sengoo_stdlib_str_ptr(body), body.len());
+        if written != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def respond_with_content_type(self, status: i64, content_type: &str, body: &str) -> Result<bool, i64> {
+        let written = sengoo_http_request_respond_with_content_type(
+            self.handle,
+            status,
+            sengoo_stdlib_str_ptr(content_type),
+            sengoo_stdlib_str_ptr(body),
+            body.len()
+        );
+        if written != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def respond_raw(self, status: i64, body_ptr: i64, body_len: i64) -> Result<bool, i64> {
+        let written = sengoo_http_request_respond(self.handle, status, body_ptr, body_len);
+        if written != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    // Closing an unanswered request first writes a deterministic 504 fallback.
+    def close(self) -> bool {
+        sengoo_http_request_close(self.handle) != 0
     }
 }
 

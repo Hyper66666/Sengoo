@@ -336,12 +336,16 @@ pub fn run_network_benchmark_report(
     })
 }
 
+/// Returns the error code widened to `i64` so negative bench codes survive
+/// the stdlib extern ABI (`-> i64`) without zero-extension corruption.
 #[no_mangle]
-pub extern "C" fn sengoo_net_bench_last_error_code() -> i32 {
-    net_bench_last_error()
-        .lock()
-        .map(|state| state.code)
-        .unwrap_or(SENGOO_NET_BENCH_ERR_INTERNAL)
+pub extern "C" fn sengoo_net_bench_last_error_code() -> i64 {
+    i64::from(
+        net_bench_last_error()
+            .lock()
+            .map(|state| state.code)
+            .unwrap_or(SENGOO_NET_BENCH_ERR_INTERNAL),
+    )
 }
 
 #[no_mangle]
@@ -362,9 +366,9 @@ pub extern "C" fn sengoo_net_bench_last_error_copy(buffer: *mut u8, capacity: us
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_net_bench_last_error_clear() -> i32 {
+pub extern "C" fn sengoo_net_bench_last_error_clear() -> i64 {
     clear_error();
-    SENGOO_NET_BENCH_OK
+    i64::from(SENGOO_NET_BENCH_OK)
 }
 
 #[no_mangle]

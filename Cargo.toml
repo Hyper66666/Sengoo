@@ -54,3 +54,12 @@ debug = false
 lto = true
 strip = true
 codegen-units = 1
+
+# Profile for the sengoo-runtime staticlib linked into compiled Sengoo
+# programs. Keeps per-module codegen units (no LTO merge) so the linker can
+# extract net/async members independently: a non-async program that uses
+# std::net must not drag in async-bridge externs it never defines.
+[profile.staticlib]
+inherits = "release"
+lto = false
+codegen-units = 256

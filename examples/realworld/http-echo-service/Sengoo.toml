@@ -1,0 +1,8 @@
+[package]
+name = "http-echo-service"
+version = "0.1.0"
+edition = "2026"
+description = "Realworld dynamic HTTP echo service using std::net pull-based serving."
+
+[bin]
+path = "src/main.sg"

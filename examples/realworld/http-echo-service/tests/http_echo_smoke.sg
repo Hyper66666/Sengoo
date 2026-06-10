@@ -1,0 +1,23 @@
+import std::net;
+
+import std::status;
+
+def native_pull_contract(server: HttpServer) -> bool {
+    let port = server.local_port().unwrap_or(0);
+    let timeout_result = server.next_request(60);
+    let timeout_mapped = if timeout_result.is_ok { false; } else { timeout_result.error == STATUS_TIMEOUT(); };
+    let stale = HttpServerRequest { handle: 0 };
+    let stale_len = stale.method_len();
+    let stale_mapped = if stale_len.is_ok { false; } else { stale_len.error == STATUS_INVALID_HANDLE(); };
+    let stale_respond = stale.respond(200, "x");
+    let respond_mapped = if stale_respond.is_ok { false; } else { stale_respond.error == STATUS_INVALID_HANDLE(); };
+    let closed = server.close();
+    port > 0 and timeout_mapped and stale_mapped and respond_mapped and closed;
+}
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
+    let native_ok = if bind_result.is_ok { native_pull_contract(bind_result.value); } else { false; };
+    if native_ok or unsupported_host { 0; } else { 2; };
+}
