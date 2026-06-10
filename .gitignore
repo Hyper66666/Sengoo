@@ -1,7 +1,7 @@
 # Rust build artifacts
 /target/
 **/target/
-Cargo.lock
+# Applications in this workspace use a committed lockfile for reproducible builds.
 
 # Editor / IDE
 .idea/

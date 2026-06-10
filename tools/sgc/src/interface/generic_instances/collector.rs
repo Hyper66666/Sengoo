@@ -440,7 +440,9 @@ pub(super) fn collect_generic_instances_in_stmt(
     callable_meta: &HashMap<String, GenericCallableMeta>,
 ) {
     match &stmt.kind {
-        StmtKind::Let { name, ty, value } => {
+        StmtKind::Let {
+            name, ty, value, ..
+        } => {
             if let Some(value) = value.as_deref() {
                 collect_generic_instances_in_expr(
                     out,

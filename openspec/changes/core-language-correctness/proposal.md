@@ -69,9 +69,7 @@ stay green in CI**, and aligns those semantics with mainstream expectations.
 
 ## Impact
 
-- OpenSpec planning artifact only in this change-creation task; no compiler or
-  runtime code is modified here.
-- Future implementation will touch `compiler/src/mir/lowering.rs`,
+- Implementation touches `compiler/src/mir/lowering/`,
   `compiler/src/codegen/` (LLVM IR emission), `compiler/src/parser/`,
   `compiler/src/typeck/`, `compiler/src/hir/`, `tools/sgc/` (example/conformance
   harness), `tools/sglsp/` (diagnostic parity), `.github/` (CI), `Cargo.lock`,

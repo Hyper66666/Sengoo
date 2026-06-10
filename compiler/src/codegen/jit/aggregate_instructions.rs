@@ -111,19 +111,6 @@ impl JITCodegen {
                     discr_loaded, discr_reg
                 ));
 
-                let payload_loaded = if let Some(payload_local) = fields.get(1) {
-                    let payload_reg = self.local_reg(*payload_local);
-                    let payload_loaded = format!("%.enum.payload.{}", destination.id);
-                    self.emit_indent();
-                    self.ir.push_str(&format!(
-                        "{} = load i64, i64* {}\n",
-                        payload_loaded, payload_reg
-                    ));
-                    payload_loaded
-                } else {
-                    "0".to_string()
-                };
-
                 self.emit_indent();
                 self.ir
                     .push_str(&format!("{} = alloca {}\n", dest, llvm_enum_ty));
@@ -138,17 +125,36 @@ impl JITCodegen {
                 self.ir
                     .push_str(&format!("store i64 {}, i64* {}\n", discr_loaded, discr_ptr));
 
-                let payload_ptr = format!("%.ptr.{}.1", destination.id);
-                self.emit_indent();
-                self.ir.push_str(&format!(
-                    "{} = getelementptr {}, {}* {}, i32 0, i32 1\n",
-                    payload_ptr, llvm_enum_ty, llvm_enum_ty, dest
-                ));
-                self.emit_indent();
-                self.ir.push_str(&format!(
-                    "store i64 {}, i64* {}\n",
-                    payload_loaded, payload_ptr
-                ));
+                if let Some(payload_local) = fields.get(1) {
+                    let payload_ty = self.get_local_type(mir_fn, *payload_local);
+                    let llvm_payload_ty = self.mir_type_to_llvm_str(&payload_ty);
+                    let payload_reg = self.local_reg(*payload_local);
+                    let payload_loaded = format!("%.enum.payload.{}", destination.id);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = load {}, {}* {}\n",
+                        payload_loaded, llvm_payload_ty, llvm_payload_ty, payload_reg
+                    ));
+
+                    let payload_bytes = format!("%.ptr.{}.1", destination.id);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                        payload_bytes, llvm_enum_ty, llvm_enum_ty, dest
+                    ));
+                    let payload_ptr = format!("%.ptr.{}.1.typed", destination.id);
+                    let payload_size = crate::codegen::common::enum_payload_storage_size(ty);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = bitcast [{} x i8]* {} to {}*\n",
+                        payload_ptr, payload_size, payload_bytes, llvm_payload_ty
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        llvm_payload_ty, payload_loaded, llvm_payload_ty, payload_ptr
+                    ));
+                }
             }
             _ => {
                 // 鍏朵粬鑱氬悎绫诲瀷锛堢粨鏋勪綋绛夛級

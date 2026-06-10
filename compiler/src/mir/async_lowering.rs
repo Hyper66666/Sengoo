@@ -344,7 +344,7 @@ fn synthesize_poll(
         Err(reason) => {
             let _ = (bb0, state, result_storage_ty, n_states);
             Err(CompileError::Codegen(format!(
-                "async frame lowering requires await control flow that can be expressed with suspend points, self-looping pending blocks, and goto/if/switch/return edges; {}",
+                "async frame lowering requires await control flow that can be expressed with suspend points, self-looping pending blocks, and goto/if/switch/return/unreachable edges; {}",
                 reason.describe()
             )))
         }

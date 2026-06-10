@@ -66,7 +66,11 @@ impl TypeChecker {
             let mut param_types = Vec::new();
             for param in &fn_decl.params {
                 let ty = self.check_type(&param.ty).map_err(CompileError::from)?;
-                self.env.insert_var(param.name.name.clone(), ty.clone());
+                self.env.insert_var_with_mutability(
+                    param.name.name.clone(),
+                    ty.clone(),
+                    param.is_mut,
+                );
                 param_types.push(ty);
             }
 
@@ -103,7 +107,8 @@ impl TypeChecker {
         let mut param_types = Vec::new();
         for param in &fn_decl.params {
             let ty = self.check_type(&param.ty)?;
-            self.env.insert_var(param.name.name.clone(), ty.clone());
+            self.env
+                .insert_var_with_mutability(param.name.name.clone(), ty.clone(), param.is_mut);
             param_types.push(ty);
         }
 
@@ -349,7 +354,7 @@ impl TypeChecker {
         self.env.push_scope();
         self.bind_type_params_with_meta(&method.type_params)?;
 
-        if method.self_param.is_some() {
+        if let Some(self_param) = method.self_param {
             let self_ty = self
                 .env
                 .lookup(class_name)
@@ -361,12 +366,14 @@ impl TypeChecker {
                         args: vec![],
                     })
                 });
-            self.env.insert_var("self".to_string(), self_ty);
+            self.env
+                .insert_var_with_mutability("self".to_string(), self_ty, self_param.is_mut());
         }
 
         for param in &method.params {
             let ty = self.check_type(&param.ty)?;
-            self.env.insert_var(param.name.name.clone(), ty);
+            self.env
+                .insert_var_with_mutability(param.name.name.clone(), ty, param.is_mut);
         }
 
         let ret_ty = if let Some(ret) = &method.return_type {

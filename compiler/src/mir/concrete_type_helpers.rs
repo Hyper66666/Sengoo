@@ -105,6 +105,11 @@ pub(crate) fn collect_concrete_named_types_from_expr(
                 collect_concrete_named_types_from_expr(arg, known_named_types, out);
             }
         }
+        HIRExpr::EnumConstruct { args, .. } => {
+            for arg in args {
+                collect_concrete_named_types_from_expr(arg, known_named_types, out);
+            }
+        }
         HIRExpr::MethodCall { receiver, args, .. } => {
             collect_concrete_named_types_from_expr(receiver, known_named_types, out);
             for arg in args {

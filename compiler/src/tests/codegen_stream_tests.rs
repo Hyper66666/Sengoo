@@ -41,8 +41,8 @@ def abs(x: i64) -> i64 {
 }
 
 def sum_to(n: i64) -> i64 {
-    let i = 0;
-    let acc = 0;
+    let mut i = 0;
+    let mut acc = 0;
     while i < n {
         acc = acc + i;
         i = i + 1;

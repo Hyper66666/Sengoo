@@ -19,6 +19,9 @@ pub struct HIRTypeParamBound {
 
 /// HIR 项
 #[derive(Debug, Clone)]
+// Boxing HIRFunction would ripple through the compiler ownership model; the
+// top-level item list is short-lived and benefits from the current direct API.
+#[allow(clippy::large_enum_variant)]
 pub enum HIRItem {
     Function(HIRFunction),
     ExternBlock(HIRExternBlock),

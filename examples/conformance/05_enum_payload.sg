@@ -1,0 +1,16 @@
+// Core conformance: payload enum construction and match extraction.
+// Run: sgc run examples/conformance/05_enum_payload.sg
+// Expected exit code: 42
+
+enum Maybe { Vacant, Value(i64) }
+
+def unwrap(value: Maybe) -> i64 {
+    match value {
+        Maybe::Vacant => 0,
+        Maybe::Value(inner) => inner,
+    }
+}
+
+def main() -> i64 {
+    unwrap(Maybe::Value(42))
+}

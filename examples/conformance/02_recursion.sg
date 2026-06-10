@@ -1,0 +1,15 @@
+// Core conformance: recursive function calls.
+// Run: sgc run examples/conformance/02_recursion.sg
+// Expected exit code: 13
+
+def fibonacci(value: i64) -> i64 {
+    if value < 2 {
+        value
+    } else {
+        fibonacci(value - 1) + fibonacci(value - 2)
+    }
+}
+
+def main() -> i64 {
+    fibonacci(7)
+}

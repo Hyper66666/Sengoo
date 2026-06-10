@@ -65,6 +65,13 @@ pub enum HIRExpr {
         site_lo: Option<u32>,
     },
 
+    EnumConstruct {
+        enum_name: String,
+        variant_name: String,
+        discriminant: u32,
+        args: Vec<HIRExpr>,
+    },
+
     /// 方法调用
     MethodCall {
         receiver: Box<HIRExpr>,

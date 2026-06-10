@@ -69,14 +69,16 @@ pub(super) fn lower_enum_match_expr(
 
     let arm_blocks: Vec<usize> = arms.iter().map(|_| ctx.new_block()).collect();
     let join_block = ctx.new_block();
+    let unreachable_block = ctx.new_block();
 
-    let switch_plan = build_match_switch_plan(arms, &arm_blocks, join_block);
+    let switch_plan = build_match_switch_plan(arms, &arm_blocks, unreachable_block);
 
     ctx.set_terminator(Terminator::Switch {
         discr: discr_local,
         targets: switch_plan.targets,
         otherwise: switch_plan.otherwise_block,
     });
+    ctx.mir_fn.basic_blocks[unreachable_block].set_terminator(Terminator::Unreachable);
 
     let mut incoming_values: Vec<(Local, usize)> = Vec::new();
     for (i, arm) in arms.iter().enumerate() {

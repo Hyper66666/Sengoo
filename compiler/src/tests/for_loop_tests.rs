@@ -65,7 +65,7 @@ def main() -> i64 {
 fn test_nested_for_loops_compile() {
     let source = r#"
 def main() -> i64 {
-    let sum = 0;
+    let mut sum = 0;
     for x in [1, 2, 3] {
         for y in [4, 5] {
             sum = sum + x + y;
@@ -91,7 +91,7 @@ def main() -> i64 {
 fn test_for_loop_break_and_continue_compile() {
     let source = r#"
 def main() -> i64 {
-    let acc = 0;
+    let mut acc = 0;
     for x in [1, 2, 3, 4, 5] {
         if x > 3 {
             break;

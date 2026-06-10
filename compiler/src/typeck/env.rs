@@ -19,7 +19,7 @@ pub struct Symbol {
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
     /// 变量
-    Var(Ty),
+    Var { ty: Ty, is_mut: bool },
     /// 函数
     Function { ty: Ty },
     /// 类型（结构体、枚举等）
@@ -40,9 +40,13 @@ pub enum SymbolKind {
 
 impl Symbol {
     pub fn var(name: String, ty: Ty) -> Self {
+        Self::var_with_mutability(name, ty, false)
+    }
+
+    pub fn var_with_mutability(name: String, ty: Ty, is_mut: bool) -> Self {
         Self {
             name,
-            kind: SymbolKind::Var(ty),
+            kind: SymbolKind::Var { ty, is_mut },
         }
     }
 
@@ -62,7 +66,7 @@ impl Symbol {
 
     pub fn get_ty(&self) -> Option<&Ty> {
         match &self.kind {
-            SymbolKind::Var(ty) => Some(ty),
+            SymbolKind::Var { ty, .. } => Some(ty),
             SymbolKind::Function { ty } => Some(ty),
             SymbolKind::Type { ty } => Some(ty),
             SymbolKind::Const { ty } => Some(ty),
@@ -250,6 +254,11 @@ impl TypeEnv {
     /// 插入变量
     pub fn insert_var(&mut self, name: String, ty: Ty) {
         let symbol = Symbol::var(name.clone(), ty);
+        self.insert(name, symbol);
+    }
+
+    pub fn insert_var_with_mutability(&mut self, name: String, ty: Ty, is_mut: bool) {
+        let symbol = Symbol::var_with_mutability(name.clone(), ty, is_mut);
         self.insert(name, symbol);
     }
 

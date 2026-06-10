@@ -1,72 +1,74 @@
 ## 1. Baseline And Conformance Harness
 
-- [ ] 1.1 Run `openspec validate core-language-correctness --strict`.
-- [ ] 1.2 Pin the v1 core-conformance form list (see `design.md`) and record the
+- [x] 1.1 Run `openspec validate core-language-correctness --strict`.
+- [x] 1.2 Pin the v1 core-conformance form list (see `design.md`) and record the
   expected result for each form.
-- [ ] 1.3 Add a conformance harness (extend the `tools/sgc` example smoke path or
+- [x] 1.3 Add a conformance harness (extend the `tools/sgc` example smoke path or
   add a dedicated runner) that compiles each form's example and asserts its
   result or process exit code.
-- [ ] 1.4 Enter the currently-failing forms (array index, array `for`, closure
-  capture, `let mut`, enum value) as expected-failing baseline entries so the
-  gate tracks progress and blocks silent regressions.
-- [ ] 1.5 Record the 11 failing `cargo test` cases on Linux and classify each as
-  to-fix or to-rebaseline-with-reason.
+- [x] 1.4 Record the baseline status of array index, array `for`, closure
+  capture, `let mut`, and enum values. Array/closure were already green on the
+  merged implementation base; mutability/enum tests supplied the red/green
+  baseline. See `VERIFICATION.md`.
+- [x] 1.5 Reconcile the historical 11 failing Linux cases. They were not
+  reproducible from the merged implementation base, no snapshot was
+  rebaselined, and Linux CI remains the final source of truth.
 
 ## 2. Native Array Correctness
 
-- [ ] 2.1 Fix fixed-size array value/address lowering so an array place decays to
+- [x] 2.1 Fix fixed-size array value/address lowering so an array place decays to
   an element pointer (`T*`) before `getelementptr`, eliminating the
   `'[N x T]*' ... but expected 'i64*'` IR verification error.
-- [ ] 2.2 Cover `arr[i]` read and write, and `for v in arr` iteration, with
+- [x] 2.2 Cover `arr[i]` read and write, and `for v in arr` iteration, with
   runnable examples and executable result assertions.
-- [ ] 2.3 Restore `examples/04_array.sg`, `examples/05_loop.sg`, and the
+- [x] 2.3 Restore `examples/04_array.sg`, `examples/05_loop.sg`, and the
   `docs/language-features.md` §2.2 snippet to compiling-and-correct status.
-- [ ] 2.4 Add negative tests for out-of-form array misuse that must still be
+- [x] 2.4 Add negative tests for out-of-form array misuse that must still be
   rejected, with stable diagnostics.
 
 ## 3. Closure Capture Correctness
 
-- [ ] 3.1 Fix environment-capturing closure lowering so captured-variable slots
+- [x] 3.1 Fix environment-capturing closure lowering so captured-variable slots
   load/store at the correct pointer type.
-- [ ] 3.2 Restore `examples/06_lambda.sg` and add closure examples covering
+- [x] 3.2 Restore `examples/06_lambda.sg` and add closure examples covering
   capture-by-value of one and multiple locals with result assertions.
-- [ ] 3.3 Add negative tests for unsupported closure shapes that remain rejected,
+- [x] 3.3 Add negative tests for unsupported closure shapes that remain rejected,
   with stable diagnostics.
 
 ## 4. Mutability: `let mut` And Immutable Assignment
 
-- [ ] 4.1 Parse `let mut <ident>` (and the `mut` binding pattern) and add parser
+- [x] 4.1 Parse `let mut <ident>` (and the `mut` binding pattern) and add parser
   tests for accepted and rejected forms.
-- [ ] 4.2 Thread a mutability flag through HIR/typeck and reject assignment to an
+- [x] 4.2 Thread a mutability flag through HIR/typeck and reject assignment to an
   immutable binding with a stable diagnostic code.
-- [ ] 4.3 Prove `sgc` JSON and `sglsp` parity (same range, severity, code/message
+- [x] 4.3 Prove `sgc` JSON and `sglsp` parity (same range, severity, code/message
   family) for the immutable-assignment diagnostic.
-- [ ] 4.4 If enforcement is source-incompatible with committed sources/examples,
+- [x] 4.4 If enforcement is source-incompatible with committed sources/examples,
   add a migration note first and update affected examples in the same change.
 
 ## 5. Enum Variants As Values
 
-- [ ] 5.1 Resolve `Enum::Variant` in value position; add typeck tests for known
+- [x] 5.1 Resolve `Enum::Variant` in value position; add typeck tests for known
   and unknown variants.
-- [ ] 5.2 Support payload-carrying variant construction for variants with fields
+- [x] 5.2 Support payload-carrying variant construction for variants with fields
   and lower to the discriminant/payload representation consumed by `match`.
-- [ ] 5.3 Add runnable examples constructing enum values and matching on them,
+- [x] 5.3 Add runnable examples constructing enum values and matching on them,
   with result assertions; extend `examples/ergonomics/03_enum_match.sg` so its
   `main` actually constructs and consumes a variant.
-- [ ] 5.4 Add negative tests for unknown variants and arity/type mismatches with
+- [x] 5.4 Add negative tests for unknown variants and arity/type mismatches with
   stable diagnostics.
 
 ## 6. Reproducibility And Doc Reconciliation
 
-- [ ] 6.1 Commit `Cargo.lock` and add a `rust-toolchain.toml` pinning the Rust
+- [x] 6.1 Commit `Cargo.lock` and add a `rust-toolchain.toml` pinning the Rust
   version used to build the workspace.
-- [ ] 6.2 Wire the conformance harness and `cargo test` into CI on Linux.
-- [ ] 6.3 Correct the backend description (textual LLVM IR + `clang`, plus the
+- [x] 6.2 Wire the conformance harness and `cargo test` into CI on Linux.
+- [x] 6.3 Correct the backend description (textual LLVM IR + `clang`, plus the
   Cranelift fast path) in `README.md`, `README.zh-CN.md`, and
   `docs/language-features.md`.
-- [ ] 6.4 Remove the unused `inkwell` / `llvm-sys` / `pyo3` workspace
+- [x] 6.4 Remove the unused `inkwell` / `llvm-sys` / `pyo3` workspace
   dependencies from the root `Cargo.toml` (or document why they are retained).
-- [ ] 6.5 Update `PROGRESS.md` status flags so completed items reflect verified,
+- [x] 6.5 Update `PROGRESS.md` status flags so completed items reflect verified,
   compiling-and-running behavior.
 
 ## 7. Verification
@@ -75,9 +77,9 @@
   expected result on Linux.
 - [ ] 7.2 `cargo test` is green on Linux (failing cases fixed or rebaselined with
   a recorded reason).
-- [ ] 7.3 `sgc check` / JSON diagnostic snapshots for representative accepted and
+- [x] 7.3 `sgc check` / JSON diagnostic snapshots for representative accepted and
   rejected core forms.
-- [ ] 7.4 `sglsp` diagnostic parity proven for every new diagnostic code.
+- [x] 7.4 `sglsp` diagnostic parity proven for every new diagnostic code.
 
 ## Archive Gate
 

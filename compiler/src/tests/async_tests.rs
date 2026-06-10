@@ -1449,7 +1449,7 @@ fn loop_with_await_polls_child_future_without_reinvoking_body() {
     let source = r#"
 async def step() -> i64 { 1 }
 async def main() -> i64 {
-    let x = 0;
+    let mut x = 0;
     while x < 2 {
         let y = await step();
         x = x + y;

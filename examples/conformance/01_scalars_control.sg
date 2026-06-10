@@ -1,0 +1,19 @@
+// Core conformance: scalars, print, if, while, and range for.
+// Run: sgc run examples/conformance/01_scalars_control.sg
+// Expected output: core
+
+def main() -> i64 {
+    print("core");
+    let ratio = 1.5 + 2.5;
+    let enabled = true;
+    let mut total = 0;
+    let mut index = 0;
+    while index < 3 {
+        total = total + 1;
+        index = index + 1;
+    }
+    for value in 0..4 {
+        total = total + value;
+    }
+    if enabled and ratio > 3.0 { total } else { 1 }
+}

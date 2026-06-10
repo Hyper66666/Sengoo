@@ -322,6 +322,9 @@ fn diagnostic_range_from_compile_error(content: &str, error: &CompileError) -> O
     match error {
         CompileError::ParseError(error) => diagnostic_range_from_parse_error(content, error),
         CompileError::TypeError(error) => diagnostic_range_from_type_error(content, error),
+        CompileError::TypeckError(error) => error
+            .span()
+            .map(|(lo, hi)| range_from_byte_span(content, lo, hi)),
         _ => None,
     }
 }
@@ -1052,6 +1055,98 @@ async def main() -> i64 {
             diagnostic_range_from_compile_error(src, &err).expect("range should be extracted");
         assert_eq!(range.start.line, 1);
         assert_eq!(range.start.character, 8);
+    }
+
+    #[test]
+    fn immutable_assignment_uses_typeck_code_and_exact_target_range() {
+        let src = r#"
+def main() -> i64 {
+    let value = 1;
+    value = value + 1;
+    value
+}
+"#;
+        let diagnostics = embedded_compiler_diagnostics(src);
+        let target_lo = src.find("value = value").expect("assignment target") as u32;
+        let expected = range_from_byte_span(src, target_lo, target_lo + "value".len() as u32);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("immutable-assignment".to_string()))
+        );
+        assert_eq!(diagnostics[0].range, expected);
+        assert!(diagnostics[0].message.contains("let mut"));
+    }
+
+    #[test]
+    fn enum_value_errors_keep_stable_codes_and_precise_ranges() {
+        let cases = [
+            (
+                "enum Color { Red }\ndef main() -> Color { Color::Blue }\n",
+                "unknown-enum-variant",
+                "Color::Blue",
+            ),
+            (
+                "enum Maybe { Value(i64) }\ndef main() -> Maybe { Maybe::Value() }\n",
+                "enum-variant-arity",
+                "Maybe::Value",
+            ),
+            (
+                "enum Maybe { Value(i64) }\ndef main() -> Maybe { Maybe::Value(true) }\n",
+                "enum-variant-type",
+                "true",
+            ),
+        ];
+
+        for (src, code, target) in cases {
+            let diagnostics = embedded_compiler_diagnostics(src);
+            let lo = src.find(target).expect("diagnostic target") as u32;
+            let expected = range_from_byte_span(src, lo, lo + target.len() as u32);
+
+            assert_eq!(diagnostics.len(), 1, "{code}");
+            assert_eq!(
+                diagnostics[0].code,
+                Some(NumberOrString::String(code.to_string()))
+            );
+            assert_eq!(diagnostics[0].range, expected, "{code}");
+        }
+    }
+
+    #[test]
+    fn array_and_closure_errors_keep_stable_codes_and_precise_ranges() {
+        let cases = [
+            (
+                "def main() -> i64 {\n    let values = [1, 2, 3];\n    values[3]\n}\n",
+                "array-index-out-of-bounds",
+                "3",
+            ),
+            (
+                "def main() -> i64 {\n    let values = [1, 2, 3];\n    values[true]\n}\n",
+                "invalid-array-index",
+                "true",
+            ),
+            (
+                "def main() -> i64 {\n    let invalid = |value, value| value;\n    invalid(1, 2)\n}\n",
+                "duplicate-closure-parameter",
+                "value|",
+            ),
+        ];
+
+        for (src, code, target) in cases {
+            let diagnostics = embedded_compiler_diagnostics(src);
+            let target_lo = src.rfind(target).expect("diagnostic target") as u32;
+            let target_len = target.trim_end_matches('|').len() as u32;
+            let expected = range_from_byte_span(src, target_lo, target_lo + target_len);
+
+            assert_eq!(diagnostics.len(), 1, "{code}");
+            assert_eq!(
+                diagnostics[0].code,
+                Some(NumberOrString::String(code.to_string()))
+            );
+            assert_eq!(diagnostics[0].range, expected, "{code}");
+        }
     }
 
     #[test]

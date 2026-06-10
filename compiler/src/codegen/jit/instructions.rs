@@ -487,6 +487,138 @@ impl JITCodegen {
             } => {
                 self.codegen_aggregate_instruction(*destination, fields, ty, mir_fn)?;
             }
+            mir::Instruction::Discriminant {
+                destination,
+                source,
+            } => {
+                let source_ty = self.get_local_type(mir_fn, *source);
+                let source_llvm = self.mir_type_to_llvm_str(&source_ty);
+                let discr_ptr = format!("%.enum.discr.ptr.{}", destination.id);
+                let discr_value = format!("%.enum.discr.{}", destination.id);
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{discr_ptr} = getelementptr {source_llvm}, {source_llvm}* {}, i32 0, i32 0\n",
+                    self.local_reg(*source)
+                ));
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("{discr_value} = load i64, i64* {discr_ptr}\n"));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store i64 {discr_value}, i64* {}\n",
+                    self.local_reg(*destination)
+                ));
+            }
+            mir::Instruction::EnumConstruct {
+                destination,
+                discriminant,
+                payload,
+                enum_type,
+            } => {
+                let enum_llvm = self.mir_type_to_llvm_str(enum_type);
+                let discr_ptr = format!("%.enum.discr.ptr.{}", destination.id);
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{discr_ptr} = getelementptr {enum_llvm}, {enum_llvm}* {}, i32 0, i32 0\n",
+                    self.local_reg(*destination)
+                ));
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("store i64 {discriminant}, i64* {discr_ptr}\n"));
+
+                if let Some(payload_local) = payload {
+                    let payload_ty = self.get_local_type(mir_fn, *payload_local);
+                    let payload_llvm = self.mir_type_to_llvm_str(&payload_ty);
+                    let payload_value = format!("%.enum.payload.{}", destination.id);
+                    let payload_bytes = format!("%.enum.payload.bytes.{}", destination.id);
+                    let payload_ptr = format!("%.enum.payload.ptr.{}", destination.id);
+                    let payload_size = common::enum_payload_storage_size(enum_type);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{payload_value} = load {payload_llvm}, {payload_llvm}* {}\n",
+                        self.local_reg(*payload_local)
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{payload_bytes} = getelementptr {enum_llvm}, {enum_llvm}* {}, i32 0, i32 1\n",
+                        self.local_reg(*destination)
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{payload_ptr} = bitcast [{payload_size} x i8]* {payload_bytes} to {payload_llvm}*\n"
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {payload_llvm} {payload_value}, {payload_llvm}* {payload_ptr}\n"
+                    ));
+                }
+            }
+            mir::Instruction::ExtractPayload {
+                destination,
+                source,
+            } => {
+                let source_ty = self.get_local_type(mir_fn, *source);
+                let source_llvm = self.mir_type_to_llvm_str(&source_ty);
+                let destination_ty = self.get_local_type(mir_fn, *destination);
+                let destination_llvm = self.mir_type_to_llvm_str(&destination_ty);
+                let payload_size = common::enum_payload_storage_size(&source_ty);
+                let payload_bytes = format!("%.enum.payload.bytes.{}", destination.id);
+                let payload_ptr = format!("%.enum.payload.ptr.{}", destination.id);
+                let payload_value = format!("%.enum.payload.{}", destination.id);
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{payload_bytes} = getelementptr {source_llvm}, {source_llvm}* {}, i32 0, i32 1\n",
+                    self.local_reg(*source)
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{payload_ptr} = bitcast [{payload_size} x i8]* {payload_bytes} to {destination_llvm}*\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{payload_value} = load {destination_llvm}, {destination_llvm}* {payload_ptr}\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {destination_llvm} {payload_value}, {destination_llvm}* {}\n",
+                    self.local_reg(*destination)
+                ));
+            }
+            mir::Instruction::Phi {
+                destination,
+                incoming,
+            } => {
+                let ty = self.get_local_type(mir_fn, *destination);
+                if matches!(ty, MIRType::Unit | MIRType::Never)
+                    || matches!(&ty, MIRType::Tuple(fields) if fields.is_empty())
+                {
+                    return Ok(());
+                }
+
+                let llvm_ty = self.mir_type_to_llvm_str(&ty);
+                let phi_value = format!("%.phi.{}", destination.id);
+                let entries = incoming
+                    .iter()
+                    .map(|(local, block)| {
+                        let value = self
+                            .phi_incoming_values
+                            .get(&(destination.index(), *block, local.index()))
+                            .cloned()
+                            .unwrap_or_else(|| self.local_reg(*local));
+                        format!("[ {value}, %bb_{block} ]")
+                    })
+                    .collect::<Vec<_>>();
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{phi_value} = phi {llvm_ty} {}\n",
+                    entries.join(", ")
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {llvm_ty} {phi_value}, {llvm_ty}* {}\n",
+                    self.local_reg(*destination)
+                ));
+            }
             _ => {
                 self.emit_indent();
                 self.ir

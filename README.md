@@ -6,7 +6,7 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 - Python interoperability for gradual migration from existing ecosystems
 - Fast full and incremental compile loops for day-to-day development
-- Native execution through an LLVM backend
+- Native execution from textual LLVM IR compiled and linked by `clang`, plus a Cranelift fast path
 - Optional non-invasive reflection with sidecar metadata
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.

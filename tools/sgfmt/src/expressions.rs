@@ -29,8 +29,18 @@ impl Formatter {
 
     fn format_stmt(&self, stmt: &Stmt, indent: usize) -> String {
         match &stmt.kind {
-            StmtKind::Let { name, ty, value } => {
-                let mut s = format!("{}let {}", self.pad(indent), name.name);
+            StmtKind::Let {
+                name,
+                ty,
+                value,
+                is_mut,
+            } => {
+                let mut s = format!(
+                    "{}let {}{}",
+                    self.pad(indent),
+                    if *is_mut { "mut " } else { "" },
+                    name.name
+                );
                 if let Some(ty) = ty {
                     s.push_str(": ");
                     s.push_str(&self.format_type(ty));
@@ -56,8 +66,13 @@ impl Formatter {
 
     fn format_stmt_inline(&self, stmt: &Stmt) -> String {
         match &stmt.kind {
-            StmtKind::Let { name, ty, value } => {
-                let mut s = format!("let {}", name.name);
+            StmtKind::Let {
+                name,
+                ty,
+                value,
+                is_mut,
+            } => {
+                let mut s = format!("let {}{}", if *is_mut { "mut " } else { "" }, name.name);
                 if let Some(ty) = ty {
                     s.push_str(": ");
                     s.push_str(&self.format_type(ty));

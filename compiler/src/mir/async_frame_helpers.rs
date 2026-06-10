@@ -478,13 +478,7 @@ pub(crate) fn push_frame_load_typed(
     match &storage_ty {
         MIRType::Enum { .. } if enum_is_payloadless(&storage_ty) => {
             let discr = push_frame_load(f, block, handle, offset, MIR_I64);
-            let zero_payload = push_i64_const(f, block, 0);
-            Ok(push_aggregate_value(
-                f,
-                block,
-                storage_ty,
-                vec![discr, zero_payload],
-            ))
+            Ok(push_aggregate_value(f, block, storage_ty, vec![discr]))
         }
         MIRType::Enum { .. } => Err(unsupported_async_frame_type(
             &storage_ty,

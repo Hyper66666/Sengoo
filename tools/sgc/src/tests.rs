@@ -34,7 +34,9 @@ use super::{
 use crate::cli::Cli;
 use crate::cross_compile::NativeBuildTarget;
 use clap::Parser as _;
-use sengoo_compiler::{compile_to_ir as compile_compiler_ir, CompileWarning};
+use sengoo_compiler::{
+    compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, JITCodegen,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -3281,6 +3283,54 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_preserves_payloadless_enum_across_resume() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = r#"
+enum State { Cold, Hot }
+
+async def step() -> i64 { 1 }
+
+async def main() -> i64 {
+    let state = State::Hot;
+    let waited = await step();
+    match state {
+        State::Cold => 0,
+        State::Hot => waited + 41,
+    }
+}
+"#;
+
+    let llvm_ir = compile_source(source, 1).expect("async enum source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-payloadless-enum", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-payloadless-enum",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async enum executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_executes_if_structured_multi_await_body() {
     let Some(clang) = find_clang() else {
         return;
@@ -3345,7 +3395,7 @@ fn async_native_runtime_executes_loop_with_await_body() {
 async def step() -> i64 { 1 }
 
 async def main() -> i64 {
-    let x = 0;
+    let mut x = 0;
     while x < 3 {
         let y = await step();
         x = x + y;
@@ -3386,7 +3436,7 @@ fn async_native_runtime_executes_sleep_inside_loop_body() {
 
     let source = r#"
 async def main() -> i64 {
-    let ticks = 0;
+    let mut ticks = 0;
     while ticks < 3 {
         await sleep(1);
         ticks = ticks + 1;
@@ -4224,6 +4274,7 @@ fn compile_and_run_example_with_args(
     relative_path: &str,
     extra_c_inputs: &[&str],
     args: &[&str],
+    strict_native: bool,
 ) -> Option<std::process::Output> {
     let source = super::expand_stdlib_imports_for_source(&read_example_source(relative_path))
         .unwrap_or_else(|err| {
@@ -4232,9 +4283,28 @@ fn compile_and_run_example_with_args(
     let llvm_ir = compile_source(&source, 1)
         .unwrap_or_else(|err| panic!("example {relative_path} should compile: {err}"));
 
-    let clang = find_clang()?;
-    let runtime_c = find_runtime_c()?;
+    let clang = find_clang().unwrap_or_else(|| {
+        if strict_native {
+            panic!("core conformance requires clang");
+        }
+        String::new()
+    });
+    if clang.is_empty() {
+        return None;
+    }
+    let runtime_c = find_runtime_c().unwrap_or_else(|| {
+        if strict_native {
+            panic!("core conformance requires the stdlib runtime sources");
+        }
+        String::new()
+    });
+    if runtime_c.is_empty() {
+        return None;
+    }
     if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        if strict_native {
+            panic!("core conformance stdlib runtime sources must compile");
+        }
         return None;
     }
 
@@ -4243,17 +4313,23 @@ fn compile_and_run_example_with_args(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("examples-smoke-{tag}-main"), obj_ext);
-    if compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).is_err() {
+    if let Err(error) = compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None) {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
+        if strict_native {
+            panic!("example {relative_path} LLVM IR should compile: {error}");
+        }
         return None;
     }
 
     let runtime_objects = match ensure_runtime_objects(&clang, &runtime_c, 1, None) {
         Ok(objects) => objects,
-        Err(_) => {
+        Err(error) => {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
+            if strict_native {
+                panic!("example {relative_path} runtime objects should compile: {error}");
+            }
             return None;
         }
     };
@@ -4270,19 +4346,20 @@ fn compile_and_run_example_with_args(
             ),
             obj_ext,
         );
-        if compile_ir_to_object(
+        if let Err(error) = compile_ir_to_object(
             &clang,
             &workspace_root.join(extra_input),
             &extra_obj,
             1,
             None,
-        )
-        .is_err()
-        {
+        ) {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
             for object in &extra_objects {
                 let _ = fs::remove_file(object);
+            }
+            if strict_native {
+                panic!("example {relative_path} extra input {extra_input} should compile: {error}");
             }
             return None;
         }
@@ -4294,13 +4371,18 @@ fn compile_and_run_example_with_args(
         &format!("examples-smoke-{tag}"),
         if cfg!(windows) { "exe" } else { "" },
     );
-    if link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).is_err() {
+    if let Err(error) =
+        link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None)
+    {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
         for object in &extra_objects {
             let _ = fs::remove_file(object);
         }
         let _ = fs::remove_file(&exe_path);
+        if strict_native {
+            panic!("example {relative_path} should link: {error}");
+        }
         return None;
     }
 
@@ -4353,7 +4435,8 @@ fn assert_example_output_with_c_inputs_and_args(
     args: &[&str],
     expected_stdout: &str,
 ) {
-    let Some(output) = compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args)
+    let Some(output) =
+        compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args, false)
     else {
         return;
     };
@@ -4367,6 +4450,156 @@ fn assert_example_output_with_c_inputs_and_args(
         String::from_utf8_lossy(&output.stdout).trim(),
         expected_stdout,
         "{relative_path} stdout mismatch"
+    );
+}
+
+#[test]
+fn immutable_assignment_json_reports_stable_code_and_target_span() {
+    let source = r#"
+def main() -> i64 {
+    let value = 1;
+    value = value + 1;
+    value
+}
+"#;
+    let error = sengoo_compiler::compile_to_ir(source).expect_err("assignment should fail");
+    let location = super::location_from_compile_error(source, &error);
+    let json = super::render_compile_error_json_with_location(
+        Some("tests/immutable.sg"),
+        &error.to_string(),
+        location,
+    );
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+    let target_lo = source.find("value = value").expect("assignment target") as u64;
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "immutable-assignment");
+    assert_eq!(value["location"]["span"]["lo"], target_lo);
+    assert_eq!(
+        value["location"]["span"]["hi"],
+        target_lo + "value".len() as u64
+    );
+}
+
+fn assert_example_result(
+    tag: &str,
+    relative_path: &str,
+    expected_exit_code: i32,
+    expected_stdout: &str,
+) {
+    let Some(output) = compile_and_run_example_with_args(tag, relative_path, &[], &[], true) else {
+        return;
+    };
+    assert_eq!(
+        output.status.code(),
+        Some(expected_exit_code),
+        "{relative_path} exit mismatch: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected_stdout,
+        "{relative_path} stdout mismatch"
+    );
+}
+
+#[test]
+fn core_conformance_examples_compile_link_and_run() {
+    let cases = [
+        (
+            "core-scalars-control",
+            "examples/conformance/01_scalars_control.sg",
+            9,
+            "core",
+        ),
+        (
+            "core-recursion",
+            "examples/conformance/02_recursion.sg",
+            13,
+            "",
+        ),
+        ("core-struct", "examples/08_struct.sg", 30, ""),
+        ("core-method", "examples/09_method_call.sg", 43, ""),
+        ("core-array-read", "examples/04_array.sg", 20, ""),
+        ("core-array-for", "examples/05_loop.sg", 15, ""),
+        (
+            "core-array-write",
+            "examples/conformance/03_array_write.sg",
+            42,
+            "",
+        ),
+        ("core-closure", "examples/06_lambda.sg", 15, ""),
+        (
+            "core-closure-multi",
+            "examples/conformance/04_closure_multi_capture.sg",
+            18,
+            "",
+        ),
+        (
+            "core-enum-value",
+            "examples/ergonomics/03_enum_match.sg",
+            2,
+            "",
+        ),
+        (
+            "core-enum-payload",
+            "examples/conformance/05_enum_payload.sg",
+            42,
+            "",
+        ),
+        (
+            "core-enum-multi-payload",
+            "examples/conformance/06_enum_multi_payload.sg",
+            42,
+            "",
+        ),
+    ];
+
+    for (tag, path, exit_code, stdout) in cases {
+        assert_example_result(tag, path, exit_code, stdout);
+    }
+}
+
+#[test]
+fn jit_enum_match_ir_is_accepted_by_clang() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let source = r#"
+enum Maybe { Empty, Value(i64) }
+
+def main() -> i64 {
+    let value = Maybe::Value(42);
+    match value {
+        Maybe::Empty => 0,
+        Maybe::Value(inner) => inner,
+    }
+}
+"#;
+    let mir = compile_to_mir(source).expect("enum match should compile to MIR");
+    let ir = JITCodegen::new()
+        .generate(&mir)
+        .expect("JIT enum match should generate LLVM IR");
+    let ll_path = temp_artifact("jit-enum-match", "ll");
+    let obj_path = temp_artifact("jit-enum-match", if cfg!(windows) { "obj" } else { "o" });
+    fs::write(&ll_path, ir).expect("JIT IR should be writable");
+
+    let output = Command::new(&clang)
+        .arg("-c")
+        .arg(&ll_path)
+        .arg("-o")
+        .arg(&obj_path)
+        .output()
+        .expect("clang should run");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&obj_path);
+    assert!(
+        output.status.success(),
+        "clang rejected JIT enum-match IR: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -6808,8 +7041,8 @@ def main() -> i64 {
     map.insert(17, 30);
 
     let iter = map.iter();
-    let item = iter.next();
-    let total = 0;
+    let mut item = iter.next();
+    let mut total = 0;
     while item.is_some {
         total = total + item.value;
         item = iter.next();

@@ -16,7 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'
@@ -60,7 +62,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'

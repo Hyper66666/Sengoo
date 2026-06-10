@@ -4,7 +4,7 @@ Sengoo is a compiled language focused on practical engineering workflows:
 
 - Hybrid Python interoperability for gradual migration
 - Fast compile feedback with incremental pipeline reuse
-- LLVM-native code generation and executable output
+- Textual LLVM IR compiled and linked by `clang`, plus a Cranelift fast path
 - Optional non-invasive reflection with sidecar metadata
 
 ## 1. Current Capability Snapshot
@@ -12,6 +12,8 @@ Sengoo is a compiled language focused on practical engineering workflows:
 | Capability | Status | Notes |
 |---|---|---|
 | Core syntax (`def`, `if`, `for`, `while`, `struct`, `impl`) | Available | Use `examples/*.sg` as validated learning surface. |
+| Immutable-by-default locals (`let mut` for reassignment) | Available | `immutable-assignment` is shared by `sgc` JSON and `sglsp`. |
+| Enum variants as values | Available | Fieldless and payload constructors lower to the representation consumed by `match`. |
 | Static type-check pipeline | Available | Entry command: `sgc check <file.sg>`. |
 | API documentation generation | Available | `sgc doc <file.sg> --output target/doc`. |
 | Incremental compile pipeline | Available | Fingerprint + workset-based invalidation/rebuild strategy. |
@@ -39,7 +41,7 @@ def add(a: i64, b: i64) -> i64 {
 
 ```sg
 def sum(arr: [i64; 4]) -> i64 {
-    let total = 0;
+    let mut total = 0;
     for v in arr {
         total = total + v;
     }
@@ -216,7 +218,7 @@ Sengoo 是一门面向工程落地的编译型语言，当前重点：
 
 - Python 互操作与渐进迁移
 - 快速编译反馈（增量链路）
-- LLVM 原生代码生成
+- 由 `clang` 编译和链接文本 LLVM IR，并提供 Cranelift 快路径
 - 按需开启的非侵入式反射
 
 ## 1. 能力快照
@@ -224,6 +226,8 @@ Sengoo 是一门面向工程落地的编译型语言，当前重点：
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | 核心语法（`def`/`if`/`for`/`while`/`struct`/`impl`） | 可用 | 建议以 `examples/*.sg` 为已验证学习面。 |
+| 默认不可变局部变量（重赋值使用 `let mut`） | 可用 | `sgc` JSON 与 `sglsp` 共用 `immutable-assignment`。 |
+| 枚举变体作为值 | 可用 | 无 payload 与带 payload 构造均降级为 `match` 使用的表示。 |
 | 静态类型检查流水线 | 可用 | 命令：`sgc check <file.sg>`。 |
 | 增量编译链路 | 可用 | 基于指纹 + workset 感知失效与重编译。 |
 | Daemon 编译服务 | 可用 | `sgc daemon --addr 127.0.0.1:48765`。 |
@@ -250,7 +254,7 @@ def add(a: i64, b: i64) -> i64 {
 
 ```sg
 def sum(arr: [i64; 4]) -> i64 {
-    let total = 0;
+    let mut total = 0;
     for v in arr {
         total = total + v;
     }
