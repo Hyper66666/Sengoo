@@ -73,9 +73,9 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Conformance harness: every v1 core form compiles, runs, and asserts the
+- [x] 7.1 Conformance harness: every v1 core form compiles, runs, and asserts the
   expected result on Linux.
-- [ ] 7.2 `cargo test` is green on Linux (failing cases fixed or rebaselined with
+- [x] 7.2 `cargo test` is green on Linux (failing cases fixed or rebaselined with
   a recorded reason).
 - [x] 7.3 `sgc check` / JSON diagnostic snapshots for representative accepted and
   rejected core forms.
@@ -83,15 +83,15 @@
 
 ## Archive Gate
 
-- [ ] `openspec validate core-language-correctness --strict` passes.
-- [ ] Every v1 core-conformance form has a committed example and an executable
+- [x] `openspec validate core-language-correctness --strict` passes.
+- [x] Every v1 core-conformance form has a committed example and an executable
   test that asserts its result.
-- [ ] Array indexing/iteration, closure capture, `let mut`, immutable-assignment
+- [x] Array indexing/iteration, closure capture, `let mut`, immutable-assignment
   rejection, and enum-value construction all compile to valid IR and run
   correctly.
-- [ ] `cargo test` is green on Linux, with any rebaselined snapshots reviewed.
-- [ ] `Cargo.lock` and `rust-toolchain.toml` are committed and the conformance
+- [x] `cargo test` is green on Linux, with any rebaselined snapshots reviewed.
+- [x] `Cargo.lock` and `rust-toolchain.toml` are committed and the conformance
   gate runs in CI.
-- [ ] Docs and `PROGRESS.md` match verified behavior; unused backend deps are
+- [x] Docs and `PROGRESS.md` match verified behavior; unused backend deps are
   removed or justified.
-- [ ] Any source-incompatible mutability cleanup has an accepted migration note.
+- [x] Any source-incompatible mutability cleanup has an accepted migration note.

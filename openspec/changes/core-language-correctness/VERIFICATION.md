@@ -6,7 +6,7 @@
 - Rust: `rustc 1.94.0`
 - Cargo: `cargo 1.94.0`
 - Clang: `19.1.7`
-- OpenSpec CLI: `1.3.1`
+- OpenSpec CLI: local `1.3.1`; CI `@fission-ai/openspec 1.4.1`
 
 ## Baseline Reconciliation
 
@@ -74,6 +74,27 @@ executable regression tests.
 The final independent follow-up review reported no remaining P0, P1, or P2
 findings.
 
+## Linux CI Evidence
+
+- GitHub Actions core-conformance run
+  [`27275073812`](https://github.com/Hyper66666/Sengoo/actions/runs/27275073812)
+  passed on Linux. Its OpenSpec validation, core conformance examples, and
+  deterministic full-workspace test steps all completed successfully.
+- GitHub Actions realworld-e2e run
+  [`27275073863`](https://github.com/Hyper66666/Sengoo/actions/runs/27275073863)
+  passed the realworld and graphics package jobs on both Ubuntu and Windows.
+- Linux CI exposed two adjacent native async ABI defects while exercising the
+  full workspace. The compiler now emits the complete scalar result-dispatch
+  symbol family for async programs and uses the SysV hidden-result-pointer ABI
+  for 24-byte channel, mutex, and timeout outcomes. Both defects have compiler
+  regression tests, and the repaired channel round trip passed in the final
+  Linux run.
+- The repository-wide `perf-smoke` workflow is not an acceptance criterion for
+  this correctness-only change. Its hosted Windows runner satisfies the
+  absolute time and RSS budgets but is still compared against a frozen,
+  machine-specific 10% regression baseline; that existing performance-gate
+  calibration remains separate work.
+
 ## Dependency Decisions
 
 - `inkwell` and `llvm-sys` were removed because the workspace emits textual LLVM
@@ -81,4 +102,4 @@ findings.
 - `pyo3` remains a workspace dependency because `sengoo-runtime` consumes it
   through the optional `python` feature.
 
-The final full-workspace and Linux CI results are recorded by the PR checks.
+The final full-workspace and Linux CI results are recorded above and by PR #13.
