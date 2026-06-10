@@ -568,3 +568,194 @@ HTTP runtime baseline before adding broader client or server APIs.
 - **WHEN** TLS, DNS, bind, listen, connect, or socket behavior is unsupported on the host
 - **THEN** the helper returns `STATUS_UNSUPPORTED` or a more specific stable status
 - **AND** native linking does not fail because of unresolved optional network symbols
+
+### Requirement: HTTP client helpers accept HTTPS URLs with verified TLS
+
+The `std::http` client surface SHALL support `https://` URLs using the host
+platform trust store and SHALL reject insecure certificate verification bypass in
+this phase.
+
+#### Scenario: HTTPS GET succeeds against a trusted endpoint
+
+- **WHEN** a program calls `http_client_get("https://example.test/...", timeout_ms)`
+  against a test endpoint with a certificate trusted by the host store
+- **THEN** the call returns `Ok(HttpResponse)` with a readable status code
+- **AND** response body copy helpers behave identically to plain HTTP
+
+#### Scenario: Plain HTTP behavior is unchanged
+
+- **WHEN** a program calls `http_client_get("http://...", timeout_ms)`
+- **THEN** behavior matches the pre-change plain HTTP implementation
+- **AND** existing realworld and runtime tests continue to pass
+
+#### Scenario: Untrusted or hostname-mismatched certificates fail with stable status
+
+- **WHEN** a program calls `http_client_get` with an `https://` URL whose server
+  presents an untrusted or hostname-mismatched certificate
+- **THEN** the call returns `Err` with a stable TLS-related `std::status` code
+- **AND** the failure is observable in both native tests and `sgc test` smoke paths
+
+#### Scenario: Unsupported schemes remain unsupported
+
+- **WHEN** a program uses non-HTTP schemes such as `ftp://`
+- **THEN** the client returns `STATUS_UNSUPPORTED` as before
+- **AND** the support matrix documents HTTPS as supported subset and FTP as unsupported
+
+### Requirement: TLS failures SHALL map to stable status categories
+
+HTTPS client failures SHALL use the existing positive `std::status` namespace.
+This change SHALL add these stable categories unless a later accepted design
+replaces the table before implementation starts:
+
+| Name | Value | Meaning |
+| --- | --- | --- |
+| `STATUS_TLS_CERT_INVALID` | `15` | certificate chain is untrusted, expired, malformed, or otherwise invalid |
+| `STATUS_TLS_HOSTNAME_MISMATCH` | `16` | certificate is valid but does not match the requested host |
+| `STATUS_TLS_HANDSHAKE` | `17` | TLS negotiation failed after a backend was available |
+| `STATUS_TLS_UNAVAILABLE` | `18` | TLS backend or trust-store capability is unavailable on the host |
+
+#### Scenario: TLS categories are observable through std::status
+
+- **WHEN** HTTPS fails for an untrusted certificate, hostname mismatch,
+  handshake-level failure, or unavailable backend
+- **THEN** `Result.error` uses the matching `STATUS_TLS_*` category when the cause
+  is known
+- **AND** `status_name_copy` and `status_message_copy` return stable names and
+  human-readable messages for the new categories
+- **AND** failures that cannot be distinguished portably return
+  `STATUS_TLS_HANDSHAKE` rather than inventing unstable host-specific values
+
+### Requirement: HTTPS scope is documented for production hosts
+
+Sengoo SHALL document TLS client prerequisites (trust store, platform backends, and
+CI skip policy) in the realworld support matrix and package README paths.
+
+#### Scenario: Support matrix cites HTTPS proof
+
+- **WHEN** this change archives
+- **THEN** `examples/realworld/SUPPORT_MATRIX.md` moves TLS/HTTPS from Deferred to
+  Supported subset with a concrete test or example path
+- **AND** documented skips name the missing host capability rather than substituting
+  fake TLS stubs
+
+#### Scenario: HTTPS tests use real verification
+
+- **WHEN** CI or local tests exercise a successful HTTPS request
+- **THEN** the test endpoint certificate is trusted through a documented
+  test-specific root-store or host trust setup
+- **AND** tests do not pass by disabling certificate or hostname verification
+
+#### Scenario: POSIX reference-host proof is required before archive
+
+- **WHEN** this change reaches archive gate
+- **THEN** POSIX/reference-host evidence covers trusted success, hostname
+  mismatch, untrusted certificate, and HTTPS runtime roundtrip
+- **OR** the support matrix records an evidenced skip that names the missing host
+  capability and leaves the claim `Platform-specific`
+- **AND** no archive claim relies on fake TLS stubs, `verify=false`, disabled
+  hostname verification, or a plain HTTP fallback
+
+### Requirement: Compression helpers SHALL be demand-backed and bounded
+
+Sengoo SHALL promote compression from a deferred placeholder only when a
+committed realworld fixture demonstrates a compressed JSON, log, or package
+artifact workflow through public `std::compress` APIs. Compression helpers SHALL
+define API shape, output ownership, resource limits, platform behavior, and
+stable failure statuses before implementation.
+
+#### Scenario: A realworld fixture proves compression demand
+
+- **WHEN** compression support is claimed as supported or supported subset
+- **THEN** `examples/realworld` contains a committed fixture that reads or writes
+  compressed JSON, logs, or package artifacts through public `std::compress`
+  APIs
+- **AND** the fixture passes the locked package loop or records an evidenced
+  platform skip
+- **AND** `examples/realworld/SUPPORT_MATRIX.md` cites the fixture and does not
+  leave compression as a stale deferred row
+
+#### Scenario: One-shot compression preserves Buffer ownership
+
+- **WHEN** a program calls public one-shot gzip-compatible compression or
+  decompression helpers with managed `Buffer` inputs and outputs
+- **THEN** successful helpers return the number of meaningful bytes written
+- **AND** existing Buffer capacity semantics remain source-compatible
+- **AND** any owned-string helper is additive and only succeeds for valid UTF-8
+  output
+
+#### Scenario: V1 gzip API names are stable
+
+- **WHEN** compression support is promoted
+- **THEN** `std::compress` exposes
+  `compress_gzip_buffer(input: Buffer, input_len: i64, out: Buffer)` and
+  `decompress_gzip_buffer(input: Buffer, input_len: i64, out: Buffer)` returning
+  `Result<i64, i64>`
+- **AND** the success value is the used output length
+- **AND** failures use positive `std::status` categories
+
+#### Scenario: Gzip metadata and checksum behavior is deterministic
+
+- **WHEN** the same bytes are compressed on supported hosts
+- **THEN** semantically irrelevant gzip metadata such as modification time and
+  original filename is normalized or documented so fixture outputs remain
+  deterministic
+- **AND** decompression validates trailer/checksum data and rejects corrupt or
+  truncated payloads with stable status categories
+- **AND** the v1 supported subset is documented if it intentionally rejects
+  gzip optional metadata or non-stored deflate block types
+
+#### Scenario: Compression enforces resource limits
+
+- **WHEN** input bytes, output bytes, decompression expansion ratio, or Buffer
+  capacity exceed documented limits
+- **THEN** the helper returns an error-shaped result with a stable
+  `std::status` category
+- **AND** the helper does not allocate unbounded memory, write past the output
+  Buffer, or return a partially successful result
+
+#### Scenario: Compression failures use stable statuses
+
+- **WHEN** compression or decompression fails because of an invalid handle,
+  invalid argument, too-small Buffer, corrupt or truncated payload, unsupported
+  format/backend, allocation failure, expansion limit, or host/backend I/O
+  failure
+- **THEN** the public wrapper maps the failure to `STATUS_INVALID_HANDLE`,
+  `STATUS_INVALID_ARGUMENT`, `STATUS_BUFFER_TOO_SMALL`, `STATUS_PARSE`,
+  `STATUS_UNSUPPORTED`, `STATUS_OUT_OF_MEMORY`, `STATUS_OVERFLOW`, or
+  `STATUS_IO` as appropriate
+- **AND** it does not collapse known causes into a generic `1`
+
+#### Scenario: Unsupported platforms remain link-safe
+
+- **WHEN** the compression backend is unavailable on a host
+- **THEN** `sgc check`, `sgc build`, and `sgc run` still link programs that
+  import `std::compress`
+- **AND** public compression helpers return `STATUS_UNSUPPORTED`
+- **AND** the support matrix records the platform-specific or deferred behavior
+
+### Requirement: Streaming data helpers SHALL require fixture-backed follow-up design
+
+Sengoo SHALL keep streaming JSON parsing/serialization, JSON schema validation,
+streaming compression handles, and dynamic data-object mapping gated behind a
+later OpenSpec update with committed realworld demand, lifecycle semantics,
+memory ceilings, platform behavior, and stable statuses. These helpers must not
+be added opportunistically.
+
+#### Scenario: A future fixture needs streaming JSON or schema validation
+
+- **WHEN** a realworld workflow needs to process JSON beyond the documented
+  one-shot cap, validate package/test metadata against a schema, or combine
+  compressed JSON with bounded memory
+- **THEN** a child change defines the parser or validator API shape, schema
+  dialect where applicable, handle lifecycle, resource ceilings, output
+  ownership, platform behavior, and stable statuses before implementation
+- **AND** the existing one-shot JSON helpers remain source-compatible
+
+#### Scenario: No fixture-backed demand exists
+
+- **WHEN** implementation agents are working on stdlib thickness without a
+  committed fixture that needs streaming JSON, schema validation, streaming
+  compression, terminal control, file locks, long-lived watch streams, richer
+  Unicode behavior, or broader network helpers
+- **THEN** those features remain deferred rather than being added as ad hoc
+  stdlib surface area

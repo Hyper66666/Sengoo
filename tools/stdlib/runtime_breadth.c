@@ -965,6 +965,30 @@ long long sengoo_config_toml_free(long long handle) {
 
 /* --- Network fallback ABI for native stdlib builds --- */
 
+static long long sengoo_copy_to_raw_buffer(const char* text, long long buffer, long long capacity) {
+    if (!text || buffer == 0 || capacity < 0) {
+        return -1;
+    }
+    size_t len = strlen(text);
+    size_t copy_len = len < (size_t)capacity ? len : (size_t)capacity;
+    if (copy_len > 0) {
+        memcpy((char*)(intptr_t)buffer, text, copy_len);
+    }
+    return (long long)copy_len;
+}
+
+static int sengoo_net_bench_fallback_last_error = 0;
+
+/*
+ * When the Rust native runtime staticlib is linked (sgc build/run path), the
+ * real network implementation must win symbol resolution. Object files always
+ * beat archive members, so these C stubs are compiled out via
+ * -DSENGOO_NATIVE_NET_RUNTIME on that path and kept only for C-only bundles.
+ * The net-bench symbols below stay unconditional: their Rust twins live in
+ * the reflect module, which is excluded from the native-bridge staticlib.
+ */
+#ifndef SENGOO_NATIVE_NET_RUNTIME
+
 enum {
     SENGOO_NET_ERR_OK = 0,
     SENGOO_NET_ERR_INVALID_ARGUMENT = 1,
@@ -988,7 +1012,6 @@ enum {
 };
 
 static int sengoo_net_fallback_last_error = SENGOO_NET_ERR_OK;
-static int sengoo_net_bench_fallback_last_error = 0;
 
 static long long sengoo_net_fallback_handle_error(int code) {
     sengoo_net_fallback_last_error = code;
@@ -1049,18 +1072,6 @@ static int sengoo_net_fallback_url_has_scheme(long long url, const char* scheme)
         }
     }
     return text[scheme_len] == ':' && text[scheme_len + 1] == '/' && text[scheme_len + 2] == '/';
-}
-
-static long long sengoo_copy_to_raw_buffer(const char* text, long long buffer, long long capacity) {
-    if (!text || buffer == 0 || capacity < 0) {
-        return -1;
-    }
-    size_t len = strlen(text);
-    size_t copy_len = len < (size_t)capacity ? len : (size_t)capacity;
-    if (copy_len > 0) {
-        memcpy((char*)(intptr_t)buffer, text, copy_len);
-    }
-    return (long long)copy_len;
 }
 
 long long sengoo_net_last_error(void) {
@@ -1255,6 +1266,124 @@ long long sengoo_http_server_close(long long handle) {
     return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
 }
 
+long long sengoo_http_server_next_request(long long handle, long long timeout_ms) {
+    (void)handle;
+    (void)timeout_ms;
+    return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
+long long sengoo_http_request_method_len(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_method_copy(long long handle, long long buffer, long long capacity) {
+    (void)handle;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_path_len(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_path_copy(long long handle, long long buffer, long long capacity) {
+    (void)handle;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_query_len(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_query_copy(long long handle, long long buffer, long long capacity) {
+    (void)handle;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_version_len(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_version_copy(long long handle, long long buffer, long long capacity) {
+    (void)handle;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_header_len(long long handle, long long name) {
+    (void)handle;
+    (void)name;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_header_copy(
+    long long handle,
+    long long name,
+    long long buffer,
+    long long capacity
+) {
+    (void)handle;
+    (void)name;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_body_len(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_body_copy(long long handle, long long buffer, long long capacity) {
+    (void)handle;
+    (void)buffer;
+    (void)capacity;
+    return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_respond(
+    long long handle,
+    long long status,
+    long long body,
+    long long body_len
+) {
+    (void)handle;
+    (void)status;
+    (void)body;
+    (void)body_len;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_respond_with_content_type(
+    long long handle,
+    long long status,
+    long long content_type,
+    long long body,
+    long long body_len
+) {
+    (void)handle;
+    (void)status;
+    (void)content_type;
+    (void)body;
+    (void)body_len;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_request_close(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
 long long sengoo_ws_connect(long long url, long long timeout_ms) {
     (void)url;
     (void)timeout_ms;
@@ -1280,6 +1409,8 @@ long long sengoo_ws_close(long long handle) {
     (void)handle;
     return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
 }
+
+#endif /* SENGOO_NATIVE_NET_RUNTIME */
 
 long long sengoo_net_bench_last_error_code(void) {
     return (long long)sengoo_net_bench_fallback_last_error;

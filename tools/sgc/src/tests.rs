@@ -4732,6 +4732,140 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_http_server_pulls_and_answers_localhost_request() {
+    use std::io::{BufRead, BufReader, Read};
+
+    let source = expand_stdlib_imports_for_source(
+        r#"
+import std::net;
+import std::io;
+import std::strconv;
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok == false {
+        10
+    } else {
+        let server = bind_result.value;
+        let port = server.local_port().unwrap_or(0);
+        let port_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+        let port_len = strconv_format_i64(port, port_buffer).unwrap_or(0);
+        io_stdout_write_raw(port_buffer.ptr(), port_len);
+        io_stdout_write("\n");
+        io_stdout_flush();
+        port_buffer.free();
+
+        let request_result = server.next_request(15000);
+        if request_result.is_ok == false {
+            server.close();
+            11
+        } else {
+            let request = request_result.value;
+            let method_ok = request.method_len().unwrap_or(0) == 4;
+            let path_ok = request.path_len().unwrap_or(0) == 5;
+            let query_ok = request.query_len().unwrap_or(0) == 7;
+            let header_ok = request.header_len("X-Trace").unwrap_or(0) == 3;
+            let body_buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+            let copied = request.body_copy(body_buffer).unwrap_or(0);
+            let responded = if method_ok && path_ok && query_ok && header_ok && copied == 4 {
+                request.respond_raw(200, body_buffer.ptr(), copied).unwrap_or(false)
+            } else {
+                request.respond(500, "mismatch").unwrap_or(false)
+            };
+            body_buffer.free();
+            server.close();
+            if responded { 0 } else { 12 }
+        }
+    }
+}
+"#,
+    )
+    .expect("http server stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&source, 1).expect("http server stdlib program should compile to LLVM IR");
+
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let ll_path = temp_artifact("stdlib-http-server-pull", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("stdlib-http-server-pull-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    let exe_path = temp_artifact(
+        "stdlib-http-server-pull",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2, None).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let mut child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("http server fixture should spawn");
+
+    let stdout = child.stdout.take().expect("child stdout should be piped");
+    let mut reader = BufReader::new(stdout);
+    let mut port_line = String::new();
+    reader
+        .read_line(&mut port_line)
+        .expect("server should print its port");
+    let port: u16 = match port_line.trim().parse() {
+        Ok(port) => port,
+        Err(_) => {
+            let status = child.wait().expect("server fixture should be waitable");
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            panic!(
+                "port line should be numeric, got {port_line:?}; exit: {status:?}; stderr:\n{stderr_text}"
+            );
+        }
+    };
+
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
+        .expect("client should connect to the Sengoo server");
+    stream
+        .write_all(
+            b"POST /echo?mode=up HTTP/1.1\r\nHost: localhost\r\nX-Trace: abc\r\nContent-Length: 4\r\nConnection: close\r\n\r\nping",
+        )
+        .expect("client request should be writable");
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .expect("client should read the response");
+    let response_text = String::from_utf8_lossy(&response);
+    assert!(
+        response_text.starts_with("HTTP/1.1 200 OK"),
+        "response: {response_text}"
+    );
+    assert!(
+        response_text.ends_with("ping"),
+        "response body should echo client bytes: {response_text}"
+    );
+
+    let status = child.wait().expect("server fixture should exit");
+    assert!(
+        status.success(),
+        "server fixture should exit cleanly, got {status:?}"
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "io-stdin",
@@ -6489,6 +6623,50 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_http_server_bind"));
     assert!(ir.contains("sengoo_http_server_add_route"));
     assert!(ir.contains("sengoo_http_server_serve_once"));
+}
+
+#[test]
+fn stdlib_net_import_preloads_http_server_request_wrappers() {
+    let source = r#"
+import std::net;
+
+def main() -> i64 {
+    let server = http_server_bind("127.0.0.1", 0).unwrap_or(HttpServer { handle: 0 });
+    let request = server.next_request(1).unwrap_or(HttpServerRequest { handle: 0 });
+    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let method = request.method_string().is_ok;
+    let path = request.path_string().is_ok;
+    let query = request.query_string().is_ok;
+    let version = request.version_string().is_ok;
+    let header = request.header_string("x-test").is_ok;
+    let body_len = request.body_len().unwrap_or(0);
+    let copied = request.body_copy(buffer).unwrap_or(0);
+    let typed = request.respond_with_content_type(200, "text/plain", "ok").unwrap_or(false);
+    let answered = request.respond(200, "ok").unwrap_or(false);
+    request.close();
+    buffer.free();
+    server.close();
+    if method && path && query && version && header && typed && answered && body_len >= 0 && copied >= 0 { 1 } else { 0 }
+}
+"#;
+    let combined = expand_stdlib_imports_for_source(source)
+        .expect("net stdlib import should expand with HTTP server request wrappers");
+    let ir = compile_compiler_ir(&combined)
+        .expect("net import should expose HTTP server request wrappers");
+
+    assert!(ir.contains("sengoo_http_server_next_request"));
+    assert!(ir.contains("sengoo_http_request_method_len"));
+    assert!(ir.contains("sengoo_http_request_method_copy"));
+    assert!(ir.contains("sengoo_http_request_path_copy"));
+    assert!(ir.contains("sengoo_http_request_query_copy"));
+    assert!(ir.contains("sengoo_http_request_version_copy"));
+    assert!(ir.contains("sengoo_http_request_header_len"));
+    assert!(ir.contains("sengoo_http_request_header_copy"));
+    assert!(ir.contains("sengoo_http_request_body_len"));
+    assert!(ir.contains("sengoo_http_request_body_copy"));
+    assert!(ir.contains("sengoo_http_request_respond"));
+    assert!(ir.contains("sengoo_http_request_respond_with_content_type"));
+    assert!(ir.contains("sengoo_http_request_close"));
 }
 
 #[test]

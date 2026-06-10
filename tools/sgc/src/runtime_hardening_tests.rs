@@ -219,6 +219,89 @@ def main() -> i64 {
 }
 
 #[test]
+fn runtime_hardening_c_bundle_http_server_request_symbols_map_fallback_statuses() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "http-server-request-c-bundle",
+        r#"
+import std::net;
+import std::status;
+
+def main() -> i64 {
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let request = HttpServerRequest { handle: 7 };
+
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    let bind_unsupported = !bind_result.is_ok && bind_result.error == STATUS_UNSUPPORTED();
+
+    let server = HttpServer { handle: 7 };
+    let next_result = server.next_request(1);
+    let next_unsupported = !next_result.is_ok && next_result.error == STATUS_UNSUPPORTED();
+
+    let method_len_result = request.method_len();
+    let method_len_invalid = !method_len_result.is_ok && method_len_result.error == STATUS_INVALID_HANDLE();
+    let method_copy_result = request.method_copy(buffer);
+    let method_copy_invalid = !method_copy_result.is_ok && method_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let path_len_result = request.path_len();
+    let path_len_invalid = !path_len_result.is_ok && path_len_result.error == STATUS_INVALID_HANDLE();
+    let path_copy_result = request.path_copy(buffer);
+    let path_copy_invalid = !path_copy_result.is_ok && path_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let query_len_result = request.query_len();
+    let query_len_invalid = !query_len_result.is_ok && query_len_result.error == STATUS_INVALID_HANDLE();
+    let query_copy_result = request.query_copy(buffer);
+    let query_copy_invalid = !query_copy_result.is_ok && query_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let version_len_result = request.version_len();
+    let version_len_invalid = !version_len_result.is_ok && version_len_result.error == STATUS_INVALID_HANDLE();
+    let version_copy_result = request.version_copy(buffer);
+    let version_copy_invalid = !version_copy_result.is_ok && version_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let header_len_result = request.header_len("x-test");
+    let header_len_invalid = !header_len_result.is_ok && header_len_result.error == STATUS_INVALID_HANDLE();
+    let header_copy_result = request.header_copy("x-test", buffer);
+    let header_copy_invalid = !header_copy_result.is_ok && header_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let body_len_result = request.body_len();
+    let body_len_invalid = !body_len_result.is_ok && body_len_result.error == STATUS_INVALID_HANDLE();
+    let body_copy_result = request.body_copy(buffer);
+    let body_copy_invalid = !body_copy_result.is_ok && body_copy_result.error == STATUS_INVALID_HANDLE();
+
+    let respond_result = request.respond(200, "x");
+    let respond_invalid = !respond_result.is_ok && respond_result.error == STATUS_INVALID_HANDLE();
+    let typed_result = request.respond_with_content_type(200, "text/plain", "x");
+    let typed_invalid = !typed_result.is_ok && typed_result.error == STATUS_INVALID_HANDLE();
+
+    let close_rejected = request.close() == false;
+    buffer.free();
+
+    if bind_unsupported && next_unsupported
+        && method_len_invalid && method_copy_invalid
+        && path_len_invalid && path_copy_invalid
+        && query_len_invalid && query_copy_invalid
+        && version_len_invalid && version_copy_invalid
+        && header_len_invalid && header_copy_invalid
+        && body_len_invalid && body_copy_invalid
+        && respond_invalid && typed_invalid && close_rejected {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn async_hardening_spawn_and_timeout_sources_compile() {
     for source in [
         r#"

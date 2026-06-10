@@ -49,10 +49,10 @@ HTTP server:
 
 Network bench:
 
-- `sengoo_net_bench_last_error_code() -> i32`
+- `sengoo_net_bench_last_error_code() -> i64`
 - `sengoo_net_bench_last_error_len() -> i64`
 - `sengoo_net_bench_last_error_copy(buffer: *mut u8, capacity: usize) -> i64`
-- `sengoo_net_bench_last_error_clear() -> i32`
+- `sengoo_net_bench_last_error_clear() -> i64`
 - `sengoo_net_bench_run(connections: u32, rtt_messages_per_connection: u32, broadcast_rounds: u32, payload_bytes: u32, report_buffer: *mut u8, report_capacity: usize) -> i64`
 
 Ownership:

@@ -9,6 +9,7 @@ This document defines the current runtime network baseline APIs.
 - HTTP over TCP (HTTP/1.1, `http://` only)
 - WebSocket over TCP (`ws://` only)
 - HTTP server runtime (HTTP/1.1 parse + routing + middleware + WS upgrade)
+- HTTP server dynamic request serving (pull-based `next_request` + respond)
 - Protocol-level error code mapping for network FFI calls
 
 ## C ABI API Surface
@@ -55,9 +56,22 @@ This document defines the current runtime network baseline APIs.
 - `i64 sengoo_http_server_serve_once(u64 server_handle, u32 timeout_ms)`
 - `i64 sengoo_http_server_close(u64 server_handle)`
 
+### HTTP Server Dynamic Requests
+
+- `u64 sengoo_http_server_next_request(u64 server_handle, u32 timeout_ms)`
+- `i64 sengoo_http_request_method_len(u64 request_handle)` / `i64 sengoo_http_request_method_copy(u64 request_handle, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_path_len(u64 request_handle)` / `i64 sengoo_http_request_path_copy(u64 request_handle, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_query_len(u64 request_handle)` / `i64 sengoo_http_request_query_copy(u64 request_handle, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_version_len(u64 request_handle)` / `i64 sengoo_http_request_version_copy(u64 request_handle, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_header_len(u64 request_handle, const u8* name)` / `i64 sengoo_http_request_header_copy(u64 request_handle, const u8* name, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_body_len(u64 request_handle)` / `i64 sengoo_http_request_body_copy(u64 request_handle, u8* buffer, usize capacity)`
+- `i64 sengoo_http_request_respond(u64 request_handle, i32 status, const u8* body, usize body_len)`
+- `i64 sengoo_http_request_respond_with_content_type(u64 request_handle, i32 status, const u8* content_type, const u8* body, usize body_len)`
+- `i64 sengoo_http_request_close(u64 request_handle)`
+
 ### Error Mapping
 
-- `i32 sengoo_net_last_error()`
+- `i64 sengoo_net_last_error()`
 - `void sengoo_net_clear_error()`
 - `i64 sengoo_net_error_name_copy(i32 code, u8* buffer, usize capacity)`
 
@@ -109,6 +123,16 @@ static routes, required-header middleware, and WS echo routes. Its
 `Ok(false)` on timeout, and `Err(code)` for runtime failures. Example:
 `examples/reflection/net_http_server.sg`.
 
+`HttpServer.next_request(timeout_ms)` pulls the next dynamic request as an
+`HttpServerRequest` handle. The request handle exposes
+`method_string()/path_string()/query_string()/version_string()` (owned
+`String` getters), `header_string(name)` (absent headers map to
+`STATUS_NOT_FOUND`), `body_len()/body_copy(buffer)`, exactly-once
+`respond(status, body)` / `respond_with_content_type(status, content_type, body)`
+/ `respond_raw(status, ptr, len)`, and `close()` (answers unanswered requests
+with the deterministic `504` fallback). A runnable package fixture lives at
+`examples/realworld/http-echo-service`.
+
 ## Return Conventions
 
 - Handle-returning APIs: `0` means failure.
@@ -153,6 +177,26 @@ static routes, required-header middleware, and WS echo routes. Its
   - route-level upgrade endpoint via `sengoo_http_server_add_ws_echo_route`
   - validates upgrade headers and returns `426 Upgrade Required` on invalid upgrade request
   - WS session supports text echo + ping/pong + close
+- Dynamic request serving (pull model):
+  - `sengoo_http_server_next_request` accepts within the timeout budget; the
+    serve loop stays serial (one connection at a time) and plaintext-only
+  - middleware rejections, static routes, and ws-echo routes are answered
+    inline before a request can surface as a dynamic handle, so existing
+    `serve_once`-era fixtures keep their behavior
+  - the request target splits at the first `?` into path and query; no
+    percent-decoding is applied in v1
+  - header lookup is case-insensitive; an absent header is distinguishable
+    from an empty value (`-1` + `ok` last-error at the C ABI level)
+  - every pulled request is answered exactly once: `respond*` writes, flushes,
+    closes (`Connection: close`), and frees the handle; double respond fails
+    with `handle_not_found`; closing an unanswered handle writes a `504`
+    fallback; closing the server drains all queued handles with the same `504`
+  - at most 64 pulled-but-unanswered requests per server; overflow requests
+    are answered `503` inline and never surface
+  - response bodies above the `set_limits` `max_body_bytes` cap are rejected
+    with `invalid_argument` while keeping the handle answerable
+  - `timeout_ms` expiry maps to the `timeout` net error (`STATUS_TIMEOUT` in
+    `std::status`)
 
 ## Current Constraints
 
@@ -160,6 +204,9 @@ static routes, required-header middleware, and WS echo routes. Its
 - HTTP keeps baseline behavior (status + body retrieval).
 - WebSocket baseline supports text frames for smoke/e2e paths.
 - HTTP server middleware/handler model is MVP-level (no async middleware chain yet).
+- Dynamic serving is synchronous and serial: no TLS server, no streaming
+  bodies, no keep-alive, no callback-style handlers, and no async/await serve
+  integration (a later reactor-backed change owns async serving).
 
 ## Verification
 

@@ -108,6 +108,7 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         "cli-json-audit",
         "compressed-json-artifact",
         "http-client-status",
+        "http-echo-service",
         "package-release-loop",
         "workspace-doc-loop",
     ] {

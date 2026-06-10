@@ -89,12 +89,15 @@ fn tcp_socket_readable(handle: u64) -> bool {
     #[cfg(all(feature = "native-bridge", windows))]
     {
         unsafe extern "system" {
-            fn GetModuleHandleA(module_name: *const u8) -> isize;
-            fn GetProcAddress(module: isize, symbol_name: *const u8) -> *mut core::ffi::c_void;
+            fn GetModuleHandleA(module_name: *const u8) -> *mut core::ffi::c_void;
+            fn GetProcAddress(
+                module: *mut core::ffi::c_void,
+                symbol_name: *const u8,
+            ) -> *mut core::ffi::c_void;
         }
 
         let module = unsafe { GetModuleHandleA(std::ptr::null()) };
-        if module == 0 {
+        if module.is_null() {
             return false;
         }
         let symbol = unsafe { GetProcAddress(module, c"sengoo_tcp_poll_readable".as_ptr().cast()) };

@@ -30,6 +30,10 @@ cd examples/realworld/http-client-status
 ```
 
 ```powershell
+cd examples/realworld/http-echo-service
+```
+
+```powershell
 cd examples/realworld/package-release-loop
 ```
 
@@ -47,6 +51,9 @@ Packages:
   `std::compress` gzip Buffer helpers and `std::json` parse verification.
 - `http-client-status`: HTTP/status example using the public `std::http`
   wrapper and a stable unsupported-scheme path.
+- `http-echo-service`: dynamic HTTP echo service using the pull-based
+  `std::net` server subset (`next_request`, request introspection,
+  exactly-once `respond`), with a network-independent smoke test.
 - `package-release-loop`: package release fixture covering dependency aliases,
   two selected local-registry versions of `shared_core`, deterministic publish
   metadata, local registry publish, and locked command stability.

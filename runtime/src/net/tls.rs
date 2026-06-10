@@ -281,7 +281,7 @@ mod tests {
         TestCertBundle {
             #[cfg(not(windows))]
             ca_der: CertificateDer::from(ca_cert.der().clone()),
-            server_der: CertificateDer::from(server_cert.der().clone()),
+            server_der: server_cert.der().clone(),
             server_key: PrivateKeyDer::Pkcs8(server_key.serialize_der().into()),
             #[cfg(not(windows))]
             wrong_host_der,

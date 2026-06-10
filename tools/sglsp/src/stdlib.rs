@@ -57,7 +57,8 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" | "time" => {
             &["status"]
         }
-        "http" | "net" => &["ffi", "status"],
+        "http" => &["ffi", "status"],
+        "net" => &["ffi", "status", "string"],
         "file" | "dir" | "io" | "env" | "path" | "process" | "args" | "strconv" => &["status"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
@@ -523,6 +524,53 @@ import std::status;
             .collect::<Vec<_>>();
         assert!(labels
             .contains(&"def result_ok_with<T, E>(value: T, error_placeholder: E) -> Result<T, E>"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_http_server_request_surface() {
+        let content = "import std::net;\n";
+
+        assert_symbols_for_content(
+            content,
+            &[
+                "HttpServer",
+                "HttpServerRequest",
+                "http_server_bind",
+                "Buffer",
+                "Result",
+                "String",
+            ],
+        );
+
+        let signatures = stdlib_signatures_for_content(content);
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            "def http_server_bind(host: &str, port: i64) -> Result<HttpServer, i64>",
+            "def next_request(self, timeout_ms: i64) -> Result<HttpServerRequest, i64> [impl HttpServer]",
+            "def method_string(self) -> Result<String, i64> [impl HttpServerRequest]",
+            "def path_string(self) -> Result<String, i64> [impl HttpServerRequest]",
+            "def query_string(self) -> Result<String, i64> [impl HttpServerRequest]",
+            "def version_string(self) -> Result<String, i64> [impl HttpServerRequest]",
+            "def header_string(self, name: &str) -> Result<String, i64> [impl HttpServerRequest]",
+            "def body_len(self) -> Result<i64, i64> [impl HttpServerRequest]",
+            "def body_copy(self, buffer: Buffer) -> Result<i64, i64> [impl HttpServerRequest]",
+            "def respond(self, status: i64, body: &str) -> Result<bool, i64> [impl HttpServerRequest]",
+            "def respond_with_content_type(self, status: i64, content_type: &str, body: &str) -> Result<bool, i64> [impl HttpServerRequest]",
+            "def close(self) -> bool [impl HttpServerRequest]",
+        ] {
+            assert!(
+                labels.contains(&expected),
+                "missing signature {expected}; labels: {labels:#?}"
+            );
+        }
+
+        let definition = stdlib_definition_for_content(content, "HttpServerRequest")
+            .expect("net import should expose HttpServerRequest definition");
+        assert_eq!(definition.uri.scheme(), "sengoo-stdlib");
+        assert!(definition.uri.as_str().ends_with("/net.sg"));
     }
 
     #[test]

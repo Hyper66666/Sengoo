@@ -4446,3 +4446,149 @@ long long sengoo_async_frame_load(long long handle, long long offset) {
     }
     return frame[offset + 1];
 }
+
+/*
+ * Async program-side dispatch contract fallbacks.
+ *
+ * The native runtime staticlib references `main__*` and the
+ * `sengoo_async_*_dispatch*` family, which async Sengoo programs define in
+ * their compiled IR. Non-async programs never run the scheduler bridge, but
+ * COMDAT-driven archive member extraction can still pull bridge objects that
+ * carry those references, so the link needs benign defaults. Windows resolves
+ * them through /alternatename (only used when the real symbol is absent);
+ * POSIX uses weak definitions that any strong IR definition overrides.
+ */
+long long sengoo_async_fallback_dispatch_i64(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 1;
+}
+
+long long sengoo_async_fallback_zero_i64(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0;
+}
+
+unsigned char sengoo_async_fallback_dispatch_bool(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0;
+}
+
+void sengoo_async_fallback_dispatch_void(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+}
+
+signed char sengoo_async_fallback_dispatch_i8(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0;
+}
+
+short sengoo_async_fallback_dispatch_i16(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0;
+}
+
+int sengoo_async_fallback_dispatch_i32(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0;
+}
+
+float sengoo_async_fallback_dispatch_f32(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0.0f;
+}
+
+double sengoo_async_fallback_dispatch_f64(long long kind, long long handle) {
+    (void)kind;
+    (void)handle;
+    return 0.0;
+}
+
+long long sengoo_async_fallback_main_start(void) {
+    return 0;
+}
+
+long long sengoo_async_fallback_main_poll(long long handle) {
+    (void)handle;
+    return 1;
+}
+
+long long sengoo_async_fallback_main_result(long long handle) {
+    (void)handle;
+    return 0;
+}
+
+#if defined(_WIN32)
+#pragma comment(linker, "/alternatename:main__start=sengoo_async_fallback_main_start")
+#pragma comment(linker, "/alternatename:main__poll=sengoo_async_fallback_main_poll")
+#pragma comment(linker, "/alternatename:main__result=sengoo_async_fallback_main_result")
+#pragma comment(linker, "/alternatename:sengoo_async_poll_dispatch=sengoo_async_fallback_dispatch_i64")
+#pragma comment(linker, "/alternatename:sengoo_async_cancel_dispatch=sengoo_async_fallback_dispatch_bool")
+#pragma comment(linker, "/alternatename:sengoo_async_drop_dispatch=sengoo_async_fallback_dispatch_void")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_i8=sengoo_async_fallback_dispatch_i8")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_i16=sengoo_async_fallback_dispatch_i16")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_i32=sengoo_async_fallback_dispatch_i32")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_i64=sengoo_async_fallback_zero_i64")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_bool=sengoo_async_fallback_dispatch_bool")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_f32=sengoo_async_fallback_dispatch_f32")
+#pragma comment(linker, "/alternatename:sengoo_async_result_dispatch_f64=sengoo_async_fallback_dispatch_f64")
+#else
+__attribute__((weak)) long long main__start(void) {
+    return sengoo_async_fallback_main_start();
+}
+
+__attribute__((weak)) long long main__poll(long long handle) {
+    return sengoo_async_fallback_main_poll(handle);
+}
+
+__attribute__((weak)) long long main__result(long long handle) {
+    return sengoo_async_fallback_main_result(handle);
+}
+
+__attribute__((weak)) long long sengoo_async_poll_dispatch(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_i64(kind, handle);
+}
+
+__attribute__((weak)) unsigned char sengoo_async_cancel_dispatch(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_bool(kind, handle);
+}
+
+__attribute__((weak)) void sengoo_async_drop_dispatch(long long kind, long long handle) {
+    sengoo_async_fallback_dispatch_void(kind, handle);
+}
+
+__attribute__((weak)) signed char sengoo_async_result_dispatch_i8(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_i8(kind, handle);
+}
+
+__attribute__((weak)) short sengoo_async_result_dispatch_i16(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_i16(kind, handle);
+}
+
+__attribute__((weak)) int sengoo_async_result_dispatch_i32(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_i32(kind, handle);
+}
+
+__attribute__((weak)) long long sengoo_async_result_dispatch_i64(long long kind, long long handle) {
+    return sengoo_async_fallback_zero_i64(kind, handle);
+}
+
+__attribute__((weak)) unsigned char sengoo_async_result_dispatch_bool(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_bool(kind, handle);
+}
+
+__attribute__((weak)) float sengoo_async_result_dispatch_f32(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_f32(kind, handle);
+}
+
+__attribute__((weak)) double sengoo_async_result_dispatch_f64(long long kind, long long handle) {
+    return sengoo_async_fallback_dispatch_f64(kind, handle);
+}
+#endif

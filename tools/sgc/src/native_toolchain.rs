@@ -128,6 +128,7 @@ fn runtime_object_cache_path(
     runtime_bundle_fingerprint: u64,
     opt_level: u8,
     target: &NativeBuildTarget,
+    defines: &[&str],
 ) -> Result<PathBuf> {
     let runtime_c_canonical =
         fs::canonicalize(runtime_c_path).unwrap_or_else(|_| runtime_c_path.to_path_buf());
@@ -142,6 +143,7 @@ fn runtime_object_cache_path(
     runtime_source_fingerprint.hash(&mut hasher);
     opt_level.hash(&mut hasher);
     target.triple.hash(&mut hasher);
+    defines.hash(&mut hasher);
     let key = hasher.finish();
 
     let ext = target.object_extension();
@@ -158,11 +160,15 @@ fn compile_runtime_source_to_object(
     object_path: &Path,
     opt_level: u8,
     target: &NativeBuildTarget,
+    defines: &[&str],
 ) -> Result<()> {
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
         .arg(format!("-O{}", opt_level));
+    for define in defines {
+        command.arg(format!("-D{define}"));
+    }
 
     if let Some(runtime_dir) = runtime_source_path.parent() {
         command.arg("-I").arg(runtime_dir);
@@ -200,6 +206,21 @@ pub(crate) fn ensure_runtime_objects(
     opt_level: u8,
     target: Option<&NativeBuildTarget>,
 ) -> Result<Vec<PathBuf>> {
+    ensure_runtime_objects_with_defines(clang_exe, runtime_c, opt_level, target, &[])
+}
+
+/// Marks the C runtime bundle as linked next to the native Rust runtime
+/// staticlib, compiling out fallback stubs that would otherwise shadow the
+/// real implementations during symbol resolution.
+pub(crate) const NATIVE_NET_RUNTIME_DEFINE: &str = "SENGOO_NATIVE_NET_RUNTIME";
+
+pub(crate) fn ensure_runtime_objects_with_defines(
+    clang_exe: &str,
+    runtime_c: &str,
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+    defines: &[&str],
+) -> Result<Vec<PathBuf>> {
     let target = effective_target(target);
     let runtime_c_path = Path::new(runtime_c);
     let sources = runtime_source_bundle(runtime_c)?;
@@ -212,6 +233,7 @@ pub(crate) fn ensure_runtime_objects(
             bundle_fingerprint,
             opt_level,
             &target,
+            defines,
         )?;
         if !object_path.exists() {
             compile_runtime_source_to_object(
@@ -220,6 +242,7 @@ pub(crate) fn ensure_runtime_objects(
                 &object_path,
                 opt_level,
                 &target,
+                defines,
             )?;
         }
         object_paths.push(object_path);
@@ -289,7 +312,10 @@ fn workspace_root() -> PathBuf {
 
 fn async_runtime_profile(opt_level: u8) -> &'static str {
     if opt_level >= 2 {
-        "release"
+        // Dedicated profile (release-like, but per-module codegen units and no
+        // LTO) so archive members stay independently extractable; see
+        // `[profile.staticlib]` in the workspace Cargo.toml.
+        "staticlib"
     } else {
         "debug"
     }
@@ -336,8 +362,8 @@ pub(crate) fn ensure_async_runtime_staticlib(opt_level: u8) -> Result<PathBuf> {
         .arg("--features")
         .arg("native-bridge")
         .env("RUSTFLAGS", "-C link-dead-code");
-    if profile == "release" {
-        command.arg("--release");
+    if profile != "debug" {
+        command.arg("--profile").arg(profile);
     }
     let status = command
         .current_dir(&workspace_root)
@@ -366,8 +392,12 @@ pub(crate) fn append_native_runtime_inputs(
     target: Option<&NativeBuildTarget>,
 ) -> Result<()> {
     if let Some(runtime_c) = runtime_c {
-        object_paths.extend(ensure_runtime_objects(
-            clang_exe, runtime_c, opt_level, target,
+        object_paths.extend(ensure_runtime_objects_with_defines(
+            clang_exe,
+            runtime_c,
+            opt_level,
+            target,
+            &[NATIVE_NET_RUNTIME_DEFINE],
         )?);
     }
     object_paths.push(ensure_async_runtime_staticlib(opt_level)?);
@@ -545,6 +575,12 @@ fn run_windows_link_command(
         "userenv.lib",
         "ws2_32.lib",
         "dbghelp.lib",
+        // Native net/TLS (schannel) support linked through the runtime staticlib.
+        "advapi32.lib",
+        "bcrypt.lib",
+        "crypt32.lib",
+        "ncrypt.lib",
+        "secur32.lib",
         "legacy_stdio_definitions.lib",
         "msvcrt.lib",
         "vcruntime.lib",
@@ -1124,6 +1160,7 @@ mod tests {
             before_fingerprint,
             1,
             &NativeBuildTarget::host(),
+            &[],
         )
         .unwrap();
 
@@ -1138,10 +1175,45 @@ mod tests {
             after_fingerprint,
             1,
             &NativeBuildTarget::host(),
+            &[],
         )
         .unwrap();
 
         assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runtime_object_cache_path_changes_with_defines() {
+        let root = temp_test_dir("runtime-object-defines");
+        let runtime_c = root.join("runtime.c");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&runtime_c, "aaaa").unwrap();
+        let fingerprint = runtime_bundle_fingerprint(&runtime_c.to_string_lossy()).unwrap();
+
+        let plain = runtime_object_cache_path(
+            &runtime_c,
+            &runtime_c,
+            fingerprint,
+            1,
+            &NativeBuildTarget::host(),
+            &[],
+        )
+        .unwrap();
+        let native_net = runtime_object_cache_path(
+            &runtime_c,
+            &runtime_c,
+            fingerprint,
+            1,
+            &NativeBuildTarget::host(),
+            &[NATIVE_NET_RUNTIME_DEFINE],
+        )
+        .unwrap();
+
+        assert_ne!(
+            plain, native_net,
+            "C-only and native-net runtime objects must not share a cache slot"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

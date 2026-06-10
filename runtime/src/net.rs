@@ -15,12 +15,19 @@ pub use http_client::{
     sengoo_http_body_copy, sengoo_http_body_len, sengoo_http_close, sengoo_http_get,
     sengoo_http_post, sengoo_http_status,
 };
-use http_server::HttpServerState;
 pub use http_server::{
+    sengoo_http_request_body_copy, sengoo_http_request_body_len, sengoo_http_request_close,
+    sengoo_http_request_header_copy, sengoo_http_request_header_len,
+    sengoo_http_request_method_copy, sengoo_http_request_method_len, sengoo_http_request_path_copy,
+    sengoo_http_request_path_len, sengoo_http_request_query_copy, sengoo_http_request_query_len,
+    sengoo_http_request_respond, sengoo_http_request_respond_with_content_type,
+    sengoo_http_request_version_copy, sengoo_http_request_version_len,
     sengoo_http_server_add_middleware_require_header, sengoo_http_server_add_route,
     sengoo_http_server_add_ws_echo_route, sengoo_http_server_bind, sengoo_http_server_close,
-    sengoo_http_server_local_port, sengoo_http_server_serve_once, sengoo_http_server_set_limits,
+    sengoo_http_server_local_port, sengoo_http_server_next_request, sengoo_http_server_serve_once,
+    sengoo_http_server_set_limits,
 };
+use http_server::{HttpRequestEntry, HttpServerState};
 #[cfg(test)]
 use http_server::{
     HttpServerMiddleware, HttpServerMiddlewareKind, HttpServerRoute, HttpServerRouteKind,
@@ -133,6 +140,7 @@ struct NetRuntime {
     http_responses: Mutex<HashMap<u64, HttpResponseEntry>>,
     ws_streams: Mutex<HashMap<u64, TcpStream>>,
     http_servers: Mutex<HashMap<u64, HttpServerState>>,
+    http_requests: Mutex<HashMap<u64, HttpRequestEntry>>,
 }
 
 enum RecvOutcome {
@@ -149,6 +157,7 @@ impl NetRuntime {
             http_responses: Mutex::new(HashMap::new()),
             ws_streams: Mutex::new(HashMap::new()),
             http_servers: Mutex::new(HashMap::new()),
+            http_requests: Mutex::new(HashMap::new()),
         }
     }
 
@@ -171,6 +180,9 @@ impl NetRuntime {
         if let Ok(mut table) = self.http_servers.lock() {
             table.clear();
         }
+        if let Ok(mut table) = self.http_requests.lock() {
+            table.clear();
+        }
         reset_last_error();
     }
 
@@ -183,9 +195,11 @@ fn net_runtime() -> &'static NetRuntime {
     NET_RUNTIME.get_or_init(NetRuntime::new)
 }
 
+/// Returns the error code widened to `i64` to match the stdlib extern ABI
+/// (`fn sengoo_net_last_error() -> i64`) on every architecture.
 #[no_mangle]
-pub extern "C" fn sengoo_net_last_error() -> i32 {
-    LAST_NET_ERROR.load(Ordering::Relaxed)
+pub extern "C" fn sengoo_net_last_error() -> i64 {
+    i64::from(LAST_NET_ERROR.load(Ordering::Relaxed))
 }
 
 #[no_mangle]
@@ -854,7 +868,10 @@ mod tests {
         let url_c = c_string_bytes(&url);
         let handle = sengoo_http_get(url_c.as_ptr(), 2_000);
         assert_eq!(handle, 0, "invalid chunk should fail request");
-        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_HTTP_CHUNKED);
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_HTTP_CHUNKED)
+        );
         worker.join().expect("join worker");
     }
 
@@ -863,7 +880,10 @@ mod tests {
         let url = c_string_bytes("ftp://127.0.0.1/");
         let handle = sengoo_http_get(url.as_ptr(), 1_000);
         assert_eq!(handle, 0, "ftp scheme should remain unsupported");
-        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_UNSUPPORTED_SCHEME)
+        );
     }
 
     #[test]
@@ -923,7 +943,10 @@ mod tests {
         let url_c = c_string_bytes(&url);
         let handle = sengoo_ws_connect(url_c.as_ptr(), 2_000);
         assert_eq!(handle, 0, "missing accept header should reject handshake");
-        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_WS_HANDSHAKE);
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_WS_HANDSHAKE)
+        );
         worker.join().expect("join worker");
     }
 
@@ -1086,7 +1109,10 @@ mod tests {
     fn invalid_argument_sets_error_mapping() {
         let ret = unsafe { sengoo_tcp_send(999, std::ptr::null(), 5) };
         assert_eq!(ret, -1);
-        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_INVALID_ARGUMENT);
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_INVALID_ARGUMENT)
+        );
 
         let mut name_buf = [0u8; 32];
         let copied = sengoo_net_error_name_copy(
@@ -1103,7 +1129,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         sengoo_net_clear_error();
-        assert_eq!(sengoo_net_last_error(), SENGOO_NET_ERR_OK);
+        assert_eq!(sengoo_net_last_error(), i64::from(SENGOO_NET_ERR_OK));
 
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -1122,7 +1148,7 @@ mod tests {
             attempt_rx
                 .recv_timeout(Duration::from_millis(50))
                 .expect("worker should set a process-visible net error");
-            if sengoo_net_last_error() == SENGOO_NET_ERR_INVALID_ARGUMENT {
+            if sengoo_net_last_error() == i64::from(SENGOO_NET_ERR_INVALID_ARGUMENT) {
                 observed_worker_error = true;
                 stop.store(true, Ordering::Relaxed);
                 break;
@@ -1131,5 +1157,452 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         worker.join().expect("worker should not panic");
         assert!(observed_worker_error);
+    }
+
+    fn read_request_text(
+        handle: u64,
+        len_fn: extern "C" fn(u64) -> i64,
+        copy_fn: extern "C" fn(u64, *mut u8, usize) -> i64,
+    ) -> String {
+        let len = len_fn(handle);
+        assert!(len >= 0, "text length should be readable");
+        let mut buf = vec![0u8; len as usize];
+        let copied = copy_fn(handle, buf.as_mut_ptr(), buf.len());
+        assert_eq!(copied, len, "copy should return full length");
+        String::from_utf8(buf).expect("request text should be utf-8")
+    }
+
+    #[test]
+    fn http_server_next_request_pull_and_respond_roundtrip() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let client = thread::spawn(move || {
+            let request = b"POST /items?limit=5 HTTP/1.1\r\nHost: localhost\r\nX-Trace: abc\r\nContent-Length: 4\r\n\r\nping";
+            send_raw_http_request(port, request)
+        });
+
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(request != 0, "dynamic request should surface a handle");
+
+        assert_eq!(
+            read_request_text(
+                request,
+                sengoo_http_request_method_len,
+                sengoo_http_request_method_copy
+            ),
+            "POST"
+        );
+        assert_eq!(
+            read_request_text(
+                request,
+                sengoo_http_request_path_len,
+                sengoo_http_request_path_copy
+            ),
+            "/items"
+        );
+        assert_eq!(
+            read_request_text(
+                request,
+                sengoo_http_request_query_len,
+                sengoo_http_request_query_copy
+            ),
+            "limit=5"
+        );
+        assert_eq!(
+            read_request_text(
+                request,
+                sengoo_http_request_version_len,
+                sengoo_http_request_version_copy
+            ),
+            "HTTP/1.1"
+        );
+
+        let mixed_case_name = c_string_bytes("X-Trace");
+        let header_len = sengoo_http_request_header_len(request, mixed_case_name.as_ptr());
+        assert_eq!(header_len, 3, "header lookup should be case-insensitive");
+        let mut header_buf = [0u8; 8];
+        let header_copied = sengoo_http_request_header_copy(
+            request,
+            mixed_case_name.as_ptr(),
+            header_buf.as_mut_ptr(),
+            header_buf.len(),
+        );
+        assert_eq!(header_copied, 3);
+        assert_eq!(&header_buf[..3], b"abc");
+
+        let missing_name = c_string_bytes("x-missing");
+        assert_eq!(
+            sengoo_http_request_header_len(request, missing_name.as_ptr()),
+            -1,
+            "absent header should be distinguishable from an empty value"
+        );
+        assert_eq!(sengoo_net_last_error(), i64::from(SENGOO_NET_ERR_OK));
+
+        assert_eq!(sengoo_http_request_body_len(request), 4);
+        let mut body_buf = [0u8; 8];
+        let body_copied =
+            sengoo_http_request_body_copy(request, body_buf.as_mut_ptr(), body_buf.len());
+        assert_eq!(body_copied, 4);
+        assert_eq!(&body_buf[..4], b"ping");
+
+        let content_type = c_string_bytes("application/json");
+        let payload = b"{\"ok\":true}";
+        assert_eq!(
+            sengoo_http_request_respond_with_content_type(
+                request,
+                200,
+                content_type.as_ptr(),
+                payload.as_ptr(),
+                payload.len(),
+            ),
+            1
+        );
+
+        let response = client.join().expect("client thread");
+        let (header, body) = split_http_headers_and_body(&response).expect("split response");
+        let (status, headers) = parse_http_headers(header).expect("parse headers");
+        assert_eq!(status, 200);
+        assert_eq!(body, payload);
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_timeout_maps_to_timeout() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let request = sengoo_http_server_next_request(server, 60);
+        assert_eq!(request, 0, "no request should map to timeout");
+        assert_eq!(sengoo_net_last_error(), i64::from(SENGOO_NET_ERR_TIMEOUT));
+
+        let client = thread::spawn(move || {
+            let request = b"GET /later HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(request != 0, "a later pull on the same server should work");
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"late".as_ptr(), 4),
+            1
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"late");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_answers_static_and_middleware_inline() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let header_name = c_string_bytes("x-auth");
+        let header_value = c_string_bytes("ok");
+        assert_eq!(
+            sengoo_http_server_add_middleware_require_header(
+                server,
+                header_name.as_ptr(),
+                header_value.as_ptr(),
+                401,
+                b"unauthorized".as_ptr(),
+                b"unauthorized".len(),
+            ),
+            1
+        );
+        let method = c_string_bytes("GET");
+        let route = c_string_bytes("/health");
+        assert_eq!(
+            sengoo_http_server_add_route(
+                server,
+                method.as_ptr(),
+                route.as_ptr(),
+                200,
+                b"healthy".as_ptr(),
+                b"healthy".len(),
+            ),
+            1
+        );
+
+        let static_client = thread::spawn(move || {
+            let request =
+                b"GET /health HTTP/1.1\r\nHost: localhost\r\nx-auth: ok\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        thread::sleep(Duration::from_millis(100));
+        let rejected_client = thread::spawn(move || {
+            let request = b"GET /dyn HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        thread::sleep(Duration::from_millis(100));
+        let dynamic_client = thread::spawn(move || {
+            let request =
+                b"GET /dyn HTTP/1.1\r\nHost: localhost\r\nx-auth: ok\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+
+        let request = sengoo_http_server_next_request(server, 6_000);
+        assert!(
+            request != 0,
+            "only the unmatched request should surface as dynamic"
+        );
+        assert_eq!(
+            read_request_text(
+                request,
+                sengoo_http_request_path_len,
+                sengoo_http_request_path_copy
+            ),
+            "/dyn"
+        );
+
+        let (static_status, static_body) =
+            parse_http_status_and_body(&static_client.join().expect("static client"));
+        assert_eq!(static_status, 200);
+        assert_eq!(static_body, b"healthy");
+
+        let (rejected_status, rejected_body) =
+            parse_http_status_and_body(&rejected_client.join().expect("rejected client"));
+        assert_eq!(rejected_status, 401);
+        assert_eq!(rejected_body, b"unauthorized");
+
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"dyn".as_ptr(), 3),
+            1
+        );
+        let (dynamic_status, dynamic_body) =
+            parse_http_status_and_body(&dynamic_client.join().expect("dynamic client"));
+        assert_eq!(dynamic_status, 200);
+        assert_eq!(dynamic_body, b"dyn");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_request_double_respond_is_rejected() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let client = thread::spawn(move || {
+            let request = b"GET /once HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(request != 0);
+
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"one".as_ptr(), 3),
+            1
+        );
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"two".as_ptr(), 3),
+            0,
+            "double respond must be rejected"
+        );
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_HANDLE_NOT_FOUND)
+        );
+
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"one", "no second response bytes may be written");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_request_close_unanswered_sends_gateway_timeout() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let client = thread::spawn(move || {
+            let request = b"GET /never HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(request != 0);
+
+        assert_eq!(sengoo_http_request_close(request), 1);
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 504);
+        assert_eq!(body, b"gateway timeout");
+
+        assert_eq!(
+            sengoo_http_request_close(request),
+            0,
+            "closing twice must report handle errors"
+        );
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_HANDLE_NOT_FOUND)
+        );
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_request_oversized_response_body_is_rejected() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        assert_eq!(sengoo_http_server_set_limits(server, 16 * 1024, 8), 1);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let client = thread::spawn(move || {
+            let request = b"GET /small HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(request != 0);
+
+        let oversized = b"123456789";
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, oversized.as_ptr(), oversized.len()),
+            0,
+            "response body above max_body_bytes must be rejected"
+        );
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_INVALID_ARGUMENT)
+        );
+
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"ok".as_ptr(), 2),
+            1,
+            "handle must stay answerable after the rejection"
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"ok");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_pending_cap_answers_overflow_inline() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let mut clients = Vec::new();
+        for index in 0..64 {
+            clients.push(thread::spawn(move || {
+                let request = format!(
+                    "GET /pending/{index} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                );
+                send_raw_http_request(port, request.as_bytes())
+            }));
+        }
+
+        let mut pulled = Vec::new();
+        for _ in 0..64 {
+            let request = sengoo_http_server_next_request(server, 8_000);
+            assert!(request != 0, "all 64 requests should be pullable");
+            pulled.push(request);
+        }
+        assert_eq!(
+            net_runtime()
+                .http_request_pending_count(server)
+                .expect("pending count"),
+            64
+        );
+
+        let overflow_client = thread::spawn(move || {
+            let request = b"GET /overflow HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let no_handle = sengoo_http_server_next_request(server, 500);
+        assert_eq!(no_handle, 0, "overflow request must not surface a handle");
+        assert_eq!(sengoo_net_last_error(), i64::from(SENGOO_NET_ERR_TIMEOUT));
+        let (overflow_status, overflow_body) =
+            parse_http_status_and_body(&overflow_client.join().expect("overflow client"));
+        assert_eq!(overflow_status, 503);
+        assert_eq!(overflow_body, b"service unavailable");
+
+        for (index, request) in pulled.iter().enumerate() {
+            let body = format!("answer {index}");
+            assert_eq!(
+                sengoo_http_request_respond(*request, 200, body.as_ptr(), body.len()),
+                1,
+                "previously pulled handles must stay answerable"
+            );
+        }
+        for client in clients {
+            let (status, _) = parse_http_status_and_body(&client.join().expect("pending client"));
+            assert_eq!(status, 200);
+        }
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_close_drains_unanswered_requests_with_gateway_timeout() {
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let first_client = thread::spawn(move || {
+            let request = b"GET /drain/a HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let first = sengoo_http_server_next_request(server, 4_000);
+        assert!(first != 0);
+        let second_client = thread::spawn(move || {
+            let request = b"GET /drain/b HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let second = sengoo_http_server_next_request(server, 4_000);
+        assert!(second != 0);
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+
+        let (first_status, first_body) =
+            parse_http_status_and_body(&first_client.join().expect("first client"));
+        assert_eq!(first_status, 504);
+        assert_eq!(first_body, b"gateway timeout");
+        let (second_status, second_body) =
+            parse_http_status_and_body(&second_client.join().expect("second client"));
+        assert_eq!(second_status, 504);
+        assert_eq!(second_body, b"gateway timeout");
+
+        assert_eq!(
+            net_runtime()
+                .http_request_pending_count(server)
+                .expect("pending count"),
+            0,
+            "drained server must leave no request entries behind"
+        );
+        assert_eq!(
+            net_runtime().http_request_table_len(),
+            0,
+            "drained server must leave the request handle table empty"
+        );
+        assert_eq!(
+            sengoo_http_request_respond(first, 200, b"x".as_ptr(), 1),
+            0,
+            "drained handles must be invalid"
+        );
+        assert_eq!(
+            sengoo_net_last_error(),
+            i64::from(SENGOO_NET_ERR_HANDLE_NOT_FOUND)
+        );
     }
 }
