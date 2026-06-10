@@ -59,8 +59,11 @@ served as the failing implementation baseline.
 ## Local Full-Workspace Gate
 
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` passes.
-- `cargo test --workspace --locked` passes after the async/JIT enum review
-  fixes; the compiler library reports 699 passing tests in the final run.
+- `cargo test --workspace --locked -- --test-threads=1` passes after the
+  async/JIT enum review fixes. The single-thread setting is required because
+  the native networking ABI intentionally exposes one process-wide
+  `LAST_NET_ERROR`; parallel network tests can otherwise overwrite each
+  other's asserted error code.
 
 An independent read-only review found and drove regression coverage for two
 adjacent enum paths: payloadless enum values crossing `await`, and the public

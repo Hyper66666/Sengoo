@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - codex/**
 
 jobs:
   core-language:
@@ -29,4 +28,4 @@ jobs:
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture
 
       - name: Run workspace tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked -- --test-threads=1
