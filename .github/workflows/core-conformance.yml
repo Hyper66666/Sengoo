@@ -23,7 +23,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang
 
       - name: Validate OpenSpec
-        run: npx --yes openspec validate core-language-correctness --strict
+        run: npx --yes @fission-ai/openspec@1.4.1 validate core-language-correctness --strict
 
       - name: Run core conformance examples
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture

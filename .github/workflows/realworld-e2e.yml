@@ -47,7 +47,7 @@ jobs:
         run: cargo test -p sengoo-runtime net::tls -- --nocapture
 
       - name: Validate OpenSpec child change
-        run: npx --yes openspec validate package-release-defaults --strict
+        run: npx --yes @fission-ai/openspec@1.4.1 validate package-release-defaults --strict
         continue-on-error: true
 
   graphics-package-smoke:
