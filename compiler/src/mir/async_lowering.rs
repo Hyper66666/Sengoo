@@ -191,7 +191,10 @@ pub fn expand_async_functions(
             _ => false,
         })
     });
-    if needs_select_runtime {
+    // The native Rust staticlib groups all scalar select entry points into one
+    // archive member. Unix linkers therefore require every dispatch symbol once
+    // any async runtime entry point pulls that member into the executable.
+    if needs_select_runtime || !spawn_dispatch_entries.is_empty() {
         for (suffix, return_ty) in [
             ("bool", MIR_BOOL),
             ("i8", MIRType::Int(8)),

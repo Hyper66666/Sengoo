@@ -92,6 +92,30 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_program_synthesizes_complete_native_result_dispatch_surface() {
+    let source = r#"
+async def main() -> i64 {
+    await sleep(1);
+    42
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("async source should lower to MIR");
+    let names = mir_fns
+        .iter()
+        .map(|function| function.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    for suffix in ["bool", "i8", "i16", "i32", "i64", "f32", "f64"] {
+        let expected = format!("sengoo_async_result_dispatch_{suffix}");
+        assert!(
+            names.contains(expected.as_str()),
+            "native async runtime link surface is missing `{expected}`"
+        );
+    }
+}
+
+#[test]
 fn async_frame_rejects_payload_enum_local_crossing_await_before_codegen() {
     let source = r#"
 enum Maybe { Val(i64) }
