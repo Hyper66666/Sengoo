@@ -1,4 +1,5 @@
 use crate::ast::DeclKind;
+use crate::codegen::{Codegen, FfiCodegenConfig};
 use crate::mir::{Instruction, LocalKind};
 use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
@@ -113,6 +114,72 @@ async def main() -> i64 {
             "native async runtime link surface is missing `{expected}`"
         );
     }
+}
+
+#[test]
+fn linux_sysv_async_three_field_results_use_sret_for_declaration_and_call() {
+    let result_ty = crate::mir::MIRType::Struct {
+        name: "ChannelRecvOutcome".to_string(),
+        fields: vec![
+            ("is_ok".to_string(), crate::mir::MIR_BOOL),
+            ("value".to_string(), crate::mir::MIR_I64),
+            ("error".to_string(), crate::mir::MIR_I64),
+        ],
+    };
+    let mut function =
+        crate::mir::MirFunction::new("probe".to_string(), vec![], crate::mir::MIR_I64);
+    let handle = function.add_local(LocalKind::Temp, crate::mir::MIR_I64);
+    let outcome = function.add_local(LocalKind::Temp, result_ty);
+    let return_value = function.add_local(LocalKind::Temp, crate::mir::MIR_I64);
+    let entry = function.start_block;
+    function.push_inst_to_block(
+        entry,
+        Instruction::Assign {
+            destination: handle,
+            value: crate::mir::MirConstant::Int(1),
+        },
+    );
+    function.push_inst_to_block(
+        entry,
+        Instruction::Call {
+            destination: outcome,
+            func: "sengoo_async_channel_recv_i64__result".to_string(),
+            args: vec![handle],
+        },
+    );
+    function.push_inst_to_block(
+        entry,
+        Instruction::Assign {
+            destination: return_value,
+            value: crate::mir::MirConstant::Int(0),
+        },
+    );
+    function
+        .block_mut(entry)
+        .expect("entry block should exist")
+        .set_terminator(crate::mir::Terminator::Return(Some(return_value)));
+
+    let mut codegen = Codegen::with_ffi_and_target(
+        FfiCodegenConfig::default(),
+        Some("x86_64-unknown-linux-gnu".to_string()),
+    );
+    let ir = codegen
+        .codegen(&[function])
+        .expect("ABI probe should lower to LLVM IR");
+    let result_llvm_ty = "{ i1, i64, i64 }";
+
+    assert!(
+        ir.contains(&format!(
+            "declare void @sengoo_async_channel_recv_i64__result({result_llvm_ty}* sret({result_llvm_ty}) align 8, i64)"
+        )),
+        "Linux SysV declaration must use an sret pointer for the 24-byte result:\n{ir}"
+    );
+    assert!(
+        ir.contains(
+            "call void @sengoo_async_channel_recv_i64__result(%ChannelRecvOutcome* sret(%ChannelRecvOutcome) align 8"
+        ),
+        "Linux SysV call must use the same sret ABI as the runtime:\n{ir}"
+    );
 }
 
 #[test]

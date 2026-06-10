@@ -566,7 +566,7 @@ impl Codegen {
                 } else if ret_ty == "void" {
                     self.ir
                         .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
-                } else if self.uses_windows_sret_async_result(func, dest_ty) {
+                } else if self.uses_sret_async_result(func, dest_ty) {
                     let sret_slot = format!("{dest}.sret");
                     self.ir
                         .push_str(&format!("{sret_slot} = alloca {ret_ty}\n"));
@@ -1093,15 +1093,8 @@ impl Codegen {
             })
     }
 
-    fn uses_windows_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
-        self.targets_windows_msvc()
-            && matches!(dest_ty, MIRType::Struct { .. })
-            && matches!(
-                func,
-                "sengoo_async_timeout_cancel_i64__result"
-                    | "sengoo_async_channel_send_i64__result"
-                    | "sengoo_async_channel_recv_i64__result"
-                    | "sengoo_async_mutex_lock_i64__result"
-            )
+    fn uses_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
+        matches!(dest_ty, MIRType::Struct { .. })
+            && Self::async_result_uses_sret(self.targets_windows_msvc(), func)
     }
 }
