@@ -160,6 +160,20 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
                 .collect(),
             site_lo: *site_lo,
         },
+        HIRExpr::EnumConstruct {
+            enum_name,
+            variant_name,
+            discriminant,
+            args,
+        } => HIRExpr::EnumConstruct {
+            enum_name: enum_name.clone(),
+            variant_name: variant_name.clone(),
+            discriminant: *discriminant,
+            args: args
+                .iter()
+                .map(|arg| substitute_hir_expr(arg, subst))
+                .collect(),
+        },
         HIRExpr::MethodCall {
             receiver,
             method,

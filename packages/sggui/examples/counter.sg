@@ -23,9 +23,9 @@ def main() -> i64 {
     let button_fill = color_new(59, 130, 246, 255);
     let button_border = color_new(147, 197, 253, 255);
 
-    let running = app.running();
-    let app_loop = app;
-    let label_loop = count_label;
+    let mut running = app.running();
+    let mut app_loop = app;
+    let mut label_loop = count_label;
     let start_ms = app.platform.ticks_ms();
     while running {
         let polled = app_loop.poll();

@@ -24,7 +24,18 @@ pub(super) fn prune_unreachable_hir_functions(items: &mut Vec<HIRItem>) -> usize
 
     let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
     for (idx, fn_item) in functions.iter().enumerate() {
-        edges[idx] = collect_hir_call_targets_from_body(&fn_item.body, &index_by_name);
+        let mut targets = collect_hir_call_targets_from_body(&fn_item.body, &index_by_name);
+        let mut seen = targets.iter().copied().collect();
+        for contract in [
+            fn_item.precondition.as_ref(),
+            fn_item.postcondition.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            collect_hir_call_targets_from_expr(contract, &index_by_name, &mut targets, &mut seen);
+        }
+        edges[idx] = targets;
     }
 
     let mut reachable = vec![false; functions.len()];
@@ -225,6 +236,11 @@ fn collect_hir_call_targets_from_expr(
                         targets.push(idx);
                     }
                 }
+            }
+        }
+        HIRExpr::EnumConstruct { args, .. } => {
+            for arg in args {
+                collect_hir_call_targets_from_expr(arg, index_by_name, targets, seen);
             }
         }
         HIRExpr::MethodCall { receiver, args, .. } => {

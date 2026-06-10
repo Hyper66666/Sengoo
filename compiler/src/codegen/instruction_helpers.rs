@@ -429,29 +429,47 @@ impl Codegen {
 
                     MIRType::Enum { .. } => {
                         let llvm_ty = self.mir_type_to_llvm_cached(ty);
+                        let payload_size = common::enum_payload_storage_size(ty);
+                        let payload_storage_llvm = format!("[{payload_size} x i8]");
                         let discr_local = fields.first().copied().ok_or_else(|| {
                             "enum aggregate missing discriminant field".to_string()
                         })?;
                         let discr_val = self.operand_value(discr_local, mir_fn);
-                        let discr_temp = format!("{}.discr", dest);
+                        let slot = format!("{dest}.slot");
+                        let discr_ptr = format!("{dest}.discr.ptr");
 
                         self.emit_indent();
-                        self.ir.push_str(&format!(
-                            "{} = insertvalue {} undef, i64 {}, 0\n",
-                            discr_temp, llvm_ty, discr_val
-                        ));
-
-                        let payload_val = if let Some(payload_local) = fields.get(1).copied() {
-                            self.operand_value(payload_local, mir_fn)
-                        } else {
-                            "0".to_string()
-                        };
-
+                        self.ir.push_str(&format!("{slot} = alloca {llvm_ty}\n"));
                         self.emit_indent();
                         self.ir.push_str(&format!(
-                            "{} = insertvalue {} {}, i64 {}, 1\n",
-                            dest, llvm_ty, discr_temp, payload_val
+                            "{discr_ptr} = getelementptr {llvm_ty}, {llvm_ty}* {slot}, i32 0, i32 0\n"
                         ));
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("store i64 {discr_val}, i64* {discr_ptr}\n"));
+
+                        if let Some(payload_local) = fields.get(1).copied() {
+                            let payload_ty = self.get_local_type(mir_fn, payload_local).clone();
+                            let payload_llvm = self.mir_type_to_llvm_cached(&payload_ty);
+                            let payload_val = self.operand_value(payload_local, mir_fn);
+                            let payload_bytes = format!("{dest}.payload.bytes");
+                            let payload_ptr = format!("{dest}.payload.ptr");
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{payload_bytes} = getelementptr {llvm_ty}, {llvm_ty}* {slot}, i32 0, i32 1\n"
+                            ));
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "{payload_ptr} = bitcast {payload_storage_llvm}* {payload_bytes} to {payload_llvm}*\n"
+                            ));
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "store {payload_llvm} {payload_val}, {payload_llvm}* {payload_ptr}\n"
+                            ));
+                        }
+                        self.emit_indent();
+                        self.ir
+                            .push_str(&format!("{dest} = load {llvm_ty}, {llvm_ty}* {slot}\n"));
                     }
 
                     _ => {
@@ -548,7 +566,7 @@ impl Codegen {
                 } else if ret_ty == "void" {
                     self.ir
                         .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
-                } else if self.uses_windows_sret_async_result(func, dest_ty) {
+                } else if self.uses_sret_async_result(func, dest_ty) {
                     let sret_slot = format!("{dest}.sret");
                     self.ir
                         .push_str(&format!("{sret_slot} = alloca {ret_ty}\n"));
@@ -579,16 +597,13 @@ impl Codegen {
 
                 source,
             } => {
-                // Construct an enum as `{ discr, payload }`, leaving payload undef when absent.
                 let dest = self.local_name(*destination);
-
-                let src = self.local_name(*source);
-
-                // ExtractValue reads a field from an aggregate source value.
-
+                let source_ty = self.get_local_type(mir_fn, *source).clone();
+                let source_llvm = self.mir_type_to_llvm_cached(&source_ty);
+                let src = self.operand_value(*source, mir_fn);
                 self.ir.push_str(&format!(
-                    "{} = extractvalue {{ i64, i64 }} {}, 0\n",
-                    dest, src
+                    "{} = extractvalue {} {}, 0\n",
+                    dest, source_llvm, src
                 ));
             }
 
@@ -599,40 +614,46 @@ impl Codegen {
 
                 payload,
 
-                enum_type: _,
+                enum_type,
             } => {
-                // Enum construction is represented as an LLVM aggregate literal.
                 let dest = self.local_name(*destination);
-
-                // Materialize the discriminant first.
-                let discr_value = format!("{}.discr", dest);
-
+                let enum_llvm = self.mir_type_to_llvm_cached(enum_type);
+                let payload_size = common::enum_payload_storage_size(enum_type);
+                let payload_storage_llvm = format!("[{payload_size} x i8]");
+                let slot = format!("{dest}.slot");
+                let discr_ptr = format!("{dest}.discr.ptr");
                 self.emit_indent();
-
+                self.ir.push_str(&format!("{slot} = alloca {enum_llvm}\n"));
+                self.emit_indent();
                 self.ir.push_str(&format!(
-                    "{} = insertvalue {{ i64, i64 }} undef, i64 {}, 0\n",
-                    discr_value, discriminant
+                    "{discr_ptr} = getelementptr {enum_llvm}, {enum_llvm}* {slot}, i32 0, i32 0\n"
                 ));
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("store i64 {discriminant}, i64* {discr_ptr}\n"));
 
-                // Fill payload slot 1 when the enum variant carries data.
                 if let Some(payload_local) = payload {
+                    let payload_ty = self.get_local_type(mir_fn, *payload_local).clone();
+                    let payload_llvm = self.mir_type_to_llvm_cached(&payload_ty);
                     let payload_val = self.operand_value(*payload_local, mir_fn);
-
+                    let payload_bytes = format!("{dest}.payload.bytes");
+                    let payload_ptr = format!("{dest}.payload.ptr");
                     self.emit_indent();
-
                     self.ir.push_str(&format!(
-                        "{} = insertvalue {{ i64, i64 }} {}, i64 {}, 1\n",
-                        dest, discr_value, payload_val
+                        "{payload_bytes} = getelementptr {enum_llvm}, {enum_llvm}* {slot}, i32 0, i32 1\n"
                     ));
-                } else {
-                    // Keep payload slot 1 as undef for payloadless variants.
                     self.emit_indent();
-
                     self.ir.push_str(&format!(
-                        "{} = insertvalue {{ i64, i64 }} {}, i64 undef, 1\n",
-                        dest, discr_value
+                        "{payload_ptr} = bitcast {payload_storage_llvm}* {payload_bytes} to {payload_llvm}*\n"
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {payload_llvm} {payload_val}, {payload_llvm}* {payload_ptr}\n"
                     ));
                 }
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("{dest} = load {enum_llvm}, {enum_llvm}* {slot}\n"));
             }
 
             mir::Instruction::ExtractPayload {
@@ -640,16 +661,35 @@ impl Codegen {
 
                 source,
             } => {
-                // Bitcast reinterprets the source bits as the destination type.
                 let dest = self.local_name(*destination);
-
-                let src = self.local_name(*source);
-
-                // The cast emits one conversion instruction into the destination local.
-
+                let source_ty = self.get_local_type(mir_fn, *source).clone();
+                let source_llvm = self.mir_type_to_llvm_cached(&source_ty);
+                let payload_size = common::enum_payload_storage_size(&source_ty);
+                let payload_storage_llvm = format!("[{payload_size} x i8]");
+                let destination_ty = self.get_local_type(mir_fn, *destination).clone();
+                let destination_llvm = self.mir_type_to_llvm_cached(&destination_ty);
+                let src = self.operand_value(*source, mir_fn);
+                let slot = format!("{dest}.enum.slot");
+                let payload_bytes = format!("{dest}.payload.bytes");
+                let payload_ptr = format!("{dest}.payload.ptr");
+                self.emit_indent();
+                self.ir
+                    .push_str(&format!("{slot} = alloca {source_llvm}\n"));
+                self.emit_indent();
                 self.ir.push_str(&format!(
-                    "{} = extractvalue {{ i64, i64 }} {}, 1\n",
-                    dest, src
+                    "store {source_llvm} {src}, {source_llvm}* {slot}\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{payload_bytes} = getelementptr {source_llvm}, {source_llvm}* {slot}, i32 0, i32 1\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{payload_ptr} = bitcast {payload_storage_llvm}* {payload_bytes} to {destination_llvm}*\n"
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{dest} = load {destination_llvm}, {destination_llvm}* {payload_ptr}\n"
                 ));
             }
 
@@ -1053,15 +1093,8 @@ impl Codegen {
             })
     }
 
-    fn uses_windows_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
-        self.targets_windows_msvc()
-            && matches!(dest_ty, MIRType::Struct { .. })
-            && matches!(
-                func,
-                "sengoo_async_timeout_cancel_i64__result"
-                    | "sengoo_async_channel_send_i64__result"
-                    | "sengoo_async_channel_recv_i64__result"
-                    | "sengoo_async_mutex_lock_i64__result"
-            )
+    fn uses_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
+        matches!(dest_ty, MIRType::Struct { .. })
+            && Self::async_result_uses_sret(self.targets_windows_msvc(), func)
     }
 }

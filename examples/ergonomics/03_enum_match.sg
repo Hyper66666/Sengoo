@@ -15,5 +15,5 @@ def label(c: Color) -> i64 {
 }
 
 def main() -> i64 {
-    0
+    label(Color::Green)
 }

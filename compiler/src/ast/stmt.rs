@@ -21,6 +21,7 @@ impl Stmt {
                 name,
                 ty,
                 value: value.map(Box::new),
+                is_mut: false,
             },
             span,
         )
@@ -70,6 +71,7 @@ pub enum StmtKind {
         name: Ident,
         ty: Option<Type>,
         value: Option<Box<Expr>>,
+        is_mut: bool,
     },
 
     /// Const 绑定 `const X: Type = expr;`

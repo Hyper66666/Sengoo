@@ -354,8 +354,8 @@ impl VecIter<bool> {
     }
 
     def filter_with(self, pred: fn(bool) -> bool) -> Option<bool> {
-        let found = 0;
-        let matched = false;
+        let mut found = 0;
+        let mut matched = false;
         while sengoo_vec_iter_done_i64(self.handle) == 0 {
             if found != 0 {
                 break;
@@ -392,8 +392,8 @@ impl Iterator for VecIter<i64> {
     }
 
     def filter_even(self) -> Option<i64> {
-        let found = 0;
-        let matched = 0;
+        let mut found = 0;
+        let mut matched = 0;
         while sengoo_vec_iter_done_i64(self.handle) == 0 {
             if found != 0 {
                 break;
@@ -421,8 +421,8 @@ impl Iterator for VecIter<i64> {
     }
 
     def filter_with(self, pred: fn(i64) -> i64) -> Option<i64> {
-        let found = 0;
-        let matched = 0;
+        let mut found = 0;
+        let mut matched = 0;
         while sengoo_vec_iter_done_i64(self.handle) == 0 {
             if found != 0 {
                 break;
@@ -592,8 +592,8 @@ impl HashMapIter<bool> {
     }
 
     def filter_with(self, pred: fn(bool) -> bool) -> Option<bool> {
-        let found = 0;
-        let matched = false;
+        let mut found = 0;
+        let mut matched = false;
         while sengoo_hashmap_iter_done_i64(self.handle) == 0 {
             if found != 0 {
                 break;
@@ -631,8 +631,8 @@ impl Iterator for HashMapIter<i64> {
     }
 
     def filter_with(self, pred: fn(i64) -> i64) -> Option<i64> {
-        let found = 0;
-        let matched = 0;
+        let mut found = 0;
+        let mut matched = 0;
         while sengoo_hashmap_iter_done_i64(self.handle) == 0 {
             if found != 0 {
                 break;

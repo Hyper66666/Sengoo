@@ -17,7 +17,7 @@ use crate::compile_to_ir;
 fn test_array_constant_index_assign_generates_getelementptr_and_store() {
     let source = r#"
 def main() -> i64 {
-    let arr = [0, 0, 0];
+    let mut arr = [0, 0, 0];
     arr[0] = 42;
     arr[0]
 }
@@ -44,7 +44,7 @@ def main() -> i64 {
 fn test_array_variable_index_assign_compiles_successfully() {
     let source = r#"
 def main() -> i64 {
-    let arr = [10, 20, 30];
+    let mut arr = [10, 20, 30];
     let i = 0;
     let j = 2;
     arr[i] = arr[j];

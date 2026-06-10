@@ -27,7 +27,10 @@ impl TypeChecker {
     pub(super) fn check_stmt(&mut self, stmt: &Stmt) -> TyResult<Option<Ty>> {
         match &stmt.kind {
             StmtKind::Let {
-                name, ty, value, ..
+                name,
+                ty,
+                value,
+                is_mut,
             } => {
                 let var_ty = if let Some(ty) = ty {
                     self.check_type(ty)?
@@ -46,7 +49,8 @@ impl TypeChecker {
                 }
                 self.infer.unify(&var_ty, &value_ty)?;
 
-                self.env.insert_var(name.name.clone(), var_ty);
+                self.env
+                    .insert_var_with_mutability(name.name.clone(), var_ty, *is_mut);
                 Ok(None)
             }
             StmtKind::Const { name, ty, value } => {

@@ -34,6 +34,7 @@ impl<'source> Parser<'source> {
             Some(token) => match &token.kind {
                 TokenKind::LetKw => {
                     self.advance();
+                    let is_mut = self.consume(TokenKind::MutKw).is_some();
                     let name = self.expect_ident()?;
 
                     let ty = if self.consume(TokenKind::Colon).is_some() {
@@ -54,6 +55,7 @@ impl<'source> Parser<'source> {
                         name,
                         ty,
                         value: value.map(Box::new),
+                        is_mut,
                     }
                 }
                 TokenKind::ConstKw => {

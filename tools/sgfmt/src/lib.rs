@@ -748,6 +748,13 @@ mod tests {
     }
 
     #[test]
+    fn preserves_mutable_local_bindings() {
+        let src = "def main()->i64{let mut value=1;value=value+1;value}";
+        let formatted = format_test_source(src, FormatOptions::default());
+        assert!(formatted.contains("let mut value = 1;"));
+    }
+
+    #[test]
     fn formats_keyword_logical_operators_idempotently() {
         let src = "def main() -> i64 {\nlet a = true;\nlet b = false;\nlet ok = a && !b || b;\nif ok { 0 } else { 1 }\n}";
         let first = format_test_source(src, FormatOptions::default());

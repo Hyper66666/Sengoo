@@ -53,7 +53,18 @@ pub(super) fn reachable_ast_function_names(program: &AstProgram) -> Option<HashS
 
     let mut edges: Vec<Vec<usize>> = vec![Vec::new(); functions.len()];
     for (idx, fn_decl) in functions.iter().enumerate() {
-        edges[idx] = collect_ast_call_targets_from_block(&fn_decl.body, &index_by_name);
+        let mut targets = collect_ast_call_targets_from_block(&fn_decl.body, &index_by_name);
+        let mut seen = targets.iter().copied().collect();
+        for contract in [
+            fn_decl.precondition.as_deref(),
+            fn_decl.postcondition.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            collect_ast_call_targets_from_expr(contract, &index_by_name, &mut targets, &mut seen);
+        }
+        edges[idx] = targets;
     }
 
     let mut reachable = vec![false; functions.len()];

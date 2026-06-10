@@ -12,9 +12,31 @@ use crate::compile_to_ir;
 /// On success returns the LLVM IR; on error returns the error description.
 fn compile_snapshot(source: &str) -> String {
     match compile_to_ir(source) {
-        Ok(ir) => ir,
+        Ok(ir) => normalize_host_target_triple(ir),
         Err(e) => format!("COMPILE ERROR: {}", e),
     }
+}
+
+fn normalize_host_target_triple(mut ir: String) -> String {
+    const PREFIX: &str = "target triple = \"";
+    let Some(start) = ir.find(PREFIX) else {
+        return ir;
+    };
+    let value_start = start + PREFIX.len();
+    let Some(value_len) = ir[value_start..].find('"') else {
+        return ir;
+    };
+    ir.replace_range(value_start..value_start + value_len, "<host>");
+    ir
+}
+
+#[test]
+fn snapshot_normalization_hides_only_the_host_triple() {
+    let ir = "target triple = \"x86_64-unknown-linux-gnu\"\ndefine i64 @main()";
+    assert_eq!(
+        normalize_host_target_triple(ir.to_string()),
+        "target triple = \"<host>\"\ndefine i64 @main()"
+    );
 }
 
 #[test]

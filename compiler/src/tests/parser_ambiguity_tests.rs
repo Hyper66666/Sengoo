@@ -61,7 +61,7 @@ def main() -> i64 {
 fn test_while_less_than_comparison_parses_as_binary_lt() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
+    let mut x = 0;
     while x < 10 {
         x = x + 1;
     }

@@ -44,7 +44,7 @@ before pointer indexing.
 - **WHEN** a program runs `for v in arr` over a fixed-size array
 - **THEN** the loop binds each element in order
 - **AND** `examples/04_array.sg`, `examples/05_loop.sg`, and the
-  `docs/language-features.md` §2.2 snippet compile and produce their documented
+  `docs/language-features.md` section 2.2 snippet compile and produce their documented
   results
 
 #### Scenario: Growable arrays remain out of scope

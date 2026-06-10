@@ -300,7 +300,7 @@ impl BorrowChecker {
         self._env
             .lookup(name)
             .and_then(|symbol| match &symbol.kind {
-                crate::typeck::env::SymbolKind::Var(ty) => Some(ty.clone()),
+                crate::typeck::env::SymbolKind::Var { ty, .. } => Some(ty.clone()),
                 _ => None,
             })
     }

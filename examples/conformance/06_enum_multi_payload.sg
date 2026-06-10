@@ -1,0 +1,16 @@
+// Core conformance: multi-field enum payload construction and extraction.
+// Run: sgc run examples/conformance/06_enum_multi_payload.sg
+// Expected exit code: 42
+
+enum Outcome { Empty, Value(i64, bool) }
+
+def resolve(value: Outcome) -> i64 {
+    match value {
+        Outcome::Empty => 0,
+        Outcome::Value(number, enabled) => if enabled { number } else { 0 },
+    }
+}
+
+def main() -> i64 {
+    resolve(Outcome::Value(42, true))
+}

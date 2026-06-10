@@ -2,7 +2,7 @@ name: realworld-e2e
 
 on:
   push:
-    branches: [main, codex/**]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -16,7 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'
@@ -45,7 +47,7 @@ jobs:
         run: cargo test -p sengoo-runtime net::tls -- --nocapture
 
       - name: Validate OpenSpec child change
-        run: npx --yes openspec validate package-release-defaults --strict
+        run: npx --yes @fission-ai/openspec@1.4.1 validate package-release-defaults --strict
         continue-on-error: true
 
   graphics-package-smoke:
@@ -60,7 +62,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'

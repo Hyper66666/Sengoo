@@ -42,6 +42,21 @@ All reproduced from a clean source build on Linux (`rustc` 1.96, `clang` +
 | Conformance/CI | `cargo test` on Linux | 670/681 pass; 11 fail (basic-example `insta` snapshots + one Linux `#[cfg]` attribute test) |
 | Reproducibility | fresh `cargo build` | no committed `Cargo.lock`; resolves newer deps that require a newer Rust than the README toolchain |
 
+## Implementation Baseline Reconciliation
+
+The implementation branch starts from merged PR #12
+(`b026b8a79a13dcee0fed71294ecebee4113ce960`). On that revision, the array and
+closure lowering fixes had already landed through other work, and the Windows
+compiler library suite passed 681/681 tests. The earlier Linux report of 11
+failures therefore remains historical reproduction evidence, not a baseline
+that can still be reproduced from this implementation base.
+
+The conformance gate treats the already-green array and closure forms as
+required passing cases. New tests for `let mut`, immutable assignment, enum
+construction, and their diagnostics were introduced before their
+implementations and used as the red/green implementation baseline. No snapshot
+was rebaselined and no failing test was ignored.
+
 ## Approach
 
 1. **Conformance contract first.** Define the pinned core-conformance form list

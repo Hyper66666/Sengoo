@@ -6,6 +6,13 @@ use super::common;
 use crate::mir::{MIRType, MirFunction};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
+struct PhiIncomingLoad {
+    name: String,
+    local: crate::mir::Local,
+    ty: MIRType,
+}
+
 mod aggregate_instructions;
 mod casts;
 mod declaration_helpers;
@@ -33,6 +40,8 @@ pub struct JITCodegen {
     /// 临时变量计数器（用于生成唯一名称）
     /// 所有函数的签名（用于类型转换）
     function_signatures: HashMap<String, (Vec<MIRType>, MIRType)>,
+    phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
+    phi_incoming_values: HashMap<(usize, usize, usize), String>,
 }
 
 impl JITCodegen {
@@ -46,6 +55,8 @@ impl JITCodegen {
             string_counter: 0,
             current_block_id: 0,
             function_signatures: HashMap::new(),
+            phi_incoming_loads_by_block: HashMap::new(),
+            phi_incoming_values: HashMap::new(),
         };
         cg.emit_header();
         cg

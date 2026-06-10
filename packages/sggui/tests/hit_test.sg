@@ -23,14 +23,14 @@ def main() -> i64 {
     assert_true(button.handle_event(inside));
     assert_true(not button.handle_event(outside));
     assert_true(not button.handle_event(key_only));
-    let count = 0;
+    let mut count = 0;
     count = counter_apply_click(count, button, outside);
     assert_eq_i64(count, 0);
     count = counter_apply_click(count, button, inside);
     assert_eq_i64(count, 1);
     count = counter_apply_click(count, button, inside);
     assert_eq_i64(count, 2);
-    let label = label_set_value(label_new("Count", count, rect_new(0, 0, 200, 32)), count);
+    let mut label = label_set_value(label_new("Count", count, rect_new(0, 0, 200, 32)), count);
     assert_eq_i64(label.value, 2);
     label = label_increment(label);
     assert_eq_i64(label.value, 3);
