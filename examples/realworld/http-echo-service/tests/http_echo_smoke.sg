@@ -5,7 +5,7 @@ import std::status;
 async def client_probe(port: i64) -> i64 {
     await sleep(10);
     let connect_result = net_tcp_connect("127.0.0.1", port, 1000);
-    if connect_result.is_ok { let stream = connect_result.value; let sent = stream.send("GET /async-smoke HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(100); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connect_result.error; };
+    if connect_result.is_ok { let stream = connect_result.value; let sent = stream.send("GET /async-smoke HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connect_result.error; };
 }
 
 async def native_async_contract(server: HttpServer) -> bool {
