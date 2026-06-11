@@ -1272,6 +1272,68 @@ long long sengoo_http_server_next_request(long long handle, long long timeout_ms
     return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
 }
 
+typedef struct {
+    long long handle;
+} SengooHttpServerRequestHandle;
+
+typedef struct {
+    unsigned char is_ok;
+    SengooHttpServerRequestHandle value;
+    long long error;
+} SengooHttpServerNextRequestResult;
+
+typedef struct {
+    long long error;
+} SengooHttpServerNextRequestFallbackFuture;
+
+long long sengoo_http_server_next_request_async__start(long long handle, long long timeout_ms) {
+    (void)handle;
+    (void)timeout_ms;
+    SengooHttpServerNextRequestFallbackFuture* future =
+        (SengooHttpServerNextRequestFallbackFuture*)calloc(
+            1,
+            sizeof(SengooHttpServerNextRequestFallbackFuture)
+        );
+    if (!future) {
+        return 0;
+    }
+    future->error = SENGOO_STATUS_UNSUPPORTED;
+    return (long long)(intptr_t)future;
+}
+
+long long sengoo_http_server_next_request_async__poll(long long handle) {
+    (void)handle;
+    return 1;
+}
+
+SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(long long handle) {
+    SengooHttpServerNextRequestResult result;
+    result.is_ok = 0;
+    result.value.handle = 0;
+    result.error = SENGOO_STATUS_INVALID_HANDLE;
+    if (handle != 0) {
+        SengooHttpServerNextRequestFallbackFuture* future =
+            (SengooHttpServerNextRequestFallbackFuture*)(intptr_t)handle;
+        result.error = future->error;
+        free(future);
+    }
+    return result;
+}
+
+unsigned char sengoo_http_server_next_request_async__cancel(long long handle) {
+    if (handle == 0) {
+        return 0;
+    }
+    free((void*)(intptr_t)handle);
+    return 1;
+}
+
+void sengoo_http_server_next_request_async__drop(long long handle) {
+    if (handle != 0) {
+        free((void*)(intptr_t)handle);
+    }
+}
+
 long long sengoo_http_request_method_len(long long handle) {
     (void)handle;
     return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);

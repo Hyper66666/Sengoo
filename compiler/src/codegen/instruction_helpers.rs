@@ -1062,6 +1062,7 @@ impl Codegen {
                     | "sengoo_async_channel_send_i64__result"
                     | "sengoo_async_channel_recv_i64__result"
                     | "sengoo_async_mutex_lock_i64__result"
+                    | "sengoo_http_server_next_request_async__result"
             )
     }
 }

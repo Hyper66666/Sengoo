@@ -2,8 +2,9 @@
 
 use super::{
     compile_and_run_stdlib_import_program_with_native_runtime,
-    compile_and_run_stdlib_import_program_with_stdin, compile_source,
-    expand_stdlib_imports_for_source, find_clang, temp_artifact,
+    compile_and_run_stdlib_import_program_with_stdin, compile_source, ensure_runtime_objects,
+    expand_stdlib_imports_for_source, find_clang, find_runtime_c, link_native_binary_from_objects,
+    temp_artifact,
 };
 use std::fs;
 use std::process::Command;
@@ -299,6 +300,105 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn runtime_hardening_c_bundle_http_server_async_result_reports_unsupported() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    let source_path = temp_artifact("http-server-async-fallback-probe", "c");
+    fs::write(
+        &source_path,
+        r#"
+#include <stdint.h>
+
+typedef struct {
+    long long handle;
+} SengooHttpServerRequestHandle;
+
+typedef struct {
+    unsigned char is_ok;
+    SengooHttpServerRequestHandle value;
+    long long error;
+} SengooHttpServerNextRequestResult;
+
+#ifdef _WIN32
+void __main(void) {}
+#endif
+
+long long sengoo_http_server_next_request_async__start(long long handle, long long timeout_ms);
+long long sengoo_http_server_next_request_async__poll(long long handle);
+SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(long long handle);
+unsigned char sengoo_http_server_next_request_async__cancel(long long handle);
+void sengoo_http_server_next_request_async__drop(long long handle);
+
+int main(void) {
+    long long handle = sengoo_http_server_next_request_async__start(7, 1);
+    if (handle == 0) {
+        return 10;
+    }
+    if (sengoo_http_server_next_request_async__poll(handle) != 1) {
+        return 11;
+    }
+    SengooHttpServerNextRequestResult result =
+        sengoo_http_server_next_request_async__result(handle);
+    if (result.is_ok != 0 || result.value.handle != 0 || result.error != 8) {
+        return 12;
+    }
+
+    long long cancel_handle = sengoo_http_server_next_request_async__start(7, 1);
+    if (cancel_handle == 0 || !sengoo_http_server_next_request_async__cancel(cancel_handle)) {
+        return 13;
+    }
+    long long drop_handle = sengoo_http_server_next_request_async__start(7, 1);
+    if (drop_handle == 0) {
+        return 14;
+    }
+    sengoo_http_server_next_request_async__drop(drop_handle);
+    return 0;
+}
+"#,
+    )
+    .expect("probe source should be writable");
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let probe_obj = temp_artifact("http-server-async-fallback-probe", obj_ext);
+    let status = Command::new(&clang)
+        .arg("-c")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&probe_obj)
+        .status()
+        .expect("clang should compile fallback probe");
+    assert!(status.success(), "fallback probe should compile");
+
+    let exe_path = temp_artifact(
+        "http-server-async-fallback-probe",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![probe_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 1, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("fallback probe should run");
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(&source_path);
+    let _ = fs::remove_file(&probe_obj);
+    let _ = fs::remove_file(&exe_path);
 }
 
 #[test]

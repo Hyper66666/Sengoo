@@ -8,8 +8,10 @@ mainstream step is an async serving loop that lets user code write:
 
 ```sg
 while true {
-    let req = await server.next_request_async();
-    req.respond(200, "ok");
+    let outcome = await server.next_request_async(5000);
+    if outcome.is_ok {
+        outcome.value.respond(200, "ok");
+    }
 }
 ```
 
@@ -31,9 +33,8 @@ process orchestration.
 ## Scope
 ### In Scope
 - Plain HTTP/1.1 server accept/read readiness on supported native hosts.
-- `HttpServer.next_request_async(timeout_ms) -> Future<Result<HttpServerRequest, i64>>`
-  or the closest equivalent that follows the existing `Future<T>::poll`
-  contract.
+- `HttpServer.next_request_async(timeout_ms) -> Future<HttpServerNextRequestOutcome>`
+  following the existing `Future<T>::poll` contract.
 - `await server.next_request_async(...)` examples and diagnostics.
 - C-only fallback symbols returning `STATUS_UNSUPPORTED`.
 - Support matrix updates that mark async HTTP serving as a supported subset

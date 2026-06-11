@@ -3,7 +3,6 @@
 #[cfg(feature = "native-bridge")]
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
-#[cfg(feature = "native-bridge")]
 use std::ptr::NonNull;
 #[cfg(all(test, feature = "native-bridge"))]
 use std::sync::{Arc, Mutex};
@@ -17,7 +16,6 @@ mod bridge;
 mod concurrent;
 #[cfg(feature = "native-bridge")]
 mod futures;
-#[cfg(feature = "native-bridge")]
 mod reactor;
 #[cfg(feature = "native-bridge")]
 mod select;
@@ -64,7 +62,11 @@ pub use futures::{
 };
 #[cfg(all(test, feature = "native-bridge"))]
 use futures::{PollLifecycle, SleepFutureState, POLL_ERROR_COMPLETED, POLL_ERROR_REENTRANT};
-#[cfg(feature = "native-bridge")]
+#[cfg(test)]
+pub(crate) use reactor::http_listener_interest_count;
+pub(crate) use reactor::{
+    http_listener_poll_accept, http_listener_register, http_listener_unregister,
+};
 pub use reactor::{
     sengoo_async_reactor_fd_readable_register, sengoo_async_reactor_tcp_readable_register,
     sengoo_async_reactor_timer_register, sengoo_async_reactor_unregister,
@@ -331,9 +333,17 @@ fn record_poll_wakeup_hint(deadline: Instant) {
     });
 }
 
+#[cfg(feature = "native-bridge")]
+pub(crate) fn record_external_poll_wakeup_hint(deadline: Instant) {
+    record_poll_wakeup_hint(deadline);
+}
+
 #[cfg(not(feature = "native-bridge"))]
 #[allow(dead_code)]
 fn record_poll_wakeup_hint(_deadline: Instant) {}
+
+#[cfg(not(feature = "native-bridge"))]
+pub(crate) fn record_external_poll_wakeup_hint(_deadline: Instant) {}
 
 #[cfg(feature = "native-bridge")]
 fn take_poll_wakeup_hint() -> Option<Instant> {
@@ -380,7 +390,6 @@ fn wait_for_wakeup_hint_or_yield(deadline: Option<Instant>) {
     }
 }
 
-#[cfg(feature = "native-bridge")]
 /// Async runtime FFI contract:
 /// - handle values come only from the matching `__start`/constructor function
 /// - `0` is reserved as an invalid handle and must be treated as absent
@@ -396,12 +405,10 @@ unsafe fn handle_ref<'a, T>(handle: i64) -> Option<&'a T> {
     handle_nonnull(handle).map(|ptr| ptr.as_ref())
 }
 
-#[cfg(feature = "native-bridge")]
 unsafe fn handle_mut<'a, T>(handle: i64) -> Option<&'a mut T> {
     handle_nonnull(handle).map(|mut ptr| ptr.as_mut())
 }
 
-#[cfg(feature = "native-bridge")]
 unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
     handle_nonnull(handle).map(|ptr| Box::from_raw(ptr.as_ptr()))
 }

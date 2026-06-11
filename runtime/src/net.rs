@@ -24,8 +24,11 @@ pub use http_server::{
     sengoo_http_request_version_copy, sengoo_http_request_version_len,
     sengoo_http_server_add_middleware_require_header, sengoo_http_server_add_route,
     sengoo_http_server_add_ws_echo_route, sengoo_http_server_bind, sengoo_http_server_close,
-    sengoo_http_server_local_port, sengoo_http_server_next_request, sengoo_http_server_serve_once,
-    sengoo_http_server_set_limits,
+    sengoo_http_server_local_port, sengoo_http_server_next_request,
+    sengoo_http_server_next_request_async__cancel, sengoo_http_server_next_request_async__drop,
+    sengoo_http_server_next_request_async__poll, sengoo_http_server_next_request_async__result,
+    sengoo_http_server_next_request_async__start, sengoo_http_server_serve_once,
+    sengoo_http_server_set_limits, HttpServerNextRequestResult,
 };
 use http_server::{HttpRequestEntry, HttpServerState};
 #[cfg(test)]
@@ -115,6 +118,29 @@ fn classify_io_error(err: &std::io::Error) -> NetErrorCode {
     match err.kind() {
         ErrorKind::TimedOut | ErrorKind::WouldBlock => NetErrorCode::Timeout,
         _ => NetErrorCode::IoError,
+    }
+}
+
+fn status_from_net_error_code(code: NetErrorCode) -> i64 {
+    match code {
+        NetErrorCode::Ok => 0,
+        NetErrorCode::InvalidArgument | NetErrorCode::InvalidUrl => 2,
+        NetErrorCode::HandleNotFound => 3,
+        NetErrorCode::UnsupportedScheme => 8,
+        NetErrorCode::ResolveFailed
+        | NetErrorCode::ConnectFailed
+        | NetErrorCode::IoError
+        | NetErrorCode::WebSocketHandshakeError
+        | NetErrorCode::RemoteClosed => 9,
+        NetErrorCode::HttpProtocolError
+        | NetErrorCode::HttpChunkDecodeError
+        | NetErrorCode::WebSocketProtocolError => 10,
+        NetErrorCode::Timeout => 11,
+        NetErrorCode::InternalError => 1,
+        NetErrorCode::TlsCertInvalid => 15,
+        NetErrorCode::TlsHostnameMismatch => 16,
+        NetErrorCode::TlsHandshake => 17,
+        NetErrorCode::TlsUnavailable => 18,
     }
 }
 
@@ -426,7 +452,17 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, UdpSocket};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::thread;
+
+    static ASYNC_HTTP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn async_http_test_lock() -> MutexGuard<'static, ()> {
+        ASYNC_HTTP_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("async HTTP test lock poisoned")
+    }
 
     fn c_string_bytes(value: &str) -> Vec<u8> {
         let mut bytes = value.as_bytes().to_vec();
@@ -1299,6 +1335,202 @@ mod tests {
         assert_eq!(status, 200);
         assert_eq!(body, b"late");
 
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    fn poll_http_next_request_until_ready(handle: i64, timeout_ms: u64) -> i64 {
+        let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            let poll = unsafe { sengoo_http_server_next_request_async__poll(handle) };
+            if poll != 0 {
+                return poll;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "async HTTP next-request future should become ready before test deadline"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn http_server_next_request_async_timeout_preserves_server() {
+        let _guard = async_http_test_lock();
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let future = sengoo_http_server_next_request_async__start(server, 40);
+        assert!(future != 0);
+        assert_eq!(poll_http_next_request_until_ready(future, 1_000), 1);
+        let result = unsafe { sengoo_http_server_next_request_async__result(future) };
+        assert!(!result.is_ok);
+        assert_eq!(result.value.handle, 0);
+        assert_eq!(result.error, 11);
+
+        let client = thread::spawn(move || {
+            let request =
+                b"GET /after-timeout HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        let request = sengoo_http_server_next_request(server, 4_000);
+        assert!(
+            request != 0,
+            "server should remain usable after async timeout"
+        );
+        assert_eq!(
+            sengoo_http_request_respond(request, 200, b"late".as_ptr(), 4),
+            1
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"late");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_async_ready_on_localhost_client() {
+        let _guard = async_http_test_lock();
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let future = sengoo_http_server_next_request_async__start(server, 4_000);
+        assert!(future != 0);
+        let client = thread::spawn(move || {
+            let request =
+                b"GET /async?x=1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+
+        assert_eq!(poll_http_next_request_until_ready(future, 4_000), 1);
+        let result = unsafe { sengoo_http_server_next_request_async__result(future) };
+        assert!(
+            result.is_ok,
+            "async result should be ok, got {}",
+            result.error
+        );
+        assert!(result.value.handle > 0);
+        assert_eq!(result.error, 0);
+        assert_eq!(
+            read_request_text(
+                result.value.handle as u64,
+                sengoo_http_request_path_len,
+                sengoo_http_request_path_copy,
+            ),
+            "/async"
+        );
+        assert_eq!(
+            sengoo_http_request_respond(result.value.handle as u64, 200, b"ok".as_ptr(), 2),
+            1
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"ok");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_async_drop_pending_leaves_server_usable() {
+        let _guard = async_http_test_lock();
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+
+        let interest_count_before = crate::async_runtime::http_listener_interest_count();
+        let dropped = sengoo_http_server_next_request_async__start(server, 4_000);
+        assert!(dropped != 0);
+        assert_eq!(
+            crate::async_runtime::http_listener_interest_count(),
+            interest_count_before + 1,
+            "starting the future should register one listener interest"
+        );
+        assert_eq!(
+            unsafe { sengoo_http_server_next_request_async__poll(dropped) },
+            0
+        );
+        unsafe { sengoo_http_server_next_request_async__drop(dropped) };
+        assert_eq!(
+            crate::async_runtime::http_listener_interest_count(),
+            interest_count_before,
+            "dropping the future should unregister its listener interest"
+        );
+
+        let future = sengoo_http_server_next_request_async__start(server, 4_000);
+        assert!(future != 0);
+        let client = thread::spawn(move || {
+            let request =
+                b"GET /after-drop HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        assert_eq!(poll_http_next_request_until_ready(future, 4_000), 1);
+        let result = unsafe { sengoo_http_server_next_request_async__result(future) };
+        assert!(result.is_ok);
+        assert!(result.value.handle > 0);
+        assert_eq!(
+            sengoo_http_request_respond(result.value.handle as u64, 200, b"ok".as_ptr(), 2),
+            1
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"ok");
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn http_server_next_request_async_slow_client_never_publishes_partial_request() {
+        let _guard = async_http_test_lock();
+        use std::io::Write;
+
+        let host = b"127.0.0.1\0";
+        let server = sengoo_http_server_bind(host.as_ptr(), 0);
+        assert!(server != 0);
+        let port = sengoo_http_server_local_port(server) as u16;
+        let future = sengoo_http_server_next_request_async__start(server, 4_000);
+        assert!(future != 0);
+
+        let mut slow_client = TcpStream::connect(("127.0.0.1", port)).expect("slow client");
+        slow_client
+            .write_all(b"POST /partial HTTP/1.1\r\nHost: localhost\r\nContent-Length: 8\r\n")
+            .expect("partial request should be writable");
+        thread::sleep(Duration::from_millis(10));
+        assert_eq!(
+            unsafe { sengoo_http_server_next_request_async__poll(future) },
+            0,
+            "an incomplete request must not surface a request handle"
+        );
+
+        let client = thread::spawn(move || {
+            let request =
+                b"GET /after-slow HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+            send_raw_http_request(port, request)
+        });
+        assert_eq!(poll_http_next_request_until_ready(future, 4_000), 1);
+        let result = unsafe { sengoo_http_server_next_request_async__result(future) };
+        assert!(result.is_ok);
+        assert_eq!(
+            read_request_text(
+                result.value.handle as u64,
+                sengoo_http_request_path_len,
+                sengoo_http_request_path_copy,
+            ),
+            "/after-slow"
+        );
+        assert_eq!(
+            sengoo_http_request_respond(result.value.handle as u64, 200, b"ok".as_ptr(), 2),
+            1
+        );
+        let (status, body) = parse_http_status_and_body(&client.join().expect("client"));
+        assert_eq!(status, 200);
+        assert_eq!(body, b"ok");
+
+        drop(slow_client);
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 

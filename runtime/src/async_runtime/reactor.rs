@@ -4,11 +4,21 @@
 //! existing poll wakeup hint thread-local.
 
 use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::net::{TcpListener, TcpStream};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::{record_poll_wakeup_hint, sengoo_async_poll_dispatch};
+use super::record_poll_wakeup_hint;
+#[cfg(feature = "native-bridge")]
+use super::sengoo_async_poll_dispatch;
 
+#[cfg(not(feature = "native-bridge"))]
+unsafe fn sengoo_async_poll_dispatch(_kind: i64, _handle: i64) -> i64 {
+    1
+}
+
+#[cfg(feature = "native-bridge")]
 const STATUS_TIMEOUT: i64 = 11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,14 +26,18 @@ enum InterestKind {
     Timer,
     TcpReadable,
     OwnedFdReadable,
+    HttpListenerReadable,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Interest {
     kind: InterestKind,
     deadline: Option<Instant>,
     tcp_handle: Option<u64>,
     owned_fd: Option<i64>,
+    http_listener: Option<TcpListener>,
+    accepted_stream: Option<TcpStream>,
+    listener_error: Option<ErrorKind>,
 }
 
 static REACTOR: OnceLock<Mutex<Reactor>> = OnceLock::new();
@@ -50,8 +64,8 @@ impl Reactor {
         self.interests.remove(&id).is_some()
     }
 
-    fn poll_interest(&self, id: u64) -> bool {
-        let Some(interest) = self.interests.get(&id) else {
+    fn poll_interest(&mut self, id: u64) -> bool {
+        let Some(interest) = self.interests.get_mut(&id) else {
             return true;
         };
 
@@ -61,6 +75,7 @@ impl Reactor {
                 .is_some_and(|deadline| Instant::now() >= deadline),
             InterestKind::TcpReadable => interest.tcp_handle.is_some_and(tcp_socket_readable),
             InterestKind::OwnedFdReadable => interest.owned_fd.is_some_and(owned_fd_readable),
+            InterestKind::HttpListenerReadable => poll_http_listener_interest(interest),
         }
     }
 
@@ -68,11 +83,94 @@ impl Reactor {
         let interest = self.interests.get(&id)?;
         match interest.kind {
             InterestKind::Timer => interest.deadline,
-            InterestKind::TcpReadable | InterestKind::OwnedFdReadable => {
-                Some(Instant::now() + Duration::from_millis(5))
-            }
+            InterestKind::TcpReadable
+            | InterestKind::OwnedFdReadable
+            | InterestKind::HttpListenerReadable => Some(Instant::now() + Duration::from_millis(5)),
         }
     }
+
+    fn take_http_listener_stream(&mut self, id: u64) -> Result<Option<TcpStream>, ErrorKind> {
+        if !self.poll_interest(id) {
+            return Ok(None);
+        }
+        let Some(interest) = self.interests.get_mut(&id) else {
+            return Err(ErrorKind::NotFound);
+        };
+        if interest.kind != InterestKind::HttpListenerReadable {
+            return Err(ErrorKind::InvalidInput);
+        }
+        if let Some(error) = interest.listener_error.take() {
+            return Err(error);
+        }
+        Ok(interest.accepted_stream.take())
+    }
+}
+
+fn poll_http_listener_interest(interest: &mut Interest) -> bool {
+    if interest.accepted_stream.is_some() || interest.listener_error.is_some() {
+        return true;
+    }
+    let Some(listener) = interest.http_listener.as_ref() else {
+        interest.listener_error = Some(ErrorKind::NotFound);
+        return true;
+    };
+    match listener.accept() {
+        Ok((stream, _)) => match stream.set_nonblocking(false) {
+            Ok(()) => interest.accepted_stream = Some(stream),
+            Err(error) => interest.listener_error = Some(error.kind()),
+        },
+        Err(error) if error.kind() == ErrorKind::WouldBlock => return false,
+        Err(error) => interest.listener_error = Some(error.kind()),
+    }
+    true
+}
+
+pub(crate) fn http_listener_register(listener: &TcpListener) -> Result<u64, ErrorKind> {
+    let listener = listener.try_clone().map_err(|error| error.kind())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.kind())?;
+    let id = {
+        let mut reactor = reactor().lock().expect("reactor mutex poisoned");
+        reactor.register(Interest {
+            kind: InterestKind::HttpListenerReadable,
+            deadline: None,
+            tcp_handle: None,
+            owned_fd: None,
+            http_listener: Some(listener),
+            accepted_stream: None,
+            listener_error: None,
+        })
+    };
+    Ok(id)
+}
+
+pub(crate) fn http_listener_poll_accept(id: u64) -> Result<Option<TcpStream>, ErrorKind> {
+    let mut reactor = reactor().lock().expect("reactor mutex poisoned");
+    let result = reactor.take_http_listener_stream(id);
+    if result.as_ref().is_ok_and(Option::is_none) {
+        if let Some(deadline) = reactor.interest_wakeup_deadline(id) {
+            record_poll_wakeup_hint(deadline);
+        }
+    }
+    result
+}
+
+pub(crate) fn http_listener_unregister(id: u64) -> bool {
+    reactor()
+        .lock()
+        .expect("reactor mutex poisoned")
+        .unregister(id)
+}
+
+#[cfg(test)]
+pub(crate) fn http_listener_interest_count() -> usize {
+    let reactor = reactor().lock().expect("reactor mutex poisoned");
+    reactor
+        .interests
+        .values()
+        .filter(|interest| interest.kind == InterestKind::HttpListenerReadable)
+        .count()
 }
 
 #[cfg(all(feature = "native-bridge", not(windows)))]
@@ -223,6 +321,9 @@ pub extern "C" fn sengoo_async_reactor_timer_register(duration_ms: i64) -> u64 {
             deadline: Some(deadline),
             tcp_handle: None,
             owned_fd: None,
+            http_listener: None,
+            accepted_stream: None,
+            listener_error: None,
         })
 }
 
@@ -236,6 +337,9 @@ pub extern "C" fn sengoo_async_reactor_tcp_readable_register(tcp_handle: u64) ->
             deadline: None,
             tcp_handle: Some(tcp_handle),
             owned_fd: None,
+            http_listener: None,
+            accepted_stream: None,
+            listener_error: None,
         })
 }
 
@@ -249,6 +353,9 @@ pub extern "C" fn sengoo_async_reactor_fd_readable_register(owned_fd: i64) -> u6
             deadline: None,
             tcp_handle: None,
             owned_fd: Some(owned_fd),
+            http_listener: None,
+            accepted_stream: None,
+            listener_error: None,
         })
 }
 
@@ -288,7 +395,7 @@ pub unsafe extern "C" fn sengoo_async_reactor_wait__poll(handle: i64) -> i64 {
         return 1;
     }
 
-    let reactor = reactor().lock().expect("reactor mutex poisoned");
+    let mut reactor = reactor().lock().expect("reactor mutex poisoned");
     if reactor.poll_interest(state.interest_id) {
         return 1;
     }
@@ -345,4 +452,5 @@ pub unsafe extern "C" fn sengoo_async_reactor_wait__drop(handle: i64) {
         .unregister(state.interest_id);
 }
 
+#[cfg(feature = "native-bridge")]
 pub(super) const STATUS_TIMEOUT_CODE: i64 = STATUS_TIMEOUT;

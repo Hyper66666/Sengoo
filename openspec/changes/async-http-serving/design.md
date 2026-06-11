@@ -39,17 +39,15 @@ Preferred source shape:
 
 ```sg
 impl HttpServer {
-    def next_request_async(self, timeout_ms: i64) -> HttpServerNextRequestFuture;
+    def next_request_async(self, timeout_ms: i64) -> Future<HttpServerNextRequestOutcome>;
 }
 
 let request_result = await server.next_request_async(5_000);
 ```
 
-The concrete future may be a stdlib struct that implements the existing
-`Future<Result<HttpServerRequest, i64>>` contract. If current generic lowering
-cannot express that exact return type cleanly, implementation may use an
-equivalent concrete `poll(ctx) -> Poll<Result<HttpServerRequest, i64>>` wrapper,
-but the public usage must remain `await server.next_request_async(timeout_ms)`.
+The native runtime returns an opaque future handle at the ABI boundary, while the
+source-level stdlib wrapper exposes a normal `Future<HttpServerNextRequestOutcome>`
+surface. The public usage must remain `await server.next_request_async(timeout_ms)`.
 
 `next_request_async` returns the same success and error categories as
 `next_request`:

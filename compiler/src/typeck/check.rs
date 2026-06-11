@@ -689,6 +689,17 @@ impl TypeChecker {
     fn check_path_type(&mut self, path: &Path, explicit_args: Vec<Ty>) -> TyResult<Ty> {
         let name = self.path_name(path)?;
 
+        if name == "Future" {
+            if explicit_args.len() != 1 {
+                return Err(TypeckError::Other(format!(
+                    "type Future expects exactly 1 generic argument, found {}",
+                    explicit_args.len()
+                )));
+            }
+            let mut args = explicit_args;
+            return Ok(self.env.new_ty(TyKind::Future(Box::new(args.remove(0)))));
+        }
+
         if let Some(meta) = self.generic_type_metas.get(&name) {
             let args = self.resolve_generic_type_args(&name, meta, explicit_args)?;
             return Ok(self.env.new_ty(TyKind::Adt { name, args }));

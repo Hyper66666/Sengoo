@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -83,6 +85,7 @@ pub(super) struct HttpRequestEntry {
 
 /// Cap of pulled-but-unanswered request handles per server (design D5).
 const MAX_PENDING_DYNAMIC_REQUESTS: usize = 64;
+const ASYNC_HTTP_IO_SLICE: Duration = Duration::from_millis(5);
 
 fn gateway_timeout_response() -> HttpServerResponse {
     HttpServerResponse {
@@ -99,6 +102,88 @@ type HttpServerSnapshot = (
     usize,
     usize,
 );
+
+#[derive(Debug, Clone, Copy)]
+enum DynamicRequestPoll {
+    Ready(u64),
+    NotReady,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AsyncNextRequestOutcome {
+    Pending,
+    Ready { is_ok: bool, value: u64, error: i64 },
+}
+
+#[derive(Debug)]
+struct AsyncNextRequestState {
+    server_handle: u64,
+    deadline: Instant,
+    listener_interest: Option<u64>,
+    lifecycle: HttpFuturePollLifecycle,
+    outcome: AsyncNextRequestOutcome,
+}
+
+#[repr(C)]
+pub struct HttpServerRequestHandle {
+    pub handle: i64,
+}
+
+#[repr(C)]
+pub struct HttpServerNextRequestResult {
+    pub is_ok: bool,
+    pub value: HttpServerRequestHandle,
+    pub error: i64,
+}
+
+#[derive(Debug, Default)]
+struct HttpFuturePollLifecycle {
+    state: AtomicU8,
+}
+
+struct HttpFuturePollGuard<'a> {
+    lifecycle: &'a HttpFuturePollLifecycle,
+    ready: bool,
+}
+
+impl HttpFuturePollLifecycle {
+    fn enter(&self) -> Result<HttpFuturePollGuard<'_>, i64> {
+        match self
+            .state
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => Ok(HttpFuturePollGuard {
+                lifecycle: self,
+                ready: false,
+            }),
+            Err(1) => Err(-2),
+            Err(_) => Err(-3),
+        }
+    }
+}
+
+impl HttpFuturePollGuard<'_> {
+    fn mark_ready(mut self) {
+        self.lifecycle.state.store(2, Ordering::Release);
+        self.ready = true;
+    }
+}
+
+impl Drop for HttpFuturePollGuard<'_> {
+    fn drop(&mut self) {
+        if !self.ready {
+            self.lifecycle.state.store(0, Ordering::Release);
+        }
+    }
+}
+
+unsafe fn async_handle_mut<'a, T>(handle: i64) -> Option<&'a mut T> {
+    NonNull::new(handle as *mut T).map(|mut ptr| unsafe { ptr.as_mut() })
+}
+
+unsafe fn async_handle_take_box<T>(handle: i64) -> Option<Box<T>> {
+    NonNull::new(handle as *mut T).map(|ptr| unsafe { Box::from_raw(ptr.as_ptr()) })
+}
 
 impl NetRuntime {
     pub(crate) fn http_server_store(&self, state: HttpServerState) -> Result<u64, NetErrorCode> {
@@ -710,6 +795,131 @@ fn accept_with_timeout(
     }
 }
 
+fn try_accept_nonblocking(listener: &TcpListener) -> Result<Option<TcpStream>, NetErrorCode> {
+    match listener.accept() {
+        Ok((stream, _)) => {
+            stream
+                .set_nonblocking(false)
+                .map_err(|err| classify_io_error(&err))?;
+            Ok(Some(stream))
+        }
+        Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
+        Err(err) => Err(classify_io_error(&err)),
+    }
+}
+
+fn poll_next_dynamic_request_once(
+    server_handle: u64,
+    listener: &TcpListener,
+    routes: &[HttpServerRoute],
+    middlewares: &[HttpServerMiddleware],
+    max_header_bytes: usize,
+    max_body_bytes: usize,
+    io_timeout: Duration,
+) -> Result<DynamicRequestPoll, NetErrorCode> {
+    let Some(stream) = try_accept_nonblocking(listener)? else {
+        return Ok(DynamicRequestPoll::NotReady);
+    };
+
+    process_dynamic_request_stream(
+        server_handle,
+        stream,
+        routes,
+        middlewares,
+        max_header_bytes,
+        max_body_bytes,
+        io_timeout,
+    )
+}
+
+fn process_dynamic_request_stream(
+    server_handle: u64,
+    mut stream: TcpStream,
+    routes: &[HttpServerRoute],
+    middlewares: &[HttpServerMiddleware],
+    max_header_bytes: usize,
+    max_body_bytes: usize,
+    io_timeout: Duration,
+) -> Result<DynamicRequestPoll, NetErrorCode> {
+    if stream.set_read_timeout(Some(io_timeout)).is_err()
+        || stream.set_write_timeout(Some(io_timeout)).is_err()
+    {
+        return Ok(DynamicRequestPoll::NotReady);
+    }
+
+    let request = match read_http_request(&mut stream, max_header_bytes, max_body_bytes) {
+        Ok(request) => request,
+        Err(_) => {
+            let _ = write_http_response(
+                &mut stream,
+                &HttpServerResponse {
+                    status: 400,
+                    headers: Vec::new(),
+                    body: b"bad request".to_vec(),
+                },
+            );
+            return Ok(DynamicRequestPoll::NotReady);
+        }
+    };
+
+    if let Some(response) = apply_middlewares(middlewares, &request) {
+        let _ = write_http_response(&mut stream, &response);
+        return Ok(DynamicRequestPoll::NotReady);
+    }
+
+    if let Some((route, params)) = find_route(routes, &request.method, &request.path) {
+        match route.kind {
+            HttpServerRouteKind::StaticResponse { status, body } => {
+                let rendered = render_route_body(&body, &params);
+                let _ = write_http_response(
+                    &mut stream,
+                    &HttpServerResponse {
+                        status,
+                        headers: Vec::new(),
+                        body: rendered,
+                    },
+                );
+            }
+            HttpServerRouteKind::WebSocketEcho => {
+                let _ = answer_ws_echo_route(&mut stream, &request);
+            }
+        }
+        return Ok(DynamicRequestPoll::NotReady);
+    }
+
+    let pending = net_runtime().http_request_pending_count(server_handle)?;
+    if pending >= MAX_PENDING_DYNAMIC_REQUESTS {
+        let _ = write_http_response(
+            &mut stream,
+            &HttpServerResponse {
+                status: 503,
+                headers: Vec::new(),
+                body: b"service unavailable".to_vec(),
+            },
+        );
+        return Ok(DynamicRequestPoll::NotReady);
+    }
+
+    let (path, query) = match request.path.split_once('?') {
+        Some((path, query)) => (path.to_string(), query.to_string()),
+        None => (request.path.clone(), String::new()),
+    };
+    let entry = HttpRequestEntry {
+        server_handle,
+        method: request.method,
+        path,
+        query,
+        version: request.version,
+        headers: request.headers,
+        body: request.body,
+        stream,
+        max_body_bytes,
+    };
+    net_runtime()
+        .http_request_store(entry)
+        .map(DynamicRequestPoll::Ready)
+}
+
 #[no_mangle]
 pub extern "C" fn sengoo_http_server_bind(host: *const u8, port: u16) -> u64 {
     reset_last_error();
@@ -919,6 +1129,7 @@ pub extern "C" fn sengoo_http_server_next_request(handle: u64, timeout_ms: u32) 
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_ms.max(1) as u64))
         .unwrap_or_else(Instant::now);
+    let io_timeout = connect_timeout(timeout_ms);
 
     loop {
         let now = Instant::now();
@@ -926,102 +1137,277 @@ pub extern "C" fn sengoo_http_server_next_request(handle: u64, timeout_ms: u32) 
             set_last_error(NetErrorCode::Timeout);
             return 0;
         }
-        let remaining_ms = deadline
-            .duration_since(now)
-            .as_millis()
-            .clamp(1, u32::MAX as u128) as u32;
 
-        let mut stream = match accept_with_timeout(&listener, remaining_ms) {
-            Ok(Some(stream)) => stream,
-            Ok(None) => {
-                set_last_error(NetErrorCode::Timeout);
-                return 0;
-            }
-            Err(code) => return fail_handle(code),
-        };
-
-        let io_timeout = connect_timeout(timeout_ms);
-        if stream.set_read_timeout(Some(io_timeout)).is_err()
-            || stream.set_write_timeout(Some(io_timeout)).is_err()
-        {
-            continue;
-        }
-
-        let request = match read_http_request(&mut stream, max_header_bytes, max_body_bytes) {
-            Ok(request) => request,
-            Err(_) => {
-                let _ = write_http_response(
-                    &mut stream,
-                    &HttpServerResponse {
-                        status: 400,
-                        headers: Vec::new(),
-                        body: b"bad request".to_vec(),
-                    },
-                );
-                continue;
-            }
-        };
-
-        if let Some(response) = apply_middlewares(&middlewares, &request) {
-            let _ = write_http_response(&mut stream, &response);
-            continue;
-        }
-
-        if let Some((route, params)) = find_route(&routes, &request.method, &request.path) {
-            match route.kind {
-                HttpServerRouteKind::StaticResponse { status, body } => {
-                    let rendered = render_route_body(&body, &params);
-                    let _ = write_http_response(
-                        &mut stream,
-                        &HttpServerResponse {
-                            status,
-                            headers: Vec::new(),
-                            body: rendered,
-                        },
-                    );
-                }
-                HttpServerRouteKind::WebSocketEcho => {
-                    let _ = answer_ws_echo_route(&mut stream, &request);
-                }
-            }
-            continue;
-        }
-
-        let pending = match net_runtime().http_request_pending_count(handle) {
-            Ok(count) => count,
-            Err(code) => return fail_handle(code),
-        };
-        if pending >= MAX_PENDING_DYNAMIC_REQUESTS {
-            let _ = write_http_response(
-                &mut stream,
-                &HttpServerResponse {
-                    status: 503,
-                    headers: Vec::new(),
-                    body: b"service unavailable".to_vec(),
-                },
-            );
-            continue;
-        }
-
-        let (path, query) = match request.path.split_once('?') {
-            Some((path, query)) => (path.to_string(), query.to_string()),
-            None => (request.path.clone(), String::new()),
-        };
-        let entry = HttpRequestEntry {
-            server_handle: handle,
-            method: request.method,
-            path,
-            query,
-            version: request.version,
-            headers: request.headers,
-            body: request.body,
-            stream,
+        match poll_next_dynamic_request_once(
+            handle,
+            &listener,
+            &routes,
+            &middlewares,
+            max_header_bytes,
             max_body_bytes,
+            io_timeout,
+        ) {
+            Ok(DynamicRequestPoll::Ready(request_handle)) => return request_handle,
+            Ok(DynamicRequestPoll::NotReady) => {
+                let remaining = deadline.saturating_duration_since(now);
+                thread::sleep(remaining.min(Duration::from_millis(2)));
+            }
+            Err(code) => return fail_handle(code),
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_http_server_next_request_async__start(
+    handle: u64,
+    timeout_ms: u32,
+) -> i64 {
+    if handle == 0 {
+        return 0;
+    }
+    let (listener_interest, outcome) = match net_runtime().http_server_snapshot(handle) {
+        Ok((listener, _, _, _, _)) => {
+            match crate::async_runtime::http_listener_register(&listener) {
+                Ok(interest) => (Some(interest), AsyncNextRequestOutcome::Pending),
+                Err(error) => (
+                    None,
+                    AsyncNextRequestOutcome::Ready {
+                        is_ok: false,
+                        value: 0,
+                        error: super::status_from_net_error_code(classify_io_error(
+                            &std::io::Error::from(error),
+                        )),
+                    },
+                ),
+            }
+        }
+        Err(code) => (
+            None,
+            AsyncNextRequestOutcome::Ready {
+                is_ok: false,
+                value: 0,
+                error: super::status_from_net_error_code(code),
+            },
+        ),
+    };
+    let state = AsyncNextRequestState {
+        server_handle: handle,
+        deadline: Instant::now()
+            .checked_add(Duration::from_millis(timeout_ms.max(1) as u64))
+            .unwrap_or_else(Instant::now),
+        listener_interest,
+        lifecycle: HttpFuturePollLifecycle::default(),
+        outcome,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or a live handle returned by
+/// [`sengoo_http_server_next_request_async__start`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64) -> i64 {
+    let Some(state) = (unsafe { async_handle_mut::<AsyncNextRequestState>(handle) }) else {
+        return 1;
+    };
+    let guard = match state.lifecycle.enter() {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    if let AsyncNextRequestOutcome::Ready { .. } = state.outcome {
+        guard.mark_ready();
+        return 1;
+    }
+
+    let now = Instant::now();
+    if now >= state.deadline {
+        if let Some(interest) = state.listener_interest.take() {
+            crate::async_runtime::http_listener_unregister(interest);
+        }
+        state.outcome = AsyncNextRequestOutcome::Ready {
+            is_ok: false,
+            value: 0,
+            error: super::status_from_net_error_code(NetErrorCode::Timeout),
         };
-        return match net_runtime().http_request_store(entry) {
-            Ok(request_handle) => request_handle,
-            Err(code) => fail_handle(code),
+        guard.mark_ready();
+        return 1;
+    }
+
+    let (listener, routes, middlewares, max_header_bytes, max_body_bytes) =
+        match net_runtime().http_server_snapshot(state.server_handle) {
+            Ok(snapshot) => snapshot,
+            Err(code) => {
+                if let Some(interest) = state.listener_interest.take() {
+                    crate::async_runtime::http_listener_unregister(interest);
+                }
+                state.outcome = AsyncNextRequestOutcome::Ready {
+                    is_ok: false,
+                    value: 0,
+                    error: super::status_from_net_error_code(code),
+                };
+                guard.mark_ready();
+                return 1;
+            }
         };
+
+    let Some(interest) = state.listener_interest else {
+        state.outcome = AsyncNextRequestOutcome::Ready {
+            is_ok: false,
+            value: 0,
+            error: super::status_from_net_error_code(NetErrorCode::HandleNotFound),
+        };
+        guard.mark_ready();
+        return 1;
+    };
+
+    let stream = match crate::async_runtime::http_listener_poll_accept(interest) {
+        Ok(Some(stream)) => {
+            crate::async_runtime::http_listener_unregister(interest);
+            state.listener_interest = None;
+            stream
+        }
+        Ok(None) => {
+            crate::async_runtime::record_external_poll_wakeup_hint(
+                state
+                    .deadline
+                    .min(Instant::now() + Duration::from_millis(5)),
+            );
+            return 0;
+        }
+        Err(error) => {
+            crate::async_runtime::http_listener_unregister(interest);
+            state.listener_interest = None;
+            state.outcome = AsyncNextRequestOutcome::Ready {
+                is_ok: false,
+                value: 0,
+                error: super::status_from_net_error_code(classify_io_error(&std::io::Error::from(
+                    error,
+                ))),
+            };
+            guard.mark_ready();
+            return 1;
+        }
+    };
+
+    match process_dynamic_request_stream(
+        state.server_handle,
+        stream,
+        &routes,
+        &middlewares,
+        max_header_bytes,
+        max_body_bytes,
+        ASYNC_HTTP_IO_SLICE.min(state.deadline.saturating_duration_since(Instant::now())),
+    ) {
+        Ok(DynamicRequestPoll::Ready(request_handle)) => {
+            state.outcome = AsyncNextRequestOutcome::Ready {
+                is_ok: true,
+                value: request_handle,
+                error: 0,
+            };
+            guard.mark_ready();
+            1
+        }
+        Ok(DynamicRequestPoll::NotReady) => {
+            match crate::async_runtime::http_listener_register(&listener) {
+                Ok(interest) => {
+                    state.listener_interest = Some(interest);
+                    crate::async_runtime::record_external_poll_wakeup_hint(
+                        state
+                            .deadline
+                            .min(Instant::now() + Duration::from_millis(5)),
+                    );
+                    0
+                }
+                Err(error) => {
+                    state.outcome = AsyncNextRequestOutcome::Ready {
+                        is_ok: false,
+                        value: 0,
+                        error: super::status_from_net_error_code(classify_io_error(
+                            &std::io::Error::from(error),
+                        )),
+                    };
+                    guard.mark_ready();
+                    1
+                }
+            }
+        }
+        Err(code) => {
+            state.outcome = AsyncNextRequestOutcome::Ready {
+                is_ok: false,
+                value: 0,
+                error: super::status_from_net_error_code(code),
+            };
+            guard.mark_ready();
+            1
+        }
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_http_server_next_request_async__start`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_async__result(
+    handle: i64,
+) -> HttpServerNextRequestResult {
+    let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
+        return HttpServerNextRequestResult {
+            is_ok: false,
+            value: HttpServerRequestHandle { handle: 0 },
+            error: super::status_from_net_error_code(NetErrorCode::HandleNotFound),
+        };
+    };
+    if let Some(interest) = state.listener_interest {
+        crate::async_runtime::http_listener_unregister(interest);
+    }
+    match state.outcome {
+        AsyncNextRequestOutcome::Ready {
+            is_ok,
+            value,
+            error,
+        } => HttpServerNextRequestResult {
+            is_ok,
+            value: HttpServerRequestHandle {
+                handle: value as i64,
+            },
+            error,
+        },
+        AsyncNextRequestOutcome::Pending => HttpServerNextRequestResult {
+            is_ok: false,
+            value: HttpServerRequestHandle { handle: 0 },
+            error: super::status_from_net_error_code(NetErrorCode::Timeout),
+        },
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_http_server_next_request_async__start`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_async__cancel(handle: i64) -> bool {
+    let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
+        return false;
+    };
+    if let Some(interest) = state.listener_interest {
+        crate::async_runtime::http_listener_unregister(interest);
+    }
+    true
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_http_server_next_request_async__start`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_async__drop(handle: i64) {
+    let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
+        return;
+    };
+    if let Some(interest) = state.listener_interest {
+        crate::async_runtime::http_listener_unregister(interest);
     }
 }
 

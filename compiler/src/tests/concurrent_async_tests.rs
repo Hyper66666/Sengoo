@@ -19,6 +19,32 @@ fn async_stdlib_prefix() -> String {
         .join("\n\n")
 }
 
+fn net_async_stdlib_prefix() -> String {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let stdlib_root = manifest_dir
+        .parent()
+        .unwrap_or(manifest_dir)
+        .join("tools")
+        .join("stdlib");
+    let modules = [
+        "option.sg",
+        "result.sg",
+        "ffi.sg",
+        "status.sg",
+        "string.sg",
+        "async.sg",
+        "net.sg",
+    ];
+    modules
+        .iter()
+        .map(|module| {
+            std::fs::read_to_string(stdlib_root.join(module))
+                .unwrap_or_else(|err| panic!("failed to read stdlib module {module}: {err}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 fn compile_with_async_stdlib(program: &str) -> String {
     let source = format!("{}\n\n{}", async_stdlib_prefix(), program);
     compile_to_ir(&source)
@@ -126,4 +152,72 @@ async def main() -> i64 {
         "spawn_blocking lowering should reach runtime start"
     );
     compile_with_async_stdlib(source);
+}
+
+#[test]
+fn async_http_server_next_request_lowers_runtime_start() {
+    let source = r#"
+def request_handle(request: HttpServerRequest) -> i64 {
+    request.handle
+}
+
+async def main() -> i64 {
+    let bound = http_server_bind("127.0.0.1", 0);
+    if !bound.is_ok { return bound.error; }
+    let outcome = await bound.value.next_request_async(1);
+    if outcome.is_ok && outcome.value.handle == request_handle(outcome.value) { 0 } else { outcome.error }
+}
+"#;
+
+    let mir = compile_to_mir(&(net_async_stdlib_prefix() + "\n\n" + source))
+        .expect("async HTTP server source should lower");
+    let has_start = mir.iter().any(|mir_fn| {
+        mir_fn.instructions.iter().any(|inst| {
+            matches!(
+                inst,
+                Instruction::Call { func, .. }
+                    if func == "sengoo_http_server_next_request_async__start"
+            )
+        })
+    });
+    assert!(
+        has_start,
+        "HttpServer.next_request_async lowering should call runtime start"
+    );
+
+    let ir = compile_to_ir(&(net_async_stdlib_prefix() + "\n\n" + source))
+        .expect("async HTTP server source should reach LLVM IR");
+    assert!(
+        ir.contains("declare i64 @sengoo_http_server_next_request_async__start(i64, i64)"),
+        "IR should declare async HTTP start, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("@sengoo_http_server_next_request_async__result"),
+        "IR should call async HTTP result, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("%HttpServerRequest = type { i64 }")
+            && ir.contains("%HttpServerNextRequestOutcome = type { i1, %HttpServerRequest, i64 }"),
+        "async HTTP outcome should preserve the request wrapper aggregate, got:\n{ir}"
+    );
+}
+
+#[test]
+fn async_http_server_rejects_awaiting_synchronous_next_request() {
+    let source = r#"
+async def main() -> i64 {
+    let bound = http_server_bind("127.0.0.1", 0);
+    if !bound.is_ok { return bound.error; }
+    let outcome = await bound.value.next_request(1);
+    if outcome.is_ok { 0 } else { outcome.error }
+}
+"#;
+
+    let err = compile_to_ir(&(net_async_stdlib_prefix() + "\n\n" + source))
+        .expect_err("the synchronous next_request result must not be awaitable");
+    let message = err.to_string();
+    assert!(
+        message.contains("await requires a Future value"),
+        "expected a non-Future await diagnostic, got: {message}"
+    );
 }
