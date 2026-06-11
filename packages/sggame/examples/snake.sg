@@ -38,8 +38,8 @@ def direction_blocks_reverse(current: Direction, requested: Direction) -> bool {
 def draw_grid(surface: Surface, cell: i64, color: Color) -> bool {
     let x = 0;
     let x_limit = surface.width;
-    let mut_x = 0;
-    let mut_x_run = true;
+    let mut mut_x = 0;
+    let mut mut_x_run = true;
     while mut_x_run {
         if mut_x > x_limit {
             mut_x_run = false;
@@ -48,8 +48,8 @@ def draw_grid(surface: Surface, cell: i64, color: Color) -> bool {
             mut_x = mut_x + cell;
         }
     }
-    let mut_y = 0;
-    let mut_y_run = true;
+    let mut mut_y = 0;
+    let mut mut_y_run = true;
     while mut_y_run {
         if mut_y > surface.height {
             mut_y_run = false;
@@ -96,15 +96,15 @@ def main() -> i64 {
     let clock_start = clock_new();
     let running_start = true;
 
-    let head_loop = head_x_start;
-    let head_y_loop = head_y_start;
-    let dir_loop = dir_start;
-    let length_loop = length_start;
-    let food_x_loop = food_x_start;
+    let mut head_loop = head_x_start;
+    let mut head_y_loop = head_y_start;
+    let mut dir_loop = dir_start;
+    let mut length_loop = length_start;
+    let mut food_x_loop = food_x_start;
     let food_y_loop = food_y_start;
-    let score_loop = score_start;
-    let clock_loop = clock_start;
-    let running_loop = running_start;
+    let mut score_loop = score_start;
+    let mut clock_loop = clock_start;
+    let mut running_loop = running_start;
 
     while running_loop {
         pump();
@@ -177,8 +177,8 @@ def main() -> i64 {
             draw_grid(surface, cell, grid_color);
 
             let segment = 0;
-            let mut_segment = 0;
-            let mut_segment_run = true;
+            let mut mut_segment = 0;
+            let mut mut_segment_run = true;
             while mut_segment_run {
                 if mut_segment >= length_after {
                     mut_segment_run = false;

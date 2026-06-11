@@ -613,6 +613,9 @@ pub(crate) fn synthesize_cfg_poll(
                     &rebase_pointer_locals,
                 )?;
             }
+            Terminator::Unreachable => {
+                f.basic_blocks[translated].set_terminator(Terminator::Unreachable);
+            }
             other => {
                 return Err(CompileError::MirLower(format!(
                     "unsupported terminator in async poll plan: {:?}",

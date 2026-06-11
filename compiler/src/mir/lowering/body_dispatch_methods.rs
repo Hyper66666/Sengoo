@@ -118,6 +118,12 @@ impl<'a> LoweringContext<'a> {
                 args,
                 site_lo,
             } => lower_call_expr(self, func, args, *site_lo),
+            HIRExpr::EnumConstruct {
+                enum_name,
+                variant_name,
+                discriminant,
+                args,
+            } => lower_enum_construct_expr(self, enum_name, variant_name, *discriminant, args),
             HIRExpr::And(left, right) => lower_logical_and_expr(self, left, right),
             HIRExpr::Or(left, right) => lower_logical_or_expr(self, left, right),
             HIRExpr::Break(value) => lower_break_expr(self, value.as_deref()),

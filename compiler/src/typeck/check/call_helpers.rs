@@ -335,6 +335,12 @@ impl TypeChecker {
     }
 
     pub(super) fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
+        if let ExprKind::Path(path) = &func.kind {
+            if let Some(result) = self.check_enum_variant_constructor(path, args) {
+                return result;
+            }
+        }
+
         let builtin_name = match &func.kind {
             ExprKind::Ident(ident) => Some(ident.name.as_str()),
             ExprKind::Path(path) if path.segments.len() == 1 => {

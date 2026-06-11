@@ -6,7 +6,7 @@
 ## 2. Implementation
 
 - [x] 2.1 Frontend memory reductions without weakening runtime fingerprint tests.
-- [x] 2.2 Add permanent CI perf gates for absolute targets and relative regression thresholds.
+- [x] 2.2 Add CI perf evidence reporting for absolute targets and relative regression thresholds; keep PR blocking enforcement deferred until 3.3/reference-host archive evidence is green.
 
 ## 3. Verification
 

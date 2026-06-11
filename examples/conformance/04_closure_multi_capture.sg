@@ -1,0 +1,10 @@
+// Core conformance: closure capture of multiple enclosing locals.
+// Run: sgc run examples/conformance/04_closure_multi_capture.sg
+// Expected exit code: 18
+
+def main() -> i64 {
+    let left = 7;
+    let right = 8;
+    let add = |value| left + right + value;
+    add(3)
+}

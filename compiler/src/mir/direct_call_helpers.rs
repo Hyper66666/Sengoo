@@ -66,6 +66,11 @@ pub(crate) fn collect_direct_calls_in_expr(expr: &HIRExpr, out: &mut HashSet<Str
                 collect_direct_calls_in_expr(arg, out);
             }
         }
+        HIRExpr::EnumConstruct { args, .. } => {
+            for arg in args {
+                collect_direct_calls_in_expr(arg, out);
+            }
+        }
         HIRExpr::MethodCall { receiver, args, .. } => {
             collect_direct_calls_in_expr(receiver, out);
             for arg in args {

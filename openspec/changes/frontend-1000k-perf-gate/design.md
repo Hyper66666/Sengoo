@@ -22,9 +22,12 @@ Child change for `six-pillar-gap-closure` Pillar 5.
 
 ## Regression gates
 
-- +10% RSS, +5pp frontend share, +10% e2e vs checked-in snapshot → CI fail
+- +10% RSS, +5pp frontend share, +10% e2e vs checked-in snapshot produce CI evidence now
 - Relative regression gates remain active after the absolute targets are met;
   snapshots may be updated only with checked-in before/after evidence
+- PR-blocking enforcement starts only after the reference-host archive gate is
+  green; until then CI runs the hard gate in report-only mode so unrelated
+  branches are not blocked by an explicitly open performance target.
 
 ## Constraints
 

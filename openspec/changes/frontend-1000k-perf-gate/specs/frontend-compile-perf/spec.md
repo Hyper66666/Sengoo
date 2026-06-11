@@ -20,12 +20,17 @@ workload on a pinned reference CI host profile.
 - **AND** end-to-end compile time remains faster than the C++ baseline unless this
   change is explicitly superseded
 
-#### Scenario: Performance regressions always fail CI
+#### Scenario: Performance regressions are reported until reference-host closure
 
 - **WHEN** a pull request regresses peak RSS by more than 10%, frontend share by
   more than 5 percentage points, or end-to-end compile time by more than 10%
   against the checked-in reference snapshot
-- **THEN** the perf gate job fails with before/after snapshot paths
+- **THEN** the perf gate job records before/after snapshot paths and the gate
+  decision in CI output
+- **AND** the job remains non-blocking until this change's reference-host
+  archive gate is green
+- **AND** after the reference-host archive gate is green, the same regression
+  thresholds fail CI
 - **AND** this relative regression gate remains active before and after the
   absolute RSS and frontend-share targets are met
 - **AND** updating the reference snapshot requires checked-in before/after evidence

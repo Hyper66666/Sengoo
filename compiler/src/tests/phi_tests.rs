@@ -59,8 +59,8 @@ def main() -> i64 {
 fn test_nested_statement_if_else_does_not_generate_phi_void() {
     let source = r#"
 def main() -> i64 {
-    let lo = 0;
-    let hi = 10;
+    let mut lo = 0;
+    let mut hi = 10;
     let mid = 5;
 
     if mid < hi {

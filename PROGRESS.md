@@ -1,5 +1,18 @@
 # Sengoo 编译器开发进度
 
+## Verified core conformance (2026-06-10)
+
+- Fixed-size array read, write, and `for` iteration compile, link, and run.
+- Environment-capturing closures compile, including multiple captured locals.
+- Locals are immutable by default; reassignment requires `let mut`.
+- Enum variants are constructible values, including checked payload variants.
+- `cargo test -p sengoo-compiler --lib` passes the full compiler library suite.
+- `cargo test -p sgc core_conformance_examples_compile_link_and_run` executes
+  the pinned scalar/control-flow, recursion, struct/method, array, closure, and
+  enum examples.
+- Native code generation emits textual LLVM IR for `clang`; Cranelift remains
+  an optional fast path. The workspace does not use `inkwell` or `llvm-sys`.
+
 ## 已完成的特性
 
 ### 1. 数组类型 ✅

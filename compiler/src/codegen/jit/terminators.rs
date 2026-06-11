@@ -106,6 +106,32 @@ impl JITCodegen {
                     else_block
                 ));
             }
+            mir::Terminator::Switch {
+                discr,
+                targets,
+                otherwise,
+            } => {
+                let discr_ty = self.get_local_type(mir_fn, *discr);
+                let discr_llvm = self.mir_type_to_llvm_str(&discr_ty);
+                let discr_value = format!("{}.switch", self.local_name(*discr));
+                self.ir.push_str(&format!(
+                    "{discr_value} = load {discr_llvm}, {discr_llvm}* {}\n",
+                    self.local_reg(*discr)
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "switch {discr_llvm} {discr_value}, label %bb_{otherwise} ["
+                ));
+                for (value, target) in targets {
+                    self.ir.push('\n');
+                    self.emit_indent();
+                    self.ir
+                        .push_str(&format!("  {discr_llvm} {value}, label %bb_{target}"));
+                }
+                self.ir.push('\n');
+                self.emit_indent();
+                self.ir.push_str("]\n");
+            }
             mir::Terminator::Break { target } => {
                 // break 璺宠浆鍒扮洰鏍囧潡
                 self.ir.push_str(&format!("br label %bb_{}\n", target));
@@ -113,6 +139,9 @@ impl JITCodegen {
             mir::Terminator::Continue { target } => {
                 // continue 璺宠浆鍒扮洰鏍囧潡
                 self.ir.push_str(&format!("br label %bb_{}\n", target));
+            }
+            mir::Terminator::Unreachable => {
+                self.ir.push_str("unreachable\n");
             }
             _ => {
                 self.ir

@@ -49,6 +49,11 @@ pub(crate) fn collect_named_symbols(expr: &HIRExpr, target_name: &str, out: &mut
                 collect_named_symbols(arg, target_name, out);
             }
         }
+        HIRExpr::EnumConstruct { args, .. } => {
+            for arg in args {
+                collect_named_symbols(arg, target_name, out);
+            }
+        }
         HIRExpr::MethodCall { receiver, args, .. } => {
             collect_named_symbols(receiver, target_name, out);
             for arg in args {

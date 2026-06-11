@@ -1,0 +1,9 @@
+// Core conformance: fixed-size array index write and read.
+// Run: sgc run examples/conformance/03_array_write.sg
+// Expected exit code: 42
+
+def main() -> i64 {
+    let mut values = [1, 2, 3];
+    values[1] = 42;
+    values[1]
+}

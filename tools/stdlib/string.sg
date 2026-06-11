@@ -66,8 +66,8 @@ def str_append(lhs: &str, rhs: &str) -> &str {
 }
 
 def str_repeat(value: &str, count: i64) -> &str {
-    let out = "";
-    let remaining = count;
+    let mut out = "";
+    let mut remaining = count;
     while remaining > 0 {
         out = str_concat(out, value);
         remaining = remaining - 1;

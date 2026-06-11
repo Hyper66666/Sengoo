@@ -384,6 +384,12 @@ pub enum TypeckError {
         span_lo: u32,
         span_hi: u32,
     },
+    Diagnostic {
+        code: &'static str,
+        message: String,
+        span_lo: u32,
+        span_hi: u32,
+    },
     /// 其他错误
     Other(String),
 }
@@ -403,6 +409,20 @@ impl TypeckError {
         }
     }
 
+    pub fn diagnostic(
+        code: &'static str,
+        message: impl Into<String>,
+        span_lo: u32,
+        span_hi: u32,
+    ) -> Self {
+        Self::Diagnostic {
+            code,
+            message: message.into(),
+            span_lo,
+            span_hi,
+        }
+    }
+
     pub fn stable_code(&self) -> Option<&'static str> {
         match self {
             Self::NonExhaustiveMatch { .. } => Some("non-exhaustive-match"),
@@ -411,6 +431,7 @@ impl TypeckError {
             Self::OrPatternBindingMismatch { .. } => Some("or-pattern-binding-mismatch"),
             Self::InvalidQuestionMark { .. } => Some("invalid-question-mark"),
             Self::FfiSignature { code, .. } => Some(code),
+            Self::Diagnostic { code, .. } => Some(code),
             _ => None,
         }
     }
@@ -427,6 +448,9 @@ impl TypeckError {
                 span_lo, span_hi, ..
             }
             | Self::FfiSignature {
+                span_lo, span_hi, ..
+            }
+            | Self::Diagnostic {
                 span_lo, span_hi, ..
             } => Some((*span_lo, *span_hi)),
             _ => None,
@@ -499,6 +523,9 @@ impl fmt::Display for TypeckError {
                 write!(f, "[invalid-question-mark] {}", message)
             }
             TypeckError::FfiSignature { code, message, .. } => {
+                write!(f, "[{}] {}", code, message)
+            }
+            TypeckError::Diagnostic { code, message, .. } => {
                 write!(f, "[{}] {}", code, message)
             }
             TypeckError::Other(msg) => {

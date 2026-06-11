@@ -780,6 +780,7 @@ fn stdlib_reflection_wrappers_accept_strings_without_raw_pointers() {
             "option.sg",
             "result.sg",
             "ffi.sg",
+            "string.sg",
             "status.sg",
             "db.sg",
             "lua54.sg",
@@ -857,7 +858,14 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_wrappers_accept_managed_buffers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "status.sg",
+            "net.sg",
+        ],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(256).unwrap_or(Buffer { handle: 0 });
@@ -891,7 +899,14 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_http_server_wrappers_accept_strings() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "status.sg",
+            "net.sg",
+        ],
         r#"
 def main() -> i64 {
     let server = http_server_bind("127.0.0.1", 0).unwrap_or(HttpServer { handle: 0 });

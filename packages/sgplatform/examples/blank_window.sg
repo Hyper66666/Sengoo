@@ -29,7 +29,7 @@ def main() -> i64 {
     let presented = renderer.present().unwrap_or(0);
 
     let start = platform.ticks_ms();
-    let running = true;
+    let mut running = true;
     while running {
         let event = platform.poll_event();
         if event_is_quit(event) {

@@ -1002,13 +1002,13 @@ def main() -> i64 {{
     #[test]
     fn cfg_false_removes_declaration() {
         let source = r#"
-#[cfg(target_os = "linux")]
-struct LinuxOnly {}
+#[cfg(all(target_os = "windows", target_os = "linux"))]
+struct ImpossibleTarget {}
 
 struct Always {}
 "#;
         let processed = process_surface_attributes(source).expect("cfg filter should succeed");
-        assert!(!processed.contains("LinuxOnly"));
+        assert!(!processed.contains("ImpossibleTarget"));
         assert!(processed.contains("Always"));
     }
 

@@ -41,14 +41,71 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
             format!("%{}", name)
         }
         MIRType::Enum { .. } => {
-            // Enums are represented as { discriminant, payload }
-            "{ i64, i64 }".to_string()
+            let payload_size = enum_payload_storage_size(ty);
+            format!("{{ i64, [{payload_size} x i8] }}")
         }
         MIRType::Future(_) => {
             // Future<T> is an opaque i64 handle at runtime
             "i64".to_string()
         }
     }
+}
+
+fn align_to(value: u64, alignment: u64) -> u64 {
+    let alignment = alignment.max(1);
+    value.div_ceil(alignment) * alignment
+}
+
+fn aggregate_layout<'a>(fields: impl IntoIterator<Item = &'a MIRType>) -> (u64, u64) {
+    let mut size = 0;
+    let mut alignment = 1;
+    for field in fields {
+        let (field_size, field_alignment) = mir_type_size_align(field);
+        size = align_to(size, field_alignment);
+        size += field_size;
+        alignment = alignment.max(field_alignment);
+    }
+    (align_to(size, alignment), alignment)
+}
+
+pub fn mir_type_size_align(ty: &MIRType) -> (u64, u64) {
+    match ty {
+        MIRType::Unit | MIRType::Never => (0, 1),
+        MIRType::Bool => (1, 1),
+        MIRType::Int(bits) | MIRType::Float(bits) => {
+            let size = (u64::from(*bits).div_ceil(8)).max(1);
+            (size, size.next_power_of_two().min(8))
+        }
+        MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } | MIRType::Future(_) => (8, 8),
+        MIRType::Array(element, len) => {
+            let (element_size, element_alignment) = mir_type_size_align(element);
+            (
+                align_to(element_size, element_alignment) * *len,
+                element_alignment,
+            )
+        }
+        MIRType::Tuple(fields) => aggregate_layout(fields),
+        MIRType::Struct { fields, .. } => {
+            aggregate_layout(fields.iter().map(|(_, field_ty)| field_ty))
+        }
+        MIRType::Enum { .. } => {
+            let payload_size = enum_payload_storage_size(ty);
+            (align_to(8 + payload_size, 8), 8)
+        }
+    }
+}
+
+pub fn enum_payload_storage_size(ty: &MIRType) -> u64 {
+    let MIRType::Enum { variants, .. } = ty else {
+        return 1;
+    };
+    variants
+        .iter()
+        .filter_map(|(_, payload)| payload.as_ref())
+        .map(|payload| mir_type_size_align(payload).0)
+        .max()
+        .unwrap_or(0)
+        .max(1)
 }
 
 pub fn mir_type_bit_width(ty: &MIRType) -> Option<u32> {
@@ -295,7 +352,23 @@ mod tests {
             discr_type: Box::new(MIRType::Int(64)),
             variants: vec![(0, None), (1, Some(MIRType::Int(64)))],
         };
-        assert_eq!(mir_type_to_llvm_str(&enum_ty), "{ i64, i64 }");
+        assert_eq!(mir_type_to_llvm_str(&enum_ty), "{ i64, [8 x i8] }");
+    }
+
+    #[test]
+    fn test_enum_payload_storage_uses_largest_variant_layout() {
+        let enum_ty = MIRType::Enum {
+            discr_type: Box::new(MIRType::Int(64)),
+            variants: vec![
+                (0, None),
+                (
+                    1,
+                    Some(MIRType::Tuple(vec![MIRType::Int(64), MIRType::Bool])),
+                ),
+            ],
+        };
+        assert_eq!(enum_payload_storage_size(&enum_ty), 16);
+        assert_eq!(mir_type_to_llvm_str(&enum_ty), "{ i64, [16 x i8] }");
     }
 
     #[test]

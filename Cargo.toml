@@ -30,10 +30,9 @@ logos = "0.15"
 chumsky = "1.0"
 
 # 代码生成
-inkwell = { version = "0.5", features = ["llvm18-0"] }
-llvm-sys = "180"
 
 # Python互操作
+# Retained for sengoo-runtime's optional `python` feature.
 pyo3 = { version = "0.23", features = ["auto-initialize"] }
 
 # 序列化

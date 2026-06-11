@@ -14,7 +14,7 @@ use crate::compile_to_ir;
 /// _Requirements: 2.1, 2.2_
 #[test]
 fn test_simple_while_loop_compiles() {
-    let source = r#"def main() -> i64 { let x = 0; while x < 10 { x = x + 1; } x }"#;
+    let source = r#"def main() -> i64 { let mut x = 0; while x < 10 { x = x + 1; } x }"#;
     let ir = compile_to_ir(source).expect("simple while loop should compile successfully");
 
     // The IR should contain:
@@ -47,8 +47,8 @@ fn test_simple_while_loop_compiles() {
 fn test_while_loop_with_if_body_compiles() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
-    let y = 0;
+    let mut x = 0;
+    let mut y = 0;
     while x < 10 {
         if x < 5 {
             y = y + 1;
@@ -78,7 +78,7 @@ def main() -> i64 {
 /// _Requirements: 2.1, 2.2_
 #[test]
 fn test_while_loop_false_condition_compiles() {
-    let source = r#"def main() -> i64 { let x = 100; while x < 10 { x = x + 1; } x }"#;
+    let source = r#"def main() -> i64 { let mut x = 100; while x < 10 { x = x + 1; } x }"#;
     let ir = compile_to_ir(source).expect("while loop with false condition should compile");
 
     // Should still have the conditional branch structure
@@ -96,7 +96,8 @@ fn test_while_loop_false_condition_compiles() {
 /// _Requirements: 2.3_
 #[test]
 fn test_loop_with_break_compiles() {
-    let source = r#"def main() -> i64 { let x = 0; loop { x = x + 1; if x > 5 { break; } } x }"#;
+    let source =
+        r#"def main() -> i64 { let mut x = 0; loop { x = x + 1; if x > 5 { break; } } x }"#;
     let ir = compile_to_ir(source).expect("loop with break should compile successfully");
 
     // The IR should contain:
@@ -150,10 +151,10 @@ fn test_loop_immediate_break_compiles() {
 fn test_nested_while_inner_break_exits_inner_only() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
-    let y = 0;
+    let mut x = 0;
+    let mut y = 0;
     while x < 3 {
-        let z = 0;
+        let mut z = 0;
         while z < 5 {
             if z > 2 {
                 break;
@@ -198,8 +199,8 @@ def main() -> i64 {
 fn test_while_containing_loop_break_exits_loop_not_while() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
-    let result = 0;
+    let mut x = 0;
+    let mut result = 0;
     while x < 5 {
         loop {
             result = result + 1;
@@ -238,9 +239,9 @@ def main() -> i64 {
 fn test_loop_containing_while_continue_targets_while_condition() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
+    let mut x = 0;
     loop {
-        let y = 0;
+        let mut y = 0;
         while y < 3 {
             y = y + 1;
             continue;
@@ -276,10 +277,10 @@ def main() -> i64 {
 fn test_nested_while_continue_targets_inner_condition() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
-    let total = 0;
+    let mut x = 0;
+    let mut total = 0;
     while x < 3 {
-        let y = 0;
+        let mut y = 0;
         while y < 5 {
             y = y + 1;
             if y > 3 {
@@ -315,8 +316,8 @@ def main() -> i64 {
 fn test_loop_continue_targets_body_start() {
     let source = r#"
 def main() -> i64 {
-    let x = 0;
-    let y = 0;
+    let mut x = 0;
+    let mut y = 0;
     loop {
         x = x + 1;
         if x > 10 {
@@ -352,10 +353,10 @@ def main() -> i64 {
 fn test_three_level_nested_loops_break_targets_innermost() {
     let source = r#"
 def main() -> i64 {
-    let a = 0;
-    let result = 0;
+    let mut a = 0;
+    let mut result = 0;
     while a < 2 {
-        let b = 0;
+        let mut b = 0;
         while b < 2 {
             loop {
                 result = result + 1;

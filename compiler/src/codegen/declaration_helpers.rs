@@ -330,7 +330,10 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_async_timeout_cancel_i64__poll(i64)\n");
         self.declarations.push_str(Self::sret_or_direct_decl(
-            self.async_result_uses_sret("sengoo_async_timeout_cancel_i64__result"),
+            Self::async_result_uses_sret(
+                self.targets_windows_msvc(),
+                "sengoo_async_timeout_cancel_i64__result",
+            ),
             "sengoo_async_timeout_cancel_i64__result",
             "{ i1, i64, i64 }",
         ));
@@ -386,14 +389,7 @@ impl Codegen {
             return;
         }
 
-        let channel_send_uses_sret =
-            self.async_result_uses_sret("sengoo_async_channel_send_i64__result");
-        let channel_recv_uses_sret =
-            self.async_result_uses_sret("sengoo_async_channel_recv_i64__result");
-        let mutex_lock_uses_sret =
-            self.async_result_uses_sret("sengoo_async_mutex_lock_i64__result");
-        let http_next_request_uses_sret =
-            self.async_result_uses_sret("sengoo_http_server_next_request_async__result");
+        let targets_windows_msvc = self.targets_windows_msvc();
 
         Self::maybe_declare_async_runtime_lifecycle(
             &mut self.declarations,
@@ -430,7 +426,10 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        channel_send_uses_sret,
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_async_channel_send_i64__result",
+                        ),
                         "sengoo_async_channel_send_i64__result",
                         "{ i1, i64 }",
                     ),
@@ -457,7 +456,10 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        channel_recv_uses_sret,
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_async_channel_recv_i64__result",
+                        ),
                         "sengoo_async_channel_recv_i64__result",
                         "{ i1, i64, i64 }",
                     ),
@@ -484,7 +486,10 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        mutex_lock_uses_sret,
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_async_mutex_lock_i64__result",
+                        ),
                         "sengoo_async_mutex_lock_i64__result",
                         "{ i1, i64, i64 }",
                     ),
@@ -511,7 +516,10 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        http_next_request_uses_sret,
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_http_server_next_request_async__result",
+                        ),
                         "sengoo_http_server_next_request_async__result",
                         "%HttpServerNextRequestOutcome",
                     ),
@@ -560,6 +568,29 @@ impl Codegen {
                 declarations.push_str(decl);
             }
         }
+    }
+
+    pub(super) fn async_result_uses_sret(targets_windows_msvc: bool, func: &str) -> bool {
+        if targets_windows_msvc {
+            return matches!(
+                func,
+                "sengoo_async_timeout_cancel_i64__result"
+                    | "sengoo_async_channel_send_i64__result"
+                    | "sengoo_async_channel_recv_i64__result"
+                    | "sengoo_async_mutex_lock_i64__result"
+                    | "sengoo_http_server_next_request_async__result"
+            );
+        }
+
+        // SysV returns aggregates larger than two eightbytes through a hidden
+        // result pointer. The send outcome is only 16 bytes and remains direct.
+        matches!(
+            func,
+            "sengoo_async_timeout_cancel_i64__result"
+                | "sengoo_async_channel_recv_i64__result"
+                | "sengoo_async_mutex_lock_i64__result"
+                | "sengoo_http_server_next_request_async__result"
+        )
     }
 
     fn sret_or_direct_decl(use_sret: bool, func: &str, ret_ty: &str) -> &'static str {
@@ -683,21 +714,26 @@ mod tests {
     }
 
     #[test]
-    fn async_result_sret_matches_supported_native_abis() {
-        let linux = Codegen::with_ffi_and_target(
-            FfiCodegenConfig::default(),
-            Some("x86_64-unknown-linux-gnu".to_string()),
-        );
-        assert!(!linux.async_result_uses_sret("sengoo_async_channel_send_i64__result"));
-        assert!(linux.async_result_uses_sret("sengoo_async_channel_recv_i64__result"));
-        assert!(linux.async_result_uses_sret("sengoo_http_server_next_request_async__result"));
-
-        let windows = Codegen::with_ffi_and_target(
-            FfiCodegenConfig::default(),
-            Some("x86_64-pc-windows-msvc".to_string()),
-        );
-        assert!(windows.async_result_uses_sret("sengoo_async_channel_send_i64__result"));
-        assert!(windows.async_result_uses_sret("sengoo_async_channel_recv_i64__result"));
-        assert!(windows.async_result_uses_sret("sengoo_http_server_next_request_async__result"));
+    fn async_result_sret_rules_match_supported_native_abis() {
+        assert!(Codegen::async_result_uses_sret(
+            false,
+            "sengoo_async_channel_recv_i64__result"
+        ));
+        assert!(!Codegen::async_result_uses_sret(
+            false,
+            "sengoo_async_channel_send_i64__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            true,
+            "sengoo_async_channel_send_i64__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            false,
+            "sengoo_http_server_next_request_async__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            true,
+            "sengoo_http_server_next_request_async__result"
+        ));
     }
 }

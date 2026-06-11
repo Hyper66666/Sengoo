@@ -643,8 +643,8 @@ def mix(x: i64) -> i64 {{
 }}
 
 def calc(n: i64) -> i64 {{
-    let i = 0
-    let acc = 0
+    let mut i = 0
+    let mut acc = 0
     while i < n {{
         {body}
         i = i + 1
@@ -669,8 +669,8 @@ def mix(x: i64) -> i64 {
 }
 
 def calc(n: i64) -> i64 {
-    let i = 0
-    let acc = 0
+    let mut i = 0
+    let mut acc = 0
     while i < n {
         acc = acc + mix(i)
         i = i + 1
@@ -693,8 +693,8 @@ def mix(x: i64, scale: i64) -> i64 {
 }
 
 def calc(n: i64) -> i64 {
-    let i = 0
-    let acc = 0
+    let mut i = 0
+    let mut acc = 0
     while i < n {
         acc = acc + mix(i, 2)
         i = i + 1
@@ -728,8 +728,8 @@ def mix(x: i64) -> i64 {{
 }}
 {extra}
 def calc(n: i64) -> i64 {{
-    let i = 0
-    let acc = 0
+    let mut i = 0
+    let mut acc = 0
     while i < n {{
         {use_extra}
         i = i + 1
@@ -1303,8 +1303,8 @@ def make_scale_source_sengoo(target_loc: int) -> str:
     lines.extend(
         [
             "def main() -> i64 {",
-            "    let acc = 0",
-            "    let i = 0",
+            "    let mut acc = 0",
+            "    let mut i = 0",
             "    while i < 1000 {",
             f"        acc = acc + f{fn_count - 1}(i)",
             "        i = i + 1",

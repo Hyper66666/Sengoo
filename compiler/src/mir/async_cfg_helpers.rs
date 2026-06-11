@@ -110,7 +110,7 @@ pub(crate) fn compute_live_in_user_locals(
                     }
                     live
                 }
-                Terminator::Return(_) => HashSet::new(),
+                Terminator::Return(_) | Terminator::Unreachable => HashSet::new(),
                 other => {
                     return Err(CompileError::MirLower(format!(
                         "unsupported terminator in async liveness: {:?}",
@@ -284,10 +284,10 @@ pub(crate) fn build_async_cfg_plan(
                     suspend_points,
                 )?;
             }
-            Terminator::Return(_) => {}
+            Terminator::Return(_) | Terminator::Unreachable => {}
             other => {
                 return Err(AsyncCfgPlanError::new(format!(
-                    "block {} uses unsupported `{}` terminator; async frame lowering currently expects await control flow built from suspend, goto, if, switch, and return edges",
+                    "block {} uses unsupported `{}` terminator; async frame lowering currently expects await control flow built from suspend, goto, if, switch, return, and unreachable edges",
                     block,
                     async_cfg_terminator_name(&other)
                 )))

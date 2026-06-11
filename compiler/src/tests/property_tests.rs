@@ -226,7 +226,7 @@ fn for_loop_ssa_program_strategy() -> impl Strategy<Value = String> {
             .collect::<Vec<_>>()
             .join(", ");
         format!(
-            "def main() -> i64 {{\n    let acc = 0;\n    for x in [{}] {{\n        acc = acc + x;\n    }}\n    acc\n}}",
+            "def main() -> i64 {{\n    let mut acc = 0;\n    for x in [{}] {{\n        acc = acc + x;\n    }}\n    acc\n}}",
             elems
         )
     })
@@ -452,12 +452,12 @@ proptest! {
 // **Validates: Requirements 2.1, 2.2**
 // ============================================================================
 
-/// Strategy to generate programs with a while loop: `def main() -> i64 { let x = 0; while x < N { x = x + 1; } x }`
+/// Strategy to generate programs with a while loop: `def main() -> i64 { let mut x = 0; while x < N { x = x + 1; } x }`
 /// where N is a random positive integer. The loop iterates x from 0 up to N.
 fn while_loop_program_strategy() -> impl Strategy<Value = String> {
     (1u32..=100).prop_map(|n| {
         format!(
-            "def main() -> i64 {{ let x = 0; while x < {} {{ x = x + 1; }} x }}",
+            "def main() -> i64 {{ let mut x = 0; while x < {} {{ x = x + 1; }} x }}",
             n
         )
     })
@@ -527,7 +527,7 @@ proptest! {
 // ============================================================================
 
 /// Strategy to generate programs with nested while loops containing break.
-/// Pattern: `def main() -> i64 { let x = 0; while x < N { let y = 0; while y < M { if y > K { break; } y = y + 1; } x = x + 1; } x }`
+/// Pattern: `def main() -> i64 { let mut x = 0; while x < N { let mut y = 0; while y < M { if y > K { break; } y = y + 1; } x = x + 1; } x }`
 /// where N, M, K are random positive integers with K < M to ensure the break is reachable.
 fn nested_while_break_program_strategy() -> impl Strategy<Value = String> {
     (1u32..=20, 2u32..=20).prop_flat_map(|(n, m)| {
@@ -536,14 +536,14 @@ fn nested_while_break_program_strategy() -> impl Strategy<Value = String> {
         (Just(n), Just(m), 0u32..=k_max)
     }).prop_map(|(n, m, k)| {
         format!(
-            "def main() -> i64 {{ let x = 0; while x < {} {{ let y = 0; while y < {} {{ if y > {} {{ break; }} y = y + 1; }} x = x + 1; }} x }}",
+            "def main() -> i64 {{ let mut x = 0; while x < {} {{ let mut y = 0; while y < {} {{ if y > {} {{ break; }} y = y + 1; }} x = x + 1; }} x }}",
             n, m, k
         )
     })
 }
 
 /// Strategy to generate programs with nested while loops containing continue.
-/// Pattern: `def main() -> i64 { let x = 0; while x < N { let y = 0; while y < M { y = y + 1; if y > K { continue; } } x = x + 1; } x }`
+/// Pattern: `def main() -> i64 { let mut x = 0; while x < N { let mut y = 0; while y < M { y = y + 1; if y > K { continue; } } x = x + 1; } x }`
 /// where N, M, K are random positive integers with K < M.
 fn nested_while_continue_program_strategy() -> impl Strategy<Value = String> {
     (1u32..=20, 2u32..=20).prop_flat_map(|(n, m)| {
@@ -551,14 +551,14 @@ fn nested_while_continue_program_strategy() -> impl Strategy<Value = String> {
         (Just(n), Just(m), 0u32..=k_max)
     }).prop_map(|(n, m, k)| {
         format!(
-            "def main() -> i64 {{ let x = 0; let total = 0; while x < {} {{ let y = 0; while y < {} {{ y = y + 1; if y > {} {{ continue; }} total = total + 1; }} x = x + 1; }} total }}",
+            "def main() -> i64 {{ let mut x = 0; let mut total = 0; while x < {} {{ let mut y = 0; while y < {} {{ y = y + 1; if y > {} {{ continue; }} total = total + 1; }} x = x + 1; }} total }}",
             n, m, k
         )
     })
 }
 
 /// Strategy to generate programs with mixed nested loops (while + loop) containing break.
-/// Pattern: `def main() -> i64 { let x = 0; while x < N { loop { x = x + 1; if x > K { break; } } } x }`
+/// Pattern: `def main() -> i64 { let mut x = 0; while x < N { loop { x = x + 1; if x > K { break; } } } x }`
 /// where N and K are random positive integers with K < N.
 fn while_loop_break_program_strategy() -> impl Strategy<Value = String> {
     (2u32..=20).prop_flat_map(|n| {
@@ -566,7 +566,7 @@ fn while_loop_break_program_strategy() -> impl Strategy<Value = String> {
         (Just(n), 1u32..=k_max)
     }).prop_map(|(n, k)| {
         format!(
-            "def main() -> i64 {{ let x = 0; while x < {} {{ loop {{ x = x + 1; if x > {} {{ break; }} }} }} x }}",
+            "def main() -> i64 {{ let mut x = 0; while x < {} {{ loop {{ x = x + 1; if x > {} {{ break; }} }} }} x }}",
             n, k
         )
     })
@@ -1241,7 +1241,7 @@ fn diverse_valid_program_strategy() -> impl Strategy<Value = String> {
         // While loop
         (1u32..=50).prop_map(|n| {
             format!(
-                "def main() -> i64 {{ let x = 0; while x < {} {{ x = x + 1; }} x }}",
+                "def main() -> i64 {{ let mut x = 0; while x < {} {{ x = x + 1; }} x }}",
                 n
             )
         }),
@@ -1250,14 +1250,14 @@ fn diverse_valid_program_strategy() -> impl Strategy<Value = String> {
             (Just(n), 1u32..n)
         }).prop_map(|(n, k)| {
             format!(
-                "def main() -> i64 {{ let x = 0; while x < {} {{ if x > {} {{ break; }} x = x + 1; }} x }}",
+                "def main() -> i64 {{ let mut x = 0; while x < {} {{ if x > {} {{ break; }} x = x + 1; }} x }}",
                 n, k
             )
         }),
         // Nested while loops
         (1u32..=20, 1u32..=20).prop_map(|(n, m)| {
             format!(
-                "def main() -> i64 {{ let x = 0; let total = 0; while x < {} {{ let y = 0; while y < {} {{ y = y + 1; total = total + 1; }} x = x + 1; }} total }}",
+                "def main() -> i64 {{ let mut x = 0; let mut total = 0; while x < {} {{ let mut y = 0; while y < {} {{ y = y + 1; total = total + 1; }} x = x + 1; }} total }}",
                 n, m
             )
         }),
@@ -1382,13 +1382,13 @@ fn unsupported_construct_strategy() -> impl Strategy<Value = String> {
         // While loops with complex conditions
         (1u32..=20).prop_map(|n| {
             format!(
-                "def main() -> i64 {{ let x = 0; while x < {} {{ x = x + 1; }} x }}",
+                "def main() -> i64 {{ let mut x = 0; while x < {} {{ x = x + 1; }} x }}",
                 n
             )
         }),
 
         // Loop with break returning a value
-        Just("def main() -> i64 { let x = 0; loop { if x > 10 { break; } x = x + 1; } x }".to_string()),
+        Just("def main() -> i64 { let mut x = 0; loop { if x > 10 { break; } x = x + 1; } x }".to_string()),
 
         // Struct with method call on unknown method
         Just("def main() -> i64 { let x: i64 = 5; x.unknown_method() }".to_string()),
@@ -1636,7 +1636,7 @@ fn name_cache_program_strategy() -> impl Strategy<Value = String> {
         // Function with while loop (generates many locals)
         (1u32..=20).prop_map(|n| {
             format!(
-                "def main() -> i64 {{ let x = 0; while x < {} {{ x = x + 1; }} x }}",
+                "def main() -> i64 {{ let mut x = 0; while x < {} {{ x = x + 1; }} x }}",
                 n
             )
         }),
@@ -2043,7 +2043,7 @@ fn array_assign_program_strategy() -> impl Strategy<Value = String> {
             let elems: Vec<String> = (0..size).map(|_| "0".to_string()).collect();
             let arr_literal = elems.join(", ");
             format!(
-                "def main() -> i64 {{\n    let arr = [{}];\n    arr[{}] = {};\n    arr[{}]\n}}",
+                "def main() -> i64 {{\n    let mut arr = [{}];\n    arr[{}] = {};\n    arr[{}]\n}}",
                 arr_literal, index, value, index
             )
         })

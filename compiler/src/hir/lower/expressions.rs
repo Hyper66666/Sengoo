@@ -35,7 +35,10 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
     for stmt in stmts_to_process {
         match &stmt.kind {
             ast::StmtKind::Let {
-                name, ty, value, ..
+                name,
+                ty,
+                value,
+                is_mut,
             } => {
                 // 如果有显式类型注解，使用它；否则从值表达式推断
                 let hir_ty = if let Some(type_annotation) = ty {
@@ -53,7 +56,7 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                     symbol: name.symbol,
                     ty: hir_ty,
                     value: hir_value,
-                    is_mut: false,
+                    is_mut: *is_mut,
                 });
             }
             ast::StmtKind::Const { name, ty, value } => {
@@ -99,7 +102,14 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             symbol: name.symbol,
         },
         ast::ExprKind::Path(path) => {
-            if let Some(ident) = path.as_simple() {
+            if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
+                HIRExpr::EnumConstruct {
+                    enum_name,
+                    variant_name,
+                    discriminant,
+                    args: Vec::new(),
+                }
+            } else if let Some(ident) = path.as_simple() {
                 HIRExpr::Var {
                     name: ident.name.clone(),
                     symbol: ident.symbol,
@@ -188,14 +198,39 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                 body: Box::new(lower_body(body, type_env)),
             }
         }
-        ast::ExprKind::Call { func, args } => HIRExpr::Call {
-            func: Box::new(lower_expr(func, type_env)?),
-            args: args
-                .iter()
-                .filter_map(|a| lower_expr(a, type_env).ok())
-                .collect(),
-            site_lo: Some(expr.span.lo),
-        },
+        ast::ExprKind::Call { func, args } => {
+            if let ast::ExprKind::Path(path) = &func.kind {
+                if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
+                    HIRExpr::EnumConstruct {
+                        enum_name,
+                        variant_name,
+                        discriminant,
+                        args: args
+                            .iter()
+                            .filter_map(|arg| lower_expr(arg, type_env).ok())
+                            .collect(),
+                    }
+                } else {
+                    HIRExpr::Call {
+                        func: Box::new(lower_expr(func, type_env)?),
+                        args: args
+                            .iter()
+                            .filter_map(|arg| lower_expr(arg, type_env).ok())
+                            .collect(),
+                        site_lo: Some(expr.span.lo),
+                    }
+                }
+            } else {
+                HIRExpr::Call {
+                    func: Box::new(lower_expr(func, type_env)?),
+                    args: args
+                        .iter()
+                        .filter_map(|arg| lower_expr(arg, type_env).ok())
+                        .collect(),
+                    site_lo: Some(expr.span.lo),
+                }
+            }
+        }
         ast::ExprKind::MethodCall {
             receiver,
             method,
@@ -387,7 +422,7 @@ fn lower_assign_op(op: &ast::AssignOp) -> HIRBinaryOp {
 fn scrutinee_enum_name(scrutinee: &ast::Expr, type_env: &TypeEnv) -> Option<String> {
     match &scrutinee.kind {
         ast::ExprKind::Ident(ident) => type_env.lookup(&ident.name).and_then(|symbol| {
-            if let SymbolKind::Var(ty) = &symbol.kind {
+            if let SymbolKind::Var { ty, .. } = &symbol.kind {
                 if let TyKind::Adt { name, .. } = &ty.kind {
                     return Some(name.clone());
                 }
@@ -424,6 +459,16 @@ fn enum_variant_pattern(
             fields,
         }
     })
+}
+
+fn enum_constructor(path: &ast::Path) -> Option<(String, String, u32)> {
+    if path.segments.len() != 2 {
+        return None;
+    }
+    let enum_name = path.segments[0].name.clone();
+    let variant_name = path.segments[1].name.clone();
+    let discriminant = enum_index::variant_discriminant(&enum_name, &variant_name)?;
+    Some((enum_name, variant_name, discriminant))
 }
 
 /// 降低模式

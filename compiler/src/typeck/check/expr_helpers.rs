@@ -46,6 +46,8 @@ impl TypeChecker {
     pub(super) fn check_path(&mut self, path: &Path) -> TyResult<Ty> {
         if let Some(ident) = path.as_simple() {
             self.check_ident(ident)
+        } else if let Some(result) = self.check_enum_variant_constructor(path, &[]) {
+            result
         } else {
             Err(TypeckError::UndefinedVariable {
                 name: path
@@ -56,6 +58,83 @@ impl TypeChecker {
                     .join("::"),
             })
         }
+    }
+
+    pub(super) fn check_enum_variant_constructor(
+        &mut self,
+        path: &Path,
+        args: &[Expr],
+    ) -> Option<TyResult<Ty>> {
+        if path.segments.len() != 2 {
+            return None;
+        }
+        let enum_name = &path.segments[0].name;
+        let variant_name = &path.segments[1].name;
+        let variants = self.enum_variants.get(enum_name)?.clone();
+        let span_lo = path.segments[0].span.lo;
+        let span_hi = path.segments[1].span.hi;
+
+        if !variants.iter().any(|variant| variant == variant_name) {
+            return Some(Err(TypeckError::diagnostic(
+                "unknown-enum-variant",
+                format!("enum `{enum_name}` has no variant `{variant_name}`"),
+                span_lo,
+                span_hi,
+            )));
+        }
+
+        let field_tys = self
+            .enum_variant_field_tys
+            .get(enum_name)
+            .and_then(|variants| variants.get(variant_name))
+            .cloned()
+            .unwrap_or_default();
+        if field_tys.len() != args.len() {
+            return Some(Err(TypeckError::diagnostic(
+                "enum-variant-arity",
+                format!(
+                    "enum variant `{enum_name}::{variant_name}` expects {} argument(s), found {}",
+                    field_tys.len(),
+                    args.len()
+                ),
+                span_lo,
+                span_hi,
+            )));
+        }
+
+        for (index, (expected, arg)) in field_tys.iter().zip(args.iter()).enumerate() {
+            let actual = match self.check_expr(arg) {
+                Ok(ty) => ty,
+                Err(error) => return Some(Err(error)),
+            };
+            if self.infer.unify(expected, &actual).is_err() {
+                let (span_lo, span_hi) = expression_subject_span(arg);
+                return Some(Err(TypeckError::diagnostic(
+                    "enum-variant-type",
+                    format!(
+                        "argument {} for `{enum_name}::{variant_name}` has type {}, expected {}",
+                        index + 1,
+                        actual.kind,
+                        expected.kind
+                    ),
+                    span_lo,
+                    span_hi,
+                )));
+            }
+        }
+
+        let enum_ty = self
+            .env
+            .lookup(enum_name)
+            .and_then(|symbol| symbol.get_ty())
+            .cloned()
+            .unwrap_or_else(|| {
+                self.env.new_ty(TyKind::Adt {
+                    name: enum_name.clone(),
+                    args: Vec::new(),
+                })
+            });
+        Some(Ok(enum_ty))
     }
 
     pub(super) fn check_binary(&mut self, op: &BinOp, left: &Expr, right: &Expr) -> TyResult<Ty> {
@@ -168,6 +247,7 @@ impl TypeChecker {
     }
 
     pub(super) fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
+        self.ensure_assignable_target(target)?;
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
         self.infer.unify(&target_ty, &value_ty)?;
@@ -180,10 +260,44 @@ impl TypeChecker {
         target: &Expr,
         value: &Expr,
     ) -> TyResult<Ty> {
+        self.ensure_assignable_target(target)?;
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
         self.infer.unify(&target_ty, &value_ty)?;
         Ok(self.env.unit_ty())
+    }
+
+    fn ensure_assignable_target(&self, target: &Expr) -> TyResult<()> {
+        let binding = match &target.kind {
+            ExprKind::Ident(ident) => Some((ident.name.as_str(), ident.span)),
+            ExprKind::Path(path) => path
+                .as_simple()
+                .map(|ident| (ident.name.as_str(), ident.span)),
+            ExprKind::Index { base, .. } | ExprKind::Field { base, .. } => {
+                return self.ensure_assignable_target(base);
+            }
+            _ => None,
+        };
+
+        let Some((name, span)) = binding else {
+            return Ok(());
+        };
+        let Some(symbol) = self.env.lookup(name) else {
+            return Ok(());
+        };
+        let SymbolKind::Var { is_mut, .. } = &symbol.kind else {
+            return Ok(());
+        };
+        if *is_mut {
+            return Ok(());
+        }
+
+        Err(TypeckError::diagnostic(
+            "immutable-assignment",
+            format!("cannot assign to immutable binding `{name}`; declare it with `let mut`"),
+            span.lo,
+            span.hi,
+        ))
     }
 
     pub(super) fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
@@ -191,10 +305,27 @@ impl TypeChecker {
         let index_ty = self.check_expr(index)?;
 
         if !index_ty.is_int() {
-            return Err(TypeckError::TypeMismatch {
-                expected: TyKind::Int(IntKind::ISize),
-                found: index_ty.kind.clone(),
-            });
+            let (span_lo, span_hi) = expression_subject_span(index);
+            return Err(TypeckError::diagnostic(
+                "invalid-array-index",
+                format!("array index must be an integer, found {}", index_ty.kind),
+                span_lo,
+                span_hi,
+            ));
+        }
+
+        if let (TyKind::Array(_, len), ExprKind::Literal(Literal::Int(value))) =
+            (&base_ty.kind, &index.kind)
+        {
+            if *value < 0 || (*value as usize) >= *len {
+                let (span_lo, span_hi) = expression_subject_span(index);
+                return Err(TypeckError::diagnostic(
+                    "array-index-out-of-bounds",
+                    format!("array index {value} is out of bounds for length {len}"),
+                    span_lo,
+                    span_hi,
+                ));
+            }
         }
 
         Ok(match &base_ty.kind {
@@ -296,6 +427,22 @@ impl TypeChecker {
     }
 
     pub(super) fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
+        let mut seen = std::collections::HashSet::new();
+        if let Some(duplicate) = params
+            .iter()
+            .find(|param| !seen.insert(param.name.as_str()))
+        {
+            return Err(TypeckError::diagnostic(
+                "duplicate-closure-parameter",
+                format!(
+                    "closure parameter `{}` is declared more than once",
+                    duplicate.name
+                ),
+                duplicate.span.lo,
+                duplicate.span.hi,
+            ));
+        }
+
         let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
 
         self.env.push_scope();
@@ -317,6 +464,27 @@ fn tuple_field_index(field: &str) -> Option<usize> {
         "w" | "a" => Some(3),
         _ => None,
     })
+}
+
+fn expression_subject_span(expr: &Expr) -> (u32, u32) {
+    match &expr.kind {
+        ExprKind::Ident(ident) => (ident.span.lo, ident.span.hi),
+        ExprKind::Path(path) if !path.segments.is_empty() => (
+            path.segments[0].span.lo,
+            path.segments
+                .last()
+                .map_or(expr.span.hi, |ident| ident.span.hi),
+        ),
+        ExprKind::Literal(Literal::Bool(value)) => {
+            let len = if *value { 4 } else { 5 };
+            (expr.span.lo, expr.span.lo + len)
+        }
+        ExprKind::Literal(Literal::Int(value)) => {
+            let len = value.to_string().len() as u32;
+            (expr.span.lo, expr.span.lo + len)
+        }
+        _ => (expr.span.lo, expr.span.hi),
+    }
 }
 
 #[cfg(test)]
