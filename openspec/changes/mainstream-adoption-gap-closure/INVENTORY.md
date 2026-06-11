@@ -16,7 +16,7 @@ Baseline audit performed against the working tree on branch
 
 | Child change | Pillar | Capability delta | Status |
 | --- | --- | --- | --- |
-| `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; blocked on `codegen-ir-correctness-and-gate` archive before codegen merges |
+| `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; prerequisite archive satisfied; codegen edits unblocked |
 | `async-cancellation-semantics` | B | new `async-cancellation` | Proposed, strictly validated; unblocked |
 | `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Proposed, strictly validated; sequenced after Pillar B |
 | `toolchain-distribution` | D | new `toolchain-distribution` | Proposed, strictly validated; unblocked, parallel with A |
@@ -25,7 +25,7 @@ Baseline audit performed against the working tree on branch
 
 | Change | State | Why it gates this program |
 | --- | --- | --- |
-| `codegen-ir-correctness-and-gate` | Active, implemented locally; awaiting pushed CI/Linux evidence before archive | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
+| `codegen-ir-correctness-and-gate` | Archived as `2026-06-11-codegen-ir-correctness-and-gate`; latest core-conformance run `27366666789` passed | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
 | `frontend-1000k-perf-gate` | Active, awaiting reference-host absolute targets | Phase 5 re-runs its gate to prove `-g` work did not regress default-mode compile performance |
 | `six-pillar-gap-closure` | Active umbrella, final verification open | Prior wave must not have its capabilities re-claimed by this wave's children |
 

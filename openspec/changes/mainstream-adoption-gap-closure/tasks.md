@@ -114,7 +114,7 @@
 - [ ] `openspec validate mainstream-adoption-gap-closure --strict` passes.
 - [ ] `openspec validate --all --strict` passes.
 - [ ] All four required child changes are archived before the umbrella.
-- [ ] The Phase 1 prerequisite (`codegen-ir-correctness-and-gate` archived)
+- [x] The Phase 1 prerequisite (`codegen-ir-correctness-and-gate` archived)
   was satisfied before debug-info codegen merges.
 - [ ] All verification commands in §6 pass; platform-specific skips document
   evidence and do not omit a pillar implementation.
