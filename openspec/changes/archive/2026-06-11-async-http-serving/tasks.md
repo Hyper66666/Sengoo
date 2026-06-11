@@ -73,5 +73,5 @@
 - [x] 8.1 Confirm support matrix rows cite proof commands and mark deferred
   TLS server, keep-alive, streaming bodies, callback handlers, and broad
   cancellation semantics.
-- [ ] 8.2 Archive only after native and realworld proof pass on the host set
+- [x] 8.2 Archive only after native and realworld proof pass on the host set
   claimed by the docs.

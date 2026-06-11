@@ -841,11 +841,12 @@ fn process_dynamic_request_stream(
     max_body_bytes: usize,
     io_timeout: Duration,
 ) -> Result<DynamicRequestPoll, NetErrorCode> {
-    if stream.set_read_timeout(Some(io_timeout)).is_err()
-        || stream.set_write_timeout(Some(io_timeout)).is_err()
-    {
-        return Ok(DynamicRequestPoll::NotReady);
-    }
+    stream
+        .set_read_timeout(Some(io_timeout))
+        .map_err(|err| classify_io_error(&err))?;
+    stream
+        .set_write_timeout(Some(io_timeout))
+        .map_err(|err| classify_io_error(&err))?;
 
     let request = match read_http_request(&mut stream, max_header_bytes, max_body_bytes) {
         Ok(request) => request,
@@ -1635,5 +1636,34 @@ pub extern "C" fn sengoo_http_request_close(handle: u64) -> i64 {
             1
         }
         Err(code) => fail_bool(code),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_request_stream_reports_timeout_configuration_errors() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
+        let address = listener.local_addr().expect("read test listener address");
+        let client = TcpStream::connect(address).expect("connect test client");
+        let (server, _) = listener.accept().expect("accept test client");
+
+        let result = process_dynamic_request_stream(
+            0,
+            server,
+            &[],
+            &[],
+            16 * 1024,
+            1024 * 1024,
+            Duration::ZERO,
+        );
+
+        assert!(
+            result.is_err(),
+            "invalid socket timeout configuration must not be reported as NotReady"
+        );
+        drop(client);
     }
 }
