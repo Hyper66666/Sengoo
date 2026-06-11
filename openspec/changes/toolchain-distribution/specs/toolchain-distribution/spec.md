@@ -3,8 +3,9 @@
 ### Requirement: Toolchain releases SHALL ship versioned, checksummed archives
 
 Tagged releases SHALL publish toolchain archives for Windows x64 and Linux
-x64 containing `sgc`, `sgpm`, `sgfmt`, and `sglsp` plus license and
-distribution README, each with a SHA-256 checksum file, where the tag
+x64 containing `sgc`, `sgpm`, `sgfmt`, `sglsp`, the bundled standard
+library/runtime bridge files needed by installed tools, a manifest, license,
+and distribution README, each with a SHA-256 checksum file, where the tag
 matches the workspace version.
 
 #### Scenario: A tag produces both target archives
@@ -13,9 +14,18 @@ matches the workspace version.
 - **THEN** the packaging workflow builds release binaries on native runners
   for both pinned targets
 - **AND** publishes one archive plus one `.sha256` per target containing
-  all four tools, the license, and the distribution README
+  all four tools, the bundled stdlib/runtime bridge files, `manifest.json`,
+  the license, and the distribution README
 - **AND** the distribution README states the pinned host `clang`/LLVM
   requirement
+
+#### Scenario: Installed tools do not require a source checkout
+
+- **WHEN** a developer installs the archive outside the repository checkout
+- **THEN** `sgc` resolves bundled `std::*` modules and runtime bridge sources
+  from the installed distribution by default
+- **AND** `SENGOO_ROOT` or equivalent environment variables are optional
+  overrides, not required setup
 
 #### Scenario: A mismatched tag fails fast
 
@@ -39,6 +49,8 @@ publication for the tag when any smoke fails.
 - **WHEN** the workflow runs in its dispatch dry-run mode
 - **THEN** it builds, smokes, and packages both targets without publishing
 - **AND** the produced archives pass checksum verification
+- **AND** the dry-run writes release-shaped artifacts under `target/dist/`
+  so the same install-script and transcript checks can consume them
 
 ### Requirement: Install scripts SHALL verify and install a pinned version
 
@@ -55,6 +67,8 @@ profiles without an explicit opt-in flag.
   confirms success via the tool version output
 - **AND** with a host `clang` present, `sgc run examples/01_hello.sg`
   succeeds with the documented result
+- **AND** a stdlib-import smoke succeeds without pointing the script or tool
+  at the source checkout
 
 #### Scenario: A checksum mismatch aborts the install
 

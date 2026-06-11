@@ -62,10 +62,30 @@ policy (D1) and v1 surface (D2) in
 - IR-level tests: compile fixtures with `-g` and assert presence/shape of
   `DICompileUnit`, `DISubprogram` for every user function, and `!dbg` on
   representative statements; assert byte-identical IR without `-g`.
+- The no-`-g` byte-identity baselines live under
+  `compiler/tests/fixtures/debug-info-baselines/` and cover exactly three
+  representative entrypoints before implementation starts: scalar control
+  flow, struct/method dispatch, and async `main`. Updating those baselines
+  without first explaining a non-debug codegen change is out of scope for
+  this change.
 - Debugger transcripts: scripted lldb batch (Linux CI or manual checklist)
   and cdb script (Windows) setting a source-line breakpoint, running,
   asserting the stop location file:line, stepping one line, continuing to
-  exit; transcripts committed under `docs/` and linked from `tasks.md`.
+  exit; transcripts committed as
+  `docs/debugging-native-linux-lldb.transcript` and
+  `docs/debugging-native-windows-cdb.transcript` and linked from
+  `docs/debugging-native.md`.
+
+### D-A6 Explicit deferrals for this change
+
+- `sgpm build`/profile forwarding to `sgc -g` is deferred. This change only
+  adds `-g`/`--debug-info` on direct `sgc build` and `sgc run` entrypoints.
+- Debug Adapter Protocol support, Sengoo-aware expression evaluation,
+  pretty-printers, local variable inspection beyond the optional parameter
+  stretch, and IDE launch configuration are deferred.
+- If span plumbing cannot locate a source statement, the implementation must
+  inherit the nearest enclosing statement location; it must not introduce
+  synthetic line `0` locations or omit `!dbg` from required statement kinds.
 
 ## Risks / Trade-offs
 
@@ -84,6 +104,5 @@ Additive flag; no migration. Existing build scripts keep current behavior.
 
 ## Open Questions
 
-- Whether `sgpm build` forwards a `--debug` profile flag to `sgc -g` lands
-  here or in a follow-up is decided during implementation (default:
-  follow-up, recorded in tasks).
+- None for the v1 surface. New debug surfaces require a follow-up OpenSpec
+  update before implementation.

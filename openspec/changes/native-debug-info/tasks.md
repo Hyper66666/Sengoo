@@ -1,12 +1,15 @@
 ## 1. Prerequisites and baseline
 
 - [x] 1.1 Run `openspec validate native-debug-info --strict`.
-- [ ] 1.2 Confirm `codegen-ir-correctness-and-gate` is archived (conformance
+- [x] 1.2 Confirm `codegen-ir-correctness-and-gate` is archived (conformance
   gate drives the real `sgc` CLI); otherwise record it as the active blocker
   and stop before §3.
 - [ ] 1.3 Record the no-`-g` baseline: pick three fixtures (scalar control
   flow, struct/method, async main) and check in their emitted IR hashes to
   prove later byte-identity without `-g`.
+- [x] 1.4 Pin explicit deferrals: no `sgpm build` debug-profile forwarding,
+  no DAP/IDE debug UI, no pretty-printers, and no full local-variable
+  inspection in v1.
 
 ## 2. Span plumbing audit
 
@@ -37,10 +40,12 @@
 
 ## 5. Debugger validation and docs
 
-- [ ] 5.1 Linux: scripted lldb transcript — breakpoint on a Sengoo
+- [ ] 5.1 Linux: scripted lldb transcript
+  `docs/debugging-native-linux-lldb.transcript` — breakpoint on a Sengoo
   file:line binds, hits, `next` steps one source line, `continue` exits 0.
-- [ ] 5.2 Windows: scripted cdb/WinDbg transcript with the same assertions
-  on the CodeView path.
+- [ ] 5.2 Windows: scripted cdb/WinDbg transcript
+  `docs/debugging-native-windows-cdb.transcript` with the same assertions on
+  the CodeView path.
 - [ ] 5.3 Stretch: parameter `DILocalVariable` + `llvm.dbg.declare`; ship
   only with passing reads in both debuggers, else record matrix-deferred.
 - [ ] 5.4 Upgrade `docs/debugging-native.md` to source-level workflows and

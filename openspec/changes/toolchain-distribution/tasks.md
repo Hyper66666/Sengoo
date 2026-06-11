@@ -22,6 +22,9 @@
 - [ ] 3.3 Package archives per D-D1 with `.sha256`; upload to the GitHub
   release; `workflow_dispatch` dry-run mode builds and smokes without
   publishing.
+- [ ] 3.4 Archives include bundled stdlib/runtime bridge files plus
+  `manifest.json`; a dry-run extracts the archive outside the checkout and
+  proves `sgc` can resolve `std::*` without `SENGOO_ROOT`.
 
 ## 4. Install scripts
 
@@ -32,6 +35,9 @@
 - [ ] 4.3 Fresh-host (or clean-container/VM) transcript per target:
   install via script, then `sgc run examples/01_hello.sg` succeeds with a
   host `clang` present; transcript committed and linked.
+- [ ] 4.4 Transcript also runs one stdlib import smoke from outside the source
+  checkout, proving the distribution is self-contained for stdlib/runtime
+  lookup.
 
 ## 5. Docs and matrix
 
@@ -49,8 +55,10 @@
 - [ ] 6.2 Version coherence test green on Windows and Linux CI
 - [ ] 6.3 Workflow dry-run produces installable, checksum-valid archives
   for both targets
-- [ ] 6.4 Install-script transcripts committed for both targets
-- [ ] 6.5 `openspec validate toolchain-distribution --strict`
+- [ ] 6.4 Dry-run archive extraction proves stdlib/runtime lookup without a
+  source checkout or manual `SENGOO_ROOT`
+- [ ] 6.5 Install-script transcripts committed for both targets
+- [ ] 6.6 `openspec validate toolchain-distribution --strict`
 
 ## Archive Gate
 
@@ -58,6 +66,7 @@
 - [ ] A dry-run (or real) tagged release produced smoke-gated, checksummed
   archives for win-x64 and linux-x64.
 - [ ] Script installs are proven by fresh-host transcripts ending in a
-  successful `sgc run examples/01_hello.sg`.
+  successful `sgc run examples/01_hello.sg` plus a stdlib import smoke from
+  outside the source checkout.
 - [ ] All four tools report one coherent version string with tests.
 - [ ] Matrix row added with proof; umbrella records Pillar D completion.

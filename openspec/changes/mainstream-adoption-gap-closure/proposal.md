@@ -34,14 +34,14 @@ adoption gaps that no active change owns:
    prebuilt `sgc`/`sgpm`/`sgfmt`/`sglsp` binaries, checksums, or install
    scripts exist for Windows and Linux hosts.
 
-Two further adoption blockers already have active owning changes and are
-tracked here only as ordered dependencies, not owned scope:
+Two further adoption blockers are tracked here only as ordered dependencies,
+not owned scope:
 
 - **Correctness trust**: `codegen-ir-correctness-and-gate` (real-CLI IR
   type consistency, multi-payload match parsing, non-blind conformance gate)
-  is proposed but unimplemented. A language whose documented core forms fail
-  under the pinned developer toolchain cannot be adopted regardless of
-  features.
+  is archived as `2026-06-11-codegen-ir-correctness-and-gate`. Native debug
+  work may now edit the same IR path, but must keep that conformance gate
+  green under both debug and non-debug builds.
 - **1000k compile budget**: `frontend-1000k-perf-gate` remains open until
   the reference-host RSS (≤ 1.8x C++) and frontend-share (≤ 65%) targets are
   met.
@@ -65,9 +65,9 @@ The required child split is:
 
 Dependency ordering:
 
-- `codegen-ir-correctness-and-gate` SHOULD be implemented and archived before
-  `native-debug-info` lands codegen-affecting work, because both edit IR
-  emission and the conformance gate must stay trustworthy under debug builds.
+- `codegen-ir-correctness-and-gate` is already archived and remains a
+  regression gate for `native-debug-info`; debug-info work must not weaken
+  real-CLI core conformance.
 - `frontend-1000k-perf-gate` remains owned by the prior umbrella; this
   program does not duplicate its targets but the final verification wave
   re-runs the perf gate to prove debug-info emission did not regress it.
@@ -148,8 +148,8 @@ The umbrella MUST NOT be archived as a substitute for those child deltas.
   http wrappers), `tools/sgc/` (`-g` flag, version plumbing), `tools/sgpm`,
   `tools/sgfmt`, `tools/sglsp` (version coherence), `.github/workflows/`
   (release packaging), `docs/`, `examples/realworld/SUPPORT_MATRIX.md`.
-- Affected active changes: depends on `codegen-ir-correctness-and-gate`
-  archiving first for IR-stability; re-runs the perf gate owned by
+- Affected active changes: consumes archived `codegen-ir-correctness-and-gate`
+  for IR-stability; re-runs the perf gate owned by
   `frontend-1000k-perf-gate` in final verification without duplicating it.
 - Existing public APIs remain source-compatible: cancellation and keep-alive
   surfaces are additive; the non-canceling `select` and `Connection: close`

@@ -5,7 +5,7 @@ adoption gaps identified after the `six-pillar-gap-closure` program: source
 -level debugging, cancellation semantics, production HTTP serving, and
 toolchain distribution. It consumes and extends:
 
-- `codegen-ir-correctness-and-gate` (active; correctness prerequisite)
+- archived `codegen-ir-correctness-and-gate` (correctness prerequisite)
 - `frontend-1000k-perf-gate` (active; perf gate re-run only, not owned)
 - archived `async-default-followups`, `async-reactor-futures`,
   `concurrent-async-runtime` (cancellation builds on their pinned surfaces)
@@ -24,6 +24,7 @@ requirements in a child change.
 ```text
 Phase 0  Inventory + dependency map + matrix baseline (this umbrella)
 Phase 1  Prerequisite: codegen-ir-correctness-and-gate implemented + archived
+         (satisfied by archive 2026-06-11-codegen-ir-correctness-and-gate)
 Phase 2  Pillar A (native-debug-info) + Pillar D (toolchain-distribution)
          in parallel — disjoint code surfaces
 Phase 3  Pillar B (async-cancellation-semantics)
@@ -37,10 +38,10 @@ integration gate that can mark the umbrella done.
 
 ## Upstream archive prerequisites
 
-- `codegen-ir-correctness-and-gate` must be archived before
+- `codegen-ir-correctness-and-gate` is archived and must stay green while
   `native-debug-info` merges IR-emission changes; both edit
-  `compiler/src/codegen/` and the conformance gate must already drive the
-  real CLI so debug-build regressions are caught.
+  `compiler/src/codegen/` and the conformance gate drives the real CLI so
+  debug-build regressions are caught.
 - `frontend-1000k-perf-gate` stays owned by `six-pillar-gap-closure`. This
   program only re-runs the perf gate as regression evidence in Phase 5; if
   the absolute targets are still unmet there, that fact blocks the prior

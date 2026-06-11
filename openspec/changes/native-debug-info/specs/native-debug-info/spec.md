@@ -24,6 +24,14 @@ produces DWARF on POSIX targets and CodeView on Windows targets.
 - **THEN** the emitted IR is byte-identical to the pre-change baseline
 - **AND** no debug metadata or module flags are added
 
+#### Scenario: Package-manager debug forwarding is not claimed
+
+- **WHEN** a package is built through `sgpm build`
+- **THEN** this change does not require `sgpm` to forward a debug profile to
+  `sgc -g`
+- **AND** any package-manager debug profile support requires a later OpenSpec
+  update
+
 ### Requirement: Source-line breakpoints SHALL bind and step in native debuggers
 
 A binary built with `-g` SHALL support setting a breakpoint on a Sengoo
@@ -82,5 +90,6 @@ breakpoint/stepping workflow per host, backed by committed transcripts.
   host
 - **THEN** the guide shows how to build with `-g`, attach or launch the
   documented debugger, set a source-line breakpoint, and step
-- **AND** the guide links validated lldb and WinDbg/cdb transcripts
+- **AND** the guide links validated `docs/debugging-native-linux-lldb.transcript`
+  and `docs/debugging-native-windows-cdb.transcript`
 - **AND** the support matrix row for source-level debugging cites them
