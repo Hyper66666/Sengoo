@@ -330,7 +330,7 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_async_timeout_cancel_i64__poll(i64)\n");
         self.declarations.push_str(Self::sret_or_direct_decl(
-            self.targets_windows_msvc(),
+            self.async_result_uses_sret("sengoo_async_timeout_cancel_i64__result"),
             "sengoo_async_timeout_cancel_i64__result",
             "{ i1, i64, i64 }",
         ));
@@ -386,7 +386,14 @@ impl Codegen {
             return;
         }
 
-        let targets_windows_msvc = self.targets_windows_msvc();
+        let channel_send_uses_sret =
+            self.async_result_uses_sret("sengoo_async_channel_send_i64__result");
+        let channel_recv_uses_sret =
+            self.async_result_uses_sret("sengoo_async_channel_recv_i64__result");
+        let mutex_lock_uses_sret =
+            self.async_result_uses_sret("sengoo_async_mutex_lock_i64__result");
+        let http_next_request_uses_sret =
+            self.async_result_uses_sret("sengoo_http_server_next_request_async__result");
 
         Self::maybe_declare_async_runtime_lifecycle(
             &mut self.declarations,
@@ -423,7 +430,7 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        targets_windows_msvc,
+                        channel_send_uses_sret,
                         "sengoo_async_channel_send_i64__result",
                         "{ i1, i64 }",
                     ),
@@ -450,7 +457,7 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        targets_windows_msvc,
+                        channel_recv_uses_sret,
                         "sengoo_async_channel_recv_i64__result",
                         "{ i1, i64, i64 }",
                     ),
@@ -477,7 +484,7 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        targets_windows_msvc,
+                        mutex_lock_uses_sret,
                         "sengoo_async_mutex_lock_i64__result",
                         "{ i1, i64, i64 }",
                     ),
@@ -504,7 +511,7 @@ impl Codegen {
                 (
                     "result",
                     Self::sret_or_direct_decl(
-                        targets_windows_msvc,
+                        http_next_request_uses_sret,
                         "sengoo_http_server_next_request_async__result",
                         "%HttpServerNextRequestOutcome",
                     ),
@@ -673,5 +680,24 @@ mod tests {
 
         let needle = "declare i64 @sengoo_async_select_winner(i64, i64, i64, i64)\n";
         assert_eq!(cg.declarations.matches(needle).count(), 1);
+    }
+
+    #[test]
+    fn async_result_sret_matches_supported_native_abis() {
+        let linux = Codegen::with_ffi_and_target(
+            FfiCodegenConfig::default(),
+            Some("x86_64-unknown-linux-gnu".to_string()),
+        );
+        assert!(!linux.async_result_uses_sret("sengoo_async_channel_send_i64__result"));
+        assert!(linux.async_result_uses_sret("sengoo_async_channel_recv_i64__result"));
+        assert!(linux.async_result_uses_sret("sengoo_http_server_next_request_async__result"));
+
+        let windows = Codegen::with_ffi_and_target(
+            FfiCodegenConfig::default(),
+            Some("x86_64-pc-windows-msvc".to_string()),
+        );
+        assert!(windows.async_result_uses_sret("sengoo_async_channel_send_i64__result"));
+        assert!(windows.async_result_uses_sret("sengoo_async_channel_recv_i64__result"));
+        assert!(windows.async_result_uses_sret("sengoo_http_server_next_request_async__result"));
     }
 }

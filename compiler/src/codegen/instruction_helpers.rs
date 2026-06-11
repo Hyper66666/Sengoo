@@ -548,7 +548,9 @@ impl Codegen {
                 } else if ret_ty == "void" {
                     self.ir
                         .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
-                } else if self.uses_windows_sret_async_result(func, dest_ty) {
+                } else if matches!(dest_ty, MIRType::Struct { .. })
+                    && self.async_result_uses_sret(func)
+                {
                     let sret_slot = format!("{dest}.sret");
                     self.ir
                         .push_str(&format!("{sret_slot} = alloca {ret_ty}\n"));
@@ -1053,16 +1055,18 @@ impl Codegen {
             })
     }
 
-    fn uses_windows_sret_async_result(&self, func: &str, dest_ty: &MIRType) -> bool {
-        self.targets_windows_msvc()
-            && matches!(dest_ty, MIRType::Struct { .. })
-            && matches!(
-                func,
-                "sengoo_async_timeout_cancel_i64__result"
-                    | "sengoo_async_channel_send_i64__result"
-                    | "sengoo_async_channel_recv_i64__result"
-                    | "sengoo_async_mutex_lock_i64__result"
-                    | "sengoo_http_server_next_request_async__result"
-            )
+    pub(super) fn async_result_uses_sret(&self, func: &str) -> bool {
+        match func {
+            // The 16-byte send result is register-returned on SysV/AAPCS64,
+            // but MSVC returns non-scalar aggregates indirectly.
+            "sengoo_async_channel_send_i64__result" => self.targets_windows_msvc(),
+            // These C-compatible results are 24 bytes and therefore use an
+            // indirect result on every native ABI currently supported by sgc.
+            "sengoo_async_timeout_cancel_i64__result"
+            | "sengoo_async_channel_recv_i64__result"
+            | "sengoo_async_mutex_lock_i64__result"
+            | "sengoo_http_server_next_request_async__result" => true,
+            _ => false,
+        }
     }
 }
