@@ -19,7 +19,7 @@ use crate::mir::async_origin_helpers::{
 };
 use crate::mir::build_enum_defs;
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
-use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
+use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
 };
@@ -34,8 +34,7 @@ use crate::mir::pattern_helpers::{
 };
 use crate::mir::type_helpers::is_void_like;
 use crate::mir::type_mapping_helpers::{
-    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
-    hir_type_to_mir_with_structs_and_subst,
+    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs_and_subst,
 };
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,

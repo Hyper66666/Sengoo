@@ -19,8 +19,55 @@ use crate::{
     RunCacheMetadata, RunEngine,
 };
 
+pub(crate) const MINIMUM_CLANG_MAJOR: u32 = 15;
+
 fn effective_target(target: Option<&NativeBuildTarget>) -> NativeBuildTarget {
     target.cloned().unwrap_or_else(NativeBuildTarget::host)
+}
+
+pub(crate) fn parse_clang_major_version(version_text: &str) -> Option<u32> {
+    let lower = version_text.to_ascii_lowercase();
+    let tail = lower
+        .find("clang version")
+        .map(|index| &version_text[index + "clang version".len()..])
+        .unwrap_or(version_text);
+    tail.split(|ch: char| !ch.is_ascii_digit())
+        .find(|part| !part.is_empty())
+        .and_then(|part| part.parse().ok())
+}
+
+pub(crate) fn detected_clang_major_version(clang_exe: &str) -> Result<Option<u32>> {
+    let output = Command::new(clang_exe)
+        .arg("--version")
+        .output()
+        .into_diagnostic()
+        .map_err(|error| {
+            miette::miette!("failed to invoke clang for version detection: {error}")
+        })?;
+    let mut version_text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !output.stderr.is_empty() {
+        version_text.push('\n');
+        version_text.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(parse_clang_major_version(&version_text))
+}
+
+fn validate_clang_major_version(major: Option<u32>, clang_exe: &str) -> Result<()> {
+    let Some(major) = major else {
+        return Err(miette::miette!(
+            "unable to determine clang/LLVM version from `{clang_exe} --version`; Sengoo native builds require clang/LLVM {MINIMUM_CLANG_MAJOR}+ with opaque pointer support"
+        ));
+    };
+    if major < MINIMUM_CLANG_MAJOR {
+        return Err(miette::miette!(
+            "unsupported clang/LLVM {major}; Sengoo native builds require clang/LLVM {MINIMUM_CLANG_MAJOR}+ with opaque pointer support. Install a newer LLVM/Clang or use `sgc build --emit-llvm` to inspect IR without native codegen."
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_supported_clang_toolchain(clang_exe: &str) -> Result<()> {
+    validate_clang_major_version(detected_clang_major_version(clang_exe)?, clang_exe)
 }
 
 fn apply_clang_target_args(command: &mut Command, target: &NativeBuildTarget) -> Result<()> {
@@ -1215,6 +1262,44 @@ mod tests {
             "C-only and native-net runtime objects must not share a cache slot"
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parse_clang_major_version_handles_common_formats() {
+        assert_eq!(parse_clang_major_version("clang version 19.1.7"), Some(19));
+        assert_eq!(
+            parse_clang_major_version("Ubuntu clang version 15.0.7 (tags/RELEASE_1507/final)"),
+            Some(15)
+        );
+        assert_eq!(
+            parse_clang_major_version("Apple clang version 16.0.0 (clang-1600.0.26.3)"),
+            Some(16)
+        );
+    }
+
+    #[test]
+    fn parse_clang_major_version_rejects_unparseable_output() {
+        assert_eq!(
+            parse_clang_major_version("not a clang version banner"),
+            None
+        );
+    }
+
+    #[test]
+    fn validate_clang_major_version_reports_contract_floor() {
+        let error = validate_clang_major_version(Some(14), "clang").unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("unsupported clang/LLVM 14"));
+        assert!(message.contains("clang/LLVM 15+"));
+        assert!(message.contains("--emit-llvm"));
+    }
+
+    #[test]
+    fn validate_clang_major_version_reports_unparseable_banner() {
+        let error = validate_clang_major_version(None, "clang").unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("unable to determine clang/LLVM version"));
+        assert!(message.contains("clang/LLVM 15+"));
     }
 
     #[test]

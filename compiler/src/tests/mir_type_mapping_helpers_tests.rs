@@ -1,6 +1,7 @@
 use crate::hir::{HIRItem, HIRStruct, HIRType, IntKind};
+use crate::mir::enum_defs::EnumDefMap;
 use crate::mir::type_mapping_helpers::{
-    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
+    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs_and_enums,
 };
 use crate::mir::{MIRType, MIR_I64};
 use crate::{lower_ast, Parser, TypeChecker};
@@ -39,7 +40,12 @@ struct Pair<T> { left: T, right: Box<T> }
         .collect::<HashMap<_, _>>();
 
     let hir_ty = HIRType::named("Pair".to_string(), vec![HIRType::int(IntKind::I64)]);
-    let mir_ty = hir_type_to_mir_with_structs(&hir_ty, &struct_refs);
+    let mir_ty = hir_type_to_mir_with_structs_and_enums(
+        &hir_ty,
+        &struct_refs,
+        &EnumDefMap::new(),
+        &HashMap::new(),
+    );
 
     let MIRType::Struct { name, fields } = mir_ty else {
         panic!("expected MIR struct");

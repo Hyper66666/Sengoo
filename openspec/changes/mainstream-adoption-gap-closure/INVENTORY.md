@@ -25,7 +25,7 @@ Baseline audit performed against the working tree on branch
 
 | Change | State | Why it gates this program |
 | --- | --- | --- |
-| `codegen-ir-correctness-and-gate` | Active, tasks unstarted | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
+| `codegen-ir-correctness-and-gate` | Active, implemented locally; awaiting pushed CI/Linux evidence before archive | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
 | `frontend-1000k-perf-gate` | Active, awaiting reference-host absolute targets | Phase 5 re-runs its gate to prove `-g` work did not regress default-mode compile performance |
 | `six-pillar-gap-closure` | Active umbrella, final verification open | Prior wave must not have its capabilities re-claimed by this wave's children |
 

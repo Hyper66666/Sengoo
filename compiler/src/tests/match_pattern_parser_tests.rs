@@ -126,3 +126,104 @@ def main() -> i64 {
         "expected arm-level or nested or-pattern"
     );
 }
+
+fn assert_tuple_struct_arm(arms: &[crate::ast::MatchArm], index: usize, arity: usize) {
+    match &arms[index].patterns[0].kind {
+        PatternKind::TupleStruct { patterns, .. } => {
+            assert_eq!(
+                patterns.len(),
+                arity,
+                "payload arm {index} should bind {arity} values"
+            );
+        }
+        other => panic!("expected tuple-struct payload pattern, got {other:?}"),
+    }
+}
+
+#[test]
+fn match_payload_arm_parses_in_first_middle_and_last_positions() {
+    let program = parse_program(
+        r#"
+enum State { One(i64), Two, Three(i64) }
+def main() -> i64 {
+    let state = State::One(1);
+    match state {
+        State::One(first) => first,
+        State::Two => 2,
+        State::Three(last) => last,
+    }
+}
+"#,
+    );
+
+    let arms = find_match_arms(&program);
+    assert_eq!(arms.len(), 3);
+    assert_tuple_struct_arm(&arms, 0, 1);
+    assert!(matches!(arms[1].patterns[0].kind, PatternKind::Path(_)));
+    assert_tuple_struct_arm(&arms, 2, 1);
+
+    let program = parse_program(
+        r#"
+enum State { One, Two(i64), Three }
+def main() -> i64 {
+    let state = State::Two(2);
+    match state {
+        State::One => 1,
+        State::Two(middle) => middle,
+        State::Three => 3,
+    }
+}
+"#,
+    );
+
+    let arms = find_match_arms(&program);
+    assert_eq!(arms.len(), 3);
+    assert_tuple_struct_arm(&arms, 1, 1);
+}
+
+#[test]
+fn match_multiple_payload_arms_parse_in_one_match() {
+    let program = parse_program(
+        r#"
+enum Event { Number(i64), Pair(i64, bool), Empty }
+def main() -> i64 {
+    let event = Event::Pair(2, true);
+    match event {
+        Event::Number(value) => value,
+        Event::Pair(number, enabled) => if enabled { number } else { 0 },
+        Event::Empty => 0,
+    }
+}
+"#,
+    );
+
+    let arms = find_match_arms(&program);
+    assert_eq!(arms.len(), 3);
+    assert_tuple_struct_arm(&arms, 0, 1);
+    assert_tuple_struct_arm(&arms, 1, 2);
+}
+
+#[test]
+fn malformed_payload_pattern_is_rejected() {
+    let mut parser = Parser::new(
+        r#"
+enum Maybe { Empty, Value(i64) }
+def main() -> i64 {
+    let value = Maybe::Value(1);
+    match value {
+        Maybe::Value(,) => 1,
+        Maybe::Empty => 0,
+    }
+}
+"#,
+    );
+
+    let error = parser
+        .parse_program()
+        .expect_err("malformed payload pattern should be rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("pattern") || message.contains("identifier"),
+        "diagnostic should be pattern-related: {message}"
+    );
+}

@@ -43,4 +43,7 @@ sgc test --exact tests/smoke.sg
 
 ## When native linking fails
 
-Confirm `clang` is on `PATH`. On Windows, install LLVM and ensure `clang.exe` is discoverable. The `sgc` command prints the selected linker during `run`/`build`.
+Confirm `clang` is on `PATH`. Native `sgc build` and native `sgc run` require
+LLVM/clang 15+ for the opaque-pointer backend contract; clang 19 matches the
+core conformance CI. On Windows, install LLVM and ensure `clang.exe` is
+discoverable. The `sgc` command prints the selected linker during `run`/`build`.

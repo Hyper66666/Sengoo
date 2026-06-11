@@ -127,13 +127,6 @@ pub(crate) fn hir_type_to_mir_with_structs_and_subst(
     hir_type_to_mir_with_structs_and_enums(ty, struct_defs, &EnumDefMap::new(), subst)
 }
 
-pub(crate) fn hir_type_to_mir_with_structs(
-    ty: &HIRType,
-    struct_defs: &HashMap<String, &hir::HIRStruct>,
-) -> MIRType {
-    hir_type_to_mir_with_structs_and_enums(ty, struct_defs, &EnumDefMap::new(), &HashMap::new())
-}
-
 pub(crate) fn bind_mir_subst_from_hir_type(
     template: &HIRType,
     actual: &MIRType,

@@ -516,6 +516,7 @@ pub(crate) async fn cmd_build(
             "clang is required to build native binaries. Install LLVM/Clang or use --emit-llvm"
         )
     })?;
+    ensure_supported_clang_toolchain(&clang_exe)?;
     let object_path = object_path
         .clone()
         .ok_or_else(|| miette::miette!("internal error: missing object path"))?;

@@ -1,0 +1,20 @@
+// Core conformance: enum-returning function and payload match extraction.
+// Run: sgc run examples/conformance/07_enum_return.sg
+// Expected exit code: 42
+
+enum Maybe { Empty, Value(i64) }
+
+def make(enabled: bool) -> Maybe {
+    if enabled {
+        Maybe::Value(42)
+    } else {
+        Maybe::Empty
+    }
+}
+
+def main() -> i64 {
+    match make(true) {
+        Maybe::Empty => 0,
+        Maybe::Value(inner) => inner,
+    }
+}

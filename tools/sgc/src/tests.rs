@@ -4554,6 +4554,12 @@ fn core_conformance_examples_compile_link_and_run() {
             42,
             "",
         ),
+        (
+            "core-enum-return",
+            "examples/conformance/07_enum_return.sg",
+            42,
+            "",
+        ),
     ];
 
     for (tag, path, exit_code, stdout) in cases {

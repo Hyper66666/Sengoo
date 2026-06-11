@@ -10,6 +10,8 @@ jobs:
   core-language:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      LLVM_VERSION: "19"
     steps:
       - uses: actions/checkout@v4
 
@@ -18,11 +20,15 @@ jobs:
           toolchain: 1.94.0
           components: rustfmt, clippy
 
-      - name: Install clang
-        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Install pinned LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+          clang --version
 
       - name: Validate OpenSpec
-        run: npx --yes @fission-ai/openspec@1.4.1 validate core-language-correctness --strict
+        run: npx --yes @fission-ai/openspec@1.4.1 validate codegen-ir-correctness-and-gate --strict
 
       - name: Run core conformance examples
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture
