@@ -654,17 +654,19 @@ def main() -> i64 {
     let unknown = STATUS_UNKNOWN();
     let invalid = STATUS_INVALID_ARGUMENT();
     let buffer_error = STATUS_BUFFER_TOO_SMALL();
+    let canceled = STATUS_CANCELED();
     let mapped = status_from_raw_ffi(-2001);
     let name_len = status_name_copy(buffer_error, buffer).unwrap_or(0);
     let message_len = status_message_copy(invalid, buffer).unwrap_or(0);
     buffer.free();
-    unknown + mapped + name_len + message_len
+    unknown + canceled + mapped + name_len + message_len
 }
 "#,
     );
 
     assert!(ir.contains("STATUS_UNKNOWN"));
     assert!(ir.contains("STATUS_INVALID_ARGUMENT"));
+    assert!(ir.contains("STATUS_CANCELED"));
     assert!(ir.contains("sengoo_status_name_copy"));
     assert!(ir.contains("sengoo_status_message_copy"));
     assert!(ir.contains("status_from_raw_ffi"));

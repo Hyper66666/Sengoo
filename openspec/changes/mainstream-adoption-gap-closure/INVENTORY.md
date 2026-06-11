@@ -12,6 +12,15 @@ Baseline audit performed against the working tree on branch
 | C Production HTTP serving | High | Reactor-backed dynamic serving works; TLS server, keep-alive, streaming, callback handlers explicitly deferred | SUPPORT_MATRIX "HTTP server dynamic serving" row; archived `2026-06-11-async-http-serving` |
 | D Toolchain distribution | Medium-high | Source build only (`cargo build --release`); release process documented but no published versioned binaries or install scripts | `docs/internal-release.md`; absence of release packaging workflow in `.github/workflows/` |
 
+## Child changes (created 2026-06-11)
+
+| Child change | Pillar | Capability delta | Status |
+| --- | --- | --- | --- |
+| `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; blocked on `codegen-ir-correctness-and-gate` archive before codegen merges |
+| `async-cancellation-semantics` | B | new `async-cancellation` | Proposed, strictly validated; unblocked |
+| `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Proposed, strictly validated; sequenced after Pillar B |
+| `toolchain-distribution` | D | new `toolchain-distribution` | Proposed, strictly validated; unblocked, parallel with A |
+
 ## Dependencies (not owned here)
 
 | Change | State | Why it gates this program |

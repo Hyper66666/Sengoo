@@ -139,6 +139,7 @@ static const char* sengoo_status_name(long long code) {
         case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return "tls_hostname_mismatch";
         case SENGOO_STATUS_TLS_HANDSHAKE: return "tls_handshake";
         case SENGOO_STATUS_TLS_UNAVAILABLE: return "tls_unavailable";
+        case SENGOO_STATUS_CANCELED: return "canceled";
         default: return "unknown";
     }
 }
@@ -164,6 +165,7 @@ static const char* sengoo_status_message(long long code) {
         case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return "TLS certificate hostname mismatch";
         case SENGOO_STATUS_TLS_HANDSHAKE: return "TLS handshake failed";
         case SENGOO_STATUS_TLS_UNAVAILABLE: return "TLS backend unavailable";
+        case SENGOO_STATUS_CANCELED: return "operation canceled";
         default: return "unknown failure";
     }
 }
@@ -194,6 +196,7 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case -SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return SENGOO_STATUS_TLS_HOSTNAME_MISMATCH;
         case -SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
         case -SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
+        case -SENGOO_STATUS_CANCELED: return SENGOO_STATUS_CANCELED;
         case SENGOO_STATUS_UNKNOWN: return SENGOO_STATUS_UNKNOWN;
         case SENGOO_STATUS_INVALID_ARGUMENT: return SENGOO_STATUS_INVALID_ARGUMENT;
         case SENGOO_STATUS_INVALID_HANDLE: return SENGOO_STATUS_INVALID_HANDLE;
@@ -212,6 +215,7 @@ long long sengoo_status_from_raw_ffi(long long code) {
         case SENGOO_STATUS_TLS_HOSTNAME_MISMATCH: return SENGOO_STATUS_TLS_HOSTNAME_MISMATCH;
         case SENGOO_STATUS_TLS_HANDSHAKE: return SENGOO_STATUS_TLS_HANDSHAKE;
         case SENGOO_STATUS_TLS_UNAVAILABLE: return SENGOO_STATUS_TLS_UNAVAILABLE;
+        case SENGOO_STATUS_CANCELED: return SENGOO_STATUS_CANCELED;
         default: return SENGOO_STATUS_UNKNOWN;
     }
 }

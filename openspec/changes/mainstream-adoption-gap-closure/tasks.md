@@ -6,22 +6,21 @@
   (`codegen-ir-correctness-and-gate`, `frontend-1000k-perf-gate`) in
   `INVENTORY.md` and `design.md`.
 - [x] 0.4 Snapshot the `SUPPORT_MATRIX.md` rows this program intends to move.
-- [ ] 0.5 Create the four child changes named in `proposal.md`
+- [x] 0.5 Create the four child changes named in `proposal.md`
   (`native-debug-info`, `async-cancellation-semantics`,
   `http-production-serving`, `toolchain-distribution`), each owning its
   capability deltas and archive gate.
-- [ ] 0.6 Link every child proposal back to this umbrella and record its
+- [x] 0.6 Link every child proposal back to this umbrella and record its
   owner/status in `INVENTORY.md`.
-- [ ] 0.7 Freeze public API and semantic tables in `design.md` (D1–D5); any
+- [x] 0.7 Freeze public API and semantic tables in `design.md` (D1–D5); any
   later public-name or behavior change must update the table before code
   edits.
-- [ ] 0.8 Confirm `codegen-ir-correctness-and-gate` is implemented and
-  archived (or record it as an explicit blocker) before `native-debug-info`
-  merges codegen edits.
+- [x] 0.8 Record `codegen-ir-correctness-and-gate` as an explicit blocker
+  before `native-debug-info` merges codegen edits.
 
 ## 1. Pillar A — Source-level debugging (`native-debug-info`)
 
-- [ ] 1.1 Child change validated strictly with DI-emission requirements,
+- [x] 1.1 Child change validated strictly with DI-emission requirements,
   `-g` policy (D1), and v1 surface table (D2).
 - [ ] 1.2 DI compile units, subprograms, and `!dbg` statement locations
   emitted under `-g` in the textual IR path.
@@ -33,7 +32,7 @@
 
 ## 2. Pillar B — Cancellation semantics (`async-cancellation-semantics`)
 
-- [ ] 2.1 Child change validated strictly with the cooperative cancellation
+- [x] 2.1 Child change validated strictly with the cooperative cancellation
   contract (D3) pinned before implementation.
 - [ ] 2.2 Task cancellation propagation: canceled task halts at next await
   point, reaches `task_status == 3`, runs no post-await user code.
@@ -46,7 +45,7 @@
 
 ## 3. Pillar C — Production HTTP serving (`http-production-serving`)
 
-- [ ] 3.1 Child change validated strictly with feature order and bounds
+- [x] 3.1 Child change validated strictly with feature order and bounds
   pinned (D4).
 - [ ] 3.2 Handler-callback routing lands with runtime tests and a realworld
   fixture update.
@@ -58,7 +57,7 @@
 
 ## 4. Pillar D — Toolchain distribution (`toolchain-distribution`)
 
-- [ ] 4.1 Child change validated strictly with artifact layout and channel
+- [x] 4.1 Child change validated strictly with artifact layout and channel
   policy pinned (D5).
 - [ ] 4.2 Tag-triggered packaging workflow produces checksummed win-x64 and
   linux-x64 archives gated on the smoke matrix.
