@@ -30,8 +30,11 @@ async def native_async_contract(server: HttpServer) -> bool {
 }
 
 async def main() -> i64 {
+    print(700);
     let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok { print(701); } else { print(710 + bind_result.error); };
     let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
     let native_ok = if bind_result.is_ok { await native_async_contract(bind_result.value); } else { false; };
+    if native_ok { print(702); } else { print(703); };
     if native_ok or unsupported_host { 0; } else { 2; };
 }
