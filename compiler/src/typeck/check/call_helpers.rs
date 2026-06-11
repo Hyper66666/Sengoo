@@ -169,6 +169,13 @@ impl TypeChecker {
                     args: vec![],
                 }))),
             )),
+            "HttpServer_next_request_async" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                    name: "HttpServerNextRequestOutcome".to_string(),
+                    args: vec![],
+                }))),
+            )),
             _ => None,
         }
     }
@@ -355,6 +362,25 @@ impl TypeChecker {
             self.check_spawn_blocking_i64_send_captures(args)?;
         }
 
+        if builtin_name == Some("sengoo_http_server_next_request_async__start") {
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            for arg in args {
+                let arg_ty = self.check_expr(arg)?;
+                self.infer.unify(&arg_ty, &i64_ty)?;
+            }
+            let outcome_ty = self.env.new_ty(TyKind::Adt {
+                name: "HttpServerNextRequestOutcome".to_string(),
+                args: vec![],
+            });
+            return Ok(Ty::new(0, TyKind::Future(Box::new(outcome_ty))));
+        }
+
         if let Some(name) = builtin_name {
             if let Some(future_ty) = self.runtime_async_wrapper_future_ty(name) {
                 if self.async_context_depth == 0 {
@@ -385,7 +411,7 @@ impl TypeChecker {
                             return Err(Self::cross_thread_send_error("value"));
                         }
                     }
-                    "channel_recv_i64" | "mutex_lock_async" => {
+                    "channel_recv_i64" | "mutex_lock_async" | "HttpServer_next_request_async" => {
                         if args.len() != 1 {
                             return Err(TypeckError::ArgumentCountMismatch {
                                 expected: 1,
@@ -819,6 +845,33 @@ impl TypeChecker {
                 });
             }
             return Ok(self.env.int_ty(crate::typeck::ty::IntKind::I64));
+        }
+
+        if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "HttpServer")
+            && method_name == "next_request_async"
+        {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "HttpServer.next_request_async is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 1 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 1,
+                    found: args.len(),
+                });
+            }
+            let timeout_ty = arg_types
+                .first()
+                .cloned()
+                .unwrap_or_else(|| self.env.int_ty(IntKind::I64));
+            let i64_ty = self.env.int_ty(IntKind::I64);
+            self.infer.unify(&timeout_ty, &i64_ty)?;
+            let outcome_ty = self.env.new_ty(TyKind::Adt {
+                name: "HttpServerNextRequestOutcome".to_string(),
+                args: vec![],
+            });
+            return Ok(Ty::new(0, TyKind::Future(Box::new(outcome_ty))));
         }
 
         // Inherent impl lookup first.

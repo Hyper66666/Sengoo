@@ -39,7 +39,9 @@ Gate thresholds (default in `bench/scripts/advanced-kpi-gate.py`):
 | 1000k | ≤ 1.8× | ≤ 65% | informational until met |
 | 2500k stretch | ≤ 2.0× | ≤ 70% | report-only |
 
-CI runs 100k ladder + regression gates in hard mode (`-SkipAbsoluteTargets` skips only 1000k absolutes).
+CI runs 100k ladder + regression gates and records the hard-mode decision, but
+keeps the step non-blocking until `frontend-1000k-perf-gate` closes its
+reference-host archive gate (`-SkipAbsoluteTargets` skips only 1000k absolutes).
 
 ## Rollback Procedure
 

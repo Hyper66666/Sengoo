@@ -2,22 +2,30 @@ import std::net;
 
 import std::status;
 
-def native_pull_contract(server: HttpServer) -> bool {
+async def client_probe(port: i64) -> i64 {
+    await sleep(10);
+    let connect_result = net_tcp_connect("127.0.0.1", port, 1000);
+    if connect_result.is_ok { let stream = connect_result.value; let sent = stream.send("GET /async-smoke HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); await sleep(1000); let closed = stream.close(); if sent.is_ok and closed { 0; } else { 2; }; } else { connect_result.error; };
+}
+
+async def native_async_contract(server: HttpServer) -> bool {
     let port = server.local_port().unwrap_or(0);
-    let timeout_result = server.next_request(60);
-    let timeout_mapped = if timeout_result.is_ok { false; } else { timeout_result.error == STATUS_TIMEOUT(); };
+    let client = spawn(client_probe(port));
+    let outcome = await server.next_request_async(5000);
+    let request_ok = if outcome.is_ok { let request = outcome.value; let path_ok = request.path_len().unwrap_or(0) == 12; let responded = request.respond(200, "ok").unwrap_or(false); path_ok and responded; } else { false; };
+    let client_ok = await client == 0;
     let stale = HttpServerRequest { handle: 0 };
     let stale_len = stale.method_len();
     let stale_mapped = if stale_len.is_ok { false; } else { stale_len.error == STATUS_INVALID_HANDLE(); };
     let stale_respond = stale.respond(200, "x");
     let respond_mapped = if stale_respond.is_ok { false; } else { stale_respond.error == STATUS_INVALID_HANDLE(); };
     let closed = server.close();
-    port > 0 and timeout_mapped and stale_mapped and respond_mapped and closed;
+    port > 0 and request_ok and client_ok and stale_mapped and respond_mapped and closed;
 }
 
-def main() -> i64 {
+async def main() -> i64 {
     let bind_result = http_server_bind("127.0.0.1", 0);
     let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    let native_ok = if bind_result.is_ok { native_pull_contract(bind_result.value); } else { false; };
+    let native_ok = if bind_result.is_ok { await native_async_contract(bind_result.value); } else { false; };
     if native_ok or unsupported_host { 0; } else { 2; };
 }

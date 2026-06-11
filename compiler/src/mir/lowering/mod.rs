@@ -19,7 +19,7 @@ use crate::mir::async_origin_helpers::{
 };
 use crate::mir::build_enum_defs;
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
-use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig};
+use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
 };
@@ -34,8 +34,7 @@ use crate::mir::pattern_helpers::{
 };
 use crate::mir::type_helpers::is_void_like;
 use crate::mir::type_mapping_helpers::{
-    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs,
-    hir_type_to_mir_with_structs_and_subst,
+    bind_mir_subst_from_hir_type, hir_type_to_mir_with_structs_and_subst,
 };
 use crate::mir::{
     Instruction, Local, LocalKind, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp,
@@ -128,6 +127,24 @@ pub(crate) struct FunctionSig {
     /// 函数参数数量（不含环境指针参数）。
     #[allow(dead_code)]
     pub(crate) env: Vec<(String, MIRType)>,
+}
+
+fn http_server_request_mir_type() -> MIRType {
+    MIRType::Struct {
+        name: "HttpServerRequest".to_string(),
+        fields: vec![("handle".to_string(), MIR_I64)],
+    }
+}
+
+fn http_server_next_request_outcome_mir_type() -> MIRType {
+    MIRType::Struct {
+        name: "HttpServerNextRequestOutcome".to_string(),
+        fields: vec![
+            ("is_ok".to_string(), MIR_BOOL),
+            ("value".to_string(), http_server_request_mir_type()),
+            ("error".to_string(), MIR_I64),
+        ],
+    }
 }
 
 /// Lambda 捕获环境。

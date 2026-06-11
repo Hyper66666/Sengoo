@@ -9,7 +9,7 @@ This document defines the current runtime network baseline APIs.
 - HTTP over TCP (HTTP/1.1, `http://` only)
 - WebSocket over TCP (`ws://` only)
 - HTTP server runtime (HTTP/1.1 parse + routing + middleware + WS upgrade)
-- HTTP server dynamic request serving (pull-based `next_request` + respond)
+- HTTP server dynamic request serving (synchronous pull or reactor-backed async await + respond)
 - Protocol-level error code mapping for network FFI calls
 
 ## C ABI API Surface
@@ -59,6 +59,11 @@ This document defines the current runtime network baseline APIs.
 ### HTTP Server Dynamic Requests
 
 - `u64 sengoo_http_server_next_request(u64 server_handle, u32 timeout_ms)`
+- `i64 sengoo_http_server_next_request_async__start(u64 server_handle, u32 timeout_ms)`
+- `i64 sengoo_http_server_next_request_async__poll(i64 future_handle)`
+- `HttpServerNextRequestResult sengoo_http_server_next_request_async__result(i64 future_handle)`
+- `bool sengoo_http_server_next_request_async__cancel(i64 future_handle)`
+- `void sengoo_http_server_next_request_async__drop(i64 future_handle)`
 - `i64 sengoo_http_request_method_len(u64 request_handle)` / `i64 sengoo_http_request_method_copy(u64 request_handle, u8* buffer, usize capacity)`
 - `i64 sengoo_http_request_path_len(u64 request_handle)` / `i64 sengoo_http_request_path_copy(u64 request_handle, u8* buffer, usize capacity)`
 - `i64 sengoo_http_request_query_len(u64 request_handle)` / `i64 sengoo_http_request_query_copy(u64 request_handle, u8* buffer, usize capacity)`
@@ -133,6 +138,18 @@ static routes, required-header middleware, and WS echo routes. Its
 with the deterministic `504` fallback). A runnable package fixture lives at
 `examples/realworld/http-echo-service`.
 
+Inside an async function, `await server.next_request_async(timeout_ms)` returns
+`HttpServerNextRequestOutcome` with the same request and status taxonomy. The
+native `HttpServerNextRequestResult.value` field uses the same one-field
+`HttpServerRequest { handle }` wrapper shape as the source-level outcome. The
+native future registers listener readiness with the cooperative reactor. A
+timeout returns `STATUS_TIMEOUT` without closing the server; dropping or
+canceling a pending future unregisters its listener interest. Accepted clients
+that do not finish a request within the short cooperative I/O slice receive a
+best-effort `400` response or are closed, and no partial request handle is
+published. C-only fallback bundles keep the lifecycle symbols linkable and
+return `STATUS_UNSUPPORTED`.
+
 ## Return Conventions
 
 - Handle-returning APIs: `0` means failure.
@@ -177,7 +194,7 @@ with the deterministic `504` fallback). A runnable package fixture lives at
   - route-level upgrade endpoint via `sengoo_http_server_add_ws_echo_route`
   - validates upgrade headers and returns `426 Upgrade Required` on invalid upgrade request
   - WS session supports text echo + ping/pong + close
-- Dynamic request serving (pull model):
+- Dynamic request serving (pull and async models):
   - `sengoo_http_server_next_request` accepts within the timeout budget; the
     serve loop stays serial (one connection at a time) and plaintext-only
   - middleware rejections, static routes, and ws-echo routes are answered
@@ -197,6 +214,10 @@ with the deterministic `504` fallback). A runnable package fixture lives at
     with `invalid_argument` while keeping the handle answerable
   - `timeout_ms` expiry maps to the `timeout` net error (`STATUS_TIMEOUT` in
     `std::status`)
+  - async listener readiness uses the runtime reactor; pending timeout,
+    cancel, result, and drop paths unregister their interest deterministically
+  - synchronous `next_request` remains source-compatible and shares parsing,
+    routing, middleware, request-handle, and status behavior with the async path
 
 ## Current Constraints
 
@@ -204,11 +225,13 @@ with the deterministic `504` fallback). A runnable package fixture lives at
 - HTTP keeps baseline behavior (status + body retrieval).
 - WebSocket baseline supports text frames for smoke/e2e paths.
 - HTTP server middleware/handler model is MVP-level (no async middleware chain yet).
-- Dynamic serving is synchronous and serial: no TLS server, no streaming
-  bodies, no keep-alive, no callback-style handlers, and no async/await serve
-  integration (a later reactor-backed change owns async serving).
+- Dynamic serving remains serial per `HttpServer`: no TLS server, no streaming
+  bodies, no keep-alive, and no callback-style handlers. This change does not
+  claim general task-cancellation propagation beyond the pending request
+  future's own cancel/drop cleanup.
 
 ## Verification
 
-- Runtime tests: `cargo test -q -p sengoo-runtime net::tests -- --nocapture`
+- Runtime tests: `cargo test -q -p sengoo-runtime net::tests -- --nocapture --test-threads=1`
+- Native async server integration: `cargo test -p sgc stdlib_http_server_async_awaits_and_answers_localhost_request -- --nocapture --test-threads=1`
 - Integrated smoke: `bench/scripts/e2e-smoke.sh` and `bench/scripts/e2e-smoke.ps1`

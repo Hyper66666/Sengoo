@@ -214,6 +214,12 @@ pub(crate) async fn cmd_run(
     let lli_exe = find_lli();
 
     let resolved_engine = resolve_engine(requested_engine, clang_exe.is_some(), lli_exe.is_some())?;
+    if matches!(resolved_engine, RunEngine::Native) {
+        let clang = clang_exe
+            .as_deref()
+            .ok_or_else(|| miette::miette!("clang is required for native execution"))?;
+        ensure_supported_clang_toolchain(clang)?;
+    }
     let lli_extra_objects = if matches!(resolved_engine, RunEngine::Lli) {
         if let (Some(clang), Some(runtime_c)) = (clang_exe.as_deref(), runtime_c.as_deref()) {
             ensure_runtime_objects(clang, runtime_c, opt_level, None)?

@@ -51,8 +51,8 @@ Packages:
   `std::compress` gzip Buffer helpers and `std::json` parse verification.
 - `http-client-status`: HTTP/status example using the public `std::http`
   wrapper and a stable unsupported-scheme path.
-- `http-echo-service`: dynamic HTTP echo service using the pull-based
-  `std::net` server subset (`next_request`, request introspection,
+- `http-echo-service`: dynamic HTTP echo service using the reactor-backed
+  `std::net` server subset (`await next_request_async`, request introspection,
   exactly-once `respond`), with a network-independent smoke test.
 - `package-release-loop`: package release fixture covering dependency aliases,
   two selected local-registry versions of `shared_core`, deterministic publish

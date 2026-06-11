@@ -194,7 +194,7 @@ Typical flow:
 ### 12. Common Issues and Fast Fixes
 
 - `clang/lli not found`:
-  - install LLVM and ensure in PATH.
+  - install LLVM/clang 15+ and ensure it is on PATH; clang 19 matches the core conformance CI.
 - `command 'sengoo.run' not found` in VS Code:
   - confirm extension installation + `Developer: Reload Window`.
 - Incremental path unexpectedly full-rebuild:

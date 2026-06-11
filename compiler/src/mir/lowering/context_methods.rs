@@ -77,7 +77,12 @@ impl<'a> LoweringContext<'a> {
 
         self.insert_function_sig(
             specialized.name.clone(),
-            build_hir_function_sig(&specialized.return_type, param_count, self.struct_defs),
+            build_hir_function_sig_with_enums(
+                &specialized.return_type,
+                param_count,
+                self.struct_defs,
+                &self.options.enum_defs,
+            ),
         );
         self.insert_known_function(specialized.name.clone());
 
@@ -171,7 +176,12 @@ impl<'a> LoweringContext<'a> {
             .function_sig(&specialized_name)
             .map(|sig| sig.ret_type.clone())
             .unwrap_or_else(|| {
-                hir_type_to_mir_with_structs(&specialized.return_type, self.struct_defs)
+                crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+                    &specialized.return_type,
+                    self.struct_defs,
+                    &self.options.enum_defs,
+                    &HashMap::new(),
+                )
             });
 
         Some(CallTargetPlan {

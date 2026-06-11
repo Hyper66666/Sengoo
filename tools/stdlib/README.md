@@ -81,8 +81,8 @@ and specific categories such as `STATUS_INVALID_ARGUMENT()`,
 `STATUS_NOT_FOUND()`, `STATUS_ALREADY_EXISTS()`,
 `STATUS_PERMISSION_DENIED()`, `STATUS_UNSUPPORTED()`, `STATUS_IO()`,
 `STATUS_PARSE()`, `STATUS_TIMEOUT()`, `STATUS_INTERRUPTED()`,
-`STATUS_OVERFLOW()`, and `STATUS_OUT_OF_MEMORY()` use the positive namespace
-specified by OpenSpec. `status_name_copy(code, buffer)` and
+`STATUS_OVERFLOW()`, `STATUS_OUT_OF_MEMORY()`, and `STATUS_CANCELED()` use
+the positive namespace specified by OpenSpec. `status_name_copy(code, buffer)` and
 `status_message_copy(code, buffer)` copy deterministic ASCII diagnostics into a
 managed `Buffer`. `status_from_raw_ffi(code)` maps existing negative FFI raw
 codes, negative `-STATUS_*` runtime returns, and positive status categories

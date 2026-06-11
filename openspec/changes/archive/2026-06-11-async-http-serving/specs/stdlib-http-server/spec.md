@@ -5,7 +5,7 @@
 without blocking the cooperative async runtime thread while waiting for the
 next inbound dynamic HTTP/1.1 request. The public source shape SHALL be
 `await server.next_request_async(timeout_ms)` or an equivalent method returning
-a concrete `Future<Result<HttpServerRequest, i64>>` wrapper.
+a concrete `Future<HttpServerNextRequestOutcome>` wrapper.
 
 The async API SHALL reuse the same request handle, request-introspection,
 response, route/middleware precedence, limits, pending-cap, fallback, and
@@ -16,7 +16,8 @@ status taxonomy as synchronous `HttpServer.next_request(timeout_ms)`.
 - **WHEN** an async Sengoo program binds a plaintext HTTP server and awaits
   `server.next_request_async(5000)`
 - **AND** a localhost client sends `GET /compute`
-- **THEN** the await completes with `Result.ok(HttpServerRequest)`
+- **THEN** the await completes with `HttpServerNextRequestOutcome.is_ok == true`
+- **AND** `HttpServerNextRequestOutcome.value` is a `HttpServerRequest`
 - **AND** user code can inspect the request and call `respond(200, body)`
 - **AND** the client receives the response without a synchronous accept call
   blocking unrelated cooperative async work

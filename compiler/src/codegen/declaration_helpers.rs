@@ -384,6 +384,7 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send_i64")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv_i64")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_mutex_lock_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
         {
             return;
         }
@@ -503,6 +504,52 @@ impl Codegen {
                 ),
             ],
         );
+        Self::maybe_declare_optional_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_http_server_next_request_async",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_http_server_next_request_async__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_http_server_next_request_async__result",
+                        ),
+                        "sengoo_http_server_next_request_async__result",
+                        "%HttpServerNextRequestOutcome",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_http_server_next_request_async__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_http_server_next_request_async__drop(i64)\n",
+                ),
+            ],
+        );
+    }
+
+    fn maybe_declare_optional_async_runtime_lifecycle(
+        declarations: &mut String,
+        mir_fns: &[MirFunction],
+        origin: &str,
+        lifecycle_decls: &[(&str, &str)],
+    ) {
+        if !Self::mir_uses_async_origin(mir_fns, origin) {
+            return;
+        }
+        for (_, decl) in lifecycle_decls {
+            if !declarations.contains(decl) {
+                declarations.push_str(decl);
+            }
+        }
     }
 
     fn maybe_declare_async_runtime_lifecycle(
@@ -531,6 +578,7 @@ impl Codegen {
                     | "sengoo_async_channel_send_i64__result"
                     | "sengoo_async_channel_recv_i64__result"
                     | "sengoo_async_mutex_lock_i64__result"
+                    | "sengoo_http_server_next_request_async__result"
             );
         }
 
@@ -541,6 +589,7 @@ impl Codegen {
             "sengoo_async_timeout_cancel_i64__result"
                 | "sengoo_async_channel_recv_i64__result"
                 | "sengoo_async_mutex_lock_i64__result"
+                | "sengoo_http_server_next_request_async__result"
         )
     }
 
@@ -559,6 +608,9 @@ impl Codegen {
                 "sengoo_async_mutex_lock_i64__result" => {
                     "declare { i1, i64, i64 } @sengoo_async_mutex_lock_i64__result(i64)\n"
                 }
+                "sengoo_http_server_next_request_async__result" => {
+                    "declare %HttpServerNextRequestOutcome @sengoo_http_server_next_request_async__result(i64)\n"
+                }
                 _ => unreachable!("unsupported async result declaration"),
             };
         }
@@ -575,6 +627,12 @@ impl Codegen {
             }
             ("sengoo_async_mutex_lock_i64__result", "{ i1, i64, i64 }") => {
                 "declare void @sengoo_async_mutex_lock_i64__result({ i1, i64, i64 }* sret({ i1, i64, i64 }) align 8, i64)\n"
+            }
+            (
+                "sengoo_http_server_next_request_async__result",
+                "%HttpServerNextRequestOutcome",
+            ) => {
+                "declare void @sengoo_http_server_next_request_async__result(%HttpServerNextRequestOutcome* sret(%HttpServerNextRequestOutcome) align 8, i64)\n"
             }
             _ => unreachable!("unsupported async result declaration"),
         }
@@ -668,6 +726,14 @@ mod tests {
         assert!(Codegen::async_result_uses_sret(
             true,
             "sengoo_async_channel_send_i64__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            false,
+            "sengoo_http_server_next_request_async__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            true,
+            "sengoo_http_server_next_request_async__result"
         ));
     }
 }

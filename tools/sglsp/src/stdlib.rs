@@ -535,6 +535,7 @@ import std::status;
             &[
                 "HttpServer",
                 "HttpServerRequest",
+                "HttpServerNextRequestOutcome",
                 "http_server_bind",
                 "Buffer",
                 "Result",
@@ -550,6 +551,7 @@ import std::status;
         for expected in [
             "def http_server_bind(host: &str, port: i64) -> Result<HttpServer, i64>",
             "def next_request(self, timeout_ms: i64) -> Result<HttpServerRequest, i64> [impl HttpServer]",
+            "def next_request_async(self, timeout_ms: i64) -> Future<HttpServerNextRequestOutcome> [impl HttpServer]",
             "def method_string(self) -> Result<String, i64> [impl HttpServerRequest]",
             "def path_string(self) -> Result<String, i64> [impl HttpServerRequest]",
             "def query_string(self) -> Result<String, i64> [impl HttpServerRequest]",

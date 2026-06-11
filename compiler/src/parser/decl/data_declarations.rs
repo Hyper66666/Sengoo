@@ -159,6 +159,8 @@ impl<'source> Parser<'source> {
                 (Vec::new(), None)
             };
 
+            self.consume(TokenKind::Comma);
+
             variants.push(EnumVariant {
                 name,
                 fields,

@@ -91,6 +91,15 @@ while the pinned developer toolchain rejects the IR.
 
 ## 5. Toolchain Contract
 
+Chosen implementation: the native backend targets the opaque-pointer LLVM
+contract. `sgc build` and native `sgc run` require `clang`/LLVM 15 or newer; core
+conformance CI pins clang 19, and the developer blueprint points to the same
+major for reproducible native behavior. `sgc build --emit-llvm` remains
+available below the native contract because it does not invoke native object
+generation. The implementation fails fast with an actionable diagnostic when
+the detected native `clang` major is below 15 instead of letting users see only a
+raw LLVM verifier error.
+
 - The native backend targets a pinned LLVM/`clang` major version (>= the first
   version whose behavior the gate validates). CI and the developer blueprint use
   the same major version.

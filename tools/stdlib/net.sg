@@ -73,6 +73,16 @@ struct HttpServerRequest {
     handle: i64,
 }
 
+struct HttpServerNextRequestOutcome {
+    is_ok: bool,
+    value: HttpServerRequest,
+    error: i64,
+}
+
+extern "C" {
+    fn sengoo_http_server_next_request_async__start(handle: i64, timeout_ms: i64) -> i64;
+}
+
 struct WsClient {
     handle: i64,
 }
@@ -361,6 +371,10 @@ impl HttpServer {
         } else {
             Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
         }
+    }
+
+    def next_request_async(self, timeout_ms: i64) -> Future<HttpServerNextRequestOutcome> {
+        sengoo_http_server_next_request_async__start(self.handle, timeout_ms)
     }
 
     def close(self) -> bool {

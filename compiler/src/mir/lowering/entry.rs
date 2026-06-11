@@ -54,10 +54,11 @@ pub fn lower_hir_with_options(
                 known_functions.insert(fn_item.name.clone());
                 known_function_sigs.insert(
                     fn_item.name.clone(),
-                    build_hir_function_sig(
+                    build_hir_function_sig_with_enums(
                         &fn_item.return_type,
                         fn_item.params.len(),
                         &struct_defs,
+                        &options.enum_defs,
                     ),
                 );
             }
@@ -67,10 +68,11 @@ pub fn lower_hir_with_options(
                         known_functions.insert(extern_fn.name.clone());
                         known_function_sigs.insert(
                             extern_fn.name.clone(),
-                            build_hir_function_sig(
+                            build_hir_function_sig_with_enums(
                                 &extern_fn.return_type,
                                 extern_fn.params.len(),
                                 &struct_defs,
+                                &options.enum_defs,
                             ),
                         );
                     }
@@ -90,10 +92,11 @@ pub fn lower_hir_with_options(
                         for registration in collected.eager_registrations() {
                             known_function_sigs.insert(
                                 registration.name.clone(),
-                                build_hir_function_sig(
+                                build_hir_function_sig_with_enums(
                                     &registration.return_type,
                                     registration.explicit_param_count,
                                     &struct_defs,
+                                    &options.enum_defs,
                                 ),
                             );
                             known_functions.insert(registration.name);
@@ -113,10 +116,11 @@ pub fn lower_hir_with_options(
                             known_functions.insert(method.name.clone());
                             known_function_sigs.insert(
                                 method.name.clone(),
-                                build_hir_function_sig(
+                                build_hir_function_sig_with_enums(
                                     &method.return_type,
                                     explicit_hir_method_param_count(method),
                                     &struct_defs,
+                                    &options.enum_defs,
                                 ),
                             );
                         }

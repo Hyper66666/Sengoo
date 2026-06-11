@@ -118,9 +118,10 @@ pub(crate) use native_toolchain::collect_package_native_c_sources;
 pub(crate) use native_toolchain::{
     append_native_runtime_inputs, append_package_native_inputs, artifact_exists,
     build_artifact_exists, compile_ir_to_object, compile_native_binary,
-    default_build_output_path_for_case, ensure_runtime_objects, link_native_binary_from_objects,
-    linker_mode_from_env, optional_runtime_bundle_fingerprint, propagate_run_exit_code,
-    recover_native_output_from_cached_artifacts, run_native_binary_with_args, run_with_lli_args,
+    default_build_output_path_for_case, ensure_runtime_objects, ensure_supported_clang_toolchain,
+    link_native_binary_from_objects, linker_mode_from_env, optional_runtime_bundle_fingerprint,
+    propagate_run_exit_code, recover_native_output_from_cached_artifacts,
+    run_native_binary_with_args, run_with_lli_args,
 };
 #[cfg(test)]
 pub(crate) use native_toolchain::{derive_cached_native_recovery_plan, parse_linker_mode};

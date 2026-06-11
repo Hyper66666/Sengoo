@@ -654,17 +654,19 @@ def main() -> i64 {
     let unknown = STATUS_UNKNOWN();
     let invalid = STATUS_INVALID_ARGUMENT();
     let buffer_error = STATUS_BUFFER_TOO_SMALL();
+    let canceled = STATUS_CANCELED();
     let mapped = status_from_raw_ffi(-2001);
     let name_len = status_name_copy(buffer_error, buffer).unwrap_or(0);
     let message_len = status_message_copy(invalid, buffer).unwrap_or(0);
     buffer.free();
-    unknown + mapped + name_len + message_len
+    unknown + canceled + mapped + name_len + message_len
 }
 "#,
     );
 
     assert!(ir.contains("STATUS_UNKNOWN"));
     assert!(ir.contains("STATUS_INVALID_ARGUMENT"));
+    assert!(ir.contains("STATUS_CANCELED"));
     assert!(ir.contains("sengoo_status_name_copy"));
     assert!(ir.contains("sengoo_status_message_copy"));
     assert!(ir.contains("status_from_raw_ffi"));
@@ -780,6 +782,7 @@ fn stdlib_reflection_wrappers_accept_strings_without_raw_pointers() {
             "option.sg",
             "result.sg",
             "ffi.sg",
+            "string.sg",
             "status.sg",
             "db.sg",
             "lua54.sg",
@@ -857,7 +860,14 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_wrappers_accept_managed_buffers() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "status.sg",
+            "net.sg",
+        ],
         r#"
 def main() -> i64 {
     let buffer = ffi_buffer_new(256).unwrap_or(Buffer { handle: 0 });
@@ -891,7 +901,14 @@ def main() -> i64 {
 #[test]
 fn stdlib_net_http_server_wrappers_accept_strings() {
     let ir = compile_with_stdlib_modules(
-        &["option.sg", "result.sg", "ffi.sg", "status.sg", "net.sg"],
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "status.sg",
+            "net.sg",
+        ],
         r#"
 def main() -> i64 {
     let server = http_server_bind("127.0.0.1", 0).unwrap_or(HttpServer { handle: 0 });

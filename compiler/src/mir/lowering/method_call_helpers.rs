@@ -125,10 +125,15 @@ pub(super) fn emit_resolved_method_call(
     arg_locals: &[Local],
     resolved_func_name: &str,
 ) -> Local {
-    let ret_type = ctx
+    let mut ret_type = ctx
         .function_sig(resolved_func_name)
         .map(|sig| sig.ret_type.clone())
         .unwrap_or(MIR_I64);
+    let mut future_origin = None;
+    if resolved_func_name == "HttpServer_next_request_async" {
+        ret_type = MIRType::Future(Box::new(http_server_next_request_outcome_mir_type()));
+        future_origin = Some("sengoo_http_server_next_request_async".to_string());
+    }
     let struct_type_name = match &ret_type {
         MIRType::Struct { name, .. } => Some(name.clone()),
         _ => None,
@@ -145,6 +150,9 @@ pub(super) fn emit_resolved_method_call(
         func: resolved_func_name.to_string(),
         args: call_args,
     });
+    if let Some(origin) = future_origin {
+        ctx.future_origins.insert(result_local, origin);
+    }
 
     result_local
 }

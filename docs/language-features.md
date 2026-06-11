@@ -4,7 +4,7 @@ Sengoo is a compiled language focused on practical engineering workflows:
 
 - Hybrid Python interoperability for gradual migration
 - Fast compile feedback with incremental pipeline reuse
-- Textual LLVM IR compiled and linked by `clang`, plus a Cranelift fast path
+- Textual LLVM IR compiled and linked by `clang` 15+ (core CI pins clang 19), plus a Cranelift fast path
 - Optional non-invasive reflection with sidecar metadata
 
 ## 1. Current Capability Snapshot
@@ -13,7 +13,7 @@ Sengoo is a compiled language focused on practical engineering workflows:
 |---|---|---|
 | Core syntax (`def`, `if`, `for`, `while`, `struct`, `impl`) | Available | Use `examples/*.sg` as validated learning surface. |
 | Immutable-by-default locals (`let mut` for reassignment) | Available | `immutable-assignment` is shared by `sgc` JSON and `sglsp`. |
-| Enum variants as values | Available | Fieldless and payload constructors lower to the representation consumed by `match`. |
+| Enum variants as values | Available | Fieldless and payload constructors, enum-returning functions, and multi-payload `match` arms are covered by the core CLI conformance gate. |
 | Static type-check pipeline | Available | Entry command: `sgc check <file.sg>`. |
 | API documentation generation | Available | `sgc doc <file.sg> --output target/doc`. |
 | Incremental compile pipeline | Available | Fingerprint + workset-based invalidation/rebuild strategy. |
@@ -91,7 +91,28 @@ sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 sgc run examples/09_method_call.sg -O 2 --contract-checks on
 ```
 
-## 2.5 C FFI (`extern "C"`)
+## 2.5 Enum payload matches
+
+Payload-carrying enum arms can appear in any match position, and one match can
+bind multiple payload-carrying variants:
+
+```sg
+enum Event { Number(i64), Pair(i64, bool), Empty }
+
+def main() -> i64 {
+    let event = Event::Pair(42, true);
+    match event {
+        Event::Number(value) => value,
+        Event::Pair(number, enabled) => if enabled { number } else { 0 },
+        Event::Empty => 0,
+    }
+}
+```
+
+The native conformance gate also covers functions that return enum values and
+then match on the returned aggregate.
+
+## 2.6 C FFI (`extern "C"`)
 
 Sengoo supports a focused FFI MVP surface:
 
@@ -118,7 +139,7 @@ For end-to-end reproducible commands (Sengoo -> C and C -> Sengoo), see:
 
 - `examples/ffi/README.md`
 
-## 2.6 Async execution
+## 2.7 Async execution
 
 `sgc run` now has a native async path when the entrypoint is `async def main()`.
 
@@ -202,6 +223,14 @@ Recommended local loop:
 3. `sgc run <file.sg> -O 1`
 4. For release: `sgc build <file.sg> -O 2`
 5. If reflection is needed: add `--reflect` and optional filters
+
+## 4.1 Native Toolchain Contract
+
+The native LLVM backend requires `clang`/LLVM 15 or newer because generated IR
+uses the opaque-pointer contract (`ptr`-compatible verifier behavior). The core
+conformance CI pins clang 19 and runs the real `sgc` binary against the pinned
+examples. When `sgc build` or native `sgc run` detects an older clang, it reports
+an actionable toolchain error before surfacing raw LLVM verifier diagnostics.
 
 ## 5. Best-Fit Scenarios
 

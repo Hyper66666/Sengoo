@@ -7,6 +7,7 @@ fn runtime_async_wrapper_origin(func_name: &str) -> Option<&'static str> {
         "channel_send_i64" => Some("sengoo_async_channel_send_i64"),
         "channel_recv_i64" => Some("sengoo_async_channel_recv_i64"),
         "mutex_lock_async" => Some("sengoo_async_mutex_lock_i64"),
+        "HttpServer_next_request_async" => Some("sengoo_http_server_next_request_async"),
         _ => None,
     }
 }
@@ -37,6 +38,9 @@ fn runtime_async_wrapper_future_ty(func_name: &str) -> Option<MIRType> {
                 ("error".to_string(), MIR_I64),
             ],
         }))),
+        "HttpServer_next_request_async" => Some(MIRType::Future(Box::new(
+            http_server_next_request_outcome_mir_type(),
+        ))),
         _ => None,
     }
 }
