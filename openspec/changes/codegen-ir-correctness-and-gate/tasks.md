@@ -64,13 +64,13 @@
 
 ## 7. Verification
 
-- [ ] 7.1 The conformance gate runs the real `sgc` CLI for every pinned core form
+- [x] 7.1 The conformance gate runs the real `sgc` CLI for every pinned core form
   on the pinned toolchain in CI and is green.
 - [x] 7.2 `sgc run` succeeds for `examples/04_array.sg`, `examples/05_loop.sg`,
   `examples/conformance/03_array_write.sg`, `examples/06_lambda.sg`,
   `examples/conformance/04_closure_multi_capture.sg`, the new enum-returning
   example, and the new multi-payload match example, with documented results.
-- [ ] 7.3 `cargo test` is green on Linux on the pinned toolchain.
+- [x] 7.3 `cargo test` is green on Linux on the pinned toolchain.
 - [x] 7.4 Parser tests prove payload match arms parse in first/middle/last
   positions.
 
@@ -85,5 +85,5 @@
   contract; it cannot pass while `sgc run` of a pinned form fails.
 - [x] CI and the developer blueprint share the same pinned `clang`/LLVM major
   version; `sgc` reports a clear error below the contract.
-- [ ] `cargo test` is green on Linux; docs and `PROGRESS.md` match CLI-verified
+- [x] `cargo test` is green on Linux; docs and `PROGRESS.md` match CLI-verified
   behavior.

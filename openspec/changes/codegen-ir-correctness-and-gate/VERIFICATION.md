@@ -18,4 +18,6 @@ Local host: Windows, `clang` 19.1.7.
 
 ## Pending External Evidence
 
-- Linux CI on the pinned core-conformance toolchain after push.
+- None for this change. GitHub Actions run `27366285231` passed
+  `core-conformance / core-language` on Ubuntu with pinned clang 19, including
+  OpenSpec validation, the real `sgc` CLI conformance gate, and workspace tests.
