@@ -24,7 +24,7 @@
   `-g` policy (D1), and v1 surface table (D2).
 - [ ] 1.2 DI compile units, subprograms, and `!dbg` statement locations
   emitted under `-g` in the textual IR path.
-- [ ] 1.3 Debug artifacts get distinct cache fingerprints; `-g` and non-`-g`
+- [x] 1.3 Debug artifacts get distinct cache fingerprints; `-g` and non-`-g`
   outputs never alias (`tools/sgc/src/cache.rs` tests).
 - [ ] 1.4 Breakpoint + stepping transcripts validated on Windows (CodeView)
   and Linux (DWARF) and committed with `docs/debugging-native.md` upgrade.
@@ -69,9 +69,9 @@
 
 ## 5. Integration and documentation
 
-- [ ] 5.1 Refresh `examples/realworld/SUPPORT_MATRIX.md` for all moved rows
+- [x] 5.1 Refresh `examples/realworld/SUPPORT_MATRIX.md` for all moved rows
   and the two new rows (debugging, distribution).
-- [ ] 5.2 Update `README.md` / `README.zh-CN.md` with adoption-wave summary
+- [x] 5.2 Update `README.md` / `README.zh-CN.md` with adoption-wave summary
   (debugging, cancellation, serving, install).
 - [ ] 5.3 Re-run the perf gate owned by `frontend-1000k-perf-gate` and record
   that `-g` emission did not regress default-mode numbers.
@@ -80,20 +80,20 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `cargo fmt --check`
-- [ ] 6.2 `cargo test -p sengoo-compiler --lib`
-- [ ] 6.3 `cargo test -p sengoo-runtime --lib --features native-bridge`
-- [ ] 6.4 `cargo test -p sgc`
-- [ ] 6.5 `cargo test -p sgpm`
-- [ ] 6.6 `cargo test -p sglsp`
-- [ ] 6.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime
+- [x] 6.1 `cargo fmt --check`
+- [x] 6.2 `cargo test -p sengoo-compiler --lib`
+- [x] 6.3 `cargo test -p sengoo-runtime --lib --features native-bridge`
+- [x] 6.4 `cargo test -p sgc`
+- [x] 6.5 `cargo test -p sgpm`
+- [x] 6.6 `cargo test -p sglsp`
+- [x] 6.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime
   -p sgfmt -p sglsp --all-targets -- -D warnings`
 - [ ] 6.8 `realworld-e2e` job (locked loop, real binaries)
 - [ ] 6.9 Debugger transcript checklist (Windows + Linux) linked from
   Pillar A child
-- [ ] 6.10 Release packaging workflow dry-run produces installable archives
-- [ ] 6.11 `openspec validate mainstream-adoption-gap-closure --strict`
-- [ ] 6.12 `openspec validate --all --strict`
+- [x] 6.10 Release packaging workflow dry-run produces installable archives
+- [x] 6.11 `openspec validate mainstream-adoption-gap-closure --strict`
+- [x] 6.12 `openspec validate --all --strict`
 
 ## Done Definition
 
@@ -111,8 +111,8 @@
 
 ## Archive Gate
 
-- [ ] `openspec validate mainstream-adoption-gap-closure --strict` passes.
-- [ ] `openspec validate --all --strict` passes.
+- [x] `openspec validate mainstream-adoption-gap-closure --strict` passes.
+- [x] `openspec validate --all --strict` passes.
 - [ ] All four required child changes are archived before the umbrella.
 - [x] The Phase 1 prerequisite (`codegen-ir-correctness-and-gate` archived)
   was satisfied before debug-info codegen merges.

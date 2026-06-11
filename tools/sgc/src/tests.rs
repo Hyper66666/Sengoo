@@ -8,17 +8,17 @@ use super::{
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
     collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
-    compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
-    derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
-    derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_objects, expand_stdlib_imports_for_source, find_clang,
-    find_runtime_c, format_edit_impact_lines, generic_fingerprints_for_module,
-    generic_instance_hit_ratio, handle_daemon_client, link_native_binary_from_objects,
-    maybe_emit_reflection_sidecar, metadata_matches, module_dependency_levels,
-    module_fingerprints_for_source, module_invalidation_stats, native_library_link_args,
-    parse_frontend_jobs_arg, parse_linker_mode, reflection_options_from_cli,
-    reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
-    resolve_engine, runtime_bundle_fingerprint, runtime_source_bundle,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, compile_source_with_phase_timings,
+    daemon_request_build, derive_build_workset_plan, derive_cached_native_recovery_plan,
+    derive_codegen_workset_manifest, derive_generic_instance_plan, derive_run_workset_plan,
+    dispatch_build_via_daemon, edit_class_label, ensure_runtime_objects,
+    expand_stdlib_imports_for_source, find_clang, find_runtime_c, format_edit_impact_lines,
+    generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
+    link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
+    module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
+    native_library_link_args, parse_frontend_jobs_arg, parse_linker_mode,
+    reflection_options_from_cli, reflection_sidecar_path_for_artifact, resolve_bench_suite_path,
+    resolve_daemon_addr, resolve_engine, runtime_bundle_fingerprint, runtime_source_bundle,
     select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
     validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
     BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode, DaemonDispatchOutcome,
@@ -35,7 +35,8 @@ use crate::cli::Cli;
 use crate::cross_compile::NativeBuildTarget;
 use clap::Parser as _;
 use sengoo_compiler::{
-    compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, JITCodegen,
+    compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, DebugInfoConfig,
+    JITCodegen,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
@@ -63,6 +64,7 @@ fn metadata_for_test() -> RunCacheMetadata {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -195,6 +197,7 @@ fn cache_miss_when_opt_level_changes() {
         vec![fp("tests/mod_a.sg", 11, 11)],
         2,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
@@ -209,6 +212,7 @@ fn cache_miss_when_engine_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Lli,
@@ -225,11 +229,31 @@ fn cache_hit_when_key_matches() {
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn cache_miss_when_debug_info_changes() {
+    let metadata = metadata_for_test();
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        true,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
+    );
+    assert!(!metadata_matches(&metadata, &key));
+    assert!(cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason.contains("debug info changed")));
 }
 
 #[test]
@@ -240,6 +264,7 @@ fn cache_miss_when_runtime_source_fingerprint_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -260,6 +285,7 @@ fn cache_miss_when_runtime_source_fingerprint_is_missing() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -301,6 +327,7 @@ fn cache_miss_when_module_dependency_changes() {
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
@@ -315,6 +342,7 @@ fn cache_mismatch_reasons_include_module_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -637,7 +665,7 @@ def main() -> i64 {
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("runtime-bundle-link-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false).unwrap();
     let inc_exe = temp_artifact(
         "runtime-bundle-link-objects",
         if cfg!(windows) { "exe" } else { "" },
@@ -684,7 +712,7 @@ def main() -> i64 {
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("runtime-tcp-readiness-fallback-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false).unwrap();
 
     let exe_path = temp_artifact(
         "runtime-tcp-readiness-fallback",
@@ -985,6 +1013,13 @@ fn contract_checks_flag_parses_for_build_and_run() {
     assert!(
         Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--contract-checks", "off",]).is_ok()
     );
+}
+
+#[test]
+fn debug_info_flag_parses_for_build_and_run() {
+    assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--debug-info"]).is_ok());
+    assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--debug-info"]).is_ok());
+    assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "-g"]).is_ok());
 }
 
 #[test]
@@ -1574,6 +1609,7 @@ fn daemon_build_request_uses_protocol_and_version() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     assert_eq!(request.protocol_version, DAEMON_PROTOCOL_VERSION);
     assert_eq!(request.client_version, env!("CARGO_PKG_VERSION"));
@@ -1614,6 +1650,7 @@ async fn daemon_happy_path_handles_build_request() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     let response = send_daemon_request(&addr.to_string(), &request)
         .await
@@ -1658,6 +1695,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         super::ReflectionCliOptions::default(),
         None,
         None,
+        false,
     )
     .await
     .unwrap();
@@ -1685,6 +1723,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     let response = send_daemon_request(&addr.to_string(), &request)
         .await
@@ -1719,6 +1758,7 @@ async fn daemon_client_fallback_when_server_unavailable() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     )
     .await
     .unwrap();
@@ -1760,6 +1800,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         1,
         false,
         false,
+        false,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
         "tests/build/a.exe".to_string(),
     );
@@ -1771,6 +1812,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -1791,6 +1833,7 @@ fn build_cache_miss_when_runtime_source_fingerprint_changes() {
         1,
         false,
         false,
+        false,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
         "tests/build/a.exe".to_string(),
     );
@@ -1802,6 +1845,7 @@ fn build_cache_miss_when_runtime_source_fingerprint_changes() {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(11),
@@ -1843,6 +1887,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -1860,6 +1905,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         false,
         &graph,
     )
@@ -1893,6 +1939,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Native,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -1910,6 +1957,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         &object_path,
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         false,
         RunEngine::Native,
         RunEngine::Native,
@@ -4158,7 +4206,7 @@ fn incremental_link_output_matches_full_link_output() {
         None,
     )
     .unwrap();
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None, false).unwrap();
 
     let mut object_paths = vec![obj_path.clone()];
     if let Some(runtime_c) = runtime_c.as_deref() {
@@ -4313,7 +4361,7 @@ fn compile_and_run_example_with_args(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("examples-smoke-{tag}-main"), obj_ext);
-    if let Err(error) = compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None) {
+    if let Err(error) = compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false) {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
         if strict_native {
@@ -4352,6 +4400,7 @@ fn compile_and_run_example_with_args(
             &extra_obj,
             1,
             None,
+            false,
         ) {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
@@ -5038,7 +5087,7 @@ def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("stdlib-http-server-pull-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
     let exe_path = temp_artifact(
         "stdlib-http-server-pull",
         if cfg!(windows) { "exe" } else { "" },
@@ -5176,7 +5225,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("stdlib-http-server-async-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
     let exe_path = temp_artifact(
         "stdlib-http-server-async",
         if cfg!(windows) { "exe" } else { "" },
@@ -6625,13 +6674,14 @@ fn examples_smoke_ffi_c_calls_sengoo_export() {
         "examples-smoke-ffi-export",
         if cfg!(windows) { "exe" } else { "" },
     );
-    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1, None).is_err()
+    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1, None, false).is_err()
         || compile_ir_to_object(
             &clang,
             &workspace_root_for_tests().join("examples/ffi/c_calls_sengoo.c"),
             &c_obj,
             1,
             None,
+            false,
         )
         .is_err()
         || link_native_binary_from_objects(
@@ -6678,7 +6728,7 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         &format!("stdlib-runtime-{}", tag),
         if cfg!(windows) { "obj" } else { "o" },
     );
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None, false).unwrap();
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -6728,7 +6778,7 @@ fn compile_and_run_stdlib_import_program_with_stdin(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-runtime-{tag}"),
@@ -6779,7 +6829,7 @@ fn compile_and_run_stdlib_import_program_with_native_runtime(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-native-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-native-runtime-{tag}"),
@@ -6853,6 +6903,7 @@ def main() -> i64 {
         super::ReflectionCliOptions::default(),
         None,
         None,
+        false,
     )
     .await;
 
@@ -7518,6 +7569,38 @@ fn compile_phase_timings_include_expected_keys() {
     assert!(phases.contains_key("hir_lower"));
     assert!(phases.contains_key("mir_lower"));
     assert!(phases.contains_key("mir_opt"));
+}
+
+#[test]
+fn debug_info_metadata_is_emitted_to_llvm_ir() {
+    let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
+    let llvm_path = temp_artifact("debug-info", "ll");
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        1,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/main.sg",
+            source.to_string(),
+        )),
+    )
+    .unwrap();
+
+    let llvm_ir = fs::read_to_string(&llvm_path).unwrap();
+    assert!(llvm_ir.contains("!llvm.dbg.cu"), "{llvm_ir}");
+    assert!(llvm_ir.contains("!DICompileUnit"), "{llvm_ir}");
+    assert!(
+        llvm_ir.contains("!DISubprogram(name: \"main\""),
+        "{llvm_ir}"
+    );
+    assert!(llvm_ir.contains("define i64 @main() !dbg !"), "{llvm_ir}");
+    assert!(llvm_ir.contains("ret i64"), "{llvm_ir}");
+    assert!(llvm_ir.contains(", !dbg !"), "{llvm_ir}");
+
+    let _ = fs::remove_file(llvm_path);
 }
 
 #[test]
@@ -9163,6 +9246,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -9187,6 +9271,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         false,
         2,
         false,
+        false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
     );
@@ -9203,6 +9288,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -9226,6 +9312,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         "tests/main.sg",
         false,
         2,
+        false,
         false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
@@ -9719,6 +9806,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -9743,6 +9831,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         "tests/main.sg",
         2,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c"),
@@ -9759,6 +9848,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -9782,6 +9872,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         Some(&impact),
         "tests/main.sg",
         2,
+        false,
         false,
         RunEngine::Native,
         RunEngine::Native,

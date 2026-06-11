@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(name = "sgfmt")]
+#[command(version = crate::SGFMT_VERSION)]
 #[command(about = "Sengoo source formatter", long_about = None)]
 pub(super) struct Args {
     #[arg(value_name = "FILE")]

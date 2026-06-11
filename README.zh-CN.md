@@ -11,6 +11,27 @@ Sengoo 是一门自研编译型语言，重点放在工程实践结果上：
 
 Sengoo 仍处于积极开发阶段，但 CLI 工作流已经可以用于真实本地项目。
 
+## 可安装工具链归档
+
+Sengoo 现在可以打包成自包含工具链归档，包含 `sgc`、`sgpm`、
+`sgfmt`、`sglsp`、标准库和 C runtime bridge。安装后的 `sgc` 可以从
+归档内的 `share/sengoo/` 解析 `std::*`，不需要源码 checkout。
+
+本地 dry-run 打包：
+
+```powershell
+cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+$archive = Get-Content target/dist/latest-archive.txt
+.\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
+```
+
+原生 debug-info 构建使用 `-g` / `--debug-info`：
+
+```powershell
+sgc build path/to/main.sg -O 0 --debug-info
+```
+
 ## AI 交接包（给其他 LLM）
 
 如果要让另一个模型快速接手，优先给它这些内容：

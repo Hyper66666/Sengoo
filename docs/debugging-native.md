@@ -7,14 +7,16 @@ Internal quickstart for debugging programs built with `sgc build` or `sgc run --
 Use a low optimization level so breakpoints map cleanly to source:
 
 ```powershell
-sgc build path/to/main.sg -O 0
+sgc build path/to/main.sg -O 0 --debug-info
 ```
 
 The native object and executable land under `build/` next to the source file (for example `build/main.exe` on Windows).
+Without `--debug-info` / `-g`, Sengoo keeps the default IR free of debug
+metadata and uses a separate artifact-cache dimension for debug builds.
 
 ## Windows (Visual Studio / WinDbg)
 
-1. Build with `-O 0` as above.
+1. Build with `-O 0 --debug-info` as above.
 2. Open the generated executable in Visual Studio (**Debug → Open Debug → File**) or launch WinDbg.
 3. Set breakpoints on exported runtime helpers (for example `sengoo_assert_failure_v1`) when investigating assertion transport.
 4. Pass program arguments through `sgc run` to reproduce CLI behavior, or run the executable directly from `build/`.
@@ -22,7 +24,7 @@ The native object and executable land under `build/` next to the source file (fo
 ## Linux / macOS (lldb)
 
 ```bash
-sgc build examples/01_hello.sg -O 0
+sgc build examples/01_hello.sg -O 0 --debug-info
 lldb build/01_hello
 (lldb) run
 ```

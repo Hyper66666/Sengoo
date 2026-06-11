@@ -80,6 +80,7 @@ pub(crate) fn can_use_incremental_link_with_metadata(
     runtime_c: Option<&str>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     graph_v2: &BuildGraphV2,
 ) -> std::result::Result<(), String> {
     if previous.cache_schema_version != BUILD_GRAPH_SCHEMA_VERSION {
@@ -93,6 +94,9 @@ pub(crate) fn can_use_incremental_link_with_metadata(
     }
     if previous.contract_checks != contract_checks {
         return Err("contract runtime checks changed".to_string());
+    }
+    if previous.debug_info != debug_info {
+        return Err("debug info changed".to_string());
     }
     if previous.output_path != output_path {
         return Err("output path changed".to_string());
@@ -126,6 +130,7 @@ pub(crate) fn can_use_incremental_link_with_run_metadata(
     runtime_c: Option<&str>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     graph_v2: &BuildGraphV2,
@@ -135,6 +140,9 @@ pub(crate) fn can_use_incremental_link_with_run_metadata(
     }
     if previous.contract_checks != contract_checks {
         return Err("contract runtime checks changed".to_string());
+    }
+    if previous.debug_info != debug_info {
+        return Err("debug info changed".to_string());
     }
     if previous.requested_engine != requested_engine || previous.resolved_engine != resolved_engine
     {
@@ -195,11 +203,13 @@ pub(crate) fn resolve_engine(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn cache_key(
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: RuntimeSourceIdentity,
@@ -209,6 +219,7 @@ pub(crate) fn cache_key(
         module_fingerprints,
         opt_level,
         contract_checks,
+        debug_info,
         requested_engine,
         resolved_engine,
         runtime_c: runtime_c.path,
@@ -216,11 +227,13 @@ pub(crate) fn cache_key(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_cache_key(
     source_hash: u64,
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     emit_llvm: bool,
     runtime_c: RuntimeSourceIdentity,
     output_path: String,
@@ -230,6 +243,7 @@ pub(crate) fn build_cache_key(
         module_fingerprints,
         opt_level,
         contract_checks,
+        debug_info,
         emit_llvm,
         runtime_c: runtime_c.path,
         runtime_c_fingerprint: runtime_c.fingerprint,
@@ -242,6 +256,7 @@ pub(crate) fn metadata_matches(metadata: &RunCacheMetadata, key: &RunCacheKey) -
         && metadata.module_fingerprints == key.module_fingerprints
         && metadata.opt_level == key.opt_level
         && metadata.contract_checks == key.contract_checks
+        && metadata.debug_info == key.debug_info
         && metadata.requested_engine == key.requested_engine
         && metadata.resolved_engine == key.resolved_engine
         && metadata.runtime_c == key.runtime_c
@@ -254,6 +269,7 @@ pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildC
         && metadata.module_fingerprints == key.module_fingerprints
         && metadata.opt_level == key.opt_level
         && metadata.contract_checks == key.contract_checks
+        && metadata.debug_info == key.debug_info
         && metadata.emit_llvm == key.emit_llvm
         && metadata.runtime_c == key.runtime_c
         && metadata.runtime_c_fingerprint == key.runtime_c_fingerprint
@@ -303,10 +319,10 @@ pub(crate) fn build_cache_mismatch_reasons(
             metadata.contract_checks, key.contract_checks
         ));
     }
-    if metadata.contract_checks != key.contract_checks {
+    if metadata.debug_info != key.debug_info {
         reasons.push(format!(
-            "contract runtime checks changed ({} -> {})",
-            metadata.contract_checks, key.contract_checks
+            "debug info changed ({} -> {})",
+            metadata.debug_info, key.debug_info
         ));
     }
     if metadata.emit_llvm != key.emit_llvm {
@@ -339,6 +355,7 @@ pub(crate) fn derive_build_workset_plan(
     emit_llvm: bool,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     output_path: &str,
     runtime_c: Option<&str>,
 ) -> BuildWorksetPlan {
@@ -355,6 +372,9 @@ pub(crate) fn derive_build_workset_plan(
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.contract_checks != contract_checks {
+        return BuildWorksetPlan::FullRebuild;
+    }
+    if previous.debug_info != debug_info {
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.output_path != output_path {
@@ -374,6 +394,7 @@ pub(crate) fn derive_run_workset_plan(
     root_module: &str,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<&str>,
@@ -385,6 +406,9 @@ pub(crate) fn derive_run_workset_plan(
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.contract_checks != contract_checks {
+        return BuildWorksetPlan::FullRebuild;
+    }
+    if previous.debug_info != debug_info {
         return BuildWorksetPlan::FullRebuild;
     }
     if previous.requested_engine != requested_engine || previous.resolved_engine != resolved_engine
@@ -659,6 +683,18 @@ pub(crate) fn cache_mismatch_reasons(
         reasons.push(format!(
             "optimization level changed ({} -> {})",
             metadata.opt_level, key.opt_level
+        ));
+    }
+    if metadata.contract_checks != key.contract_checks {
+        reasons.push(format!(
+            "contract runtime checks changed ({} -> {})",
+            metadata.contract_checks, key.contract_checks
+        ));
+    }
+    if metadata.debug_info != key.debug_info {
+        reasons.push(format!(
+            "debug info changed ({} -> {})",
+            metadata.debug_info, key.debug_info
         ));
     }
     if metadata.requested_engine != key.requested_engine {

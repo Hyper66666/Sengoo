@@ -8,6 +8,7 @@ impl Codegen {
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
+        let dbg = self.debug_location_suffix(&mir_fn.name);
         match inst {
             mir::Instruction::Nop => {}
 
@@ -559,13 +560,17 @@ impl Codegen {
                 if is_print {
                     // print lowers to puts and discards the C return code.
                     self.ir
-                        .push_str(&format!("call i32 @puts({})\n", arg_strs.join(", ")));
+                        .push_str(&format!("call i32 @puts({}){}\n", arg_strs.join(", "), dbg));
 
                     // Model print as returning unit in Sengoo.
                     self.ir.push_str(&format!("{} = add i8 0, 0\n", dest));
                 } else if ret_ty == "void" {
-                    self.ir
-                        .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
+                    self.ir.push_str(&format!(
+                        "call void {}({}){}\n",
+                        callee,
+                        arg_strs.join(", "),
+                        dbg
+                    ));
                 } else if self.uses_sret_async_result(func, dest_ty) {
                     let sret_slot = format!("{dest}.sret");
                     self.ir
@@ -574,8 +579,12 @@ impl Codegen {
                     let mut sret_args =
                         vec![format!("{ret_ty}* sret({ret_ty}) align 8 {sret_slot}")];
                     sret_args.extend(arg_strs);
-                    self.ir
-                        .push_str(&format!("call void {}({})\n", callee, sret_args.join(", ")));
+                    self.ir.push_str(&format!(
+                        "call void {}({}){}\n",
+                        callee,
+                        sret_args.join(", "),
+                        dbg
+                    ));
                     self.emit_indent();
                     self.ir.push_str(&format!(
                         "{} = load {}, {}* {}\n",
@@ -583,11 +592,12 @@ impl Codegen {
                     ));
                 } else {
                     self.ir.push_str(&format!(
-                        "{} = call {} {}({})\n",
+                        "{} = call {} {}({}){}\n",
                         dest,
                         ret_ty,
                         callee,
-                        arg_strs.join(", ")
+                        arg_strs.join(", "),
+                        dbg
                     ));
                 }
             }
@@ -996,7 +1006,7 @@ impl Codegen {
 
                             self.emit_indent();
 
-                            self.ir.push_str(&format!("call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)\n", dest_ptr, src_ptr, size));
+                            self.ir.push_str(&format!("call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false){}\n", dest_ptr, src_ptr, size, dbg));
                         }
                     }
 
@@ -1012,8 +1022,8 @@ impl Codegen {
                                 self.emit_indent();
 
                                 self.ir.push_str(&format!(
-                                    "{} = call i32 @memcmp(i8* {}, i8* {}, i64 {})\n",
-                                    dest_name, left_ptr, right_ptr, size
+                                    "{} = call i32 @memcmp(i8* {}, i8* {}, i64 {}){}\n",
+                                    dest_name, left_ptr, right_ptr, size, dbg
                                 ));
                             }
                         }
@@ -1027,7 +1037,7 @@ impl Codegen {
 
                             self.emit_indent();
 
-                            self.ir.push_str(&format!("call void @llvm.memmove.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)\n", dest_ptr, src_ptr, size));
+                            self.ir.push_str(&format!("call void @llvm.memmove.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false){}\n", dest_ptr, src_ptr, size, dbg));
                         }
                     }
                 }

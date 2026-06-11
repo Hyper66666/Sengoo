@@ -17,9 +17,16 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+const SGPM_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("SENGOO_BUILD_HASH"),
+    ")"
+);
+
 #[derive(Parser, Debug)]
 #[command(name = "sgpm")]
-#[command(version)]
+#[command(version = SGPM_VERSION)]
 #[command(about = "Sengoo package manager MVP", long_about = None)]
 struct Cli {
     #[command(subcommand)]

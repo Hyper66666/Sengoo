@@ -1,0 +1,166 @@
+name: toolchain-distribution
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/toolchain-distribution.yml"
+      - "scripts/package-toolchain.ps1"
+      - "scripts/install.ps1"
+      - "scripts/install.sh"
+      - "tools/sgc/**"
+      - "tools/sgpm/**"
+      - "tools/sgfmt/**"
+      - "tools/sglsp/**"
+      - "tools/stdlib/**"
+      - "compiler/**"
+      - "runtime/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+jobs:
+  package-smoke:
+    name: package smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}".Substring(1)
+          $line = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          $workspaceVersion = $line.Matches[0].Groups[1].Value
+          if ($tagVersion -ne $workspaceVersion) {
+            throw "tag version $tagVersion does not match workspace version $workspaceVersion"
+          }
+
+      - name: Build release tools
+        shell: pwsh
+        run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+
+      - name: Run release smoke matrix
+        shell: pwsh
+        run: |
+          $releaseBin = Resolve-Path target/release
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $env:CARGO_BIN_EXE_sgc = Join-Path $releaseBin "sgc$suffix"
+          $env:CARGO_BIN_EXE_sgfmt = Join-Path $releaseBin "sgfmt$suffix"
+          & $env:CARGO_BIN_EXE_sgc run examples/01_hello.sg --force-rebuild
+          if ($LASTEXITCODE -ne 0) {
+            throw "sgc hello smoke failed on ${{ matrix.os }}"
+          }
+          cargo test -p sgpm realworld -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw "sgpm realworld smoke failed on ${{ matrix.os }}"
+          }
+          cargo test -p sglsp realworld -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw "sglsp realworld smoke failed on ${{ matrix.os }}"
+          }
+          npx --yes openspec validate package-release-defaults --strict
+          if ($LASTEXITCODE -ne 0) {
+            throw "package-release-defaults OpenSpec smoke failed on ${{ matrix.os }}"
+          }
+          npx --yes openspec validate --all --strict
+          if ($LASTEXITCODE -ne 0) {
+            throw "OpenSpec all smoke failed on ${{ matrix.os }}"
+          }
+
+      - name: Package toolchain
+        shell: pwsh
+        env:
+          SENGOO_BUILD_HASH: ${{ github.sha }}
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".Substring(1)
+          } else {
+            $version = "0.1.0-ci"
+          }
+          ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
+
+      - name: Install package
+        shell: pwsh
+        run: |
+          $archive = Get-Content target/dist/latest-archive.txt
+          ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
+
+      - name: Installed stdlib smoke
+        shell: pwsh
+        run: |
+          $bin = Join-Path (Resolve-Path target/install-smoke) "bin"
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $line = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          $workspaceVersion = $line.Matches[0].Groups[1].Value
+          $versionSignatures = @{}
+          foreach ($tool in @("sgc", "sgpm", "sgfmt", "sglsp")) {
+            $exe = Join-Path $bin "$tool$suffix"
+            $version = & $exe --version
+            Write-Host "$tool version: $version"
+            $expectedPattern = "^$tool $([regex]::Escape($workspaceVersion)) \((?<hash>[0-9a-fA-F]{7,40})\)$"
+            if ($version -notmatch $expectedPattern) {
+              throw "unexpected $tool version output: $version"
+            }
+            $versionSignatures[$tool] = "$workspaceVersion|$($Matches.hash)"
+          }
+          $uniqueSignatures = @($versionSignatures.Values | Sort-Object -Unique)
+          if ($uniqueSignatures.Count -ne 1) {
+            throw "tool version/hash mismatch: $($versionSignatures | ConvertTo-Json -Compress)"
+          }
+          $sgc = Join-Path $bin "sgc$suffix"
+          & $sgc --version
+          New-Item -ItemType Directory -Force -Path target/install-smoke-work | Out-Null
+          @'
+          import std::status;
+
+          def main() -> i64 {
+              STATUS_OK()
+          }
+          '@ | Set-Content -LiteralPath target/install-smoke-work/main.sg -Encoding UTF8
+          & $sgc build target/install-smoke-work/main.sg --emit-llvm --force-rebuild
+          if ($LASTEXITCODE -ne 0) {
+            throw "installed sgc stdlib smoke failed"
+          }
+          & $sgc run target/install-smoke-work/main.sg --force-rebuild
+          if ($LASTEXITCODE -ne 0) {
+            throw "installed sgc run smoke failed"
+          }
+
+      - name: Upload packaged toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: sengoo-toolchain-${{ matrix.os }}
+          path: |
+            target/dist/*.zip
+            target/dist/*.tar.gz
+            target/dist/*.sha256
+            target/dist/*/manifest.json
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/dist/*.zip
+            target/dist/*.tar.gz
+            target/dist/*.sha256

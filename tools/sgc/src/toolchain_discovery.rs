@@ -8,11 +8,30 @@ fn workspace_root_from_manifest_dir() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+fn installed_share_root_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent().unwrap_or(Path::new("."));
+    let install_root = exe_dir.parent()?;
+    let candidate = install_root.join("share").join("sengoo");
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn find_stdlib_root() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("SENGOO_STDLIB") {
         let path = PathBuf::from(path);
         if path.exists() {
             return Some(path);
+        }
+    }
+
+    if let Some(share_root) = installed_share_root_from_exe() {
+        let candidate = share_root.join("stdlib");
+        if candidate.exists() {
+            return Some(candidate);
         }
     }
 
@@ -58,6 +77,13 @@ pub(crate) fn find_runtime_c() -> Option<String> {
 
     if let Some(stdlib_root) = find_stdlib_root() {
         let candidate = stdlib_root.join("runtime.c");
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    if let Some(share_root) = installed_share_root_from_exe() {
+        let candidate = share_root.join("runtime").join("runtime.c");
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }

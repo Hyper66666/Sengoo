@@ -11,6 +11,28 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
 
+## Installable Toolchain Archives
+
+Sengoo can now be packaged as a self-contained toolchain archive containing
+`sgc`, `sgpm`, `sgfmt`, `sglsp`, the standard library, and the C runtime bridge.
+The archive layout lets installed `sgc` resolve `std::*` imports without a
+source checkout.
+
+Local dry-run packaging:
+
+```powershell
+cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+$archive = Get-Content target/dist/latest-archive.txt
+.\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
+```
+
+Native debug-info builds use `-g` / `--debug-info`:
+
+```powershell
+sgc build path/to/main.sg -O 0 --debug-info
+```
+
 ## AI Handoff Pack (for other LLMs)
 
 To let another model take over quickly, use:

@@ -12,11 +12,18 @@ use crate::{
     TestOutputFormat, DEFAULT_DAEMON_ADDR,
 };
 
+pub(crate) const SGC_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("SENGOO_BUILD_HASH"),
+    ")"
+);
+
 /// Sengoo command-line compiler.
 #[derive(ClapParser, Debug)]
 #[command(name = "sgc")]
 #[command(author = "Sengoo Team")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(version = SGC_VERSION)]
 #[command(about = "Sengoo language compiler", long_about = None)]
 pub(crate) struct Cli {
     /// Error output format.
@@ -99,6 +106,10 @@ pub(crate) enum Commands {
         /// Write schema-version-1 compile phase timings to PATH.
         #[arg(long = "timings-json")]
         timings_json: Option<String>,
+
+        /// Emit native debug metadata and pass -g to clang object compilation.
+        #[arg(short = 'g', long = "debug-info")]
+        debug_info: bool,
     },
 
     /// Run a Sengoo source file.
@@ -159,6 +170,10 @@ pub(crate) enum Commands {
         /// Restrict reflection to selected symbols (repeatable).
         #[arg(long = "reflect-symbol")]
         reflect_symbol: Vec<String>,
+
+        /// Emit native debug metadata and pass -g to clang object compilation.
+        #[arg(short = 'g', long = "debug-info")]
+        debug_info: bool,
 
         /// Arguments passed to program (reserved).
         #[arg(trailing_var_arg = true)]
@@ -335,6 +350,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             reflect_symbol,
             target,
             timings_json,
+            debug_info,
         } => {
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
@@ -352,6 +368,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     reflect,
                     &reflect_module,
                     &reflect_symbol,
+                    debug_info,
                 )
                 .await?;
                 if matches!(outcome, DaemonDispatchOutcome::Handled) {
@@ -371,6 +388,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
                 target.as_deref(),
                 timings_json.as_deref(),
+                debug_info,
             )
             .await
         }
@@ -388,6 +406,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             reflect,
             reflect_module,
             reflect_symbol,
+            debug_info,
             args,
         } => {
             if daemon {
@@ -406,6 +425,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                     reflect,
                     &reflect_module,
                     &reflect_symbol,
+                    debug_info,
                 )
                 .await?;
                 if matches!(outcome, DaemonDispatchOutcome::Handled) {
@@ -423,6 +443,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 frontend_jobs,
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+                debug_info,
             )
             .await
         }

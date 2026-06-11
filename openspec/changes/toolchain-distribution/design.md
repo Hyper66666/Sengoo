@@ -12,11 +12,11 @@ scripts, and workspace-sourced version coherence.
 ### D-D1 Artifact layout
 
 ```text
-sengoo-<version>-windows-x64.zip
+sengoo-<version>-x86_64-pc-windows-msvc.zip
   bin/sgc.exe  bin/sgpm.exe  bin/sgfmt.exe  bin/sglsp.exe
   share/sengoo/stdlib/**  share/sengoo/runtime/**
   LICENSE  README-dist.md  manifest.json
-sengoo-<version>-linux-x64.tar.gz
+sengoo-<version>-x86_64-unknown-linux-gnu.tar.gz
   bin/sgc  bin/sgpm  bin/sgfmt  bin/sglsp
   share/sengoo/stdlib/**  share/sengoo/runtime/**
   LICENSE  README-dist.md  manifest.json
@@ -33,9 +33,15 @@ sengoo-<version>-<target>.{zip,tar.gz}.sha256
   set `SENGOO_ROOT` to import `std::*` modules or link the bundled runtime C
   bridge sources. If an environment override remains supported, it is an
   override, not the default lookup path.
+- A repository `LICENSE*`/`COPYING*` file is copied as `LICENSE` when present;
+  if the source tree has no license file, packaging records
+  `license_included=false` and the release remains blocked by the archive
+  gate rather than inventing a license in automation.
 - `manifest.json` records target, version, git hash, build time, runner OS
-  image, tool binary names, bundled stdlib/runtime bundle hash, archive
-  filename, and SHA-256 checksum.
+  image, tool version outputs, bundled stdlib/runtime file lists, archive
+  filename, checksum sidecar filename, and smoke evidence label. The archive
+  SHA-256 value itself lives in the adjacent `.sha256` sidecar because the
+  checksum is computed after the archive is sealed.
 
 ### D-D2 Workflow gating
 

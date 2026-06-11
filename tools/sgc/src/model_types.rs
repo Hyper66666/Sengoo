@@ -267,6 +267,8 @@ struct RunCacheMetadata {
     opt_level: u8,
     #[serde(default)]
     contract_checks: bool,
+    #[serde(default)]
+    debug_info: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
@@ -300,6 +302,7 @@ struct RunCacheKey {
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     requested_engine: RunEngine,
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
@@ -320,6 +323,8 @@ struct BuildCacheMetadata {
     opt_level: u8,
     #[serde(default)]
     contract_checks: bool,
+    #[serde(default)]
+    debug_info: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
     #[serde(default)]
@@ -340,6 +345,7 @@ struct BuildCacheKey {
     module_fingerprints: Vec<ModuleFingerprint>,
     opt_level: u8,
     contract_checks: bool,
+    debug_info: bool,
     emit_llvm: bool,
     runtime_c: Option<String>,
     runtime_c_fingerprint: Option<u64>,
