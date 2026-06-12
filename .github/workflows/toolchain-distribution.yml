@@ -76,11 +76,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "sglsp realworld smoke failed on ${{ matrix.os }}"
           }
-          npx --yes openspec validate package-release-defaults --strict
+          npx --yes @fission-ai/openspec validate toolchain-distribution --strict
           if ($LASTEXITCODE -ne 0) {
-            throw "package-release-defaults OpenSpec smoke failed on ${{ matrix.os }}"
+            throw "toolchain-distribution OpenSpec smoke failed on ${{ matrix.os }}"
           }
-          npx --yes openspec validate --all --strict
+          npx --yes @fission-ai/openspec validate --all --strict
           if ($LASTEXITCODE -ne 0) {
             throw "OpenSpec all smoke failed on ${{ matrix.os }}"
           }

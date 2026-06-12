@@ -69,8 +69,8 @@ Run on the candidate host before tagging:
 cargo build -p sgc -p sgpm -p sgfmt -p sglsp
 cargo test -p sgpm realworld -- --nocapture
 cargo test -p sglsp realworld -- --nocapture
-npx --yes openspec validate package-release-defaults --strict
-npx --yes openspec validate --all --strict
+npx --yes @fission-ai/openspec validate toolchain-distribution --strict
+npx --yes @fission-ai/openspec validate --all --strict
 ```
 
 The `realworld-e2e` CI workflow builds real `sgc`, `sgpm`, `sgfmt`, and
@@ -84,7 +84,7 @@ and the locked package loop.
 
 ## Tagging
 
-1. Ensure `npx --yes openspec validate --all --strict` passes.
+1. Ensure `npx --yes @fission-ai/openspec validate --all --strict` passes.
 2. Tag the repository with the workspace version (`v<version>`). The
    `toolchain-distribution` workflow rejects tags that do not match the
    workspace version.
