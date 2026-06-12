@@ -64,8 +64,9 @@ jobs:
           $env:CARGO_BIN_EXE_sgc = Join-Path $releaseBin "sgc$suffix"
           $env:CARGO_BIN_EXE_sgfmt = Join-Path $releaseBin "sgfmt$suffix"
           & $env:CARGO_BIN_EXE_sgc run examples/01_hello.sg --force-rebuild
-          if ($LASTEXITCODE -ne 0) {
-            throw "sgc hello smoke failed on ${{ matrix.os }}"
+          $helloExit = $LASTEXITCODE
+          if ($helloExit -ne 42) {
+            throw "sgc hello smoke expected exit 42 on ${{ matrix.os }}, got $helloExit"
           }
           cargo test -p sgpm realworld -- --nocapture
           if ($LASTEXITCODE -ne 0) {
