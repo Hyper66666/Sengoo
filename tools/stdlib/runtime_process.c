@@ -1108,6 +1108,7 @@ typedef struct {
 #endif
     int completed;
     int timed_out;
+    int killed;
     long long exit_code;
 } SengooProcessHandleState;
 
@@ -1292,6 +1293,7 @@ static long long sengoo_process_command_spawn_platform(SengooProcessCommand* com
     state->thread = process_info.hThread;
     state->completed = 0;
     state->timed_out = 0;
+    state->killed = 0;
     state->exit_code = -1;
     return sengoo_process_handle_alloc(state);
 }
@@ -1328,6 +1330,7 @@ static long long sengoo_process_command_spawn_platform(SengooProcessCommand* com
     state->pid = pid;
     state->completed = 0;
     state->timed_out = 0;
+    state->killed = 0;
     state->exit_code = -1;
     return sengoo_process_handle_alloc(state);
 }
@@ -1401,16 +1404,81 @@ long long sengoo_process_handle_wait(long long handle, long long timeout_ms) {
 #endif
 }
 
+long long sengoo_process_handle_wait_cancellable(long long handle, long long timeout_ms) {
+    SengooProcessHandleState* state = sengoo_process_handle_resolve(handle);
+    if (!state) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (state->completed) {
+        if (state->timed_out) {
+            return -SENGOO_STATUS_TIMEOUT;
+        }
+        return state->killed ? -SENGOO_STATUS_CANCELED : state->exit_code;
+    }
+    long long start_ms = sengoo_process_now_ms();
+#ifdef _WIN32
+    for (;;) {
+        DWORD wait = WaitForSingleObject(state->process, 0);
+        if (wait == WAIT_OBJECT_0) {
+            DWORD code = 1;
+            if (GetExitCodeProcess(state->process, &code)) {
+                state->exit_code = (long long)code;
+            }
+            state->completed = 1;
+            return state->killed ? -SENGOO_STATUS_CANCELED : state->exit_code;
+        }
+        if (timeout_ms >= 0 && sengoo_process_now_ms() - start_ms >= timeout_ms) {
+            state->timed_out = 1;
+            state->completed = 1;
+            return -SENGOO_STATUS_TIMEOUT;
+        }
+        sengoo_process_sleep_short();
+    }
+#else
+    for (;;) {
+        int status = 0;
+        pid_t waited = waitpid(state->pid, &status, WNOHANG);
+        if (waited == state->pid) {
+            if (WIFEXITED(status)) {
+                state->exit_code = (long long)WEXITSTATUS(status);
+            } else if (WIFSIGNALED(status)) {
+                state->exit_code = 128 + WTERMSIG(status);
+                state->killed = 1;
+            } else {
+                state->exit_code = -1;
+            }
+            state->completed = 1;
+            return state->killed ? -SENGOO_STATUS_CANCELED : state->exit_code;
+        }
+        if (waited < 0 && errno != EINTR) {
+            return -SENGOO_STATUS_IO;
+        }
+        if (timeout_ms >= 0 && sengoo_process_now_ms() - start_ms >= timeout_ms) {
+            state->timed_out = 1;
+            state->completed = 1;
+            return -SENGOO_STATUS_TIMEOUT;
+        }
+        sengoo_process_sleep_short();
+    }
+#endif
+}
+
 long long sengoo_process_handle_kill(long long handle) {
     SengooProcessHandleState* state = sengoo_process_handle_resolve(handle);
     if (!state) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
 #ifdef _WIN32
-    return TerminateProcess(state->process, 1) ? 1 : -SENGOO_STATUS_IO;
+    if (!TerminateProcess(state->process, 1)) {
+        return -SENGOO_STATUS_IO;
+    }
 #else
-    return kill(state->pid, SIGKILL) == 0 ? 1 : -SENGOO_STATUS_IO;
+    if (kill(state->pid, SIGKILL) != 0) {
+        return -SENGOO_STATUS_IO;
+    }
 #endif
+    state->killed = 1;
+    return 1;
 }
 
 long long sengoo_process_handle_exit_code(long long handle) {

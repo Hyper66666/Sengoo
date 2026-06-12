@@ -15,12 +15,13 @@ status, and releases its resources through normal future cleanup.
 - **AND** child futures owned by the canceled frame are dropped and their
   reactor interest registrations are removed
 
-#### Scenario: Awaiting a canceled task surfaces a stable status
+#### Scenario: Cancellation status remains observable without changing await types
 
-- **WHEN** a program awaits a spawned future whose underlying task was
-  canceled
-- **THEN** the await resolves to `STATUS_CANCELED() == 19` instead of
-  blocking forever
+- **WHEN** a program cancels a spawned task through `cancel_task`
+- **THEN** `task_status` reports the canceled terminal state (`3`)
+- **AND** ordinary `await Future<T>` remains type-stable and returns `T`
+- **AND** cancellation-aware operations that already return `Result<T, i64>`
+  use `STATUS_CANCELED() == 19` for canceled outcomes
 - **AND** a task that already completed stays completed and is not demoted
 
 ### Requirement: A consuming select variant SHALL cancel its losers

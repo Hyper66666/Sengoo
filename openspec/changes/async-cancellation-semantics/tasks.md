@@ -7,57 +7,63 @@
 
 ## 2. Task cancellation propagation
 
-- [ ] 2.1 Runtime: canceled mark observed at next await point; frame does
+- [x] 2.1 Runtime: canceled mark observed at next await point; frame does
   not resume user code past that await; status reaches `3`.
-- [ ] 2.2 Awaiting a canceled spawned future resolves to the
-  `STATUS_CANCELED` error path; completed tasks never demote.
-- [ ] 2.3 Dropped child futures of a canceled frame unregister reactor
+- [x] 2.2 Cancellation status remains observable through `task_status` and
+  status-returning futures/APIs without changing ordinary `await Future<T>`
+  result types; completed tasks never demote.
+- [x] 2.3 Dropped child futures of a canceled frame unregister reactor
   interest (assert via reactor registration counters).
-- [ ] 2.4 Compiler + native tests: post-await code never runs after cancel;
+- [x] 2.4 Compiler + native tests: post-await code never runs after cancel;
   pending/completed/canceled transitions covered.
 
 ## 3. `select_cancel`
 
-- [ ] 3.1 Stdlib + lowering for `select_cancel` 2..8 homogeneous operands
+- [x] 3.1 Stdlib + lowering for `select_cancel` 2..8 homogeneous operands
   with rotating poll order (mirror `select` arity/type diagnostics).
-- [ ] 3.2 Runtime: winner returned; losers canceled-then-dropped before
+- [x] 3.2 Runtime: winner returned; losers canceled-then-dropped before
   return; no dangling reactor interest (drop-order assertions).
-- [ ] 3.3 Spawned-task losers transition underlying tasks to canceled.
-- [ ] 3.4 Native tests with 2, 3, and 8 operands plus a mixed
+- [x] 3.3 Spawned-task losers transition underlying tasks to canceled.
+- [x] 3.4 Native tests with 2, 3, and 8 operands plus a mixed
   spawned/plain-future loser case; existing `select` tests stay green
   unchanged.
 
 ## 4. Cancellable process wait
 
-- [ ] 4.1 Runtime cancellable wait: exit → code; timeout →
-  `STATUS_TIMEOUT`; kill during wait → prompt `STATUS_CANCELED`.
-- [ ] 4.2 Stdlib wrapper on `ProcessHandle` with generation checks and
+- [x] 4.1 Runtime cancellable wait: exit -> code; timeout ->
+  `STATUS_TIMEOUT`; kill during wait -> prompt `STATUS_CANCELED`.
+- [x] 4.2 Stdlib wrapper on `ProcessHandle` with generation checks and
   existing `STATUS_INVALID_HANDLE` mapping.
 - [ ] 4.3 Tests on Windows and POSIX: kill-during-wait resolves promptly
-  (bounded by a small grace assertion, not the full timeout).
+  (bounded by a small grace assertion, not the full timeout). Windows local
+  proof is covered by `stdlib_process_wait_cancellable_returns_promptly_after_kill`;
+  POSIX reference-host proof remains pending.
 
 ## 5. Docs and matrix
 
-- [ ] 5.1 Update `docs/runtime-async-semantics.md` with the cancellation
+- [x] 5.1 Update `docs/runtime-async-semantics.md` with the cancellation
   contract, `select_cancel`, and the process wait semantics.
-- [ ] 5.2 Move the three Deferred SUPPORT_MATRIX rows (task cancellation
-  boundaries, select loser cancellation, process cancellation) to supported
-  subsets with proof links.
+- [x] 5.2 Update the SUPPORT_MATRIX rows with proof links: task
+  cancellation boundaries and select loser cancellation are supported
+  subsets; process cancellation is host-qualified until POSIX prompt proof
+  lands.
 
 ## 6. Verification
 
-- [ ] 6.1 `cargo fmt --check`
-- [ ] 6.2 `cargo test -p sengoo-compiler --lib`
-- [ ] 6.3 `cargo test -p sengoo-runtime --lib --features native-bridge -- --test-threads=1`
-- [ ] 6.4 `cargo test -p sgc async_native_runtime -- --test-threads=1`
-- [ ] 6.5 `openspec validate async-cancellation-semantics --strict`
+- [x] 6.1 `cargo fmt --check`
+- [x] 6.2 `cargo test -p sengoo-compiler --lib`
+- [x] 6.3 `cargo test -p sengoo-runtime --lib --features native-bridge -- --test-threads=1`
+- [x] 6.4 `cargo test -p sgc async_native_runtime -- --test-threads=1`
+- [x] 6.5 `openspec validate async-cancellation-semantics --strict`
 
 ## Archive Gate
 
-- [ ] `openspec validate async-cancellation-semantics --strict` passes.
-- [ ] Canceled tasks provably run no post-await user code; status machine
+- [x] `openspec validate async-cancellation-semantics --strict` passes.
+- [x] Canceled tasks provably run no post-await user code; status machine
   covered end to end.
-- [ ] `select_cancel` determinism and no-dangling-interest assertions pass
+- [x] `select_cancel` determinism and no-dangling-interest assertions pass
   for 2..8 operands; existing `select` semantics unchanged.
 - [ ] Cancellable process wait proven prompt on Windows and POSIX.
-- [ ] Matrix rows moved with proof; umbrella records Pillar B completion.
+- [x] Matrix rows updated with proof links and host-qualified process
+  cancellation status.
+- [ ] Umbrella records Pillar B completion after POSIX process prompt proof.

@@ -16,6 +16,7 @@ use super::async_dispatch_helpers::{
     OPTIONAL_ASYNC_DISPATCH_NAMES,
 };
 use super::async_dispatch_synthesis_helpers::{
+    select_cancel_n_winner_runtime_function_name, select_cancel_winner_runtime_function_name,
     select_n_winner_runtime_function_name, select_result_runtime_suffix,
     select_winner_runtime_function_name, synthesize_result_dispatch,
     synthesize_spawn_cancel_dispatch, synthesize_spawn_drop_dispatch,
@@ -186,6 +187,8 @@ pub fn expand_async_functions(
             Instruction::Call { func, .. } => {
                 func == select_winner_runtime_function_name()
                     || func == select_n_winner_runtime_function_name()
+                    || func == select_cancel_winner_runtime_function_name()
+                    || func == select_cancel_n_winner_runtime_function_name()
                     || func.starts_with("sengoo_async_select_")
             }
             _ => false,

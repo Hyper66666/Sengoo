@@ -156,16 +156,17 @@ Currently supported:
 - `cancel_task(task_id) -> bool`
 - `task_status(task_id) -> i64` (`0=unknown`, `1=pending`, `2=completed`, `3=canceled`)
 - `join(f1, f2)`
-- `select(f1, f2)` for two futures with the same result type, including scalar, tuple, and struct results covered by the current tests
+- `select(f1, .., fN)` for 2..8 futures with the same result type, including scalar, tuple, and struct results covered by the current tests
+- `select_cancel(f1, .., fN)` for 2..8 homogeneous futures; the first ready future wins and loser futures are canceled/dropped before the call returns
 
 Current limitations:
 
-- `select` is limited to two operands.
-- loser futures in `select` are not canceled yet.
+- `select` remains the non-canceling variant; use `select_cancel` when losing branches must not continue.
 - `spawn(future)` still returns an awaitable `Future<T>`; task lifecycle management is exposed separately through `spawn_task/cancel_task/task_status`.
+- plain `await Future<T>` returns `T`; cancellation-aware status results are exposed by dedicated futures such as `timeout_cancel`.
 - timer support currently covers `sleep` and `timeout`, but not a general timer queue or wheel.
-- no IO wakeups yet.
-- no user-defined awaitables or full trait-based Future abstraction.
+- IO wakeups are limited to the documented reactor subset.
+- user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
 
 ## 3. Non-Invasive Reflection (Opt-In)
 

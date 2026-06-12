@@ -11,6 +11,12 @@ const ASYNC_SELECT_WINNER_DECLARATION: &str =
 const ASYNC_SELECT_N_WINNER_FUNCTION: &str = "sengoo_async_select_n_winner";
 const ASYNC_SELECT_N_WINNER_DECLARATION: &str =
     "declare i64 @sengoo_async_select_n_winner(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n";
+const ASYNC_SELECT_CANCEL_WINNER_FUNCTION: &str = "sengoo_async_select_cancel_winner";
+const ASYNC_SELECT_CANCEL_WINNER_DECLARATION: &str =
+    "declare i64 @sengoo_async_select_cancel_winner(i64, i64, i64, i64)\n";
+const ASYNC_SELECT_CANCEL_N_WINNER_FUNCTION: &str = "sengoo_async_select_cancel_n_winner";
+const ASYNC_SELECT_CANCEL_N_WINNER_DECLARATION: &str =
+    "declare i64 @sengoo_async_select_cancel_n_winner(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n";
 
 pub fn select_winner_runtime_function_name() -> &'static str {
     ASYNC_SELECT_WINNER_FUNCTION
@@ -26,6 +32,22 @@ pub fn select_n_winner_runtime_function_name() -> &'static str {
 
 pub fn select_n_winner_runtime_declaration() -> &'static str {
     ASYNC_SELECT_N_WINNER_DECLARATION
+}
+
+pub fn select_cancel_winner_runtime_function_name() -> &'static str {
+    ASYNC_SELECT_CANCEL_WINNER_FUNCTION
+}
+
+pub fn select_cancel_winner_runtime_declaration() -> &'static str {
+    ASYNC_SELECT_CANCEL_WINNER_DECLARATION
+}
+
+pub fn select_cancel_n_winner_runtime_function_name() -> &'static str {
+    ASYNC_SELECT_CANCEL_N_WINNER_FUNCTION
+}
+
+pub fn select_cancel_n_winner_runtime_declaration() -> &'static str {
+    ASYNC_SELECT_CANCEL_N_WINNER_DECLARATION
 }
 
 pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {

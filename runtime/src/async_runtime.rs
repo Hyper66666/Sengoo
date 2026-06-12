@@ -76,7 +76,8 @@ pub use reactor::{
 };
 #[cfg(feature = "native-bridge")]
 pub use select::{
-    sengoo_async_select_bool, sengoo_async_select_f32, sengoo_async_select_f64,
+    sengoo_async_select_bool, sengoo_async_select_cancel_n_winner,
+    sengoo_async_select_cancel_winner, sengoo_async_select_f32, sengoo_async_select_f64,
     sengoo_async_select_i16, sengoo_async_select_i32, sengoo_async_select_i64,
     sengoo_async_select_i8, sengoo_async_select_n_winner, sengoo_async_select_winner,
 };
@@ -100,6 +101,10 @@ pub enum TaskLifecycleStatus {
 
 pub trait CoroutineTask {
     fn poll(&mut self) -> TaskState;
+
+    fn foreign_identity(&self) -> Option<(i64, i64)> {
+        None
+    }
 
     fn cancel(&mut self) -> bool {
         true
@@ -203,6 +208,33 @@ impl CoroutineScheduler {
             .queue
             .remove(index)
             .expect("task index located in queue should remain valid");
+        self.statuses.insert(task_id, TaskLifecycleStatus::Canceled);
+        true
+    }
+
+    pub fn cancel_foreign(&mut self, kind: i64, handle: i64) -> bool {
+        let Some(index) = self
+            .queue
+            .iter()
+            .position(|entry| entry.task.foreign_identity() == Some((kind, handle)))
+        else {
+            return false;
+        };
+
+        let canceled = self
+            .queue
+            .get_mut(index)
+            .map(|entry| entry.task.cancel())
+            .unwrap_or(false);
+        if !canceled {
+            return false;
+        }
+
+        let task_id = self
+            .queue
+            .remove(index)
+            .expect("foreign task index located in queue should remain valid")
+            .id;
         self.statuses.insert(task_id, TaskLifecycleStatus::Canceled);
         true
     }
@@ -689,6 +721,18 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_cancel_does_not_demote_completed_tasks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(0));
+
+        assert_eq!(scheduler.tick(), vec![task]);
+        assert_eq!(scheduler.task_status(task) as i64, 2);
+        assert!(!scheduler.cancel(task));
+        assert_eq!(scheduler.task_status(task) as i64, 2);
+    }
+
+    #[test]
     fn scheduler_ffi_cancel_and_status_handle_null_and_unknown_tasks() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         let scheduler = sengoo_async_scheduler_new();
@@ -768,6 +812,31 @@ mod tests {
         assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
 
         unsafe { sengoo_async_scheduler_free(scheduler) };
+    }
+
+    #[test]
+    fn current_scheduler_can_cancel_foreign_task_by_kind_and_handle() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let mut scheduler = CoroutineScheduler::new();
+        let handle = sengoo_async_sleep__start(25);
+        let task = scheduler.spawn(ForeignAsyncTask {
+            kind: async_spawn_kind_id_for_tests(),
+            handle,
+        });
+
+        CURRENT_SCHEDULER.with(|cell| {
+            let previous = cell.replace(&mut scheduler);
+            assert!(bridge::cancel_scheduled_foreign(
+                async_spawn_kind_id_for_tests(),
+                handle
+            ));
+            cell.set(previous);
+        });
+
+        assert_eq!(scheduler.task_status(task) as i64, 3);
+        assert_eq!(scheduler.stats().scheduled, 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -1015,6 +1084,82 @@ mod tests {
             sengoo_async_sleep__result(pending);
             sengoo_async_sleep__result(ready);
         }
+    }
+
+    #[test]
+    fn select_cancel_winner_cancels_loser_before_returning() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let loser = sengoo_async_sleep__start(20);
+        let winner = sengoo_async_sleep__start(0);
+
+        let selected = sengoo_async_select_cancel_winner(
+            async_spawn_kind_id_for_tests(),
+            loser,
+            async_select_hint_kind_id_for_tests(),
+            winner,
+        );
+
+        assert_eq!(selected, 1);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        unsafe { sengoo_async_sleep__result(winner) };
+    }
+
+    #[test]
+    fn select_cancel_duplicate_winner_handle_is_not_canceled_as_loser() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let shared = sengoo_async_sleep__start(0);
+
+        let selected = sengoo_async_select_cancel_winner(
+            async_spawn_kind_id_for_tests(),
+            shared,
+            async_spawn_kind_id_for_tests(),
+            shared,
+        );
+
+        assert_eq!(selected, 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        unsafe { sengoo_async_sleep__result(shared) };
+    }
+
+    #[test]
+    fn select_cancel_n_winner_cancels_all_losers() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        let loser_a = sengoo_async_sleep__start(20);
+        let winner = sengoo_async_sleep__start(0);
+        let loser_b = sengoo_async_sleep__start(25);
+
+        let selected = sengoo_async_select_cancel_n_winner(
+            3,
+            async_spawn_kind_id_for_tests(),
+            loser_a,
+            async_select_hint_kind_id_for_tests(),
+            winner,
+            async_spawn_kind_id_for_tests(),
+            loser_b,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        );
+
+        assert_eq!(selected, 1);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        unsafe { sengoo_async_sleep__result(winner) };
     }
 
     #[test]

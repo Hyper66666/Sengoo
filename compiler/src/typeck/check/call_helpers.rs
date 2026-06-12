@@ -614,11 +614,12 @@ impl TypeChecker {
             return Ok(i64_ty);
         }
 
-        if builtin_name == Some("select") {
+        if builtin_name == Some("select") || builtin_name == Some("select_cancel") {
+            let builtin = builtin_name.expect("checked select builtin name");
             if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "select is only allowed in async contexts".to_string(),
-                ));
+                return Err(TypeckError::Other(format!(
+                    "{builtin} is only allowed in async contexts"
+                )));
             }
             if !(2..=8).contains(&args.len()) {
                 return Err(TypeckError::ArgumentCountMismatch {
@@ -631,9 +632,9 @@ impl TypeChecker {
             for arg in args {
                 let future_ty = self.check_expr(arg)?;
                 let TyKind::Future(current_inner) = &future_ty.kind else {
-                    return Err(TypeckError::Other(
-                        "select requires Future values".to_string(),
-                    ));
+                    return Err(TypeckError::Other(format!(
+                        "{builtin} requires Future values"
+                    )));
                 };
                 if let Some(expected) = &inner_ty {
                     self.infer.unify(expected, current_inner)?;

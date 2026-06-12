@@ -32,7 +32,14 @@ future without exposing lifecycle ids.
 - Already-completed tasks cannot be canceled (`cancel` returns `false`).
 - Canceled tasks run `on_scheduler_drop` / future `drop` hooks to release
   owned handles.
-- `select` does **not** cancel the losing future.
+- Cancellation is cooperative and observable at await boundaries. A canceled
+  queued task is removed from the scheduler, so it does not resume user code
+  after the pending await that made it cancellable.
+- Plain `await Future<T>` still returns `T`; stable status values for
+  cancellation-aware operations are carried by dedicated `Result<T, i64>`
+  futures such as `timeout_cancel`, not by changing ordinary await types.
+- `select` does **not** cancel the losing future. `select_cancel` is the
+  consuming loser-canceling variant.
 
 ## Timeout (`timeout(future, ms)`)
 
@@ -55,6 +62,17 @@ future without exposing lifecycle ids.
   poll rounds; the first ready operand in the current order wins.
 - Losing operands are **not** canceled; they are dropped through normal future
   cleanup when their handles go out of scope.
+
+## Select Cancel (`select_cancel(f0, .., fn)`)
+
+- Accepts **2..8** homogeneous `Future<T>` operands and uses the same rotating
+  poll order as `select`.
+- The first ready operand wins and its value is returned.
+- Every losing operand is canceled and dropped before `select_cancel` returns.
+  If a loser was also scheduled through `spawn(future)`, the matching
+  scheduler task is removed and marked canceled so it cannot resume user code
+  after the select returns.
+- The existing `select` builtin keeps its non-canceling semantics.
 
 ## Reactor
 
@@ -127,7 +145,8 @@ future without exposing lifecycle ids.
   semantics beyond the documented task/status APIs.
 
 `select`, `timeout`, and `timeout_cancel` semantics are unchanged when the pool
-is enabled.
+is enabled. `select_cancel` keeps the same loser-cancellation contract when the
+pool is enabled.
 
 ## Unsupported (stable `STATUS_UNSUPPORTED` or compile error)
 

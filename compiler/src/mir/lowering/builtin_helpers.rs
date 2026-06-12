@@ -17,6 +17,7 @@ impl<'a> LoweringContext<'a> {
             "cancel_task" => Some(self.lower_builtin_cancel_task(arg_locals)),
             "task_status" => Some(self.lower_builtin_task_status(arg_locals)),
             "select" => Some(self.lower_builtin_select(arg_locals)),
+            "select_cancel" => Some(self.lower_builtin_select_with_cancel(arg_locals)),
             _ => None,
         }
     }
@@ -327,9 +328,22 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn lower_builtin_select(&mut self, arg_locals: &[Local]) -> Local {
+        self.lower_builtin_select_impl(arg_locals, false)
+    }
+
+    pub(super) fn lower_builtin_select_with_cancel(&mut self, arg_locals: &[Local]) -> Local {
+        self.lower_builtin_select_impl(arg_locals, true)
+    }
+
+    fn lower_builtin_select_impl(&mut self, arg_locals: &[Local], cancel_losers: bool) -> Local {
+        let builtin = if cancel_losers {
+            "select_cancel"
+        } else {
+            "select"
+        };
         if !(2..=8).contains(&arg_locals.len()) {
             self.errors.push(format!(
-                "select expects between two and eight arguments, got {}",
+                "{builtin} expects between two and eight arguments, got {}",
                 arg_locals.len()
             ));
             return self.add_local(None, LocalKind::Temp, MIR_UNIT);
@@ -339,10 +353,9 @@ impl<'a> LoweringContext<'a> {
         for handle in arg_locals {
             let name = self.resolve_async_base_name(*handle);
             if name == "unknown" {
-                self.errors.push(
-                    "select requires futures produced by async functions or async blocks"
-                        .to_string(),
-                );
+                self.errors.push(format!(
+                    "{builtin} requires futures produced by async functions or async blocks"
+                ));
                 return self.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
             operand_names.push(name);
@@ -351,10 +364,9 @@ impl<'a> LoweringContext<'a> {
         let result_ty = self.async_await_result_type(arg_locals[0]);
         for handle in &arg_locals[1..] {
             if self.async_await_result_type(*handle) != result_ty {
-                self.errors.push(
-                    "select requires futures with matching result types during MIR lowering"
-                        .to_string(),
-                );
+                self.errors.push(format!(
+                    "{builtin} requires futures with matching result types during MIR lowering"
+                ));
                 return self.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
         }
@@ -405,10 +417,17 @@ impl<'a> LoweringContext<'a> {
             }
             args
         };
-        let winner_fn = if arg_locals.len() == 2 {
-            crate::mir::async_dispatch_synthesis_helpers::select_winner_runtime_function_name()
-        } else {
-            crate::mir::async_dispatch_synthesis_helpers::select_n_winner_runtime_function_name()
+        let winner_fn = match (cancel_losers, arg_locals.len() == 2) {
+            (false, true) => {
+                crate::mir::async_dispatch_synthesis_helpers::select_winner_runtime_function_name()
+            }
+            (false, false) => {
+                crate::mir::async_dispatch_synthesis_helpers::select_n_winner_runtime_function_name()
+            }
+            (true, true) => crate::mir::async_dispatch_synthesis_helpers::
+                select_cancel_winner_runtime_function_name(),
+            (true, false) => crate::mir::async_dispatch_synthesis_helpers::
+                select_cancel_n_winner_runtime_function_name(),
         };
         self.push_inst(Instruction::Call {
             destination: winner,

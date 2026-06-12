@@ -62,6 +62,14 @@ pub(super) struct ForeignAsyncTask {
 }
 
 impl CoroutineTask for ForeignAsyncTask {
+    fn foreign_identity(&self) -> Option<(i64, i64)> {
+        if self.handle == 0 {
+            None
+        } else {
+            Some((self.kind, self.handle))
+        }
+    }
+
     fn poll(&mut self) -> TaskState {
         if unsafe { sengoo_async_poll_dispatch(self.kind, self.handle) } == 0 {
             TaskState::Pending
@@ -87,6 +95,16 @@ impl CoroutineTask for ForeignAsyncTask {
             self.handle = 0;
         }
     }
+}
+
+pub(super) fn cancel_scheduled_foreign(kind: i64, handle: i64) -> bool {
+    CURRENT_SCHEDULER.with(|cell| {
+        let scheduler = cell.get();
+        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
+            return false;
+        };
+        scheduler.cancel_foreign(kind, handle)
+    })
 }
 
 #[no_mangle]
