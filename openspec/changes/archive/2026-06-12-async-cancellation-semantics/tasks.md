@@ -34,19 +34,19 @@
   `STATUS_TIMEOUT`; kill during wait -> prompt `STATUS_CANCELED`.
 - [x] 4.2 Stdlib wrapper on `ProcessHandle` with generation checks and
   existing `STATUS_INVALID_HANDLE` mapping.
-- [ ] 4.3 Tests on Windows and POSIX: kill-during-wait resolves promptly
+- [x] 4.3 Tests on Windows and POSIX: kill-during-wait resolves promptly
   (bounded by a small grace assertion, not the full timeout). Windows local
   proof is covered by `stdlib_process_wait_cancellable_returns_promptly_after_kill`;
-  POSIX reference-host proof remains pending.
+  POSIX proof is covered by PR #17 Ubuntu `core-conformance`
+  `cargo test --workspace --locked -- --test-threads=1`.
 
 ## 5. Docs and matrix
 
 - [x] 5.1 Update `docs/runtime-async-semantics.md` with the cancellation
   contract, `select_cancel`, and the process wait semantics.
 - [x] 5.2 Update the SUPPORT_MATRIX rows with proof links: task
-  cancellation boundaries and select loser cancellation are supported
-  subsets; process cancellation is host-qualified until POSIX prompt proof
-  lands.
+  cancellation boundaries, select loser cancellation, and process
+  cancellation are supported subsets.
 
 ## 6. Verification
 
@@ -63,7 +63,7 @@
   covered end to end.
 - [x] `select_cancel` determinism and no-dangling-interest assertions pass
   for 2..8 operands; existing `select` semantics unchanged.
-- [ ] Cancellable process wait proven prompt on Windows and POSIX.
-- [x] Matrix rows updated with proof links and host-qualified process
+- [x] Cancellable process wait proven prompt on Windows and POSIX.
+- [x] Matrix rows updated with proof links and supported-subset process
   cancellation status.
-- [ ] Umbrella records Pillar B completion after POSIX process prompt proof.
+- [x] Umbrella records Pillar B completion after POSIX process prompt proof.

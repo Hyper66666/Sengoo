@@ -11,7 +11,7 @@ one pass.
 | Pillar | Priority | Current state | Primary evidence |
 | --- | --- | --- | --- |
 | 1 Stdlib MVP gap | High | Strong internal-tooling subset; recursive tree and fd helpers remain accepted-risk until fixture-backed | `openspec/specs/stdlib-mainstream-usability/spec.md`, `examples/realworld/SUPPORT_MATRIX.md` |
-| 2 Async runtime | High | Supported subset: reactor hints, user Future lowering, 2..8 select, timeout_cancel, channels/mutex; all-host owned-fd readiness, task cancellation API, and loser cancellation remain deferred | `openspec/specs/async-reactor-futures/spec.md`, `openspec/specs/async-default-followups/spec.md`, `docs/runtime-async-semantics.md` |
+| 2 Async runtime | High | Supported subset: reactor hints, user Future lowering, 2..8 select, `select_cancel`, task cancellation boundaries, timeout_cancel, channels/mutex; all-host owned-fd readiness remains deferred | `openspec/specs/async-reactor-futures/spec.md`, `openspec/specs/async-default-followups/spec.md`, `docs/runtime-async-semantics.md` |
 | 3 Package graph | High | Alias dependencies, lockfile v2, multi-version registry resolution, metadata JSON, and release fixture are implemented | `openspec/specs/sgpm-package-graph/spec.md`, `examples/realworld/package-release-loop` |
 | 4 Language surface | High | Attributes/cfg/deprecated diagnostics, class trait headers, and dynamic native i64 arity 0..8 are implemented; broader FFI and payload enum frame widening are deferred | `openspec/specs/language-surface-expansion/spec.md`, `openspec/specs/language-default-polish/spec.md` |
 | 5 Compile perf | Medium-high | Regression gates and low-memory mitigation exist; 1000k absolute RSS/share target remains open | `openspec/changes/frontend-1000k-perf-gate/tasks.md`, `bench/FRONTEND_BASELINE.md` |
@@ -25,7 +25,7 @@ one pass.
 | `Vec<i64>` / text collections | Supported subset | `tools/stdlib/collections.sg`, `runtime_collections.c`, LSP stdlib tests | Richer generic collections remain future work |
 | JSON handle API | Supported subset | `tools/stdlib/json.sg`; 1 MiB cap and owned string reads in canonical stdlib spec | Streaming/schema/JSON5 remain deferred |
 | Recursive dir ops | Accepted risk | `dir_walk`, `dir_copy_tree`, `dir_remove_tree`; stdlib/runtime tests; SUPPORT_MATRIX row | No committed realworld recursive-tree fixture yet |
-| Process timeout/capture/pipes/background | Supported subset | `workspace-doc-loop`, `ProcessCommand.pipe_stdout_to`, `ProcessCommand.spawn`, stdlib process tests | Async process cancellation remains deferred |
+| Process timeout/capture/pipes/background | Supported subset | `workspace-doc-loop`, `ProcessCommand.pipe_stdout_to`, `ProcessCommand.spawn`, `ProcessHandle.wait_cancellable`, stdlib process tests | Richer async process orchestration remains future work |
 | Sync fd IO | Accepted risk | `io_fd_read`, `io_fd_write`; runtime tests; platform behavior docs | No committed realworld fd fixture yet |
 | Async fd IO | Deferred | SUPPORT_MATRIX all-host owned-fd row | Needs future all-host reactor evidence |
 
@@ -37,8 +37,8 @@ one pass.
 | Reactor timer/TCP wakeups | Supported subset | SUPPORT_MATRIX reactor row; runtime `reactor.rs` tests | All-host owned-fd readiness still deferred |
 | User `Future` trait / await lowering | Supported subset | `user_future_impl_can_be_awaited_and_lowers_poll_loop`, native user-future tests | Exhaustive negative JSON/LSP snapshots and wakeup-registration diagnostics deferred |
 | Future value flow | Supported subset | local/parameter/return user-future tests | Cross-thread/unsafe escapes remain rejected |
-| 2..8 select | Supported subset | compiler/runtime select tests; SUPPORT_MATRIX row | Loser cancellation remains deferred |
-| Task cancellation boundaries | Deferred | SUPPORT_MATRIX task cancellation row | Needs explicit user task cancellation API |
+| 2..8 select and `select_cancel` | Supported subset | compiler/runtime select tests; SUPPORT_MATRIX select rows; PR #17 checks | Existing non-canceling `select` remains unchanged |
+| Task cancellation boundaries | Supported subset | SUPPORT_MATRIX task cancellation row; `async_native_runtime_cancel_task_prevents_post_await_code`; PR #17 checks | Richer cancellation propagation APIs remain future work |
 | Windows native async link | Supported regression path | `cargo test -p sgc async_native_runtime`; fallback dispatch symbols in `runtime.c` | Linux CI should re-prove staticlib extraction/weak-symbol path |
 
 ## Pillar 3 - Package Graph
@@ -99,7 +99,8 @@ one pass.
 
 ## Additional Archived Follow-Ups Consumed
 
-- `async-default-followups` - archived 2026-06-10; support-matrix rows now split supported subsets from deferred all-host/cancellation work.
+- `async-default-followups` - archived 2026-06-10; support-matrix rows split supported subsets from deferred all-host owned-fd work.
+- `async-cancellation-semantics` - archived 2026-06-12; task cancellation, `select_cancel`, and process `wait_cancellable` are supported subsets with PR #17 Windows/Ubuntu evidence.
 - `language-default-polish` - archived 2026-06-10; diagnostic parity and still-rejected adjacent language forms recorded.
 - `mainstream-default-readiness` - archived 2026-06-10; default-readiness inventory promoted to canonical spec.
 - `mainstream-production-readiness` - archived 2026-06-10; front-five status promoted to canonical spec.
@@ -126,7 +127,9 @@ one pass.
 - `Async IO wakeups` - Split into supported reactor timer/TCP subset and deferred all-host owned-fd readiness.
 - `User-defined Future support` - Supported subset with deferred exhaustive diagnostics.
 - `Multi-operand select` - Supported subset for 2..8.
-- `Select loser cancellation` - Deferred.
+- `Select loser cancellation` - Supported subset via `select_cancel`.
+- `Task cancellation boundaries` - Supported subset.
+- `Process cancellation` - Supported subset.
 - `Terminal/fd APIs` - Accepted risk.
 - `Recursive file transfer` - Accepted risk.
 - `Shell pipelines` - Supported subset.
