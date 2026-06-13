@@ -81,7 +81,7 @@
 
 ## 7. Verification
 
-- [ ] 7.1 Run `cargo fmt --check`.
+- [x] 7.1 Run `cargo fmt --check`.
 - [x] 7.2 Run native-link metadata tests from task 2.4.
 - [x] 7.3 Run `cargo test -p sgc` and package-specific tests for graphics
   packages.
@@ -109,7 +109,7 @@
 
 ## Archive Gate
 
-- [ ] All tasks above checked or explicitly marked as accepted platform/doc
+- [x] All tasks above checked or explicitly marked as accepted platform/doc
   skips in the support matrix.
 - [x] The archive evidence includes at least one non-skipped `blank_window`
   smoke run.
@@ -134,3 +134,4 @@
 - 2026-06-08 local Windows host: targeted rustfmt checks passed for touched
   Rust files, but global `cargo fmt --check` remains unchecked because unrelated
   pre-existing workspace changes require formatting.
+- 2026-06-13 local Windows host: global `cargo fmt --check` passed.

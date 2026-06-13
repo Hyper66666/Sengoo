@@ -2,10 +2,10 @@
 
 ## Purpose
 Capture the async runtime's current default-readiness contract after the reactor,
-user-future, select, timeout, thread-pool, channel, and mutex waves, while
-pinning the remaining deferred gaps such as all-host owned-fd readiness,
-exhaustive user-future diagnostics, wakeup-registration enforcement, and public
-task cancellation APIs.
+user-future, select, timeout, thread-pool, channel, mutex, and async
+cancellation waves, while pinning the remaining deferred gaps such as all-host
+owned-fd readiness, exhaustive user-future diagnostics, and wakeup-registration
+enforcement.
 ## Requirements
 ### Requirement: Async default follow-ups SHALL preserve current supported subset
 
@@ -18,8 +18,10 @@ documented async HTTP serving subset once `async-http-serving` lands.
 
 Async HTTP serving SHALL reduce the "no async HTTP server loop" gap only for
 the host-scoped subset proven by its own native and realworld tests. It SHALL
-NOT imply general task cancellation, select loser cancellation, TLS server
-support, streaming bodies, keep-alive, or all-host owned-fd readiness.
+NOT imply TLS server support, streaming bodies, keep-alive, or all-host
+owned-fd readiness. Task cancellation, select loser cancellation, and
+cancellable process waits are supported only through the bounded
+`async-cancellation` subset.
 
 #### Scenario: Existing async subset remains available
 
@@ -31,13 +33,13 @@ support, streaming bodies, keep-alive, or all-host owned-fd readiness.
 - **AND** unsupported paths fail with stable diagnostics or statuses rather than
   invalid LLVM or unresolved native symbols
 
-#### Scenario: Async HTTP serving does not expand cancellation claims
+#### Scenario: Async HTTP serving does not expand cancellation beyond the owned subset
 
 - **WHEN** an async HTTP request future is dropped or times out
 - **THEN** its own reactor interest and accepted-but-unpublished connection are
   cleaned up according to `stdlib-http-server`
-- **AND** support matrices still mark broad task cancellation and select loser
-  cancellation as Deferred unless separately proven
+- **AND** support matrices point cancellation claims at the `async-cancellation`
+  subset rather than implying broader HTTP-specific cancellation semantics
 
 ### Requirement: User-defined Future lowering SHALL declare a bounded supported subset
 
@@ -104,16 +106,16 @@ handle shapes and unsupported cases.
 
 ### Requirement: Cancellation defaults SHALL be user-visible and bounded
 
-Task cancellation, timeout cancellation, and select loser behavior SHALL have
-documented cleanup semantics before any new user-facing cancellation claim is
-made.
+Sengoo SHALL document task cancellation, timeout cancellation, process wait
+cancellation, and select loser behavior as bounded subsets before any broader
+user-facing cancellation claim is made.
 
-#### Scenario: Select loser cancellation remains deferred
+#### Scenario: Non-canceling select remains unchanged
 
 - **WHEN** `select` chooses a winning operand
 - **THEN** losing operands are dropped through normal cleanup
-- **AND** docs and support matrices do not claim cancellation unless tests prove
-  the cancellation behavior
+- **AND** docs and support matrices direct users to `select_cancel` when they
+  need deterministic loser cancellation
 
 ### Requirement: Public async cleanup wrappers SHALL lower correctly
 
