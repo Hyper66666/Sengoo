@@ -1,7 +1,129 @@
+use crate::ast::{DeclKind, TypeKind};
 use crate::{
     compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker,
 };
 use std::collections::HashSet;
+
+#[test]
+fn dyn_trait_type_syntax_parses_trait_bounds() {
+    let source = r#"
+trait Show {}
+
+def takes(x: dyn Show) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should accept dyn Trait syntax");
+    let function = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Function(function) if function.name.name == "takes" => Some(function),
+            _ => None,
+        })
+        .expect("expected takes function");
+
+    let TypeKind::Dyn(bounds) = &function.params[0].ty.kind else {
+        panic!(
+            "expected dyn trait parameter, got {:?}",
+            function.params[0].ty.kind
+        );
+    };
+
+    let names = bounds
+        .iter()
+        .map(|bound| {
+            bound
+                .path
+                .as_simple()
+                .expect("dyn bound should be a simple trait path")
+                .name
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["Show"]);
+}
+
+#[test]
+fn dyn_trait_type_syntax_parses_multiple_bounds() {
+    let source = r#"
+trait Read {}
+trait Write {}
+
+def stream(x: dyn Read + Write) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should accept dyn A + B syntax");
+    let function = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Function(function) if function.name.name == "stream" => Some(function),
+            _ => None,
+        })
+        .expect("expected stream function");
+
+    let TypeKind::Dyn(bounds) = &function.params[0].ty.kind else {
+        panic!(
+            "expected dyn trait parameter, got {:?}",
+            function.params[0].ty.kind
+        );
+    };
+
+    let names = bounds
+        .iter()
+        .map(|bound| {
+            bound
+                .path
+                .as_simple()
+                .expect("dyn bound should be a simple trait path")
+                .name
+                .as_str()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["Read", "Write"]);
+}
+
+#[test]
+fn dyn_trait_type_requires_declared_trait() {
+    let source = r#"
+def bad(x: dyn Missing) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse before type checking");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("undefined dyn trait should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[undefined-dyn-trait]") && message.contains("Missing"),
+        "expected undefined-dyn-trait diagnostic, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_typechecks_when_trait_is_declared() {
+    let source = r#"
+trait Show {}
+
+def takes(x: dyn Show) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("declared dyn trait should typecheck");
+}
 
 #[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {

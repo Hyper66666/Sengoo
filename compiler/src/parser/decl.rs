@@ -17,7 +17,7 @@ impl<'source> Parser<'source> {
         kinds.iter().any(|kind| self.check(kind.clone()))
     }
 
-    fn parse_trait_bounds(&mut self) -> Result<Vec<TraitBound>> {
+    pub(super) fn parse_trait_bounds(&mut self) -> Result<Vec<TraitBound>> {
         let mut bounds = Vec::new();
         loop {
             let path = self.parse_path()?;

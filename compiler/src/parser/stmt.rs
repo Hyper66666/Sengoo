@@ -256,6 +256,10 @@ impl<'source> Parser<'source> {
 
                     TypeKind::Fn { params, ret }
                 }
+                TokenKind::DynKw => {
+                    self.advance();
+                    TypeKind::Dyn(self.parse_trait_bounds()?)
+                }
                 TokenKind::Not => {
                     self.advance();
                     TypeKind::Never
