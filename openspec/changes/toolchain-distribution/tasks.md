@@ -10,7 +10,7 @@
   source version from `workspace.package.version`.
 - [x] 2.2 `--version` on `sgc`, `sgpm`, `sgfmt`, `sglsp` prints
   `<tool> <version> (<short-hash>)`.
-- [ ] 2.3 Workspace test asserts all four tools agree on version and hash.
+- [x] 2.3 Workspace test asserts all four tools agree on version and hash.
 
 ## 3. Packaging workflow
 
