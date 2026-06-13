@@ -8,6 +8,7 @@ pub(super) fn lower_named_call(
     match ctx.resolve_named_call_target(name, arg_locals) {
         CallTargetResolution::Builtin(local) => local,
         CallTargetResolution::Planned(plan) => {
+            ctx.mark_drop_locals_moved(arg_locals);
             let invocation = {
                 let async_functions = ctx.options.async_functions.borrow();
                 build_call_invocation_plan(

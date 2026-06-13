@@ -125,6 +125,8 @@ pub(super) fn emit_resolved_method_call(
     arg_locals: &[Local],
     resolved_func_name: &str,
 ) -> Local {
+    ctx.mark_drop_locals_moved(arg_locals);
+
     let mut ret_type = ctx
         .function_sig(resolved_func_name)
         .map(|sig| sig.ret_type.clone())
@@ -163,6 +165,10 @@ pub(super) fn lower_method_call_from_locals(
     method: &str,
     arg_locals: &[Local],
 ) -> Local {
+    if method == "drop" {
+        ctx.mark_drop_local_moved(receiver_local);
+    }
+
     if let Some(result_local) = try_lower_string_len_method_call(ctx, receiver_local, method) {
         return result_local;
     }

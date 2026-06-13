@@ -26,12 +26,33 @@
 ## 3. MIR drop-glue insertion
 
 - [ ] 3.1 Add a MIR pass that inserts drop calls for owning locals at scope exit.
+  - Partial: top-level stdlib `String` let bindings now get MIR-level
+    `String_drop` calls at function exits; straight-line single-exit functions
+    use the no-flag fast path only when every dropped binding initializes in
+    the entry block. Conditionally initialized bindings use runtime flags even
+    when the function has one return. General owning locals and nested scope
+    exits remain open.
 - [ ] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
+  - Partial: `?` propagation exits use per-binding runtime drop flags, set false
+    at function entry and true after the owning let initializes. Every MIR
+    `Return` exit is guarded so values declared before `?` are dropped, values
+    declared after `?` are skipped on early propagation, multiple bindings drop
+    in reverse declaration order, and moved-from bindings are excluded for the
+    implemented move sites: direct `let b = a`, owned tail-expression returns,
+    owned named-call arguments, owned method-call arguments, and explicit
+    `String.drop()` receivers. Existing `return` expression lowering is still a
+    no-op and must reuse this machinery once it becomes a real MIR exit; loop
+    `break`/`continue` currently rejoin before function return; nested scope
+    exit timing and partial-move flag clearing remain open.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
 - [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
 - [ ] 3.5 IR/codegen tests asserting drop count and order (extend
   `codegen_*`/`struct_codegen` test lanes).
+  - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
+    straight-line drop insertion, `?` early-return flags, reverse drop order,
+    conditional-init flags, tail-return moves, named-call/method-argument moves,
+    explicit drop receivers, and moved binding exclusion.
 
 ## 4. Runtime resource migration
 
