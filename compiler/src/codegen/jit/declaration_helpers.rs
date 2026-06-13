@@ -1,9 +1,16 @@
 use super::JITCodegen;
 use crate::mir::async_dispatch_synthesis_helpers::{
+    select_cancel_n_winner_runtime_declaration, select_cancel_n_winner_runtime_function_name,
+    select_cancel_winner_runtime_declaration, select_cancel_winner_runtime_function_name,
+    select_n_winner_runtime_declaration, select_n_winner_runtime_function_name,
     select_runtime_declaration, select_runtime_function_name, select_runtime_return_type,
     select_winner_runtime_declaration, select_winner_runtime_function_name,
 };
 use crate::mir::MIRType;
+
+fn select_n_winner_signature() -> (Vec<MIRType>, MIRType) {
+    (vec![MIRType::Int(64); 17], MIRType::Int(64))
+}
 
 impl JITCodegen {
     pub(super) fn declare_runtime_functions(&mut self) {
@@ -18,6 +25,12 @@ impl JITCodegen {
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
         self.extern_decls
             .push_str(select_winner_runtime_declaration());
+        self.extern_decls
+            .push_str(select_n_winner_runtime_declaration());
+        self.extern_decls
+            .push_str(select_cancel_winner_runtime_declaration());
+        self.extern_decls
+            .push_str(select_cancel_n_winner_runtime_declaration());
         for ty in [
             MIRType::Int(8),
             MIRType::Int(16),
@@ -70,6 +83,26 @@ impl JITCodegen {
                 ],
                 MIRType::Int(64),
             ),
+        );
+        self.function_signatures.insert(
+            select_n_winner_runtime_function_name().to_string(),
+            select_n_winner_signature(),
+        );
+        self.function_signatures.insert(
+            select_cancel_winner_runtime_function_name().to_string(),
+            (
+                vec![
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                    MIRType::Int(64),
+                ],
+                MIRType::Int(64),
+            ),
+        );
+        self.function_signatures.insert(
+            select_cancel_n_winner_runtime_function_name().to_string(),
+            select_n_winner_signature(),
         );
         for ty in [
             MIRType::Int(8),

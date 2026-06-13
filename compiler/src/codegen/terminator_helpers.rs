@@ -8,6 +8,7 @@ impl Codegen {
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
+        let dbg = self.debug_location_suffix(&mir_fn.name);
         match terminator {
             mir::Terminator::Return(value) => {
                 if let Some(v) = value {
@@ -20,11 +21,11 @@ impl Codegen {
                     if is_main_returning_unit {
                         self.emit_indent();
 
-                        self.ir.push_str("ret i64 0\n");
+                        self.ir.push_str(&format!("ret i64 0{dbg}\n"));
                     } else if matches!(mir_fn.return_type, MIRType::Unit | MIRType::Never) {
                         self.emit_indent();
 
-                        self.ir.push_str("ret void\n");
+                        self.ir.push_str(&format!("ret void{dbg}\n"));
                     } else {
                         // Non-unit returns use operand_value to resolve the return register.
                         let reg = self.operand_value(*v, mir_fn);
@@ -33,18 +34,19 @@ impl Codegen {
 
                         self.emit_indent();
 
-                        self.ir.push_str(&format!("ret {} {}\n", llvm_ty, reg));
+                        self.ir
+                            .push_str(&format!("ret {} {}{}\n", llvm_ty, reg, dbg));
                     }
                 } else {
                     // Functions without an explicit return emit a default return value.
                     if mir_fn.name == "main" {
                         self.emit_indent();
 
-                        self.ir.push_str("ret i64 0\n");
+                        self.ir.push_str(&format!("ret i64 0{dbg}\n"));
                     } else {
                         self.emit_indent();
 
-                        self.ir.push_str("ret void\n");
+                        self.ir.push_str(&format!("ret void{dbg}\n"));
                     }
                 }
             }
@@ -52,7 +54,8 @@ impl Codegen {
             mir::Terminator::Goto(target) => {
                 self.emit_indent();
 
-                self.ir.push_str(&format!("br label %bb_{}\n", target));
+                self.ir
+                    .push_str(&format!("br label %bb_{}{}\n", target, dbg));
             }
 
             mir::Terminator::If {
@@ -83,8 +86,8 @@ impl Codegen {
                 self.emit_indent();
 
                 self.ir.push_str(&format!(
-                    "br i1 {}, label %bb_{}, label %bb_{}\n",
-                    cond_value, then_block, else_block
+                    "br i1 {}, label %bb_{}, label %bb_{}{}\n",
+                    cond_value, then_block, else_block, dbg
                 ));
             }
 
@@ -127,19 +130,21 @@ impl Codegen {
             mir::Terminator::Break { target } => {
                 self.emit_indent();
 
-                self.ir.push_str(&format!("br label %bb_{}\n", target));
+                self.ir
+                    .push_str(&format!("br label %bb_{}{}\n", target, dbg));
             }
 
             mir::Terminator::Continue { target } => {
                 self.emit_indent();
 
-                self.ir.push_str(&format!("br label %bb_{}\n", target));
+                self.ir
+                    .push_str(&format!("br label %bb_{}{}\n", target, dbg));
             }
 
             mir::Terminator::Unreachable => {
                 self.emit_indent();
 
-                self.ir.push_str("unreachable\n");
+                self.ir.push_str(&format!("unreachable{dbg}\n"));
             }
 
             mir::Terminator::Call {
@@ -191,21 +196,27 @@ impl Codegen {
 
                 let callee = self.emitted_function_name(func);
                 if ret_ty == "void" {
-                    self.ir
-                        .push_str(&format!("call void @{}({})\n", callee, arg_strs.join(", ")));
+                    self.ir.push_str(&format!(
+                        "call void @{}({}){}\n",
+                        callee,
+                        arg_strs.join(", "),
+                        dbg
+                    ));
                 } else {
                     self.ir.push_str(&format!(
-                        "{} = call {} @{}({})\n",
+                        "{} = call {} @{}({}){}\n",
                         dest,
                         ret_ty,
                         callee,
-                        arg_strs.join(", ")
+                        arg_strs.join(", "),
+                        dbg
                     ));
                 }
 
                 self.emit_indent();
 
-                self.ir.push_str(&format!("br label %bb_{}\n", target));
+                self.ir
+                    .push_str(&format!("br label %bb_{}{}\n", target, dbg));
             }
 
             mir::Terminator::Suspend {
@@ -220,8 +231,8 @@ impl Codegen {
 
                 self.emit_indent();
                 self.ir.push_str(&format!(
-                    "{} = call i64 @{}(i64 {})\n",
-                    dest, poll_func, handle_val
+                    "{} = call i64 @{}(i64 {}){}\n",
+                    dest, poll_func, handle_val, dbg
                 ));
 
                 let cmp = format!("{}_cmp", dest);
@@ -231,8 +242,8 @@ impl Codegen {
 
                 self.emit_indent();
                 self.ir.push_str(&format!(
-                    "br i1 {}, label %bb_{}, label %bb_{}\n",
-                    cmp, ready_block, pending_block
+                    "br i1 {}, label %bb_{}, label %bb_{}{}\n",
+                    cmp, ready_block, pending_block, dbg
                 ));
             }
         }

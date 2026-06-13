@@ -9,6 +9,13 @@ use std::path::Path;
 mod config;
 use config::{resolve_options, Args};
 
+pub(crate) const SGFMT_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("SENGOO_BUILD_HASH"),
+    ")"
+);
+
 fn format_file(path: &Path, options: &FormatOptions) -> Result<String> {
     let content = fs::read_to_string(path).into_diagnostic()?;
     format_source(&content, options)

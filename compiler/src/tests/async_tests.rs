@@ -1,5 +1,5 @@
 use crate::ast::DeclKind;
-use crate::codegen::{Codegen, FfiCodegenConfig};
+use crate::codegen::{Codegen, FfiCodegenConfig, JITCodegen};
 use crate::mir::{Instruction, LocalKind};
 use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
@@ -811,6 +811,138 @@ async def main() -> i64 {
     assert!(
         saw_phi,
         "select lowering should merge select results with a phi"
+    );
+}
+
+#[test]
+fn select_cancel_lowering_emits_cancel_winner_runtime_call_and_result_phi() {
+    let source = r#"
+async def first_step() -> i64 { 1 }
+async def second_step() -> i64 { 2 }
+async def main() -> i64 {
+    let first = spawn(first_step());
+    let second = spawn(second_step());
+    select_cancel(first, second)
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("select_cancel source should lower to MIR");
+    let mut saw_winner = false;
+    let mut saw_first_result = false;
+    let mut saw_second_result = false;
+    let mut saw_phi = false;
+    for mir_fn in &mir_fns {
+        for inst in &mir_fn.instructions {
+            match inst {
+                Instruction::Call { func, .. } if func == "sengoo_async_select_cancel_winner" => {
+                    saw_winner = true;
+                }
+                Instruction::Call { func, .. } if func == "first_step__result" => {
+                    saw_first_result = true;
+                }
+                Instruction::Call { func, .. } if func == "second_step__result" => {
+                    saw_second_result = true;
+                }
+                Instruction::Phi { incoming, .. } if incoming.len() == 2 => {
+                    saw_phi = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        saw_winner,
+        "select_cancel lowering should emit the canceling winner runtime call"
+    );
+    assert!(
+        saw_first_result,
+        "select_cancel lowering should emit the first future result call"
+    );
+    assert!(
+        saw_second_result,
+        "select_cancel lowering should emit the second future result call"
+    );
+    assert!(
+        saw_phi,
+        "select_cancel lowering should merge select results with a phi"
+    );
+}
+
+#[test]
+fn select_cancel_three_operands_lowering_emits_cancel_n_winner_runtime_call() {
+    let source = r#"
+async def a() -> i64 { 1 }
+async def b() -> i64 { 2 }
+async def c() -> i64 { 3 }
+
+async def main() -> i64 {
+    select_cancel(spawn(a()), spawn(b()), spawn(c()))
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("select_cancel source should lower to MIR");
+    assert!(
+        mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                Instruction::Call { func, .. } => func == "sengoo_async_select_cancel_n_winner",
+                _ => false,
+            })
+        }),
+        "select_cancel with three operands should call the canceling n-winner runtime"
+    );
+}
+
+#[test]
+fn jit_declares_select_cancel_n_winner_runtime_call() {
+    let source = r#"
+async def a() -> i64 { 1 }
+async def b() -> i64 { 2 }
+async def c() -> i64 { 3 }
+
+async def main() -> i64 {
+    select_cancel(spawn(a()), spawn(b()), spawn(c()))
+}
+"#;
+
+    let mir_fns = compile_to_mir(source).expect("select_cancel source should lower to MIR");
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&mir_fns)
+        .expect("JIT should generate IR for n-ary select_cancel");
+
+    assert!(
+        ir.contains(
+            "declare i64 @sengoo_async_select_cancel_n_winner(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)"
+        ),
+        "JIT IR should declare n-ary select_cancel winner runtime, got:\n{}",
+        &ir[..ir.len().min(4000)]
+    );
+}
+
+#[test]
+fn select_cancel_rejects_mismatched_future_result_types() {
+    let source = r#"
+async def left() -> i64 { 1 }
+async def right() -> bool { true }
+
+async def main() -> i64 {
+    let first = spawn(left());
+    let second = spawn(right());
+    let picked = select_cancel(first, second);
+    if picked > 0 { picked } else { 0 }
+}
+"#;
+
+    let err = compile_to_ir(source)
+        .expect_err("select_cancel should reject mismatched future result types");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            || msg.contains("cannot unify")
+            || msg.contains("matching")
+            || (msg.contains("type check error") && msg.contains("bool") && msg.contains("i64")),
+        "unexpected select_cancel diagnostic: {msg}"
     );
 }
 

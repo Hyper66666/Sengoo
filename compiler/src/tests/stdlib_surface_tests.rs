@@ -373,9 +373,11 @@ def main() -> i64 {
     let missing_1 = process_run_1("sengoo-missing-process", "a").is_err();
     let missing_2 = process_run_2("sengoo-missing-process", "a", "b").is_err();
     let missing_3 = process_run_3("sengoo-missing-process", "a", "b", "c").is_err();
+    let stale_handle = ProcessHandle { handle: 0 };
+    let wait_cancellable_rejected = stale_handle.wait_cancellable(1).is_err();
     buffer.free();
 
-    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 && missing_0 && missing_1 && missing_2 && missing_3 {
+    if len > 0 && copied == len && pid > 0 && ok_code == 0 && err_code == 9 && missing_0 && missing_1 && missing_2 && missing_3 && wait_cancellable_rejected {
         1
     } else {
         0
@@ -388,6 +390,7 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_process_current_dir_len"));
     assert!(ir.contains("sengoo_process_current_dir_copy"));
     assert!(ir.contains("sengoo_process_run"));
+    assert!(ir.contains("sengoo_process_handle_wait_cancellable"));
     assert!(ir.contains("process_exit_code"));
 }
 

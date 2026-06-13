@@ -1,12 +1,15 @@
 ## 1. Prerequisites and baseline
 
 - [x] 1.1 Run `openspec validate native-debug-info --strict`.
-- [ ] 1.2 Confirm `codegen-ir-correctness-and-gate` is archived (conformance
+- [x] 1.2 Confirm `codegen-ir-correctness-and-gate` is archived (conformance
   gate drives the real `sgc` CLI); otherwise record it as the active blocker
   and stop before §3.
 - [ ] 1.3 Record the no-`-g` baseline: pick three fixtures (scalar control
   flow, struct/method, async main) and check in their emitted IR hashes to
   prove later byte-identity without `-g`.
+- [x] 1.4 Pin explicit deferrals: no `sgpm build` debug-profile forwarding,
+  no DAP/IDE debug UI, no pretty-printers, and no full local-variable
+  inspection in v1.
 
 ## 2. Span plumbing audit
 
@@ -17,9 +20,9 @@
 
 ## 3. DI emission
 
-- [ ] 3.1 Emit `DIFile`/`DICompileUnit` named metadata and module flags
+- [x] 3.1 Emit `DIFile`/`DICompileUnit` named metadata and module flags
   (`Debug Info Version`, DWARF version) under `-g`.
-- [ ] 3.2 Emit `DISubprogram` per function with `!dbg` attachment, including
+- [x] 3.2 Emit `DISubprogram` per function with `!dbg` attachment, including
   synthesized lambda names.
 - [ ] 3.3 Attach statement `!dbg` locations per design D-A2.
 - [ ] 3.4 IR tests: DI presence/shape under `-g`; byte-identical IR without
@@ -27,9 +30,9 @@
 
 ## 4. CLI and cache
 
-- [ ] 4.1 Add `-g`/`--debug-info` to `sgc build` and `sgc run`; forward `-g`
+- [x] 4.1 Add `-g`/`--debug-info` to `sgc build` and `sgc run`; forward `-g`
   to `clang` compile/link.
-- [ ] 4.2 Add the debug-mode dimension to the artifact-cache fingerprint;
+- [x] 4.2 Add the debug-mode dimension to the artifact-cache fingerprint;
   tests prove `-g` and non-`-g` artifacts never alias and cache reuse still
   works within each mode.
 - [ ] 4.3 Conformance examples run under `-g` with unchanged results through
@@ -37,10 +40,12 @@
 
 ## 5. Debugger validation and docs
 
-- [ ] 5.1 Linux: scripted lldb transcript — breakpoint on a Sengoo
+- [ ] 5.1 Linux: scripted lldb transcript
+  `docs/debugging-native-linux-lldb.transcript` — breakpoint on a Sengoo
   file:line binds, hits, `next` steps one source line, `continue` exits 0.
-- [ ] 5.2 Windows: scripted cdb/WinDbg transcript with the same assertions
-  on the CodeView path.
+- [ ] 5.2 Windows: scripted cdb/WinDbg transcript
+  `docs/debugging-native-windows-cdb.transcript` with the same assertions on
+  the CodeView path.
 - [ ] 5.3 Stretch: parameter `DILocalVariable` + `llvm.dbg.declare`; ship
   only with passing reads in both debuggers, else record matrix-deferred.
 - [ ] 5.4 Upgrade `docs/debugging-native.md` to source-level workflows and
@@ -50,16 +55,16 @@
 
 ## 6. Verification
 
-- [ ] 6.1 `cargo fmt --check`
-- [ ] 6.2 `cargo test -p sengoo-compiler --lib`
-- [ ] 6.3 `cargo test -p sgc`
+- [x] 6.1 `cargo fmt --check`
+- [x] 6.2 `cargo test -p sengoo-compiler --lib`
+- [x] 6.3 `cargo test -p sgc`
 - [ ] 6.4 Perf gate re-run (umbrella Phase 5 evidence): default-mode
   numbers unchanged vs reference snapshot.
-- [ ] 6.5 `openspec validate native-debug-info --strict`
+- [x] 6.5 `openspec validate native-debug-info --strict`
 
 ## Archive Gate
 
-- [ ] `openspec validate native-debug-info --strict` passes.
+- [x] `openspec validate native-debug-info --strict` passes.
 - [ ] Breakpoint + stepping transcripts exist for both Windows (CodeView)
   and Linux (DWARF) and are linked from the docs.
 - [ ] Non-`-g` IR is byte-identical to the pre-change baseline; conformance

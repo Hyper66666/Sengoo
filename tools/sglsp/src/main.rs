@@ -43,8 +43,23 @@ use workspace::{
     workspace_roots_from_initialize, workspace_symbols_for_documents,
 };
 
+const SGLSP_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("SENGOO_BUILD_HASH"),
+    ")"
+);
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("sglsp {SGLSP_VERSION}");
+        return Ok(());
+    }
+
     tracing_subscriber::fmt().init();
 
     let stdin = tokio::io::stdin();

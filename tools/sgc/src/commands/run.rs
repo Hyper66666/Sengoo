@@ -1,6 +1,6 @@
 use crate::*;
 use miette::{IntoDiagnostic, Result};
-use sengoo_compiler::AssertCallsiteContext;
+use sengoo_compiler::{AssertCallsiteContext, DebugInfoConfig};
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
@@ -24,6 +24,7 @@ pub(crate) async fn cmd_run(
     frontend_jobs: FrontendJobs,
     frontend_trace: bool,
     reflection: ReflectionCliOptions,
+    debug_info: bool,
 ) -> Result<()> {
     println!("Running: {}", input);
 
@@ -235,6 +236,7 @@ pub(crate) async fn cmd_run(
         format!("low_memory={}", low_memory),
         format!("reflection={}", reflection.enabled),
         format!("contract_checks={}", contract_checks_enabled),
+        format!("debug_info={}", debug_info),
     ];
     let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
         previous_generic_cache_seed.as_ref(),
@@ -259,6 +261,7 @@ pub(crate) async fn cmd_run(
         module_fingerprints.clone(),
         opt_level,
         contract_checks_enabled,
+        debug_info,
         requested_engine,
         resolved_engine,
         RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
@@ -351,6 +354,7 @@ pub(crate) async fn cmd_run(
         &graph_v2.root_module,
         opt_level,
         contract_checks_enabled,
+        debug_info,
         requested_engine,
         resolved_engine,
         runtime_c.as_deref(),
@@ -496,6 +500,12 @@ pub(crate) async fn cmd_run(
         },
         Some(assert_callsite),
         None,
+        debug_info.then(|| {
+            DebugInfoConfig::for_source(
+                input_path.to_string_lossy().replace('\\', "/"),
+                root_source.clone(),
+            )
+        }),
     )
     .map_err(|e| {
         emit_compile_error(Some(input), &e.to_string());
@@ -531,6 +541,7 @@ pub(crate) async fn cmd_run(
                         runtime_c.as_deref(),
                         opt_level,
                         contract_checks_enabled,
+                        debug_info,
                         requested_engine,
                         resolved_engine,
                         &graph_v2,
@@ -562,10 +573,24 @@ pub(crate) async fn cmd_run(
                             println!("  - {}", line);
                         }
                     }
-                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level, None)?;
+                    compile_ir_to_object(
+                        clang,
+                        &llvm_ir_path,
+                        &object_path,
+                        opt_level,
+                        None,
+                        debug_info,
+                    )?;
                 }
                 None => {
-                    compile_ir_to_object(clang, &llvm_ir_path, &object_path, opt_level, None)?;
+                    compile_ir_to_object(
+                        clang,
+                        &llvm_ir_path,
+                        &object_path,
+                        opt_level,
+                        None,
+                        debug_info,
+                    )?;
                 }
             }
 
@@ -629,6 +654,7 @@ pub(crate) async fn cmd_run(
         module_fingerprints,
         opt_level,
         contract_checks: contract_checks_enabled,
+        debug_info,
         requested_engine,
         resolved_engine,
         runtime_c,

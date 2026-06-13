@@ -34,6 +34,8 @@ enum DaemonCommand {
         frontend_jobs: String,
         #[serde(default)]
         frontend_trace: bool,
+        #[serde(default)]
+        debug_info: bool,
         reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
@@ -52,6 +54,8 @@ enum DaemonCommand {
         frontend_jobs: String,
         #[serde(default)]
         frontend_trace: bool,
+        #[serde(default)]
+        debug_info: bool,
         reflect: ReflectionMode,
         reflect_module: Vec<String>,
         reflect_symbol: Vec<String>,
@@ -102,6 +106,7 @@ pub(super) fn daemon_request_build(
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
+    debug_info: bool,
 ) -> DaemonRequest {
     DaemonRequest {
         protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -116,6 +121,7 @@ pub(super) fn daemon_request_build(
             low_memory,
             frontend_jobs: frontend_jobs_label(frontend_jobs),
             frontend_trace,
+            debug_info,
             reflect,
             reflect_module: reflect_module.to_vec(),
             reflect_symbol: reflect_symbol.to_vec(),
@@ -137,6 +143,7 @@ fn daemon_request_run(
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
+    debug_info: bool,
 ) -> DaemonRequest {
     DaemonRequest {
         protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -151,6 +158,7 @@ fn daemon_request_run(
             low_memory,
             frontend_jobs: frontend_jobs_label(frontend_jobs),
             frontend_trace,
+            debug_info,
             reflect,
             reflect_module: reflect_module.to_vec(),
             reflect_symbol: reflect_symbol.to_vec(),
@@ -173,6 +181,7 @@ pub(crate) async fn dispatch_build_via_daemon(
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
+    debug_info: bool,
 ) -> Result<DaemonDispatchOutcome> {
     let request = daemon_request_build(
         input,
@@ -187,6 +196,7 @@ pub(crate) async fn dispatch_build_via_daemon(
         reflect,
         reflect_module,
         reflect_symbol,
+        debug_info,
     );
     dispatch_daemon_request(addr, &request, "build").await
 }
@@ -206,6 +216,7 @@ pub(crate) async fn dispatch_run_via_daemon(
     reflect: ReflectionMode,
     reflect_module: &[String],
     reflect_symbol: &[String],
+    debug_info: bool,
 ) -> Result<DaemonDispatchOutcome> {
     let request = daemon_request_run(
         input,
@@ -220,6 +231,7 @@ pub(crate) async fn dispatch_run_via_daemon(
         reflect,
         reflect_module,
         reflect_symbol,
+        debug_info,
     );
     dispatch_daemon_request(addr, &request, "run").await
 }
@@ -380,6 +392,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             low_memory,
             frontend_jobs,
             frontend_trace,
+            debug_info,
             reflect,
             reflect_module,
             reflect_symbol,
@@ -397,6 +410,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
                 None,
                 None,
+                debug_info,
             )
             .await
         }
@@ -410,6 +424,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
             low_memory,
             frontend_jobs,
             frontend_trace,
+            debug_info,
             reflect,
             reflect_module,
             reflect_symbol,
@@ -425,6 +440,7 @@ async fn execute_daemon_request(request: DaemonRequest) -> DaemonResponse {
                 parse_frontend_jobs_wire(&frontend_jobs),
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
+                debug_info,
             )
             .await
         }

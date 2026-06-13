@@ -17,10 +17,12 @@ consuming variant; the process wait gains a cancellation-capable form.
 - Status machine stays `0=unknown, 1=pending, 2=completed, 3=canceled`;
   completed tasks are never demoted; canceling an unknown id returns
   `false` as today.
-- Awaiting a future produced by `spawn(...)` whose underlying task was
-  canceled resolves to the runtime cancellation error path with stable
-  status `STATUS_CANCELED() == 19`, appended after the existing status
-  taxonomy with no renumbering of existing categories.
+- Plain `await Future<T>` remains type-stable and returns `T`; this change
+  does not retrofit ordinary awaits into `Result<T, i64>`. Cancellation
+  status is observed through `task_status(task_id)` for scheduled tasks and
+  through dedicated status-returning futures / stdlib APIs such as
+  `timeout_cancel` and `ProcessHandle.wait_cancellable`, using
+  `STATUS_CANCELED() == 19` with no renumbering of existing categories.
 - Child futures owned by a canceled frame are dropped through normal future
   cleanup, which unregisters any reactor interest (reuse of the HTTP-drop
   invariant).

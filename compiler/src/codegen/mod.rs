@@ -1,5 +1,6 @@
 pub mod common;
 
+mod debug_info;
 mod declaration_helpers;
 mod instruction_helpers;
 pub mod jit;
@@ -7,6 +8,7 @@ mod module_helpers;
 mod module_pipeline_helpers;
 mod terminator_helpers;
 
+pub use debug_info::DebugInfoConfig;
 pub use jit::JITCodegen;
 
 use crate::mir::{self, Local, LocalKind, MIRType, MirConstant, MirFunction, MIR_I64};
@@ -84,6 +86,10 @@ pub struct Codegen {
     phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
 
     phi_incoming_values: HashMap<(usize, usize, usize), String>,
+
+    debug_info: DebugInfoConfig,
+
+    debug_locations: HashMap<String, debug_info::DebugLocationIds>,
 }
 
 impl Codegen {
@@ -96,6 +102,14 @@ impl Codegen {
     }
 
     pub fn with_ffi_and_target(ffi: FfiCodegenConfig, target_triple: Option<String>) -> Self {
+        Self::with_ffi_target_and_debug(ffi, target_triple, DebugInfoConfig::disabled())
+    }
+
+    pub fn with_ffi_target_and_debug(
+        ffi: FfiCodegenConfig,
+        target_triple: Option<String>,
+        debug_info: DebugInfoConfig,
+    ) -> Self {
         let mut cg = Self {
             ir: String::new(),
 
@@ -122,6 +136,10 @@ impl Codegen {
             phi_incoming_loads_by_block: HashMap::new(),
 
             phi_incoming_values: HashMap::new(),
+
+            debug_info,
+
+            debug_locations: HashMap::new(),
         };
 
         cg.emit_header();
@@ -201,7 +219,10 @@ impl Codegen {
             self.ir.push_str(&format!("{} {}", param_ty, param_name));
         }
 
-        self.ir.push_str(") {\n");
+        self.ir.push_str(&format!(
+            "){} {{\n",
+            self.debug_subprogram_suffix(&mir_fn.name)
+        ));
 
         self.indent += 1;
 

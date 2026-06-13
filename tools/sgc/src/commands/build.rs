@@ -1,5 +1,6 @@
 use crate::*;
 use miette::{IntoDiagnostic, Result};
+use sengoo_compiler::DebugInfoConfig;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,6 +25,7 @@ pub(crate) async fn cmd_build(
     reflection: ReflectionCliOptions,
     target: Option<&str>,
     timings_json: Option<&str>,
+    debug_info: bool,
 ) -> Result<()> {
     let build_target = NativeBuildTarget::resolve(target)?;
     if build_target.is_cross() {
@@ -235,6 +237,7 @@ pub(crate) async fn cmd_build(
         format!("low_memory={}", low_memory),
         format!("reflection={}", reflection.enabled),
         format!("contract_checks={}", contract_checks_enabled),
+        format!("debug_info={}", debug_info),
     ];
     let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
         previous_generic_cache_seed.as_ref(),
@@ -259,6 +262,7 @@ pub(crate) async fn cmd_build(
         module_fingerprints.clone(),
         opt_level,
         contract_checks_enabled,
+        debug_info,
         emit_llvm,
         RuntimeSourceIdentity::new(runtime_c.clone(), runtime_c_fingerprint),
         output_file.clone(),
@@ -324,6 +328,7 @@ pub(crate) async fn cmd_build(
         emit_llvm,
         opt_level,
         contract_checks_enabled,
+        debug_info,
         &output_file,
         runtime_c.as_deref(),
     );
@@ -460,6 +465,12 @@ pub(crate) async fn cmd_build(
         },
         None,
         Some(&build_target.triple),
+        debug_info.then(|| {
+            DebugInfoConfig::for_source(
+                input_path.to_string_lossy().replace('\\', "/"),
+                root_source.clone(),
+            )
+        }),
     )
     .map_err(|e| {
         emit_compile_error(Some(input), &e.to_string());
@@ -491,6 +502,7 @@ pub(crate) async fn cmd_build(
             module_fingerprints,
             opt_level,
             contract_checks: contract_checks_enabled,
+            debug_info,
             emit_llvm: true,
             runtime_c,
             runtime_c_fingerprint,
@@ -538,6 +550,7 @@ pub(crate) async fn cmd_build(
                 runtime_c.as_deref(),
                 opt_level,
                 contract_checks_enabled,
+                debug_info,
                 &graph_v2,
             )
         })
@@ -573,6 +586,7 @@ pub(crate) async fn cmd_build(
                 &object_path,
                 opt_level,
                 Some(&build_target),
+                debug_info,
             )?;
         }
         None => {
@@ -582,6 +596,7 @@ pub(crate) async fn cmd_build(
                 &object_path,
                 opt_level,
                 Some(&build_target),
+                debug_info,
             )?;
         }
     }
@@ -625,6 +640,7 @@ pub(crate) async fn cmd_build(
         module_fingerprints,
         opt_level,
         contract_checks: contract_checks_enabled,
+        debug_info,
         emit_llvm: false,
         runtime_c,
         runtime_c_fingerprint,

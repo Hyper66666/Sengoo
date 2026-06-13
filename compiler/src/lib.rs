@@ -14,7 +14,7 @@ pub(crate) mod type_naming;
 pub mod typeck;
 
 pub use ast::*;
-pub use codegen::{jit::JITCodegen, Codegen, FfiCodegenConfig};
+pub use codegen::{jit::JITCodegen, Codegen, DebugInfoConfig, FfiCodegenConfig};
 pub use error::{CompileError, CompileWarning, Result};
 pub use hir::lower_ast;
 pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};

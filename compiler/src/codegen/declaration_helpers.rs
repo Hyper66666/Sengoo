@@ -1,5 +1,7 @@
 use super::*;
 use crate::mir::async_dispatch_synthesis_helpers::{
+    select_cancel_n_winner_runtime_declaration, select_cancel_n_winner_runtime_function_name,
+    select_cancel_winner_runtime_declaration, select_cancel_winner_runtime_function_name,
     select_n_winner_runtime_declaration, select_n_winner_runtime_function_name,
     select_runtime_declaration, select_winner_runtime_declaration,
     select_winner_runtime_function_name,
@@ -159,6 +161,34 @@ impl Codegen {
         });
         if needs_n_winner && !self.declarations.contains(n_winner_decl) {
             self.declarations.push_str(n_winner_decl);
+        }
+
+        let cancel_winner_decl = select_cancel_winner_runtime_declaration();
+        let needs_cancel_winner = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. }
+                        if func == select_cancel_winner_runtime_function_name()
+                )
+            })
+        });
+        if needs_cancel_winner && !self.declarations.contains(cancel_winner_decl) {
+            self.declarations.push_str(cancel_winner_decl);
+        }
+
+        let cancel_n_winner_decl = select_cancel_n_winner_runtime_declaration();
+        let needs_cancel_n_winner = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. }
+                        if func == select_cancel_n_winner_runtime_function_name()
+                )
+            })
+        });
+        if needs_cancel_n_winner && !self.declarations.contains(cancel_n_winner_decl) {
+            self.declarations.push_str(cancel_n_winner_decl);
         }
 
         let mut needed = std::collections::BTreeSet::new();

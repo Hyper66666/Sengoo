@@ -8,17 +8,17 @@ use super::{
     can_use_incremental_link_with_metadata, can_use_incremental_link_with_run_metadata,
     classify_edit_impact, cmd_build, collect_bench_cases, collect_impl_only_impacted_symbols,
     collect_module_graph_snapshot, compile_ir_to_object, compile_native_binary, compile_source,
-    compile_source_with_phase_timings, daemon_request_build, derive_build_workset_plan,
-    derive_cached_native_recovery_plan, derive_codegen_workset_manifest,
-    derive_generic_instance_plan, derive_run_workset_plan, dispatch_build_via_daemon,
-    edit_class_label, ensure_runtime_objects, expand_stdlib_imports_for_source, find_clang,
-    find_runtime_c, format_edit_impact_lines, generic_fingerprints_for_module,
-    generic_instance_hit_ratio, handle_daemon_client, link_native_binary_from_objects,
-    maybe_emit_reflection_sidecar, metadata_matches, module_dependency_levels,
-    module_fingerprints_for_source, module_invalidation_stats, native_library_link_args,
-    parse_frontend_jobs_arg, parse_linker_mode, reflection_options_from_cli,
-    reflection_sidecar_path_for_artifact, resolve_bench_suite_path, resolve_daemon_addr,
-    resolve_engine, runtime_bundle_fingerprint, runtime_source_bundle,
+    compile_source_to_llvm_file_with_phase_timings_with_mode, compile_source_with_phase_timings,
+    daemon_request_build, derive_build_workset_plan, derive_cached_native_recovery_plan,
+    derive_codegen_workset_manifest, derive_generic_instance_plan, derive_run_workset_plan,
+    dispatch_build_via_daemon, edit_class_label, ensure_runtime_objects,
+    expand_stdlib_imports_for_source, find_clang, find_runtime_c, format_edit_impact_lines,
+    generic_fingerprints_for_module, generic_instance_hit_ratio, handle_daemon_client,
+    link_native_binary_from_objects, maybe_emit_reflection_sidecar, metadata_matches,
+    module_dependency_levels, module_fingerprints_for_source, module_invalidation_stats,
+    native_library_link_args, parse_frontend_jobs_arg, parse_linker_mode,
+    reflection_options_from_cli, reflection_sidecar_path_for_artifact, resolve_bench_suite_path,
+    resolve_daemon_addr, resolve_engine, runtime_bundle_fingerprint, runtime_source_bundle,
     select_reflection_i64_zero_arity_symbol, send_daemon_request, signature_is_zero_arity_i64,
     validate_reflection_metadata, BuildCacheMetadata, BuildGraphNodeV2, BuildGraphV2,
     BuildWorksetPlan, CachedNativeRecoveryPlan, ContractChecksMode, DaemonDispatchOutcome,
@@ -35,7 +35,8 @@ use crate::cli::Cli;
 use crate::cross_compile::NativeBuildTarget;
 use clap::Parser as _;
 use sengoo_compiler::{
-    compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, JITCodegen,
+    compile_to_ir as compile_compiler_ir, compile_to_mir, CompileWarning, DebugInfoConfig,
+    JITCodegen,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
@@ -63,6 +64,7 @@ fn metadata_for_test() -> RunCacheMetadata {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -195,6 +197,7 @@ fn cache_miss_when_opt_level_changes() {
         vec![fp("tests/mod_a.sg", 11, 11)],
         2,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
@@ -209,6 +212,7 @@ fn cache_miss_when_engine_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Lli,
@@ -225,11 +229,31 @@ fn cache_hit_when_key_matches() {
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
     );
     assert!(metadata_matches(&metadata, &key));
+}
+
+#[test]
+fn cache_miss_when_debug_info_changes() {
+    let metadata = metadata_for_test();
+    let key = cache_key(
+        123,
+        vec![fp("tests/mod_a.sg", 11, 11)],
+        1,
+        false,
+        true,
+        RunEngine::Auto,
+        RunEngine::Native,
+        RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
+    );
+    assert!(!metadata_matches(&metadata, &key));
+    assert!(cache_mismatch_reasons(&metadata, &key)
+        .iter()
+        .any(|reason| reason.contains("debug info changed")));
 }
 
 #[test]
@@ -240,6 +264,7 @@ fn cache_miss_when_runtime_source_fingerprint_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -260,6 +285,7 @@ fn cache_miss_when_runtime_source_fingerprint_is_missing() {
         123,
         vec![fp("tests/mod_a.sg", 11, 11)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -301,6 +327,7 @@ fn cache_miss_when_module_dependency_changes() {
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
@@ -315,6 +342,7 @@ fn cache_mismatch_reasons_include_module_changes() {
         123,
         vec![fp("tests/mod_a.sg", 11, 99)],
         1,
+        false,
         false,
         RunEngine::Auto,
         RunEngine::Native,
@@ -637,7 +665,7 @@ def main() -> i64 {
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("runtime-bundle-link-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false).unwrap();
     let inc_exe = temp_artifact(
         "runtime-bundle-link-objects",
         if cfg!(windows) { "exe" } else { "" },
@@ -684,7 +712,7 @@ def main() -> i64 {
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("runtime-tcp-readiness-fallback-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false).unwrap();
 
     let exe_path = temp_artifact(
         "runtime-tcp-readiness-fallback",
@@ -985,6 +1013,13 @@ fn contract_checks_flag_parses_for_build_and_run() {
     assert!(
         Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--contract-checks", "off",]).is_ok()
     );
+}
+
+#[test]
+fn debug_info_flag_parses_for_build_and_run() {
+    assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "--debug-info"]).is_ok());
+    assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--debug-info"]).is_ok());
+    assert!(Cli::try_parse_from(["sgc", "build", "tests/demo.sg", "-g"]).is_ok());
 }
 
 #[test]
@@ -1574,6 +1609,7 @@ fn daemon_build_request_uses_protocol_and_version() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     assert_eq!(request.protocol_version, DAEMON_PROTOCOL_VERSION);
     assert_eq!(request.client_version, env!("CARGO_PKG_VERSION"));
@@ -1614,6 +1650,7 @@ async fn daemon_happy_path_handles_build_request() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     let response = send_daemon_request(&addr.to_string(), &request)
         .await
@@ -1658,6 +1695,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         super::ReflectionCliOptions::default(),
         None,
         None,
+        false,
     )
     .await
     .unwrap();
@@ -1685,6 +1723,7 @@ async fn daemon_and_oneshot_build_emit_same_workset_manifest() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     );
     let response = send_daemon_request(&addr.to_string(), &request)
         .await
@@ -1719,6 +1758,7 @@ async fn daemon_client_fallback_when_server_unavailable() {
         ReflectionMode::Off,
         &[],
         &[],
+        false,
     )
     .await
     .unwrap();
@@ -1760,6 +1800,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         1,
         false,
         false,
+        false,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(777)),
         "tests/build/a.exe".to_string(),
     );
@@ -1771,6 +1812,7 @@ fn build_cache_schema_mismatch_forces_metadata_miss() {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -1791,6 +1833,7 @@ fn build_cache_miss_when_runtime_source_fingerprint_changes() {
         1,
         false,
         false,
+        false,
         RuntimeSourceIdentity::new(Some("tools/stdlib/runtime.c".to_string()), Some(22)),
         "tests/build/a.exe".to_string(),
     );
@@ -1802,6 +1845,7 @@ fn build_cache_miss_when_runtime_source_fingerprint_changes() {
         module_fingerprints: vec![fp("tests/mod_a.sg", 11, 11)],
         opt_level: 1,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(11),
@@ -1843,6 +1887,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -1860,6 +1905,7 @@ fn incremental_link_reuse_requires_matching_ir_hash() {
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         false,
         &graph,
     )
@@ -1893,6 +1939,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Native,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -1910,6 +1957,7 @@ fn run_incremental_link_reuse_accepts_matching_metadata() {
         &object_path,
         Some("tools/stdlib/runtime.c"),
         2,
+        false,
         false,
         RunEngine::Native,
         RunEngine::Native,
@@ -2742,6 +2790,95 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_cancel_task_prevents_post_await_code() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-cancel-post-await-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_cancel_post_await_counter = 0;\nlong long sengoo_test_cancel_post_await_reset(void) {{ sengoo_test_cancel_post_await_counter = 0; return 0; }}\nlong long sengoo_test_cancel_post_await_mark(void) {{ sengoo_test_cancel_post_await_counter += 1; return sengoo_test_cancel_post_await_counter; }}\nlong long sengoo_test_cancel_post_await_get(void) {{ return sengoo_test_cancel_post_await_counter; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_cancel_post_await_reset() -> i64;
+    fn sengoo_test_cancel_post_await_mark() -> i64;
+    fn sengoo_test_cancel_post_await_get() -> i64;
+}
+
+async def child() -> i64 {
+    await sleep(20);
+    sengoo_test_cancel_post_await_mark();
+    7
+}
+
+async def main() -> i64 {
+    sengoo_test_cancel_post_await_reset();
+    let task = spawn_task(child());
+    await sleep(1);
+    let canceled = cancel_task(task);
+    await sleep(40);
+    let status = task_status(task);
+    let marks = sengoo_test_cancel_post_await_get();
+    if canceled {
+        if status == 3 {
+            if marks == 0 { 42 } else { 1 }
+        } else {
+            2
+        }
+    } else {
+        3
+    }
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("cancel post-await source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-cancel-post-await", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact(
+        "async-cancel-post-await",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("cancel post-await executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
 fn async_native_runtime_polls_spawned_future_while_parent_waits() {
     let Some(clang) = find_clang() else {
         return;
@@ -2982,6 +3119,222 @@ async def main() -> i64 {
         .output()
         .expect("select native executable should run");
     assert_eq!(output.status.code(), Some(7));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
+fn async_native_runtime_select_cancel_prevents_loser_post_await_code() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-select-cancel-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_select_cancel_counter = 0;\nlong long sengoo_test_select_cancel_reset(void) {{ sengoo_test_select_cancel_counter = 0; return 0; }}\nlong long sengoo_test_select_cancel_mark(void) {{ sengoo_test_select_cancel_counter += 1; return sengoo_test_select_cancel_counter; }}\nlong long sengoo_test_select_cancel_get(void) {{ return sengoo_test_select_cancel_counter; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_select_cancel_reset() -> i64;
+    fn sengoo_test_select_cancel_mark() -> i64;
+    fn sengoo_test_select_cancel_get() -> i64;
+}
+
+async def fast() -> i64 {
+    7
+}
+
+async def slow() -> i64 {
+    await sleep(20);
+    sengoo_test_select_cancel_mark();
+    9
+}
+
+async def main() -> i64 {
+    sengoo_test_select_cancel_reset();
+    let first = spawn(fast());
+    let second = spawn(slow());
+    let picked = select_cancel(first, second);
+    await sleep(40);
+    let marks = sengoo_test_select_cancel_get();
+
+    sengoo_test_select_cancel_reset();
+    let mixed = select_cancel(spawn(fast()), slow());
+    await sleep(40);
+    let mixed_marks = sengoo_test_select_cancel_get();
+
+    let shared = spawn(fast());
+    let alias = select_cancel(shared, shared);
+
+    if picked == 7 {
+        if marks == 0 {
+            if mixed == 7 {
+                if mixed_marks == 0 {
+                    if alias == 7 { 42 } else { 5 }
+                } else {
+                    1
+                }
+            } else {
+                2
+            }
+        } else {
+            3
+        }
+    } else {
+        4
+    }
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("select_cancel source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-cancel", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+
+    let exe_path = temp_artifact(
+        "async-select-cancel",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("select_cancel native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+    let _ = fs::remove_file(&custom_runtime_c);
+}
+
+#[test]
+fn async_native_runtime_select_cancel_handles_three_and_eight_operands() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let runtime_source = fs::read_to_string(&runtime_c).expect("runtime.c should be readable");
+    let custom_runtime_c = temp_artifact("async-select-cancel-n-runtime", "c");
+    fs::write(
+        &custom_runtime_c,
+        format!(
+            "{}\n\nlong long sengoo_test_select_cancel_n_counter = 0;\nlong long sengoo_test_select_cancel_n_reset(void) {{ sengoo_test_select_cancel_n_counter = 0; return 0; }}\nlong long sengoo_test_select_cancel_n_mark(void) {{ sengoo_test_select_cancel_n_counter += 1; return sengoo_test_select_cancel_n_counter; }}\nlong long sengoo_test_select_cancel_n_get(void) {{ return sengoo_test_select_cancel_n_counter; }}\n",
+            runtime_source
+        ),
+    )
+    .unwrap();
+
+    let source = r#"
+extern "C" {
+    fn sengoo_test_select_cancel_n_reset() -> i64;
+    fn sengoo_test_select_cancel_n_mark() -> i64;
+    fn sengoo_test_select_cancel_n_get() -> i64;
+}
+
+async def fast() -> i64 { 7 }
+
+async def slow() -> i64 {
+    await sleep(20);
+    sengoo_test_select_cancel_n_mark();
+    9
+}
+
+async def main() -> i64 {
+    sengoo_test_select_cancel_n_reset();
+    let three = select_cancel(spawn(slow()), spawn(fast()), spawn(slow()));
+    await sleep(40);
+    let three_marks = sengoo_test_select_cancel_n_get();
+
+    sengoo_test_select_cancel_n_reset();
+    let eight = select_cancel(
+        spawn(slow()),
+        spawn(slow()),
+        spawn(slow()),
+        spawn(slow()),
+        spawn(slow()),
+        spawn(slow()),
+        spawn(slow()),
+        spawn(fast()),
+    );
+    await sleep(40);
+    let eight_marks = sengoo_test_select_cancel_n_get();
+
+    if three == 7 {
+        if three_marks == 0 {
+            if eight == 7 {
+                if eight_marks == 0 { 42 } else { 1 }
+            } else {
+                2
+            }
+        } else {
+            3
+        }
+    } else {
+        4
+    }
+}
+"#;
+
+    let llvm_ir =
+        compile_source(source, 1).expect("select_cancel n-ary source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-select-cancel-n", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let custom_runtime_c_str = custom_runtime_c.to_string_lossy().to_string();
+
+    let exe_path = temp_artifact(
+        "async-select-cancel-n",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(
+        &clang,
+        &ll_path,
+        &exe_path,
+        Some(&custom_runtime_c_str),
+        1,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("select_cancel n-ary native executable should run");
+    assert_eq!(output.status.code(), Some(42));
 
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
@@ -4158,7 +4511,7 @@ fn incremental_link_output_matches_full_link_output() {
         None,
     )
     .unwrap();
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None, false).unwrap();
 
     let mut object_paths = vec![obj_path.clone()];
     if let Some(runtime_c) = runtime_c.as_deref() {
@@ -4313,7 +4666,7 @@ fn compile_and_run_example_with_args(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("examples-smoke-{tag}-main"), obj_ext);
-    if let Err(error) = compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None) {
+    if let Err(error) = compile_ir_to_object(&clang, &ll_path, &main_obj, 1, None, false) {
         let _ = fs::remove_file(&ll_path);
         let _ = fs::remove_file(&main_obj);
         if strict_native {
@@ -4352,6 +4705,7 @@ fn compile_and_run_example_with_args(
             &extra_obj,
             1,
             None,
+            false,
         ) {
             let _ = fs::remove_file(&ll_path);
             let _ = fs::remove_file(&main_obj);
@@ -5038,7 +5392,7 @@ def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("stdlib-http-server-pull-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
     let exe_path = temp_artifact(
         "stdlib-http-server-pull",
         if cfg!(windows) { "exe" } else { "" },
@@ -5176,7 +5530,7 @@ async def main() -> i64 {
     fs::write(&ll_path, llvm_ir).unwrap();
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact("stdlib-http-server-async-main", obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
     let exe_path = temp_artifact(
         "stdlib-http-server-async",
         if cfg!(windows) { "exe" } else { "" },
@@ -5839,6 +6193,21 @@ def main() -> i64 {{
     let pipeline_output_closed = pipeline_output.close();
     let pipeline_command_closed = pipeline.close();
 
+    let wait_command = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let wait_arg0 = wait_command.arg("literal").unwrap_or(false);
+    let wait_arg1 = wait_command.arg("literal spaces &^%$!").unwrap_or(false);
+    let wait_handle = wait_command.spawn().unwrap_or(ProcessHandle {{ handle: 0 }});
+    let wait_code = wait_handle.wait_cancellable(2000).unwrap_or(-1);
+    let wait_exit = wait_handle.exit_code().unwrap_or(-1);
+    let wait_closed = wait_handle.close();
+
+    let kill_command = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let kill_arg = kill_command.arg("timeout").unwrap_or(false);
+    let kill_handle = kill_command.spawn().unwrap_or(ProcessHandle {{ handle: 0 }});
+    let killed = kill_handle.kill().unwrap_or(false);
+    let canceled_wait = kill_handle.wait_cancellable(2000);
+    let kill_closed = kill_handle.close();
+
     let ok =
         fixed == 7
         && inherited_arg
@@ -5895,7 +6264,17 @@ def main() -> i64 {{
         && pipeline_copied == 3
         && pipeline_value == 789
         && pipeline_output_closed
-        && pipeline_command_closed;
+        && pipeline_command_closed
+        && wait_arg0
+        && wait_arg1
+        && wait_code == 7
+        && wait_exit == 7
+        && wait_closed
+        && kill_arg
+        && killed
+        && canceled_wait.is_err()
+        && canceled_wait.error == 19
+        && kill_closed;
 
     stdout_buffer.free();
     stderr_buffer.free();
@@ -5913,6 +6292,10 @@ def main() -> i64 {{
         43
     }} else if pipeline_value != 789 {{
         44
+    }} else if wait_code != 7 || wait_exit != 7 {{
+        45
+    }} else if !canceled_wait.is_err() || canceled_wait.error != 19 {{
+        46
     }} else {{
         1
     }}
@@ -5944,6 +6327,138 @@ def main() -> i64 {{
     assert!(
         stderr.contains("inherit-stderr"),
         "stderr should include inherited child stderr, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn stdlib_process_wait_cancellable_returns_promptly_after_kill() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+
+    let child_c = temp_artifact("process-wait-cancellable-child", "c");
+    let child_exe = temp_artifact(
+        "process-wait-cancellable-child",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    fs::write(
+        &child_c,
+        r#"
+#include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+static void sleep_ms(unsigned long ms) { Sleep(ms); }
+#else
+#include <unistd.h>
+static void sleep_ms(unsigned long ms) { usleep(ms * 1000); }
+#endif
+
+int main(int argc, char** argv) {
+    if (argc == 2 && strcmp(argv[1], "sleep") == 0) {
+        sleep_ms(5000);
+        return 5;
+    }
+    return 7;
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(&clang)
+        .arg(&child_c)
+        .arg("-o")
+        .arg(&child_exe)
+        .status()
+        .expect("wait-cancellable child fixture should compile");
+    assert!(
+        status.success(),
+        "wait-cancellable child fixture should compile"
+    );
+
+    let executable = child_exe.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::process;
+
+def main() -> i64 {{
+    let command = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let arg = command.arg("sleep").unwrap_or(false);
+    let handle = command.spawn().unwrap_or(ProcessHandle {{ handle: 0 }});
+    let killed = handle.kill().unwrap_or(false);
+    let waited = handle.wait_cancellable(5000);
+    let closed = handle.close();
+
+    let timeout_command = process_command("{executable}").unwrap_or(ProcessCommand {{ handle: 0 }});
+    let timeout_arg = timeout_command.arg("sleep").unwrap_or(false);
+    let timeout_handle = timeout_command.spawn().unwrap_or(ProcessHandle {{ handle: 0 }});
+    let timed_wait = timeout_handle.wait_cancellable(1);
+    let timeout_killed = timeout_handle.kill().unwrap_or(false);
+    let timeout_closed = timeout_handle.close();
+
+    if arg
+        && killed
+        && waited.is_err()
+        && waited.error == 19
+        && closed
+        && timeout_arg
+        && timed_wait.is_err()
+        && timed_wait.error == 11
+        && timeout_killed
+        && timeout_closed {{
+        0
+    }} else {{
+        1
+    }}
+}}
+"#
+    );
+
+    let source = expand_stdlib_imports_for_source(&source)
+        .unwrap_or_else(|err| panic!("stdlib imports should expand: {err}"));
+    let llvm_ir = compile_source(&source, 1)
+        .unwrap_or_else(|err| panic!("wait-cancellable source should compile: {err}"));
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let ll_path = temp_artifact("process-wait-cancellable", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("process-wait-cancellable-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
+
+    let exe_path = temp_artifact(
+        "process-wait-cancellable",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 2, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let started = std::time::Instant::now();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("wait-cancellable binary should run");
+    let elapsed = started.elapsed();
+
+    let _ = fs::remove_file(&child_c);
+    let _ = fs::remove_file(&child_exe);
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "wait_cancellable should not wait for the 5s child sleep; elapsed={elapsed:?}"
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -6625,13 +7140,14 @@ fn examples_smoke_ffi_c_calls_sengoo_export() {
         "examples-smoke-ffi-export",
         if cfg!(windows) { "exe" } else { "" },
     );
-    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1, None).is_err()
+    if compile_ir_to_object(&clang, &ll_path, &sengoo_obj, 1, None, false).is_err()
         || compile_ir_to_object(
             &clang,
             &workspace_root_for_tests().join("examples/ffi/c_calls_sengoo.c"),
             &c_obj,
             1,
             None,
+            false,
         )
         .is_err()
         || link_native_binary_from_objects(
@@ -6678,7 +7194,7 @@ fn compile_and_run_stdlib_program(tag: &str, source: &str) -> Option<std::proces
         &format!("stdlib-runtime-{}", tag),
         if cfg!(windows) { "obj" } else { "o" },
     );
-    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &obj_path, 2, None, false).unwrap();
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
@@ -6728,7 +7244,7 @@ fn compile_and_run_stdlib_import_program_with_stdin(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-runtime-{tag}"),
@@ -6779,7 +7295,7 @@ fn compile_and_run_stdlib_import_program_with_native_runtime(
 
     let obj_ext = if cfg!(windows) { "obj" } else { "o" };
     let main_obj = temp_artifact(&format!("stdlib-import-native-runtime-{tag}-main"), obj_ext);
-    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None).unwrap();
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
 
     let exe_path = temp_artifact(
         &format!("stdlib-import-native-runtime-{tag}"),
@@ -6853,6 +7369,7 @@ def main() -> i64 {
         super::ReflectionCliOptions::default(),
         None,
         None,
+        false,
     )
     .await;
 
@@ -7518,6 +8035,38 @@ fn compile_phase_timings_include_expected_keys() {
     assert!(phases.contains_key("hir_lower"));
     assert!(phases.contains_key("mir_lower"));
     assert!(phases.contains_key("mir_opt"));
+}
+
+#[test]
+fn debug_info_metadata_is_emitted_to_llvm_ir() {
+    let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
+    let llvm_path = temp_artifact("debug-info", "ll");
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        1,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/main.sg",
+            source.to_string(),
+        )),
+    )
+    .unwrap();
+
+    let llvm_ir = fs::read_to_string(&llvm_path).unwrap();
+    assert!(llvm_ir.contains("!llvm.dbg.cu"), "{llvm_ir}");
+    assert!(llvm_ir.contains("!DICompileUnit"), "{llvm_ir}");
+    assert!(
+        llvm_ir.contains("!DISubprogram(name: \"main\""),
+        "{llvm_ir}"
+    );
+    assert!(llvm_ir.contains("define i64 @main() !dbg !"), "{llvm_ir}");
+    assert!(llvm_ir.contains("ret i64"), "{llvm_ir}");
+    assert!(llvm_ir.contains(", !dbg !"), "{llvm_ir}");
+
+    let _ = fs::remove_file(llvm_path);
 }
 
 #[test]
@@ -9163,6 +9712,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -9187,6 +9737,7 @@ fn workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root() {
         false,
         2,
         false,
+        false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
     );
@@ -9203,6 +9754,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         emit_llvm: false,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
         runtime_c_fingerprint: Some(777),
@@ -9226,6 +9778,7 @@ fn workset_plan_rebuilds_root_when_impl_only_touches_root() {
         "tests/main.sg",
         false,
         2,
+        false,
         false,
         "tests/build/main.exe",
         Some("tools/stdlib/runtime.c"),
@@ -9719,6 +10272,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -9743,6 +10297,7 @@ fn run_workset_plan_reuses_previous_artifacts_when_impl_only_does_not_touch_root
         "tests/main.sg",
         2,
         false,
+        false,
         RunEngine::Auto,
         RunEngine::Native,
         Some("tools/stdlib/runtime.c"),
@@ -9759,6 +10314,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         module_fingerprints: vec![],
         opt_level: 2,
         contract_checks: false,
+        debug_info: false,
         requested_engine: RunEngine::Auto,
         resolved_engine: RunEngine::Native,
         runtime_c: Some("tools/stdlib/runtime.c".to_string()),
@@ -9782,6 +10338,7 @@ fn run_workset_plan_full_rebuild_when_engine_changes() {
         Some(&impact),
         "tests/main.sg",
         2,
+        false,
         false,
         RunEngine::Native,
         RunEngine::Native,

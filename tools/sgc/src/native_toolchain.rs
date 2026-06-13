@@ -815,12 +815,16 @@ pub(crate) fn compile_ir_to_object(
     object_path: &Path,
     opt_level: u8,
     target: Option<&NativeBuildTarget>,
+    debug_info: bool,
 ) -> Result<()> {
     let target = effective_target(target);
     let mut command = Command::new(clang_exe);
     command
         .arg("-Wno-override-module")
         .arg(format!("-O{}", opt_level));
+    if debug_info {
+        command.arg("-g");
+    }
     apply_clang_target_args(&mut command, &target)?;
 
     let status = command
@@ -980,6 +984,7 @@ pub(crate) fn compile_native_binary(
         &object_path,
         opt_level,
         Some(&target),
+        false,
     )?;
     let mut object_paths = vec![object_path];
     append_native_runtime_inputs(
@@ -1111,7 +1116,7 @@ pub(crate) fn recover_native_output_from_cached_artifacts(
         recovery_plan,
         CachedNativeRecoveryPlan::RebuildObjectFromCachedIr
     ) {
-        compile_ir_to_object(clang_exe, llvm_ir_path, object_path, opt_level, None)?;
+        compile_ir_to_object(clang_exe, llvm_ir_path, object_path, opt_level, None, false)?;
     }
 
     let mut object_paths = vec![object_path.to_path_buf()];

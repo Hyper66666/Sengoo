@@ -24,6 +24,7 @@ extern "C" {
     fn sengoo_process_command_pipe_stdout_to(upstream: i64, downstream: i64) -> i64;
     fn sengoo_process_command_spawn(handle: i64) -> i64;
     fn sengoo_process_handle_wait(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_process_handle_wait_cancellable(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_process_handle_kill(handle: i64) -> i64;
     fn sengoo_process_handle_exit_code(handle: i64) -> i64;
     fn sengoo_process_handle_close(handle: i64) -> i64;
@@ -228,6 +229,10 @@ impl ProcessCommand {
 impl ProcessHandle {
     def wait(self, timeout_ms: i64) -> Result<i64, i64> {
         process_status_i64_result(sengoo_process_handle_wait(self.handle, timeout_ms))
+    }
+
+    def wait_cancellable(self, timeout_ms: i64) -> Result<i64, i64> {
+        process_status_i64_result(sengoo_process_handle_wait_cancellable(self.handle, timeout_ms))
     }
 
     def kill(self) -> Result<bool, i64> {

@@ -28,9 +28,13 @@ Build release artifacts:
 
 ```powershell
 cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
+.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
 ```
 
-Ship the contents of `target/release/` (plus `tools/stdlib/` runtime bundle) as a versioned archive.
+The packaging script writes a release-shaped archive, `manifest.json`, and a
+`.sha256` sidecar under `target/dist/`. The archive includes `bin/` plus
+`share/sengoo/stdlib` and `share/sengoo/runtime`, so installed `sgc` can resolve
+stdlib imports without `SENGOO_ROOT` or a source checkout.
 
 Name archives with the toolchain tag and host triple, for example
 `sengoo-toolchain-2026.06.08-x86_64-pc-windows-msvc.zip`.
@@ -65,8 +69,8 @@ Run on the candidate host before tagging:
 cargo build -p sgc -p sgpm -p sgfmt -p sglsp
 cargo test -p sgpm realworld -- --nocapture
 cargo test -p sglsp realworld -- --nocapture
-npx --yes openspec validate package-release-defaults --strict
-npx --yes openspec validate --all --strict
+npx --yes @fission-ai/openspec validate toolchain-distribution --strict
+npx --yes @fission-ai/openspec validate --all --strict
 ```
 
 The `realworld-e2e` CI workflow builds real `sgc`, `sgpm`, `sgfmt`, and
@@ -80,10 +84,13 @@ and the locked package loop.
 
 ## Tagging
 
-1. Ensure `npx --yes openspec validate --all --strict` passes.
-2. Tag the repository with the toolchain version (for example `toolchain-2026.06.07`).
-3. Attach the release archive, manifest, and checksum sidecar. Record the Git
-   SHA and host triple in the internal change log.
+1. Ensure `npx --yes @fission-ai/openspec validate --all --strict` passes.
+2. Tag the repository with the workspace version (`v<version>`). The
+   `toolchain-distribution` workflow rejects tags that do not match the
+   workspace version.
+3. Let `.github/workflows/toolchain-distribution.yml` build, smoke, checksum,
+   and upload the Windows/Linux archives. Record the Git SHA and host triple in
+   the internal change log.
 
 ## Rollback
 

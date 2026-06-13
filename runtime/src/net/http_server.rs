@@ -1666,4 +1666,28 @@ mod tests {
         );
         drop(client);
     }
+
+    #[test]
+    fn async_next_request_cancel_unregisters_listener_interest() {
+        let baseline = crate::async_runtime::http_listener_interest_count();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0, "test server should bind");
+
+        let future = sengoo_http_server_next_request_async__start(server, 30_000);
+        assert_ne!(future, 0, "async next_request should allocate a future");
+        assert_eq!(
+            crate::async_runtime::http_listener_interest_count(),
+            baseline + 1,
+            "pending next_request future should register one listener interest"
+        );
+
+        assert!(unsafe { sengoo_http_server_next_request_async__cancel(future) });
+        assert_eq!(
+            crate::async_runtime::http_listener_interest_count(),
+            baseline,
+            "canceling pending next_request future should unregister listener interest"
+        );
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
 }

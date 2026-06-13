@@ -3,7 +3,7 @@ use sengoo_compiler::hir::HIRItem;
 use sengoo_compiler::mir::MirFunction;
 use sengoo_compiler::{
     collect_ffi_codegen_config, lower_ast, lower_hir_with_options, AssertCallsiteContext, Codegen,
-    FfiCodegenConfig, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
+    DebugInfoConfig, FfiCodegenConfig, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
 };
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -439,7 +439,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
     llvm_path: &Path,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
     compile_source_to_llvm_file_with_phase_timings_with_mode(
-        source, opt_level, llvm_path, None, None, None,
+        source, opt_level, llvm_path, None, None, None, None,
     )
 }
 
@@ -450,6 +450,7 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
     forced_memory_mode: Option<FrontendMemoryMode>,
     assert_callsite: Option<AssertCallsiteContext>,
     target_triple: Option<&str>,
+    debug_info: Option<DebugInfoConfig>,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
     let resolved_memory_mode =
         forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.as_ref().len()));
@@ -475,7 +476,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
             )
         })?;
         let mut writer = BufWriter::new(file);
-        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen.clone(), codegen_target.clone());
+        let mut codegen = Codegen::with_ffi_target_and_debug(
+            ffi_codegen.clone(),
+            codegen_target.clone(),
+            debug_info.clone().unwrap_or_else(DebugInfoConfig::disabled),
+        );
         codegen
             .codegen_to_writer(&mir_fns, &mut writer)
             .map_err(|e| miette::miette!("codegen failed: {}", e))
@@ -485,7 +490,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
 
     if let Err(_err) = stream_result {
         effective_mode = FrontendMemoryMode::Legacy;
-        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen.clone(), codegen_target.clone());
+        let mut codegen = Codegen::with_ffi_target_and_debug(
+            ffi_codegen.clone(),
+            codegen_target.clone(),
+            debug_info.clone().unwrap_or_else(DebugInfoConfig::disabled),
+        );
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;
@@ -493,7 +502,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
             .into_diagnostic()
             .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
     } else if matches!(resolved_memory_mode, FrontendMemoryMode::Legacy) {
-        let mut codegen = Codegen::with_ffi_and_target(ffi_codegen, codegen_target);
+        let mut codegen = Codegen::with_ffi_target_and_debug(
+            ffi_codegen,
+            codegen_target,
+            debug_info.unwrap_or_else(DebugInfoConfig::disabled),
+        );
         let llvm_ir = codegen
             .codegen(&mir_fns)
             .map_err(|e| miette::miette!("codegen failed: {}", e))?;
