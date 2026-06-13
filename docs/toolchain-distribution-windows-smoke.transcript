@@ -1,16 +1,16 @@
-Windows package smoke transcript from PR #21 on 2026-06-13
+Windows package smoke transcript from PR #22 on 2026-06-13
 
 Workflow:
   toolchain-distribution
 Run:
-  https://github.com/Hyper66666/Sengoo/actions/runs/27459074968
+  https://github.com/Hyper66666/Sengoo/actions/runs/27460449147
 Job:
   package smoke (windows-latest)
-  https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/job/81169133091
+  https://github.com/Hyper66666/Sengoo/actions/runs/27460449147/job/81173089229
 Head:
-  bd204b1b6ceb503d0eaa99e8321da768461a5719
+  cd5c1ce905bc494c54e3bc276a53b22da6fc178d
 Checkout:
-  09dc5ab731508ad068fa306a6f878794289b088f
+  6a84e21e3083cf3fd7dbf41dce1942084beca2ad
 
 Host:
   Microsoft Windows Server 2025 10.0.26100 Datacenter
@@ -28,33 +28,34 @@ Run release smoke matrix
   npx --yes @fission-ai/openspec validate --all --strict
 
 Package toolchain
-  ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke windows-latest bd204b1b6ceb503d0eaa99e8321da768461a5719"
+  ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke windows-latest cd5c1ce905bc494c54e3bc276a53b22da6fc178d"
   archive: D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip
   sha256:  D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip.sha256
 
 Install package (Windows)
   $archive = Get-Content target/dist/latest-archive.txt
   ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
-  sgc 0.1.0 (09dc5ab73150)
+  sgc 0.1.0 (6a84e21e3083)
   Add this directory to PATH: D:\a\Sengoo\Sengoo\target\install-smoke\bin
   Installed Sengoo to D:\a\Sengoo\Sengoo\target\install-smoke
 
 Installed stdlib smoke
-  sgc version: sgc 0.1.0 (09dc5ab73150)
-  sgpm version: sgpm 0.1.0 (09dc5ab73150)
-  sgfmt version: sgfmt 0.1.0 (09dc5ab73150)
-  sglsp version: sglsp 0.1.0 (09dc5ab73150)
-  sgc 0.1.0 (09dc5ab73150)
+  sgc version: sgc 0.1.0 (6a84e21e3083)
+  sgpm version: sgpm 0.1.0 (6a84e21e3083)
+  sgfmt version: sgfmt 0.1.0 (6a84e21e3083)
+  sglsp version: sglsp 0.1.0 (6a84e21e3083)
+  sgc 0.1.0 (6a84e21e3083)
   Running: examples/01_hello.sg
   exit code: 42
-  Building: target/install-smoke-work/main.sg
-  LLVM IR written to target/install-smoke-work\build\main.ll
-  Running: target/install-smoke-work/main.sg
+  Installed stdlib smoke work root: D:\a\_temp\sengoo-install-smoke-work
+  Building: D:\a\_temp\sengoo-install-smoke-work\main.sg
+  LLVM IR written to D:\a\_temp\sengoo-install-smoke-work\build\main.ll
+  Running: D:\a\_temp\sengoo-install-smoke-work\main.sg
   exit code: 0
 
 Upload packaged toolchain
-  Artifact ID 7608224918
-  Artifact download URL: https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/artifacts/7608224918
+  Artifact ID 7608721209
+  Artifact download URL: https://github.com/Hyper66666/Sengoo/actions/runs/27460449147/artifacts/7608721209
 ```
 
 Notes:
