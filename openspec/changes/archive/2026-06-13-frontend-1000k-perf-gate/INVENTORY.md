@@ -6,8 +6,8 @@ Child change for `six-pillar-gap-closure` Pillar 5.
 
 **Superseded by** `compile-scale-production-gate` (June 2026). Production closure,
 ladder gates (100k / 1000k / 2500k report-only), and updated canonical deltas live
-in the child change. Medians and gate evidence were copied to
-`openspec/changes/compile-scale-production-gate/INVENTORY.md`.
+in archived `compile-scale-production-gate`. Medians and gate evidence live at
+`openspec/changes/archive/2026-06-08-compile-scale-production-gate/INVENTORY.md`.
 
 ## Pinned reference host profile
 

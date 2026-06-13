@@ -1,11 +1,11 @@
 ## Why
 
-The `six-pillar-gap-closure` program closed the internal-production gaps:
-stdlib production surface, reactor-backed async subset, package graph
-maturity, language surface expansion, and default toolchain UX are archived
-with evidence, and the 1000k performance child has since been superseded by
-archived `compile-scale-production-gate` evidence. Sengoo is now usable for
-committed internal projects while this wave closes outsider adoption gaps.
+The `six-pillar-gap-closure` program closed the implementation side of the
+internal-production gaps: stdlib production surface, reactor-backed async
+subset, package graph maturity, language surface expansion, default toolchain
+UX, and 1000k compile-scale evidence are archived with proof. Its umbrella
+still tracks final verification, but Sengoo is now usable for committed
+internal projects while this wave closes outsider adoption gaps.
 
 The next blocker set is different in kind: it is no longer "can an internal
 team that built the compiler use it", but "can a team that did not build the
