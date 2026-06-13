@@ -1,20 +1,20 @@
-Windows package smoke transcript from PR #21 on 2026-06-13
+Linux package smoke transcript from PR #21 on 2026-06-13
 
 Workflow:
   toolchain-distribution
 Run:
   https://github.com/Hyper66666/Sengoo/actions/runs/27459074968
 Job:
-  package smoke (windows-latest)
-  https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/job/81169133091
+  package smoke (ubuntu-latest)
+  https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/job/81169133064
 Head:
   bd204b1b6ceb503d0eaa99e8321da768461a5719
 Checkout:
   09dc5ab731508ad068fa306a6f878794289b088f
 
 Host:
-  Microsoft Windows Server 2025 10.0.26100 Datacenter
-  runner image windows-2025-vs2026 version 20260608.135.2
+  Ubuntu 24.04.4 LTS
+  runner image ubuntu-24.04 version 20260607.184.1
 
 Selected transcript:
 
@@ -28,16 +28,16 @@ Run release smoke matrix
   npx --yes @fission-ai/openspec validate --all --strict
 
 Package toolchain
-  ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke windows-latest bd204b1b6ceb503d0eaa99e8321da768461a5719"
-  archive: D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip
-  sha256:  D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip.sha256
+  ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ubuntu-latest bd204b1b6ceb503d0eaa99e8321da768461a5719"
+  archive: /home/runner/work/Sengoo/Sengoo/target/dist/sengoo-0.1.0-ci-x86_64-unknown-linux-gnu.tar.gz
+  sha256:  /home/runner/work/Sengoo/Sengoo/target/dist/sengoo-0.1.0-ci-x86_64-unknown-linux-gnu.tar.gz.sha256
 
-Install package (Windows)
-  $archive = Get-Content target/dist/latest-archive.txt
-  ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
+Install package (Linux)
+  archive=$(cat target/dist/latest-archive.txt)
+  sh scripts/install.sh "$archive" target/install-smoke
   sgc 0.1.0 (09dc5ab73150)
-  Add this directory to PATH: D:\a\Sengoo\Sengoo\target\install-smoke\bin
-  Installed Sengoo to D:\a\Sengoo\Sengoo\target\install-smoke
+  Add this directory to PATH: /home/runner/work/Sengoo/Sengoo/target/install-smoke/bin
+  Installed Sengoo to /home/runner/work/Sengoo/Sengoo/target/install-smoke
 
 Installed stdlib smoke
   sgc version: sgc 0.1.0 (09dc5ab73150)
@@ -48,13 +48,13 @@ Installed stdlib smoke
   Running: examples/01_hello.sg
   exit code: 42
   Building: target/install-smoke-work/main.sg
-  LLVM IR written to target/install-smoke-work\build\main.ll
+  LLVM IR written to target/install-smoke-work/build/main.ll
   Running: target/install-smoke-work/main.sg
   exit code: 0
 
 Upload packaged toolchain
-  Artifact ID 7608224918
-  Artifact download URL: https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/artifacts/7608224918
+  Artifact ID 7608188114
+  Artifact download URL: https://github.com/Hyper66666/Sengoo/actions/runs/27459074968/artifacts/7608188114
 ```
 
 Notes:

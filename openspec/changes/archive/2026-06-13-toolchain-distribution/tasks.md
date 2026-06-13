@@ -19,7 +19,7 @@
   toolchain.
 - [x] 3.2 Smoke matrix from `docs/internal-release.md` runs against built
   binaries on each target; any failure blocks all publication for the tag.
-- [ ] 3.3 Package archives per D-D1 with `.sha256`; upload to the GitHub
+- [x] 3.3 Package archives per D-D1 with `.sha256`; upload to the GitHub
   release; `workflow_dispatch` dry-run mode builds and smokes without
   publishing.
 - [x] 3.4 Archives include bundled stdlib/runtime bridge files plus
@@ -32,7 +32,7 @@
   extract, PATH shim or instruction, `sgc --version` success check; no
   auto-update, opt-in `--add-to-path` only.
 - [x] 4.2 `scripts/install.ps1`: same contract for Windows.
-- [ ] 4.3 Fresh-host (or clean-container/VM) transcript per target:
+- [x] 4.3 Fresh-host (or clean-container/VM) transcript per target:
   install via script, then `sgc run examples/01_hello.sg` succeeds with a
   host `clang` present; transcript committed and linked.
 - [x] 4.4 Transcript also runs one stdlib import smoke from outside the source
@@ -57,16 +57,16 @@
   for both targets
 - [x] 6.4 Dry-run archive extraction proves stdlib/runtime lookup without a
   source checkout or manual `SENGOO_ROOT`
-- [ ] 6.5 Install-script transcripts committed for both targets
+- [x] 6.5 Install-script transcripts committed for both targets
 - [x] 6.6 `openspec validate toolchain-distribution --strict`
 
 ## Archive Gate
 
 - [x] `openspec validate toolchain-distribution --strict` passes.
-- [ ] A dry-run (or real) tagged release produced smoke-gated, checksummed
+- [x] A dry-run (or real) tagged release produced smoke-gated, checksummed
   archives for win-x64 and linux-x64.
-- [ ] Script installs are proven by fresh-host transcripts ending in a
+- [x] Script installs are proven by fresh-host transcripts ending in a
   successful `sgc run examples/01_hello.sg` plus a stdlib import smoke from
   outside the source checkout.
-- [ ] All four tools report one coherent version string with tests.
-- [ ] Matrix row added with proof; umbrella records Pillar D completion.
+- [x] All four tools report one coherent version string with tests.
+- [x] Matrix row added with proof; umbrella records Pillar D completion.
