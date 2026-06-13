@@ -47,6 +47,26 @@ void sengoo_print_str(const char* s) {
     }
 }
 
+void sengoo_eprint_i64(long long val) {
+    fprintf(stderr, "%lld\n", val);
+}
+
+void sengoo_eprint_bool(long long val) {
+    fprintf(stderr, "%s\n", val ? "true" : "false");
+}
+
+void sengoo_eprint_f64(double val) {
+    fprintf(stderr, "%g\n", val);
+}
+
+void sengoo_eprint_str(const char* s) {
+    if (s) {
+        fprintf(stderr, "%s\n", s);
+    } else {
+        fprintf(stderr, "\n");
+    }
+}
+
 long long sengoo_stdlib_str_ptr(const char* s) {
     return (long long)(intptr_t)s;
 }

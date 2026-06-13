@@ -1081,6 +1081,63 @@ def main() -> i64 {
     }
 
     #[test]
+    fn use_after_move_uses_typeck_code_and_exact_target_range() {
+        let src = r#"
+struct String { handle: i64 }
+
+def main() -> i64 {
+    let a: String = String { handle: 1 };
+    let b = a;
+    a.handle
+}
+"#;
+        let diagnostics = embedded_compiler_diagnostics(src);
+        let target_lo = src.rfind("a.handle").expect("moved value use") as u32;
+        let expected = range_from_byte_span(src, target_lo, target_lo + "a.".len() as u32);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String("use-after-move".to_string()))
+        );
+        assert_eq!(diagnostics[0].range, expected);
+    }
+
+    #[test]
+    fn unsatisfied_trait_bound_uses_typeck_code_and_exact_target_range() {
+        let src = r#"
+trait Showable {
+    def show(self) -> i64 {
+        0
+    }
+}
+
+def consume<T: Showable>(x: T) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    consume(42)
+}
+"#;
+        let diagnostics = embedded_compiler_diagnostics(src);
+        let target_lo = src.rfind("consume(").expect("generic call target") as u32;
+        let expected = range_from_byte_span(src, target_lo, target_lo + "consume(".len() as u32);
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String(
+                "unsatisfied-trait-bound".to_string()
+            ))
+        );
+        assert_eq!(diagnostics[0].range, expected);
+        assert!(diagnostics[0].message.contains("Showable"));
+    }
+
+    #[test]
     fn enum_value_errors_keep_stable_codes_and_precise_ranges() {
         let cases = [
             (

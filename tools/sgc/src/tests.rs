@@ -4835,6 +4835,73 @@ def main() -> i64 {
     );
 }
 
+#[test]
+fn use_after_move_json_reports_stable_code_and_target_span() {
+    let source = r#"
+struct String { handle: i64 }
+
+def main() -> i64 {
+    let a: String = String { handle: 1 };
+    let b = a;
+    a.handle
+}
+"#;
+    let error = sengoo_compiler::compile_to_ir(source).expect_err("use after move should fail");
+    let location = super::location_from_compile_error(source, &error);
+    let json = super::render_compile_error_json_with_location(
+        Some("tests/use_after_move.sg"),
+        &error.to_string(),
+        location,
+    );
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+    let target_lo = source.rfind("a.handle").expect("moved value use") as u64;
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "use-after-move");
+    assert_eq!(value["location"]["span"]["lo"], target_lo);
+}
+
+#[test]
+fn unsatisfied_trait_bound_json_reports_stable_code_and_target_span() {
+    let source = r#"
+trait Showable {
+    def show(self) -> i64 {
+        0
+    }
+}
+
+def consume<T: Showable>(x: T) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    consume(42)
+}
+"#;
+    let error = sengoo_compiler::compile_to_ir(source)
+        .expect_err("unsatisfied generic trait bound should fail");
+    let location = super::location_from_compile_error(source, &error);
+    let json = super::render_compile_error_json_with_location(
+        Some("tests/unsatisfied_bound.sg"),
+        &error.to_string(),
+        location,
+    );
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+    let target_lo = source.rfind("consume(").expect("call target") as u64;
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "unsatisfied-trait-bound");
+    assert_eq!(value["location"]["span"]["lo"], target_lo);
+    assert_eq!(
+        value["location"]["span"]["hi"],
+        target_lo + "consume(".len() as u64
+    );
+    assert!(value["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Showable"));
+}
+
 fn assert_example_result(
     tag: &str,
     relative_path: &str,
@@ -5288,6 +5355,37 @@ fn examples_smoke_stdlib_config_hash_import() {
         "examples/stdlib/23_config_hash.sg",
         "23",
     );
+}
+
+#[test]
+fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "builtin-eprintln",
+        r#"
+def main() -> i64 {
+    eprintln("err");
+    eprintln(42);
+    0
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "eprintln should not write stdout, got:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+    assert_eq!(stderr.trim(), "err\n42");
 }
 
 #[test]

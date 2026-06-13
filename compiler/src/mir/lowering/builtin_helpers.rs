@@ -7,7 +7,8 @@ impl<'a> LoweringContext<'a> {
         arg_locals: &[Local],
     ) -> Option<Local> {
         match name {
-            "print" => Some(self.lower_builtin_print(arg_locals)),
+            "print" | "println" => Some(self.lower_builtin_print(arg_locals)),
+            "eprintln" => Some(self.lower_builtin_eprint(arg_locals)),
             "spawn" => Some(self.lower_builtin_spawn(arg_locals)),
             "spawn_task" => Some(self.lower_builtin_spawn_task(arg_locals)),
             "sleep" => Some(self.lower_builtin_sleep(arg_locals)),
@@ -34,6 +35,21 @@ impl<'a> LoweringContext<'a> {
         let arg_local = arg_locals[0];
         let arg_ty = self.get_local_type(arg_local).clone();
         self.emit_print_value(arg_local, &arg_ty);
+        self.add_local(None, LocalKind::Temp, MIR_UNIT)
+    }
+
+    pub(super) fn lower_builtin_eprint(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 1 {
+            self.errors.push(format!(
+                "eprintln expects exactly one argument, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+
+        let arg_local = arg_locals[0];
+        let arg_ty = self.get_local_type(arg_local).clone();
+        self.emit_eprint_value(arg_local, &arg_ty);
         self.add_local(None, LocalKind::Temp, MIR_UNIT)
     }
 
