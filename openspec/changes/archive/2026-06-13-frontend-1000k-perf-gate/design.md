@@ -2,6 +2,13 @@
 
 Child change for `six-pillar-gap-closure` Pillar 5.
 
+## Supersession
+
+`compile-scale-production-gate` supersedes this child change. It owns the
+final reference-host evidence, CI ladder closure, and canonical spec promotion.
+This change now archives as historical baseline context only and must not
+re-apply overlapping spec deltas.
+
 ## Delta ownership
 
 - `frontend-compile-perf`: 1000k absolute targets, regression gates, interning/memory evidence

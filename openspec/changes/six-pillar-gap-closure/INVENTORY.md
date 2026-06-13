@@ -3,7 +3,8 @@
 ## Status Snapshot (June 2026)
 
 This umbrella has mostly been consumed by archived child changes. It remains
-active because the 1000k frontend performance child is still open, POSIX
+active for final verification and remaining POSIX/reference-host evidence. The
+1000k frontend performance child is now archived as superseded, while POSIX
 reference-host evidence still needs CI confirmation for the newest staticlib/net
 linking path, and the umbrella-wide final verification has not been completed in
 one pass.
@@ -14,7 +15,7 @@ one pass.
 | 2 Async runtime | High | Supported subset: reactor hints, user Future lowering, 2..8 select, `select_cancel`, task cancellation boundaries, timeout_cancel, channels/mutex; all-host owned-fd readiness remains deferred | `openspec/specs/async-reactor-futures/spec.md`, `openspec/specs/async-default-followups/spec.md`, `docs/runtime-async-semantics.md` |
 | 3 Package graph | High | Alias dependencies, lockfile v2, multi-version registry resolution, metadata JSON, and release fixture are implemented | `openspec/specs/sgpm-package-graph/spec.md`, `examples/realworld/package-release-loop` |
 | 4 Language surface | High | Attributes/cfg/deprecated diagnostics, class trait headers, and dynamic native i64 arity 0..8 are implemented; broader FFI and payload enum frame widening are deferred | `openspec/specs/language-surface-expansion/spec.md`, `openspec/specs/language-default-polish/spec.md` |
-| 5 Compile perf | Medium-high | Regression gates and low-memory mitigation exist; 1000k absolute RSS/share target remains open | `openspec/changes/frontend-1000k-perf-gate/tasks.md`, `bench/FRONTEND_BASELINE.md` |
+| 5 Compile perf | Medium-high | Closed by archived `compile-scale-production-gate`; `frontend-1000k-perf-gate` archived as superseded baseline context | `openspec/changes/archive/2026-06-08-compile-scale-production-gate/INVENTORY.md`, `bench/results/1780946346830-advanced-pipeline.json` |
 | 6 Toolchain UX | Medium-high | Structured assertion output, realworld e2e, debugger/editor/release docs, and LSP realworld coverage exist | `openspec/specs/tooling-mainstream-ecosystem/spec.md`, `.github/workflows/realworld-e2e.yml` |
 
 ## Pillar 1 - Stdlib
@@ -68,11 +69,11 @@ one pass.
 
 | Workload | Current evidence | Status |
 | --- | --- | --- |
-| 1000k peak RSS target | Baseline 3.14x C++; target <= 1.8x | Open |
-| 1000k frontend share target | Baseline 86.93%; target <= 65% | Open |
+| 1000k peak RSS target | Passing evidence: 0.11x C++ in `compile-scale-production-gate` | Closed |
+| 1000k frontend share target | Passing evidence: 31.83% in `compile-scale-production-gate` | Closed |
 | 1000k e2e time vs C++ | Faster in baseline | Met but not sufficient |
 | `--low-memory` RSS reduction | ~52% / 672 MB in README baseline | Mitigation only; not archive evidence |
-| CI regression gates | `.github/workflows/perf-smoke.yml`, `bench/scripts/advanced-kpi-gate.py` | Regression gate exists; absolute target informational until met |
+| CI regression gates | `.github/workflows/perf-smoke.yml`, `bench/scripts/advanced-kpi-gate.py` | Active; PR #22 `compile-scale-production-gate` check passed in 39m48s |
 
 ## Pillar 6 - Toolchain
 
@@ -94,7 +95,7 @@ one pass.
 | 2 | `async-reactor-futures` | `async-reactor-futures` | Archived 2026-06-08 |
 | 3 | `sgpm-alias-multiversion` | `sgpm-package-graph` | Archived 2026-06-08; later expanded by `package-release-defaults` |
 | 4 | `language-surface-expansion` | `language-surface-expansion` | Archived 2026-06-08; later polished by `language-default-polish` |
-| 5 | `frontend-1000k-perf-gate` | `frontend-build-performance`, `frontend-compile-perf` | Active; absolute 1000k gate open |
+| 5 | `frontend-1000k-perf-gate` | `frontend-build-performance`, `frontend-compile-perf` | Archived 2026-06-13 as superseded by archived `compile-scale-production-gate` |
 | 6 | `toolchain-internal-ux` | `tooling-mainstream-ecosystem` | Archived 2026-06-08 |
 
 ## Additional Archived Follow-Ups Consumed
@@ -112,9 +113,9 @@ one pass.
 
 ## Current Remaining Blockers Before Umbrella Archive
 
-- `frontend-1000k-perf-gate` tasks 3.3 and archive gate remain open until the
-  reference host proves 100k/1000k results and the 1000k RSS/frontend-share
-  absolute targets pass or the spec is explicitly superseded.
+- `frontend-1000k-perf-gate` is archived as superseded by
+  `compile-scale-production-gate`; Pillar 5 is closed by the passing 100k/1000k
+  reference-host evidence recorded there.
 - POSIX CI must run the new staticlib/native-net path through `realworld-e2e`
   and TLS tests. Windows local evidence exists, but Linux weak-symbol extraction
   is the risk the CI matrix must close.

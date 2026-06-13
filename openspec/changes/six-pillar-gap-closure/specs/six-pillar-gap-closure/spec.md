@@ -242,7 +242,8 @@ Sengoo SHALL publish and enforce compile memory and frontend time budgets for
 
 - **WHEN** the same 1000k benchmark runs
 - **THEN** frontend phase time is at most 65% of total compile-stage time
-- **AND** missing this target keeps the Pillar 5 child change open
+- **AND** a regression below this target blocks umbrella archive or requires a
+  follow-up perf change with new evidence
 
 #### Scenario: Performance regressions fail CI
 

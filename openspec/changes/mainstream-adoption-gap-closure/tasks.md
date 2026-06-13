@@ -3,8 +3,9 @@
 - [x] 0.1 Add `INVENTORY.md` baseline for all four pillars with current evidence.
 - [x] 0.2 Run `openspec validate mainstream-adoption-gap-closure --strict`.
 - [x] 0.3 Record cross-pillar dependencies and upstream prerequisites
-  (`codegen-ir-correctness-and-gate`, `frontend-1000k-perf-gate`) in
-  `INVENTORY.md` and `design.md`.
+  (`codegen-ir-correctness-and-gate`, archived `compile-scale-production-gate`,
+  archived `frontend-1000k-perf-gate` supersession) in `INVENTORY.md` and
+  `design.md`.
 - [x] 0.4 Snapshot the `SUPPORT_MATRIX.md` rows this program intends to move.
 - [x] 0.5 Create the four child changes named in `proposal.md`
   (`native-debug-info`, `async-cancellation-semantics`,
@@ -73,8 +74,9 @@
   and the two new rows (debugging, distribution).
 - [x] 5.2 Update `README.md` / `README.zh-CN.md` with adoption-wave summary
   (debugging, cancellation, serving, install).
-- [ ] 5.3 Re-run the perf gate owned by `frontend-1000k-perf-gate` and record
-  that `-g` emission did not regress default-mode numbers.
+- [ ] 5.3 Re-run the compile-scale perf gate after `native-debug-info` lands
+  and record that `-g` / debug-info changes did not regress default-mode
+  numbers.
 - [ ] 5.4 Each child change points back to this umbrella; each completed
   pillar updates its canonical capability before umbrella archive.
 
