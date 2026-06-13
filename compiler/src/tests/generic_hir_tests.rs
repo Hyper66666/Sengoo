@@ -80,6 +80,43 @@ def foo<T>(x: i64) -> i64 where T: Add + Copy {
 }
 
 #[test]
+fn lower_ast_preserves_dyn_trait_object_parameter() {
+    let source = r#"
+trait Show {}
+
+def takes(x: dyn Show) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("typecheck should succeed");
+    let env = checker.into_env();
+    let module = lower_ast(&program, &env);
+
+    let function = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HIRItem::Function(function) if function.name == "takes" => Some(function),
+            _ => None,
+        })
+        .expect("expected function takes in HIR");
+
+    assert!(
+        matches!(
+            &function.params[0].ty.kind,
+            crate::hir::HIRTypeKind::TraitObject(bounds) if bounds == &vec!["Show".to_string()]
+        ),
+        "expected dyn Show to lower to HIR trait object, got {:?}",
+        function.params[0].ty
+    );
+}
+
+#[test]
 fn lower_ast_preserves_generic_params_on_trait_method() {
     let source = r#"
 trait Mapper {
