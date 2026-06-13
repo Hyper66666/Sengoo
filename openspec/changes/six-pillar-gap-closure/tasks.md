@@ -15,8 +15,9 @@
     `mainstream-default-readiness`, `mainstream-production-readiness`,
     `package-release-defaults`, `stdlib-default-followups`,
     `stdlib-http-server-handlers`, `stdlib-https-tls`.
-  - Remaining active child: `frontend-1000k-perf-gate` because the reference
-    1000k absolute RSS/frontend-share gate remains open.
+  - Original children are archived/consumed. `frontend-1000k-perf-gate` was
+    superseded by archived `compile-scale-production-gate` and archived with
+    `--skip-specs` to avoid re-applying overlapping canonical deltas.
 
 ## 1. Pillar 6 — Toolchain quick wins (unblock other lanes)
 
@@ -162,12 +163,22 @@
 
 ## 6. Pillar 5 — Large-scale compile performance
 
-- [ ] 6.1 Record the reference CI host profile, compiler revisions, generator seed, C++ command, and three-run median baselines in `INVENTORY.md`.
-- [ ] 6.2 Implement frontend memory reductions (interning, pruning, default mode tuning).
-- [ ] 6.3 Add permanent CI perf gates for the absolute targets and 10% RSS/time plus 5 percentage-point frontend-share regression thresholds from `design.md`.
-- [ ] 6.4 Verify runtime cache fingerprint correctness after perf changes.
-- [ ] 6.5 Document `--low-memory` recommendation for 1000k until default mode meets target.
-- [ ] 6.6 If an interim run misses the target, record the measured ratio, host profile, and mitigation without marking the Pillar 5 child complete.
+- [x] 6.1 Record the reference CI host profile, compiler revisions, generator seed, C++ command, and three-run median baselines in `INVENTORY.md`.
+  - Superseded by archived `compile-scale-production-gate` evidence copied from
+    `frontend-1000k-perf-gate`.
+- [x] 6.2 Implement frontend memory reductions (interning, pruning, default mode tuning).
+  - Covered by `compile-scale-production-gate` phase-timing and pruning evidence.
+- [x] 6.3 Add permanent CI perf gates for the absolute targets and 10% RSS/time plus 5 percentage-point frontend-share regression thresholds from `design.md`.
+  - `.github/workflows/perf-smoke.yml`, `bench/scripts/advanced-kpi-gate.py`,
+    and PR #22 `compile-scale-production-gate` check remain green.
+- [x] 6.4 Verify runtime cache fingerprint correctness after perf changes.
+  - Covered by `compile-scale-production-gate` sgc/runtime fingerprint tests.
+- [x] 6.5 Document `--low-memory` recommendation for 1000k until default mode meets target.
+  - Historical mitigation remains in README/bench docs; default-mode target is
+    now closed by the passing compile-scale evidence.
+- [x] 6.6 If an interim run misses the target, record the measured ratio, host profile, and mitigation without marking the Pillar 5 child complete.
+  - Failing and passing reference-host runs are recorded in archived
+    `compile-scale-production-gate/INVENTORY.md`.
 
 ## 7. Integration and documentation
 
@@ -177,7 +188,7 @@
 - [x] 7.4 Run subagent or peer review on spec acceptance gaps before implementation wave.
 - [x] 7.5 Ensure each child change points back to this umbrella and each completed pillar updates the canonical capability before umbrella archive.
   - Re-synced `INVENTORY.md` after child archives. The umbrella still stays
-    active because Pillar 5 and final verification remain open.
+    active for POSIX/reference-host evidence and final verification.
 
 ## 8. Verification
 
@@ -189,7 +200,9 @@
 - [ ] 8.6 `cargo test -p sglsp`
 - [ ] 8.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime -p sgfmt -p sglsp --all-targets -- -D warnings`
 - [ ] 8.8 `realworld-e2e` job (locked loop, real binaries)
-- [ ] 8.9 `advanced_pipeline_bench.py` perf gate (100k + 1000k)
+- [x] 8.9 `advanced_pipeline_bench.py` perf gate (100k + 1000k)
+  - Archived `compile-scale-production-gate` produced the passing P0-focused
+    gate artifact; PR #22 also passed `compile-scale-production-gate` in CI.
 - [x] 8.10 `openspec validate six-pillar-gap-closure --strict`
 - [x] 8.11 `openspec validate --all --strict`
 
@@ -199,13 +212,13 @@
 - [ ] Realworld fixtures run end-to-end with real `sgc`/`sgpm` in CI.
 - [ ] Internal docs (`debugging-native`, `editor-setup`, `internal-release`) exist.
 - [ ] `SUPPORT_MATRIX.md` reflects closure status with proof links.
-- [ ] The 1000k reference perf gate meets the absolute RSS and frontend-share targets and is recorded in `INVENTORY.md`.
+- [x] The 1000k reference perf gate meets the absolute RSS and frontend-share targets and is recorded in `INVENTORY.md`.
 
 ## Archive Gate
 
 - [x] `openspec validate six-pillar-gap-closure --strict` passes.
 - [x] `openspec validate --all --strict` passes.
-- [ ] All six required child changes are archived before the umbrella.
-  - Five of six original children are archived. `frontend-1000k-perf-gate`
-    remains active and must not be treated as closed.
+- [x] All six required child changes are archived before the umbrella.
+  - `frontend-1000k-perf-gate` is archived as superseded by
+    `compile-scale-production-gate`; no original child remains active.
 - [ ] All verification commands in §8 pass; platform-specific skips document evidence and do not omit a pillar implementation.

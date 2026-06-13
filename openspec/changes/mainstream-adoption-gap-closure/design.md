@@ -6,7 +6,7 @@ adoption gaps identified after the `six-pillar-gap-closure` program: source
 toolchain distribution. It consumes and extends:
 
 - archived `codegen-ir-correctness-and-gate` (correctness prerequisite)
-- `frontend-1000k-perf-gate` (active; perf gate re-run only, not owned)
+- archived `compile-scale-production-gate` / archived `frontend-1000k-perf-gate` supersession (perf gate re-run only, not owned)
 - archived `async-default-followups`, `async-reactor-futures`,
   `concurrent-async-runtime` (cancellation builds on their pinned surfaces)
 - archived `async-http-serving`, `stdlib-https-tls` deltas in
@@ -42,10 +42,10 @@ integration gate that can mark the umbrella done.
   `native-debug-info` merges IR-emission changes; both edit
   `compiler/src/codegen/` and the conformance gate drives the real CLI so
   debug-build regressions are caught.
-- `frontend-1000k-perf-gate` stays owned by `six-pillar-gap-closure`. This
-  program only re-runs the perf gate as regression evidence in Phase 5; if
-  the absolute targets are still unmet there, that fact blocks the prior
-  umbrella, not this one.
+- `compile-scale-production-gate` closed the 100k/1000k performance evidence
+  and superseded `frontend-1000k-perf-gate`. This program only re-runs the
+  perf gate as regression evidence in Phase 5 after `-g` / debug-info work;
+  any regression blocks this umbrella before archive.
 - Two active changes must not claim the same canonical requirement; child
   proposals list any unarchived upstream as an explicit blocker.
 

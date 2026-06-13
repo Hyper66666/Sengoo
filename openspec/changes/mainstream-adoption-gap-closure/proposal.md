@@ -1,10 +1,11 @@
 ## Why
 
-The `six-pillar-gap-closure` program closed the internal-production gaps:
-stdlib production surface, reactor-backed async subset, package graph
-maturity, language surface expansion, and default toolchain UX are archived
-with evidence, and only the 1000k performance child plus final verification
-remain open. Sengoo is now usable for committed internal projects.
+The `six-pillar-gap-closure` program closed the implementation side of the
+internal-production gaps: stdlib production surface, reactor-backed async
+subset, package graph maturity, language surface expansion, default toolchain
+UX, and 1000k compile-scale evidence are archived with proof. Its umbrella
+still tracks final verification, but Sengoo is now usable for committed
+internal projects while this wave closes outsider adoption gaps.
 
 The next blocker set is different in kind: it is no longer "can an internal
 team that built the compiler use it", but "can a team that did not build the
@@ -43,9 +44,10 @@ not owned scope:
   is archived as `2026-06-11-codegen-ir-correctness-and-gate`. Native debug
   work may now edit the same IR path, but must keep that conformance gate
   green under both debug and non-debug builds.
-- **1000k compile budget**: `frontend-1000k-perf-gate` remains open until
-  the reference-host RSS (â‰?1.8x C++) and frontend-share (â‰?65%) targets are
-  met.
+- **1000k compile budget**: archived `compile-scale-production-gate` closed
+  the reference-host RSS (0.11x C++) and frontend-share (31.83%) targets;
+  this umbrella only re-runs the gate after `-g` work to prove no default-mode
+  regression.
 
 ## Proposal
 
@@ -69,9 +71,11 @@ Dependency ordering:
 - `codegen-ir-correctness-and-gate` is already archived and remains a
   regression gate for `native-debug-info`; debug-info work must not weaken
   real-CLI core conformance.
-- `frontend-1000k-perf-gate` remains owned by the prior umbrella; this
-  program does not duplicate its targets but the final verification wave
-  re-runs the perf gate to prove debug-info emission did not regress it.
+- `compile-scale-production-gate` owns the passing 100k/1000k performance
+  evidence and archived `frontend-1000k-perf-gate` as superseded baseline
+  context. This program does not duplicate its targets; the final verification
+  wave only re-runs the perf gate to prove debug-info emission did not regress
+  default-mode compile performance.
 
 ### Pillar 1 â€?Source-level debugging (`native-debug-info`)
 
@@ -150,8 +154,8 @@ The umbrella MUST NOT be archived as a substitute for those child deltas.
   `tools/sgfmt`, `tools/sglsp` (version coherence), `.github/workflows/`
   (release packaging), `docs/`, `examples/realworld/SUPPORT_MATRIX.md`.
 - Affected active changes: consumes archived `codegen-ir-correctness-and-gate`
-  for IR-stability; re-runs the perf gate owned by
-  `frontend-1000k-perf-gate` in final verification without duplicating it.
+  for IR-stability; re-runs the perf gate proven by archived
+  `compile-scale-production-gate` in final verification without duplicating it.
 - Existing public APIs remain source-compatible: cancellation and keep-alive
   surfaces are additive; the non-canceling `select` and `Connection: close`
   defaults are unchanged until child specs say otherwise.

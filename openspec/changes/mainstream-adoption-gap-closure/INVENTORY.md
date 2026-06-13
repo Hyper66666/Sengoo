@@ -27,7 +27,7 @@ archive.
 | Change | State | Why it gates this program |
 | --- | --- | --- |
 | `codegen-ir-correctness-and-gate` | Archived as `2026-06-11-codegen-ir-correctness-and-gate`; latest core-conformance run `27366666789` passed | IR emission and the conformance gate must be trustworthy before debug-metadata emission edits the same codegen path |
-| `frontend-1000k-perf-gate` | Active, awaiting reference-host absolute targets | Phase 5 re-runs its gate to prove `-g` work did not regress default-mode compile performance |
+| `compile-scale-production-gate` | Archived 2026-06-08 with passing 100k/1000k evidence; `frontend-1000k-perf-gate` archived 2026-06-13 as superseded baseline context | Phase 5 re-runs the compile-scale gate after `-g` work to prove no default-mode regression |
 | `six-pillar-gap-closure` | Active umbrella, final verification open | Prior wave must not have its capabilities re-claimed by this wave's children |
 
 ## Pillar A â€?Source-level debugging
