@@ -9,8 +9,9 @@ remain open. Sengoo is now usable for committed internal projects.
 The next blocker set is different in kind: it is no longer "can an internal
 team that built the compiler use it", but "can a team that did not build the
 compiler adopt it". Audit of `examples/realworld/SUPPORT_MATRIX.md`, the
-archived change record, and the compiler source shows four structural
-adoption gaps that no active change owns:
+archived change record, and the compiler source originally showed four
+structural adoption gaps; the cancellation pillar has since been implemented
+and archived, while the remaining pillars stay active:
 
 1. **No source-level debugging.** The native backend emits no LLVM debug
    metadata at all (no `!dbg` locations, no DI nodes anywhere under
@@ -18,11 +19,11 @@ adoption gaps that no active change owns:
    WinDbg to a `sgc build` artifact, but without line tables a developer
    steps through assembly, not Sengoo source. Every mainstream language
    ships breakpoints-on-source-lines as table stakes.
-2. **Cancellation semantics are deferred everywhere.** Three SUPPORT_MATRIX
-   rows â€” task cancellation boundaries, select loser cancellation, and
-   process cancellation â€” are `Deferred` with no active owning change after
-   `async-default-followups` archived. Production async services need a
-   defined way to stop work they started.
+2. **Cancellation semantics needed a bounded production subset.** Three
+   SUPPORT_MATRIX rows - task cancellation boundaries, select loser
+   cancellation, and process cancellation - were originally `Deferred`.
+   `async-cancellation-semantics` archived the supported subset; broader
+   propagation APIs remain future work.
 3. **HTTP serving is not production-shaped.** `async-http-serving` archived
    with reactor-backed dynamic serving, but explicitly deferred TLS server,
    keep-alive, streaming bodies, and callback handlers. A serial
@@ -43,7 +44,7 @@ not owned scope:
   work may now edit the same IR path, but must keep that conformance gate
   green under both debug and non-debug builds.
 - **1000k compile budget**: `frontend-1000k-perf-gate` remains open until
-  the reference-host RSS (â‰¤ 1.8x C++) and frontend-share (â‰¤ 65%) targets are
+  the reference-host RSS (â‰?1.8x C++) and frontend-share (â‰?65%) targets are
   met.
 
 ## Proposal
@@ -72,7 +73,7 @@ Dependency ordering:
   program does not duplicate its targets but the final verification wave
   re-runs the perf gate to prove debug-info emission did not regress it.
 
-### Pillar 1 â€” Source-level debugging (`native-debug-info`)
+### Pillar 1 â€?Source-level debugging (`native-debug-info`)
 
 - Emit LLVM debug-info metadata (DI compile units, subprograms, locations)
   in the textual IR path so `clang` produces DWARF on POSIX and CodeView on
@@ -84,7 +85,7 @@ Dependency ordering:
 - Upgrade `docs/debugging-native.md` from assembly-level to source-level
   workflows with validated lldb and Windows debugger transcripts.
 
-### Pillar 2 â€” Cancellation semantics (`async-cancellation-semantics`)
+### Pillar 2 â€?Cancellation semantics (`async-cancellation-semantics`)
 
 - Specify and implement a user-facing task cancellation contract on top of
   existing `spawn_task`/`cancel_task`/`task_status`: cooperative
@@ -97,7 +98,7 @@ Dependency ordering:
 - Move the three Deferred SUPPORT_MATRIX rows to supported subsets with
   proof rows.
 
-### Pillar 3 â€” Production HTTP serving (`http-production-serving`)
+### Pillar 3 â€?Production HTTP serving (`http-production-serving`)
 
 - Add opt-in HTTP/1.1 keep-alive with bounded per-connection request counts
   and idle timeouts; default remains `Connection: close` until proven.
@@ -108,7 +109,7 @@ Dependency ordering:
   on Windows, rustls on POSIX), with the same no-fake-TLS rules as the
   client rows.
 
-### Pillar 4 â€” Toolchain distribution (`toolchain-distribution`)
+### Pillar 4 â€?Toolchain distribution (`toolchain-distribution`)
 
 - Produce versioned, checksummed release archives containing `sgc`, `sgpm`,
   `sgfmt`, and `sglsp` for Windows x64 and Linux x64 from the existing

@@ -34,13 +34,13 @@
 
 - [x] 2.1 Child change validated strictly with the cooperative cancellation
   contract (D3) pinned before implementation.
-- [ ] 2.2 Task cancellation propagation: canceled task halts at next await
+- [x] 2.2 Task cancellation propagation: canceled task halts at next await
   point, reaches `task_status == 3`, runs no post-await user code.
-- [ ] 2.3 `select_cancel` for 2..8 homogeneous operands with deterministic
+- [x] 2.3 `select_cancel` for 2..8 homogeneous operands with deterministic
   loser cancel/drop and no dangling reactor interest registrations.
-- [ ] 2.4 Cancellation-capable process wait resolving promptly on kill with
+- [x] 2.4 Cancellation-capable process wait resolving promptly on kill with
   a stable status; Windows + POSIX tests.
-- [ ] 2.5 Move the three Deferred matrix rows to supported subsets with
+- [x] 2.5 Move the three Deferred matrix rows to supported subsets with
   proof links.
 
 ## 3. Pillar C — Production HTTP serving (`http-production-serving`)
@@ -88,7 +88,7 @@
 - [x] 6.6 `cargo test -p sglsp`
 - [x] 6.7 `cargo clippy -p sgc -p sgpm -p sengoo-compiler -p sengoo-runtime
   -p sgfmt -p sglsp --all-targets -- -D warnings`
-- [ ] 6.8 `realworld-e2e` job (locked loop, real binaries)
+- [x] 6.8 `realworld-e2e` job (locked loop, real binaries)
 - [ ] 6.9 Debugger transcript checklist (Windows + Linux) linked from
   Pillar A child
 - [x] 6.10 Release packaging workflow dry-run produces installable archives
@@ -102,7 +102,7 @@
 - [ ] A developer can install a versioned toolchain on a fresh Windows or
   Linux host without building from source and debug a Sengoo program at
   source-line level.
-- [ ] Async tasks, select losers, and child processes can be canceled with
+- [x] Async tasks, select losers, and child processes can be canceled with
   documented, tested semantics.
 - [ ] An HTTP service with handler routing, keep-alive, streaming, and TLS
   subset runs from a realworld fixture.

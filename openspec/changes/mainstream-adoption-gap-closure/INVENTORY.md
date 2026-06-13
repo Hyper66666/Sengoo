@@ -3,12 +3,13 @@
 ## Status Snapshot (June 2026)
 
 Baseline audit performed against the working tree on branch
-`codex/mainstream-usable-loop` after the `async-http-serving` archive.
+`codex/mainstream-usable-loop`; updated after the `async-cancellation-semantics`
+archive.
 
 | Pillar | Priority | Current state | Primary evidence |
 | --- | --- | --- | --- |
 | A Source-level debugging | High | No debug metadata exists anywhere in the emitted IR; debugger docs are assembly-level | Search of `compiler/src/` finds zero `!dbg`/DI/DWARF references; `docs/debugging-native.md` |
-| B Cancellation semantics | High | Three Deferred matrix rows with no active owner | `examples/realworld/SUPPORT_MATRIX.md` rows: task cancellation boundaries, select loser cancellation, process cancellation |
+| B Cancellation semantics | High | Supported subset archived: task cancellation boundaries, `select_cancel`, and cancellable process waits; broader cancellation propagation APIs remain future work | `openspec/specs/async-cancellation/spec.md`; `examples/realworld/SUPPORT_MATRIX.md` rows: task cancellation boundaries, select loser cancellation, process cancellation |
 | C Production HTTP serving | High | Reactor-backed dynamic serving works; TLS server, keep-alive, streaming, callback handlers explicitly deferred | SUPPORT_MATRIX "HTTP server dynamic serving" row; archived `2026-06-11-async-http-serving` |
 | D Toolchain distribution | Medium-high | Source build only (`cargo build --release`); release process documented but no published versioned binaries or install scripts | `docs/internal-release.md`; absence of release packaging workflow in `.github/workflows/` |
 
@@ -17,7 +18,7 @@ Baseline audit performed against the working tree on branch
 | Child change | Pillar | Capability delta | Status |
 | --- | --- | --- | --- |
 | `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; prerequisite archive satisfied; codegen edits unblocked |
-| `async-cancellation-semantics` | B | new `async-cancellation` | Proposed, strictly validated; unblocked |
+| `async-cancellation-semantics` | B | new `async-cancellation` | Archived 2026-06-12; PR #17 Windows/Ubuntu evidence recorded |
 | `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Proposed, strictly validated; sequenced after Pillar B |
 | `toolchain-distribution` | D | new `toolchain-distribution` | Proposed, strictly validated; unblocked, parallel with A |
 
@@ -29,7 +30,7 @@ Baseline audit performed against the working tree on branch
 | `frontend-1000k-perf-gate` | Active, awaiting reference-host absolute targets | Phase 5 re-runs its gate to prove `-g` work did not regress default-mode compile performance |
 | `six-pillar-gap-closure` | Active umbrella, final verification open | Prior wave must not have its capabilities re-claimed by this wave's children |
 
-## Pillar A â€” Source-level debugging
+## Pillar A â€?Source-level debugging
 
 | Item | Current evidence |
 | --- | --- |
@@ -38,17 +39,17 @@ Baseline audit performed against the working tree on branch
 | Debugger docs | `docs/debugging-native.md` exists (Pillar 6 of prior wave) but documents symbol-less native attach |
 | Cache interaction | Artifact cache fingerprints runtime/source bytes; no debug-mode dimension yet (`tools/sgc/src/cache.rs`) |
 
-## Pillar B â€” Cancellation semantics
+## Pillar B â€?Cancellation semantics
 
 | Item | Current evidence |
 | --- | --- |
-| `spawn_task` / `cancel_task` / `task_status` | Exist with statuses `0..3`; pending-task cancel covered by async tests; propagation contract unspecified |
-| `select` (2..8) | Non-canceling loser policy pinned by `async-reactor-futures`; losers dropped via normal cleanup |
+| `spawn_task` / `cancel_task` / `task_status` | Supported subset with statuses `0..3`; canceled tasks stop at the next await point and report canceled status |
+| `select` (2..8) | Existing `select` remains non-canceling; `select_cancel` supports homogeneous 2..8 operands with deterministic loser cancel/drop |
 | `timeout_cancel(future, ms)` | Exists and consumes its future (`async-default-followups`); single-future only |
-| Process cancellation | `ProcessHandle.wait(timeout_ms)/kill` exist; no cancellation-capable wait; matrix row Deferred |
-| Reactor interest cleanup | Pending async drop unregisters listener interest (HTTP server row) â€” pattern to reuse for loser cancellation |
+| Process cancellation | `ProcessHandle.wait_cancellable(timeout_ms)` maps killed waits to `STATUS_CANCELED` and is proven on Windows plus Ubuntu CI |
+| Reactor interest cleanup | Pending async drop and select-cancel loser cleanup unregister listener interest in the supported subset |
 
-## Pillar C â€” Production HTTP serving
+## Pillar C â€?Production HTTP serving
 
 | Item | Current evidence |
 | --- | --- |
@@ -59,7 +60,7 @@ Baseline audit performed against the working tree on branch
 | Streaming bodies | Not implemented |
 | TLS server | Not implemented; client stacks exist (Schannel verified on Windows; rustls implemented with POSIX reference-host success evidence still pending under `six-pillar-gap-closure`) |
 
-## Pillar D â€” Toolchain distribution
+## Pillar D â€?Toolchain distribution
 
 | Item | Current evidence |
 | --- | --- |
@@ -85,9 +86,9 @@ Recorded so they are not silently lost; each needs its own future change:
 
 | SUPPORT_MATRIX row | From | To (target) |
 | --- | --- | --- |
-| Task cancellation boundaries | Deferred | Supported subset |
-| Select loser cancellation | Deferred | Supported subset (`select_cancel`) |
-| Process cancellation | Deferred | Supported subset |
+| Task cancellation boundaries | Deferred | Supported subset (complete via `async-cancellation-semantics`) |
+| Select loser cancellation | Deferred | Supported subset (`select_cancel`; complete via `async-cancellation-semantics`) |
+| Process cancellation | Deferred | Supported subset (complete via `async-cancellation-semantics`) |
 | HTTP server dynamic serving | Supported subset (close-only) | Supported subset incl. keep-alive, handlers, streaming, TLS-server row(s) |
-| (new row) Source-level debugging | â€” | Supported subset (line-level) |
-| (new row) Toolchain distribution | â€” | Supported (win-x64, linux-x64) |
+| (new row) Source-level debugging | â€?| Supported subset (line-level) |
+| (new row) Toolchain distribution | â€?| Supported (win-x64, linux-x64) |

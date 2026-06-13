@@ -1,7 +1,7 @@
 ## 1. Pinning and prerequisites
 
 - [x] 1.1 Run `openspec validate http-production-serving --strict`.
-- [ ] 1.2 Confirm `async-cancellation-semantics` is archived (teardown
+- [x] 1.2 Confirm `async-cancellation-semantics` is archived (teardown
   primitives available); otherwise record it as the active blocker.
 - [x] 1.3 Pin numeric bounds in `design.md`: max requests per connection,
   idle timeout default, max streaming chunk size.
