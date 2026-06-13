@@ -96,6 +96,8 @@ pub(super) fn lower_function(
     }
 
     // 降级结束后检查是否有错误需要报告。
+    ctx.insert_drop_glue();
+
     if !ctx.errors.is_empty() {
         return Err(format!(
             "MIR lowering errors in function '{}':\n  {}",

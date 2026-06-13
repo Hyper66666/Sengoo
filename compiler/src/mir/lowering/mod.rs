@@ -59,6 +59,7 @@ mod call_invocation_helpers;
 mod call_target_helpers;
 mod context_methods;
 mod contract_methods;
+mod drop_glue_helpers;
 mod entry;
 mod enum_expr_helpers;
 mod for_expr_helpers;
@@ -120,6 +121,12 @@ struct LoopContext {
 }
 
 /// 函数签名信息，存储函数名、参数数量和参数类型。
+#[derive(Debug, Clone)]
+struct DropBinding {
+    local: Local,
+    drop_func: &'static str,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FunctionSig {
     pub(crate) ret_type: MIRType,
@@ -205,6 +212,8 @@ struct LoweringContext<'a> {
     /// bindings so that `let f = async_fn(); await f` resolves correctly.
     future_origins: HashMap<Local, String>,
     try_scope_stack: Vec<try_expr_helpers::TryScope>,
+    drop_bindings: Vec<DropBinding>,
+    moved_drop_locals: HashSet<Local>,
 }
 
 impl<'a> LoweringContext<'a> {
