@@ -17,7 +17,7 @@
 - [x] 3.1 Tag-triggered workflow (`v*`) with tag == version fail-fast
   check; per-target release builds on native runners with the pinned Rust
   toolchain.
-- [ ] 3.2 Smoke matrix from `docs/internal-release.md` runs against built
+- [x] 3.2 Smoke matrix from `docs/internal-release.md` runs against built
   binaries on each target; any failure blocks all publication for the tag.
 - [ ] 3.3 Package archives per D-D1 with `.sha256`; upload to the GitHub
   release; `workflow_dispatch` dry-run mode builds and smokes without
@@ -52,8 +52,8 @@
 ## 6. Verification
 
 - [x] 6.1 `cargo fmt --check`
-- [ ] 6.2 Version coherence test green on Windows and Linux CI
-- [ ] 6.3 Workflow dry-run produces installable, checksum-valid archives
+- [x] 6.2 Version coherence test green on Windows and Linux CI
+- [x] 6.3 Workflow dry-run produces installable, checksum-valid archives
   for both targets
 - [x] 6.4 Dry-run archive extraction proves stdlib/runtime lookup without a
   source checkout or manual `SENGOO_ROOT`
