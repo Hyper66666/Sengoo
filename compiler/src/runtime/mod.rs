@@ -53,6 +53,36 @@ impl Allocator {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn sengoo_eprint_i64(value: i64) {
+    eprintln!("{}", value);
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_eprint_bool(value: i64) {
+    eprintln!("{}", if value != 0 { "true" } else { "false" });
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_eprint_f64(value: f64) {
+    eprintln!("{}", value);
+}
+
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn sengoo_eprint_str(ptr: *const u8) {
+    if ptr.is_null() {
+        eprintln!();
+        return;
+    }
+    unsafe {
+        let len = sengoo_str_len(ptr);
+        let slice = std::slice::from_raw_parts(ptr, len);
+        let s = String::from_utf8_lossy(slice);
+        eprintln!("{}", s);
+    }
+}
+
 // ============================================================================
 // 字符串处理
 // ============================================================================

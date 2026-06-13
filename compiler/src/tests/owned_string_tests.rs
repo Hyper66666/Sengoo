@@ -82,6 +82,31 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_use_after_move_reports_stable_code() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let a: String = string_from_str("a").value;
+    let b = a;
+    a.len()
+}
+"#
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("use after move should fail type checking");
+
+    let crate::error::CompileError::TypeckError(typeck_err) = err else {
+        panic!("expected typeck error, got {err:?}");
+    };
+    assert_eq!(typeck_err.stable_code(), Some("use-after-move"));
+}
+
+#[test]
 fn stdlib_owned_string_move_rejects_use_after_inner_block_move() {
     let err = typecheck_fails_with_stdlib(
         r#"

@@ -648,11 +648,19 @@ impl TypeChecker {
                 .apply_subst(&inner_ty.expect("select has at least two operands")));
         }
 
-        // Special handling for `print` builtin function
+        // Special handling for `print`/`println`/`eprintln` builtin functions
         // Check both Ident and Path (single-segment) since the parser may produce either
         let is_print = match &func.kind {
-            ExprKind::Ident(ident) => ident.name == "print",
-            ExprKind::Path(path) => path.segments.len() == 1 && path.segments[0].name == "print",
+            ExprKind::Ident(ident) => {
+                matches!(ident.name.as_str(), "print" | "println" | "eprintln")
+            }
+            ExprKind::Path(path) => {
+                path.segments.len() == 1
+                    && matches!(
+                        path.segments[0].name.as_str(),
+                        "print" | "println" | "eprintln"
+                    )
+            }
             _ => false,
         };
         if is_print {
@@ -736,7 +744,8 @@ impl TypeChecker {
             }
 
             if let Some((name, meta, var_map)) = generic_ctx.as_ref() {
-                self.enforce_generic_function_constraints(name, meta, var_map)?;
+                let span = func.span();
+                self.enforce_generic_function_constraints(name, meta, var_map, span.lo, span.hi)?;
             }
 
             let resolved_ret = self.infer.apply_subst(ret);
@@ -765,6 +774,8 @@ impl TypeChecker {
         function_name: &str,
         meta: &GenericFunctionMeta,
         var_map: &HashMap<TyVarId, TyVarId>,
+        span_lo: u32,
+        span_hi: u32,
     ) -> TyResult<()> {
         for param in &meta.params {
             let mut concrete_ty = if let Some(instantiated_var) = var_map.get(&param.var_id) {
@@ -806,10 +817,14 @@ impl TypeChecker {
                     .impl_registry
                     .implements_trait(trait_name, &concrete_key)
                 {
-                    return Err(TypeckError::Other(format!(
-                        "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
-                        function_name, concrete_key, trait_name, param.name
-                    )));
+                    return Err(Self::unsatisfied_trait_bound_error(
+                        function_name,
+                        &concrete_key,
+                        trait_name,
+                        &param.name,
+                        span_lo,
+                        span_hi,
+                    ));
                 }
             }
         }

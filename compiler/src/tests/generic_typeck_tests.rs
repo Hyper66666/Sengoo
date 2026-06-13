@@ -351,3 +351,28 @@ def main() -> i64 {
         ir
     );
 }
+
+#[test]
+fn generic_enum_payload_typechecks_and_lowers_to_ir() {
+    let source = r#"
+enum Maybe<T> { Empty, Value(T) }
+
+def unwrap(value: Maybe<i64>) -> i64 {
+    match value {
+        Maybe::Empty => 0,
+        Maybe::Value(inner) => inner,
+    }
+}
+
+def main() -> i64 {
+    unwrap(Maybe::Value(42))
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("generic enum payload should compile to IR");
+    assert!(
+        ir.contains("; Function: main"),
+        "expected generic enum program to lower to IR\n{}",
+        ir
+    );
+}

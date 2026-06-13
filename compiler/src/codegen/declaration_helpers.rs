@@ -133,6 +133,47 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
     }
 
+    pub(super) fn maybe_declare_eprint_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let declarations = [
+            (
+                "sengoo_eprint_i64",
+                "declare void @sengoo_eprint_i64(i64)\n",
+            ),
+            (
+                "sengoo_eprint_bool",
+                "declare void @sengoo_eprint_bool(i64)\n",
+            ),
+            (
+                "sengoo_eprint_f64",
+                "declare void @sengoo_eprint_f64(double)\n",
+            ),
+            (
+                "sengoo_eprint_str",
+                "declare void @sengoo_eprint_str(i8*)\n",
+            ),
+        ];
+
+        let mut needed = std::collections::BTreeSet::new();
+        for mir_fn in mir_fns {
+            for inst in &mir_fn.instructions {
+                if let mir::Instruction::Call { func, .. } = inst {
+                    needed.insert(func.as_str());
+                }
+            }
+            for block in &mir_fn.basic_blocks {
+                if let Some(mir::Terminator::Call { func, .. }) = &block.terminator {
+                    needed.insert(func.as_str());
+                }
+            }
+        }
+
+        for (name, decl) in declarations {
+            if needed.contains(name) && !self.declarations.contains(decl) {
+                self.declarations.push_str(decl);
+            }
+        }
+    }
+
     /// Declare the async select runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
         let winner_decl = select_winner_runtime_declaration();

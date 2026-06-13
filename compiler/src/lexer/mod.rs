@@ -85,9 +85,25 @@ mod tests {
 
     #[test]
     fn test_tokenize_floats() {
-        let tokens = Lexer::tokenize("3.14 2.0");
+        let tokens = Lexer::tokenize("3.14 2.0 1.5f32 2.25f64");
         assert!(matches!(tokens[0].kind, TokenKind::Float(Some(_))));
         assert!(matches!(tokens[1].kind, TokenKind::Float(Some(_))));
+        assert!(
+            matches!(tokens[2].kind, TokenKind::Float(Some(v)) if (v - 1.5).abs() < f64::EPSILON)
+        );
+        assert!(
+            matches!(tokens[3].kind, TokenKind::Float(Some(v)) if (v - 2.25).abs() < f64::EPSILON)
+        );
+    }
+
+    #[test]
+    fn test_tokenize_integer_bases_and_type_suffixes() {
+        let tokens = Lexer::tokenize("0b101010 0o52 42i64 7u8 1_000_000");
+        assert!(matches!(tokens[0].kind, TokenKind::Int(Some(42))));
+        assert!(matches!(tokens[1].kind, TokenKind::Int(Some(42))));
+        assert!(matches!(tokens[2].kind, TokenKind::Int(Some(42))));
+        assert!(matches!(tokens[3].kind, TokenKind::Int(Some(7))));
+        assert!(matches!(tokens[4].kind, TokenKind::Int(Some(1_000_000))));
     }
 
     #[test]
@@ -130,8 +146,17 @@ mod tests {
 
     #[test]
     fn test_tokenize_string() {
-        let tokens = Lexer::tokenize("\"hello\"");
+        let tokens = Lexer::tokenize("\"hello\" b\"bytes\"");
         assert!(matches!(tokens[0].kind, TokenKind::String(Some(_))));
+        assert!(matches!(&tokens[1].kind, TokenKind::Bytes(Some(bytes)) if bytes == b"bytes"));
+    }
+
+    #[test]
+    fn test_tokenize_multiline_string_strips_common_indent() {
+        let tokens = Lexer::tokenize("\"\"\"\n    alpha\n    beta\n    \"\"\"");
+        assert!(
+            matches!(&tokens[0].kind, TokenKind::String(Some(value)) if value == "alpha\nbeta")
+        );
     }
 
     #[test]

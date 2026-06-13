@@ -322,15 +322,18 @@ pub enum TokenKind {
     Ident,
 
     // 整数
-    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
-    #[regex(r"0x[0-9a-fA-F]+", |lex| i64::from_str_radix(&lex.slice()[2..], 16).ok())]
+    #[regex(r"0b[01][01_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
+    #[regex(r"0o[0-7][0-7_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
+    #[regex(r"0x[0-9a-fA-F][0-9a-fA-F_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
+    #[regex(r"[0-9][0-9_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
     Int(Option<i64>),
 
     // 浮点数
-    #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", |lex| lex.slice().parse::<f64>().ok())]
+    #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(f32|f64)?", |lex| parse_float_literal(lex.slice()))]
     Float(Option<f64>),
 
     // 字符串
+    #[token("\"\"\"", lex_multiline_string)]
     #[regex(r#""[^"\\]*(?:\\.[^"\\]*)*""#, |lex| Some(unescape_string(&lex.slice()[1..lex.slice().len()-1])))]
     String(Option<String>),
 
@@ -639,6 +642,70 @@ impl Token {
 }
 
 /// 处理字符串中的转义序列
+fn lex_multiline_string(lex: &mut logos::Lexer<TokenKind>) -> Option<String> {
+    let remainder = lex.remainder();
+    let end = remainder.find("\"\"\"")?;
+    let raw = &remainder[..end];
+    lex.bump(end + 3);
+    Some(strip_multiline_indent(raw))
+}
+
+fn strip_multiline_indent(raw: &str) -> String {
+    let mut lines: Vec<&str> = raw.lines().collect();
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take_while(|c| *c == ' ' || *c == '\t').count())
+        .min()
+        .unwrap_or(0);
+    lines
+        .into_iter()
+        .map(|line| {
+            let byte_idx = line
+                .char_indices()
+                .nth(indent)
+                .map(|(idx, _)| idx)
+                .unwrap_or_else(|| line.len());
+            line[byte_idx..].to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn parse_float_literal(slice: &str) -> Option<f64> {
+    let digits = slice
+        .strip_suffix("f32")
+        .or_else(|| slice.strip_suffix("f64"))
+        .unwrap_or(slice);
+    digits.replace('_', "").parse::<f64>().ok()
+}
+
+fn parse_int_literal(slice: &str) -> Option<i64> {
+    const SUFFIXES: &[&str] = &[
+        "isize", "usize", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8",
+    ];
+    let digits = SUFFIXES
+        .iter()
+        .find_map(|suffix| slice.strip_suffix(suffix))
+        .unwrap_or(slice);
+    let normalized = digits.replace('_', "");
+    if let Some(rest) = normalized.strip_prefix("0b") {
+        i64::from_str_radix(rest, 2).ok()
+    } else if let Some(rest) = normalized.strip_prefix("0o") {
+        i64::from_str_radix(rest, 8).ok()
+    } else if let Some(rest) = normalized.strip_prefix("0x") {
+        i64::from_str_radix(rest, 16).ok()
+    } else {
+        normalized.parse::<i64>().ok()
+    }
+}
+
 fn unescape_string(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
