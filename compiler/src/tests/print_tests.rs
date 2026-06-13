@@ -5,6 +5,55 @@
 use crate::compile_to_ir;
 
 #[test]
+fn test_print_extended_numeric_literals_compile() {
+    let source = r#"def main() -> i64 { print(0b101010 + 0o52 + 42i64 + 1_000_000); 0 }"#;
+    let ir = compile_to_ir(source).expect("extended numeric literals should compile successfully");
+    assert!(
+        ir.contains("call void @sengoo_print_i64(i64"),
+        "Expected IR to contain i64 print call for extended numeric literals, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn test_println_aliases_print_lowering() {
+    let source = r#"def main() -> i64 { println("hello"); println(42); 0 }"#;
+    let ir = compile_to_ir(source).expect("println should compile through the print runtime path");
+    assert!(
+        ir.contains("@sengoo_print_str("),
+        "Expected println(str) to lower to string print runtime call, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("@sengoo_print_i64("),
+        "Expected println(i64) to lower to i64 print runtime call, got:\n{}",
+        ir
+    );
+}
+
+#[test]
+fn test_eprintln_lowers_to_stderr_runtime_calls() {
+    let source = r#"def main() -> i64 { eprintln("oops"); eprintln(42); 0 }"#;
+    let ir = compile_to_ir(source).expect("eprintln should compile through stderr runtime calls");
+    assert!(
+        ir.contains("@sengoo_eprint_str("),
+        "Expected eprintln(str) to lower to stderr string runtime call, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("@sengoo_eprint_i64("),
+        "Expected eprintln(i64) to lower to stderr i64 runtime call, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("declare void @sengoo_eprint_str(i8*)")
+            && ir.contains("declare void @sengoo_eprint_i64(i64)"),
+        "Expected stderr runtime declarations to be emitted on demand, got:\n{}",
+        ir
+    );
+}
+
+#[test]
 fn test_print_i64_generates_correct_runtime_call() {
     let source = r#"def main() -> i64 { print(42); 0 }"#;
     let ir = compile_to_ir(source).expect("print(42) should compile successfully");

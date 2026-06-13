@@ -83,12 +83,30 @@ impl TypeChecker {
             )));
         }
 
-        let field_tys = self
+        let raw_field_tys = self
             .enum_variant_field_tys
             .get(enum_name)
             .and_then(|variants| variants.get(variant_name))
             .cloned()
             .unwrap_or_default();
+        let generic_meta = self.generic_type_metas.get(enum_name).cloned();
+        let (field_tys, generic_param_placeholders) = if let Some(meta) = generic_meta.as_ref() {
+            let mut template_parts = raw_field_tys.clone();
+            for param in &meta.params {
+                template_parts.push(Ty::new(0, TyKind::Var(param.var_id)));
+            }
+            let template = Ty::new(0, TyKind::Tuple(template_parts));
+            let instantiated = self.infer.instantiate_with_fresh_vars(&template);
+            let TyKind::Tuple(mut parts) = instantiated.kind else {
+                return Some(Err(TypeckError::Other(
+                    "internal error: generic enum instantiation expected tuple".to_string(),
+                )));
+            };
+            let param_placeholders = parts.split_off(raw_field_tys.len());
+            (parts, param_placeholders)
+        } else {
+            (raw_field_tys, Vec::new())
+        };
         if field_tys.len() != args.len() {
             return Some(Err(TypeckError::diagnostic(
                 "enum-variant-arity",
@@ -121,6 +139,44 @@ impl TypeChecker {
                     span_hi,
                 )));
             }
+        }
+
+        if let Some(meta) = generic_meta.as_ref() {
+            let mut enum_args = Vec::with_capacity(meta.params.len());
+            let mut resolved_by_old_id = std::collections::HashMap::new();
+            for (param, placeholder) in meta.params.iter().zip(generic_param_placeholders.iter()) {
+                let mut concrete_ty = self.infer.apply_subst(placeholder);
+                if matches!(concrete_ty.kind, TyKind::Var(_)) {
+                    if let Some(default_ty) = &param.default {
+                        concrete_ty = self.substitute_ty_vars(default_ty, &resolved_by_old_id);
+                        concrete_ty = self.infer.apply_subst(&concrete_ty);
+                    } else {
+                        return Some(Err(TypeckError::Other(format!(
+                            "cannot infer generic argument `{}` for enum `{}` variant `{}`",
+                            param.name, enum_name, variant_name
+                        ))));
+                    }
+                }
+                for bound in &param.bounds {
+                    let concrete_key = type_key(&concrete_ty);
+                    if !self.impl_registry.implements_trait(bound, &concrete_key) {
+                        return Some(Err(Self::unsatisfied_trait_bound_error(
+                            format!("enum `{enum_name}` variant `{variant_name}`"),
+                            &concrete_key,
+                            bound,
+                            &param.name,
+                            span_lo,
+                            span_hi,
+                        )));
+                    }
+                }
+                resolved_by_old_id.insert(param.var_id, concrete_ty.clone());
+                enum_args.push(concrete_ty);
+            }
+            return Some(Ok(self.env.new_ty(TyKind::Adt {
+                name: enum_name.clone(),
+                args: enum_args,
+            })));
         }
 
         let enum_ty = self

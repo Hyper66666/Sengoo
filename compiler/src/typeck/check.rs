@@ -368,20 +368,29 @@ impl TypeChecker {
                     .map(|variant| variant.name.name.clone())
                     .collect::<Vec<_>>();
                 self.enum_variants.insert(name.clone(), variants);
-                let mut variant_fields = HashMap::new();
-                for variant in &enum_decl.variants {
-                    let field_tys = variant
-                        .fields
-                        .iter()
-                        .map(|field| match field {
-                            crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
-                            crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
-                        })
-                        .collect::<TyResult<Vec<_>>>()?;
-                    variant_fields.insert(variant.name.name.clone(), field_tys);
-                }
+                self.env.push_scope();
+                let enum_meta_and_fields =
+                    (|| -> TyResult<(Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>)> {
+                        let type_meta = self
+                            .bind_type_params_with_meta(&enum_decl.type_params)
+                            .map_err(|err| TypeckError::Other(err.to_string()))?;
+                        let mut variant_fields = HashMap::new();
+                        for variant in &enum_decl.variants {
+                            let field_tys = variant
+                                .fields
+                                .iter()
+                                .map(|field| match field {
+                                    crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
+                                    crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
+                                })
+                                .collect::<TyResult<Vec<_>>>()?;
+                            variant_fields.insert(variant.name.name.clone(), field_tys);
+                        }
+                        Ok((type_meta, variant_fields))
+                    })();
+                self.env.pop_scope();
+                let (type_meta, variant_fields) = enum_meta_and_fields?;
                 self.enum_variant_field_tys.insert(name, variant_fields);
-                let type_meta = self.collect_generic_type_meta(&enum_decl.type_params);
                 self.set_generic_type_meta(enum_decl.name.name.clone(), type_meta);
             }
             DeclKind::Class(class_decl) => {
@@ -636,6 +645,28 @@ impl TypeChecker {
             }
             _ => pattern.kind == concrete.kind,
         }
+    }
+
+    pub(super) fn unsatisfied_trait_bound_error(
+        context: impl AsRef<str>,
+        concrete_type: impl AsRef<str>,
+        trait_name: impl AsRef<str>,
+        type_param: impl AsRef<str>,
+        span_lo: u32,
+        span_hi: u32,
+    ) -> TypeckError {
+        TypeckError::diagnostic(
+            "unsatisfied-trait-bound",
+            format!(
+                "generic constraint violated in `{}`: `{}` does not implement `{}` for `{}`",
+                context.as_ref(),
+                concrete_type.as_ref(),
+                trait_name.as_ref(),
+                type_param.as_ref()
+            ),
+            span_lo,
+            span_hi,
+        )
     }
 
     fn resolve_generic_type_args(
@@ -911,10 +942,17 @@ impl TypeChecker {
                             for bound in &param.bounds {
                                 let concrete_key = type_key(&concrete_ty);
                                 if !self.impl_registry.implements_trait(bound, &concrete_key) {
-                                    return Err(TypeckError::Other(format!(
-                                        "generic constraint violated in struct `{}` literal: `{}` does not implement `{}` for `{}`",
-                                        name, concrete_key, bound, param.name
-                                    )));
+                                    let span = path.segments.last().map(|segment| segment.span);
+                                    let (span_lo, span_hi) =
+                                        span.map(|span| (span.lo, span.hi)).unwrap_or((0, 0));
+                                    return Err(Self::unsatisfied_trait_bound_error(
+                                        format!("struct `{name}` literal"),
+                                        &concrete_key,
+                                        bound,
+                                        &param.name,
+                                        span_lo,
+                                        span_hi,
+                                    ));
                                 }
                             }
                             args.push(concrete_ty);
