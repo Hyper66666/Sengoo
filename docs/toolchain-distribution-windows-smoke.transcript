@@ -1,39 +1,65 @@
-Windows local smoke on 2026-06-12:
+Windows package smoke transcript from PR #22 on 2026-06-13
+
+Workflow:
+  toolchain-distribution
+Run:
+  https://github.com/Hyper66666/Sengoo/actions/runs/27460449147
+Job:
+  package smoke (windows-latest)
+  https://github.com/Hyper66666/Sengoo/actions/runs/27460449147/job/81173089229
+Head:
+  cd5c1ce905bc494c54e3bc276a53b22da6fc178d
+Checkout:
+  6a84e21e3083cf3fd7dbf41dce1942084beca2ad
+
+Host:
+  Microsoft Windows Server 2025 10.0.26100 Datacenter
+  runner image windows-2025-vs2026 version 20260608.135.2
+
+Selected transcript:
 
 ```
-> cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
-release binaries produced under target/release/
+Run release smoke matrix
+  sgc run examples/01_hello.sg --force-rebuild
+  exit code: 42
+  cargo test -p sgpm realworld -- --nocapture
+  cargo test -p sglsp realworld -- --nocapture
+  npx --yes @fission-ai/openspec validate toolchain-distribution --strict
+  npx --yes @fission-ai/openspec validate --all --strict
 
-> powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild -SmokeEvidence local-smoke
-Packaged Sengoo toolchain:
-  archive: D:\Sengoo\target\dist\sengoo-0.1.0-smoke-x86_64-pc-windows-msvc.zip
-  sha256:  D:\Sengoo\target\dist\sengoo-0.1.0-smoke-x86_64-pc-windows-msvc.zip.sha256
+Package toolchain
+  ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke windows-latest cd5c1ce905bc494c54e3bc276a53b22da6fc178d"
+  archive: D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip
+  sha256:  D:\a\Sengoo\Sengoo\target\dist\sengoo-0.1.0-ci-x86_64-pc-windows-msvc.zip.sha256
 
-> powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Archive target/dist/sengoo-0.1.0-smoke-x86_64-pc-windows-msvc.zip -InstallDir target/install-smoke
-sgc 0.1.0 (388542112a8a)
-Add this directory to PATH: target\install-smoke\bin
-Installed Sengoo to target/install-smoke
+Install package (Windows)
+  $archive = Get-Content target/dist/latest-archive.txt
+  ./scripts/install.ps1 -Archive $archive -InstallDir target/install-smoke
+  sgc 0.1.0 (6a84e21e3083)
+  Add this directory to PATH: D:\a\Sengoo\Sengoo\target\install-smoke\bin
+  Installed Sengoo to D:\a\Sengoo\Sengoo\target\install-smoke
 
-> target/install-smoke/bin/{sgc,sgpm,sgfmt,sglsp}.exe --version
-sgc 0.1.0 (388542112a8a)
-sgpm 0.1.0 (388542112a8a)
-sgfmt 0.1.0 (388542112a8a)
-sglsp 0.1.0 (388542112a8a)
+Installed stdlib smoke
+  sgc version: sgc 0.1.0 (6a84e21e3083)
+  sgpm version: sgpm 0.1.0 (6a84e21e3083)
+  sgfmt version: sgfmt 0.1.0 (6a84e21e3083)
+  sglsp version: sglsp 0.1.0 (6a84e21e3083)
+  sgc 0.1.0 (6a84e21e3083)
+  Running: examples/01_hello.sg
+  exit code: 42
+  Installed stdlib smoke work root: D:\a\_temp\sengoo-install-smoke-work
+  Building: D:\a\_temp\sengoo-install-smoke-work\main.sg
+  LLVM IR written to D:\a\_temp\sengoo-install-smoke-work\build\main.ll
+  Running: D:\a\_temp\sengoo-install-smoke-work\main.sg
+  exit code: 0
 
-> target/install-smoke/bin/sgc.exe build target/install-smoke-work/main.sg --emit-llvm --force-rebuild
-Building: target/install-smoke-work/main.sg
-LLVM IR written to target/install-smoke-work\build\main.ll
-
-> target/install-smoke/bin/sgc.exe run target/install-smoke-work/main.sg --force-rebuild
-Running: target/install-smoke-work/main.sg
-exit code: 0
-
-> scripts/install.ps1 -Archive target/dist/sengoo-0.1.0-smoke-x86_64-pc-windows-msvc.zip -InstallDir %TEMP%\sengoo-install-smoke-...
-sgc 0.1.0 (388542112a8a)
-Add this directory to PATH: %TEMP%\sengoo-install-smoke-...\bin
-Installed Sengoo to %TEMP%\sengoo-install-smoke-...
-
-> %TEMP%\sengoo-install-smoke-...\bin\sgc.exe build %TEMP%\sengoo-work-smoke-...\main.sg --emit-llvm --force-rebuild
-Building: %TEMP%\sengoo-work-smoke-...\main.sg
-LLVM IR written to %TEMP%\sengoo-work-smoke-...\build\main.ll
+Upload packaged toolchain
+  Artifact ID 7608721209
+  Artifact download URL: https://github.com/Hyper66666/Sengoo/actions/runs/27460449147/artifacts/7608721209
 ```
+
+Notes:
+  This PR dry-run uploaded GitHub Actions artifacts and did not exercise the
+  tag-only `Validate tag version` and `Publish GitHub release assets` steps.
+  The tag path is implemented in `.github/workflows/toolchain-distribution.yml`
+  and guarded by the same package/smoke/install steps above.

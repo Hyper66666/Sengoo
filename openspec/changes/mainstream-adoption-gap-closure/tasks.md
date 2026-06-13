@@ -59,12 +59,12 @@
 
 - [x] 4.1 Child change validated strictly with artifact layout and channel
   policy pinned (D5).
-- [ ] 4.2 Tag-triggered packaging workflow produces checksummed win-x64 and
+- [x] 4.2 Tag-triggered packaging workflow produces checksummed win-x64 and
   linux-x64 archives gated on the smoke matrix.
-- [ ] 4.3 `install.ps1` / `install.sh` fetch, verify, and install a pinned
+- [x] 4.3 `install.ps1` / `install.sh` fetch, verify, and install a pinned
   version; documented fresh-host transcript runs
   `sgc run examples/01_hello.sg`.
-- [ ] 4.4 `sgc`, `sgpm`, `sgfmt`, `sglsp` report one coherent version string
+- [x] 4.4 `sgc`, `sgpm`, `sgfmt`, `sglsp` report one coherent version string
   with tests.
 
 ## 5. Integration and documentation

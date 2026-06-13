@@ -1,4 +1,4 @@
-## Context
+﻿## Context
 
 Release engineering assets today: CI build/test workflows, perf and
 realworld-e2e jobs, and `docs/internal-release.md` defining a smoke matrix
@@ -45,12 +45,14 @@ sengoo-<version>-<target>.{zip,tar.gz}.sha256
 
 ### D-D2 Workflow gating
 
-- Trigger: pushing tag `v*`. Steps per target runner: checkout → pinned
-  Rust toolchain (`rust-toolchain.toml`) → `cargo build --release` →
-  run the `docs/internal-release.md` smoke matrix against the built
-  binaries (`sgc run examples/01_hello.sg`, one stdlib import smoke,
-  `sgpm new/check/build` loop, `sgfmt --check`, `sglsp` handshake smoke)
-  → package → checksum → upload to the GitHub release for the tag.
+- Trigger: pushing tag `v*`. Steps per target runner: checkout -> pinned
+  Rust toolchain (`rust-toolchain.toml`) -> `cargo build --release` -> run
+  the release smoke matrix against the built binaries (`sgc run
+  examples/01_hello.sg`, `cargo test -p sgpm realworld`,
+  `cargo test -p sglsp realworld`, and strict OpenSpec validation) ->
+  package -> checksum -> install from the packaged archive into a clean
+  install dir -> run installed-tool version/hello/stdlib-import smokes ->
+  upload to the GitHub release for the tag.
 - Any smoke failure on any target blocks publication of all artifacts for
   that tag (no partial releases).
 - A `workflow_dispatch` dry-run mode builds and smokes without publishing
@@ -64,9 +66,9 @@ sengoo-<version>-<target>.{zip,tar.gz}.sha256
   (required, no "latest" auto-resolution in v1), install dir (default
   `~/.sengoo` or `%USERPROFILE%\.sengoo`), and optional repository/source
   URL for internal mirrors.
-- Behavior: download archive + `.sha256` → verify checksum (hard fail on
-  mismatch) → extract to versioned dir → place/refresh PATH shims from
-  `<install-dir>/bin` or print the exact PATH instruction → run
+- Behavior: download archive + `.sha256` 鈫?verify checksum (hard fail on
+  mismatch) 鈫?extract to versioned dir 鈫?place/refresh PATH shims from
+  `<install-dir>/bin` or print the exact PATH instruction 鈫?run
   `sgc --version` as the success check.
 - Never auto-update, never elevate, never modify shell profiles without an
   explicit `-AddToPath`/`--add-to-path` flag.
@@ -84,7 +86,7 @@ sengoo-<version>-<target>.{zip,tar.gz}.sha256
 
 - The SUPPORT_MATRIX distribution row claims exactly: versioned win-x64 and
   linux-x64 archives with checksums, smoke-gated publication, script
-  install, and version coherence — citing the workflow file, a release tag
+  install, and version coherence 鈥?citing the workflow file, a release tag
   dry-run log, and the fresh-host transcript.
 - macOS stays out of the claim; the row records it as deferred.
 - The fresh-host transcript must prove both a trivial program and a stdlib
@@ -98,8 +100,7 @@ sengoo-<version>-<target>.{zip,tar.gz}.sha256
 - GitHub runner images drift; pinning the Rust toolchain file and recording
   runner image versions in the release log keeps builds attributable.
 - `sgc` still requires a host `clang`: the dist README must say so
-  prominently, or installs "succeed" but native builds fail confusingly —
-  the fresh-host transcript covers this path explicitly.
+  prominently, or installs "succeed" but native builds fail confusingly 鈥?  the fresh-host transcript covers this path explicitly.
 
 ## Migration Plan
 

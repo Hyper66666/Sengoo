@@ -11,7 +11,7 @@ archive.
 | A Source-level debugging | High | No debug metadata exists anywhere in the emitted IR; debugger docs are assembly-level | Search of `compiler/src/` finds zero `!dbg`/DI/DWARF references; `docs/debugging-native.md` |
 | B Cancellation semantics | High | Supported subset archived: task cancellation boundaries, `select_cancel`, and cancellable process waits; broader cancellation propagation APIs remain future work | `openspec/specs/async-cancellation/spec.md`; `examples/realworld/SUPPORT_MATRIX.md` rows: task cancellation boundaries, select loser cancellation, process cancellation |
 | C Production HTTP serving | High | Reactor-backed dynamic serving works; TLS server, keep-alive, streaming, callback handlers explicitly deferred | SUPPORT_MATRIX "HTTP server dynamic serving" row; archived `2026-06-11-async-http-serving` |
-| D Toolchain distribution | Medium-high | Source build only (`cargo build --release`); release process documented but no published versioned binaries or install scripts | `docs/internal-release.md`; absence of release packaging workflow in `.github/workflows/` |
+| D Toolchain distribution | Medium-high | Supported subset complete for Windows/Linux package dry-run: tag workflow path, checksummed archives, install scripts, coherent versions, and installed `sgc run` smoke are proven by PR #22; a real release tag has not yet been cut and macOS remains deferred | `.github/workflows/toolchain-distribution.yml`; `docs/toolchain-distribution-windows-smoke.transcript`; `docs/toolchain-distribution-linux-smoke.transcript`; PR #22 run `27460449147` |
 
 ## Child changes (created 2026-06-11)
 
@@ -20,7 +20,7 @@ archive.
 | `native-debug-info` | A | new `native-debug-info` | Proposed, strictly validated; prerequisite archive satisfied; codegen edits unblocked |
 | `async-cancellation-semantics` | B | new `async-cancellation` | Archived 2026-06-12; PR #17 Windows/Ubuntu evidence recorded |
 | `http-production-serving` | C | ADDED requirements on `stdlib-http-server` | Proposed, strictly validated; sequenced after Pillar B |
-| `toolchain-distribution` | D | new `toolchain-distribution` | Proposed, strictly validated; unblocked, parallel with A |
+| `toolchain-distribution` | D | new `toolchain-distribution` | Archived 2026-06-13 after PR #22 Windows/Linux dry-run evidence |
 
 ## Dependencies (not owned here)
 
@@ -64,11 +64,11 @@ archive.
 
 | Item | Current evidence |
 | --- | --- |
-| Obtaining toolchain | `cargo build --release` from a cloned workspace only |
-| Release process | `docs/internal-release.md` defines versioned binary smoke matrix and rollback (docs only) |
-| CI workflows | Build/test/perf/realworld-e2e workflows exist; no tag-triggered packaging/publish workflow |
-| Version reporting | Workspace version `0.1.0` in `Cargo.toml`; per-tool `--version` coherence unverified |
-| Install scripts | None |
+| Obtaining toolchain | `.github/workflows/toolchain-distribution.yml` builds Windows/Linux release archives in dry-run/package-smoke mode; real tag publication uses the same package path but has not been exercised by a release tag |
+| Release process | `docs/internal-release.md` plus the package workflow run the release smoke matrix before packaging and publication |
+| CI workflows | PR #22 run `27460449147` succeeded on `package smoke (ubuntu-latest)` and `package smoke (windows-latest)` |
+| Version reporting | Installed `sgc`, `sgpm`, `sgfmt`, and `sglsp` all reported `0.1.0 (6a84e21e3083)` in both platform transcripts |
+| Install scripts | `scripts/install.sh` and `scripts/install.ps1` installed the packaged archives, then installed `sgc` ran `examples/01_hello.sg` with exit code 42 and a stdlib import smoke from runner temp outside the source checkout with exit code 0 |
 
 ## Tracked-but-not-in-this-wave candidates
 
