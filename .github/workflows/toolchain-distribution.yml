@@ -97,7 +97,15 @@ jobs:
           }
           ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
 
-      - name: Install package
+      - name: Install package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          archive=$(cat target/dist/latest-archive.txt)
+          sh scripts/install.sh "$archive" target/install-smoke
+
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $archive = Get-Content target/dist/latest-archive.txt
@@ -130,6 +138,11 @@ jobs:
           }
           $sgc = Join-Path $bin "sgc$suffix"
           & $sgc --version
+          & $sgc run examples/01_hello.sg --force-rebuild
+          $helloExit = $LASTEXITCODE
+          if ($helloExit -ne 42) {
+            throw "installed sgc hello smoke expected exit 42, got $helloExit"
+          }
           New-Item -ItemType Directory -Force -Path target/install-smoke-work | Out-Null
           @'
           import std::status;
