@@ -70,12 +70,26 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
             );
             HIRType::function(param_types, ret_type)
         }
+        ast::TypeKind::Dyn(bounds) => HIRType::new(HIRTypeKind::TraitObject(
+            bounds
+                .iter()
+                .map(|bound| path_to_string(&bound.path))
+                .collect(),
+        )),
         ast::TypeKind::Never => HIRType::never(),
         _ => HIRType::new(HIRTypeKind::Error),
     }
 }
 
 /// 从 AST 表达式推断类型（简化版，用于 let 语句类型推断）
+fn path_to_string(path: &ast::Path) -> String {
+    path.segments
+        .iter()
+        .map(|segment| segment.name.as_str())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
 pub(super) fn infer_expr_type(expr: &ast::Expr) -> HIRType {
     match &expr.kind {
         ast::ExprKind::Literal(lit) => match lit {

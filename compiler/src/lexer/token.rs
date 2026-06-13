@@ -89,6 +89,8 @@ pub enum TokenKind {
     ImplKw,
     #[token("trait")]
     TraitKw,
+    #[token("dyn")]
+    DynKw,
     #[token("type")]
     TypeKw,
     #[token("const")]
@@ -388,6 +390,7 @@ impl TokenKind {
                 | TokenKind::EnumKw
                 | TokenKind::ImplKw
                 | TokenKind::TraitKw
+                | TokenKind::DynKw
                 | TokenKind::TypeKw
                 | TokenKind::ConstKw
                 | TokenKind::StaticKw
@@ -450,6 +453,7 @@ impl TokenKind {
                 | (TokenKind::EnumKw, Keyword::Enum)
                 | (TokenKind::ImplKw, Keyword::Impl)
                 | (TokenKind::TraitKw, Keyword::Trait)
+                | (TokenKind::DynKw, Keyword::Dyn)
                 | (TokenKind::TypeKw, Keyword::Type)
                 | (TokenKind::ConstKw, Keyword::Const)
                 | (TokenKind::StaticKw, Keyword::Static)
@@ -538,6 +542,7 @@ impl TokenKind {
             TokenKind::EnumKw => Some(Keyword::Enum),
             TokenKind::ImplKw => Some(Keyword::Impl),
             TokenKind::TraitKw => Some(Keyword::Trait),
+            TokenKind::DynKw => Some(Keyword::Dyn),
             TokenKind::TypeKw => Some(Keyword::Type),
             TokenKind::ConstKw => Some(Keyword::Const),
             TokenKind::StaticKw => Some(Keyword::Static),

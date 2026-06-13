@@ -26,6 +26,9 @@
 
 ## 3. Trait objects (`dyn`)
 
+- [x] 3.0 Parse, lower, and type-check `dyn Trait` / `dyn A + B` as a frontend
+  skeleton while vtable/object-safety/codegen remain open.
+  - Verified by `cargo test -p sengoo-compiler dyn_trait -- --nocapture`.
 - [ ] 3.1 Object-safety check with a stable `not-object-safe` diagnostic.
 - [ ] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
   slots + `drop` + size/align.

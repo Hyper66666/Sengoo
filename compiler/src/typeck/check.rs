@@ -801,11 +801,47 @@ impl TypeChecker {
             TypeKind::Never => self.env.never_ty(),
             TypeKind::Infer => self.infer.fresh_ty_var(),
             TypeKind::Dyn(trait_bounds) => {
-                let names: Vec<String> = trait_bounds
-                    .iter()
-                    .filter_map(|b| b.path.as_simple())
-                    .map(|ident| ident.name.clone())
-                    .collect();
+                if trait_bounds.is_empty() {
+                    return Err(TypeckError::diagnostic(
+                        "invalid-dyn-trait",
+                        "`dyn` requires at least one trait bound",
+                        ty.span.lo,
+                        ty.span.hi,
+                    ));
+                }
+
+                let mut names = Vec::with_capacity(trait_bounds.len());
+                for bound in trait_bounds {
+                    if !bound.params.is_empty() {
+                        return Err(TypeckError::diagnostic(
+                            "invalid-dyn-trait",
+                            "`dyn` trait bounds with type arguments are not supported yet",
+                            bound.span().lo,
+                            bound.span().hi,
+                        ));
+                    }
+
+                    let Some(ident) = bound.path.as_simple() else {
+                        return Err(TypeckError::diagnostic(
+                            "invalid-dyn-trait",
+                            "`dyn` currently requires a simple trait name",
+                            bound.span().lo,
+                            bound.span().hi,
+                        ));
+                    };
+
+                    if !self.is_declared_trait(&ident.name) {
+                        return Err(TypeckError::diagnostic(
+                            "undefined-dyn-trait",
+                            format!("undefined trait `{}` in dyn trait object", ident.name),
+                            ident.span.lo,
+                            ident.span.hi,
+                        ));
+                    }
+
+                    names.push(ident.name.clone());
+                }
+
                 self.env.new_ty(TyKind::Dyn(names))
             }
             TypeKind::ImplTrait(trait_bounds) => {
@@ -817,6 +853,14 @@ impl TypeChecker {
                 self.env.new_ty(TyKind::ImplTrait(names))
             }
         })
+    }
+
+    fn is_declared_trait(&self, name: &str) -> bool {
+        self.trait_registry.contains(name)
+            || matches!(
+                self.env.lookup(name).map(|symbol| &symbol.kind),
+                Some(SymbolKind::Trait { .. })
+            )
     }
 
     fn check_expr(&mut self, expr: &Expr) -> TyResult<Ty> {
