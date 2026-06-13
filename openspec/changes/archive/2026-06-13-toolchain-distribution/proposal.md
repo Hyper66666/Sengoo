@@ -13,11 +13,11 @@ cannot be adopted. This is Pillar D of the
 ## What Changes
 
 - Add a tag-triggered packaging workflow that builds, smoke-tests, and
-  publishes versioned toolchain archives for Windows x64
-  (`sengoo-<version>-windows-x64.zip`) and Linux x64
-  (`sengoo-<version>-linux-x64.tar.gz`), each containing `sgc`, `sgpm`,
-  `sgfmt`, `sglsp`, the license, and a pinned-toolchain README, plus a
-  `.sha256` per archive.
+  publishes versioned target-triple toolchain archives for Windows x64
+  (`sengoo-<version>-x86_64-pc-windows-msvc.zip`) and Linux x64
+  (`sengoo-<version>-x86_64-unknown-linux-gnu.tar.gz`), each containing
+  `sgc`, `sgpm`, `sgfmt`, `sglsp`, the license, and a pinned-toolchain
+  README, plus a `.sha256` per archive.
 - Gate publication on the `docs/internal-release.md` smoke matrix: a failed
   smoke blocks the release.
 - Add install scripts (`install.ps1`, `install.sh`) that download a pinned

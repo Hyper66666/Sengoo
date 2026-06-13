@@ -58,7 +58,7 @@ Upload packaged toolchain
 ```
 
 Notes:
-  This PR dry-run uploaded GitHub Actions artifacts and skipped only the
-  tag-only `Publish GitHub release assets` step. The tag path is implemented
-  in `.github/workflows/toolchain-distribution.yml` and guarded by the same
-  package/smoke/install steps above.
+  This PR dry-run uploaded GitHub Actions artifacts and did not exercise the
+  tag-only `Validate tag version` and `Publish GitHub release assets` steps.
+  The tag path is implemented in `.github/workflows/toolchain-distribution.yml`
+  and guarded by the same package/smoke/install steps above.

@@ -143,19 +143,29 @@ jobs:
           if ($helloExit -ne 42) {
             throw "installed sgc hello smoke expected exit 42, got $helloExit"
           }
-          New-Item -ItemType Directory -Force -Path target/install-smoke-work | Out-Null
+          $workRoot = Join-Path ([System.IO.Path]::GetTempPath()) "sengoo-install-smoke-work"
+          if ($env:RUNNER_TEMP) {
+            $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-install-smoke-work"
+          }
+          Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+          Write-Host "Installed stdlib smoke work root: $workRoot"
+          $smokeSource = Join-Path $workRoot "main.sg"
           @'
           import std::status;
 
           def main() -> i64 {
               STATUS_OK()
           }
-          '@ | Set-Content -LiteralPath target/install-smoke-work/main.sg -Encoding UTF8
-          & $sgc build target/install-smoke-work/main.sg --emit-llvm --force-rebuild
+          '@ | Set-Content -LiteralPath $smokeSource -Encoding UTF8
+          & $sgc build $smokeSource --emit-llvm --force-rebuild
           if ($LASTEXITCODE -ne 0) {
             throw "installed sgc stdlib smoke failed"
           }
-          & $sgc run target/install-smoke-work/main.sg --force-rebuild
+          & $sgc run $smokeSource --force-rebuild
           if ($LASTEXITCODE -ne 0) {
             throw "installed sgc run smoke failed"
           }
