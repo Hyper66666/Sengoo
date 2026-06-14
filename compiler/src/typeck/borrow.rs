@@ -5,6 +5,7 @@
 
 use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
 use crate::lexer::Span;
+use crate::typeck::r#trait::type_key;
 use crate::typeck::ty::Ty;
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
@@ -70,7 +71,9 @@ pub struct BorrowChecker {
     lifetime_counter: usize,
     /// Collected errors.
     errors: Vec<BorrowError>,
-    /// Variables whose owned `String` value was moved in the current scope.
+    /// Type keys whose values move instead of copy because they own cleanup.
+    move_only_types: HashSet<String>,
+    /// Variables whose move-only value was moved in the current scope.
     moved: HashSet<String>,
     /// Nested scope snapshots for moved-variable tracking.
     moved_stack: Vec<HashSet<String>>,
@@ -81,12 +84,17 @@ pub struct BorrowChecker {
 impl BorrowChecker {
     /// Create a new checker.
     pub fn new(env: TypeEnv) -> Self {
+        Self::new_with_move_only_types(env, HashSet::new())
+    }
+
+    pub fn new_with_move_only_types(env: TypeEnv, move_only_types: HashSet<String>) -> Self {
         Self {
             _env: env,
             borrows: HashMap::new(),
             borrow_stack: Vec::new(),
             lifetime_counter: 0,
             errors: Vec::new(),
+            move_only_types,
             moved: HashSet::new(),
             moved_stack: Vec::new(),
             move_spans: HashMap::new(),
@@ -114,7 +122,7 @@ impl BorrowChecker {
                     self.check_expr(value);
                     self.track_borrows_in_expr(&name.name, value);
                     if let Some(source) = Self::expr_var_name(value) {
-                        if self.var_is_lang_owned_string(&source) {
+                        if self.var_is_move_only_owned(&source) {
                             self.mark_moved(&source, value.span);
                         }
                     }
@@ -189,7 +197,7 @@ impl BorrowChecker {
                 self.check_expr(func);
                 for arg in args {
                     self.check_expr(arg);
-                    self.maybe_move_string_arg(arg);
+                    self.maybe_move_owned_arg(arg);
                 }
             }
             ExprKind::MethodCall {
@@ -202,7 +210,7 @@ impl BorrowChecker {
                 self.check_owned_string_invalidation(receiver, &method.name);
                 for arg in args {
                     self.check_expr(arg);
-                    self.maybe_move_string_arg(arg);
+                    self.maybe_move_owned_arg(arg);
                 }
             }
             ExprKind::Block(block) => self.check_block(block),
@@ -297,6 +305,10 @@ impl BorrowChecker {
             .is_some_and(|canonical| canonical.kind == ty.kind)
     }
 
+    fn ty_is_user_move_only(&self, ty: &Ty) -> bool {
+        self.move_only_types.contains(&type_key(ty))
+    }
+
     fn var_ty(&self, name: &str) -> Option<Ty> {
         self._env
             .lookup(name)
@@ -306,9 +318,9 @@ impl BorrowChecker {
             })
     }
 
-    fn var_is_lang_owned_string(&self, name: &str) -> bool {
+    fn var_is_move_only_owned(&self, name: &str) -> bool {
         self.var_ty(name)
-            .is_some_and(|ty| self.ty_is_lang_owned_string(&ty))
+            .is_some_and(|ty| self.ty_is_lang_owned_string(&ty) || self.ty_is_user_move_only(&ty))
     }
 
     fn check_owned_string_invalidation(&mut self, receiver: &Expr, method_name: &str) {
@@ -347,9 +359,9 @@ impl BorrowChecker {
         });
     }
 
-    fn maybe_move_string_arg(&mut self, arg: &Expr) {
+    fn maybe_move_owned_arg(&mut self, arg: &Expr) {
         if let Some(name) = Self::expr_var_name(arg) {
-            if self.var_is_lang_owned_string(&name) {
+            if self.var_is_move_only_owned(&name) {
                 self.mark_moved(&name, arg.span);
             }
         }
@@ -361,7 +373,7 @@ impl BorrowChecker {
         if target_name.is_some() && target_name == value_name {
             return;
         }
-        self.maybe_move_string_arg(value);
+        self.maybe_move_owned_arg(value);
     }
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {

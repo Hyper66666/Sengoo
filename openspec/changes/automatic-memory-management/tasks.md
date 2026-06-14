@@ -25,22 +25,25 @@
 
 - [ ] 2.1 Extend the type checker to mark a local dead after a by-value move
   (argument, return, assignment, field move-out).
-  - Partial: the owned `String` checker now marks direct let moves, named-call
-    arguments, method-call arguments, and assignment RHS moves. Return moves are
-    handled by MIR drop suppression for function exits; general non-`Copy`
-    values, field move-out, and path-sensitive move analysis remain open.
+  - Partial: the move checker now marks direct let moves, named-call arguments,
+    method-call arguments, and assignment RHS moves for the canonical owned
+    `String` type and user structs with a known `impl Drop`. Return moves are
+    handled by MIR drop suppression for function exits; non-`Copy` values
+    without `Drop`, field move-out, and path-sensitive move analysis remain
+    open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
-  - Implemented for the current owned `String` move checker; verified by
-    compiler, `sgc` JSON, and `sglsp` diagnostic tests. General non-`Copy`
-    move analysis remains open under 2.1/2.4.
+  - Implemented for the current owned `String` move checker and user structs
+    with a known `impl Drop`; verified by compiler, `sgc` JSON, and `sglsp`
+    diagnostic tests for the stable code. General non-`Copy` move analysis
+    remains open under 2.1/2.4.
 - [ ] 2.3 Support partial moves: moved-out fields are not dropped; remaining
   fields are.
 - [ ] 2.4 Tests under `compiler/src/tests/` for move, partial move, and the
   negative use-after-move diagnostic.
-  - Partial: owned `String` negative use-after-move tests exist; partial moves
-    and general owning values remain open. Assignment RHS move coverage is now
-    included.
+  - Partial: owned `String` and user `impl Drop` negative use-after-move tests
+    exist; partial moves and general owning values remain open. Assignment RHS
+    move coverage is now included.
 
 ## 3. MIR drop-glue insertion
 

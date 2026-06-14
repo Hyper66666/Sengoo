@@ -302,6 +302,14 @@ impl ImplRegistry {
             .and_then(|type_map| type_map.get(type_key))
     }
 
+    /// Return all type keys that implement the named trait.
+    pub fn trait_impl_type_keys(&self, trait_name: &str) -> Vec<String> {
+        self.trait_impls
+            .get(trait_name)
+            .map(|type_map| type_map.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// 获取类型的所有固有 impl
     pub fn get_inherent_impls(&self, type_key: &str) -> Vec<&ImplInfo> {
         self.inherent_impls

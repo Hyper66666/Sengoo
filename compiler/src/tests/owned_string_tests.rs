@@ -210,6 +210,36 @@ def main() -> i64 {
 }
 
 #[test]
+fn user_drop_struct_move_rejects_use_after_move() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let a: Resource = Resource { handle: 1 };
+    let b: Resource = a;
+    a.handle
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Drop structs should be move-only");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("use of moved value `a`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_exact_capacity_emits_runtime_calls() {
     let ir = compile_to_ir(&format!(
         "{}\n\n{}",
