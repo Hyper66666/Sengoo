@@ -338,3 +338,54 @@ def main() -> i64 {
         "the explicit String.drop() call should be the only drop for the receiver"
     );
 }
+
+#[test]
+fn explicit_return_creates_distinct_function_exit() {
+    let mir = compile_with_owned_string(
+        r#"
+def choose(flag: bool) -> i64 {
+    if flag {
+        return 7;
+    }
+    9
+}
+"#,
+    );
+    let choose = function(&mir, "choose");
+
+    let return_count = choose
+        .basic_blocks
+        .iter()
+        .filter(|block| matches!(block.terminator, Some(Terminator::Return(_))))
+        .count();
+    assert_eq!(
+        return_count, 2,
+        "explicit return should lower to its own MIR return exit"
+    );
+}
+
+#[test]
+fn explicit_return_runs_drop_glue_for_live_owned_binding() {
+    let mir = compile_with_owned_string(
+        r#"
+def choose(flag: bool) -> i64 {
+    let text: String = string_from_str("return").value;
+    if flag {
+        return text.len();
+    }
+    0
+}
+"#,
+    );
+    let choose = function(&mir, "choose");
+
+    assert_eq!(
+        string_drop_calls(choose).len(),
+        2,
+        "both the explicit return and the fallthrough return should drop the live String"
+    );
+    assert!(
+        has_guard_terminator(choose),
+        "multi-exit drop glue should guard explicit-return exits"
+    );
+}

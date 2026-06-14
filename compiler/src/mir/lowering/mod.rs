@@ -81,6 +81,7 @@ mod options;
 mod pattern_methods;
 mod pointer_expr_helpers;
 mod print_methods;
+mod return_expr_helpers;
 mod try_expr_helpers;
 mod while_expr_helpers;
 use self::aggregate_expr_helpers::{
@@ -106,6 +107,7 @@ use self::op_expr_helpers::{
     lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr,
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
+use self::return_expr_helpers::lower_return_expr;
 use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};

@@ -41,8 +41,8 @@
     in reverse declaration order, and moved-from bindings are excluded for the
     implemented move sites: direct `let b = a`, owned tail-expression returns,
     owned named-call arguments, owned method-call arguments, and explicit
-    `String.drop()` receivers. Existing `return` expression lowering is still a
-    no-op and must reuse this machinery once it becomes a real MIR exit; loop
+    `String.drop()` receivers. Explicit `return expr` now lowers to a real MIR
+    `Return` exit and reuses the same drop-flag machinery. Loop
     `break`/`continue` currently rejoin before function return; nested scope
     exit timing and partial-move flag clearing remain open.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
@@ -52,7 +52,8 @@
   - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
     straight-line drop insertion, `?` early-return flags, reverse drop order,
     conditional-init flags, tail-return moves, named-call/method-argument moves,
-    explicit drop receivers, and moved binding exclusion.
+    explicit `return` exits, explicit drop receivers, and moved binding
+    exclusion.
 
 ## 4. Runtime resource migration
 
