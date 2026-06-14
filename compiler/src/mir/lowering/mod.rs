@@ -126,7 +126,8 @@ struct LoopContext {
 #[derive(Debug, Clone)]
 struct DropBinding {
     local: Local,
-    drop_func: &'static str,
+    drop_func: String,
+    ret_type: MIRType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

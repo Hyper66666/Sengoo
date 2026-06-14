@@ -1,5 +1,5 @@
-use crate::compile_to_mir;
 use crate::mir::{Instruction, Local, MirConstant, MirFunction, Terminator};
+use crate::{compile_to_ir, compile_to_mir};
 use std::fs;
 use std::path::Path;
 
@@ -37,11 +37,15 @@ fn function<'a>(mir_fns: &'a [MirFunction], name: &str) -> &'a MirFunction {
 }
 
 fn string_drop_calls(function: &MirFunction) -> Vec<Vec<Local>> {
+    drop_calls(function, "String_drop")
+}
+
+fn drop_calls(function: &MirFunction, drop_func: &str) -> Vec<Vec<Local>> {
     function
         .instructions
         .iter()
         .filter_map(|inst| match inst {
-            Instruction::Call { func, args, .. } if func == "String_drop" => Some(args.clone()),
+            Instruction::Call { func, args, .. } if func == drop_func => Some(args.clone()),
             _ => None,
         })
         .collect()
@@ -89,6 +93,47 @@ def main() -> i64 {
         0,
         "single-exit drop glue should not allocate drop flags"
     );
+}
+
+#[test]
+fn user_drop_impl_inserts_trait_drop_call_at_exit() {
+    let mir =
+        compile_to_mir(user_drop_impl_source()).expect("user Drop impl should compile to MIR");
+    let main_fn = function(&mir, "main");
+
+    let calls = drop_calls(main_fn, "Resource_Drop_drop");
+    assert_eq!(
+        calls.len(),
+        1,
+        "main should drop the Resource binding through the Drop impl once"
+    );
+}
+
+#[test]
+fn user_drop_impl_codegen_emits_void_drop_call() {
+    let ir = compile_to_ir(user_drop_impl_source()).expect("user Drop impl should compile to IR");
+    assert!(
+        ir.contains("call void @Resource_Drop_drop("),
+        "IR should call the user Drop impl as a void destructor, got:\n{ir}"
+    );
+}
+
+fn user_drop_impl_source() -> &'static str {
+    r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource: Resource = Resource { handle: 7 };
+    0
+}
+"#
 }
 
 #[test]

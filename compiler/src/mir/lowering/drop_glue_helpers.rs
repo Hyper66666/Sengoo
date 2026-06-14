@@ -3,12 +3,9 @@ use crate::mir::InstId;
 
 impl<'a> LoweringContext<'a> {
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
-        let Some(drop_func) = self.drop_func_for_local(local) else {
+        let Some(binding) = self.drop_binding_for_local(local) else {
             return;
         };
-        if !self.is_known_function(drop_func) {
-            return;
-        }
         if self
             .drop_bindings
             .iter()
@@ -16,11 +13,11 @@ impl<'a> LoweringContext<'a> {
         {
             return;
         }
-        self.drop_bindings.push(DropBinding { local, drop_func });
+        self.drop_bindings.push(binding);
     }
 
     pub(super) fn mark_drop_local_moved(&mut self, local: Local) {
-        if self.drop_func_for_local(local).is_some() {
+        if self.drop_binding_for_local(local).is_some() {
             self.moved_drop_locals.insert(local);
         }
     }
@@ -32,7 +29,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn mark_drop_local_reinitialized(&mut self, local: Local) {
-        if self.drop_func_for_local(local).is_some() {
+        if self.drop_binding_for_local(local).is_some() {
             self.moved_drop_locals.remove(&local);
             self.record_drop_binding_if_needed(local);
         }
@@ -42,12 +39,9 @@ impl<'a> LoweringContext<'a> {
         if self.moved_drop_locals.contains(&local) {
             return;
         }
-        let Some(drop_func) = self.drop_func_for_local(local) else {
+        let Some(binding) = self.drop_binding_for_local(local) else {
             return;
         };
-        if !self.is_known_function(drop_func) {
-            return;
-        }
         if !self
             .drop_bindings
             .iter()
@@ -55,18 +49,35 @@ impl<'a> LoweringContext<'a> {
         {
             return;
         }
-        let binding = DropBinding { local, drop_func };
         self.push_drop_call(self.current_block(), &binding);
     }
 
-    fn drop_func_for_local(&self, local: Local) -> Option<&'static str> {
-        match self.get_local_type(local) {
-            MIRType::Struct { name, .. } if name == "String" => Some("String_drop"),
-            _ => match self.type_names.get(&local).map(String::as_str) {
-                Some("String") => Some("String_drop"),
-                _ => None,
-            },
+    fn drop_binding_for_local(&self, local: Local) -> Option<DropBinding> {
+        let type_name = match self.get_local_type(local) {
+            MIRType::Struct { name, .. } => Some(name.as_str()),
+            _ => self.type_names.get(&local).map(String::as_str),
+        }?;
+        let drop_func = self.drop_func_for_type_name(type_name)?;
+        if !self.is_known_function(&drop_func) {
+            return None;
         }
+        let ret_type = self
+            .function_sig(&drop_func)
+            .map(|sig| sig.ret_type.clone())
+            .unwrap_or(MIR_BOOL);
+        Some(DropBinding {
+            local,
+            drop_func,
+            ret_type,
+        })
+    }
+
+    fn drop_func_for_type_name(&self, type_name: &str) -> Option<String> {
+        if type_name == "String" {
+            return Some("String_drop".to_string());
+        }
+        let candidate = format!("{type_name}_Drop_drop");
+        self.is_known_function(&candidate).then_some(candidate)
     }
 
     pub(super) fn insert_drop_glue(&mut self) {
@@ -158,12 +169,14 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn push_drop_call(&mut self, block: usize, binding: &DropBinding) {
-        let destination = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+        let destination = self
+            .mir_fn
+            .add_local(LocalKind::Temp, binding.ret_type.clone());
         self.mir_fn.push_inst_to_block(
             block,
             Instruction::Call {
                 destination,
-                func: binding.drop_func.to_string(),
+                func: binding.drop_func.clone(),
                 args: vec![binding.local],
             },
         );
