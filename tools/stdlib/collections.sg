@@ -195,6 +195,10 @@ def vec_new_string() -> Vec<String> {
     Vec { handle: sengoo_vec_new_string(), marker: String { handle: 0 } }
 }
 
+def hashmap_new_string_i64() -> HashMap<String, i64> {
+    HashMap { handle: sengoo_string_map_new(), key_marker: String { handle: 0 }, value_marker: 0 }
+}
+
 def string_map_string_new() -> StringMapString {
     StringMapString { handle: sengoo_string_map_string_new() }
 }
@@ -884,6 +888,48 @@ impl Vec<String> {
 
     def iter(self) -> VecStringIter {
         VecStringIter { handle: sengoo_vec_string_iter_new(self.handle) }
+    }
+}
+
+impl HashMap<String, i64> {
+    def insert_raw(self, key_ptr: i64, value: i64) -> bool {
+        sengoo_string_map_insert_i64(self.handle, key_ptr, value) != 0
+    }
+
+    def insert(self, key: &str, value: i64) -> bool {
+        self.insert_raw(sengoo_stdlib_str_ptr(key), value)
+    }
+
+    def contains_raw(self, key_ptr: i64) -> bool {
+        sengoo_string_map_contains(self.handle, key_ptr) != 0
+    }
+
+    def contains(self, key: &str) -> bool {
+        self.contains_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def get_raw(self, key_ptr: i64) -> Option<i64> {
+        if self.contains_raw(key_ptr) {
+            option_some_i64(sengoo_string_map_get_or_default_i64(self.handle, key_ptr, 0))
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def get(self, key: &str) -> Option<i64> {
+        self.get_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def remove_raw(self, key_ptr: i64) -> bool {
+        sengoo_string_map_remove(self.handle, key_ptr) != 0
+    }
+
+    def remove(self, key: &str) -> bool {
+        self.remove_raw(sengoo_stdlib_str_ptr(key))
+    }
+
+    def iter_keys(self) -> StringMapKeyIter {
+        StringMapKeyIter { handle: sengoo_string_map_key_iter_new(self.handle) }
     }
 }
 

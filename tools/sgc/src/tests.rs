@@ -5257,6 +5257,15 @@ fn examples_smoke_stdlib_collections_import() {
 }
 
 #[test]
+fn examples_smoke_stdlib_generic_collections_import() {
+    assert_example_output(
+        "stdlib-generic-collections",
+        "examples/stdlib/25_generic_collections.sg",
+        "25",
+    );
+}
+
+#[test]
 fn examples_smoke_stdlib_args_import() {
     assert_example_output_with_args(
         "stdlib-args",

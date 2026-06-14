@@ -9,7 +9,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, copied-text lists, and string-key maps for scalar i64/bool values.
+- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, `Vec<String>` transfer helpers, `HashMap<String, i64>` string-key wrappers, copied-text lists, and compatibility string-key maps for scalar i64/bool values.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`,
@@ -109,13 +109,18 @@ meaningful byte count through their `Result` return value.
 
 `std::collections` keeps the existing scalar `Vec<T>` and `HashMap<K, V>`
 helpers for i64/bool combinations and adds runtime-owned text shapes for common
-tooling workloads. `TextList` copies inserted `&str` values and can copy
-elements back into a managed `Buffer` with `get_copy`, `remove_copy`, and
+tooling workloads. `Vec<String>` stores owned string handles, clones on `get`,
+and transfers ownership back on `remove`. `HashMap<String, i64>` is currently a
+thin string-key wrapper over the same runtime storage as `StringMapI64`: keys
+are copied from `&str`, duplicate inserts replace the previous value, and
+lookups return `Option<i64>`. `TextList` copies inserted `&str` values and can
+copy elements back into a managed `Buffer` with `get_copy`, `remove_copy`, and
 iterator `next_copy`. `StringMapI64` and `StringMapBool` copy string keys on
 insert, replace existing values when a duplicate key is inserted, and expose
 deterministic key iteration by unsigned byte ordering. Key ordering is byte
 based only; Unicode normalization, locale collation, and case folding are not
-applied.
+applied. Fully generic hash/ordered collections, `HashSet`, `BTree*`,
+`VecDeque`, and type-driven collection drop glue remain OpenSpec follow-ups.
 
 ## String Conversion Helpers
 

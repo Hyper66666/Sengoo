@@ -1354,6 +1354,28 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_hashmap_string_i64_uses_string_key_runtime() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let map: HashMap<String, i64> = hashmap_new_string_i64();
+    map.insert("alpha", 1);
+    let got = map.get("alpha").unwrap_or(0);
+    let removed = map.remove("alpha");
+    if got == 1 && removed { 1 } else { 0 }
+}
+"#,
+    );
+
+    assert!(ir.contains("hashmap_new_string_i64"));
+    assert!(ir.contains("HashMap_String_i64_insert"));
+    assert!(ir.contains("HashMap_String_i64_get"));
+    assert!(ir.contains("sengoo_string_map_insert_i64"));
+    assert!(ir.contains("sengoo_string_map_get_or_default_i64"));
+    assert!(ir.contains("sengoo_string_map_remove"));
+}
+
+#[test]
 fn stdlib_surface_generic_bool_methods_emit_bool_returns() {
     let ir = compile_with_stdlib(
         r#"

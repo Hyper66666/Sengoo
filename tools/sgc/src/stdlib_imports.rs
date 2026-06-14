@@ -399,6 +399,7 @@ mod tests {
         assert!(expanded.contains("def text_list_new() -> TextList"));
         assert!(expanded.contains("def string_map_i64_new() -> StringMapI64"));
         assert!(expanded.contains("def string_map_bool_new() -> StringMapBool"));
+        assert!(expanded.contains("def hashmap_new_string_i64() -> HashMap<String, i64>"));
     }
 
     #[test]
