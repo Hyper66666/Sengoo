@@ -362,10 +362,15 @@ packages. The debug profile maps to `sgc test` without `--release` (`sgc run
 -O 0` per test), and `--release` adds `sgc test --release` (`sgc run -O 2`).
 
 Direct `sgc test` discovers `tests/**/*.sg` plus any `[[test]]` entries in
-`Sengoo.toml`. Use `--filter TEXT`, `--exact NAME`, `--format json`,
-`--nocapture`, `--manifest-path PATH`, and `--locked` (requires `sgpm` on
-`PATH` to run `sgpm update --check`). JSON output includes `schema_version`,
-`exit_status`, `capture`, and per-test `duration_ms`.
+`Sengoo.toml`. A file with `main` remains one test case. A file without `main`
+can define zero-argument synchronous `test_*() -> i64` functions, which are
+reported and filtered independently as `path::function`. See
+[`docs/testing.md`](testing.md) for the current conventions and limits.
+Use `--filter TEXT`, `--exact NAME`, `--format json`, `--nocapture`,
+`--manifest-path PATH`, and `--locked` (requires `sgpm` on `PATH` to run
+`sgpm update --check`). JSON output includes `schema_version`, `exit_status`,
+`capture`, per-test `duration_ms`, and an optional `function` field for
+function-discovered cases.
 
 Optional `sengoo-schema = 1` in `Sengoo.toml` is validated; unsupported values
 fail with an explicit incompatible-version error. `Sengoo.lock` uses

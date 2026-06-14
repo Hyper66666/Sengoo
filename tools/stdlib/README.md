@@ -18,7 +18,9 @@ runtime wrappers, and examples can depend on only the surfaces they need.
   (`wrapping_*_i64`, `checked_*_i64 -> Option<i64>`, `saturating_*_i64`
   for add/sub/mul).
 - `error.sg`: compatibility assertion helpers (prefer `assert.sg` for new code).
-- `assert.sg`: primary assertion helpers for boolean, i64, string, and f64 checks.
+- `assert.sg`: primary assertion helpers for boolean, i64, string, and f64
+  checks; structured failures are consumed by the `sgc test` conventions in
+  [`docs/testing.md`](../../docs/testing.md).
 - `fmt.sg`: primitive formatting into managed `Buffer` handles via `strconv` and `status`.
 - `regex.sg`: bounded regex compile/match helpers (`runtime_breadth.c`).
 - `log.sg`: level-based logging with deterministic test sink output.

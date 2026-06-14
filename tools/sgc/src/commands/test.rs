@@ -1,4 +1,5 @@
 use miette::{IntoDiagnostic, Result};
+use sengoo_compiler::{DeclKind, Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -54,6 +55,8 @@ pub(crate) enum AssertionEnvelopeRead {
 struct TestCaseJson<'a> {
     name: &'a str,
     path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function: Option<&'a str>,
     ok: bool,
     duration_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,7 +73,24 @@ struct TestCaseJson<'a> {
 
 struct TestCase {
     path: PathBuf,
+    run_path: PathBuf,
     name: String,
+    function: Option<String>,
+    generated_source: bool,
+}
+
+impl TestCase {
+    fn remove_generated_source(&self) {
+        if self.generated_source {
+            let _ = fs::remove_file(&self.run_path);
+        }
+    }
+}
+
+impl Drop for TestCase {
+    fn drop(&mut self) {
+        self.remove_generated_source();
+    }
 }
 
 pub(crate) struct TestOptions<'a> {
@@ -90,7 +110,7 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
     }
 
     let mut tests = discover_tests(options.root)?;
-    tests.sort_by(|a, b| a.path.cmp(&b.path));
+    tests.sort_by(|a, b| a.name.cmp(&b.name));
 
     if let Some(exact) = options.exact {
         tests.retain(|test| test.name == exact);
@@ -125,38 +145,44 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
         command
             .current_dir(options.root)
             .arg("run")
-            .arg(&test.path)
+            .arg(&test.run_path)
             .arg("-O")
             .arg(opt_level)
             .env(ASSERT_REPORT_ENV, &assert_report_path);
         apply_module_map_env(&mut command, std::env::var_os(MODULE_MAP_ENV).as_deref());
 
-        let display = test.path.display();
-        let (ok, exit_code, stdout, stderr) = if options.nocapture {
+        let display = &test.name;
+        let execution = if options.nocapture {
             command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-            let status = command
-                .status()
-                .into_diagnostic()
-                .map_err(|err| miette::miette!("failed to run test {}: {}", display, err))?;
-            (status.success(), status.code(), None, None)
+            command.status().into_diagnostic().map(|status| {
+                (
+                    status.success(),
+                    status.code(),
+                    None::<String>,
+                    None::<String>,
+                )
+            })
         } else {
-            let output = command
-                .output()
-                .into_diagnostic()
-                .map_err(|err| miette::miette!("failed to run test {}: {}", display, err))?;
-            let ok = output.status.success();
-            let exit_code = output.status.code();
-            let stdout = lossy_output(&output.stdout);
-            let stderr = lossy_output(&output.stderr);
-            (ok, exit_code, stdout, stderr)
+            command.output().into_diagnostic().map(|output| {
+                (
+                    output.status.success(),
+                    output.status.code(),
+                    lossy_output(&output.stdout),
+                    lossy_output(&output.stderr),
+                )
+            })
         };
+        test.remove_generated_source();
+        let (ok, exit_code, stdout, stderr) =
+            execution.map_err(|err| miette::miette!("failed to run test {}: {}", display, err))?;
         let duration_ms = started.elapsed().as_millis();
-        let (assertion, assertion_transport) = if ok {
+        let (mut assertion, assertion_transport) = if ok {
             let _ = fs::remove_file(&assert_report_path);
             (None, None)
         } else {
             read_assertion_envelope(&assert_report_path)
         };
+        remap_generated_assertion_source(&mut assertion, test);
 
         if ok {
             passed += 1;
@@ -192,6 +218,7 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
             json_cases.push(TestCaseJson {
                 name: &test.name,
                 path: test.path.to_string_lossy().to_string(),
+                function: test.function.as_deref(),
                 ok,
                 duration_ms,
                 exit_code,
@@ -359,15 +386,103 @@ fn push_test_case(
     if !path.is_file() {
         miette::bail!("declared test path does not exist: {}", path.display());
     }
-    let name = path
+    let relative_name = path
         .strip_prefix(root)
         .unwrap_or(&path)
         .to_string_lossy()
         .replace('\\', "/");
-    if seen.insert(name.clone()) {
-        tests.push(TestCase { path, name });
+
+    let source = fs::read_to_string(&path)
+        .into_diagnostic()
+        .map_err(|err| miette::miette!("failed to read test {}: {}", path.display(), err))?;
+    let function_tests = discover_test_functions(&source);
+    if !function_tests.is_empty() {
+        for function in function_tests {
+            let name = format!("{relative_name}::{function}");
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let run_path = create_function_test_wrapper(&path, &source, &function)?;
+            tests.push(TestCase {
+                path: path.clone(),
+                run_path,
+                name,
+                function: Some(function),
+                generated_source: true,
+            });
+        }
+        return Ok(());
+    }
+
+    if seen.insert(relative_name.clone()) {
+        tests.push(TestCase {
+            run_path: path.clone(),
+            path,
+            name: relative_name,
+            function: None,
+            generated_source: false,
+        });
     }
     Ok(())
+}
+
+fn discover_test_functions(source: &str) -> Vec<String> {
+    let Ok(program) = Parser::parse(source) else {
+        return Vec::new();
+    };
+    let has_main = program.decls.iter().any(
+        |decl| matches!(&decl.kind, DeclKind::Function(function) if function.name.name == "main"),
+    );
+    if has_main {
+        return Vec::new();
+    }
+
+    program
+        .decls
+        .iter()
+        .filter_map(|decl| {
+            let DeclKind::Function(function) = &decl.kind else {
+                return None;
+            };
+            (function.name.name.starts_with("test_")
+                && function.params.is_empty()
+                && function.type_params.is_empty()
+                && !function.is_async)
+                .then(|| function.name.name.clone())
+        })
+        .collect()
+}
+
+fn create_function_test_wrapper(path: &Path, source: &str, function: &str) -> Result<PathBuf> {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .into_diagnostic()?
+        .as_nanos();
+    let safe_function = function
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let parent = path
+        .parent()
+        .ok_or_else(|| miette::miette!("invalid test path: {}", path.display()))?;
+    let wrapper_path = parent.join(format!(".sengoo-test-{safe_function}-{stamp}.sg"));
+    let wrapper = format!("{source}\n\ndef main() -> i64 {{\n    {function}()\n}}\n");
+    fs::write(&wrapper_path, wrapper)
+        .into_diagnostic()
+        .map_err(|err| {
+            miette::miette!(
+                "failed to create test wrapper {}: {}",
+                wrapper_path.display(),
+                err
+            )
+        })?;
+    Ok(wrapper_path)
 }
 
 fn collect_sg_tests(
@@ -386,6 +501,13 @@ fn collect_sg_tests(
             continue;
         }
         if path.extension().and_then(OsStr::to_str) != Some("sg") {
+            continue;
+        }
+        if path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.starts_with(".sengoo-test-"))
+        {
             continue;
         }
         push_test_case(root, path, seen, tests)?;
@@ -520,6 +642,26 @@ fn emit_captured_stream(label: &str, content: Option<&str>) {
     }
 }
 
+fn remap_generated_assertion_source(
+    assertion: &mut Option<AssertionEnvelopeRead>,
+    test: &TestCase,
+) {
+    if !test.generated_source {
+        return;
+    }
+    let Some(AssertionEnvelopeRead::Valid(envelope)) = assertion.as_mut() else {
+        return;
+    };
+    let Some(reported) = envelope.file.as_deref() else {
+        return;
+    };
+    let reported = reported.replace('\\', "/");
+    let generated = test.run_path.to_string_lossy().replace('\\', "/");
+    if reported == generated {
+        envelope.file = Some(test.path.to_string_lossy().to_string());
+    }
+}
+
 pub(crate) fn apply_module_map_env(command: &mut Command, module_map: Option<&OsStr>) {
     command.env_remove(MODULE_MAP_ENV);
     if let Some(value) = module_map {
@@ -563,6 +705,38 @@ mod tests {
     }
 
     #[test]
+    fn discover_tests_expands_zero_arg_test_function_convention() {
+        let root = temp_dir("discover_function_tests");
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(
+            root.join("tests/math.sg"),
+            r#"
+def helper() -> i64 { 40 }
+
+def test_adds_values() -> i64 {
+    helper() + 2
+}
+"#,
+        )
+        .unwrap();
+
+        let tests = discover_tests(&root).expect("discover tests");
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "tests/math.sg::test_adds_values");
+        assert!(tests[0].path.ends_with("tests/math.sg"));
+        assert!(
+            tests[0].run_path.is_file(),
+            "function test should use a generated wrapper source"
+        );
+        let wrapper = fs::read_to_string(&tests[0].run_path).unwrap();
+        assert!(wrapper.contains("def main() -> i64"));
+        assert!(wrapper.contains("test_adds_values()"));
+
+        let _ = fs::remove_file(&tests[0].run_path);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn json_report_has_schema_fields() {
         let json = serde_json::to_string(&TestReportJson {
             schema_version: 1,
@@ -574,6 +748,7 @@ mod tests {
             tests: vec![TestCaseJson {
                 name: "tests/basic.sg",
                 path: "tests/basic.sg".to_string(),
+                function: None,
                 ok: true,
                 duration_ms: 3,
                 exit_code: Some(0),

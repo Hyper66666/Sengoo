@@ -16,25 +16,37 @@
 
 ## 3. Test discovery and fixtures
 
-- [ ] 3.1 `#[test]` attribute (and/or `def test_*` convention) discovered by
+- [x] 3.1 `#[test]` attribute (and/or `def test_*` convention) discovered by
   `sgc test`.
+  - Implemented the additive `def test_*` convention for zero-argument,
+    synchronous `i64` status functions in files without `main`. Existing
+    one-file/one-main tests remain source-compatible.
 - [ ] 3.2 Setup/teardown fixtures with documented ordering.
 - [ ] 3.3 Parametrized / table-driven cases.
 - [ ] 3.4 Tests covering discovery, fixtures, and parametrization.
+  - Partial: unit and native e2e tests cover function discovery, per-function
+    JSON names, execution, and generated-wrapper cleanup.
+    Fixture and parametrization tests remain open.
 
 ## 4. Failure output and coverage
 
-- [ ] 4.1 Extend `std::assert` structured failures (expected/actual, file/line)
+- [x] 4.1 Extend `std::assert` structured failures (expected/actual, file/line)
   in the existing JSON envelope.
+  - Covered by `tools/sgc/tests/assertion_transport.rs`.
 - [ ] 4.2 `sgc test --coverage` line-coverage report (machine-readable + summary).
 - [ ] 4.3 Extend the `sgc test` JSON schema with optional coverage and
   parametrization fields, keeping existing fields.
+  - Partial: function-discovered cases now add an optional `function` field
+    while preserving schema version 1 and every existing field. Coverage and
+    parametrization fields remain open.
 
 ## 5. Docs and validation
 
-- [ ] 5.1 Document the test framework in `docs/` and `tools/stdlib/README.md`.
+- [x] 5.1 Document the test framework in `docs/` and `tools/stdlib/README.md`.
+  - See `docs/testing.md`, `docs/sgpm-quickstart.md`, and the `std::assert`
+    entry in `tools/stdlib/README.md`.
 - [ ] 5.2 Migrate at least one realworld smoke test to fixtures + parametrization.
-- [ ] 5.3 Run `openspec validate debugger-and-test-framework --strict`.
+- [x] 5.3 Run `openspec validate debugger-and-test-framework --strict`.
 
 ## Verification
 
