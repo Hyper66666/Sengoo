@@ -5,7 +5,6 @@ use crate::{lower_ast, Parser, TypeChecker};
 fn lower_ast_preserves_generic_bounds_in_hir_function() {
     let source = r#"
 trait Add {}
-trait Copy {}
 
 def foo<T: Add + Copy>(x: i64) -> i64 {
     x
@@ -44,7 +43,6 @@ def foo<T: Add + Copy>(x: i64) -> i64 {
 fn lower_ast_preserves_where_clause_bounds_in_hir_function() {
     let source = r#"
 trait Add {}
-trait Copy {}
 
 def foo<T>(x: i64) -> i64 where T: Add + Copy {
     x

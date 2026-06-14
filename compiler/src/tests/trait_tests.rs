@@ -56,6 +56,16 @@ trait Drop {
 }
 
 #[test]
+fn builtin_copy_trait_name_is_reserved() {
+    let source = r#"
+trait Copy {
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("copy-trait-reserved"));
+}
+
+#[test]
 fn drop_impl_requires_mut_self_drop_signature() {
     let source = r#"
 struct Resource {
@@ -91,6 +101,44 @@ def main() -> i64 {
 "#;
 
     assert_eq!(typecheck_stable_code(source), Some("drop-direct-call"));
+}
+
+#[test]
+fn copy_then_drop_impl_is_rejected_with_stable_conflict() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Copy for Resource {
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("copy-drop-conflict"));
+}
+
+#[test]
+fn drop_then_copy_impl_is_rejected_with_stable_conflict() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+impl Copy for Resource {
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("copy-drop-conflict"));
 }
 
 /// Test that a trait impl method call on i64 resolves to the three-part mangled name.

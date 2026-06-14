@@ -48,10 +48,19 @@
 - [ ] 5.1 Define compiler-known core traits (Clone, Copy, PartialEq/Eq,
   PartialOrd/Ord, Hash, Default, Display, Debug, Iterator, IntoIterator) plus
   `Ordering` and `Formatter`/`Hasher` support types.
+  - Partial: `Copy` is now a compiler-known marker trait and its name is
+    reserved from user redeclaration with stable `copy-trait-reserved`.
+    Remaining core traits and support types are open.
 - [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
 - [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.
+  - Partial: a type cannot implement both compiler-known `Copy` and `Drop`;
+    either source order produces stable `copy-drop-conflict`, including generic
+    impl constructors. Recursive all-field `Copy` validation remains open.
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
+  - Partial: compiler tests cover reserved `Copy` and both declaration orders
+    of the `Copy`/`Drop` conflict. Per-derive and non-`Copy` field tests remain
+    open.
 
 ## 6. Orphan rule and docs
 

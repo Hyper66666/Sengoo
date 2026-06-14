@@ -52,6 +52,14 @@ impl TypeChecker {
                 trait_decl.name.span.hi,
             )));
         }
+        if trait_decl.name.name == "Copy" {
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "copy-trait-reserved",
+                "`Copy` is a compiler-known trait; user code must not redeclare it",
+                trait_decl.name.span.lo,
+                trait_decl.name.span.hi,
+            )));
+        }
 
         self.env.push_scope();
         self.bind_type_params_with_meta(&trait_decl.type_params)?;
@@ -154,6 +162,21 @@ impl TypeChecker {
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
         let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
+        let is_copy_impl = matches!(trait_name.as_deref(), Some("Copy"));
+
+        let conflicts_with_drop = is_copy_impl
+            && Self::ownership_type_set_contains(&self.drop_move_only_type_keys, &target_ty);
+        let conflicts_with_copy =
+            is_drop_impl && Self::ownership_type_set_contains(&self.copy_type_keys, &target_ty);
+        if conflicts_with_drop || conflicts_with_copy {
+            self.env.pop_scope();
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "copy-drop-conflict",
+                format!("type `{target_key}` cannot implement both `Copy` and `Drop`"),
+                impl_decl.span.lo,
+                impl_decl.span.hi,
+            )));
+        }
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 

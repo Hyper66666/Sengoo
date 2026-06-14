@@ -12,8 +12,9 @@
   are never moved or dropped.
 - Implemented for the current ownership subset: primitive scalars and borrowed
   references remain usable after by-value copy sites and do not get drop glue.
-  Trait-level `Copy` derivation/exclusivity remains owned by
-  `generics-and-trait-system` tasks 5.1/5.3.
+  `Copy` is now also a compiler-known marker and is mutually exclusive with
+  `Drop`; recursive field validation and derive remain owned by
+  `generics-and-trait-system` tasks 5.1-5.4.
 - [x] 1.3 Document drop order (reverse declaration order within a scope) in
   `docs/language-features.md`.
 - Documented the implemented top-level owner scope: live owned `String` values

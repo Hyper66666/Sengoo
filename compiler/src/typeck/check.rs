@@ -81,6 +81,7 @@ pub struct TypeChecker {
     propagation_stack: Vec<try_helpers::PropagationContext>,
     try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
     drop_move_only_type_keys: HashSet<String>,
+    copy_type_keys: HashSet<String>,
     warnings: Vec<crate::error::CompileWarning>,
     deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
     trait_default_methods: HashMap<String, HashMap<String, Function>>,
@@ -93,6 +94,17 @@ impl TypeChecker {
 
     pub fn new() -> Self {
         let mut env = TypeEnv::new();
+        for trait_name in ["Copy", "Drop"] {
+            env.insert(
+                trait_name.to_string(),
+                Symbol {
+                    name: trait_name.to_string(),
+                    kind: SymbolKind::Trait {
+                        name: trait_name.to_string(),
+                    },
+                },
+            );
+        }
         let infer = TypeInfer::with_env(env.clone());
         let mut trait_registry = TraitRegistry::new();
         let mut drop_trait = TraitInfo::new("Drop".to_string(), Vec::new(), true);
@@ -101,6 +113,7 @@ impl TypeChecker {
             MethodSig::new(true, Vec::new(), env.unit_ty(), Vec::new()),
         );
         trait_registry.register(drop_trait);
+        trait_registry.register(TraitInfo::new("Copy".to_string(), Vec::new(), true));
         Self {
             env,
             infer,
@@ -118,6 +131,7 @@ impl TypeChecker {
             propagation_stack: Vec::new(),
             try_block_mode_stack: Vec::new(),
             drop_move_only_type_keys: HashSet::new(),
+            copy_type_keys: HashSet::new(),
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
@@ -196,7 +210,7 @@ impl TypeChecker {
         }
 
         self.prepare_class_hierarchy(program)?;
-        self.record_drop_move_only_type_keys(program)?;
+        self.record_ownership_impl_type_keys(program)?;
 
         for decl in &program.decls {
             self.check_decl(decl)?;
@@ -217,7 +231,7 @@ impl TypeChecker {
         }
 
         self.prepare_class_hierarchy(program)?;
-        self.record_drop_move_only_type_keys(program)?;
+        self.record_ownership_impl_type_keys(program)?;
 
         for decl in &program.decls {
             self.check_decl_with_filtered_function_bodies(decl, checked_function_names)?;
@@ -226,18 +240,22 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn record_drop_move_only_type_keys(&mut self, program: &Program) -> Result<()> {
+    fn record_ownership_impl_type_keys(&mut self, program: &Program) -> Result<()> {
         self.drop_move_only_type_keys.clear();
+        self.copy_type_keys.clear();
         for decl in &program.decls {
             let DeclKind::Impl(impl_decl) = &decl.kind else {
                 continue;
             };
-            let is_drop_impl = impl_decl
+            let Some(trait_name) = impl_decl
                 .trait_path
                 .as_ref()
                 .and_then(|path| path.as_simple())
-                .is_some_and(|ident| ident.name == "Drop");
-            if !is_drop_impl {
+                .map(|ident| ident.name.as_str())
+            else {
+                continue;
+            };
+            if !matches!(trait_name, "Copy" | "Drop") {
                 continue;
             }
 
@@ -256,9 +274,19 @@ impl TypeChecker {
                 }
             })();
             self.env.pop_scope();
-            self.drop_move_only_type_keys.insert(target_key?);
+            let target_key = target_key?;
+            if trait_name == "Drop" {
+                self.drop_move_only_type_keys.insert(target_key);
+            } else {
+                self.copy_type_keys.insert(target_key);
+            }
         }
         Ok(())
+    }
+
+    fn ownership_type_set_contains(type_keys: &HashSet<String>, ty: &Ty) -> bool {
+        type_keys.contains(&type_key(ty))
+            || matches!(&ty.kind, TyKind::Adt { name, .. } if type_keys.contains(name))
     }
 
     /// Register declarations so later bodies can resolve names.
