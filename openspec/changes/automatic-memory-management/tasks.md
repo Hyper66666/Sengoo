@@ -29,9 +29,11 @@
     method-call arguments, and assignment RHS moves for the canonical owned
     `String` type and user structs with a known `impl Drop`; Drop ownership is
     pre-collected before body checking so the result does not depend on whether
-    the impl appears before or after a function. Return moves are handled by MIR
-    drop suppression for function exits; non-`Copy` values without `Drop`, field
-    move-out, and path-sensitive move analysis remain open.
+    the impl appears before or after a function. Generic `impl<T> Drop for
+    Owner<T>` records the owning type constructor so every concrete
+    instantiation is move-only. Return moves are handled by MIR drop suppression
+    for function exits; non-`Copy` values without `Drop`, field move-out, and
+    path-sensitive move analysis remain open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker and user structs
@@ -42,9 +44,9 @@
   fields are.
 - [ ] 2.4 Tests under `compiler/src/tests/` for move, partial move, and the
   negative use-after-move diagnostic.
-  - Partial: owned `String` and user `impl Drop` negative use-after-move tests
-    exist; partial moves and general owning values remain open. Assignment RHS
-    move coverage is now included.
+  - Partial: owned `String`, concrete user `impl Drop`, and generic user
+    `impl<T> Drop` negative use-after-move tests exist; partial moves and general
+    owning values remain open. Assignment RHS move coverage is now included.
 
 ## 3. MIR drop-glue insertion
 

@@ -270,6 +270,36 @@ impl Drop for Resource {
 }
 
 #[test]
+fn generic_drop_impl_makes_each_instantiation_move_only() {
+    let source = r#"
+struct Resource<T> {
+    value: T,
+}
+
+impl<T> Drop for Resource<T> {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let a: Resource<i64> = Resource { value: 1 };
+    let b: Resource<i64> = a;
+    a.value
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("all instantiations of a generic Drop impl should be move-only");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("use of moved value `a`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_exact_capacity_emits_runtime_calls() {
     let ir = compile_to_ir(&format!(
         "{}\n\n{}",

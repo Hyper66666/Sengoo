@@ -6,7 +6,7 @@
 use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
 use crate::lexer::Span;
 use crate::typeck::r#trait::type_key;
-use crate::typeck::ty::Ty;
+use crate::typeck::ty::{Ty, TyKind};
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
 
@@ -307,6 +307,10 @@ impl BorrowChecker {
 
     fn ty_is_user_move_only(&self, ty: &Ty) -> bool {
         self.move_only_types.contains(&type_key(ty))
+            || matches!(
+                &ty.kind,
+                TyKind::Adt { name, .. } if self.move_only_types.contains(name)
+            )
     }
 
     fn var_ty(&self, name: &str) -> Option<Ty> {

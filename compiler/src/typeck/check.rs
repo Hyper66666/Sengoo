@@ -247,7 +247,13 @@ impl TypeChecker {
                 let target_ty = self
                     .check_type(&impl_decl.target_type)
                     .map_err(CompileError::from)?;
-                Ok(type_key(&target_ty))
+                if impl_decl.type_params.is_empty() {
+                    Ok(type_key(&target_ty))
+                } else if let TyKind::Adt { name, .. } = &target_ty.kind {
+                    Ok(name.clone())
+                } else {
+                    Ok(type_key(&target_ty))
+                }
             })();
             self.env.pop_scope();
             self.drop_move_only_type_keys.insert(target_key?);
