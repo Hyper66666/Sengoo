@@ -27,10 +27,11 @@
   (argument, return, assignment, field move-out).
   - Partial: the move checker now marks direct let moves, named-call arguments,
     method-call arguments, and assignment RHS moves for the canonical owned
-    `String` type and user structs with a known `impl Drop`. Return moves are
-    handled by MIR drop suppression for function exits; non-`Copy` values
-    without `Drop`, field move-out, and path-sensitive move analysis remain
-    open.
+    `String` type and user structs with a known `impl Drop`; Drop ownership is
+    pre-collected before body checking so the result does not depend on whether
+    the impl appears before or after a function. Return moves are handled by MIR
+    drop suppression for function exits; non-`Copy` values without `Drop`, field
+    move-out, and path-sensitive move analysis remain open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker and user structs

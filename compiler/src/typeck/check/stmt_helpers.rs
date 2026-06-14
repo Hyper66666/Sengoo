@@ -209,9 +209,8 @@ impl TypeChecker {
 
 impl TypeChecker {
     fn move_only_type_keys(&self) -> HashSet<String> {
-        self.impl_registry
-            .trait_impl_type_keys("Drop")
-            .into_iter()
-            .collect()
+        let mut keys = self.drop_move_only_type_keys.clone();
+        keys.extend(self.impl_registry.trait_impl_type_keys("Drop"));
+        keys
     }
 }

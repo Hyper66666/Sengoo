@@ -80,6 +80,7 @@ pub struct TypeChecker {
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
     try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
+    drop_move_only_type_keys: HashSet<String>,
     warnings: Vec<crate::error::CompileWarning>,
     deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
     trait_default_methods: HashMap<String, HashMap<String, Function>>,
@@ -116,6 +117,7 @@ impl TypeChecker {
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
             try_block_mode_stack: Vec::new(),
+            drop_move_only_type_keys: HashSet::new(),
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
@@ -194,6 +196,7 @@ impl TypeChecker {
         }
 
         self.prepare_class_hierarchy(program)?;
+        self.record_drop_move_only_type_keys(program)?;
 
         for decl in &program.decls {
             self.check_decl(decl)?;
@@ -214,11 +217,41 @@ impl TypeChecker {
         }
 
         self.prepare_class_hierarchy(program)?;
+        self.record_drop_move_only_type_keys(program)?;
 
         for decl in &program.decls {
             self.check_decl_with_filtered_function_bodies(decl, checked_function_names)?;
         }
 
+        Ok(())
+    }
+
+    fn record_drop_move_only_type_keys(&mut self, program: &Program) -> Result<()> {
+        self.drop_move_only_type_keys.clear();
+        for decl in &program.decls {
+            let DeclKind::Impl(impl_decl) = &decl.kind else {
+                continue;
+            };
+            let is_drop_impl = impl_decl
+                .trait_path
+                .as_ref()
+                .and_then(|path| path.as_simple())
+                .is_some_and(|ident| ident.name == "Drop");
+            if !is_drop_impl {
+                continue;
+            }
+
+            self.env.push_scope();
+            let target_key = (|| -> Result<String> {
+                self.bind_type_params_with_meta(&impl_decl.type_params)?;
+                let target_ty = self
+                    .check_type(&impl_decl.target_type)
+                    .map_err(CompileError::from)?;
+                Ok(type_key(&target_ty))
+            })();
+            self.env.pop_scope();
+            self.drop_move_only_type_keys.insert(target_key?);
+        }
         Ok(())
     }
 
