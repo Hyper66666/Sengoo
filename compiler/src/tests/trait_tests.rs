@@ -181,6 +181,41 @@ impl Copy for Outer {
     typecheck_source(source).expect("Copy fields should allow the enclosing Copy impl");
 }
 
+#[test]
+fn derive_copy_generates_copy_impl_for_field_validation() {
+    let source = r#"
+#[derive(Copy)]
+struct Inner {
+    handle: i64,
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Copy for Outer {
+}
+"#;
+
+    typecheck_source(source).expect("derive(Copy) should generate an impl Copy for Inner");
+}
+
+#[test]
+fn derive_copy_reuses_non_copy_field_diagnostic() {
+    let source = r#"
+struct Inner {
+    handle: i64,
+}
+
+#[derive(Copy)]
+struct Outer {
+    inner: Inner,
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("copy-field-not-copy"));
+}
+
 /// Test that a trait impl method call on i64 resolves to the three-part mangled name.
 ///
 /// When `show` is defined via `impl Printable for i64`, calling `x.show()` should

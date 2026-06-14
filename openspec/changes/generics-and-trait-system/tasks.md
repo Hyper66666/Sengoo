@@ -53,6 +53,9 @@
     Remaining core traits and support types are open.
 - [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
+  - Partial: built-in `#[derive(Copy)]` now expands to `impl Copy for Type {}`
+    and reuses the compiler's Copy/Drop and field-Copy validation. Clone,
+    equality/ordering, Hash, Debug, and Default derive remain open.
 - [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.
   - Partial: a type cannot implement both compiler-known `Copy` and `Drop`;
     either source order produces stable `copy-drop-conflict`, including generic
@@ -63,7 +66,8 @@
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
   - Partial: compiler tests cover reserved `Copy` and both declaration orders
     of the `Copy`/`Drop` conflict, plus non-`Copy` field rejection and nested
-    ADT-with-`Copy` acceptance. Per-derive and generic-bound field tests remain
+    ADT-with-`Copy` acceptance. `derive(Copy)` expansion and field-diagnostic
+    reuse are covered. Remaining derives and generic-bound field tests remain
     open.
 
 ## 6. Orphan rule and docs

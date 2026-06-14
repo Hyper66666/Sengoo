@@ -261,6 +261,10 @@ fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Re
 }
 
 fn generate_builtin_derive(derive: &str, target: &DeriveTarget) -> String {
+    if derive.rsplit("::").next() == Some("Copy") {
+        return format!("impl Copy for {} {{\n}}", target.name);
+    }
+
     let method = format!("__derive_{}", sanitize_ident(derive));
     format!(
         "impl {} {{\n    def {}(self) -> i64 {{\n        1\n    }}\n}}",
@@ -519,6 +523,21 @@ struct User {
         assert!(!expanded.contains("#[derive"));
         assert!(expanded.contains("impl User"));
         assert!(expanded.contains("__derive_auto"));
+    }
+
+    #[test]
+    fn derive_copy_expands_to_trait_impl() {
+        let source = r#"
+#[derive(Copy)]
+struct User {
+    id: i64,
+}
+"#;
+
+        let expanded = expand_derive_macros(source).expect("derive expansion should succeed");
+        assert!(!expanded.contains("#[derive"));
+        assert!(expanded.contains("impl Copy for User"));
+        assert!(!expanded.contains("__derive_copy"));
     }
 
     #[test]
