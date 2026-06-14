@@ -383,6 +383,17 @@ of silently skipping unreadable `.sg` files.
 
 Git dependencies are cloned into `target/sgpm/git/` under the selected package.
 Remote registry dependencies are unpacked into `target/sgpm/registry/`.
+The complete v1 HTTP contract, owner reservation model, yank behavior, and
+reference-server instructions are documented in
+[`docs/registry-protocol.md`](registry-protocol.md). For local development:
+
+```text
+sgpm registry serve --root target/sgpm-registry --listen 127.0.0.1:7878
+```
+
+Remote cache entries retain the archive checksum plus a deterministic extracted
+content hash. Locked commands repair modified or incomplete cache contents
+before invoking `sgc`.
 Incomplete cached packages are validated and downloaded again automatically.
 Failed downloads remove their staging directory instead of exposing a partial
 cache version. Git clones and refreshes also complete in sibling staging paths;

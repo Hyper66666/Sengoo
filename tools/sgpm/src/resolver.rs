@@ -14,9 +14,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tar::Archive;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
+use walkdir::WalkDir;
 
 static REMOTE_REGISTRY_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 static GIT_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
+const REMOTE_ARCHIVE_CHECKSUM_FILE: &str = ".sgpm-archive.sha256";
+const REMOTE_CONTENT_CHECKSUM_FILE: &str = ".sgpm-content.sha256";
 
 #[derive(Debug, Clone)]
 pub struct DependencyEdge {
@@ -52,6 +55,7 @@ pub enum PackageSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RegistryPackageMetadata {
+    pub checksum: Option<String>,
     pub yanked: bool,
     pub yank_reason: Option<String>,
     pub features: Vec<String>,
@@ -671,8 +675,12 @@ fn fetch_remote_registry_package_manifest(
         package_name,
         &version.to_string(),
     );
-    let cache_is_valid = manifest_path.exists()
-        && validate_registry_package_manifest(&manifest_path, package_name, &version).is_ok();
+    let package_dir = manifest_path
+        .parent()
+        .ok_or_else(|| miette::miette!("invalid registry cache path"))?;
+    let cache_is_valid =
+        validate_cached_remote_package(package_dir, package_name, &version, checksum.as_deref())
+            .is_ok();
     if !cache_is_valid {
         let download_url = format!(
             "{}/api/v1/packages/{}/{}/download",
@@ -698,6 +706,7 @@ fn fetch_remote_registry_package_manifest(
             package_name,
             &version,
             &archive,
+            checksum.as_deref(),
         )?;
     }
     validate_registry_package_manifest(&manifest_path, package_name, &version)?;
@@ -825,6 +834,7 @@ fn select_remote_registry_version(
                 version,
                 entry.checksum.clone(),
                 RegistryPackageMetadata {
+                    checksum: entry.checksum.clone(),
                     yanked: entry.yanked,
                     yank_reason: entry.yank_reason.clone(),
                     features: normalized_features(entry.features.clone()),
@@ -865,6 +875,7 @@ fn load_local_registry_metadata(package_version_dir: &Path) -> Result<RegistryPa
         .into_diagnostic()
         .with_context(|| format!("failed to parse {}", metadata_path.display()))?;
     Ok(RegistryPackageMetadata {
+        checksum: None,
         yanked: parsed.yanked,
         yank_reason: parsed
             .yank_reason
@@ -945,6 +956,7 @@ fn unpack_remote_registry_archive(
     package_name: &str,
     version: &Version,
     archive: &[u8],
+    archive_checksum: Option<&str>,
 ) -> Result<()> {
     let package_dir = cached_remote_manifest_path(
         registry_cache_dir,
@@ -978,13 +990,24 @@ fn unpack_remote_registry_archive(
             package_name,
             version,
         )?;
-        if package_dir.exists() {
-            if validate_registry_package_manifest(
-                &package_dir.join("Sengoo.toml"),
-                package_name,
-                version,
+        if let Some(checksum) = archive_checksum {
+            fs::write(
+                staging_dir.join(REMOTE_ARCHIVE_CHECKSUM_FILE),
+                format!("{checksum}\n"),
             )
-            .is_ok()
+            .into_diagnostic()
+            .context("failed to write remote archive checksum marker")?;
+        }
+        let content_checksum = remote_package_content_checksum(&staging_dir)?;
+        fs::write(
+            staging_dir.join(REMOTE_CONTENT_CHECKSUM_FILE),
+            format!("{content_checksum}\n"),
+        )
+        .into_diagnostic()
+        .context("failed to write remote content checksum marker")?;
+        if package_dir.exists() {
+            if validate_cached_remote_package(&package_dir, package_name, version, archive_checksum)
+                .is_ok()
             {
                 return Ok(());
             }
@@ -1006,6 +1029,81 @@ fn unpack_remote_registry_archive(
         let _ = fs::remove_dir_all(&staging_dir);
     }
     unpack_result
+}
+
+fn validate_cached_remote_package(
+    package_dir: &Path,
+    package_name: &str,
+    version: &Version,
+    archive_checksum: Option<&str>,
+) -> Result<()> {
+    validate_registry_package_manifest(&package_dir.join("Sengoo.toml"), package_name, version)?;
+    if let Some(expected) = archive_checksum {
+        let marker = fs::read_to_string(package_dir.join(REMOTE_ARCHIVE_CHECKSUM_FILE))
+            .into_diagnostic()
+            .context("missing remote archive checksum marker")?;
+        if marker.trim() != expected {
+            miette::bail!(
+                "remote registry cache archive checksum mismatch: expected {}, got {}",
+                expected,
+                marker.trim()
+            );
+        }
+    }
+    let expected_content = fs::read_to_string(package_dir.join(REMOTE_CONTENT_CHECKSUM_FILE))
+        .into_diagnostic()
+        .context("missing remote content checksum marker")?;
+    let actual_content = remote_package_content_checksum(package_dir)?;
+    if expected_content.trim() != actual_content {
+        miette::bail!(
+            "remote registry cache content checksum mismatch: expected {}, got {}",
+            expected_content.trim(),
+            actual_content
+        );
+    }
+    Ok(())
+}
+
+fn remote_package_content_checksum(package_dir: &Path) -> Result<String> {
+    let mut files = WalkDir::new(package_dir)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.file_type().is_file() => Some(Ok(entry.into_path())),
+            Ok(_) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .into_diagnostic()
+        .with_context(|| format!("failed to enumerate {}", package_dir.display()))?;
+    files.retain(|path| {
+        !matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(REMOTE_ARCHIVE_CHECKSUM_FILE | REMOTE_CONTENT_CHECKSUM_FILE)
+        )
+    });
+    files.sort_by_key(|path| {
+        path.strip_prefix(package_dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    });
+
+    let mut digest = Sha256::new();
+    for path in files {
+        let relative = path
+            .strip_prefix(package_dir)
+            .into_diagnostic()?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let bytes = fs::read(&path)
+            .into_diagnostic()
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        digest.update(relative.len().to_le_bytes());
+        digest.update(relative.as_bytes());
+        digest.update(bytes.len().to_le_bytes());
+        digest.update(bytes);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn create_remote_registry_staging_dir(package_dir: &Path) -> Result<PathBuf> {
@@ -1557,9 +1655,15 @@ mod tests {
     fn failed_remote_registry_unpack_does_not_leave_partial_cache() {
         let dir = temp_dir("remote_unpack_cleanup");
         let version = Version::parse("1.0.0").unwrap();
-        let err =
-            unpack_remote_registry_archive(&dir, "default", "foo", &version, b"not a gzip archive")
-                .unwrap_err();
+        let err = unpack_remote_registry_archive(
+            &dir,
+            "default",
+            "foo",
+            &version,
+            b"not a gzip archive",
+            None,
+        )
+        .unwrap_err();
 
         assert!(err.to_string().contains("failed to unpack remote package"));
         assert!(!dir.join("default/foo/1.0.0").exists());

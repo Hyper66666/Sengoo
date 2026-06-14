@@ -1,17 +1,27 @@
 ## 1. Registry protocol and reference server
 
-- [ ] 1.1 Specify the HTTP registry API (publish, yank, versions, metadata,
+- [x] 1.1 Specify the HTTP registry API (publish, yank, versions, metadata,
   download) with checksums and name reservation in `docs/`.
-- [ ] 1.2 Implement a reference registry server.
-- [ ] 1.3 Make `sgpm publish` upload real artifacts to the reference server
+  - `docs/registry-protocol.md` freezes the v1 routes, auth/ownership model,
+    status codes, upload limit, lockfile contract, and cache verification.
+- [x] 1.2 Implement a reference registry server.
+  - `sgpm registry serve` provides filesystem-backed publish, index, metadata,
+    download, yank/unyank, immutable versions, and hashed owner reservations.
+- [x] 1.3 Make `sgpm publish` upload real artifacts to the reference server
   (replace dry-run for the registry path).
+  - The existing remote publish client is covered against the reference server
+    rather than only a request-capture stub.
 
 ## 2. Registry-backed resolution
 
-- [ ] 2.1 Semver version requirements in `Sengoo.toml` for registry deps.
-- [ ] 2.2 Deterministic resolver producing hash-locked lockfile entries.
-- [ ] 2.3 e2e test: publish to the reference server, resolve, build, and run a
+- [x] 2.1 Semver version requirements in `Sengoo.toml` for registry deps.
+- [x] 2.2 Deterministic resolver producing hash-locked lockfile entries.
+  - Lock schema v2 records `source.checksum`; remote caches verify both the
+    archive checksum marker and a deterministic extracted-tree hash.
+- [x] 2.3 e2e test: publish to the reference server, resolve, build, and run a
   consumer package.
+  - `reference_registry_serves_publish_download_and_name_reservation` also
+    tampers with the extracted cache and proves a locked run repairs it.
 
 ## 3. Binary distribution
 
@@ -24,7 +34,9 @@
 
 - [ ] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
 - [ ] 4.2 Document install/upgrade and the registry workflow.
-- [ ] 4.3 Run `openspec validate package-registry-and-distribution --strict`.
+  - Registry workflow complete in `docs/registry-protocol.md` and
+    `docs/sgpm-quickstart.md`; three-platform install/upgrade text remains open.
+- [x] 4.3 Run `openspec validate package-registry-and-distribution --strict`.
 
 ## Verification
 

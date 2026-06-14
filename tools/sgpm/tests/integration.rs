@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -31,6 +31,78 @@ fn run_sgpm(args: &[&str], cwd: &Path) -> Output {
         .current_dir(cwd)
         .output()
         .expect("run sgpm")
+}
+
+fn reserve_local_addr() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().to_string()
+}
+
+fn spawn_reference_registry(root: &Path, addr: &str, max_requests: usize) -> Child {
+    Command::new(sgpm())
+        .args([
+            "registry",
+            "serve",
+            "--root",
+            root.to_str().unwrap(),
+            "--listen",
+            addr,
+            "--max-requests",
+            &max_requests.to_string(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn reference registry")
+}
+
+fn send_http_request(
+    addr: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> (u16, Vec<u8>) {
+    let mut stream = None;
+    for _ in 0..100 {
+        match TcpStream::connect(addr) {
+            Ok(connected) => {
+                stream = Some(connected);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut stream = stream.expect("reference registry should accept connections");
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        request.push_str(name);
+        request.push_str(": ");
+        request.push_str(value);
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("http response headers")
+        + 4;
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .expect("http response status");
+    (status, response[header_end..].to_vec())
 }
 
 #[derive(Debug)]
@@ -385,6 +457,25 @@ fn fake_sgc(dir: &Path) -> PathBuf {
     perms.set_mode(0o755);
     fs::set_permissions(&script, perms).unwrap();
     script
+}
+
+#[cfg(windows)]
+fn install_success_executable(path: &Path) {
+    let system_root = std::env::var_os("SystemRoot").expect("SystemRoot");
+    let source = PathBuf::from(system_root).join("System32/whoami.exe");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::copy(source, path).unwrap();
+}
+
+#[cfg(not(windows))]
+fn install_success_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::copy("/bin/true", path).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 #[cfg(not(windows))]
@@ -2299,6 +2390,207 @@ fn publish_to_default_remote_registry_uploads_package_archive() {
         "stdout:\n{stdout}"
     );
 
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn reference_registry_serves_publish_download_and_name_reservation() {
+    let dir = temp_dir("reference_registry");
+    let registry_root = dir.join("registry");
+    let app = dir.join("ownedpkg");
+    write_pkg_version(&app, "ownedpkg", "0.3.0", &[]);
+    let addr = reserve_local_addr();
+    let base_url = format!("http://{addr}");
+    let mut manifest = fs::read_to_string(app.join("Sengoo.toml")).unwrap();
+    manifest.push_str(&format!(
+        "\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n"
+    ));
+    fs::write(app.join("Sengoo.toml"), manifest).unwrap();
+
+    let mut server = spawn_reference_registry(&registry_root, &addr, 8);
+    let publish = Command::new(sgpm())
+        .args([
+            "publish",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("publish to reference registry");
+    assert!(
+        publish.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&publish.stdout),
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let consumer = dir.join("consumer");
+    write_pkg(&consumer, "consumer", &[]);
+    fs::write(
+        consumer.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'consumer'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n\n[dependencies]\nownedpkg = '0.3.0'\n"
+        ),
+    )
+    .unwrap();
+    let update = Command::new(sgpm())
+        .args([
+            "update",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("resolve reference registry package");
+    assert!(
+        update.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let lockfile = fs::read_to_string(consumer.join("Sengoo.lock")).unwrap();
+    assert!(
+        lockfile.contains("source.checksum = \""),
+        "registry lock entry should record the archive checksum:\n{lockfile}"
+    );
+
+    let cached_source = consumer.join("target/sgpm/registry/default/ownedpkg/0.3.0/src/main.sg");
+    fs::write(&cached_source, "def main() -> i64 { 99 }\n").unwrap();
+    let fake = fake_sgc(&dir);
+    let record = dir.join("reference-registry-run.txt");
+    install_success_executable(&consumer.join(if cfg!(windows) {
+        "target/debug/consumer.exe"
+    } else {
+        "target/debug/consumer"
+    }));
+    let run = Command::new(sgpm())
+        .args([
+            "run",
+            "--locked",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .env("SGPM_SGC", fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run consumer with locked registry package");
+    assert!(
+        run.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(record.is_file(), "locked consumer should invoke sgc");
+    assert_eq!(
+        fs::read_to_string(&cached_source).unwrap(),
+        "def main() -> i64 { 0 }\n",
+        "locked resolution should repair a content-tampered registry cache"
+    );
+
+    let (index_status, index_body) =
+        send_http_request(&addr, "GET", "/api/v1/packages/ownedpkg", &[], &[]);
+    assert_eq!(index_status, 200);
+    let index: serde_json::Value = serde_json::from_slice(&index_body).unwrap();
+    let checksum = index["versions"][0]["checksum"]
+        .as_str()
+        .expect("published checksum");
+    assert_eq!(checksum.len(), 64);
+
+    let (download_status, archive) = send_http_request(
+        &addr,
+        "GET",
+        "/api/v1/packages/ownedpkg/0.3.0/download",
+        &[],
+        &[],
+    );
+    assert_eq!(download_status, 200);
+    assert!(archive.starts_with(&[0x1f, 0x8b]));
+
+    let manifest_path = app.join("Sengoo.toml");
+    let updated = fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("version = '0.3.0'", "version = '0.4.0'");
+    fs::write(&manifest_path, updated).unwrap();
+    let stolen = Command::new(sgpm())
+        .args([
+            "publish",
+            "--manifest-path",
+            manifest_path.to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-two")
+        .output()
+        .expect("attempt reserved-name publish");
+    assert!(!stolen.status.success());
+    assert!(
+        String::from_utf8_lossy(&stolen.stderr).contains("reserved"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&stolen.stderr)
+    );
+
+    let status = server.wait().expect("reference registry exits");
+    assert!(status.success());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn reference_registry_owner_can_yank_a_published_version() {
+    let dir = temp_dir("reference_registry_yank");
+    let registry_root = dir.join("registry");
+    let app = dir.join("ownedpkg");
+    write_pkg_version(&app, "ownedpkg", "1.0.0", &[]);
+    let addr = reserve_local_addr();
+    let mut manifest = fs::read_to_string(app.join("Sengoo.toml")).unwrap();
+    manifest.push_str(&format!(
+        "\n[registries.default]\nurl = 'http://{addr}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n"
+    ));
+    fs::write(app.join("Sengoo.toml"), manifest).unwrap();
+    let mut server = spawn_reference_registry(&registry_root, &addr, 3);
+
+    let publish = Command::new(sgpm())
+        .args([
+            "publish",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("publish package before yank");
+    assert!(
+        publish.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let (yank_status, yank_body) = send_http_request(
+        &addr,
+        "POST",
+        "/api/v1/packages/ownedpkg/1.0.0/yank",
+        &[
+            ("Authorization", "Bearer owner-one"),
+            ("Content-Type", "application/json"),
+        ],
+        br#"{"reason":"critical regression"}"#,
+    );
+    assert_eq!(
+        yank_status,
+        200,
+        "yank body: {}",
+        String::from_utf8_lossy(&yank_body)
+    );
+    let (index_status, index_body) =
+        send_http_request(&addr, "GET", "/api/v1/packages/ownedpkg", &[], &[]);
+    assert_eq!(index_status, 200);
+    let index: serde_json::Value = serde_json::from_slice(&index_body).unwrap();
+    assert_eq!(index["versions"][0]["yanked"], true);
+    assert_eq!(index["versions"][0]["yank_reason"], "critical regression");
+
+    assert!(server.wait().expect("reference registry exits").success());
     let _ = fs::remove_dir_all(dir);
 }
 
