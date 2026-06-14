@@ -56,10 +56,14 @@
 - [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.
   - Partial: a type cannot implement both compiler-known `Copy` and `Drop`;
     either source order produces stable `copy-drop-conflict`, including generic
-    impl constructors. Recursive all-field `Copy` validation remains open.
+    impl constructors. Concrete struct `impl Copy` now recursively rejects
+    non-`Copy` fields with stable `copy-field-not-copy` and accepts fields whose
+    ADT type has its own `Copy` impl. Generic field bounds and derive-generated
+    `Copy` remain open.
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
   - Partial: compiler tests cover reserved `Copy` and both declaration orders
-    of the `Copy`/`Drop` conflict. Per-derive and non-`Copy` field tests remain
+    of the `Copy`/`Drop` conflict, plus non-`Copy` field rejection and nested
+    ADT-with-`Copy` acceptance. Per-derive and generic-bound field tests remain
     open.
 
 ## 6. Orphan rule and docs

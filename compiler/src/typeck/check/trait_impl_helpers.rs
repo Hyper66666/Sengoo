@@ -177,6 +177,22 @@ impl TypeChecker {
                 impl_decl.span.hi,
             )));
         }
+        if is_copy_impl {
+            if let Err(err) = self.validate_copy_fields(&target_ty) {
+                self.env.pop_scope();
+                return match err {
+                    TypeckError::Other(message) => {
+                        Err(CompileError::from(TypeckError::diagnostic(
+                            "copy-field-not-copy",
+                            message,
+                            impl_decl.span.lo,
+                            impl_decl.span.hi,
+                        )))
+                    }
+                    err => Err(CompileError::TypeckError(err)),
+                };
+            }
+        }
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 
@@ -260,5 +276,86 @@ impl TypeChecker {
 
         self.env.pop_scope();
         Ok(())
+    }
+
+    fn validate_copy_fields(&mut self, target_ty: &Ty) -> TyResult<()> {
+        let TyKind::Adt { name, .. } = &target_ty.kind else {
+            return Ok(());
+        };
+        let Some(field_defs) = self.struct_field_defs.get(name).cloned() else {
+            return Ok(());
+        };
+
+        for (field_name, field_ty) in field_defs {
+            let field_ty = self.check_type(&field_ty)?;
+            if !self.ty_is_copy(&field_ty, &mut HashSet::new())? {
+                return Err(TypeckError::Other(format!(
+                    "type `{}` cannot implement `Copy` because field `{}` has non-Copy type {}",
+                    type_key(target_ty),
+                    field_name,
+                    field_ty.kind
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn ty_is_copy(&mut self, ty: &Ty, visiting: &mut HashSet<String>) -> TyResult<bool> {
+        match &ty.kind {
+            TyKind::Error
+            | TyKind::Unit
+            | TyKind::Never
+            | TyKind::Bool
+            | TyKind::Int(_)
+            | TyKind::Float(_)
+            | TyKind::Char
+            | TyKind::Byte
+            | TyKind::Str
+            | TyKind::Ref(_, _)
+            | TyKind::Ptr(_)
+            | TyKind::Fn { .. } => Ok(true),
+            TyKind::Tuple(items) => {
+                for item in items {
+                    if !self.ty_is_copy(item, visiting)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            TyKind::Array(item, _) | TyKind::Slice(item) => self.ty_is_copy(item, visiting),
+            TyKind::Adt { name, .. } => {
+                if Self::ownership_type_set_contains(&self.copy_type_keys, ty) {
+                    return Ok(true);
+                }
+                if self.drop_move_only_type_keys.contains(name) {
+                    return Ok(false);
+                }
+
+                let ty_key = type_key(ty);
+                if !visiting.insert(ty_key.clone()) {
+                    return Ok(true);
+                }
+                let Some(field_defs) = self.struct_field_defs.get(name).cloned() else {
+                    visiting.remove(&ty_key);
+                    return Ok(false);
+                };
+                for (_, field_ty) in field_defs {
+                    let field_ty = self.check_type(&field_ty)?;
+                    if !self.ty_is_copy(&field_ty, visiting)? {
+                        visiting.remove(&ty_key);
+                        return Ok(false);
+                    }
+                }
+                visiting.remove(&ty_key);
+                Ok(false)
+            }
+            TyKind::Bytes
+            | TyKind::Var(_)
+            | TyKind::Dyn(_)
+            | TyKind::ImplTrait(_)
+            | TyKind::Future(_)
+            | TyKind::SelfType
+            | TyKind::Inferred => Ok(false),
+        }
     }
 }

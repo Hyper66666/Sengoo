@@ -141,6 +141,46 @@ impl Copy for Resource {
     assert_eq!(typecheck_stable_code(source), Some("copy-drop-conflict"));
 }
 
+#[test]
+fn copy_impl_rejects_non_copy_field_with_stable_code() {
+    let source = r#"
+struct Inner {
+    handle: i64,
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Copy for Outer {
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("copy-field-not-copy"));
+}
+
+#[test]
+fn copy_impl_accepts_fields_with_copy_impls() {
+    let source = r#"
+struct Inner {
+    handle: i64,
+}
+
+impl Copy for Inner {
+}
+
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+impl Copy for Outer {
+}
+"#;
+
+    typecheck_source(source).expect("Copy fields should allow the enclosing Copy impl");
+}
+
 /// Test that a trait impl method call on i64 resolves to the three-part mangled name.
 ///
 /// When `show` is defined via `impl Printable for i64`, calling `x.show()` should
