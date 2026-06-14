@@ -45,3 +45,22 @@ POSIX shell:
 scripts/install.sh ./sengoo-<version>-<target>.tar.gz
 scripts/install.sh --version <version>
 ```
+
+Published channels use these target names:
+
+- `x86_64-pc-windows-msvc`
+- `x86_64-unknown-linux-gnu`
+- `aarch64-apple-darwin`
+- `x86_64-apple-darwin`
+
+The installers detect the current host target. Pass `--target` / `-Target` to
+override it, or `--print-target` / `-PrintTarget` to inspect the selected
+channel. Re-running the version command with a newer pinned version performs an
+explicit checksum-verified upgrade; the scripts never auto-update.
+
+Release archives also carry GitHub build-provenance attestations. After
+downloading from GitHub Releases, verify one with:
+
+```sh
+gh attestation verify sengoo-<version>-<target>.tar.gz --repo Hyper66666/Sengoo
+```

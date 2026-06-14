@@ -25,17 +25,24 @@
 
 ## 3. Binary distribution
 
-- [ ] 3.1 Versioned release artifacts for Linux x86_64 and Windows x64.
+- [x] 3.1 Versioned release artifacts for Linux x86_64 and Windows x64.
 - [ ] 3.2 macOS channel (arm64 + x86_64) artifacts.
-- [ ] 3.3 One-command installer / version manager.
+  - Native `macos-15` arm64 and `macos-15-intel` x64 jobs are configured;
+    keep open until the remote matrix produces and installs both archives.
+- [x] 3.3 One-command installer / version manager.
+  - Both installers select a pinned version, auto-detect architecture, verify
+    SHA-256, and support explicit repeatable upgrades without auto-update.
 - [ ] 3.4 Release smoke matrix per platform (install -> `sgc run hello`).
+  - Four-platform workflow is implemented; remote macOS evidence is pending.
 
 ## 4. Release process and docs
 
-- [ ] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
-- [ ] 4.2 Document install/upgrade and the registry workflow.
-  - Registry workflow complete in `docs/registry-protocol.md` and
-    `docs/sgpm-quickstart.md`; three-platform install/upgrade text remains open.
+- [x] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
+  - Workspace-coherent versions, SHA-256 sidecars, and GitHub build-provenance
+    attestations are gated behind the complete platform smoke matrix.
+- [x] 4.2 Document install/upgrade and the registry workflow.
+  - See `docs/registry-protocol.md`, `docs/sgpm-quickstart.md`,
+    `docs/internal-release.md`, and `README-dist.md`.
 - [x] 4.3 Run `openspec validate package-registry-and-distribution --strict`.
 
 ## Verification

@@ -27,6 +27,20 @@ $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
+Pinned release install or upgrade:
+
+```powershell
+.\scripts\install.ps1 -Version 0.1.0
+```
+
+```sh
+sh scripts/install.sh --version 0.1.0
+```
+
+The release workflow builds native Windows x64, Linux x64, macOS arm64, and
+macOS x64 archives, verifies SHA-256 during installation, and publishes signed
+GitHub build provenance only after every platform smoke passes.
+
 Native debug-info builds use `-g` / `--debug-info`:
 
 ```powershell

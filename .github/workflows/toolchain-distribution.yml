@@ -31,7 +31,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: macos-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -85,10 +97,23 @@ jobs:
             throw "OpenSpec all smoke failed on ${{ matrix.os }}"
           }
 
+      - name: Verify installer target detection
+        shell: pwsh
+        run: |
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $actual = (./scripts/install.ps1 -PrintTarget).Trim()
+          } else {
+            $actual = (sh scripts/install.sh --print-target).Trim()
+          }
+          if ($actual -ne "${{ matrix.target }}") {
+            throw "installer target mismatch: expected ${{ matrix.target }}, got $actual"
+          }
+
       - name: Package toolchain
         shell: pwsh
         env:
           SENGOO_BUILD_HASH: ${{ github.sha }}
+          SENGOO_DIST_TARGET: ${{ matrix.target }}
         run: |
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}".Substring(1)
@@ -97,8 +122,8 @@ jobs:
           }
           ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
 
-      - name: Install package (Linux)
-        if: runner.os == 'Linux'
+      - name: Install package (POSIX)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           archive=$(cat target/dist/latest-archive.txt)
@@ -173,15 +198,39 @@ jobs:
       - name: Upload packaged toolchain
         uses: actions/upload-artifact@v4
         with:
-          name: sengoo-toolchain-${{ matrix.os }}
+          name: sengoo-toolchain-${{ matrix.artifact }}
           path: |
             target/dist/*.zip
             target/dist/*.tar.gz
             target/dist/*.sha256
             target/dist/*/manifest.json
 
+  publish-release:
+    name: publish complete toolchain release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download all smoke-gated archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sengoo-toolchain-*
+          path: target/dist
+          merge-multiple: true
+
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            target/dist/*.zip
+            target/dist/*.tar.gz
+
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
