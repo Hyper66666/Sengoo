@@ -2,10 +2,18 @@
 
 - [ ] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
   trait/typeck layer and reserve it from manual direct calls.
-- [ ] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
+- [x] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
   are never moved or dropped.
-- [ ] 1.3 Document drop order (reverse declaration order within a scope) in
+- Implemented for the current ownership subset: primitive scalars and borrowed
+  references remain usable after by-value copy sites and do not get drop glue.
+  Trait-level `Copy` derivation/exclusivity remains owned by
+  `generics-and-trait-system` tasks 5.1/5.3.
+- [x] 1.3 Document drop order (reverse declaration order within a scope) in
   `docs/language-features.md`.
+- Documented the implemented top-level owner scope: live owned `String` values
+  drop in reverse declaration order at every function exit, guarded by runtime
+  flags on conditional-init / multi-exit paths. General nested lexical-scope
+  timing remains open under 3.1/3.2.
 
 ## 2. Move / use-after-move checking
 

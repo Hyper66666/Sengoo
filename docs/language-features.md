@@ -168,6 +168,32 @@ Current limitations:
 - IO wakeups are limited to the documented reactor subset.
 - user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
 
+## 2.8 Ownership and Drop Subset
+
+The current P0 memory-management lane is additive and intentionally narrow while
+the full `Drop` trait and generic ownership model are being completed.
+
+Current compiler-enforced behavior:
+
+- Primitive integer scalars, float scalars, `bool`, and borrowed references such
+  as `&str` / `&T` are `Copy`: copying them into another local or passing them by
+  value does not mark the source as moved, and they do not receive drop glue.
+- The stdlib-owned `String` type is treated as move-only in the implemented
+  subset. Moving it through a direct `let` binding, by-value call argument,
+  assignment RHS, owned tail return, or explicit `String.drop()` receiver makes
+  the source unusable and reports the stable `use-after-move` diagnostic.
+- Top-level live `String` owners receive compiler-inserted `String_drop` calls at
+  function exits. Straight-line single-exit functions use a no-flag fast path.
+  Conditional initialization and multiple return exits use runtime drop flags so
+  only initialized, still-owned bindings are dropped.
+- Drop order for the implemented top-level owner scope is reverse declaration
+  order. This applies to normal returns and `?` propagation exits.
+
+Still open in `automatic-memory-management`: the compiler-known `Drop` trait,
+general owning locals beyond `String`, partial moves, nested lexical-scope exit
+timing, abort-path cleanup, and automatic drop impls for `Buffer`, generic
+collections, JSON/process/net handles, and other runtime resources.
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:

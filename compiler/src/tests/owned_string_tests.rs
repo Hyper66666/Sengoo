@@ -145,6 +145,51 @@ def main() -> i64 {
 }
 
 #[test]
+fn copy_scalars_remain_usable_after_by_value_copy_sites() {
+    let source = r#"
+def take_i64(value: i64) -> i64 {
+    value
+}
+
+def take_bool(value: bool) -> i64 {
+    if value { 1 } else { 0 }
+}
+
+def take_f64(value: f64) -> f64 {
+    value
+}
+
+def main() -> i64 {
+    let n: i64 = 7;
+    let copied_n = n;
+    let echoed_n = take_i64(n);
+    let after_arg_n = n;
+
+    let flag: bool = true;
+    let copied_flag = flag;
+    let flag_score = take_bool(flag);
+    let flag_after_arg = if flag { 1 } else { 0 };
+
+    let real: f64 = 2.5;
+    let copied_real = real;
+    let echoed_real = take_f64(real);
+    let echoed_real_again = take_f64(real);
+
+    if copied_flag {
+        copied_n + echoed_n + after_arg_n + flag_score + flag_after_arg
+    } else {
+        0
+    }
+}
+"#;
+    let parsed = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&parsed)
+        .expect("Copy scalar bindings and arguments should remain usable");
+}
+
+#[test]
 fn stdlib_owned_string_user_struct_does_not_get_move_rules() {
     let source = r#"
 struct MyString {
