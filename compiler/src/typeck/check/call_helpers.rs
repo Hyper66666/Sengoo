@@ -914,6 +914,20 @@ impl TypeChecker {
         }
 
         // Then trait impl lookup.
+        if method_name == "drop"
+            && self
+                .impl_registry
+                .lookup_trait_method("Drop", &receiver_key, method_name)
+                .is_some()
+        {
+            return Err(TypeckError::diagnostic(
+                "drop-direct-call",
+                "`Drop::drop` is compiler-inserted and cannot be called directly",
+                method.span.lo,
+                method.span.hi,
+            ));
+        }
+
         if let Some(fn_ty) =
             self.select_trait_method_call_candidate(&receiver_key, method_name, args.len())?
         {

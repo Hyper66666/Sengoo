@@ -13,7 +13,9 @@ use crate::method_resolution::{
 use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
 use crate::typeck::ffi as ffi_check;
 use crate::typeck::infer::TypeInfer;
-use crate::typeck::r#trait::{type_key, FunctionTy, ImplRegistry, TraitRegistry};
+use crate::typeck::r#trait::{
+    type_key, FunctionTy, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
+};
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -89,12 +91,19 @@ impl TypeChecker {
     }
 
     pub fn new() -> Self {
-        let env = TypeEnv::new();
+        let mut env = TypeEnv::new();
         let infer = TypeInfer::with_env(env.clone());
+        let mut trait_registry = TraitRegistry::new();
+        let mut drop_trait = TraitInfo::new("Drop".to_string(), Vec::new(), true);
+        drop_trait.add_method(
+            "drop".to_string(),
+            MethodSig::new(true, Vec::new(), env.unit_ty(), Vec::new()),
+        );
+        trait_registry.register(drop_trait);
         Self {
             env,
             infer,
-            trait_registry: TraitRegistry::new(),
+            trait_registry,
             impl_registry: ImplRegistry::new(),
             struct_field_defs: HashMap::new(),
             enum_variants: HashMap::new(),

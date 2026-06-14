@@ -5,7 +5,93 @@
 //!
 //! _Requirements: 4.2, 4.3_
 
-use crate::compile_to_ir;
+use crate::error::CompileError;
+use crate::{compile_to_ir, Parser, TypeChecker};
+
+fn typecheck_source(source: &str) -> crate::Result<()> {
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker.check_program(&program)
+}
+
+fn typecheck_stable_code(source: &str) -> Option<&'static str> {
+    let err = typecheck_source(source).expect_err("source should fail type checking");
+    let CompileError::TypeckError(typeck_err) = err else {
+        panic!("expected typeck error");
+    };
+    typeck_err.stable_code()
+}
+
+#[test]
+fn builtin_drop_trait_accepts_valid_impl_without_user_declaration() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource: Resource = Resource { handle: 1 };
+    0
+}
+"#;
+
+    typecheck_source(source).expect("compiler-known Drop trait should accept a valid impl");
+}
+
+#[test]
+fn builtin_drop_trait_name_is_reserved() {
+    let source = r#"
+trait Drop {
+    def drop(&mut self) {
+    }
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("drop-trait-reserved"));
+}
+
+#[test]
+fn drop_impl_requires_mut_self_drop_signature() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(self) {
+    }
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("drop-trait-contract"));
+}
+
+#[test]
+fn drop_trait_method_cannot_be_called_directly() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let mut resource: Resource = Resource { handle: 1 };
+    resource.drop();
+    0
+}
+"#;
+
+    assert_eq!(typecheck_stable_code(source), Some("drop-direct-call"));
+}
 
 /// Test that a trait impl method call on i64 resolves to the three-part mangled name.
 ///

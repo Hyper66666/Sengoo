@@ -1,7 +1,13 @@
 ## 1. Drop trait and semantics
 
-- [ ] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
+- [x] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
   trait/typeck layer and reserve it from manual direct calls.
+  - `TypeChecker::new` now registers compiler-known `Drop`; user `trait Drop`
+    declarations emit stable `drop-trait-reserved`, `impl Drop` methods must use
+    the `def drop(&mut self)` contract, and direct trait-dispatched `drop()` calls
+    emit stable `drop-direct-call`. Existing inherent compatibility methods such
+    as stdlib `String.drop()` remain callable until the safe auto-drop surface
+    replaces them.
 - [x] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
   are never moved or dropped.
 - Implemented for the current ownership subset: primitive scalars and borrowed
