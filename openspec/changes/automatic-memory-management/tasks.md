@@ -79,8 +79,11 @@
 - [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
   - Partial: LLVM-text codegen now emits void calls for user-defined
     `Type_Drop_drop` destructors and preserves the existing bool-returning
-    `String_drop` compatibility path. Cranelift coverage and full runtime
-    destructor ABI remain open.
+    `String_drop` compatibility path. The Cranelift fast-jit path now consumes
+    sgc's MIR bundle instead of the former AST constant evaluator for its
+    supported subset, and executes user `Drop` glue through MIR function calls
+    with host-probe coverage. Full MIR-to-Cranelift lowering, `String_drop`
+    runtime ABI coverage, and broad destructor ABI remain open.
 - [ ] 3.5 IR/codegen tests asserting drop count and order (extend
   `codegen_*`/`struct_codegen` test lanes).
   - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
@@ -118,5 +121,6 @@
 - `cargo test -p sengoo-compiler --lib`
 - `cargo test -p sgc core_conformance_examples_compile_link_and_run`
 - New move/drop unit tests (tasks 2.4, 3.5)
+- `cargo test -p sgc cranelift_fast_jit_runs_user_drop_from_mir -- --nocapture`
 - Auto-drop example runs with zero manual release and no leak under a
   leak-check build (task 6.1)
