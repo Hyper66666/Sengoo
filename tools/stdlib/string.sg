@@ -14,6 +14,9 @@ extern "C" {
     fn sengoo_string_clear_status(handle: i64) -> i64;
     fn sengoo_string_copy_to_buffer(handle: i64, buffer_handle: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
+    fn sengoo_string_contains(handle: i64, needle_ptr: i64) -> i64;
+    fn sengoo_string_starts_with(handle: i64, prefix_ptr: i64) -> i64;
+    fn sengoo_string_ends_with(handle: i64, suffix_ptr: i64) -> i64;
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
 }
 
@@ -154,5 +157,17 @@ impl String {
 
     def eq(self, other: String) -> bool {
         sengoo_string_eq(self.handle, other.handle) != 0
+    }
+
+    def contains(self, needle: &str) -> bool {
+        sengoo_string_contains(self.handle, sengoo_stdlib_str_ptr(needle)) != 0
+    }
+
+    def starts_with(self, prefix: &str) -> bool {
+        sengoo_string_starts_with(self.handle, sengoo_stdlib_str_ptr(prefix)) != 0
+    }
+
+    def ends_with(self, suffix: &str) -> bool {
+        sengoo_string_ends_with(self.handle, sengoo_stdlib_str_ptr(suffix)) != 0
     }
 }

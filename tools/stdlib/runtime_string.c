@@ -361,3 +361,41 @@ long long sengoo_string_eq(long long lhs_handle, long long rhs_handle) {
     }
     return memcmp(lhs->data, rhs->data, lhs->len) == 0 ? 1 : 0;
 }
+
+long long sengoo_string_contains(long long handle, long long needle_ptr) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    const char* needle = (const char*)sengoo_handle_to_ptr(needle_ptr);
+    if (!owned || !needle) {
+        return 0;
+    }
+    const char* data = owned->data ? owned->data : "";
+    return strstr(data, needle) != NULL ? 1 : 0;
+}
+
+long long sengoo_string_starts_with(long long handle, long long prefix_ptr) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    const char* prefix = (const char*)sengoo_handle_to_ptr(prefix_ptr);
+    if (!owned || !prefix) {
+        return 0;
+    }
+    size_t prefix_len = strlen(prefix);
+    if (prefix_len > owned->len) {
+        return 0;
+    }
+    const char* data = owned->data ? owned->data : "";
+    return memcmp(data, prefix, prefix_len) == 0 ? 1 : 0;
+}
+
+long long sengoo_string_ends_with(long long handle, long long suffix_ptr) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    const char* suffix = (const char*)sengoo_handle_to_ptr(suffix_ptr);
+    if (!owned || !suffix) {
+        return 0;
+    }
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > owned->len) {
+        return 0;
+    }
+    const char* data = owned->data ? owned->data : "";
+    return memcmp(data + (owned->len - suffix_len), suffix, suffix_len) == 0 ? 1 : 0;
+}

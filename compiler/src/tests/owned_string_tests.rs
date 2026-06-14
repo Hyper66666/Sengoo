@@ -432,3 +432,29 @@ def main() -> i64 {
         "owned String equality must not compare aggregate values directly:\n{main_section}"
     );
 }
+
+#[test]
+fn owned_string_search_methods_compile_and_call_runtime_helpers() {
+    let ir = compile_to_ir(&format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let text: String = string_from_str("sengoo").value;
+    if text.contains("goo") && text.starts_with("sen") && text.ends_with("goo") && text.len() == 6 {
+        1
+    } else {
+        0
+    }
+}
+"#
+    ))
+    .expect("owned String search methods should typecheck");
+
+    assert!(
+        ir.contains("sengoo_string_contains")
+            && ir.contains("sengoo_string_starts_with")
+            && ir.contains("sengoo_string_ends_with"),
+        "owned String search should call runtime helpers:\n{ir}"
+    );
+}

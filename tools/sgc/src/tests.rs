@@ -5494,6 +5494,45 @@ def main() -> i64 {
 }
 
 #[test]
+fn owned_string_search_methods_run_with_native_runtime() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "owned-string-search",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let text: String = string_from_str("sengoo").value;
+    if text.contains("goo")
+        && text.starts_with("sen")
+        && text.ends_with("goo")
+        && !text.contains("zzz")
+        && text.len() == 6 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "owned String search smoke should be silent, stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

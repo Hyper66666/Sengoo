@@ -20,6 +20,10 @@
     cross `String`/`&str` comparisons, and ordering remain open.
 - [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
+  - Partial: owned `String` now exposes `contains`, `starts_with`, and
+    `ends_with` against `&str` needles/prefixes/suffixes through native runtime
+    helpers, and the methods borrow the receiver. `split`, `trim`, ASCII case
+    transforms, and iterator-backed variants remain open.
 - [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
 - [ ] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
