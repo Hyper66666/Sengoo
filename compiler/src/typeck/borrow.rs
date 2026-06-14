@@ -195,9 +195,12 @@ impl BorrowChecker {
             }
             ExprKind::Call { func, args } => {
                 self.check_expr(func);
+                let print_borrows_args = Self::call_is_print_builtin(func);
                 for arg in args {
                     self.check_expr(arg);
-                    self.maybe_move_owned_arg(arg);
+                    if !print_borrows_args {
+                        self.maybe_move_owned_arg(arg);
+                    }
                 }
             }
             ExprKind::MethodCall {
@@ -378,6 +381,11 @@ impl BorrowChecker {
             return;
         }
         self.maybe_move_owned_arg(value);
+    }
+
+    fn call_is_print_builtin(func: &Expr) -> bool {
+        Self::expr_var_name(func)
+            .is_some_and(|name| matches!(name.as_str(), "print" | "println" | "eprintln"))
     }
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {

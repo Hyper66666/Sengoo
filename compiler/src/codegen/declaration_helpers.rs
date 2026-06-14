@@ -174,6 +174,30 @@ impl Codegen {
         }
     }
 
+    pub(super) fn maybe_declare_owned_string_view_runtime_function(
+        &mut self,
+        mir_fns: &[MirFunction],
+    ) {
+        let decl = "declare i8* @sengoo_string_as_str_ptr(i64)\n";
+        let needed = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| {
+                matches!(
+                    inst,
+                    mir::Instruction::Call { func, .. } if func == "sengoo_string_as_str_ptr"
+                )
+            }) || mir_fn.basic_blocks.iter().any(|block| {
+                matches!(
+                    &block.terminator,
+                    Some(mir::Terminator::Call { func, .. })
+                        if func == "sengoo_string_as_str_ptr"
+                )
+            })
+        });
+        if needed && !self.declarations.contains(decl) {
+            self.declarations.push_str(decl);
+        }
+    }
+
     /// Declare the async select runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_select_runtime_function(&mut self, mir_fns: &[MirFunction]) {
         let winner_decl = select_winner_runtime_declaration();

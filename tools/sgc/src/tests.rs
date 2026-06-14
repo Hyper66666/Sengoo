@@ -5389,6 +5389,39 @@ def main() -> i64 {
 }
 
 #[test]
+fn owned_string_prints_text_and_remains_usable_with_native_runtime() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "owned-string-print",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let text: String = string_from_str("hello").value;
+    println(text);
+    if text.len() == 5 { 0 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hello\n");
+    assert!(
+        output.stderr.is_empty(),
+        "owned String println should not write stderr, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

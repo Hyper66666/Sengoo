@@ -319,3 +319,35 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_string_from_str_copy"));
     assert!(ir.contains("sengoo_string_len"));
 }
+
+#[test]
+fn owned_string_printing_borrows_and_lowers_as_text() {
+    let ir = compile_to_ir(&format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let text: String = string_from_str("hello").value;
+    println(text);
+    eprintln(text);
+    text.len()
+}
+"#
+    ))
+    .expect("printing an owned String should borrow it and preserve later uses");
+
+    assert_eq!(
+        ir.matches("@sengoo_string_as_str_ptr(").count(),
+        3,
+        "owned String printing should convert only the two print arguments plus the runtime declaration:\n{ir}"
+    );
+    assert!(
+        ir.contains("call void @sengoo_print_str(i8*")
+            && ir.contains("call void @sengoo_eprint_str(i8*"),
+        "owned String printing should use the text sinks:\n{ir}"
+    );
+    assert!(
+        !ir.contains("String { handle:"),
+        "owned String printing must not use structural formatting:\n{ir}"
+    );
+}

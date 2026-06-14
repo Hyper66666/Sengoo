@@ -62,6 +62,23 @@ impl<'a> LoweringContext<'a> {
 
     fn emit_print_value_to(&mut self, value_local: Local, value_ty: &MIRType, sink: PrintSink) {
         match value_ty {
+            MIRType::Struct { name, fields } if is_owned_string_mir_type(name, fields) => {
+                let handle_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+                self.push_inst(Instruction::Extract {
+                    destination: handle_local,
+                    value: value_local,
+                    index: 0,
+                });
+
+                let ptr_ty = MIRType::Ptr(Box::new(MIRType::Int(8)));
+                let text_local = self.add_local(None, LocalKind::Temp, ptr_ty);
+                self.push_inst(Instruction::Call {
+                    destination: text_local,
+                    func: "sengoo_string_as_str_ptr".to_string(),
+                    args: vec![handle_local],
+                });
+                self.emit_runtime_print_call(sink.str_func(), text_local);
+            }
             MIRType::Struct { name, fields } => {
                 self.emit_print_str_literal(&format!("{} {{ ", name), sink);
 
@@ -97,4 +114,15 @@ impl<'a> LoweringContext<'a> {
             }
         }
     }
+}
+
+fn is_owned_string_mir_type(name: &str, fields: &[(String, MIRType)]) -> bool {
+    name == "String"
+        && matches!(
+            fields,
+            [(
+                field_name,
+                MIRType::Int(64)
+            )] if field_name == "handle"
+        )
 }

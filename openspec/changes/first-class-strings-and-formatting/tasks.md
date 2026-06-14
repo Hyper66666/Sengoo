@@ -30,6 +30,9 @@
     runtime path. `eprintln` supports the current printable primitive/struct
     surface and writes through native stderr runtime symbols. Trait-backed
     `Display` remains open.
+  - Partial: owned `String` arguments now print as UTF-8 text through
+    `sengoo_string_as_str_ptr` and are borrowed rather than consumed, so later
+    `String` uses remain valid. General `Display` dispatch remains open.
 - [ ] 3.5 `#[derive(Debug)]` integration for structs/enums.
 
 ## 4. Literals and interpolation
@@ -63,4 +66,6 @@
 
 - `cargo test -p sengoo-compiler --lib` (lexer/string/format lanes)
 - `cargo test -p sgc core_conformance_examples_compile_link_and_run`
+- `cargo test -p sengoo-compiler owned_string_printing_borrows_and_lowers_as_text -- --nocapture`
+- `cargo test -p sgc owned_string_prints_text_and_remains_usable_with_native_runtime -- --nocapture`
 - New string/format examples compile, link, and run; `print(42)` still works

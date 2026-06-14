@@ -19,6 +19,8 @@
   `.free()/.drop()/.close()`, generic `Result<T, E>` used across at least two
   concrete types, and `println` formatting an owned `String` and a struct via
   `Display`.
+  - Partial: owned `String` now prints as text and remains usable after
+    `println`; struct `Display` and the full realworld fixture remain open.
 
 ## 2. P1 gate — usable surface
 
