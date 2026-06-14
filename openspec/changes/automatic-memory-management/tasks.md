@@ -11,6 +11,10 @@
 
 - [ ] 2.1 Extend the type checker to mark a local dead after a by-value move
   (argument, return, assignment, field move-out).
+  - Partial: the owned `String` checker now marks direct let moves, named-call
+    arguments, method-call arguments, and assignment RHS moves. Return moves are
+    handled by MIR drop suppression for function exits; general non-`Copy`
+    values, field move-out, and path-sensitive move analysis remain open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker; verified by
@@ -21,7 +25,8 @@
 - [ ] 2.4 Tests under `compiler/src/tests/` for move, partial move, and the
   negative use-after-move diagnostic.
   - Partial: owned `String` negative use-after-move tests exist; partial moves
-    and general owning values remain open.
+    and general owning values remain open. Assignment RHS move coverage is now
+    included.
 
 ## 3. MIR drop-glue insertion
 
@@ -40,9 +45,9 @@
     declared after `?` are skipped on early propagation, multiple bindings drop
     in reverse declaration order, and moved-from bindings are excluded for the
     implemented move sites: direct `let b = a`, owned tail-expression returns,
-    owned named-call arguments, owned method-call arguments, and explicit
-    `String.drop()` receivers. Explicit `return expr` now lowers to a real MIR
-    `Return` exit and reuses the same drop-flag machinery. Loop
+    owned named-call arguments, owned method-call arguments, owned assignment
+    RHS moves, and explicit `String.drop()` receivers. Explicit `return expr`
+    now lowers to a real MIR `Return` exit and reuses the same drop-flag machinery. Loop
     `break`/`continue` currently rejoin before function return; nested scope
     exit timing and partial-move flag clearing remain open.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
@@ -52,8 +57,8 @@
   - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
     straight-line drop insertion, `?` early-return flags, reverse drop order,
     conditional-init flags, tail-return moves, named-call/method-argument moves,
-    explicit `return` exits, explicit drop receivers, and moved binding
-    exclusion.
+    assignment moves, explicit `return` exits, explicit drop receivers, and
+    moved binding exclusion.
 
 ## 4. Runtime resource migration
 

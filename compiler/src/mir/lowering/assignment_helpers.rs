@@ -13,6 +13,10 @@ pub(super) fn lower_assign_expr(
             if value_local == target_local {
                 return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
+            if matches!(value, HIRExpr::Var { .. }) {
+                ctx.mark_drop_local_moved(value_local);
+            }
+            ctx.drop_local_now_if_initialized(target_local);
             if let Some(type_name) = ctx.type_names.get(&value_local).cloned() {
                 ctx.type_names.insert(target_local, type_name);
             }
@@ -20,6 +24,7 @@ pub(super) fn lower_assign_expr(
                 destination: target_local,
                 value: value_local,
             });
+            ctx.mark_drop_local_reinitialized(target_local);
         }
         HIRExpr::Index { base, index } => {
             let base_local = ctx.lower_expr(base);

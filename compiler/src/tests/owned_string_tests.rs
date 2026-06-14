@@ -127,6 +127,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_assignment_move_rejects_use_after_move() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let a: String = string_from_str("a").value;
+    let mut b: String = string_from_str("b").value;
+    b = a;
+    a.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `a`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_user_struct_does_not_get_move_rules() {
     let source = r#"
 struct MyString {

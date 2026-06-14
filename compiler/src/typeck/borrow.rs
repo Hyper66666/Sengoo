@@ -256,6 +256,7 @@ impl BorrowChecker {
             ExprKind::Assign { target, value } | ExprKind::AssignOp { target, value, .. } => {
                 self.check_expr(target);
                 self.check_expr(value);
+                self.maybe_move_assignment_value(target, value);
             }
             ExprKind::Range { start, end, .. } => {
                 if let Some(start) = start {
@@ -352,6 +353,15 @@ impl BorrowChecker {
                 self.mark_moved(&name, arg.span);
             }
         }
+    }
+
+    fn maybe_move_assignment_value(&mut self, target: &Expr, value: &Expr) {
+        let target_name = Self::expr_var_name(target);
+        let value_name = Self::expr_var_name(value);
+        if target_name.is_some() && target_name == value_name {
+            return;
+        }
+        self.maybe_move_string_arg(value);
     }
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
