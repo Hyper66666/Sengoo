@@ -4801,7 +4801,9 @@ fn assert_example_output_with_c_inputs_and_args(
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stdout)
+            .replace("\r\n", "\n")
+            .trim(),
         expected_stdout,
         "{relative_path} stdout mismatch"
     );
@@ -5334,8 +5336,33 @@ fn examples_smoke_stdlib_owned_string_import() {
     assert_example_output(
         "stdlib-owned-string",
         "examples/stdlib/20_owned_string.sg",
-        "20",
+        "sengoo\n20",
     );
+}
+
+#[test]
+fn examples_owned_string_demonstrates_auto_drop_and_ergo_surface() {
+    let source = read_example_source("examples/stdlib/20_owned_string.sg");
+
+    for forbidden in [".drop()", ".free()"] {
+        assert!(
+            !source.contains(forbidden),
+            "owned String example should rely on compiler/runtime cleanup, not manual {forbidden}"
+        );
+    }
+
+    for expected in [
+        " + \"",
+        " == ",
+        ".contains(",
+        ".starts_with(",
+        ".ends_with(",
+    ] {
+        assert!(
+            source.contains(expected),
+            "owned String example should demonstrate ergonomic string surface: missing {expected}"
+        );
+    }
 }
 
 #[test]

@@ -71,7 +71,11 @@
 
 - [ ] 6.1 Add `examples/stdlib/` programs printing a `String`, a struct via
   `Debug`, and an interpolated `f"..."`.
-- [ ] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
+  - Partial: `examples/stdlib/20_owned_string.sg` now prints an owned `String`
+    and exercises `String + &str`, owned equality, and owned search methods
+    without manual release. `Debug` and `f"..."` interpolation examples remain
+    open.
+- [x] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
 - [x] 6.3 Run `openspec validate first-class-strings-and-formatting --strict`.
 
 ## Verification

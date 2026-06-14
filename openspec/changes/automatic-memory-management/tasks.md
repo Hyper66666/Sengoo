@@ -82,8 +82,10 @@
     `String_drop` compatibility path. The Cranelift fast-jit path now consumes
     sgc's MIR bundle instead of the former AST constant evaluator for its
     supported subset, and executes user `Drop` glue through MIR function calls
-    with host-probe coverage. Full MIR-to-Cranelift lowering, `String_drop`
-    runtime ABI coverage, and broad destructor ABI remain open.
+    with host-probe coverage. LLVM-text codegen now lowers mutable drop flags to
+    stack slots (`alloca` + `store` + `load`) so conditional-init and multi-exit
+    drop glue does not redefine SSA values. Full MIR-to-Cranelift lowering,
+    `String_drop` runtime ABI coverage, and broad destructor ABI remain open.
 - [ ] 3.5 IR/codegen tests asserting drop count and order (extend
   `codegen_*`/`struct_codegen` test lanes).
   - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
@@ -92,7 +94,8 @@
     assignment moves, explicit `return` exits, explicit drop receivers, and
     moved binding exclusion. It now also asserts user `impl Drop` produces one
     `Type_Drop_drop` MIR call and an LLVM-text `call void @Type_Drop_drop(...)`,
-    including specialized generic Drop instances.
+    including specialized generic Drop instances, plus a regression that
+    guarded drop flags compile to unique LLVM SSA definitions.
 
 ## 4. Runtime resource migration
 
@@ -113,7 +116,11 @@
 - [ ] 6.1 Rewrite `examples/stdlib/20_owned_string.sg` and
   `examples/realworld/cli-json-audit/src/main.sg` to use auto-drop (no manual
   release) as new committed examples; keep the originals as compatibility smoke.
-- [ ] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
+  - Partial: `examples/stdlib/20_owned_string.sg` now relies on compiler/runtime
+    auto-drop with no manual `.drop()` / `.free()`, and its smoke test covers
+    owned printing plus the current string operator/query subset. The
+    `cli-json-audit` migration and leak-check build evidence remain open.
+- [x] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
 - [x] 6.3 Run `openspec validate automatic-memory-management --strict`.
 
 ## Verification

@@ -1,5 +1,6 @@
 use crate::mir::{Instruction, Local, MirConstant, MirFunction, Terminator};
 use crate::{compile_to_ir, compile_to_mir};
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -72,6 +73,26 @@ fn has_guard_terminator(function: &MirFunction) -> bool {
         .basic_blocks
         .iter()
         .any(|block| matches!(block.terminator, Some(Terminator::If { .. })))
+}
+
+fn assert_unique_ssa_definitions(ir: &str) {
+    let mut defs = HashSet::new();
+    for line in ir.lines().map(str::trim) {
+        if line.starts_with("define ") {
+            defs.clear();
+            continue;
+        }
+        let Some((name, _)) = line.split_once(" = ") else {
+            continue;
+        };
+        if !name.starts_with('%') {
+            continue;
+        }
+        assert!(
+            defs.insert(name.to_string()),
+            "LLVM IR redefined SSA value {name}:\n{ir}"
+        );
+    }
 }
 
 #[test]
@@ -356,6 +377,27 @@ def choose(flag: bool) -> i64 {
         has_guard_terminator(choose),
         "single-return conditional init must use guarded drop glue"
     );
+}
+
+#[test]
+fn conditional_init_drop_flags_codegen_unique_ssa_names() {
+    let ir = compile_to_ir(&format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def choose(flag: bool) -> i64 {
+    if flag {
+        let text: String = string_from_str("branch").value;
+        text.len()
+    } else {
+        0
+    }
+}
+"#,
+    ))
+    .expect("conditional owned String source should compile to IR");
+
+    assert_unique_ssa_definitions(&ir);
 }
 
 #[test]

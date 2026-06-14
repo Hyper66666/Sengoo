@@ -87,6 +87,8 @@ pub struct Codegen {
 
     phi_incoming_values: HashMap<(usize, usize, usize), String>,
 
+    mutable_stack_locals: HashSet<usize>,
+
     debug_info: DebugInfoConfig,
 
     debug_locations: HashMap<String, debug_info::DebugLocationIds>,
@@ -136,6 +138,8 @@ impl Codegen {
             phi_incoming_loads_by_block: HashMap::new(),
 
             phi_incoming_values: HashMap::new(),
+
+            mutable_stack_locals: HashSet::new(),
 
             debug_info,
 
@@ -192,6 +196,8 @@ impl Codegen {
 
         self.prepare_phi_incoming_loads(mir_fn);
 
+        self.prepare_mutable_stack_locals(mir_fn);
+
         // Reset load counter per function for clean SSA naming
 
         self.load_counter = 0;
@@ -226,17 +232,17 @@ impl Codegen {
 
         self.indent += 1;
 
-        // Track which locals need alloca (user variables only)
+        // Track which locals need alloca (user variables plus mutable temporaries)
 
-        let user_locals: Vec<_> = mir_fn
+        let stack_locals: Vec<_> = mir_fn
             .locals
             .iter()
-            .filter(|(l, _)| l.kind == LocalKind::User)
+            .filter(|(l, _)| self.local_uses_stack_slot(*l, mir_fn))
             .collect();
 
         for bb in &mir_fn.basic_blocks {
             let allocas: Vec<(Local, MIRType)> = if bb.id == 0 {
-                user_locals.iter().map(|(l, t)| (*l, t.clone())).collect()
+                stack_locals.iter().map(|(l, t)| (*l, t.clone())).collect()
             } else {
                 vec![]
             };
@@ -339,6 +345,21 @@ impl Codegen {
         }
     }
 
+    fn prepare_mutable_stack_locals(&mut self, mir_fn: &MirFunction) {
+        self.mutable_stack_locals.clear();
+        let mut assign_counts = HashMap::<usize, usize>::new();
+        for inst in &mir_fn.instructions {
+            if let mir::Instruction::Assign { destination, .. } = inst {
+                *assign_counts.entry(destination.index()).or_default() += 1;
+            }
+        }
+        self.mutable_stack_locals.extend(
+            assign_counts
+                .into_iter()
+                .filter_map(|(idx, count)| (count > 1).then_some(idx)),
+        );
+    }
+
     fn emit_phi_incoming_loads_for_block(&mut self, block_id: usize) -> Result<(), String> {
         let loads = self
             .phi_incoming_loads_by_block
@@ -399,6 +420,13 @@ impl Codegen {
         common::emit_indent(&mut self.ir, self.indent);
     }
 
+    fn local_uses_stack_slot(&self, local: Local, mir_fn: &MirFunction) -> bool {
+        let Some((local_info, _)) = mir_fn.locals.get(local.index()) else {
+            return false;
+        };
+        local_info.kind == LocalKind::User || self.mutable_stack_locals.contains(&local.index())
+    }
+
     /// Convert a MIR type to LLVM IR text, using the local cache when possible.
     fn mir_type_to_llvm_cached(&mut self, ty: &MIRType) -> String {
         if let Some(cached) = self.type_str_cache.get(ty) {
@@ -425,37 +453,31 @@ impl Codegen {
 
     /// Resolve an operand to an LLVM value, loading from stack slots when needed.
     fn operand_value(&mut self, local: Local, mir_fn: &MirFunction) -> String {
-        // Look up the local metadata before choosing the lowering path.
-        let local_info = &mir_fn.locals[local.index()].0;
+        if self.local_uses_stack_slot(local, mir_fn) {
+            // User locals and mutable compiler temporaries are stack slots, so
+            // load from the alloca before use.
+            let ty = self.get_local_type(mir_fn, local);
 
-        match local_info.kind {
-            LocalKind::User => {
-                // User locals are stack slots, so load from the alloca before use.
-                let ty = self.get_local_type(mir_fn, local);
+            let llvm_ty = self.mir_type_to_llvm_cached(ty);
 
-                let llvm_ty = self.mir_type_to_llvm_cached(ty);
+            let temp_reg = format!("%load.{}", self.load_counter);
 
-                let temp_reg = format!("%load.{}", self.load_counter);
+            self.load_counter += 1;
 
-                self.load_counter += 1;
+            self.emit_indent();
 
-                self.emit_indent();
-
-                self.ir.push_str(&format!(
-                    "{} = load {}, {}* {}\n",
-                    temp_reg,
-                    llvm_ty,
-                    llvm_ty,
-                    self.local_name(local)
-                ));
-
-                temp_reg
-            }
-
-            _ => {
-                // Temporaries and parameters are already valid LLVM operand names.
+            self.ir.push_str(&format!(
+                "{} = load {}, {}* {}\n",
+                temp_reg,
+                llvm_ty,
+                llvm_ty,
                 self.local_name(local)
-            }
+            ));
+
+            temp_reg
+        } else {
+            // Single-assignment temporaries and parameters are valid LLVM operands.
+            self.local_name(local)
         }
     }
 
