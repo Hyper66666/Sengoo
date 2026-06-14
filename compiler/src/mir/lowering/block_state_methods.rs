@@ -109,6 +109,12 @@ impl<'a> LoweringContext<'a> {
         self.current_block.unwrap_or(self.mir_fn.start_block)
     }
 
+    pub(super) fn current_block_is_terminated(&self) -> bool {
+        self.current_block
+            .and_then(|block| self.mir_fn.basic_blocks.get(block))
+            .is_some_and(|block| block.terminator.is_some())
+    }
+
     pub(super) fn propagate_future_origin_through_phi(
         &mut self,
         destination: Local,

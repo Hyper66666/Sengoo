@@ -11,10 +11,16 @@ impl<'a> LoweringContext<'a> {
         self.set_current_block(target_block);
 
         for stmt in &body.stmts {
+            if self.current_block_is_terminated() {
+                break;
+            }
             self.lower_stmt(stmt);
         }
 
         if let Some(expr) = &body.expr {
+            if self.current_block_is_terminated() {
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
             self.lower_expr(expr)
         } else {
             self.add_local(None, LocalKind::Temp, MIR_UNIT)
@@ -32,11 +38,17 @@ impl<'a> LoweringContext<'a> {
 
         // 降级函数体的所有语句到当前基本块。
         for stmt in &body.stmts {
+            if self.current_block_is_terminated() {
+                break;
+            }
             self.lower_stmt(stmt);
         }
 
         // 若块尾存在表达式，则先降级该表达式并视情况插入 return。
         if let Some(expr) = &body.expr {
+            if self.current_block_is_terminated() {
+                return;
+            }
             let result_local = self.lower_expr(expr);
             if add_return {
                 // Only add return if the current block doesn't already have a
@@ -155,6 +167,7 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::AsyncBlock(body) => lower_async_block_expr(self, body),
             HIRExpr::Try(operand) => lower_try_expr(self, operand),
             HIRExpr::TryBlock(body) => lower_try_block_expr(self, body),
+            HIRExpr::Return(value) => lower_return_expr(self, value.as_deref()),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }
