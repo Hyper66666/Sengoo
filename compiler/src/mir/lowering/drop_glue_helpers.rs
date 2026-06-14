@@ -31,6 +31,34 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    pub(super) fn mark_drop_local_reinitialized(&mut self, local: Local) {
+        if self.drop_func_for_local(local).is_some() {
+            self.moved_drop_locals.remove(&local);
+            self.record_drop_binding_if_needed(local);
+        }
+    }
+
+    pub(super) fn drop_local_now_if_initialized(&mut self, local: Local) {
+        if self.moved_drop_locals.contains(&local) {
+            return;
+        }
+        let Some(drop_func) = self.drop_func_for_local(local) else {
+            return;
+        };
+        if !self.is_known_function(drop_func) {
+            return;
+        }
+        if !self
+            .drop_bindings
+            .iter()
+            .any(|binding| binding.local == local)
+        {
+            return;
+        }
+        let binding = DropBinding { local, drop_func };
+        self.push_drop_call(self.current_block(), &binding);
+    }
+
     fn drop_func_for_local(&self, local: Local) -> Option<&'static str> {
         match self.get_local_type(local) {
             MIRType::Struct { name, .. } if name == "String" => Some("String_drop"),

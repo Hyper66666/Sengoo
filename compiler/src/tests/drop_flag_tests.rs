@@ -217,6 +217,32 @@ def main() -> i64 {
 }
 
 #[test]
+fn assignment_moved_owned_binding_is_excluded_from_drop_glue() {
+    let mir = compile_with_owned_string(
+        r#"
+def main() -> i64 {
+    let first: String = string_from_str("first").value;
+    let mut second: String = string_from_str("second").value;
+    second = first;
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+
+    let calls = string_drop_calls(main_fn);
+    assert_eq!(
+        calls.len(),
+        2,
+        "assignment should drop the overwritten target once and the reinitialized target at exit"
+    );
+    assert_eq!(
+        calls[0][0], calls[1][0],
+        "assignment drop glue should target the reassigned local, not the moved-from source"
+    );
+}
+
+#[test]
 fn conditional_init_uses_flags_even_with_single_function_return() {
     let mir = compile_with_owned_string(
         r#"
