@@ -14,6 +14,10 @@
     is covered by compiler and sgc native-run tests. `+=`, `String + String`,
     and fallible allocation/status surfacing remain open.
 - [ ] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
+  - Partial: owned `String == String` and `String != String` now borrow both
+    operands, lower through `sengoo_string_eq`, remain usable after comparison,
+    and run through the native runtime. Trait-backed `PartialEq`/`Eq`,
+    cross `String`/`&str` comparisons, and ordering remain open.
 - [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
 - [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.

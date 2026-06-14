@@ -5456,6 +5456,44 @@ def main() -> i64 {
 }
 
 #[test]
+fn owned_string_equality_borrows_and_runs_with_native_runtime() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "owned-string-eq",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let left: String = string_from_str("hi").value;
+    let same: String = string_from_str("hi").value;
+    let different: String = string_from_str("bye").value;
+
+    if left == same && left != different && left.len() == 2 && same.len() == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "owned String equality smoke should be silent, stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

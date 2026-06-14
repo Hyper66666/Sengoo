@@ -50,6 +50,53 @@ fn lower_owned_string_concat_str(
     result_local
 }
 
+fn extract_owned_string_handle(ctx: &mut LoweringContext<'_>, string_local: Local) -> Local {
+    let handle_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: handle_local,
+        value: string_local,
+        index: 0,
+    });
+    handle_local
+}
+
+fn lower_owned_string_equality(
+    ctx: &mut LoweringContext<'_>,
+    op: MirBinOp,
+    left_local: Local,
+    right_local: Local,
+) -> Local {
+    let left_handle = extract_owned_string_handle(ctx, left_local);
+    let right_handle = extract_owned_string_handle(ctx, right_local);
+
+    let call_result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: call_result,
+        func: "sengoo_string_eq".to_string(),
+        args: vec![left_handle, right_handle],
+    });
+
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+
+    let cmp_op = if op == MirBinOp::Eq {
+        MirBinOp::Ne
+    } else {
+        MirBinOp::Eq
+    };
+    let bool_result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: bool_result,
+        op: cmp_op,
+        left: call_result,
+        right: zero,
+    });
+    bool_result
+}
+
 pub(super) fn lower_unary_expr(
     ctx: &mut LoweringContext<'_>,
     op: &hir::HIRUnaryOp,
@@ -146,6 +193,15 @@ pub(super) fn lower_binary_expr(
     }
 
     if mir_op == MirBinOp::Eq || mir_op == MirBinOp::Ne {
+        let owned_string_cmp = {
+            let left_ty = ctx.get_local_type(left_local);
+            let right_ty = ctx.get_local_type(right_local);
+            is_owned_string(left_ty) && is_owned_string(right_ty)
+        };
+        if owned_string_cmp {
+            return lower_owned_string_equality(ctx, mir_op, left_local, right_local);
+        }
+
         let is_string_cmp = {
             let left_ty = ctx.get_local_type(left_local);
             let right_ty = ctx.get_local_type(right_local);

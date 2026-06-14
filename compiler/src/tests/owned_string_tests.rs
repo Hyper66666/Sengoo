@@ -394,3 +394,41 @@ def main() -> i64 {
         "String + &str should consume the left owned String, got: {err}"
     );
 }
+
+#[test]
+fn owned_string_equality_borrows_and_lowers_to_runtime_eq() {
+    let ir = compile_to_ir(&format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let left: String = string_from_str("hi").value;
+    let same: String = string_from_str("hi").value;
+    let different: String = string_from_str("bye").value;
+
+    if left == same && left != different && left.len() == 2 && same.len() == 2 {
+        1
+    } else {
+        0
+    }
+}
+"#
+    ))
+    .expect("owned String equality should typecheck and preserve later uses");
+
+    let main_section = ir
+        .split("; Function: main")
+        .nth(1)
+        .expect("main function should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap_or("");
+    assert!(
+        main_section.contains("call i64 @sengoo_string_eq"),
+        "owned String equality should lower through the owned runtime helper:\n{ir}"
+    );
+    assert!(
+        !main_section.contains("icmp eq %String") && !main_section.contains("icmp ne %String"),
+        "owned String equality must not compare aggregate values directly:\n{main_section}"
+    );
+}
