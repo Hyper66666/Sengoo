@@ -351,3 +351,46 @@ def main() -> i64 {
         "owned String printing must not use structural formatting:\n{ir}"
     );
 }
+
+#[test]
+fn owned_string_plus_borrowed_str_lowers_to_owned_concat() {
+    let ir = compile_to_ir(&format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let left: String = string_from_str("hello").value;
+    let combined: String = left + " world";
+    println(combined);
+    combined.len()
+}
+"#
+    ))
+    .expect("String + &str should typecheck and lower to owned-string concatenation");
+
+    assert!(
+        ir.contains("sengoo_string_concat_str"),
+        "String + &str should lower through the owned concat runtime helper:\n{ir}"
+    );
+    assert!(
+        ir.contains("call void @sengoo_print_str(i8*"),
+        "concatenated String should remain printable as text:\n{ir}"
+    );
+}
+
+#[test]
+fn owned_string_plus_borrowed_str_consumes_left_operand() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let left: String = string_from_str("hello").value;
+    let combined: String = left + " world";
+    left.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `left`"),
+        "String + &str should consume the left owned String, got: {err}"
+    );
+}

@@ -178,23 +178,34 @@ impl Codegen {
         &mut self,
         mir_fns: &[MirFunction],
     ) {
-        let decl = "declare i8* @sengoo_string_as_str_ptr(i64)\n";
-        let needed = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| {
-                matches!(
-                    inst,
-                    mir::Instruction::Call { func, .. } if func == "sengoo_string_as_str_ptr"
-                )
-            }) || mir_fn.basic_blocks.iter().any(|block| {
-                matches!(
-                    &block.terminator,
-                    Some(mir::Terminator::Call { func, .. })
-                        if func == "sengoo_string_as_str_ptr"
-                )
-            })
-        });
-        if needed && !self.declarations.contains(decl) {
-            self.declarations.push_str(decl);
+        let declarations = [
+            (
+                "sengoo_string_as_str_ptr",
+                "declare i8* @sengoo_string_as_str_ptr(i64)\n",
+            ),
+            (
+                "sengoo_string_concat_str",
+                "declare i64 @sengoo_string_concat_str(i64, i8*)\n",
+            ),
+        ];
+
+        for (name, decl) in declarations {
+            let needed = mir_fns.iter().any(|mir_fn| {
+                mir_fn.instructions.iter().any(|inst| {
+                    matches!(
+                        inst,
+                        mir::Instruction::Call { func, .. } if func == name
+                    )
+                }) || mir_fn.basic_blocks.iter().any(|block| {
+                    matches!(
+                        &block.terminator,
+                        Some(mir::Terminator::Call { func, .. }) if func == name
+                    )
+                })
+            });
+            if needed && !self.declarations.contains(decl) {
+                self.declarations.push_str(decl);
+            }
         }
     }
 

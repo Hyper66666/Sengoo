@@ -5422,6 +5422,40 @@ def main() -> i64 {
 }
 
 #[test]
+fn owned_string_plus_borrowed_str_prints_concat_with_native_runtime() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "owned-string-concat",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let left: String = string_from_str("hello").value;
+    let combined: String = left + " world";
+    println(combined);
+    if combined.len() == 11 { 0 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    assert_eq!(stdout, "hello world\n");
+    assert!(
+        output.stderr.is_empty(),
+        "owned String concat should not write stderr, got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

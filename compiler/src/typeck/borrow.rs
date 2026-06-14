@@ -3,7 +3,7 @@
 //! This is a lightweight borrow-rule checker over AST, intended to provide
 //! early diagnostics for obvious mutable/immutable borrow conflicts.
 
-use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
+use crate::ast::{BinOp, Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
 use crate::lexer::Span;
 use crate::typeck::r#trait::type_key;
 use crate::typeck::ty::{Ty, TyKind};
@@ -189,9 +189,12 @@ impl BorrowChecker {
                 }
                 self.check_expr(operand);
             }
-            ExprKind::Binary { left, right, .. } => {
+            ExprKind::Binary { op, left, right } => {
                 self.check_expr(left);
                 self.check_expr(right);
+                if matches!(op, BinOp::Add) {
+                    self.maybe_move_owned_arg(left);
+                }
             }
             ExprKind::Call { func, args } => {
                 self.check_expr(func);

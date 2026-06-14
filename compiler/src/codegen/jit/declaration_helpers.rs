@@ -22,6 +22,8 @@ impl JITCodegen {
         self.extern_decls.push_str("declare i8* @malloc(i64)\n");
         self.extern_decls.push_str("declare void @free(i8*)\n");
         self.extern_decls
+            .push_str("declare i64 @sengoo_string_concat_str(i64, i8*)\n");
+        self.extern_decls
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
         self.extern_decls
             .push_str(select_winner_runtime_declaration());
@@ -68,6 +70,13 @@ impl JITCodegen {
             .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
         self.extern_decls
             .push_str("declare i64 @sengoo_async_task_status(i64)\n");
+        self.function_signatures.insert(
+            "sengoo_string_concat_str".to_string(),
+            (
+                vec![MIRType::Int(64), MIRType::Ptr(Box::new(MIRType::Int(8)))],
+                MIRType::Int(64),
+            ),
+        );
         self.function_signatures.insert(
             "sengoo_async_spawn_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),

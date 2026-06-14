@@ -197,6 +197,13 @@ impl TypeChecker {
         let left_ty = self.check_expr(left)?;
         let right_ty = self.check_expr(right)?;
 
+        if matches!(op, BinOp::Add)
+            && self.is_owned_string_ty(&left_ty)
+            && Self::is_borrowed_str_ty(&right_ty)
+        {
+            return Ok(left_ty);
+        }
+
         if matches!(
             op,
             BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
@@ -281,6 +288,18 @@ impl TypeChecker {
             }
             BinOp::Pipe | BinOp::Compose | BinOp::Range | BinOp::RangeInclusive => result_ty,
         })
+    }
+
+    fn is_borrowed_str_ty(ty: &Ty) -> bool {
+        matches!(&ty.kind, TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str))
+    }
+
+    fn is_owned_string_ty(&self, ty: &Ty) -> bool {
+        self.env
+            .owned_string_ty
+            .as_ref()
+            .is_some_and(|canonical| canonical.kind == ty.kind)
+            || matches!(&ty.kind, TyKind::Adt { name, args } if name == "String" && args.is_empty())
     }
 
     pub(super) fn check_unary(&mut self, op: &UnOp, operand: &Expr) -> TyResult<Ty> {

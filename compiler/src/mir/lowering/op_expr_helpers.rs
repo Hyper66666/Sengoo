@@ -4,8 +4,50 @@ fn is_string_ptr(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
 }
 
+fn is_owned_string(ty: &MIRType) -> bool {
+    matches!(
+        ty,
+        MIRType::Struct { name, fields }
+            if name == "String"
+                && fields.len() == 1
+                && fields[0].0 == "handle"
+                && fields[0].1 == MIR_I64
+    )
+}
+
 fn is_async_context_type(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Struct { name, .. } if name == "AsyncContext")
+}
+
+fn lower_owned_string_concat_str(
+    ctx: &mut LoweringContext<'_>,
+    left_local: Local,
+    right_local: Local,
+    string_ty: MIRType,
+) -> Local {
+    let handle_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: handle_local,
+        value: left_local,
+        index: 0,
+    });
+
+    let result_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: result_handle,
+        func: "sengoo_string_concat_str".to_string(),
+        args: vec![handle_local, right_local],
+    });
+
+    let result_local = ctx.add_local(None, LocalKind::Temp, string_ty.clone());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result_local,
+        fields: vec![result_handle],
+        ty: string_ty,
+    });
+    ctx.type_names.insert(result_local, "String".to_string());
+    ctx.mark_drop_local_moved(left_local);
+    result_local
 }
 
 pub(super) fn lower_unary_expr(
@@ -73,6 +115,19 @@ pub(super) fn lower_binary_expr(
     let mir_op = ctx.lower_bin_op(op);
 
     if mir_op == MirBinOp::Add {
+        let owned_string_concat = {
+            let left_ty = ctx.get_local_type(left_local);
+            let right_ty = ctx.get_local_type(right_local);
+            if is_owned_string(left_ty) && is_string_ptr(right_ty) {
+                Some(left_ty.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(string_ty) = owned_string_concat {
+            return lower_owned_string_concat_str(ctx, left_local, right_local, string_ty);
+        }
+
         let is_string_concat = {
             let left_ty = ctx.get_local_type(left_local);
             let right_ty = ctx.get_local_type(right_local);

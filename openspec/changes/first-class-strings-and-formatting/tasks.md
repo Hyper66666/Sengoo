@@ -9,6 +9,10 @@
 ## 2. Ergonomic methods and operators
 
 - [ ] 2.1 `+`/`+=` concatenation (`String + &str`).
+  - Partial: `String + &str` now type-checks, consumes the left owned `String`,
+    lowers through `sengoo_string_concat_str`, links in the native runtime, and
+    is covered by compiler and sgc native-run tests. `+=`, `String + String`,
+    and fallible allocation/status surfacing remain open.
 - [ ] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
 - [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.

@@ -316,6 +316,14 @@ long long sengoo_string_push_str_status(long long handle, long long value_ptr) {
     return SENGOO_STATUS_OK;
 }
 
+long long sengoo_string_concat_str(long long handle, char* value) {
+    long long status = sengoo_string_push_str_status(handle, sengoo_ptr_to_handle(value));
+    if (status < 0) {
+        return status;
+    }
+    return handle;
+}
+
 long long sengoo_string_clear_status(long long handle) {
     SengooOwnedString* owned = sengoo_string_resolve(handle);
     if (!owned) {
