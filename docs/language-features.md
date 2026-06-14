@@ -194,6 +194,32 @@ general owning locals beyond `String`, partial moves, nested lexical-scope exit
 timing, abort-path cleanup, and automatic drop impls for `Buffer`, generic
 collections, JSON/process/net handles, and other runtime resources.
 
+## 2.9 Numeric Model Subset
+
+Sengoo's numeric type system already carries explicit integer widths through the
+front end and LLVM-text backend for the supported scalar subset:
+
+- signed integer types: `i8`, `i16`, `i32`, `i64`, `isize`
+- unsigned integer types: `u8`, `u16`, `u32`, `u64`, `usize`
+- float types: `f32`, `f64`
+- typed integer suffixes and based literals such as `42i64`, `7u8`, `0b1010`,
+  `0o52`, and digit separators such as `1_000`
+- casts through `as` lower to real LLVM cast instructions for the covered
+  scalar cases, including signed widening and bool widening
+
+`std::math` exposes the current i64 overflow helper subset:
+
+- `i64_min()` / `i64_max()`
+- `wrapping_add_i64`, `wrapping_sub_i64`, `wrapping_mul_i64`
+- `checked_add_i64`, `checked_sub_i64`, `checked_mul_i64`, returning
+  `Option<i64>`
+- `saturating_add_i64`, `saturating_sub_i64`, `saturating_mul_i64`
+
+Still open in `numeric-type-system`: debug-build overflow traps, release-mode
+overflow documentation across all operators, helper methods for every integer
+width, float math/parse/format completeness, operator traits, and lossless
+`From`/`Into` conversions.
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:

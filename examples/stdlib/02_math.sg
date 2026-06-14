@@ -3,7 +3,7 @@
 // Demonstrates: importing std::math integer helper functions.
 //
 // Run: sgc run examples/stdlib/02_math.sg
-// Expected output: 50
+// Expected output: 104
 
 import std::math;
 
@@ -17,6 +17,43 @@ def main() -> i64 {
         + lcm_i64(4, 6)
         + pow_i64(2, 3);
 
-    print(score);
+    let checked_ok = checked_mul_i64(6, 7).unwrap_or(0);
+    let add_overflow = checked_add_i64(i64_max(), 1);
+    let add_underflow = checked_add_i64(i64_min(), 0 - 1);
+    let sub_overflow = checked_sub_i64(i64_max(), 0 - 1);
+    let sub_underflow = checked_sub_i64(i64_min(), 1);
+    let mul_overflow = checked_mul_i64(i64_max(), 2);
+    let mul_min_overflow = checked_mul_i64(i64_min(), 0 - 1);
+    let overflow_score =
+        if add_overflow.is_none()
+            && add_underflow.is_none()
+            && sub_overflow.is_none()
+            && sub_underflow.is_none()
+            && mul_overflow.is_none()
+            && mul_min_overflow.is_none() {
+            6
+        } else {
+            0
+        };
+
+    let saturating_score =
+        if saturating_add_i64(i64_max(), 1) == i64_max()
+            && saturating_sub_i64(i64_min(), 1) == i64_min()
+            && saturating_mul_i64(i64_min(), 0 - 1) == i64_max() {
+            3
+        } else {
+            0
+        };
+
+    let wrapping_score =
+        if wrapping_add_i64(20, 22) == 42
+            && wrapping_sub_i64(9, 3) == 6
+            && wrapping_mul_i64(6, 7) == 42 {
+            3
+        } else {
+            0
+        };
+
+    print(score + checked_ok + overflow_score + saturating_score + wrapping_score);
     0
 }

@@ -11,7 +11,14 @@
 - [ ] 2.1 Trap-on-overflow in debug builds, wrap in release builds, for `+ - *`.
 - [ ] 2.2 Provide `wrapping_*`, `checked_*` (-> `Option`), and `saturating_*`
   methods on integer types.
+  - Partial: `std::math` now provides the i64 helper subset
+    (`wrapping_add/sub/mul_i64`, `checked_add/sub/mul_i64 -> Option<i64>`, and
+    `saturating_add/sub/mul_i64`) plus `i64_min()` / `i64_max()`. Method syntax
+    and non-i64 widths remain open.
 - [ ] 2.3 Tests covering each mode and a documented division-by-zero behavior.
+  - Partial: compiler surface and sgc example smoke tests now cover the i64
+    helper subset, including checked overflow/underflow and saturating paths.
+    Debug/release operator-mode tests and division-by-zero behavior remain open.
 
 ## 3. Floats
 
@@ -39,8 +46,14 @@
 
 - [ ] 5.1 Add generic numeric helpers alongside the existing `*_i64` ones; keep
   `*_i64` names source-compatible.
+  - Partial: new overflow helpers keep the `*_i64` compatibility naming and
+    extend `math.sg` without removing existing functions. Generic/all-width
+    wrappers remain open.
 - [ ] 5.2 Document the numeric model (widths, overflow, floats, conversions) in
   `docs/language-features.md`.
+  - Partial: the current width/cast/literal facts and i64 overflow helper subset
+    are documented. Full overflow-mode, all-width, float parse/format, and
+    conversion-trait docs remain open.
 - [x] 5.3 Run `openspec validate numeric-type-system --strict`.
 
 ## Verification

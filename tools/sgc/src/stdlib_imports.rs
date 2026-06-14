@@ -83,6 +83,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
         "collections" | "json" | "status" => &["ffi", "string"],
+        "math" => &["option"],
         "string" => &["ffi"],
         "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
         "path" | "dir" => &["status", "string"],
@@ -222,6 +223,18 @@ mod tests {
         let source = "import std::reflect;\ndef main() -> i64 { 0 }\n";
 
         assert_eq!(expand_stdlib_imports_for_source(source).unwrap(), source);
+    }
+
+    #[test]
+    fn math_import_expands_option_result_dependencies() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::math;\ndef main() -> i64 { 0 }\n")
+                .expect("math stdlib import should expand");
+
+        assert!(expanded.contains("struct Option"));
+        assert!(expanded.contains("struct Result"));
+        assert!(expanded.contains("def checked_add_i64"));
+        assert!(expanded.contains("def saturating_mul_i64"));
     }
 
     #[test]

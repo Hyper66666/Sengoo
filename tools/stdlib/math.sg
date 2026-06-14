@@ -1,3 +1,11 @@
+def i64_max() -> i64 {
+    9223372036854775807
+}
+
+def i64_min() -> i64 {
+    (0 - 9223372036854775807) - 1
+}
+
 def abs_i64(value: i64) -> i64 {
     if value < 0 {
         0 - value
@@ -67,5 +75,100 @@ def pow_i64(base: i64, exp: i64) -> i64 {
         1
     } else {
         base * pow_i64(base, exp - 1)
+    }
+}
+
+def wrapping_add_i64(lhs: i64, rhs: i64) -> i64 {
+    lhs + rhs
+}
+
+def wrapping_sub_i64(lhs: i64, rhs: i64) -> i64 {
+    lhs - rhs
+}
+
+def wrapping_mul_i64(lhs: i64, rhs: i64) -> i64 {
+    lhs * rhs
+}
+
+def checked_add_i64(lhs: i64, rhs: i64) -> Option<i64> {
+    if rhs > 0 && lhs > i64_max() - rhs {
+        option_none_i64()
+    } else if rhs < 0 && lhs < i64_min() - rhs {
+        option_none_i64()
+    } else {
+        option_some_i64(lhs + rhs)
+    }
+}
+
+def checked_sub_i64(lhs: i64, rhs: i64) -> Option<i64> {
+    if rhs < 0 && lhs > i64_max() + rhs {
+        option_none_i64()
+    } else if rhs > 0 && lhs < i64_min() + rhs {
+        option_none_i64()
+    } else {
+        option_some_i64(lhs - rhs)
+    }
+}
+
+def checked_mul_i64(lhs: i64, rhs: i64) -> Option<i64> {
+    if lhs == 0 || rhs == 0 {
+        option_some_i64(0)
+    } else if lhs == i64_min() && rhs == 0 - 1 {
+        option_none_i64()
+    } else if rhs == i64_min() && lhs == 0 - 1 {
+        option_none_i64()
+    } else if lhs > 0 {
+        if rhs > 0 {
+            if lhs > i64_max() / rhs {
+                option_none_i64()
+            } else {
+                option_some_i64(lhs * rhs)
+            }
+        } else if rhs < i64_min() / lhs {
+            option_none_i64()
+        } else {
+            option_some_i64(lhs * rhs)
+        }
+    } else if rhs > 0 {
+        if lhs < i64_min() / rhs {
+            option_none_i64()
+        } else {
+            option_some_i64(lhs * rhs)
+        }
+    } else if rhs < i64_max() / lhs {
+        option_none_i64()
+    } else {
+        option_some_i64(lhs * rhs)
+    }
+}
+
+def saturating_add_i64(lhs: i64, rhs: i64) -> i64 {
+    if rhs > 0 && lhs > i64_max() - rhs {
+        i64_max()
+    } else if rhs < 0 && lhs < i64_min() - rhs {
+        i64_min()
+    } else {
+        lhs + rhs
+    }
+}
+
+def saturating_sub_i64(lhs: i64, rhs: i64) -> i64 {
+    if rhs < 0 && lhs > i64_max() + rhs {
+        i64_max()
+    } else if rhs > 0 && lhs < i64_min() + rhs {
+        i64_min()
+    } else {
+        lhs - rhs
+    }
+}
+
+def saturating_mul_i64(lhs: i64, rhs: i64) -> i64 {
+    let checked = checked_mul_i64(lhs, rhs);
+    if checked.is_some {
+        checked.value
+    } else if (lhs < 0 && rhs < 0) || (lhs > 0 && rhs > 0) {
+        i64_max()
+    } else {
+        i64_min()
     }
 }

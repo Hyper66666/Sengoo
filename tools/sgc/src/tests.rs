@@ -5205,7 +5205,7 @@ fn examples_smoke_stdlib_strings_import() {
 
 #[test]
 fn examples_smoke_stdlib_math_import() {
-    assert_example_output("stdlib-math", "examples/stdlib/02_math.sg", "50");
+    assert_example_output("stdlib-math", "examples/stdlib/02_math.sg", "104");
 }
 
 #[test]

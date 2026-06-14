@@ -573,7 +573,7 @@ fn codegen_preserves_zero_argument_main_without_args_runtime() {
 #[test]
 fn math_module_imports_and_runs_abs_i64() {
     let ir = compile_with_stdlib_modules(
-        &["math.sg"],
+        &["option.sg", "result.sg", "math.sg"],
         r#"
 def main() -> i64 {
     abs_i64(0 - 7)
@@ -594,6 +594,30 @@ def main() -> i64 {
     assert!(ir.contains("clamp_i64"));
     assert!(ir.contains("gcd_i64"));
     assert!(ir.contains("lcm_i64"));
+}
+
+#[test]
+fn math_module_imports_i64_overflow_helper_subset() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "math.sg"],
+        r#"
+def main() -> i64 {
+    let maxed = saturating_add_i64(i64_max(), 1);
+    let checked = checked_mul_i64(6, 7);
+    let wrapped = wrapping_sub_i64(9, 3);
+    if maxed == i64_max() && checked.unwrap_or(0) == 42 {
+        wrapped
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("checked_mul_i64"));
+    assert!(ir.contains("saturating_add_i64"));
+    assert!(ir.contains("wrapping_sub_i64"));
+    assert!(ir.contains("option_some_i64"));
 }
 
 #[test]

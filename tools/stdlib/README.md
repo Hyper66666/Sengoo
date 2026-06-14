@@ -12,7 +12,11 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, copied-text lists, and string-key maps for scalar i64/bool values.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
-- `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
+- `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`,
+  `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, `pow_i64`,
+  `i64_min`, `i64_max`, and the i64 overflow-helper subset
+  (`wrapping_*_i64`, `checked_*_i64 -> Option<i64>`, `saturating_*_i64`
+  for add/sub/mul).
 - `error.sg`: compatibility assertion helpers (prefer `assert.sg` for new code).
 - `assert.sg`: primary assertion helpers for boolean, i64, string, and f64 checks.
 - `fmt.sg`: primitive formatting into managed `Buffer` handles via `strconv` and `status`.
