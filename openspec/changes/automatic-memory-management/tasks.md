@@ -57,8 +57,10 @@
     the entry block. Conditionally initialized bindings use runtime flags even
     when the function has one return. Top-level locals whose concrete struct
     type has a known user `impl Drop` now get the matching `Type_Drop_drop` call
-    at function exits. General owning locals without a `Drop` impl, field-owned
-    teardown, and nested scope exits remain open.
+    at function exits. Generic Drop impls reuse normal impl specialization, so a
+    concrete `Owner<i64>` local calls `Owner_i64_Drop_drop`. General owning
+    locals without a `Drop` impl, field-owned teardown, and nested scope exits
+    remain open.
 - [ ] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Partial: `?` propagation exits use per-binding runtime drop flags, set false
@@ -85,7 +87,8 @@
     conditional-init flags, tail-return moves, named-call/method-argument moves,
     assignment moves, explicit `return` exits, explicit drop receivers, and
     moved binding exclusion. It now also asserts user `impl Drop` produces one
-    `Type_Drop_drop` MIR call and an LLVM-text `call void @Type_Drop_drop(...)`.
+    `Type_Drop_drop` MIR call and an LLVM-text `call void @Type_Drop_drop(...)`,
+    including specialized generic Drop instances.
 
 ## 4. Runtime resource migration
 

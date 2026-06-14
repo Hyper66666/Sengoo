@@ -118,6 +118,40 @@ fn user_drop_impl_codegen_emits_void_drop_call() {
     );
 }
 
+#[test]
+fn generic_user_drop_impl_inserts_specialized_drop_call() {
+    let source = r#"
+struct Resource<T> {
+    value: T,
+}
+
+impl<T> Drop for Resource<T> {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource: Resource<i64> = Resource { value: 7 };
+    0
+}
+"#;
+    let mir = compile_to_mir(source).expect("generic user Drop impl should compile to MIR");
+    let main_fn = function(&mir, "main");
+
+    let calls = drop_calls(main_fn, "Resource_i64_Drop_drop");
+    assert_eq!(
+        calls.len(),
+        1,
+        "main should call the specialized generic Drop impl exactly once"
+    );
+
+    let ir = compile_to_ir(source).expect("generic user Drop impl should compile to IR");
+    assert!(
+        ir.contains("call void @Resource_i64_Drop_drop("),
+        "IR should call the specialized generic Drop impl as a void destructor, got:\n{ir}"
+    );
+}
+
 fn user_drop_impl_source() -> &'static str {
     r#"
 struct Resource {
