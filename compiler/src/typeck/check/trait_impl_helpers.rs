@@ -16,6 +16,35 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Enforce the compiler-known `Drop` trait contract: `def drop(&mut self)`.
+    /// `drop` is compiler-inserted, so its only method must take `&mut self` and
+    /// accept no other parameters; a malformed signature is rejected here rather
+    /// than producing surprising drop glue later.
+    fn validate_drop_contract(method: &Function) -> Result<()> {
+        if method.name.name != "drop" {
+            return Ok(());
+        }
+
+        if !matches!(method.self_param, Some(SelfParam::BorrowedMut)) {
+            return Err(CompileError::from(TypeckError::Other(
+                "Drop::drop must use `&mut self` receiver".to_string(),
+            )));
+        }
+
+        let extra_params = method
+            .params
+            .iter()
+            .filter(|param| param.name.name != "self")
+            .count();
+        if extra_params != 0 {
+            return Err(CompileError::from(TypeckError::Other(
+                "Drop::drop must take no parameters other than `&mut self`".to_string(),
+            )));
+        }
+
+        Ok(())
+    }
+
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&trait_decl.type_params)?;
@@ -35,6 +64,9 @@ impl TypeChecker {
                 TraitItem::Function(method) => {
                     if trait_decl.name.name == "Future" {
                         Self::validate_future_poll_contract(method)?;
+                    }
+                    if trait_decl.name.name == "Drop" {
+                        Self::validate_drop_contract(method)?;
                     }
 
                     self.env.push_scope();
@@ -117,12 +149,16 @@ impl TypeChecker {
             .map(|arg| self.check_type(arg))
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
+        let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 
         for item in &impl_decl.items {
             if is_future_impl {
                 Self::validate_future_poll_contract(item)?;
+            }
+            if is_drop_impl {
+                Self::validate_drop_contract(item)?;
             }
 
             self.env.push_scope();

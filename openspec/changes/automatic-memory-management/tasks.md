@@ -2,6 +2,12 @@
 
 - [ ] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
   trait/typeck layer and reserve it from manual direct calls.
+  - Partial: the type checker now enforces the compiler-known `Drop` contract —
+    a `trait Drop` method and any `impl Drop for T` must declare
+    `drop(&mut self)` with no extra parameters, mirroring the `Future::poll`
+    contract check (`compiler/src/typeck/check/trait_impl_helpers.rs`); covered
+    by `compiler/src/tests/drop_trait_tests.rs`. Seeding `Drop` as a prelude
+    trait and reserving `drop` from arbitrary direct calls remain open.
 - [ ] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
   are never moved or dropped.
 - [x] 1.3 Document drop order (reverse declaration order within a scope) in
