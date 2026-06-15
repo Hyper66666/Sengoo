@@ -3,9 +3,10 @@
 //! 管理符号表和作用域。
 
 use crate::typeck::interner::TyInterner;
+use crate::typeck::r#trait::type_key;
 use crate::typeck::ty::{Ty, TyKind};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// 符号
@@ -121,6 +122,8 @@ pub struct TypeEnv {
     interner: Rc<RefCell<TyInterner>>,
     /// Canonical stdlib `String { handle: i64 }` type identity for move rules.
     pub owned_string_ty: Option<Ty>,
+    /// Type keys for non-Copy values with compiler-managed ownership.
+    drop_owned_type_keys: HashSet<String>,
 }
 
 impl TypeEnv {
@@ -132,6 +135,7 @@ impl TypeEnv {
             next_ty_var_id: 0,
             interner: Rc::new(RefCell::new(TyInterner::new())),
             owned_string_ty: None,
+            drop_owned_type_keys: HashSet::new(),
         };
         // 创建全局作用域
         env.push_scope();
@@ -280,6 +284,16 @@ impl TypeEnv {
     pub fn insert_type(&mut self, name: String, ty: Ty) {
         let symbol = Symbol::type_symbol(name.clone(), ty);
         self.insert(name, symbol);
+    }
+
+    pub fn mark_drop_owned_type(&mut self, ty: &Ty) {
+        if !ty.is_copy_value() {
+            self.drop_owned_type_keys.insert(type_key(ty));
+        }
+    }
+
+    pub fn is_drop_owned_type(&self, ty: &Ty) -> bool {
+        !ty.is_copy_value() && self.drop_owned_type_keys.contains(&type_key(ty))
     }
 
     /// 查找符号（在当前及父作用域中查找）

@@ -70,7 +70,7 @@ pub struct BorrowChecker {
     lifetime_counter: usize,
     /// Collected errors.
     errors: Vec<BorrowError>,
-    /// Variables whose owned `String` value was moved in the current scope.
+    /// Variables whose owned value was moved in the current scope.
     moved: HashSet<String>,
     /// Nested scope snapshots for moved-variable tracking.
     moved_stack: Vec<HashSet<String>>,
@@ -114,7 +114,7 @@ impl BorrowChecker {
                     self.check_expr(value);
                     self.track_borrows_in_expr(&name.name, value);
                     if let Some(source) = Self::expr_var_name(value) {
-                        if self.var_is_lang_owned_string(&source) {
+                        if self.var_is_movable_owning_value(&source) {
                             self.mark_moved(&source, value.span);
                         }
                     }
@@ -290,11 +290,16 @@ impl BorrowChecker {
         }
     }
 
-    fn ty_is_lang_owned_string(&self, ty: &Ty) -> bool {
-        self._env
-            .owned_string_ty
-            .as_ref()
-            .is_some_and(|canonical| canonical.kind == ty.kind)
+    fn ty_is_movable_owning_value(&self, ty: &Ty) -> bool {
+        if ty.is_copy_value() {
+            return false;
+        }
+        self._env.is_drop_owned_type(ty)
+            || self
+                ._env
+                .owned_string_ty
+                .as_ref()
+                .is_some_and(|canonical| canonical.kind == ty.kind)
     }
 
     fn var_ty(&self, name: &str) -> Option<Ty> {
@@ -306,9 +311,9 @@ impl BorrowChecker {
             })
     }
 
-    fn var_is_lang_owned_string(&self, name: &str) -> bool {
+    fn var_is_movable_owning_value(&self, name: &str) -> bool {
         self.var_ty(name)
-            .is_some_and(|ty| self.ty_is_lang_owned_string(&ty))
+            .is_some_and(|ty| self.ty_is_movable_owning_value(&ty))
     }
 
     fn check_owned_string_invalidation(&mut self, receiver: &Expr, method_name: &str) {
@@ -349,7 +354,7 @@ impl BorrowChecker {
 
     fn maybe_move_string_arg(&mut self, arg: &Expr) {
         if let Some(name) = Self::expr_var_name(arg) {
-            if self.var_is_lang_owned_string(&name) {
+            if self.var_is_movable_owning_value(&name) {
                 self.mark_moved(&name, arg.span);
             }
         }

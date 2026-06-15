@@ -16,6 +16,15 @@ fn typecheck(source: &str) -> Result<(), String> {
 }
 
 #[test]
+fn drop_trait_is_compiler_known_by_default() {
+    let checker = TypeChecker::new();
+    assert!(
+        checker.trait_registry().contains("Drop"),
+        "`Drop` should be seeded as a compiler-known trait"
+    );
+}
+
+#[test]
 fn drop_impl_with_mut_self_typechecks() {
     typecheck(
         r#"
@@ -86,5 +95,37 @@ impl Drop for Widget {
     assert!(
         err.contains("Drop::drop must take no parameters"),
         "expected the Drop parameter diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn direct_drop_trait_call_is_rejected() {
+    let err = typecheck(
+        r#"
+trait Drop {
+    def drop(&mut self) {
+    }
+}
+
+struct Widget {
+    id: i64,
+}
+
+impl Drop for Widget {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let w = Widget { id: 1 };
+    w.drop();
+    0
+}
+"#,
+    )
+    .expect_err("user code must not call a `Drop` trait method directly");
+    assert!(
+        err.contains("Drop::drop is reserved for compiler-inserted cleanup"),
+        "expected the direct Drop call diagnostic, got: {err}"
     );
 }

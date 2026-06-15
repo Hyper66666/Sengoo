@@ -942,6 +942,11 @@ impl TypeChecker {
                 .lookup_trait_method(&trait_name, receiver_key, method_name)
                 .cloned()
             {
+                if trait_name == "Drop" && method_name == "drop" {
+                    return Err(TypeckError::Other(
+                        "Drop::drop is reserved for compiler-inserted cleanup; use an explicit compatibility release method instead".to_string(),
+                    ));
+                }
                 let instantiated = self.instantiate_method_function_ty(&fn_ty, &HashMap::new());
                 candidates.push(MethodCandidate {
                     label: trait_name,

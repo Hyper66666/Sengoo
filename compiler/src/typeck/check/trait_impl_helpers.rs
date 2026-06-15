@@ -150,6 +150,9 @@ impl TypeChecker {
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
         let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
+        if is_drop_impl {
+            self.env.mark_drop_owned_type(&target_ty);
+        }
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 

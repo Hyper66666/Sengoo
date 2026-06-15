@@ -1,15 +1,18 @@
 ## 1. Drop trait and semantics
 
-- [ ] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
+- [x] 1.1 Add the compiler-known `Drop` trait (`def drop(&mut self)`) to the
   trait/typeck layer and reserve it from manual direct calls.
-  - Partial: the type checker now enforces the compiler-known `Drop` contract —
-    a `trait Drop` method and any `impl Drop for T` must declare
-    `drop(&mut self)` with no extra parameters, mirroring the `Future::poll`
-    contract check (`compiler/src/typeck/check/trait_impl_helpers.rs`); covered
-    by `compiler/src/tests/drop_trait_tests.rs`. Seeding `Drop` as a prelude
-    trait and reserving `drop` from arbitrary direct calls remain open.
-- [ ] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
+  - Completed: `TypeChecker::new` seeds `Drop` as a compiler-known trait with
+    `drop(&mut self)`, the type checker enforces that contract for trait
+    declarations and impls, and direct trait-dispatched `Drop::drop` calls are
+    rejected while inherent compatibility release methods keep their existing
+    priority. Covered by `compiler/src/tests/drop_trait_tests.rs`.
+- [x] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
   are never moved or dropped.
+  - Completed: `Ty::is_copy_value` defines the compiler-known Copy baseline for
+    integer/float/bool scalars and references; the current owned-value move
+    checker consults it before marking owned values moved. Covered by
+    `typeck::ty::copy_tests` plus existing owned-`String` move tests.
 - [x] 1.3 Document drop order (reverse declaration order within a scope) in
   `docs/language-features.md`.
   - Added "Ownership, moves, and automatic drop" (EN §2.8 / ZH §2.6) covering
@@ -24,7 +27,8 @@
   - Partial: the owned `String` checker now marks direct let moves, named-call
     arguments, method-call arguments, and assignment RHS moves. Return moves are
     handled by MIR drop suppression for function exits; general non-`Copy`
-    values, field move-out, and path-sensitive move analysis remain open.
+    values implementing `Drop` now share the same direct let move tracking.
+    Return moves, field move-out, and path-sensitive move analysis remain open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker; verified by
@@ -36,7 +40,8 @@
   negative use-after-move diagnostic.
   - Partial: owned `String` negative use-after-move tests exist; partial moves
     and general owning values remain open. Assignment RHS move coverage is now
-    included.
+    included, and a user `Drop` type move/use-after-move test covers the first
+    non-`String` owning-value path.
 
 ## 3. MIR drop-glue insertion
 
