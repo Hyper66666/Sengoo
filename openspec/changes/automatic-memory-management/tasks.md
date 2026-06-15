@@ -4,8 +4,12 @@
   trait/typeck layer and reserve it from manual direct calls.
 - [ ] 1.2 Define `Copy` set (integer/float/bool scalars, `&T`) so `Copy` values
   are never moved or dropped.
-- [ ] 1.3 Document drop order (reverse declaration order within a scope) in
+- [x] 1.3 Document drop order (reverse declaration order within a scope) in
   `docs/language-features.md`.
+  - Added "Ownership, moves, and automatic drop" (EN §2.8 / ZH §2.6) covering
+    reverse-declaration drop order, early-exit drop flags, move/use-after-move,
+    and compiler-called `drop`; honestly scoped to the current owned-`String`
+    surface with the broader auto-drop work marked as in progress.
 
 ## 2. Move / use-after-move checking
 

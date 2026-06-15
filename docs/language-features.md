@@ -168,6 +168,33 @@ Current limitations:
 - IO wakeups are limited to the documented reactor subset.
 - user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
 
+## 2.8 Ownership, moves, and automatic drop
+
+Sengoo manages memory with move-based ownership and compiler-inserted cleanup
+(RAII); there is no garbage collector. A type that has an `impl Drop` is
+*affine*: it has a single owner, and the compiler runs cleanup automatically
+when the owner goes out of scope.
+
+- **Drop order is reverse declaration order.** When a scope exits, the owning
+  locals that still hold a value are dropped last-declared-first. Early exits
+  (`return`, `?` propagation) drop exactly the locals that are live on that path,
+  tracked with per-binding drop flags, and a value already moved out is not
+  dropped again.
+- **Moves transfer ownership.** Binding (`let b = a`), passing an owned value by
+  value (named-call and method-call arguments), assigning an owned value, and
+  returning it all *move* it. After a move the source is dead; reading it is a
+  compile error with the stable `use-after-move` diagnostic (also surfaced in
+  `sgc --error-format json` and `sglsp`).
+- **`drop` is compiler-called, not user-called.** The compatibility release
+  methods (`.drop()` / `.free()` / `.close()`) run cleanup immediately and mark
+  the value moved, so the later automatic drop is suppressed and there is no
+  double free.
+
+Current surface: the verified auto-drop and move-checking path covers owned
+`String`. Generalized `Copy`/move analysis, partial moves, and auto-drop for the
+other runtime resources (`Buffer`, `Vec<T>`, `JsonDoc`, process/net handles) are
+landing incrementally, so some examples still call the explicit release methods.
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:
@@ -357,6 +384,24 @@ pub extern "C" fn sengoo_add(a: i64, b: i64) -> i64 {
 可直接复现的双向调用命令（Sengoo -> C / C -> Sengoo）见：
 
 - `examples/ffi/README.md`
+
+## 2.6 所有权、移动与自动 drop
+
+Sengoo 采用基于移动的所有权 + 编译器插入清理（RAII）管理内存，没有垃圾回收器。
+带有 `impl Drop` 的类型是*仿射*的：只有唯一所有者，所有者离开作用域时编译器自动执行清理。
+
+- **drop 顺序为声明逆序。** 作用域退出时，仍持有值的所属局部按“后声明先 drop”清理；
+  提前退出（`return`、`?` 传播）只 drop 该路径上仍存活的局部，使用每绑定的 drop 标志跟踪，
+  已移动走的值不会重复 drop。
+- **移动转移所有权。** 绑定（`let b = a`）、按值传递所属值（具名调用与方法调用实参）、
+  对所属值赋值，以及返回它，都会*移动*它。移动后源变量失效，再次读取是编译错误，
+  诊断码为稳定的 `use-after-move`（同样出现在 `sgc --error-format json` 与 `sglsp`）。
+- **drop 由编译器调用，而非用户调用。** 兼容用的释放方法（`.drop()` / `.free()` / `.close()`）
+  会立即执行清理并把值标记为已移动，从而抑制后续的自动 drop，不会二次释放。
+
+当前覆盖面：已验证的自动 drop 与移动检查路径覆盖所属 `String`；通用 `Copy`/移动分析、
+部分移动，以及其余运行时资源（`Buffer`、`Vec<T>`、`JsonDoc`、进程/网络句柄）的自动 drop
+正在逐步落地，因此部分示例仍调用显式释放方法。
 
 ## 3. 非侵入式反射（按需开启）
 
