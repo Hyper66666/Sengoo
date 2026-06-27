@@ -354,6 +354,9 @@ impl BorrowChecker {
         if ty.is_copy_value() {
             return false;
         }
+        if self._env.is_legacy_idempotent_handle_type(ty) {
+            return false;
+        }
         self._env.type_contains_drop_owned_value(ty)
             || self
                 ._env

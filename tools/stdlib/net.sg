@@ -158,6 +158,12 @@ impl TcpStream {
     }
 }
 
+impl Drop for TcpStream {
+    def drop(&mut self) {
+        sengoo_tcp_close(self.handle);
+    }
+}
+
 def udp_bind_raw(host_ptr: i64, port: i64) -> Result<UdpSocket, i64> {
     let handle = sengoo_udp_bind(host_ptr, port);
     if handle != 0 {
@@ -213,6 +219,12 @@ impl UdpSocket {
 
     def close(self) -> bool {
         sengoo_udp_close(self.handle) != 0
+    }
+}
+
+impl Drop for UdpSocket {
+    def drop(&mut self) {
+        sengoo_udp_close(self.handle);
     }
 }
 
@@ -276,6 +288,12 @@ impl HttpClient {
 
     def close(self) -> bool {
         sengoo_http_close(self.handle) != 0
+    }
+}
+
+impl Drop for HttpClient {
+    def drop(&mut self) {
+        sengoo_http_close(self.handle);
     }
 }
 
@@ -379,6 +397,12 @@ impl HttpServer {
 
     def close(self) -> bool {
         sengoo_http_server_close(self.handle) != 0
+    }
+}
+
+impl Drop for HttpServer {
+    def drop(&mut self) {
+        sengoo_http_server_close(self.handle);
     }
 }
 
@@ -614,6 +638,12 @@ impl HttpServerRequest {
     }
 }
 
+impl Drop for HttpServerRequest {
+    def drop(&mut self) {
+        sengoo_http_request_close(self.handle);
+    }
+}
+
 def ws_connect_raw(url_ptr: i64, timeout_ms: i64) -> Result<WsClient, i64> {
     let handle = sengoo_ws_connect(url_ptr, timeout_ms);
     if handle != 0 {
@@ -656,6 +686,12 @@ impl WsClient {
 
     def close(self) -> bool {
         sengoo_ws_close(self.handle) != 0
+    }
+}
+
+impl Drop for WsClient {
+    def drop(&mut self) {
+        sengoo_ws_close(self.handle);
     }
 }
 

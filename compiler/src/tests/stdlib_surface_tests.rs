@@ -125,6 +125,63 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_handles_auto_drop_without_manual_release() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "string.sg",
+            "collections.sg",
+            "json.sg",
+            "process.sg",
+            "net.sg",
+        ],
+        r##"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let vec = vec_new_i64();
+    let strings = vec_new_string();
+    let doc = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let command = process_command("sengoo-missing-owned-drop").unwrap_or(ProcessCommand { handle: 0 });
+    let output = ProcessOutput { handle: 0 };
+    let process = ProcessHandle { handle: 0 };
+    let stream = TcpStream { handle: 0 };
+    let socket = UdpSocket { handle: 0 };
+    let client = HttpClient { handle: 0 };
+    let server = HttpServer { handle: 0 };
+    let request = HttpServerRequest { handle: 0 };
+
+    buffer.len() + vec.len() + strings.len() + doc.root().node_id + command.handle
+        + output.handle + process.handle + stream.handle + socket.handle
+        + client.handle + server.handle + request.handle
+}
+"##,
+    );
+
+    for symbol in [
+        "Buffer_Drop_drop",
+        "Vec_i64_Drop_drop",
+        "Vec_String_Drop_drop",
+        "JsonDoc_Drop_drop",
+        "ProcessCommand_Drop_drop",
+        "ProcessOutput_Drop_drop",
+        "ProcessHandle_Drop_drop",
+        "TcpStream_Drop_drop",
+        "UdpSocket_Drop_drop",
+        "HttpClient_Drop_drop",
+        "HttpServer_Drop_drop",
+        "HttpServerRequest_Drop_drop",
+    ] {
+        assert!(
+            ir.contains(symbol),
+            "expected stdlib owning handle auto-drop symbol {symbol}\n{ir}"
+        );
+    }
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

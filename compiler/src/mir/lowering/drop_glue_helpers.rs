@@ -48,6 +48,11 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
+        if local.kind == LocalKind::Param
+            && Self::is_legacy_idempotent_handle_mir_type(self.get_local_type(local))
+        {
+            return;
+        }
         let mut bindings = Vec::new();
         if let Some(drop_func) = self.drop_func_for_local(local) {
             bindings.push(DropBinding {
@@ -222,6 +227,28 @@ impl<'a> LoweringContext<'a> {
             MIRType::Tuple(fields) => fields.get(field as usize).cloned(),
             MIRType::Array(elem, len) if (field as u64) < *len => Some((**elem).clone()),
             _ => None,
+        }
+    }
+
+    fn is_legacy_idempotent_handle_mir_type(ty: &MIRType) -> bool {
+        match ty {
+            MIRType::Struct { name, .. } => {
+                matches!(
+                    name.as_str(),
+                    "Buffer"
+                        | "JsonDoc"
+                        | "ProcessCommand"
+                        | "ProcessOutput"
+                        | "ProcessHandle"
+                        | "TcpStream"
+                        | "UdpSocket"
+                        | "HttpClient"
+                        | "HttpServer"
+                        | "HttpServerRequest"
+                        | "WsClient"
+                ) || name.starts_with("Vec_")
+            }
+            _ => false,
         }
     }
 

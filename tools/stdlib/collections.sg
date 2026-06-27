@@ -233,6 +233,24 @@ impl<T> Vec<T> {
     }
 }
 
+impl Drop for Vec<i64> {
+    def drop(&mut self) {
+        sengoo_vec_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for Vec<bool> {
+    def drop(&mut self) {
+        sengoo_vec_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for Vec<String> {
+    def drop(&mut self) {
+        sengoo_vec_string_free_status(self.handle);
+    }
+}
+
 impl Vec<i64> {
     def push(self, value: i64) -> bool {
         sengoo_vec_push_i64(self.handle, value) != 0

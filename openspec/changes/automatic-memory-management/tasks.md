@@ -95,8 +95,19 @@
 
 - [ ] 4.1 Make C free functions idempotent in `tools/stdlib/runtime*.c`
   (`Buffer`, collections, `runtime_json`, process, net).
-- [ ] 4.2 Add compiler-known `Drop` impls for `Buffer`, `Vec<T>`, `String`,
+- [x] 4.2 Add compiler-known `Drop` impls for `Buffer`, `Vec<T>`, `String`,
   `JsonDoc`, `ProcessHandle`, and net handles.
+  - Completed for the current concrete stdlib handle surface: `Buffer`,
+    `Vec<i64>`, `Vec<bool>`, `Vec<String>`, `JsonDoc`, `ProcessCommand`,
+    `ProcessOutput`, `ProcessHandle`, `TcpStream`, `UdpSocket`, `HttpClient`,
+    `HttpServer`, `HttpServerRequest`, and `WsClient` now implement `Drop`
+    and auto-release at local scope exits. Existing `String` auto-drop remains
+    compiler-known. Legacy by-value handle APIs are temporarily treated as
+    idempotent borrow-like wrappers for move checking, and callee parameters of
+    those legacy handle types are not auto-dropped, because the current public
+    stdlib methods still pass handles by value rather than through `&self`.
+    Covered by `stdlib_owned_handles_auto_drop_without_manual_release` plus the
+    existing `stdlib_surface` suite.
 - [ ] 4.3 Re-implement `free()/drop()/close()` wrappers as "explicit early drop"
   that marks the value moved so no double release occurs.
 

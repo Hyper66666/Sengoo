@@ -344,6 +344,27 @@ impl TypeEnv {
         self.type_contains_drop_owned_value_inner(ty, &mut HashSet::new())
     }
 
+    pub fn is_legacy_idempotent_handle_type(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, .. } => matches!(
+                name.as_str(),
+                "Buffer"
+                    | "Vec"
+                    | "JsonDoc"
+                    | "ProcessCommand"
+                    | "ProcessOutput"
+                    | "ProcessHandle"
+                    | "TcpStream"
+                    | "UdpSocket"
+                    | "HttpClient"
+                    | "HttpServer"
+                    | "HttpServerRequest"
+                    | "WsClient"
+            ),
+            _ => false,
+        }
+    }
+
     fn type_contains_drop_owned_value_inner(
         &self,
         ty: &Ty,
