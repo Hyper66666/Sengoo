@@ -337,6 +337,13 @@ pub fn type_key(ty: &Ty) -> String {
                 )
             }
         }
+        crate::typeck::ty::TyKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } => {
+            format!("<{} as {}>::{}", type_key(base), trait_name, name)
+        }
         crate::typeck::ty::TyKind::Ref(_, inner) => format!("&{}", type_key(inner)),
         crate::typeck::ty::TyKind::Ptr(inner) => format!("*{}", type_key(inner)),
         crate::typeck::ty::TyKind::Array(elem, len) => format!("[{}; {}]", type_key(elem), len),

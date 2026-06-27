@@ -437,6 +437,15 @@ impl TypeEnv {
                     .map(|arg| Self::substitute_ty_vars(arg, subst))
                     .collect(),
             },
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => TyKind::AssocProjection {
+                base: Box::new(Self::substitute_ty_vars(base, subst)),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            },
             TyKind::Future(inner) => {
                 TyKind::Future(Box::new(Self::substitute_ty_vars(inner, subst)))
             }

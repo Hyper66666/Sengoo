@@ -77,6 +77,7 @@ pub struct TypeChecker {
     class_decls: HashMap<String, ClassDeclInfo>,
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
     generic_type_metas: HashMap<String, GenericTypeMeta>,
+    generic_var_bounds: HashMap<TyVarId, Vec<String>>,
     async_context_depth: usize,
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
@@ -107,6 +108,7 @@ impl TypeChecker {
             class_decls: HashMap::new(),
             generic_function_metas: HashMap::new(),
             generic_type_metas: HashMap::new(),
+            generic_var_bounds: HashMap::new(),
             async_context_depth: 0,
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
@@ -552,6 +554,18 @@ impl TypeChecker {
                         .collect(),
                 },
             },
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => Ty {
+                id: ty.id,
+                kind: TyKind::AssocProjection {
+                    base: Box::new(self.substitute_ty_vars(base, subst)),
+                    trait_name: trait_name.clone(),
+                    name: name.clone(),
+                },
+            },
             _ => ty.clone(),
         }
     }
@@ -733,6 +747,43 @@ impl TypeChecker {
     }
 
     fn check_path_type(&mut self, path: &Path, explicit_args: Vec<Ty>) -> TyResult<Ty> {
+        if path.segments.len() == 2 && explicit_args.is_empty() {
+            let base_name = &path.segments[0].name;
+            let assoc_name = &path.segments[1].name;
+            if let Some(base) = self.env.lookup(base_name).and_then(Symbol::get_ty).cloned() {
+                let TyKind::Var(var_id) = &base.kind else {
+                    return Err(TypeckError::Other(format!(
+                        "associated type projection `{base_name}::{assoc_name}` currently requires a generic type parameter base"
+                    )));
+                };
+                let bounds = self
+                    .generic_var_bounds
+                    .get(var_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut declaring_traits = bounds.into_iter().filter(|trait_name| {
+                    self.trait_registry
+                        .get(trait_name)
+                        .is_some_and(|info| info.assoc_types.iter().any(|name| name == assoc_name))
+                });
+                let Some(trait_name) = declaring_traits.next() else {
+                    return Err(TypeckError::Other(format!(
+                        "associated type `{assoc_name}` is not declared by a bound on `{base_name}`"
+                    )));
+                };
+                if declaring_traits.next().is_some() {
+                    return Err(TypeckError::Other(format!(
+                        "associated type `{assoc_name}` is ambiguous for `{base_name}`; add an explicit trait binding"
+                    )));
+                }
+                return Ok(self.env.new_ty(TyKind::AssocProjection {
+                    base: Box::new(base),
+                    trait_name,
+                    name: assoc_name.clone(),
+                }));
+            }
+        }
+
         let name = self.path_name(path)?;
 
         if name == "Future" {

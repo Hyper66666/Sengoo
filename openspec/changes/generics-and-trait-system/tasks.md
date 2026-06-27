@@ -46,6 +46,11 @@
     impl checking also rejects missing required and unknown associated types.
 - [ ] 4.2 Resolve `T::Item` in generic code; require fixed associated types in
   `dyn` object types (`dyn Iterator<Item = i64>`).
+  - `T::Item` in generic function signatures resolves through the declaring
+    trait bound and the concrete impl at call sites; unbounded `T::Item` is
+    rejected. Verified by `cargo test -p sengoo-compiler
+    associated_type_projection -- --nocapture`.
+  - Remaining: fixed associated-type bindings in `dyn` object types.
 - [ ] 4.3 Tests covering associated-type resolution and the `dyn` fixing rule.
 
 ## 5. Core traits and derive

@@ -148,6 +148,58 @@ impl Iterator for Counter {
 }
 
 #[test]
+fn generic_associated_type_projection_resolves_at_call_site() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+
+def select_item<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+
+def main() -> i64 {
+    select_item(Counter { value: 0 }, 7)
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("T::Item should resolve through the concrete trait impl");
+    compile_to_ir(source).expect("resolved associated type projection should lower to LLVM IR");
+}
+
+#[test]
+fn unbounded_associated_type_projection_is_rejected() {
+    let source = r#"
+def bad<T>(value: T::Item) -> T::Item {
+    value
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unbounded associated projection should be rejected");
+    assert!(
+        err.to_string()
+            .contains("associated type `Item` is not declared by a bound on `T`"),
+        "expected bounded projection diagnostic, got: {err}"
+    );
+}
+
+#[test]
 fn dyn_trait_type_syntax_parses_multiple_bounds() {
     let source = r#"
 trait Read {}

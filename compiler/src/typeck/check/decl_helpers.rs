@@ -252,6 +252,9 @@ impl TypeChecker {
             if let Some(default_ty) = &type_param.default {
                 meta.default = Some(self.check_type(default_ty).map_err(CompileError::from)?);
             }
+
+            self.generic_var_bounds
+                .insert(meta.var_id, meta.bounds.clone());
         }
 
         Ok(metas)

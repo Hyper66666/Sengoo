@@ -176,6 +176,11 @@ pub enum TyKind {
     Adt { name: String, args: Vec<Ty> },
     /// Trait 对象 `dyn Trait`
     Dyn(Vec<String>),
+    AssocProjection {
+        base: Box<Ty>,
+        trait_name: String,
+        name: String,
+    },
     /// impl Trait
     ImplTrait(Vec<String>),
     /// Future type (async function return type)
@@ -237,6 +242,7 @@ impl fmt::Display for TyKind {
                 write!(f, ">")
             }
             TyKind::Dyn(traits) => write!(f, "dyn {}", traits.join(" + ")),
+            TyKind::AssocProjection { base, name, .. } => write!(f, "{}::{}", base, name),
             TyKind::ImplTrait(traits) => write!(f, "impl {}", traits.join(" + ")),
             TyKind::Future(inner) => write!(f, "Future<{}>", inner),
             TyKind::SelfType => write!(f, "Self"),

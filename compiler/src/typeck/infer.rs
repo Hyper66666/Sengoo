@@ -164,6 +164,18 @@ impl TypeInfer {
                     },
                 )
             }
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => Ty::new(
+                ty.id,
+                TyKind::AssocProjection {
+                    base: Box::new(self.subst_apply(subst, base)),
+                    trait_name: trait_name.clone(),
+                    name: name.clone(),
+                },
+            ),
             _ => ty.clone(),
         }
     }
@@ -227,6 +239,18 @@ impl TypeInfer {
                         .iter()
                         .map(|t| self.instantiate_fresh_impl(t, var_map))
                         .collect(),
+                },
+            ),
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => Ty::new(
+                ty.id,
+                TyKind::AssocProjection {
+                    base: Box::new(self.instantiate_fresh_impl(base, var_map)),
+                    trait_name: trait_name.clone(),
+                    name: name.clone(),
                 },
             ),
             _ => ty.clone(),
@@ -354,6 +378,18 @@ impl TypeInfer {
                 }
                 Ok(())
             }
+            (
+                TyKind::AssocProjection {
+                    base: base1,
+                    trait_name: trait_name1,
+                    name: name1,
+                },
+                TyKind::AssocProjection {
+                    base: base2,
+                    trait_name: trait_name2,
+                    name: name2,
+                },
+            ) if trait_name1 == trait_name2 && name1 == name2 => self.unify_in_place(base1, base2),
 
             _ => Err(TypeckError::TypeMismatch {
                 expected: ty2.kind.clone(),
@@ -418,6 +454,7 @@ impl ContainsVar for Ty {
                 params.iter().any(|t| t.contains_var(var_id)) || ret.contains_var(var_id)
             }
             TyKind::Adt { args, .. } => args.iter().any(|t| t.contains_var(var_id)),
+            TyKind::AssocProjection { base, .. } => base.contains_var(var_id),
             _ => false,
         }
     }
