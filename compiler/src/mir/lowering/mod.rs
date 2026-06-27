@@ -62,6 +62,7 @@ mod drop_glue_helpers;
 mod entry;
 mod enum_expr_helpers;
 mod for_expr_helpers;
+mod format_methods;
 mod function_lowering;
 mod if_expr_helpers;
 mod lambda_expr_helpers;

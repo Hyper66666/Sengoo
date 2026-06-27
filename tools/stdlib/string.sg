@@ -14,6 +14,11 @@ extern "C" {
     fn sengoo_string_from_buffer(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_string_clone_status(handle: i64) -> i64;
     fn sengoo_string_push_str_status(handle: i64, value_ptr: i64) -> i64;
+    fn sengoo_string_as_str_ptr(handle: i64) -> i64;
+    fn sengoo_string_with_capacity(capacity: i64) -> i64;
+    fn sengoo_string_push_i64_status(handle: i64, value: i64) -> i64;
+    fn sengoo_string_push_bool_status(handle: i64, value: i64) -> i64;
+    fn sengoo_string_push_char_status(handle: i64, codepoint: i64) -> i64;
     fn sengoo_string_clear_status(handle: i64) -> i64;
     fn sengoo_string_copy_to_buffer(handle: i64, buffer_handle: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
@@ -125,6 +130,15 @@ def string_new() -> String {
     String { handle: sengoo_string_new() }
 }
 
+def string_with_capacity(capacity: i64) -> Result<String, i64> {
+    let raw = sengoo_string_with_capacity(capacity);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
 def string_from_str(value: &str) -> Result<String, i64> {
     let raw = sengoo_string_from_str_copy(sengoo_stdlib_str_ptr(value));
     if raw >= 0 {
@@ -163,6 +177,15 @@ impl String {
 
     def push_str(self, value: &str) -> Result<bool, i64> {
         let raw = sengoo_string_push_str_status(self.handle, sengoo_stdlib_str_ptr(value));
+        if raw >= 0 {
+            result_ok_bool(true)
+        } else {
+            result_err_bool(0 - raw)
+        }
+    }
+
+    def push_i64(self, value: i64) -> Result<bool, i64> {
+        let raw = sengoo_string_push_i64_status(self.handle, value);
         if raw >= 0 {
             result_ok_bool(true)
         } else {

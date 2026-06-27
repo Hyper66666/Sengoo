@@ -26,6 +26,7 @@ pub mod drop_trait_tests;
 pub mod enum_match_lowering_tests;
 pub mod ffi_tests;
 pub mod for_loop_tests;
+pub mod format_tests;
 pub mod function_sig_helpers_tests;
 pub mod generic_constraints_tests;
 pub mod generic_hir_tests;

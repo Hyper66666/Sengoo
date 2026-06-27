@@ -70,7 +70,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Whether `type_name` has a user `impl Display` whose `to_string` was
     /// lowered to the eager `<Type>_Display_to_string` runtime function.
-    fn has_display_to_string(&self, type_name: &str) -> bool {
+    pub(super) fn has_display_to_string(&self, type_name: &str) -> bool {
         self.is_known_function(&format!("{}_Display_to_string", type_name))
     }
 

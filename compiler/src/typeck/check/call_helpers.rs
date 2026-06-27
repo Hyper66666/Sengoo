@@ -161,6 +161,45 @@ impl TypeChecker {
             .implements_trait("Display", &type_key(ty))
     }
 
+    /// Type-check a `format(template, args...)` call: the template must be a
+    /// string literal, its `{}` placeholders must match the argument count, and
+    /// every argument must be renderable (built-in printable or `impl Display`).
+    /// Returns the owned `String` type the call produces.
+    fn check_format_call(&mut self, args: &[Expr]) -> TyResult<Ty> {
+        let Some((template_arg, value_args)) = args.split_first() else {
+            return Err(TypeckError::Other(
+                "format requires a string literal template".to_string(),
+            ));
+        };
+        let ExprKind::Literal(crate::ast::Literal::String(template)) = &template_arg.kind else {
+            return Err(TypeckError::Other(
+                "format template must be a string literal".to_string(),
+            ));
+        };
+        let segments = crate::format_template::parse_format_template(template)
+            .map_err(|err| TypeckError::Other(err.message()))?;
+        let expected = crate::format_template::placeholder_count(&segments);
+        if expected != value_args.len() {
+            return Err(TypeckError::ArgumentCountMismatch {
+                expected: expected + 1,
+                found: args.len(),
+            });
+        }
+        for arg in value_args {
+            let arg_ty = self.check_expr(arg)?;
+            let mut visiting = HashSet::new();
+            let context = match &arg_ty.kind {
+                TyKind::Adt { name, .. } => name.clone(),
+                _ => "format argument".to_string(),
+            };
+            self.ensure_type_printable_for_print(&arg_ty, &context, &mut visiting)?;
+        }
+        Ok(self.env.new_ty(TyKind::Adt {
+            name: "String".to_string(),
+            args: Vec::new(),
+        }))
+    }
+
     fn ensure_struct_printable(
         &mut self,
         struct_name: &str,
@@ -702,6 +741,17 @@ impl TypeChecker {
             return Ok(self
                 .infer
                 .apply_subst(&inner_ty.expect("select has at least two operands")));
+        }
+
+        // Special handling for the `format` builtin: a compile-time template
+        // literal followed by the positional arguments it renders.
+        let is_format = match &func.kind {
+            ExprKind::Ident(ident) => ident.name == "format",
+            ExprKind::Path(path) => path.segments.len() == 1 && path.segments[0].name == "format",
+            _ => false,
+        };
+        if is_format {
+            return self.check_format_call(args);
         }
 
         // Special handling for `print`/`println`/`eprintln` builtin functions

@@ -336,6 +336,91 @@ long long sengoo_string_push_str_status(long long handle, long long value_ptr) {
     return SENGOO_STATUS_OK;
 }
 
+static long long sengoo_owned_string_append_bytes(
+    long long handle, const char* bytes, size_t add_len) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (!owned || (!bytes && add_len != 0)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (add_len == 0) {
+        return SENGOO_STATUS_OK;
+    }
+    if (!sengoo_bytes_are_utf8((const unsigned char*)bytes, add_len)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t new_len = owned->len + add_len;
+    if (!sengoo_owned_string_reserve(owned, sengoo_string_capacity_for_len(new_len))) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    memcpy(owned->data + owned->len, bytes, add_len);
+    owned->len = new_len;
+    owned->data[owned->len] = '\0';
+    return SENGOO_STATUS_OK;
+}
+
+long long sengoo_string_with_capacity(long long capacity) {
+    if (capacity < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    long long handle = sengoo_owned_string_new_handle();
+    if (handle <= 0) {
+        return handle;
+    }
+    if (capacity > 0) {
+        SengooOwnedString* owned = sengoo_string_resolve(handle);
+        if (!sengoo_owned_string_reserve(
+                owned, sengoo_string_capacity_for_len((size_t)capacity))) {
+            sengoo_string_free_status(handle);
+            return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+        }
+    }
+    return handle;
+}
+
+long long sengoo_string_push_i64_status(long long handle, long long value) {
+    char buffer[32];
+    int written = snprintf(buffer, sizeof(buffer), "%lld", value);
+    if (written < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    return sengoo_owned_string_append_bytes(handle, buffer, (size_t)written);
+}
+
+long long sengoo_string_push_bool_status(long long handle, long long value) {
+    const char* text = value ? "true" : "false";
+    return sengoo_owned_string_append_bytes(handle, text, strlen(text));
+}
+
+long long sengoo_string_push_char_status(long long handle, long long codepoint) {
+    if (codepoint < 0 || codepoint > 0x10FFFF
+        || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    unsigned char buf[4];
+    size_t n;
+    unsigned long cp = (unsigned long)codepoint;
+    if (cp < 0x80) {
+        buf[0] = (unsigned char)cp;
+        n = 1;
+    } else if (cp < 0x800) {
+        buf[0] = (unsigned char)(0xC0 | (cp >> 6));
+        buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 2;
+    } else if (cp < 0x10000) {
+        buf[0] = (unsigned char)(0xE0 | (cp >> 12));
+        buf[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 3;
+    } else {
+        buf[0] = (unsigned char)(0xF0 | (cp >> 18));
+        buf[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 4;
+    }
+    return sengoo_owned_string_append_bytes(handle, (const char*)buf, n);
+}
+
 long long sengoo_string_clear_status(long long handle) {
     SengooOwnedString* owned = sengoo_string_resolve(handle);
     if (!owned) {

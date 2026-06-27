@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod error;
+pub mod format_template;
 pub mod hir;
 pub mod lexer;
 mod method_resolution;

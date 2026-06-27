@@ -32,6 +32,9 @@ pub(super) fn lower_call_expr(
     site_lo: Option<u32>,
 ) -> Local {
     if let HIRExpr::Var { name, .. } = func {
+        if name == "format" {
+            return ctx.lower_format_call(args);
+        }
         if is_spawn_blocking_call(name) {
             if let Some(capture) = args
                 .first()
