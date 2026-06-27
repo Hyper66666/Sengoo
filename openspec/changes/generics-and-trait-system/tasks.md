@@ -33,11 +33,21 @@
   - Verified by `cargo test -p sengoo-compiler dyn_trait_ -- --nocapture`,
     covering associated functions, generic methods, undefined traits, and
     `Self` returned through reference indirection.
-- [ ] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
+- [~] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
   slots + `drop` + size/align.
-- [ ] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
-- [ ] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
+  - Done: `%__dyn_Trait = { i8*, i8* }` fat pointer; one `[N x i64]` vtable
+    global per `(trait, concrete)` pair with deterministic method slots.
+  - Deferred: `drop` slot + size/align entries (needs dyn-value Drop).
+- [~] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
+  - Done (LLVM-text): `&Concrete -> &dyn Trait` coercion, by-pointer dispatch
+    shims, vtable-slot load + `CallIndirect` for single-trait `&self` methods.
+  - Deferred: Cranelift path; multi-trait `dyn A + B`; value/`&mut self`
+    receivers; `Box<dyn Trait>`.
+- [~] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
   `dyn` value runs the concrete `Drop`.
+  - Done: IR-level dispatch tests (`tests::dyn_dispatch_tests`) +
+    `examples/traits/03_dyn_dispatch.sg` runs and exits 25.
+  - Deferred: dropping a `dyn` value runs the concrete `Drop`.
 
 ## 4. Associated types
 
