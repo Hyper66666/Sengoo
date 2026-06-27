@@ -1,5 +1,14 @@
 use super::*;
 
+/// Upper bound on how deeply generic specializations may nest while lowering.
+/// Polymorphic recursion (`f<T>` calling `f<Wrap<T>>`) grows the type argument
+/// without bound, producing infinitely many ever-larger specializations; this
+/// limit turns that into a stable `monomorphization-overflow` diagnostic instead
+/// of an unbounded (and increasingly expensive) lowering. Real programs nest
+/// monomorphization only a handful of levels, so this bound is never reached by
+/// well-formed code.
+const MONOMORPHIZATION_DEPTH_LIMIT: usize = 16;
+
 impl<'a> LoweringContext<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -90,7 +99,18 @@ impl<'a> LoweringContext<'a> {
         );
         self.insert_known_function(specialized.name.clone());
 
-        match lower_function(
+        let depth = self.concrete_type_registry.enter_specialization();
+        if depth > MONOMORPHIZATION_DEPTH_LIMIT {
+            self.concrete_type_registry.leave_specialization();
+            self.errors.push(format!(
+                "[monomorphization-overflow] exceeded the monomorphization depth limit ({}) while \
+                 specializing `{}`; this usually indicates unbounded polymorphic recursion",
+                MONOMORPHIZATION_DEPTH_LIMIT, specialized.name,
+            ));
+            return None;
+        }
+
+        let lowered = lower_function(
             &specialized,
             self.lambda_counter,
             self.known_functions_base,
@@ -102,7 +122,10 @@ impl<'a> LoweringContext<'a> {
             self.trait_method_templates,
             self.known_functions_overlay.clone(),
             self.function_sigs_overlay.clone(),
-        ) {
+        );
+        self.concrete_type_registry.leave_specialization();
+
+        match lowered {
             Ok((mir_fn, nested)) => {
                 self.lambda_functions.push(mir_fn);
                 self.lambda_functions.extend(nested);

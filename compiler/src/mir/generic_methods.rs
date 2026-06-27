@@ -14,6 +14,10 @@ pub(crate) struct ConcreteTypeRegistry {
 #[derive(Debug, Default)]
 struct ConcreteTypeRegistryInner {
     hir_by_instance_name: HashMap<String, HIRType>,
+    /// Number of generic specializations currently being lowered on the native
+    /// stack. Shared across the per-specialization lowering contexts so
+    /// monomorphization recursion can be bounded.
+    active_specialization_depth: usize,
 }
 
 impl ConcreteTypeRegistry {
@@ -31,6 +35,19 @@ impl ConcreteTypeRegistry {
             registry.register_instance(instance_name.clone(), ty.clone());
         }
         registry
+    }
+
+    /// Enter a nested specialization, returning the new active depth.
+    pub(crate) fn enter_specialization(&self) -> usize {
+        let mut inner = self.inner.borrow_mut();
+        inner.active_specialization_depth += 1;
+        inner.active_specialization_depth
+    }
+
+    /// Leave a specialization previously entered with `enter_specialization`.
+    pub(crate) fn leave_specialization(&self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.active_specialization_depth = inner.active_specialization_depth.saturating_sub(1);
     }
 
     pub(crate) fn register_instance(&self, instance_name: String, ty: HIRType) {

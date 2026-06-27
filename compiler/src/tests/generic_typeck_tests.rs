@@ -481,6 +481,38 @@ impl Wave for i64 {
 }
 
 #[test]
+fn polymorphic_recursion_reports_monomorphization_overflow() {
+    // `deepen<T>` recurses as `deepen<Wrap<T>>`, growing the type argument
+    // without bound. Monomorphization must stop with a stable diagnostic rather
+    // than recursing until the compiler stack overflows.
+    let source = r#"
+struct Wrap<T> {
+    inner: T,
+}
+
+def deepen<T>(value: T, n: i64) -> i64 {
+    if n <= 0 {
+        0
+    } else {
+        deepen(Wrap { inner: value }, n - 1)
+    }
+}
+
+def main() -> i64 {
+    deepen(0, 1000)
+}
+"#;
+
+    let result = compile_to_ir(source);
+    let err = result.expect_err("unbounded polymorphic recursion should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[monomorphization-overflow]"),
+        "expected monomorphization-overflow diagnostic, got: {message}"
+    );
+}
+
+#[test]
 fn compiler_known_core_traits_and_support_types_are_available() {
     let source = r#"
 def accepts_core_traits<T: Clone + Copy + Debug + Default + Iterator>(value: T) -> i64 {
