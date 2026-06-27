@@ -25,23 +25,24 @@
 - [ ] 2.1 Extend the type checker to mark a local dead after a by-value move
   (argument, return, assignment, field move-out).
   - Partial: the owned `String` checker now marks direct let moves, named-call
-    arguments, method-call arguments, and assignment RHS moves. Return moves are
-    handled by MIR drop suppression for function exits; general non-`Copy`
-    values implementing `Drop` now share the same direct let move tracking.
-    Return moves, field move-out, and path-sensitive move analysis remain open.
+    arguments, method-call arguments, assignment RHS moves, and owning field
+    move-outs. Return moves are handled by MIR drop suppression for function
+    exits; general non-`Copy` values implementing `Drop` now share the same
+    direct let move tracking. A complete typeck-level return-move model remains
+    open.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker; verified by
     compiler, `sgc` JSON, and `sglsp` diagnostic tests. General non-`Copy`
     move analysis remains open under 2.1/2.4.
-- [ ] 2.3 Support partial moves: moved-out fields are not dropped; remaining
+- [x] 2.3 Support partial moves: moved-out fields are not dropped; remaining
   fields are.
-- [ ] 2.4 Tests under `compiler/src/tests/` for move, partial move, and the
+- [x] 2.4 Tests under `compiler/src/tests/` for move, partial move, and the
   negative use-after-move diagnostic.
-  - Partial: owned `String` negative use-after-move tests exist; partial moves
-    and general owning values remain open. Assignment RHS move coverage is now
-    included, and a user `Drop` type move/use-after-move test covers the first
-    non-`String` owning-value path.
+  - Covered by owned `String` negative use-after-move tests, user `Drop` type
+    move/use-after-move coverage, field move diagnostics, sibling-field access,
+    whole-parent partial-move rejection, assignment RHS moves, and field
+    assignment reinitialization.
 
 ## 3. MIR drop-glue insertion
 
@@ -56,20 +57,21 @@
     Lexical blocks, if branches, loop/while/for bodies, and try blocks now drop
     their own bindings at the scope boundary instead of delaying cleanup until
     function return.
-- [ ] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
+- [x] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
-  - Partial: `?` propagation exits use per-binding runtime drop flags, set false
-    at function entry and true after the owning let initializes. Every MIR
-    `Return` exit is guarded so values declared before `?` are dropped, values
-    declared after `?` are skipped on early propagation, multiple bindings drop
-    in reverse declaration order, and moved-from bindings are excluded for the
-    implemented move sites: direct `let b = a`, owned tail-expression returns,
-    owned named-call arguments, owned method-call arguments, owned assignment
-    RHS moves, and explicit `String.drop()` receivers. Explicit `return expr`
-    now lowers to a real MIR `Return` exit and reuses the same drop-flag
-    machinery. Nested lexical scopes emit cleanup before normal exit, explicit
-    `return`, `?` propagation, try-block propagation, `break`, and `continue`.
-    Partial-move field-state clearing remains open.
+  - Completed for the current MIR drop-glue surface: `?` propagation exits use
+    per-binding runtime drop flags, set false at function entry and true after
+    the owning let initializes. Every MIR `Return` exit is guarded so values
+    declared before `?` are dropped, values declared after `?` are skipped on
+    early propagation, multiple bindings drop in reverse declaration order, and
+    moved-from bindings are excluded for the implemented move sites: direct
+    `let b = a`, owned tail-expression returns, owned named-call arguments,
+    owned method-call arguments, owned assignment RHS moves, field moves, and
+    explicit `String.drop()` receivers. Explicit `return expr` now lowers to a
+    real MIR `Return` exit and reuses the same drop-flag machinery. Nested
+    lexical scopes emit cleanup before normal exit, explicit `return`, `?`
+    propagation, try-block propagation, `break`, and `continue`. Partial-move
+    field-state clearing and field reinitialization are covered.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
 - [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
   - Partial: the LLVM-text backend now receives unit-typed auto-drop calls for
@@ -85,7 +87,9 @@
     by-value parameters, non-recursive `Drop::drop` receivers, and LLVM-text
     unit-return codegen for user auto-drop calls. Nested block/branch/loop/try
     tests assert cleanup occurs in the exiting CFG block before control leaves
-    the lexical scope.
+    the lexical scope. Composite owning-field tests now cover reverse field
+    drop order, partial-move skip/drop behavior, field moves through calls and
+    returns, and field reinitialization restoring scope-exit drop.
 
 ## 4. Runtime resource migration
 

@@ -9,6 +9,48 @@ use crate::typeck::ty::Ty;
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MovePath {
+    root: String,
+    fields: Vec<String>,
+}
+
+impl MovePath {
+    fn root(name: String) -> Self {
+        Self {
+            root: name,
+            fields: Vec::new(),
+        }
+    }
+
+    fn child(&self, field: String) -> Self {
+        let mut fields = self.fields.clone();
+        fields.push(field);
+        Self {
+            root: self.root.clone(),
+            fields,
+        }
+    }
+
+    fn is_prefix_of(&self, other: &Self) -> bool {
+        self.root == other.root
+            && self.fields.len() <= other.fields.len()
+            && self
+                .fields
+                .iter()
+                .zip(other.fields.iter())
+                .all(|(left, right)| left == right)
+    }
+
+    fn display(&self) -> String {
+        if self.fields.is_empty() {
+            self.root.clone()
+        } else {
+            format!("{}.{}", self.root, self.fields.join("."))
+        }
+    }
+}
+
 /// Borrow category.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BorrowKind {
@@ -56,6 +98,12 @@ pub enum BorrowError {
         use_span: (usize, usize),
         move_span: (usize, usize),
     },
+    /// Use of a parent value after one of its owning fields was moved.
+    UseAfterPartialMove {
+        var: String,
+        use_span: (usize, usize),
+        move_span: (usize, usize),
+    },
 }
 
 /// Borrow checker.
@@ -71,11 +119,11 @@ pub struct BorrowChecker {
     /// Collected errors.
     errors: Vec<BorrowError>,
     /// Variables whose owned value was moved in the current scope.
-    moved: HashSet<String>,
+    moved: HashSet<MovePath>,
     /// Nested scope snapshots for moved-variable tracking.
-    moved_stack: Vec<HashSet<String>>,
+    moved_stack: Vec<HashSet<MovePath>>,
     /// Last move site per variable (for diagnostics).
-    move_spans: HashMap<String, (usize, usize)>,
+    move_spans: HashMap<MovePath, (usize, usize)>,
 }
 
 impl BorrowChecker {
@@ -113,8 +161,8 @@ impl BorrowChecker {
                 if let Some(value) = value {
                     self.check_expr(value);
                     self.track_borrows_in_expr(&name.name, value);
-                    if let Some(source) = Self::expr_var_name(value) {
-                        if self.var_is_movable_owning_value(&source) {
+                    if let Some(source) = Self::expr_move_path(value) {
+                        if self.move_path_is_movable_owning_value(&source) {
                             self.mark_moved(&source, value.span);
                         }
                     }
@@ -153,10 +201,10 @@ impl BorrowChecker {
             self.borrows = prev;
         }
         if let Some(mut prev_moved) = self.moved_stack.pop() {
-            for name in std::mem::take(&mut self.moved) {
-                if let Some(span) = self.move_spans.remove(&name) {
-                    prev_moved.insert(name.clone());
-                    self.move_spans.insert(name, span);
+            for path in std::mem::take(&mut self.moved) {
+                if let Some(span) = self.move_spans.remove(&path) {
+                    prev_moved.insert(path.clone());
+                    self.move_spans.insert(path, span);
                 }
             }
             self.moved = prev_moved;
@@ -239,7 +287,11 @@ impl BorrowChecker {
                 self.check_expr(base);
                 self.check_expr(index);
             }
-            ExprKind::Field { base, .. } => self.check_expr(base),
+            ExprKind::Field { .. } => {
+                if let Some(path) = Self::expr_move_path(expr) {
+                    self.check_move_path_use(&path, expr.span);
+                }
+            }
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
                 for elem in elems {
                     self.check_expr(elem);
@@ -253,7 +305,15 @@ impl BorrowChecker {
                     self.check_expr(base);
                 }
             }
-            ExprKind::Assign { target, value } | ExprKind::AssignOp { target, value, .. } => {
+            ExprKind::Assign { target, value } => {
+                self.check_assignment_place(target);
+                self.check_expr(value);
+                self.maybe_move_assignment_value(target, value);
+                if let Some(path) = Self::expr_move_path(target) {
+                    self.reinitialize_move_path(&path);
+                }
+            }
+            ExprKind::AssignOp { target, value, .. } => {
                 self.check_expr(target);
                 self.check_expr(value);
                 self.maybe_move_assignment_value(target, value);
@@ -280,11 +340,11 @@ impl BorrowChecker {
             ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => self.check_block(block),
             ExprKind::Continue | ExprKind::Literal(_) => {}
             ExprKind::Ident(ident) => {
-                self.check_use_after_move(&ident.name, expr.span);
+                self.check_move_path_use(&MovePath::root(ident.name.clone()), expr.span);
             }
             ExprKind::Path(path) => {
                 if let Some(ident) = path.as_simple() {
-                    self.check_use_after_move(&ident.name, expr.span);
+                    self.check_move_path_use(&MovePath::root(ident.name.clone()), expr.span);
                 }
             }
         }
@@ -294,7 +354,7 @@ impl BorrowChecker {
         if ty.is_copy_value() {
             return false;
         }
-        self._env.is_drop_owned_type(ty)
+        self._env.type_contains_drop_owned_value(ty)
             || self
                 ._env
                 .owned_string_ty
@@ -311,8 +371,16 @@ impl BorrowChecker {
             })
     }
 
-    fn var_is_movable_owning_value(&self, name: &str) -> bool {
-        self.var_ty(name)
+    fn move_path_ty(&self, path: &MovePath) -> Option<Ty> {
+        let mut ty = self.var_ty(&path.root)?;
+        for field in &path.fields {
+            ty = self._env.struct_field_type(&ty, field)?;
+        }
+        Some(ty)
+    }
+
+    fn move_path_is_movable_owning_value(&self, path: &MovePath) -> bool {
+        self.move_path_ty(path)
             .is_some_and(|ty| self.ty_is_movable_owning_value(&ty))
     }
 
@@ -320,53 +388,86 @@ impl BorrowChecker {
         if !matches!(method_name, "push_str" | "clear" | "drop") {
             return;
         }
-        if let Some(name) = Self::expr_var_name(receiver) {
-            if self.moved.contains(&name) {
-                let use_span = (receiver.span.lo as usize, receiver.span.hi as usize);
-                let move_span = self.move_spans.get(&name).copied().unwrap_or(use_span);
-                self.errors.push(BorrowError::UseAfterMove {
-                    var: name,
-                    use_span,
-                    move_span,
-                });
-            }
+        if let Some(path) = Self::expr_move_path(receiver) {
+            self.check_move_path_use(&path, receiver.span);
         }
     }
 
-    fn mark_moved(&mut self, name: &str, span: Span) {
+    fn mark_moved(&mut self, path: &MovePath, span: Span) {
         let use_span = (span.lo as usize, span.hi as usize);
-        self.moved.insert(name.to_string());
-        self.move_spans.insert(name.to_string(), use_span);
+        self.moved.insert(path.clone());
+        self.move_spans.insert(path.clone(), use_span);
     }
 
-    fn check_use_after_move(&mut self, name: &str, span: Span) {
-        if !self.moved.contains(name) {
+    fn check_move_path_use(&mut self, path: &MovePath, span: Span) {
+        let use_span = (span.lo as usize, span.hi as usize);
+        if let Some(moved) = self.moved.iter().find(|moved| moved.is_prefix_of(path)) {
+            let move_span = self.move_spans.get(moved).copied().unwrap_or(use_span);
+            self.errors.push(BorrowError::UseAfterMove {
+                var: moved.display(),
+                use_span,
+                move_span,
+            });
             return;
         }
-        let use_span = (span.lo as usize, span.hi as usize);
-        let move_span = self.move_spans.get(name).copied().unwrap_or(use_span);
-        self.errors.push(BorrowError::UseAfterMove {
-            var: name.to_string(),
-            use_span,
-            move_span,
-        });
+        if let Some(moved) = self.moved.iter().find(|moved| path.is_prefix_of(moved)) {
+            let move_span = self.move_spans.get(moved).copied().unwrap_or(use_span);
+            self.errors.push(BorrowError::UseAfterPartialMove {
+                var: path.display(),
+                use_span,
+                move_span,
+            });
+        }
     }
 
     fn maybe_move_string_arg(&mut self, arg: &Expr) {
-        if let Some(name) = Self::expr_var_name(arg) {
-            if self.var_is_movable_owning_value(&name) {
-                self.mark_moved(&name, arg.span);
+        if let Some(path) = Self::expr_move_path(arg) {
+            if self.move_path_is_movable_owning_value(&path) {
+                self.mark_moved(&path, arg.span);
             }
         }
     }
 
     fn maybe_move_assignment_value(&mut self, target: &Expr, value: &Expr) {
-        let target_name = Self::expr_var_name(target);
-        let value_name = Self::expr_var_name(value);
-        if target_name.is_some() && target_name == value_name {
+        let target_path = Self::expr_move_path(target);
+        let value_path = Self::expr_move_path(value);
+        if target_path.is_some() && target_path == value_path {
             return;
         }
         self.maybe_move_string_arg(value);
+    }
+
+    fn check_assignment_place(&mut self, target: &Expr) {
+        let Some(path) = Self::expr_move_path(target) else {
+            self.check_expr(target);
+            return;
+        };
+        let use_span = (target.span.lo as usize, target.span.hi as usize);
+        if let Some(moved) = self
+            .moved
+            .iter()
+            .find(|moved| moved.fields.len() < path.fields.len() && moved.is_prefix_of(&path))
+        {
+            let move_span = self.move_spans.get(moved).copied().unwrap_or(use_span);
+            self.errors.push(BorrowError::UseAfterMove {
+                var: moved.display(),
+                use_span,
+                move_span,
+            });
+        }
+    }
+
+    fn reinitialize_move_path(&mut self, path: &MovePath) {
+        let reinitialized = self
+            .moved
+            .iter()
+            .filter(|moved| path.is_prefix_of(moved))
+            .cloned()
+            .collect::<Vec<_>>();
+        for moved in reinitialized {
+            self.moved.remove(&moved);
+            self.move_spans.remove(&moved);
+        }
     }
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
@@ -452,6 +553,20 @@ impl BorrowChecker {
         match &expr.kind {
             ExprKind::Ident(ident) => Some(ident.name.clone()),
             ExprKind::Path(path) => path.as_simple().map(|ident| ident.name.clone()),
+            _ => None,
+        }
+    }
+
+    fn expr_move_path(expr: &Expr) -> Option<MovePath> {
+        match &expr.kind {
+            ExprKind::Ident(ident) => Some(MovePath::root(ident.name.clone())),
+            ExprKind::Path(path) => path
+                .as_simple()
+                .map(|ident| MovePath::root(ident.name.clone())),
+            ExprKind::Field { base, field } => {
+                Self::expr_move_path(base).map(|path| path.child(field.name.clone()))
+            }
+            ExprKind::Paren(inner) => Self::expr_move_path(inner),
             _ => None,
         }
     }

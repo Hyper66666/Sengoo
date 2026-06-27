@@ -195,6 +195,105 @@ def main() -> i64 {
 }
 
 #[test]
+fn owned_field_move_rejects_reusing_the_same_field() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_move_keeps_sibling_field_available() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.right.len()
+}
+"#,
+    )
+    .expect("moving one owning field should not move its sibling");
+}
+
+#[test]
+fn owned_field_move_rejects_using_the_whole_parent_value() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def consume(value: Pair) -> i64 {
+    value.right.len()
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    consume(pair)
+}
+"#,
+    );
+    assert!(
+        err.contains("use of partially moved value `pair`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_assignment_reinitializes_a_moved_field() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let mut pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left = string_from_str("replacement").value;
+    pair.left.len()
+}
+"#,
+    )
+    .expect("assigning a moved field should reinitialize that field");
+}
+
+#[test]
 fn stdlib_owned_string_exact_capacity_emits_runtime_calls() {
     let ir = compile_to_ir(&format!(
         "{}\n\n{}",

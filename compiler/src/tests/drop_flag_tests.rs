@@ -81,6 +81,15 @@ fn has_guard_terminator(function: &MirFunction) -> bool {
         .any(|block| matches!(block.terminator, Some(Terminator::If { .. })))
 }
 
+fn extracted_field_index(function: &MirFunction, local: Local) -> Option<u32> {
+    function.instructions.iter().find_map(|inst| match inst {
+        Instruction::Extract {
+            destination, index, ..
+        } if *destination == local => Some(*index),
+        _ => None,
+    })
+}
+
 #[test]
 fn drop_glue_inserts_straight_line_string_drop_without_flags() {
     let mir = compile_with_owned_string(
@@ -224,6 +233,180 @@ def main() -> i64 {
         string_drop_calls(main_fn).len(),
         1,
         "the moved-from binding should not be dropped a second time"
+    );
+}
+
+#[test]
+fn composite_owning_fields_are_dropped_in_reverse_declaration_order() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1, 0],
+        "composite fields should be dropped in reverse declaration order"
+    );
+}
+
+#[test]
+fn partial_move_drops_only_the_remaining_composite_field() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "the moved-out field must be skipped while the sibling field is dropped"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        2,
+        "the moved binding and the one remaining field should each be dropped once"
+    );
+}
+
+#[test]
+fn field_moved_into_call_is_not_dropped_by_the_caller() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def consume(value: String) -> i64 {
+    value.len()
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    consume(pair.left)
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "only the sibling field should remain owned by the caller"
+    );
+    assert_eq!(string_drop_calls(main_fn).len(), 1);
+}
+
+#[test]
+fn returned_field_is_not_dropped_before_leaving_the_function() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def take_left() -> String {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    pair.left
+}
+"#,
+    );
+    let take_left = function(&mir, "take_left");
+    let field_order = string_drop_calls(take_left)
+        .iter()
+        .filter_map(|args| extracted_field_index(take_left, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "the returned field must move out while its sibling is dropped"
+    );
+    assert_eq!(string_drop_calls(take_left).len(), 1);
+}
+
+#[test]
+fn reinitialized_moved_field_is_dropped_again_at_scope_exit() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let mut pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left = string_from_str("replacement").value;
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1, 0],
+        "both fields should be live again and dropped in reverse order"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        3,
+        "the moved binding plus both reconstituted fields should be dropped"
     );
 }
 

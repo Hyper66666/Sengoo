@@ -22,7 +22,7 @@ impl<'a> LoweringContext<'a> {
             return;
         }
         for binding in bindings.iter().rev() {
-            if self.moved_drop_locals.contains(&binding.local) {
+            if self.drop_binding_is_moved(binding) {
                 continue;
             }
             self.push_drop_call(self.current_block(), binding);
@@ -39,7 +39,7 @@ impl<'a> LoweringContext<'a> {
         };
         let bindings = self.drop_bindings[marker..]
             .iter()
-            .filter(|binding| !self.moved_drop_locals.contains(&binding.local))
+            .filter(|binding| !self.drop_binding_is_moved(binding))
             .cloned()
             .collect::<Vec<_>>();
         for binding in bindings.iter().rev() {
@@ -48,17 +48,24 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
-        let Some(drop_func) = self.drop_func_for_local(local) else {
-            return;
+        let mut bindings = Vec::new();
+        if let Some(drop_func) = self.drop_func_for_local(local) {
+            bindings.push(DropBinding {
+                local,
+                field_path: Vec::new(),
+                drop_func,
+            });
+        } else {
+            let ty = self.get_local_type(local).clone();
+            self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
         };
-        if self
-            .drop_bindings
-            .iter()
-            .any(|binding| binding.local == local)
-        {
-            return;
+        for binding in bindings {
+            if !self.drop_bindings.iter().any(|existing| {
+                existing.local == binding.local && existing.field_path == binding.field_path
+            }) {
+                self.drop_bindings.push(binding);
+            }
         }
-        self.drop_bindings.push(DropBinding { local, drop_func });
     }
 
     pub(super) fn mark_drop_local_moved(&mut self, local: Local) {
@@ -73,29 +80,149 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    pub(super) fn mark_drop_local_reinitialized(&mut self, local: Local) {
-        if self.drop_func_for_local(local).is_some() {
-            self.moved_drop_locals.remove(&local);
-            self.record_drop_binding_if_needed(local);
+    pub(super) fn mark_drop_expr_moved(&mut self, expr: &HIRExpr) {
+        let Some((local, field_path)) = self.resolve_drop_place(expr) else {
+            return;
+        };
+        if field_path.is_empty() {
+            self.mark_drop_local_moved(local);
+        } else {
+            self.mark_drop_field_moved(local, field_path);
         }
+    }
+
+    pub(super) fn resolve_drop_place(&mut self, expr: &HIRExpr) -> Option<(Local, Vec<u32>)> {
+        match expr {
+            HIRExpr::Var { name, symbol } => Some((self.resolve_local(name, *symbol), Vec::new())),
+            HIRExpr::Field { base, field } => {
+                let (local, mut path) = self.resolve_drop_place(base)?;
+                let owner_ty = self.drop_place_type(local, &path)?;
+                let index = match owner_ty {
+                    MIRType::Struct { fields, .. } => {
+                        fields.iter().position(|(name, _)| name == field)?
+                    }
+                    MIRType::Tuple(fields) => {
+                        let index = field.parse::<usize>().ok()?;
+                        (index < fields.len()).then_some(index)?
+                    }
+                    _ => return None,
+                };
+                path.push(index as u32);
+                Some((local, path))
+            }
+            _ => None,
+        }
+    }
+
+    fn drop_place_type(&self, local: Local, path: &[u32]) -> Option<MIRType> {
+        let mut ty = self.get_local_type(local).clone();
+        for index in path {
+            ty = match ty {
+                MIRType::Struct { fields, .. } => fields.get(*index as usize)?.1.clone(),
+                MIRType::Tuple(fields) => fields.get(*index as usize)?.clone(),
+                MIRType::Array(elem, len) if (*index as u64) < len => *elem,
+                _ => return None,
+            };
+        }
+        Some(ty)
+    }
+
+    pub(super) fn mark_drop_local_reinitialized(&mut self, local: Local) {
+        self.moved_drop_locals.remove(&local);
+        self.moved_drop_fields
+            .retain(|(moved_local, _)| *moved_local != local);
+        self.record_drop_binding_if_needed(local);
     }
 
     pub(super) fn drop_local_now_if_initialized(&mut self, local: Local) {
         if self.moved_drop_locals.contains(&local) {
             return;
         }
-        let Some(drop_func) = self.drop_func_for_local(local) else {
-            return;
-        };
-        if !self
+        let bindings = self
             .drop_bindings
             .iter()
-            .any(|binding| binding.local == local)
-        {
+            .filter(|binding| binding.local == local && !self.drop_binding_is_moved(binding))
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings.iter().rev() {
+            self.push_drop_call(self.current_block(), binding);
+        }
+    }
+
+    pub(super) fn drop_field_now_if_initialized(&mut self, local: Local, field_path: &[u32]) {
+        if self.moved_drop_locals.contains(&local) {
             return;
         }
-        let binding = DropBinding { local, drop_func };
-        self.push_drop_call(self.current_block(), &binding);
+        let bindings = self
+            .drop_bindings
+            .iter()
+            .filter(|binding| {
+                binding.local == local
+                    && Self::field_path_is_prefix(field_path, &binding.field_path)
+                    && !self.drop_binding_is_moved(binding)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings.iter().rev() {
+            self.push_drop_call(self.current_block(), binding);
+        }
+    }
+
+    pub(super) fn mark_drop_field_reinitialized(&mut self, local: Local, field_path: &[u32]) {
+        self.moved_drop_fields.retain(|(moved_local, moved_path)| {
+            *moved_local != local || !Self::field_path_is_prefix(field_path, moved_path)
+        });
+        self.record_drop_binding_if_needed(local);
+    }
+
+    pub(super) fn rebuild_drop_place_with_value(
+        &mut self,
+        root: Local,
+        field_path: &[u32],
+        new_value: Local,
+    ) -> Option<Local> {
+        let root_ty = self.get_local_type(root).clone();
+        self.rebuild_drop_place_inner(root, root_ty, field_path, new_value)
+    }
+
+    fn rebuild_drop_place_inner(
+        &mut self,
+        aggregate: Local,
+        aggregate_ty: MIRType,
+        field_path: &[u32],
+        new_value: Local,
+    ) -> Option<Local> {
+        let (&field, rest) = field_path.split_first()?;
+        let field_ty = Self::field_type_at(&aggregate_ty, field)?;
+        let replacement = if rest.is_empty() {
+            new_value
+        } else {
+            let extracted = self.add_local(None, LocalKind::Temp, field_ty.clone());
+            self.push_inst(Instruction::Extract {
+                destination: extracted,
+                value: aggregate,
+                index: field,
+            });
+            self.rebuild_drop_place_inner(extracted, field_ty, rest, new_value)?
+        };
+
+        let rebuilt = self.add_local(None, LocalKind::Temp, aggregate_ty);
+        self.push_inst(Instruction::Insert {
+            destination: rebuilt,
+            value: aggregate,
+            field,
+            new_value: replacement,
+        });
+        Some(rebuilt)
+    }
+
+    fn field_type_at(ty: &MIRType, field: u32) -> Option<MIRType> {
+        match ty {
+            MIRType::Struct { fields, .. } => fields.get(field as usize).map(|(_, ty)| ty.clone()),
+            MIRType::Tuple(fields) => fields.get(field as usize).cloned(),
+            MIRType::Array(elem, len) if (field as u64) < *len => Some((**elem).clone()),
+            _ => None,
+        }
     }
 
     fn drop_func_for_local(&self, local: Local) -> Option<String> {
@@ -111,11 +238,74 @@ impl<'a> LoweringContext<'a> {
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
+    fn drop_func_for_type(&self, ty: &MIRType) -> Option<String> {
+        let MIRType::Struct { name, .. } = ty else {
+            return None;
+        };
+        let drop_func = if name == "String" {
+            "String_drop".to_string()
+        } else {
+            format!("{name}_Drop_drop")
+        };
+        self.is_known_function(&drop_func).then_some(drop_func)
+    }
+
+    fn collect_field_drop_bindings(
+        &self,
+        local: Local,
+        ty: &MIRType,
+        path: &mut Vec<u32>,
+        bindings: &mut Vec<DropBinding>,
+    ) {
+        if let Some(drop_func) = self.drop_func_for_type(ty) {
+            bindings.push(DropBinding {
+                local,
+                field_path: path.clone(),
+                drop_func,
+            });
+            return;
+        }
+        let fields = match ty {
+            MIRType::Struct { fields, .. } => fields.iter().map(|(_, ty)| ty).collect::<Vec<_>>(),
+            MIRType::Tuple(fields) => fields.iter().collect::<Vec<_>>(),
+            MIRType::Array(elem, len) => (0..*len).map(|_| elem.as_ref()).collect::<Vec<_>>(),
+            _ => return,
+        };
+        for (index, field_ty) in fields.into_iter().enumerate() {
+            path.push(index as u32);
+            self.collect_field_drop_bindings(local, field_ty, path, bindings);
+            path.pop();
+        }
+    }
+
+    fn drop_binding_is_moved(&self, binding: &DropBinding) -> bool {
+        self.moved_drop_locals.contains(&binding.local)
+            || self.moved_drop_fields.iter().any(|(local, moved_path)| {
+                *local == binding.local
+                    && (Self::field_path_is_prefix(moved_path, &binding.field_path)
+                        || Self::field_path_is_prefix(&binding.field_path, moved_path))
+            })
+    }
+
+    fn field_path_is_prefix(left: &[u32], right: &[u32]) -> bool {
+        left.len() <= right.len() && left.iter().zip(right).all(|(left, right)| left == right)
+    }
+
+    pub(super) fn mark_drop_field_moved(&mut self, local: Local, field_path: Vec<u32>) {
+        if self
+            .drop_bindings
+            .iter()
+            .any(|binding| binding.local == local && !binding.field_path.is_empty())
+        {
+            self.moved_drop_fields.insert((local, field_path));
+        }
+    }
+
     pub(super) fn insert_drop_glue(&mut self) {
         let bindings = self
             .drop_bindings
             .iter()
-            .filter(|binding| !self.moved_drop_locals.contains(&binding.local))
+            .filter(|binding| !self.drop_binding_is_moved(binding))
             .cloned()
             .collect::<Vec<_>>();
         if bindings.is_empty() {
@@ -204,13 +394,35 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn push_drop_call(&mut self, block: usize, binding: &DropBinding) {
+        let mut argument = binding.local;
+        for index in &binding.field_path {
+            let field_ty = match self.get_local_type(argument) {
+                MIRType::Struct { fields, .. } => fields
+                    .get(*index as usize)
+                    .map(|(_, ty)| ty.clone())
+                    .unwrap_or(MIR_UNIT),
+                MIRType::Tuple(fields) => fields.get(*index as usize).cloned().unwrap_or(MIR_UNIT),
+                MIRType::Array(elem, _) => (**elem).clone(),
+                _ => MIR_UNIT,
+            };
+            let extracted = self.mir_fn.add_local(LocalKind::Temp, field_ty);
+            self.mir_fn.push_inst_to_block(
+                block,
+                Instruction::Extract {
+                    destination: extracted,
+                    value: argument,
+                    index: *index,
+                },
+            );
+            argument = extracted;
+        }
         let destination = self.mir_fn.add_local(LocalKind::Temp, MIR_UNIT);
         self.mir_fn.push_inst_to_block(
             block,
             Instruction::Call {
                 destination,
                 func: binding.drop_func.clone(),
-                args: vec![binding.local],
+                args: vec![argument],
             },
         );
     }

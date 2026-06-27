@@ -126,6 +126,7 @@ struct LoopContext {
 #[derive(Debug, Clone)]
 struct DropBinding {
     local: Local,
+    field_path: Vec<u32>,
     drop_func: String,
 }
 
@@ -217,6 +218,7 @@ struct LoweringContext<'a> {
     drop_bindings: Vec<DropBinding>,
     drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
+    moved_drop_fields: HashSet<(Local, Vec<u32>)>,
 }
 
 impl<'a> LoweringContext<'a> {

@@ -21,6 +21,7 @@ use crate::Result;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
+type EnumMetaAndFields = (Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>);
 
 mod call_helpers;
 mod class_hierarchy_helpers;
@@ -384,25 +385,24 @@ impl TypeChecker {
                     .collect::<Vec<_>>();
                 self.enum_variants.insert(name.clone(), variants);
                 self.env.push_scope();
-                let enum_meta_and_fields =
-                    (|| -> TyResult<(Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>)> {
-                        let type_meta = self
-                            .bind_type_params_with_meta(&enum_decl.type_params)
-                            .map_err(|err| TypeckError::Other(err.to_string()))?;
-                        let mut variant_fields = HashMap::new();
-                        for variant in &enum_decl.variants {
-                            let field_tys = variant
-                                .fields
-                                .iter()
-                                .map(|field| match field {
-                                    crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
-                                    crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
-                                })
-                                .collect::<TyResult<Vec<_>>>()?;
-                            variant_fields.insert(variant.name.name.clone(), field_tys);
-                        }
-                        Ok((type_meta, variant_fields))
-                    })();
+                let enum_meta_and_fields = (|| -> TyResult<EnumMetaAndFields> {
+                    let type_meta = self
+                        .bind_type_params_with_meta(&enum_decl.type_params)
+                        .map_err(|err| TypeckError::Other(err.to_string()))?;
+                    let mut variant_fields = HashMap::new();
+                    for variant in &enum_decl.variants {
+                        let field_tys = variant
+                            .fields
+                            .iter()
+                            .map(|field| match field {
+                                crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
+                                crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
+                            })
+                            .collect::<TyResult<Vec<_>>>()?;
+                        variant_fields.insert(variant.name.name.clone(), field_tys);
+                    }
+                    Ok((type_meta, variant_fields))
+                })();
                 self.env.pop_scope();
                 let (type_meta, variant_fields) = enum_meta_and_fields?;
                 self.enum_variant_field_tys.insert(name, variant_fields);

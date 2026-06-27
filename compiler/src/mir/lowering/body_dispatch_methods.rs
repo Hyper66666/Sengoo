@@ -68,7 +68,7 @@ impl<'a> LoweringContext<'a> {
                     if is_main_with_unit_body {
                         self.set_terminator(Terminator::Return(None));
                     } else {
-                        self.mark_drop_local_moved(result_local);
+                        self.mark_drop_expr_moved(expr);
                         self.set_terminator(Terminator::Return(Some(result_local)));
                     }
                 }

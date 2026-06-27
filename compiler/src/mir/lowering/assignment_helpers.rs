@@ -13,9 +13,7 @@ pub(super) fn lower_assign_expr(
             if value_local == target_local {
                 return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
-            if matches!(value, HIRExpr::Var { .. }) {
-                ctx.mark_drop_local_moved(value_local);
-            }
+            ctx.mark_drop_expr_moved(value);
             ctx.drop_local_now_if_initialized(target_local);
             if let Some(type_name) = ctx.type_names.get(&value_local).cloned() {
                 ctx.type_names.insert(target_local, type_name);
@@ -25,6 +23,24 @@ pub(super) fn lower_assign_expr(
                 value: value_local,
             });
             ctx.mark_drop_local_reinitialized(target_local);
+        }
+        HIRExpr::Field { .. } => {
+            let Some((root, field_path)) = ctx.resolve_drop_place(target) else {
+                ctx.errors.push("unsupported assignment target".to_string());
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            };
+            ctx.mark_drop_expr_moved(value);
+            ctx.drop_field_now_if_initialized(root, &field_path);
+            let Some(rebuilt) = ctx.rebuild_drop_place_with_value(root, &field_path, value_local)
+            else {
+                ctx.errors.push("unsupported assignment target".to_string());
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            };
+            ctx.push_inst(Instruction::Store {
+                destination: root,
+                value: rebuilt,
+            });
+            ctx.mark_drop_field_reinitialized(root, &field_path);
         }
         HIRExpr::Index { base, index } => {
             let base_local = ctx.lower_expr(base);

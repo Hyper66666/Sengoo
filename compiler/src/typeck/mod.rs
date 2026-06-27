@@ -85,14 +85,23 @@ pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
                 "use of moved value `{}` (moved {:?}, used {:?})",
                 var, move_span, use_span
             )),
+            BorrowError::UseAfterPartialMove {
+                var,
+                use_span,
+                move_span,
+            } => lines.push(format!(
+                "use of partially moved value `{}` (field moved {:?}, used {:?})",
+                var, move_span, use_span
+            )),
         }
     }
 
     let message = format!("borrow check failed:\n- {}", lines.join("\n- "));
-    if let Some(BorrowError::UseAfterMove { use_span, .. }) = errors
-        .iter()
-        .find(|err| matches!(err, BorrowError::UseAfterMove { .. }))
-    {
+    if let Some(use_span) = errors.iter().find_map(|err| match err {
+        BorrowError::UseAfterMove { use_span, .. }
+        | BorrowError::UseAfterPartialMove { use_span, .. } => Some(*use_span),
+        _ => None,
+    }) {
         return TypeckError::diagnostic(
             "use-after-move",
             message,
