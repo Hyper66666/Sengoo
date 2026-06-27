@@ -92,6 +92,7 @@ pub(super) fn type_signature(ty: &Type) -> String {
         }
         TypeKind::Never => "!".to_string(),
         TypeKind::Infer => "_".to_string(),
+        TypeKind::SelfType => "Self".to_string(),
         TypeKind::Dyn(bounds) => {
             let joined = bounds
                 .iter()
@@ -311,7 +312,7 @@ fn append_decl_interface_signature(out: &mut String, decl: &Decl) {
                         )
                     }
                     TraitItem::Type(alias) => {
-                        format!("type:{}={}", alias.name.name, type_signature(&alias.ty))
+                        format!("type:{}", alias.name.name)
                     }
                 })
                 .collect::<Vec<_>>()

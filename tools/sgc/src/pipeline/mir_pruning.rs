@@ -45,7 +45,13 @@ pub(super) fn prune_unreachable_mir_functions(mir_fns: &mut Vec<MirFunction>) ->
         }
     }
     for (idx, mir_fn) in mir_fns.iter().enumerate() {
-        if mir_fn.name.starts_with("$__lambda") {
+        // Lambdas and dyn-dispatch shims are entered indirectly (function
+        // pointers / vtable slots), so keep them as reachability roots.
+        if mir_fn.name.starts_with("$__lambda")
+            || mir_fn
+                .name
+                .starts_with(sengoo_compiler::mir::dyn_dispatch::VTABLE_SHIM_PREFIX)
+        {
             stack.push(idx);
         }
     }

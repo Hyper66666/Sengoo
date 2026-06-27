@@ -23,6 +23,7 @@ pub mod direct_call_helpers_tests;
 pub mod display_print_tests;
 pub mod drop_flag_tests;
 pub mod drop_trait_tests;
+pub mod dyn_dispatch_tests;
 pub mod enum_match_lowering_tests;
 pub mod ffi_tests;
 pub mod for_loop_tests;

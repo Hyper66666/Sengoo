@@ -82,6 +82,17 @@ impl Codegen {
 ",
                                 dest, llvm_dest_ty, name, llvm_dest_ty
                             ));
+                        } else if matches!(dest_ty, MIRType::Ptr(_) | MIRType::Ref(_)) {
+                            // Address of a global (e.g. a `dyn Trait` vtable),
+                            // reinterpreted to the destination pointer type.
+                            let src_ty = self
+                                .global_llvm_type(name)
+                                .map(|ty| format!("{}*", ty))
+                                .unwrap_or_else(|| llvm_dest_ty.clone());
+                            self.ir.push_str(&format!(
+                                "{} = bitcast {} @{} to {}\n",
+                                dest, src_ty, name, llvm_dest_ty
+                            ));
                         } else {
                             self.ir.push_str(&format!(
                                 "{} = bitcast i64* @{} to i64
@@ -589,6 +600,64 @@ impl Codegen {
                     self.ir.push_str(&format!(
                         "{} = load {}, {}* {}\n",
                         dest, ret_ty, ret_ty, sret_slot
+                    ));
+                } else {
+                    self.ir.push_str(&format!(
+                        "{} = call {} {}({}){}\n",
+                        dest,
+                        ret_ty,
+                        callee,
+                        arg_strs.join(", "),
+                        dbg
+                    ));
+                }
+            }
+
+            mir::Instruction::CallIndirect {
+                destination,
+                func_ptr,
+                args,
+            } => {
+                let dest = self.local_name(*destination);
+                let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                let ret_ty = self.mir_type_to_llvm_cached(&dest_ty);
+
+                let mut arg_tys: Vec<String> = Vec::new();
+                let mut arg_strs: Vec<String> = Vec::new();
+                for arg in args {
+                    let arg_ty = self.get_local_type(mir_fn, *arg);
+                    let llvm_arg_ty = self.mir_type_to_llvm_cached(arg_ty);
+                    let val = self.operand_value(*arg, mir_fn);
+                    arg_strs.push(format!("{} {}", llvm_arg_ty, val));
+                    arg_tys.push(llvm_arg_ty);
+                }
+
+                // The function pointer arrives as a pointer-sized integer word
+                // (loaded from a vtable slot); materialize a typed function
+                // pointer before calling.
+                let fn_ptr_ty = format!("{} ({})*", ret_ty, arg_tys.join(", "));
+                let fn_word = self.operand_value(*func_ptr, mir_fn);
+                let fn_word_ty = self.get_local_type(mir_fn, *func_ptr).clone();
+                let fn_word_llvm = self.mir_type_to_llvm_cached(&fn_word_ty);
+                let callee = format!("%callindirect.fn.{}", destination.id);
+                let cast_op = if matches!(fn_word_ty, MIRType::Int(_)) {
+                    "inttoptr"
+                } else {
+                    "bitcast"
+                };
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = {} {} {} to {}\n",
+                    callee, cast_op, fn_word_llvm, fn_word, fn_ptr_ty
+                ));
+
+                self.emit_indent();
+                if ret_ty == "void" {
+                    self.ir.push_str(&format!(
+                        "call void {}({}){}\n",
+                        callee,
+                        arg_strs.join(", "),
+                        dbg
                     ));
                 } else {
                     self.ir.push_str(&format!(

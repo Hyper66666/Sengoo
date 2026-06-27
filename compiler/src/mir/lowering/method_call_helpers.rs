@@ -173,6 +173,12 @@ pub(super) fn lower_method_call_from_locals(
         return result_local;
     }
 
+    if let Some(result_local) =
+        try_lower_dyn_method_dispatch(ctx, receiver_local, method, arg_locals)
+    {
+        return result_local;
+    }
+
     let resolved_func_name =
         match resolve_method_call_target_with_ctx(ctx, receiver_local, method, arg_locals) {
             Ok(name) => name,
@@ -186,6 +192,111 @@ pub(super) fn lower_method_call_from_locals(
 
 fn is_explicit_release_method(method: &str) -> bool {
     matches!(method, "drop" | "free" | "close")
+}
+
+/// Lower a method call on a `&dyn Trait` receiver into a vtable-backed indirect
+/// call. Returns `None` for non-`dyn` receivers so the normal monomorphic path
+/// runs. The fat pointer is `{ data: i8*, vtable: i8* }`; the slot index is the
+/// method's position in the trait's deterministic vtable layout.
+fn try_lower_dyn_method_dispatch(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    method: &str,
+    arg_locals: &[Local],
+) -> Option<Local> {
+    let receiver_ty = ctx.get_local_type(receiver_local).clone();
+    let trait_name = crate::mir::dyn_dispatch::dyn_trait_of_type(&receiver_ty)?.to_string();
+
+    let resolved = ctx
+        .options
+        .trait_method_order
+        .get(&trait_name)
+        .and_then(|slots| {
+            slots
+                .iter()
+                .position(|slot| slot.name == method)
+                .map(|index| (index, slots[index].ret.clone()))
+        });
+    let (slot, ret_ty) = match resolved {
+        Some(found) => found,
+        None => {
+            ctx.errors.push(format!(
+                "dyn dispatch: method '{}' not found on trait '{}'",
+                method, trait_name
+            ));
+            return Some(ctx.add_local(None, LocalKind::Temp, MIR_UNIT));
+        }
+    };
+
+    ctx.mark_drop_locals_moved(arg_locals);
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let i64_ptr = MIRType::Ptr(Box::new(MIR_I64));
+
+    // data = extractvalue receiver, 0  (concrete receiver as i8*)
+    let data_local = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Extract {
+        destination: data_local,
+        value: receiver_local,
+        index: 0,
+    });
+
+    // vtable = extractvalue receiver, 1  (i8* to the function-pointer table)
+    let vtable_i8 = ctx.add_local(None, LocalKind::Temp, i8_ptr);
+    ctx.push_inst(Instruction::Extract {
+        destination: vtable_i8,
+        value: receiver_local,
+        index: 1,
+    });
+
+    // Reinterpret the table as `i64*` so each slot holds one pointer-sized word.
+    let vtable_words = ctx.add_local(None, LocalKind::Temp, i64_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: vtable_words,
+        value: vtable_i8,
+        to: i64_ptr,
+    });
+
+    // slot index constant
+    let slot_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: slot_local,
+        value: MirConstant::Int(slot as i64),
+    });
+
+    // slot_addr = &vtable[slot]
+    let slot_addr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(MIR_I64)));
+    ctx.push_inst(Instruction::IndexAddr {
+        destination: slot_addr,
+        base: vtable_words,
+        index: slot_local,
+    });
+
+    // fnptr (as an integer word) = load slot_addr; CallIndirect reinterprets it.
+    let fnptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Load {
+        destination: fnptr,
+        source: slot_addr,
+    });
+
+    let struct_type_name = match &ret_ty {
+        MIRType::Struct { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    let result_local = ctx.add_local(None, LocalKind::Temp, ret_ty);
+    if let Some(name) = struct_type_name {
+        ctx.type_names.insert(result_local, name);
+    }
+
+    let mut call_args = vec![data_local];
+    call_args.extend(arg_locals.iter().copied());
+    ctx.push_inst(Instruction::CallIndirect {
+        destination: result_local,
+        func_ptr: fnptr,
+        args: call_args,
+    });
+
+    Some(result_local)
 }
 
 #[cfg(test)]

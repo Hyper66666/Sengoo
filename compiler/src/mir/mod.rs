@@ -18,6 +18,7 @@ mod bb;
 pub(crate) mod concrete_type_helpers;
 #[cfg(test)]
 pub(crate) mod direct_call_helpers;
+pub mod dyn_dispatch;
 pub(crate) mod function_sig_helpers;
 mod generic_methods;
 pub(crate) mod hir_specialization_helpers;
@@ -256,7 +257,15 @@ impl From<HIRType> for MIRType {
             HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
                 MIRType::Ptr(Box::new(MIRType::Int(8)))
             }
-            HIRTypeKind::Ref(_, inner) => MIRType::Ref(Box::new((*inner).into())),
+            HIRTypeKind::Ref(_, inner) => match inner.kind {
+                HIRTypeKind::TraitObject(ref traits) if !traits.is_empty() => {
+                    dyn_dispatch::dyn_fat_ptr_type(&traits[0])
+                }
+                _ => MIRType::Ref(Box::new((*inner).into())),
+            },
+            HIRTypeKind::TraitObject(ref traits) if !traits.is_empty() => {
+                dyn_dispatch::dyn_fat_ptr_type(&traits[0])
+            }
             HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new((*inner).into())),
             HIRTypeKind::Array(elem, len) => MIRType::Array(Box::new((*elem).into()), len as u64),
             HIRTypeKind::Tuple(types) => {

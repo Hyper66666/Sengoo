@@ -2,6 +2,7 @@ pub mod common;
 
 mod debug_info;
 mod declaration_helpers;
+mod dyn_vtable_codegen;
 mod instruction_helpers;
 pub mod jit;
 mod module_helpers;
@@ -90,6 +91,11 @@ pub struct Codegen {
     debug_info: DebugInfoConfig,
 
     debug_locations: HashMap<String, debug_info::DebugLocationIds>,
+
+    /// LLVM type string of module-level globals (e.g. `dyn Trait` vtables),
+    /// keyed by global symbol name. Used to materialize correctly-typed
+    /// `bitcast`s when a `GlobalRef` is taken as a pointer.
+    global_types: HashMap<String, String>,
 }
 
 impl Codegen {
@@ -140,6 +146,8 @@ impl Codegen {
             debug_info,
 
             debug_locations: HashMap::new(),
+
+            global_types: HashMap::new(),
         };
 
         cg.emit_header();

@@ -154,6 +154,18 @@ fn remap_instruction(
                 .map(|local| remap_local(*local, local_map))
                 .collect::<Result<Vec<_>, _>>()?,
         },
+        Instruction::CallIndirect {
+            destination,
+            func_ptr,
+            args,
+        } => Instruction::CallIndirect {
+            destination: remap_local(*destination, local_map)?,
+            func_ptr: remap_local(*func_ptr, local_map)?,
+            args: args
+                .iter()
+                .map(|local| remap_local(*local, local_map))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
         Instruction::Intrinsic {
             destination,
             intrinsic,

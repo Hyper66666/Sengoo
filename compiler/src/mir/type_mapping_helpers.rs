@@ -75,9 +75,20 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
         HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
             MIRType::Ptr(Box::new(MIRType::Int(8)))
         }
-        HIRTypeKind::Ref(_, inner) => MIRType::Ref(Box::new(
-            hir_type_to_mir_with_structs_and_enums(inner, struct_defs, enum_defs, subst),
-        )),
+        HIRTypeKind::Ref(_, inner) => match &inner.kind {
+            HIRTypeKind::TraitObject(traits) if !traits.is_empty() => {
+                crate::mir::dyn_dispatch::dyn_fat_ptr_type(&traits[0])
+            }
+            _ => MIRType::Ref(Box::new(hir_type_to_mir_with_structs_and_enums(
+                inner,
+                struct_defs,
+                enum_defs,
+                subst,
+            ))),
+        },
+        HIRTypeKind::TraitObject(traits) if !traits.is_empty() => {
+            crate::mir::dyn_dispatch::dyn_fat_ptr_type(&traits[0])
+        }
         HIRTypeKind::Ptr(inner) => MIRType::Ptr(Box::new(hir_type_to_mir_with_structs_and_enums(
             inner,
             struct_defs,

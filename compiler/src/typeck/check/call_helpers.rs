@@ -848,6 +848,9 @@ impl TypeChecker {
                 {
                     continue;
                 }
+                if self.is_dyn_unsize_coercion(&expected_ty, &actual_ty) {
+                    continue;
+                }
                 self.infer.unify(&expected_ty, &actual_ty)?;
             }
 
@@ -939,6 +942,31 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Whether `actual` can be unsize-coerced to `expected` as a trait object,
+    /// i.e. `&Concrete -> &dyn Trait` where `Concrete` implements every listed
+    /// trait. This mirrors the fat-pointer coercion performed in MIR lowering.
+    pub(super) fn is_dyn_unsize_coercion(&self, expected: &Ty, actual: &Ty) -> bool {
+        use crate::typeck::r#trait::type_key;
+        let (TyKind::Ref(_, exp_inner), TyKind::Ref(_, act_inner)) = (&expected.kind, &actual.kind)
+        else {
+            return false;
+        };
+        let TyKind::Dyn(traits) = &exp_inner.kind else {
+            return false;
+        };
+        if traits.is_empty() {
+            return false;
+        }
+        let concrete = self.infer.apply_subst(act_inner);
+        if matches!(concrete.kind, TyKind::Dyn(_) | TyKind::Var(_)) {
+            return false;
+        }
+        let concrete_key = type_key(&concrete);
+        traits
+            .iter()
+            .all(|t| self.impl_registry.implements_trait(t, &concrete_key))
+    }
+
     /// Type check a method call by resolving candidates against the receiver type.
     pub(super) fn check_method_call(
         &mut self,
@@ -957,6 +985,42 @@ impl TypeChecker {
         }
 
         let method_name = &method.name;
+
+        // Dynamic dispatch through a `dyn Trait` (or `&dyn Trait`) receiver:
+        // resolve the method against the trait object's declared traits.
+        let dyn_traits = match &receiver_ty.kind {
+            TyKind::Dyn(traits) => Some(traits.clone()),
+            TyKind::Ref(_, inner) => match &inner.kind {
+                TyKind::Dyn(traits) => Some(traits.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(traits) = dyn_traits {
+            for trait_name in &traits {
+                let Some(trait_info) = self.trait_registry.get(trait_name) else {
+                    continue;
+                };
+                let Some(method_sig) = trait_info.get_method(method_name) else {
+                    continue;
+                };
+                if method_sig.param_types.len() != args.len() {
+                    return Err(TypeckError::ArgumentCountMismatch {
+                        expected: method_sig.param_types.len(),
+                        found: args.len(),
+                    });
+                }
+                for (expected, actual) in method_sig.param_types.iter().zip(arg_types.iter()) {
+                    let expected = self.infer.apply_subst(expected);
+                    self.infer.unify(&expected, actual)?;
+                }
+                return Ok(self.infer.apply_subst(&method_sig.return_type));
+            }
+            return Err(TypeckError::MethodNotFound {
+                type_name: format!("dyn {}", traits.join(" + ")),
+                method_name: method_name.clone(),
+            });
+        }
 
         // Built-in string method: (&str).len() -> i64
         let is_str_ref =
