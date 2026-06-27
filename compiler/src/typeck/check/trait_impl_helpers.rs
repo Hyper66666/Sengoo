@@ -59,6 +59,22 @@ impl TypeChecker {
             matches!(trait_decl.vis, Visibility::Public),
         );
 
+        for bound in &trait_decl.bounds {
+            if let Some(ident) = bound.path.as_simple() {
+                trait_info.add_supertrait(ident.name.clone());
+                self.pending_supertrait_links.push((
+                    trait_decl.name.name.clone(),
+                    ident.name.clone(),
+                    trait_decl.span,
+                ));
+            } else {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::Other(
+                    "unsupported supertrait path in trait declaration".to_string(),
+                )));
+            }
+        }
+
         for item in &trait_decl.items {
             match item {
                 TraitItem::Function(method) => {
@@ -287,6 +303,18 @@ impl TypeChecker {
                 }
             }
 
+            if self
+                .trait_registry
+                .get(&trait_name)
+                .map(|info| !info.supertraits.is_empty())
+                .unwrap_or(false)
+            {
+                self.pending_supertrait_obligations.push((
+                    trait_name.clone(),
+                    target_key.clone(),
+                    impl_decl.span,
+                ));
+            }
             self.impl_registry
                 .register_trait_impl(trait_name, target_key, impl_info);
         } else {
@@ -294,6 +322,81 @@ impl TypeChecker {
         }
 
         self.env.pop_scope();
+        Ok(())
+    }
+
+    /// Compute the transitive set of supertraits of `trait_name`. Uses a `seen`
+    /// set so a cyclic supertrait graph terminates instead of looping forever.
+    pub(super) fn transitive_supertraits(&self, trait_name: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut stack: Vec<String> = Vec::new();
+        if let Some(info) = self.trait_registry.get(trait_name) {
+            stack.extend(info.supertraits.iter().cloned());
+        }
+        while let Some(current) = stack.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            out.push(current.clone());
+            if let Some(info) = self.trait_registry.get(&current) {
+                stack.extend(info.supertraits.iter().cloned());
+            }
+        }
+        out
+    }
+
+    /// Validate supertrait declarations and impl obligations once every trait and
+    /// impl has been registered (ordering-independent): declared supertraits must
+    /// name known traits, the supertrait graph must be acyclic, and any
+    /// `impl Sub for T` requires `T` to also implement each supertrait of `Sub`.
+    pub(super) fn validate_supertrait_obligations(&mut self) -> Result<()> {
+        let links = std::mem::take(&mut self.pending_supertrait_links);
+        for (owner, supertrait, span) in &links {
+            if !self.trait_registry.contains(supertrait) {
+                self.pending_supertrait_obligations.clear();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "unknown-supertrait",
+                    format!("trait `{owner}` lists unknown supertrait `{supertrait}`"),
+                    span.lo,
+                    span.hi,
+                )));
+            }
+        }
+        for (owner, _supertrait, span) in &links {
+            if self
+                .transitive_supertraits(owner)
+                .iter()
+                .any(|s| s == owner)
+            {
+                self.pending_supertrait_obligations.clear();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "supertrait-cycle",
+                    format!("trait `{owner}` is part of a supertrait cycle"),
+                    span.lo,
+                    span.hi,
+                )));
+            }
+        }
+
+        let obligations = std::mem::take(&mut self.pending_supertrait_obligations);
+        for (trait_name, target_key, span) in obligations {
+            for supertrait in self.transitive_supertraits(&trait_name) {
+                if !self
+                    .impl_registry
+                    .implements_trait(&supertrait, &target_key)
+                {
+                    return Err(CompileError::from(TypeckError::diagnostic(
+                        "missing-supertrait-impl",
+                        format!(
+                            "`{target_key}` implements `{trait_name}` but not its supertrait `{supertrait}`; add `impl {supertrait} for {target_key}`"
+                        ),
+                        span.lo,
+                        span.hi,
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 

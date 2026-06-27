@@ -59,6 +59,7 @@ pub mod stdlib_breadth_tests;
 pub mod stdlib_surface_tests;
 pub mod string_tests;
 pub mod struct_codegen_tests;
+pub mod supertrait_tests;
 pub mod symbol_and_borrow_tests;
 pub mod trait_dispatch_helpers_tests;
 pub mod trait_tests;

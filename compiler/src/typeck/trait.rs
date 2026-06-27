@@ -19,6 +19,8 @@ pub struct TraitInfo {
     pub consts: HashMap<String, Ty>,
     /// 关联类型
     pub assoc_types: Vec<String>,
+    /// 父 trait（supertraits），如 `trait Ord: PartialOrd` 中的 `PartialOrd`
+    pub supertraits: Vec<String>,
     /// 是否公开
     pub is_pub: bool,
 }
@@ -31,7 +33,15 @@ impl TraitInfo {
             methods: HashMap::new(),
             consts: HashMap::new(),
             assoc_types: Vec::new(),
+            supertraits: Vec::new(),
             is_pub,
+        }
+    }
+
+    /// 添加父 trait
+    pub fn add_supertrait(&mut self, name: String) {
+        if !self.supertraits.contains(&name) {
+            self.supertraits.push(name);
         }
     }
 

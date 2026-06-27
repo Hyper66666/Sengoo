@@ -85,6 +85,12 @@ pub struct TypeChecker {
     warnings: Vec<crate::error::CompileWarning>,
     deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
     trait_default_methods: HashMap<String, HashMap<String, Function>>,
+    /// Declared supertrait links `(owner_trait, supertrait, span)` collected while
+    /// checking trait declarations; validated once all traits are registered.
+    pending_supertrait_links: Vec<(String, String, crate::lexer::Span)>,
+    /// Trait-impl supertrait obligations `(trait, type_key, span)` collected while
+    /// checking impls; validated once every impl has been registered.
+    pending_supertrait_obligations: Vec<(String, String, crate::lexer::Span)>,
 }
 
 impl TypeChecker {
@@ -117,6 +123,8 @@ impl TypeChecker {
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
+            pending_supertrait_links: Vec::new(),
+            pending_supertrait_obligations: Vec::new(),
         }
     }
 
@@ -230,6 +238,8 @@ impl TypeChecker {
         self.load_deprecated_decls();
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.pending_supertrait_links.clear();
+        self.pending_supertrait_obligations.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -239,6 +249,8 @@ impl TypeChecker {
         for decl in &program.decls {
             self.check_decl(decl)?;
         }
+
+        self.validate_supertrait_obligations()?;
 
         Ok(())
     }
@@ -250,6 +262,8 @@ impl TypeChecker {
     ) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.pending_supertrait_links.clear();
+        self.pending_supertrait_obligations.clear();
         for decl in &program.decls {
             self.declare_decl(decl)?;
         }
@@ -259,6 +273,8 @@ impl TypeChecker {
         for decl in &program.decls {
             self.check_decl_with_filtered_function_bodies(decl, checked_function_names)?;
         }
+
+        self.validate_supertrait_obligations()?;
 
         Ok(())
     }

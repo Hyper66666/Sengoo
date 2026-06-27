@@ -251,6 +251,18 @@ impl TypeChecker {
                 meta.bounds.push(trait_name);
             }
 
+            // A bound `T: Sub` also makes every supertrait of `Sub` available on
+            // `T`, so expand the recorded bound set with transitive supertraits.
+            let mut expanded = Vec::new();
+            for bound in &meta.bounds {
+                for supertrait in self.transitive_supertraits(bound) {
+                    if !meta.bounds.contains(&supertrait) && !expanded.contains(&supertrait) {
+                        expanded.push(supertrait);
+                    }
+                }
+            }
+            meta.bounds.extend(expanded);
+
             if let Some(default_ty) = &type_param.default {
                 meta.default = Some(self.check_type(default_ty).map_err(CompileError::from)?);
             }
