@@ -467,6 +467,62 @@ def main() -> i64 {
 }
 
 #[test]
+fn copy_and_drop_impls_are_mutually_exclusive() {
+    let source = r#"
+#[derive(Copy)]
+struct Resource {
+    id: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy and Drop should be mutually exclusive");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-drop-conflict]") && message.contains("Resource"),
+        "expected copy-drop-conflict diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn copy_derive_rejects_non_copy_fields() {
+    let source = r#"
+struct Owned {
+    id: i64,
+}
+
+impl Drop for Owned {
+    def drop(&mut self) {}
+}
+
+#[derive(Copy)]
+struct Wrapper {
+    owned: Owned,
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy should require all fields to be Copy");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-field-not-copy]")
+            && message.contains("Wrapper")
+            && message.contains("owned"),
+        "expected copy-field-not-copy diagnostic, got: {message}"
+    );
+}
+
+#[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {
     let source = r#"
 def id<T>(x: T) -> T {

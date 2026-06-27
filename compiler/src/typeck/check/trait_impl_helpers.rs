@@ -146,13 +146,29 @@ impl TypeChecker {
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
         let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
+        let is_copy_impl = matches!(trait_name.as_deref(), Some("Copy"));
         if let Some(name) = trait_name.as_deref() {
             if let Err(err) = self.validate_orphan_rule(name, &target_ty, impl_decl.span) {
                 self.env.pop_scope();
                 return Err(CompileError::from(err));
             }
         }
+        if is_copy_impl {
+            if let Err(err) = self.validate_copy_impl(&target_ty, &target_key, impl_decl.span) {
+                self.env.pop_scope();
+                return Err(CompileError::from(err));
+            }
+        }
         if is_drop_impl {
+            if self.impl_registry.implements_trait("Copy", &target_key) {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "copy-drop-conflict",
+                    format!("type `{target_key}` cannot implement both `Copy` and `Drop`"),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
             self.env.mark_drop_owned_type(&target_ty);
         }
 
@@ -316,6 +332,61 @@ impl TypeChecker {
                     || self.struct_field_defs.contains_key(name)
                     || self.enum_variants.contains_key(name)
                     || self.class_decls.contains_key(name)
+            }
+            _ => false,
+        }
+    }
+
+    fn validate_copy_impl(
+        &mut self,
+        target_ty: &Ty,
+        target_key: &str,
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        if self.env.is_drop_owned_type(target_ty) {
+            return Err(TypeckError::diagnostic(
+                "copy-drop-conflict",
+                format!("type `{target_key}` cannot implement both `Copy` and `Drop`"),
+                span.lo,
+                span.hi,
+            ));
+        }
+
+        let TyKind::Adt { name, .. } = &target_ty.kind else {
+            return Ok(());
+        };
+        let Some(field_defs) = self.struct_field_defs.get(name).cloned() else {
+            return Ok(());
+        };
+
+        for (field_name, field_ty) in field_defs {
+            let resolved = self.check_type(&field_ty)?;
+            if !self.type_is_copy_eligible(&resolved) {
+                return Err(TypeckError::diagnostic(
+                    "copy-field-not-copy",
+                    format!(
+                        "type `{target_key}` cannot implement `Copy` because field `{field_name}` has non-Copy type `{resolved}`"
+                    ),
+                    span.lo,
+                    span.hi,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn type_is_copy_eligible(&self, ty: &Ty) -> bool {
+        if ty.is_copy_value() {
+            return true;
+        }
+        match &ty.kind {
+            TyKind::Tuple(types) => types.iter().all(|ty| self.type_is_copy_eligible(ty)),
+            TyKind::Array(elem, _) => self.type_is_copy_eligible(elem),
+            TyKind::Adt { .. } => {
+                let key = type_key(ty);
+                !self.env.is_drop_owned_type(ty)
+                    && self.impl_registry.implements_trait("Copy", &key)
             }
             _ => false,
         }

@@ -73,8 +73,12 @@
     Verified by `cargo test -p sengoo-compiler
     builtin_derives_register_core_trait_impls_for_bounds -- --nocapture`.
   - Remaining: field-aware Clone/compare/hash/debug/default behavior.
-- [ ] 5.3 Enforce `Copy` â‡” no `Drop` and `Copy` requires all-`Copy` fields.
+- [x] 5.3 Enforce `Copy` â‡?no `Drop` and `Copy` requires all-`Copy` fields.
+  - Verified by `cargo test -p sengoo-compiler copy_ -- --nocapture`,
+    including `copy-drop-conflict` and `copy-field-not-copy` diagnostics.
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
+  - Copy/Drop exclusivity and non-Copy field coverage exists; remaining tests
+    must cover field-aware behavior for every supported derive.
 
 ## 6. Orphan rule and docs
 
