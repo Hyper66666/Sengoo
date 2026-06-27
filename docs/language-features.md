@@ -191,11 +191,28 @@ when the owner goes out of scope.
   double free.
 
 Current surface: the verified auto-drop and move-checking path covers owned
-`String`. Generalized `Copy`/move analysis, partial moves, and auto-drop for the
-other runtime resources (`Buffer`, `Vec<T>`, `JsonDoc`, process/net handles) are
-landing incrementally, so some examples still call the explicit release methods.
+`String`, current concrete stdlib handles (`Buffer`, `Vec<T>`, `JsonDoc`,
+process/net handles), and scalar `Rc` handles. Some runtime domains still keep
+compatibility release methods because older examples and direct FFI-style
+stdlib calls use them, but new examples prefer automatic drop.
 
-### 2.8.1 Opt-in shared ownership with `Rc`
+## 2.9 Text and Strings
+
+Sengoo has two practical text surfaces today:
+
+- `&str` is the borrowed literal/view type. It supports length, concatenation,
+  equality/inequality, `contains`, `starts_with`, `ends_with`, and `index_of`
+  through the stdlib string helpers.
+- `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
+  can be cloned, pushed to, copied into a `Buffer`, and compared with another
+  `String`.
+
+Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
+`str_to_ascii_lower`, each returning an owned `String`. The case conversion is
+deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
+locale collation remain future work.
+
+## 2.10 Opt-in shared ownership with `Rc`
 
 `Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
 increments a non-atomic reference count, and compiler-inserted `Drop` releases

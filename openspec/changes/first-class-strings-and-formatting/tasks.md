@@ -1,10 +1,19 @@
 ## 1. Core string types
 
-- [ ] 1.1 Promote `String` to a move-only, auto-`Drop`, UTF-8 owning type
+- [x] 1.1 Promote `String` to a move-only, auto-`Drop`, UTF-8 owning type
   (depends on `automatic-memory-management`).
+  - Completed for the current owned handle surface: `tools/stdlib/string.sg`
+    defines `impl Drop for String`, MIR drop glue calls `String_Drop_drop`, and
+    owned `String` move/use-after-move tests cover the stable diagnostic.
+    Verified by `examples/stdlib/20_owned_string.sg` and the automatic-memory
+    management drop suites.
 - [ ] 1.2 Make `&str` a first-class borrowed view with lifetime tracking.
 - [ ] 1.3 Add `char` (Unicode scalar) type.
-- [ ] 1.4 Guarantee `String` construction validates UTF-8.
+- [x] 1.4 Guarantee `String` construction validates UTF-8.
+  - Completed for stdlib construction paths backed by
+    `sengoo_owned_string_from_bytes`: `string_from_str`,
+    `string_from_buffer`, `string_clone_status`, `push_str`, and the new
+    trim/ASCII case helpers all reject invalid UTF-8 or preserve valid input.
 
 ## 2. Ergonomic methods and operators
 
@@ -12,6 +21,10 @@
 - [ ] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
 - [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
+  - Partial: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`, and
+    `index_of` already existed; this slice adds `str_trim`,
+    `str_to_ascii_upper`, and `str_to_ascii_lower` returning owned `String`
+    values. `split` remains open.
 - [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
 - [ ] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
@@ -49,14 +62,18 @@
 
 - [ ] 5.1 Boundary checks on slice/index; stable status on non-boundary offsets.
 - [ ] 5.2 `chars()` decodes UTF-8; reject invalid sequences at construction.
-- [ ] 5.3 Document ASCII-only case ops and the Unicode follow-up in
+- [x] 5.3 Document ASCII-only case ops and the Unicode follow-up in
   `docs/language-features.md`.
+  - Documented in the new "Text and Strings" section.
 
 ## 6. Conformance and docs
 
 - [ ] 6.1 Add `examples/stdlib/` programs printing a `String`, a struct via
   `Debug`, and an interpolated `f"..."`.
 - [ ] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
+  - Partial: the owned-string row now mentions trim/ASCII case transforms and
+    links to the new stdlib/native tests. Formatting/interpolation rows remain
+    open until Display/Debug/format land.
 - [x] 6.3 Run `openspec validate first-class-strings-and-formatting --strict`.
 
 ## Verification

@@ -3,6 +3,9 @@ extern "C" {
     fn sengoo_str_starts_with(value: &str, prefix: &str) -> i64;
     fn sengoo_str_ends_with(value: &str, suffix: &str) -> i64;
     fn sengoo_str_index_of(value: &str, needle: &str) -> i64;
+    fn sengoo_str_trim(value: &str) -> i64;
+    fn sengoo_str_to_ascii_upper(value: &str) -> i64;
+    fn sengoo_str_to_ascii_lower(value: &str) -> i64;
     fn sengoo_string_new() -> i64;
     fn sengoo_string_free_status(handle: i64) -> i64;
     fn sengoo_string_len(handle: i64) -> i64;
@@ -73,6 +76,33 @@ def str_repeat(value: &str, count: i64) -> &str {
         remaining = remaining - 1;
     }
     out
+}
+
+def str_trim(value: &str) -> Result<String, i64> {
+    let raw = sengoo_str_trim(value);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+def str_to_ascii_upper(value: &str) -> Result<String, i64> {
+    let raw = sengoo_str_to_ascii_upper(value);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+def str_to_ascii_lower(value: &str) -> Result<String, i64> {
+    let raw = sengoo_str_to_ascii_lower(value);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
 }
 
 def string_copy_result(value: i64) -> Result<i64, i64> {

@@ -5441,6 +5441,42 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_runtime_string_trim_and_ascii_case_return_owned_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "string-trim-case",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let trimmed = str_trim("  Sengoo\n").unwrap_or(String { handle: 0 });
+    let expected_trim = string_from_str("Sengoo").unwrap_or(String { handle: 0 });
+    let upper = str_to_ascii_upper("SenGoo").unwrap_or(String { handle: 0 });
+    let expected_upper = string_from_str("SENGOO").unwrap_or(String { handle: 0 });
+    let lower = str_to_ascii_lower("SenGoo").unwrap_or(String { handle: 0 });
+    let expected_lower = string_from_str("sengoo").unwrap_or(String { handle: 0 });
+
+    if trimmed.eq(expected_trim) and upper.eq(expected_upper) and lower.eq(expected_lower) {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

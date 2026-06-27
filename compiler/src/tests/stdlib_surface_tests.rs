@@ -280,6 +280,26 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_trim_and_ascii_case_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let trimmed = str_trim("  sengoo\n").unwrap_or(String { handle: 0 });
+    let upper = str_to_ascii_upper("senGoo").unwrap_or(String { handle: 0 });
+    let lower = str_to_ascii_lower("SenGOO").unwrap_or(String { handle: 0 });
+    trimmed.len() + upper.len() + lower.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_trim"));
+    assert!(ir.contains("sengoo_str_to_ascii_upper"));
+    assert!(ir.contains("sengoo_str_to_ascii_lower"));
+    assert!(ir.contains("String_Drop_drop"));
+}
+
+#[test]
 fn strconv_module_imports_i64_parse_and_format_helpers() {
     let ir = compile_with_stdlib_modules(
         &[
