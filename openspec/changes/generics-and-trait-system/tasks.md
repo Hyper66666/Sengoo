@@ -68,7 +68,11 @@
 
 ## 6. Orphan rule and docs
 
-- [ ] 6.1 Enforce the package-local orphan rule with a stable diagnostic.
+- [x] 6.1 Enforce the package-local orphan rule with a stable diagnostic.
+  - Verified by `cargo test -p sengoo-compiler
+    orphan_rule_rejects_external_trait_for_external_type -- --nocapture`;
+    `cargo test -p sengoo-compiler --lib` confirms local-trait and local-type
+    impls still pass.
 - [ ] 6.2 Document generics, bounds, `dyn`, associated types, and derive in
   `docs/language-features.md`.
 - [ ] 6.3 Add `examples/generics/` programs using a real generic function with a

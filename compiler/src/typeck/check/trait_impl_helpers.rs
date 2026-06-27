@@ -146,6 +146,12 @@ impl TypeChecker {
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
         let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
+        if let Some(name) = trait_name.as_deref() {
+            if let Err(err) = self.validate_orphan_rule(name, &target_ty, impl_decl.span) {
+                self.env.pop_scope();
+                return Err(CompileError::from(err));
+            }
+        }
         if is_drop_impl {
             self.env.mark_drop_owned_type(&target_ty);
         }
@@ -273,5 +279,45 @@ impl TypeChecker {
 
         self.env.pop_scope();
         Ok(())
+    }
+
+    fn validate_orphan_rule(
+        &self,
+        trait_name: &str,
+        target_ty: &Ty,
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        if self.is_package_local_trait(trait_name) || self.is_package_local_type(target_ty) {
+            return Ok(());
+        }
+
+        Err(TypeckError::diagnostic(
+            "orphan-rule",
+            format!(
+                "orphan impl rejected: trait `{}` and type `{}` are both external to this package",
+                trait_name, target_ty
+            ),
+            span.lo,
+            span.hi,
+        ))
+    }
+
+    fn is_package_local_trait(&self, trait_name: &str) -> bool {
+        matches!(
+            self.env.lookup(trait_name).map(|symbol| &symbol.kind),
+            Some(SymbolKind::Trait { .. })
+        )
+    }
+
+    fn is_package_local_type(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, .. } => {
+                self.generic_type_metas.contains_key(name)
+                    || self.struct_field_defs.contains_key(name)
+                    || self.enum_variants.contains_key(name)
+                    || self.class_decls.contains_key(name)
+            }
+            _ => false,
+        }
     }
 }

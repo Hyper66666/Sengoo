@@ -404,6 +404,26 @@ def takes(x: dyn Borrowed) -> i64 {
 }
 
 #[test]
+fn orphan_rule_rejects_external_trait_for_external_type() {
+    let source = r#"
+impl Drop for i64 {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("external trait for external type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[orphan-rule]") && message.contains("Drop") && message.contains("i64"),
+        "expected orphan-rule diagnostic, got: {message}"
+    );
+}
+
+#[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {
     let source = r#"
 def id<T>(x: T) -> T {
