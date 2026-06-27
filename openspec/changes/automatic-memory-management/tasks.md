@@ -53,7 +53,9 @@
     when the function has one return. User types with `impl Drop` now resolve
     their concrete `<Type>_Drop_drop` function for live locals and by-value
     parameters, while `Drop::drop` receivers are not recursively auto-dropped.
-    Nested scope exits remain open.
+    Lexical blocks, if branches, loop/while/for bodies, and try blocks now drop
+    their own bindings at the scope boundary instead of delaying cleanup until
+    function return.
 - [ ] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Partial: `?` propagation exits use per-binding runtime drop flags, set false
@@ -64,9 +66,10 @@
     implemented move sites: direct `let b = a`, owned tail-expression returns,
     owned named-call arguments, owned method-call arguments, owned assignment
     RHS moves, and explicit `String.drop()` receivers. Explicit `return expr`
-    now lowers to a real MIR `Return` exit and reuses the same drop-flag machinery. Loop
-    `break`/`continue` currently rejoin before function return; nested scope
-    exit timing and partial-move flag clearing remain open.
+    now lowers to a real MIR `Return` exit and reuses the same drop-flag
+    machinery. Nested lexical scopes emit cleanup before normal exit, explicit
+    `return`, `?` propagation, try-block propagation, `break`, and `continue`.
+    Partial-move field-state clearing remains open.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
 - [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
   - Partial: the LLVM-text backend now receives unit-typed auto-drop calls for
@@ -80,7 +83,9 @@
     assignment moves, explicit `return` exits, explicit drop receivers, and
     moved binding exclusion. It now also covers user `impl Drop` live locals,
     by-value parameters, non-recursive `Drop::drop` receivers, and LLVM-text
-    unit-return codegen for user auto-drop calls.
+    unit-return codegen for user auto-drop calls. Nested block/branch/loop/try
+    tests assert cleanup occurs in the exiting CFG block before control leaves
+    the lexical scope.
 
 ## 4. Runtime resource migration
 

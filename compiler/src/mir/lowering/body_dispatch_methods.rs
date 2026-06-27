@@ -171,4 +171,15 @@ impl<'a> LoweringContext<'a> {
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }
+
+    pub(super) fn lower_scoped_body_to_block_val(
+        &mut self,
+        body: &HIRBody,
+        target_block: usize,
+    ) -> Local {
+        self.push_drop_scope();
+        let result = self.lower_body_to_block_val(body, target_block);
+        self.pop_drop_scope(Some(result));
+        result
+    }
 }

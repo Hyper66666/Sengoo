@@ -5,6 +5,7 @@ pub(super) fn lower_return_expr(ctx: &mut LoweringContext<'_>, value: Option<&HI
     if let Some(local) = return_value {
         ctx.mark_drop_local_moved(local);
     }
+    ctx.emit_active_drop_scopes_before_exit();
     ctx.set_terminator(Terminator::Return(return_value));
     ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
 }

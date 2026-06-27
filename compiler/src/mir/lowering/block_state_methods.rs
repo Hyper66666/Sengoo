@@ -6,6 +6,7 @@ impl<'a> LoweringContext<'a> {
         self.loop_stack.push(LoopContext {
             break_block,
             continue_block,
+            drop_scope_depth: self.drop_scope_markers.len(),
         });
     }
 
@@ -22,6 +23,10 @@ impl<'a> LoweringContext<'a> {
     /// 获取当前循环的continue目标块索引。
     pub(super) fn get_continue_target(&self) -> Option<usize> {
         self.loop_stack.last().map(|ctx| ctx.continue_block)
+    }
+
+    pub(super) fn get_loop_drop_scope_depth(&self) -> Option<usize> {
+        self.loop_stack.last().map(|ctx| ctx.drop_scope_depth)
     }
 
     /// 添加一个新的局部变量并返回其Local句柄。

@@ -5,6 +5,7 @@ pub(super) enum TryScope {
     Function,
     TryBlock {
         merge_block: usize,
+        drop_scope_depth: usize,
         result_local: Option<Local>,
         /// Inferred `Result` / `Option` container from the first `?` in this block.
         container_ty: Option<MIRType>,
@@ -142,19 +143,24 @@ pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -
     });
 
     ctx.set_current_block(fail_block);
-    match ctx.try_scope_stack.last() {
+    match ctx.try_scope_stack.last().cloned() {
         Some(TryScope::Function) | None => {
+            ctx.emit_active_drop_scopes_before_exit();
             ctx.set_terminator(Terminator::Return(Some(operand_local)));
         }
-        Some(TryScope::TryBlock { merge_block, .. }) => {
-            let merge = *merge_block;
+        Some(TryScope::TryBlock {
+            merge_block,
+            drop_scope_depth,
+            ..
+        }) => {
+            ctx.emit_drop_scopes_from_depth(drop_scope_depth);
             record_try_block_container(ctx, operand_ty.clone());
             let result_local = ensure_try_block_result_local(ctx, operand_ty.clone());
             ctx.push_inst(Instruction::Store {
                 destination: result_local,
                 value: operand_local,
             });
-            ctx.set_terminator(Terminator::Goto(merge));
+            ctx.set_terminator(Terminator::Goto(merge_block));
         }
     }
 
@@ -165,14 +171,16 @@ pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -
 pub(super) fn lower_try_block_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> Local {
     let entry_block = ctx.current_block();
     let merge_block = ctx.new_block();
+    let drop_scope_depth = ctx.drop_scope_depth();
 
     ctx.push_try_scope(TryScope::TryBlock {
         merge_block,
+        drop_scope_depth,
         result_local: None,
         container_ty: None,
     });
 
-    let body_val = ctx.lower_body_to_block_val(body, entry_block);
+    let body_val = ctx.lower_scoped_body_to_block_val(body, entry_block);
     let body_ty = ctx.get_local_type(body_val).clone();
 
     let mut out_local = body_val;

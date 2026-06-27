@@ -51,7 +51,6 @@ mod async_methods;
 mod block_async_expr_helpers;
 mod block_state_methods;
 mod body_dispatch_methods;
-mod body_lowering_helpers;
 mod builtin_helpers;
 mod call_emission_helpers;
 mod call_expr_helpers;
@@ -120,6 +119,7 @@ struct LoopContext {
     break_block: usize,
     /// continue目标基本块的索引。
     continue_block: usize,
+    drop_scope_depth: usize,
 }
 
 /// 函数签名信息，存储函数名、参数数量和参数类型。
@@ -215,6 +215,7 @@ struct LoweringContext<'a> {
     future_origins: HashMap<Local, String>,
     try_scope_stack: Vec<try_expr_helpers::TryScope>,
     drop_bindings: Vec<DropBinding>,
+    drop_scope_markers: Vec<usize>,
     moved_drop_locals: HashSet<Local>,
 }
 

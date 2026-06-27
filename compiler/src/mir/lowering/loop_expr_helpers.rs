@@ -6,7 +6,9 @@ pub(super) fn lower_loop_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> 
 
     ctx.set_terminator(Terminator::Goto(loop_block));
     ctx.push_loop(exit_block, loop_block);
+    ctx.push_drop_scope();
     ctx.lower_body_to_block_with_return(body, loop_block, false);
+    ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
     let end_block = ctx.current_block();

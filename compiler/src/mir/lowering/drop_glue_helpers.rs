@@ -2,6 +2,51 @@ use super::*;
 use crate::mir::InstId;
 
 impl<'a> LoweringContext<'a> {
+    pub(super) fn push_drop_scope(&mut self) {
+        self.drop_scope_markers.push(self.drop_bindings.len());
+    }
+
+    pub(super) fn drop_scope_depth(&self) -> usize {
+        self.drop_scope_markers.len()
+    }
+
+    pub(super) fn pop_drop_scope(&mut self, moved_result: Option<Local>) {
+        if let Some(result) = moved_result {
+            self.mark_drop_local_moved(result);
+        }
+        let Some(marker) = self.drop_scope_markers.pop() else {
+            return;
+        };
+        let bindings = self.drop_bindings.split_off(marker);
+        if self.current_block_is_terminated() {
+            return;
+        }
+        for binding in bindings.iter().rev() {
+            if self.moved_drop_locals.contains(&binding.local) {
+                continue;
+            }
+            self.push_drop_call(self.current_block(), binding);
+        }
+    }
+
+    pub(super) fn emit_active_drop_scopes_before_exit(&mut self) {
+        self.emit_drop_scopes_from_depth(0);
+    }
+
+    pub(super) fn emit_drop_scopes_from_depth(&mut self, depth: usize) {
+        let Some(marker) = self.drop_scope_markers.get(depth).copied() else {
+            return;
+        };
+        let bindings = self.drop_bindings[marker..]
+            .iter()
+            .filter(|binding| !self.moved_drop_locals.contains(&binding.local))
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings.iter().rev() {
+            self.push_drop_call(self.current_block(), binding);
+        }
+    }
+
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
         let Some(drop_func) = self.drop_func_for_local(local) else {
             return;

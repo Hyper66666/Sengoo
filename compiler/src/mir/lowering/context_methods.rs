@@ -47,6 +47,7 @@ impl<'a> LoweringContext<'a> {
             future_origins: HashMap::new(),
             try_scope_stack: Vec::new(),
             drop_bindings: Vec::new(),
+            drop_scope_markers: Vec::new(),
             moved_drop_locals: HashSet::new(),
         }
     }
