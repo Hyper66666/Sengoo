@@ -46,6 +46,10 @@ impl<'a> LoweringContext<'a> {
             async_dispatch_registry,
             future_origins: HashMap::new(),
             try_scope_stack: Vec::new(),
+            drop_bindings: Vec::new(),
+            drop_scope_markers: Vec::new(),
+            moved_drop_locals: HashSet::new(),
+            moved_drop_fields: HashSet::new(),
         }
     }
 

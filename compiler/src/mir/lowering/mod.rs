@@ -51,7 +51,6 @@ mod async_methods;
 mod block_async_expr_helpers;
 mod block_state_methods;
 mod body_dispatch_methods;
-mod body_lowering_helpers;
 mod builtin_helpers;
 mod call_emission_helpers;
 mod call_expr_helpers;
@@ -59,6 +58,7 @@ mod call_invocation_helpers;
 mod call_target_helpers;
 mod context_methods;
 mod contract_methods;
+mod drop_glue_helpers;
 mod entry;
 mod enum_expr_helpers;
 mod for_expr_helpers;
@@ -80,6 +80,7 @@ mod options;
 mod pattern_methods;
 mod pointer_expr_helpers;
 mod print_methods;
+mod return_expr_helpers;
 mod try_expr_helpers;
 mod while_expr_helpers;
 use self::aggregate_expr_helpers::{
@@ -105,6 +106,7 @@ use self::op_expr_helpers::{
     lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr,
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
+use self::return_expr_helpers::lower_return_expr;
 use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};
@@ -117,9 +119,17 @@ struct LoopContext {
     break_block: usize,
     /// continue目标基本块的索引。
     continue_block: usize,
+    drop_scope_depth: usize,
 }
 
 /// 函数签名信息，存储函数名、参数数量和参数类型。
+#[derive(Debug, Clone)]
+struct DropBinding {
+    local: Local,
+    field_path: Vec<u32>,
+    drop_func: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FunctionSig {
     pub(crate) ret_type: MIRType,
@@ -205,6 +215,10 @@ struct LoweringContext<'a> {
     /// bindings so that `let f = async_fn(); await f` resolves correctly.
     future_origins: HashMap<Local, String>,
     try_scope_stack: Vec<try_expr_helpers::TryScope>,
+    drop_bindings: Vec<DropBinding>,
+    drop_scope_markers: Vec<usize>,
+    moved_drop_locals: HashSet<Local>,
+    moved_drop_fields: HashSet<(Local, Vec<u32>)>,
 }
 
 impl<'a> LoweringContext<'a> {

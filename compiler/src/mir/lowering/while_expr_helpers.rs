@@ -20,7 +20,9 @@ pub(super) fn lower_while_expr(
     });
 
     ctx.push_loop(exit_block, cond_block);
+    ctx.push_drop_scope();
     ctx.lower_body_to_block_with_return(body, body_block, false);
+    ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
     let body_end_block = ctx.current_block();

@@ -47,7 +47,7 @@ pub(super) fn lower_call_expr(
 
     let mut arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
 
-    match func {
+    let result = match func {
         HIRExpr::Var { name, .. } => {
             super::assert_callsite_helpers::append_assert_callsite_args(
                 ctx,
@@ -58,7 +58,11 @@ pub(super) fn lower_call_expr(
             lower_named_call(ctx, name, &arg_locals)
         }
         _ => lower_non_named_call(ctx, &arg_locals),
+    };
+    for arg in args {
+        ctx.mark_drop_expr_moved(arg);
     }
+    result
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ impl<'a> LoweringContext<'a> {
         self.loop_stack.push(LoopContext {
             break_block,
             continue_block,
+            drop_scope_depth: self.drop_scope_markers.len(),
         });
     }
 
@@ -22,6 +23,10 @@ impl<'a> LoweringContext<'a> {
     /// 获取当前循环的continue目标块索引。
     pub(super) fn get_continue_target(&self) -> Option<usize> {
         self.loop_stack.last().map(|ctx| ctx.continue_block)
+    }
+
+    pub(super) fn get_loop_drop_scope_depth(&self) -> Option<usize> {
+        self.loop_stack.last().map(|ctx| ctx.drop_scope_depth)
     }
 
     /// 添加一个新的局部变量并返回其Local句柄。
@@ -107,6 +112,12 @@ impl<'a> LoweringContext<'a> {
     pub(super) fn current_block(&self) -> usize {
         debug_assert!(self.current_block.is_some(), "no current block set");
         self.current_block.unwrap_or(self.mir_fn.start_block)
+    }
+
+    pub(super) fn current_block_is_terminated(&self) -> bool {
+        self.current_block
+            .and_then(|block| self.mir_fn.basic_blocks.get(block))
+            .is_some_and(|block| block.terminator.is_some())
     }
 
     pub(super) fn propagate_future_origin_through_phi(

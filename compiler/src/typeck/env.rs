@@ -3,9 +3,10 @@
 //! 管理符号表和作用域。
 
 use crate::typeck::interner::TyInterner;
-use crate::typeck::ty::{Ty, TyKind};
+use crate::typeck::r#trait::type_key;
+use crate::typeck::ty::{Ty, TyKind, TyVarId};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// 符号
@@ -121,6 +122,16 @@ pub struct TypeEnv {
     interner: Rc<RefCell<TyInterner>>,
     /// Canonical stdlib `String { handle: i64 }` type identity for move rules.
     pub owned_string_ty: Option<Ty>,
+    /// Type keys for non-Copy values with compiler-managed ownership.
+    drop_owned_type_keys: HashSet<String>,
+    /// Resolved field layouts used by ownership analysis after type checking.
+    struct_field_types: HashMap<String, StructFieldTypes>,
+}
+
+#[derive(Debug, Clone)]
+struct StructFieldTypes {
+    type_params: Vec<TyVarId>,
+    fields: Vec<(String, Ty)>,
 }
 
 impl TypeEnv {
@@ -132,6 +143,8 @@ impl TypeEnv {
             next_ty_var_id: 0,
             interner: Rc::new(RefCell::new(TyInterner::new())),
             owned_string_ty: None,
+            drop_owned_type_keys: HashSet::new(),
+            struct_field_types: HashMap::new(),
         };
         // 创建全局作用域
         env.push_scope();
@@ -280,6 +293,165 @@ impl TypeEnv {
     pub fn insert_type(&mut self, name: String, ty: Ty) {
         let symbol = Symbol::type_symbol(name.clone(), ty);
         self.insert(name, symbol);
+    }
+
+    pub fn mark_drop_owned_type(&mut self, ty: &Ty) {
+        if !ty.is_copy_value() {
+            self.drop_owned_type_keys.insert(type_key(ty));
+        }
+    }
+
+    pub fn is_drop_owned_type(&self, ty: &Ty) -> bool {
+        !ty.is_copy_value() && self.drop_owned_type_keys.contains(&type_key(ty))
+    }
+
+    pub fn register_struct_field_types(
+        &mut self,
+        name: String,
+        type_params: Vec<TyVarId>,
+        fields: Vec<(String, Ty)>,
+    ) {
+        self.struct_field_types.insert(
+            name,
+            StructFieldTypes {
+                type_params,
+                fields,
+            },
+        );
+    }
+
+    pub fn struct_field_type(&self, owner: &Ty, field_name: &str) -> Option<Ty> {
+        let TyKind::Adt { name, args } = &owner.kind else {
+            return None;
+        };
+        let layout = self.struct_field_types.get(name)?;
+        let field_ty = layout
+            .fields
+            .iter()
+            .find(|(name, _)| name == field_name)?
+            .1
+            .clone();
+        let subst = layout
+            .type_params
+            .iter()
+            .copied()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Some(Self::substitute_ty_vars(&field_ty, &subst))
+    }
+
+    pub fn type_contains_drop_owned_value(&self, ty: &Ty) -> bool {
+        self.type_contains_drop_owned_value_inner(ty, &mut HashSet::new())
+    }
+
+    pub fn is_legacy_idempotent_handle_type(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, .. } => matches!(
+                name.as_str(),
+                "Buffer"
+                    | "Vec"
+                    | "JsonDoc"
+                    | "ProcessCommand"
+                    | "ProcessOutput"
+                    | "ProcessHandle"
+                    | "TcpStream"
+                    | "UdpSocket"
+                    | "HttpClient"
+                    | "HttpServer"
+                    | "HttpServerRequest"
+                    | "WsClient"
+            ),
+            _ => false,
+        }
+    }
+
+    fn type_contains_drop_owned_value_inner(
+        &self,
+        ty: &Ty,
+        visiting_adts: &mut HashSet<String>,
+    ) -> bool {
+        if ty.is_copy_value() {
+            return false;
+        }
+        if self.is_drop_owned_type(ty) {
+            return true;
+        }
+        match &ty.kind {
+            TyKind::Tuple(types) => types
+                .iter()
+                .any(|field| self.type_contains_drop_owned_value_inner(field, visiting_adts)),
+            TyKind::Array(elem, _) => {
+                self.type_contains_drop_owned_value_inner(elem, visiting_adts)
+            }
+            TyKind::Adt { name, .. } => self.struct_field_types.get(name).is_some_and(|layout| {
+                if !visiting_adts.insert(name.clone()) {
+                    return false;
+                }
+                let contains = layout.fields.iter().any(|(field_name, _)| {
+                    self.struct_field_type(ty, field_name).is_some_and(|field| {
+                        self.type_contains_drop_owned_value_inner(&field, visiting_adts)
+                    })
+                });
+                visiting_adts.remove(name);
+                contains
+            }),
+            _ => false,
+        }
+    }
+
+    fn substitute_ty_vars(ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
+        let kind = match &ty.kind {
+            TyKind::Var(var_id) => {
+                return subst.get(var_id).cloned().unwrap_or_else(|| ty.clone());
+            }
+            TyKind::Tuple(types) => TyKind::Tuple(
+                types
+                    .iter()
+                    .map(|inner| Self::substitute_ty_vars(inner, subst))
+                    .collect(),
+            ),
+            TyKind::Array(elem, len) => {
+                TyKind::Array(Box::new(Self::substitute_ty_vars(elem, subst)), *len)
+            }
+            TyKind::Slice(elem) => TyKind::Slice(Box::new(Self::substitute_ty_vars(elem, subst))),
+            TyKind::Ref(is_mut, inner) => {
+                TyKind::Ref(*is_mut, Box::new(Self::substitute_ty_vars(inner, subst)))
+            }
+            TyKind::Ptr(inner) => TyKind::Ptr(Box::new(Self::substitute_ty_vars(inner, subst))),
+            TyKind::Fn {
+                params,
+                ret,
+                is_variadic,
+            } => TyKind::Fn {
+                params: params
+                    .iter()
+                    .map(|param| Self::substitute_ty_vars(param, subst))
+                    .collect(),
+                ret: Box::new(Self::substitute_ty_vars(ret, subst)),
+                is_variadic: *is_variadic,
+            },
+            TyKind::Adt { name, args } => TyKind::Adt {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| Self::substitute_ty_vars(arg, subst))
+                    .collect(),
+            },
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => TyKind::AssocProjection {
+                base: Box::new(Self::substitute_ty_vars(base, subst)),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            },
+            TyKind::Future(inner) => {
+                TyKind::Future(Box::new(Self::substitute_ty_vars(inner, subst)))
+            }
+            _ => return ty.clone(),
+        };
+        Ty { id: ty.id, kind }
     }
 
     /// 查找符号（在当前及父作用域中查找）

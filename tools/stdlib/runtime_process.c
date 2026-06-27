@@ -1006,8 +1006,11 @@ long long sengoo_process_command_run(long long handle) {
 
 long long sengoo_process_command_close(long long handle) {
     SengooProcessCommand* command = sengoo_process_command_from_handle(handle);
-    if (!command || command->closed) {
+    if (!command) {
         return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (command->closed) {
+        return 0;
     }
     long long upstream_handle = command->pipe_stdout_upstream_handle;
     command->pipe_stdout_upstream_handle = 0;
@@ -1086,8 +1089,11 @@ long long sengoo_process_output_stderr_copy(long long handle, long long out_buff
 
 long long sengoo_process_output_close(long long handle) {
     SengooProcessOutput* output = sengoo_process_output_from_handle(handle);
-    if (!output || output->closed) {
+    if (!output) {
         return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (output->closed) {
+        return 0;
     }
     free(output->stdout_data);
     free(output->stderr_data);
@@ -1505,8 +1511,11 @@ long long sengoo_process_handle_close(long long handle) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
     SengooProcessHandleSlot* slot = &g_process_handle_slots[index];
-    if (!slot->alive || slot->generation != generation || !slot->state) {
+    if (slot->generation != generation) {
         return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!slot->alive || !slot->state) {
+        return 0;
     }
     sengoo_process_handle_state_destroy(slot->state);
     slot->state = NULL;

@@ -48,9 +48,10 @@ impl TypeChecker {
                     ));
                 }
                 self.infer.unify(&var_ty, &value_ty)?;
+                let resolved_var_ty = self.infer.apply_subst(&var_ty);
 
                 self.env
-                    .insert_var_with_mutability(name.name.clone(), var_ty, *is_mut);
+                    .insert_var_with_mutability(name.name.clone(), resolved_var_ty, *is_mut);
                 Ok(None)
             }
             StmtKind::Const { name, ty, value } => {

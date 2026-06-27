@@ -65,6 +65,11 @@ pub enum InternedTyKind {
         args: Vec<InternedTyId>,
     },
     Dyn(Vec<String>),
+    AssocProjection {
+        base: InternedTyId,
+        trait_name: String,
+        name: String,
+    },
     ImplTrait(Vec<String>),
     Future(InternedTyId),
     SelfType,
@@ -183,6 +188,15 @@ impl TyInterner {
                 }
             }
             TyKind::Dyn(traits) => InternedTyKind::Dyn(traits.clone()),
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => InternedTyKind::AssocProjection {
+                base: self.intern_ty(base),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            },
             TyKind::ImplTrait(traits) => InternedTyKind::ImplTrait(traits.clone()),
             TyKind::Future(inner) => InternedTyKind::Future(self.intern_ty(inner)),
             TyKind::SelfType => InternedTyKind::SelfType,
@@ -265,6 +279,15 @@ impl TyInterner {
                 args: args.iter().map(|&id| self.materialize(id)).collect(),
             },
             InternedTyKind::Dyn(traits) => TyKind::Dyn(traits.clone()),
+            InternedTyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => TyKind::AssocProjection {
+                base: Box::new(self.materialize(*base)),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            },
             InternedTyKind::ImplTrait(traits) => TyKind::ImplTrait(traits.clone()),
             InternedTyKind::Future(inner_id) => {
                 TyKind::Future(Box::new(self.materialize(*inner_id)))

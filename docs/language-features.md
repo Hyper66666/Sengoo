@@ -61,7 +61,65 @@ impl i64 {
 let x = (-21).abs();
 ```
 
-## 2.4 Contracts (`requires` / `ensures`)
+## 2.4 Generics, Traits, Associated Types, And Derive
+
+Sengoo supports generic `def`, `struct`, `enum`, and `impl` declarations with
+monomorphized concrete instances. Generic bounds can use direct type parameter
+syntax and `where` clauses:
+
+```sg
+trait Show {
+    def show(self) -> i64;
+}
+
+def score<T: Show>(value: T) -> i64 {
+    value.show()
+}
+```
+
+The compiler checks bounds at instantiation sites. If a concrete type does not
+implement a required trait, type checking reports the stable
+`unsatisfied-trait-bound` diagnostic.
+
+Traits can declare associated types, and generic code can refer to them through
+the bounded type parameter:
+
+```sg
+trait Iterator {
+    type Item;
+}
+
+def choose<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+```
+
+Each `impl Trait for Type` must define the trait's required associated types.
+For trait objects, associated types must be fixed in the object type:
+
+```sg
+def takes_iter(value: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+```
+
+Current `dyn Trait` support is a frontend/type-checking skeleton. Object-safety
+diagnostics and fixed associated-type validation are implemented, but vtable
+representation and runtime dynamic dispatch are still roadmap work.
+
+Core trait names are compiler-known for bounds: `Clone`, `Copy`,
+`PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`, `Display`, `Debug`,
+`Iterator`, and `IntoIterator`. Support types `Ordering`, `Formatter`, and
+`Hasher` resolve in signatures. `#[derive(...)]` currently registers core trait
+impls for the derivable marker surface, while field-aware clone/compare/hash/
+debug/default behavior is still under construction. `Copy` is checked against
+`Drop`: a type cannot implement both, and a `Copy` type cannot contain
+non-`Copy` fields.
+
+Impls follow the package-local orphan rule: an `impl Trait for Type` is allowed
+only when the trait or the target type is defined in the current package.
+
+## 2.5 Contracts (`requires` / `ensures`)
 
 ```sg
 def divide(a: i64, b: i64) -> i64
@@ -91,7 +149,7 @@ sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 sgc run examples/09_method_call.sg -O 2 --contract-checks on
 ```
 
-## 2.5 Enum payload matches
+## 2.6 Enum payload matches
 
 Payload-carrying enum arms can appear in any match position, and one match can
 bind multiple payload-carrying variants:
@@ -112,7 +170,7 @@ def main() -> i64 {
 The native conformance gate also covers functions that return enum values and
 then match on the returned aggregate.
 
-## 2.6 C FFI (`extern "C"`)
+## 2.7 C FFI (`extern "C"`)
 
 Sengoo supports a focused FFI MVP surface:
 
@@ -139,7 +197,7 @@ For end-to-end reproducible commands (Sengoo -> C and C -> Sengoo), see:
 
 - `examples/ffi/README.md`
 
-## 2.7 Async execution
+## 2.8 Async execution
 
 `sgc run` now has a native async path when the entrypoint is `async def main()`.
 
@@ -167,6 +225,69 @@ Current limitations:
 - timer support currently covers `sleep` and `timeout`, but not a general timer queue or wheel.
 - IO wakeups are limited to the documented reactor subset.
 - user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
+
+## 2.9 Ownership, moves, and automatic drop
+
+Sengoo manages memory with move-based ownership and compiler-inserted cleanup
+(RAII); there is no garbage collector. A type that has an `impl Drop` is
+*affine*: it has a single owner, and the compiler runs cleanup automatically
+when the owner goes out of scope.
+
+- **Drop order is reverse declaration order.** When a scope exits, the owning
+  locals that still hold a value are dropped last-declared-first. Early exits
+  (`return`, `?` propagation) drop exactly the locals that are live on that path,
+  tracked with per-binding drop flags, and a value already moved out is not
+  dropped again.
+- **Moves transfer ownership.** Binding (`let b = a`), passing an owned value by
+  value (named-call and method-call arguments), assigning an owned value, and
+  returning it all *move* it. After a move the source is dead; reading it is a
+  compile error with the stable `use-after-move` diagnostic (also surfaced in
+  `sgc --error-format json` and `sglsp`).
+- **`drop` is compiler-called, not user-called.** The compatibility release
+  methods (`.drop()` / `.free()` / `.close()`) run cleanup immediately and mark
+  the value moved, so the later automatic drop is suppressed and there is no
+  double free.
+
+Current surface: the verified auto-drop and move-checking path covers owned
+`String`, current concrete stdlib handles (`Buffer`, `Vec<T>`, `JsonDoc`,
+process/net handles), and scalar `Rc` handles. Some runtime domains still keep
+compatibility release methods because older examples and direct FFI-style
+stdlib calls use them, but new examples prefer automatic drop.
+
+## 2.10 Text and Strings
+
+Sengoo has two practical text surfaces today:
+
+- `&str` is the borrowed literal/view type. It supports length, concatenation,
+  equality/inequality, `contains`, `starts_with`, `ends_with`, and `index_of`
+  through the stdlib string helpers.
+- `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
+  can be cloned, pushed to, copied into a `Buffer`, and compared with another
+  `String`.
+
+Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
+`str_to_ascii_lower`, each returning an owned `String`. The case conversion is
+deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
+locale collation remain future work.
+
+## 2.11 Opt-in shared ownership with `Rc`
+
+`Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
+increments a non-atomic reference count, and compiler-inserted `Drop` releases
+the shared allocation only after the last handle leaves scope. Plain non-`Rc`
+owning values remain move-only by default.
+
+Current verified surface:
+
+- `rc_new_i64(value) -> Rc<i64>`
+- `rc_new_bool(value) -> Rc<bool>`
+- `clone()`, `get()`, `strong_count()`, and `is_unique()`
+- automatic `Drop` for `Rc<i64>` and `Rc<bool>`
+
+`Rc` deliberately does not collect cycles. If two or more future `Rc`-backed
+objects retain each other, that cycle leaks until the process exits. Break such
+graphs manually or avoid cyclic ownership; `Rc` is not a tracing garbage
+collector.
 
 ## 3. Non-Invasive Reflection (Opt-In)
 
@@ -357,6 +478,24 @@ pub extern "C" fn sengoo_add(a: i64, b: i64) -> i64 {
 可直接复现的双向调用命令（Sengoo -> C / C -> Sengoo）见：
 
 - `examples/ffi/README.md`
+
+## 2.6 所有权、移动与自动 drop
+
+Sengoo 采用基于移动的所有权 + 编译器插入清理（RAII）管理内存，没有垃圾回收器。
+带有 `impl Drop` 的类型是*仿射*的：只有唯一所有者，所有者离开作用域时编译器自动执行清理。
+
+- **drop 顺序为声明逆序。** 作用域退出时，仍持有值的所属局部按“后声明先 drop”清理；
+  提前退出（`return`、`?` 传播）只 drop 该路径上仍存活的局部，使用每绑定的 drop 标志跟踪，
+  已移动走的值不会重复 drop。
+- **移动转移所有权。** 绑定（`let b = a`）、按值传递所属值（具名调用与方法调用实参）、
+  对所属值赋值，以及返回它，都会*移动*它。移动后源变量失效，再次读取是编译错误，
+  诊断码为稳定的 `use-after-move`（同样出现在 `sgc --error-format json` 与 `sglsp`）。
+- **drop 由编译器调用，而非用户调用。** 兼容用的释放方法（`.drop()` / `.free()` / `.close()`）
+  会立即执行清理并把值标记为已移动，从而抑制后续的自动 drop，不会二次释放。
+
+当前覆盖面：已验证的自动 drop 与移动检查路径覆盖所属 `String`；通用 `Copy`/移动分析、
+部分移动，以及其余运行时资源（`Buffer`、`Vec<T>`、`JsonDoc`、进程/网络句柄）的自动 drop
+正在逐步落地，因此部分示例仍调用显式释放方法。
 
 ## 3. 非侵入式反射（按需开启）
 

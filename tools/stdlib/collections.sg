@@ -1,4 +1,12 @@
 extern "C" {
+    fn sengoo_rc_new_i64(value: i64) -> i64;
+    fn sengoo_rc_new_bool(value: i64) -> i64;
+    fn sengoo_rc_clone(handle: i64) -> i64;
+    fn sengoo_rc_strong_count(handle: i64) -> i64;
+    fn sengoo_rc_get_i64(handle: i64) -> i64;
+    fn sengoo_rc_get_bool(handle: i64) -> i64;
+    fn sengoo_rc_drop(handle: i64) -> i64;
+
     fn sengoo_vec_new_i64() -> i64;
     fn sengoo_vec_len_i64(handle: i64) -> i64;
     fn sengoo_vec_clear_i64_status(handle: i64) -> i64;
@@ -87,6 +95,11 @@ extern "C" {
     fn sengoo_string_map_string_key_iter_free_status(iter_handle: i64) -> i64;
 }
 
+struct Rc<T> {
+    handle: i64,
+    marker: T,
+}
+
 struct Vec<T> {
     handle: i64,
     marker: T,
@@ -150,6 +163,56 @@ def bool_to_i64(value: bool) -> i64 {
 
 def i64_to_bool(value: i64) -> bool {
     value != 0
+}
+
+def rc_new_i64(value: i64) -> Rc<i64> {
+    Rc { handle: sengoo_rc_new_i64(value), marker: value }
+}
+
+def rc_new_bool(value: bool) -> Rc<bool> {
+    Rc { handle: sengoo_rc_new_bool(bool_to_i64(value)), marker: value }
+}
+
+impl<T> Rc<T> {
+    def strong_count(&self) -> i64 {
+        sengoo_rc_strong_count(self.handle)
+    }
+
+    def is_unique(&self) -> bool {
+        self.strong_count() == 1
+    }
+}
+
+impl Rc<i64> {
+    def clone(&self) -> Rc<i64> {
+        Rc { handle: sengoo_rc_clone(self.handle), marker: self.marker }
+    }
+
+    def get(&self) -> i64 {
+        sengoo_rc_get_i64(self.handle)
+    }
+}
+
+impl Rc<bool> {
+    def clone(&self) -> Rc<bool> {
+        Rc { handle: sengoo_rc_clone(self.handle), marker: self.marker }
+    }
+
+    def get(&self) -> bool {
+        i64_to_bool(sengoo_rc_get_bool(self.handle))
+    }
+}
+
+impl Drop for Rc<i64> {
+    def drop(&mut self) {
+        sengoo_rc_drop(self.handle);
+    }
+}
+
+impl Drop for Rc<bool> {
+    def drop(&mut self) {
+        sengoo_rc_drop(self.handle);
+    }
 }
 
 def collections_copy_result(value: i64) -> Result<i64, i64> {
@@ -230,6 +293,24 @@ impl<T> Vec<T> {
 
     def free(self) -> bool {
         sengoo_vec_free_i64_status(self.handle) != 0
+    }
+}
+
+impl Drop for Vec<i64> {
+    def drop(&mut self) {
+        sengoo_vec_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for Vec<bool> {
+    def drop(&mut self) {
+        sengoo_vec_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for Vec<String> {
+    def drop(&mut self) {
+        sengoo_vec_string_free_status(self.handle);
     }
 }
 

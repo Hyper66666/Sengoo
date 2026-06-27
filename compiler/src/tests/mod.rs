@@ -20,6 +20,8 @@ pub mod core_language_correctness_tests;
 pub mod derive_macro_tests;
 pub mod diagnostics_tests;
 pub mod direct_call_helpers_tests;
+pub mod drop_flag_tests;
+pub mod drop_trait_tests;
 pub mod enum_match_lowering_tests;
 pub mod ffi_tests;
 pub mod for_loop_tests;

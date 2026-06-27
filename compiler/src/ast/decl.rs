@@ -547,7 +547,13 @@ impl Node for Trait {
 pub enum TraitItem {
     Function(Function),
     Const(Const),
-    Type(TypeAlias),
+    Type(AssociatedTypeDecl),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssociatedTypeDecl {
+    pub name: Ident,
+    pub span: Span,
 }
 
 /// Impl 块
@@ -558,6 +564,7 @@ pub struct Impl {
     pub target_type: Type,
     pub trait_path: Option<Path>,
     pub trait_args: Vec<Type>,
+    pub associated_types: Vec<TypeAlias>,
     pub items: Vec<Function>,
     pub span: Span,
 }
@@ -570,6 +577,7 @@ impl Impl {
             target_type,
             trait_path: None,
             trait_args: Vec::new(),
+            associated_types: Vec::new(),
             items: Vec::new(),
             span,
         }

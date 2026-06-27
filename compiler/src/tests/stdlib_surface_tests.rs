@@ -40,6 +40,15 @@ fn compile_with_stdlib_modules(modules: &[&str], program: &str) -> String {
         .unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
 }
 
+fn llvm_function_section<'a>(ir: &'a str, function_header: &str) -> &'a str {
+    let start = ir
+        .find(function_header)
+        .unwrap_or_else(|| panic!("missing LLVM function header `{function_header}`\n{ir}"));
+    let rest = &ir[start..];
+    let next = rest.find("\n; Function: ").unwrap_or(rest.len());
+    &rest[..next]
+}
+
 #[test]
 fn option_module_imports_and_unwraps() {
     let ir = compile_with_stdlib_modules(
@@ -125,6 +134,126 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_handles_auto_drop_without_manual_release() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "string.sg",
+            "collections.sg",
+            "json.sg",
+            "process.sg",
+            "net.sg",
+        ],
+        r##"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let vec = vec_new_i64();
+    let strings = vec_new_string();
+    let doc = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let command = process_command("sengoo-missing-owned-drop").unwrap_or(ProcessCommand { handle: 0 });
+    let output = ProcessOutput { handle: 0 };
+    let process = ProcessHandle { handle: 0 };
+    let stream = TcpStream { handle: 0 };
+    let socket = UdpSocket { handle: 0 };
+    let client = HttpClient { handle: 0 };
+    let server = HttpServer { handle: 0 };
+    let request = HttpServerRequest { handle: 0 };
+
+    buffer.len() + vec.len() + strings.len() + doc.root().node_id + command.handle
+        + output.handle + process.handle + stream.handle + socket.handle
+        + client.handle + server.handle + request.handle
+}
+"##,
+    );
+
+    for symbol in [
+        "Buffer_Drop_drop",
+        "Vec_i64_Drop_drop",
+        "Vec_String_Drop_drop",
+        "JsonDoc_Drop_drop",
+        "ProcessCommand_Drop_drop",
+        "ProcessOutput_Drop_drop",
+        "ProcessHandle_Drop_drop",
+        "TcpStream_Drop_drop",
+        "UdpSocket_Drop_drop",
+        "HttpClient_Drop_drop",
+        "HttpServer_Drop_drop",
+        "HttpServerRequest_Drop_drop",
+    ] {
+        assert!(
+            ir.contains(symbol),
+            "expected stdlib owning handle auto-drop symbol {symbol}\n{ir}"
+        );
+    }
+}
+
+#[test]
+fn stdlib_owned_result_unwrap_or_moves_value_without_dropping_it_first() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    buffer.len()
+}
+"#,
+    );
+    let unwrap_or = llvm_function_section(&ir, "define %Buffer @Result_Buffer_i64_unwrap_or");
+
+    assert!(
+        !unwrap_or.contains("Buffer_Drop_drop"),
+        "owned Result.unwrap_or must move its selected value out before drop glue runs\n{unwrap_or}"
+    );
+}
+
+#[test]
+fn stdlib_rc_shared_ownership_compiles_and_auto_drops() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let first = rc_new_i64(21);
+    let second = first.clone();
+    first.strong_count() + second.get()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("sengoo_rc_clone"),
+        "Rc clone should lower to runtime refcount increment\n{ir}"
+    );
+    assert!(
+        ir.contains("Rc_i64_Drop_drop"),
+        "Rc<i64> locals should auto-drop through Drop glue\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_drop"),
+        "Rc Drop impl should call the runtime decrement/free helper\n{ir}"
+    );
+
+    let clone_section = llvm_function_section(&ir, "; Function: Rc_i64_clone");
+    assert!(
+        !clone_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::clone has a borrowed receiver and must not auto-drop its receiver parameter\n{clone_section}"
+    );
+    let count_section = llvm_function_section(&ir, "; Function: Rc_i64_strong_count");
+    assert!(
+        !count_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::strong_count has a borrowed receiver and must not auto-drop its receiver parameter\n{count_section}"
+    );
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],
@@ -148,6 +277,26 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_str_starts_with"));
     assert!(ir.contains("sengoo_str_ends_with"));
     assert!(ir.contains("sengoo_str_index_of"));
+}
+
+#[test]
+fn string_module_imports_trim_and_ascii_case_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let trimmed = str_trim("  sengoo\n").unwrap_or(String { handle: 0 });
+    let upper = str_to_ascii_upper("senGoo").unwrap_or(String { handle: 0 });
+    let lower = str_to_ascii_lower("SenGOO").unwrap_or(String { handle: 0 });
+    trimmed.len() + upper.len() + lower.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_trim"));
+    assert!(ir.contains("sengoo_str_to_ascii_upper"));
+    assert!(ir.contains("sengoo_str_to_ascii_lower"));
+    assert!(ir.contains("String_Drop_drop"));
 }
 
 #[test]

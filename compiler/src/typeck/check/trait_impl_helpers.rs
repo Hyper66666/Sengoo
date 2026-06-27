@@ -16,6 +16,35 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Enforce the compiler-known `Drop` trait contract: `def drop(&mut self)`.
+    /// `drop` is compiler-inserted, so its only method must take `&mut self` and
+    /// accept no other parameters; a malformed signature is rejected here rather
+    /// than producing surprising drop glue later.
+    fn validate_drop_contract(method: &Function) -> Result<()> {
+        if method.name.name != "drop" {
+            return Ok(());
+        }
+
+        if !matches!(method.self_param, Some(SelfParam::BorrowedMut)) {
+            return Err(CompileError::from(TypeckError::Other(
+                "Drop::drop must use `&mut self` receiver".to_string(),
+            )));
+        }
+
+        let extra_params = method
+            .params
+            .iter()
+            .filter(|param| param.name.name != "self")
+            .count();
+        if extra_params != 0 {
+            return Err(CompileError::from(TypeckError::Other(
+                "Drop::drop must take no parameters other than `&mut self`".to_string(),
+            )));
+        }
+
+        Ok(())
+    }
+
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&trait_decl.type_params)?;
@@ -36,20 +65,19 @@ impl TypeChecker {
                     if trait_decl.name.name == "Future" {
                         Self::validate_future_poll_contract(method)?;
                     }
+                    if trait_decl.name.name == "Drop" {
+                        Self::validate_drop_contract(method)?;
+                    }
 
                     self.env.push_scope();
                     let method_generic_meta =
                         self.bind_type_params_with_meta(&method.type_params)?;
                     let mut param_types = Vec::new();
-                    let mut has_self = false;
+                    let has_self = method.self_param.is_some();
 
                     for param in &method.params {
-                        if param.name.name == "self" {
-                            has_self = true;
-                        } else {
-                            let ty = self.check_type(&param.ty)?;
-                            param_types.push(ty);
-                        }
+                        let ty = self.check_type(&param.ty)?;
+                        param_types.push(ty);
                     }
 
                     let ret_ty = if let Some(ret) = &method.return_type {
@@ -117,12 +145,46 @@ impl TypeChecker {
             .map(|arg| self.check_type(arg))
             .collect::<TyResult<Vec<_>>>()?;
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
+        let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
+        let is_copy_impl = matches!(trait_name.as_deref(), Some("Copy"));
+        if let Some(name) = trait_name.as_deref() {
+            if let Err(err) = self.validate_orphan_rule(name, &target_ty, impl_decl.span) {
+                self.env.pop_scope();
+                return Err(CompileError::from(err));
+            }
+        }
+        if is_copy_impl {
+            if let Err(err) = self.validate_copy_impl(&target_ty, &target_key, impl_decl.span) {
+                self.env.pop_scope();
+                return Err(CompileError::from(err));
+            }
+        }
+        if is_drop_impl {
+            if self.impl_registry.implements_trait("Copy", &target_key) {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "copy-drop-conflict",
+                    format!("type `{target_key}` cannot implement both `Copy` and `Drop`"),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+            self.env.mark_drop_owned_type(&target_ty);
+        }
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
+
+        for item in &impl_decl.associated_types {
+            let ty = self.check_type(&item.ty)?;
+            impl_info.add_assoc_type(item.name.name.clone(), ty);
+        }
 
         for item in &impl_decl.items {
             if is_future_impl {
                 Self::validate_future_poll_contract(item)?;
+            }
+            if is_drop_impl {
+                Self::validate_drop_contract(item)?;
             }
 
             self.env.push_scope();
@@ -187,6 +249,42 @@ impl TypeChecker {
                     ));
                     return Err(CompileError::TypeckError(err));
                 }
+
+                let mut missing_associated_types = trait_info
+                    .assoc_types
+                    .iter()
+                    .filter(|name| !impl_info.assoc_types.contains_key(*name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !missing_associated_types.is_empty() {
+                    missing_associated_types.sort();
+                    self.env.pop_scope();
+                    let err = TypeckError::Other(format!(
+                        "impl {} for {} is missing required associated types: {}",
+                        trait_name,
+                        target_key,
+                        missing_associated_types.join(", ")
+                    ));
+                    return Err(CompileError::TypeckError(err));
+                }
+
+                let mut unknown_associated_types = impl_info
+                    .assoc_types
+                    .keys()
+                    .filter(|name| !trait_info.assoc_types.contains(*name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !unknown_associated_types.is_empty() {
+                    unknown_associated_types.sort();
+                    self.env.pop_scope();
+                    let err = TypeckError::Other(format!(
+                        "impl {} for {} defines unknown associated types: {}",
+                        trait_name,
+                        target_key,
+                        unknown_associated_types.join(", ")
+                    ));
+                    return Err(CompileError::TypeckError(err));
+                }
             }
 
             self.impl_registry
@@ -197,5 +295,100 @@ impl TypeChecker {
 
         self.env.pop_scope();
         Ok(())
+    }
+
+    fn validate_orphan_rule(
+        &self,
+        trait_name: &str,
+        target_ty: &Ty,
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        if self.is_package_local_trait(trait_name) || self.is_package_local_type(target_ty) {
+            return Ok(());
+        }
+
+        Err(TypeckError::diagnostic(
+            "orphan-rule",
+            format!(
+                "orphan impl rejected: trait `{}` and type `{}` are both external to this package",
+                trait_name, target_ty
+            ),
+            span.lo,
+            span.hi,
+        ))
+    }
+
+    fn is_package_local_trait(&self, trait_name: &str) -> bool {
+        matches!(
+            self.env.lookup(trait_name).map(|symbol| &symbol.kind),
+            Some(SymbolKind::Trait { .. })
+        )
+    }
+
+    fn is_package_local_type(&self, ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, .. } => {
+                self.generic_type_metas.contains_key(name)
+                    || self.struct_field_defs.contains_key(name)
+                    || self.enum_variants.contains_key(name)
+                    || self.class_decls.contains_key(name)
+            }
+            _ => false,
+        }
+    }
+
+    fn validate_copy_impl(
+        &mut self,
+        target_ty: &Ty,
+        target_key: &str,
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        if self.env.is_drop_owned_type(target_ty) {
+            return Err(TypeckError::diagnostic(
+                "copy-drop-conflict",
+                format!("type `{target_key}` cannot implement both `Copy` and `Drop`"),
+                span.lo,
+                span.hi,
+            ));
+        }
+
+        let TyKind::Adt { name, .. } = &target_ty.kind else {
+            return Ok(());
+        };
+        let Some(field_defs) = self.struct_field_defs.get(name).cloned() else {
+            return Ok(());
+        };
+
+        for (field_name, field_ty) in field_defs {
+            let resolved = self.check_type(&field_ty)?;
+            if !self.type_is_copy_eligible(&resolved) {
+                return Err(TypeckError::diagnostic(
+                    "copy-field-not-copy",
+                    format!(
+                        "type `{target_key}` cannot implement `Copy` because field `{field_name}` has non-Copy type `{resolved}`"
+                    ),
+                    span.lo,
+                    span.hi,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn type_is_copy_eligible(&self, ty: &Ty) -> bool {
+        if ty.is_copy_value() {
+            return true;
+        }
+        match &ty.kind {
+            TyKind::Tuple(types) => types.iter().all(|ty| self.type_is_copy_eligible(ty)),
+            TyKind::Array(elem, _) => self.type_is_copy_eligible(elem),
+            TyKind::Adt { .. } => {
+                let key = type_key(ty);
+                !self.env.is_drop_owned_type(ty)
+                    && self.impl_registry.implements_trait("Copy", &key)
+            }
+            _ => false,
+        }
     }
 }

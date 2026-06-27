@@ -9,7 +9,14 @@ pub(super) fn lower_method_call_expr(
 ) -> Local {
     let receiver_local = ctx.lower_expr(receiver);
     let arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
-    lower_method_call_from_locals(ctx, receiver_local, method, &arg_locals)
+    let result = lower_method_call_from_locals(ctx, receiver_local, method, &arg_locals);
+    for arg in args {
+        ctx.mark_drop_expr_moved(arg);
+    }
+    if method == "drop" {
+        ctx.mark_drop_expr_moved(receiver);
+    }
+    result
 }
 
 #[cfg(test)]

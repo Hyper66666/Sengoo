@@ -89,6 +89,7 @@ pub(super) fn lower_let_stmt(
             }
         } else {
             let value_ty = ctx.get_local_type(value_local).clone();
+            ctx.mark_drop_expr_moved(value_expr);
             let value_info_opt = ctx
                 .mir_fn
                 .locals
@@ -115,6 +116,7 @@ pub(super) fn lower_let_stmt(
                     if let Some(origin) = ctx.future_origins.get(&value_local).cloned() {
                         ctx.future_origins.insert(local, origin);
                     }
+                    ctx.record_drop_binding_if_needed(local);
                     return;
                 }
             };
@@ -136,6 +138,7 @@ pub(super) fn lower_let_stmt(
                 if let Some(origin) = ctx.future_origins.get(&value_local).cloned() {
                     ctx.future_origins.insert(local, origin);
                 }
+                ctx.record_drop_binding_if_needed(local);
             }
         }
     } else {

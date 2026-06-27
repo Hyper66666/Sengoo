@@ -13,12 +13,15 @@ use crate::method_resolution::{
 use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
 use crate::typeck::ffi as ffi_check;
 use crate::typeck::infer::TypeInfer;
-use crate::typeck::r#trait::{type_key, FunctionTy, ImplRegistry, TraitRegistry};
+use crate::typeck::r#trait::{
+    type_key, FunctionTy, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
+};
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 type TyResult<T> = std::result::Result<T, TypeckError>;
+type EnumMetaAndFields = (Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>);
 
 mod call_helpers;
 mod class_hierarchy_helpers;
@@ -74,6 +77,7 @@ pub struct TypeChecker {
     class_decls: HashMap<String, ClassDeclInfo>,
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
     generic_type_metas: HashMap<String, GenericTypeMeta>,
+    generic_var_bounds: HashMap<TyVarId, Vec<String>>,
     async_context_depth: usize,
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
@@ -89,12 +93,14 @@ impl TypeChecker {
     }
 
     pub fn new() -> Self {
-        let env = TypeEnv::new();
+        let mut env = TypeEnv::new();
+        let trait_registry = Self::compiler_known_traits(&mut env);
+        Self::compiler_known_support_types(&mut env);
         let infer = TypeInfer::with_env(env.clone());
         Self {
             env,
             infer,
-            trait_registry: TraitRegistry::new(),
+            trait_registry,
             impl_registry: ImplRegistry::new(),
             struct_field_defs: HashMap::new(),
             enum_variants: HashMap::new(),
@@ -103,6 +109,7 @@ impl TypeChecker {
             class_decls: HashMap::new(),
             generic_function_metas: HashMap::new(),
             generic_type_metas: HashMap::new(),
+            generic_var_bounds: HashMap::new(),
             async_context_depth: 0,
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
@@ -110,6 +117,49 @@ impl TypeChecker {
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
+        }
+    }
+
+    fn compiler_known_traits(env: &mut TypeEnv) -> TraitRegistry {
+        let mut registry = TraitRegistry::new();
+        let mut drop_trait = TraitInfo::new("Drop".to_string(), Vec::new(), true);
+        drop_trait.add_method(
+            "drop".to_string(),
+            MethodSig::new(true, Vec::new(), env.unit_ty(), Vec::new()),
+        );
+        registry.register(drop_trait);
+        for trait_name in [
+            "Clone",
+            "Copy",
+            "PartialEq",
+            "Eq",
+            "PartialOrd",
+            "Ord",
+            "Hash",
+            "Default",
+            "Display",
+            "Debug",
+        ] {
+            registry.register(TraitInfo::new(trait_name.to_string(), Vec::new(), true));
+        }
+        let mut iterator = TraitInfo::new("Iterator".to_string(), Vec::new(), true);
+        iterator.add_assoc_type("Item".to_string());
+        registry.register(iterator);
+
+        let mut into_iterator = TraitInfo::new("IntoIterator".to_string(), Vec::new(), true);
+        into_iterator.add_assoc_type("Item".to_string());
+        into_iterator.add_assoc_type("IntoIter".to_string());
+        registry.register(into_iterator);
+        registry
+    }
+
+    fn compiler_known_support_types(env: &mut TypeEnv) {
+        for type_name in ["Ordering", "Formatter", "Hasher"] {
+            let ty = env.new_ty(TyKind::Adt {
+                name: type_name.to_string(),
+                args: Vec::new(),
+            });
+            env.insert_type(type_name.to_string(), ty);
         }
     }
 
@@ -344,6 +394,7 @@ impl TypeChecker {
                     && fields[0].0 == "handle"
                 {
                     self.env.owned_string_ty = Some(ty.clone());
+                    self.env.mark_drop_owned_type(&ty);
                 }
                 self.env.insert_type(name, ty);
                 let type_meta = self.collect_generic_type_meta(&struct_decl.type_params);
@@ -369,25 +420,24 @@ impl TypeChecker {
                     .collect::<Vec<_>>();
                 self.enum_variants.insert(name.clone(), variants);
                 self.env.push_scope();
-                let enum_meta_and_fields =
-                    (|| -> TyResult<(Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>)> {
-                        let type_meta = self
-                            .bind_type_params_with_meta(&enum_decl.type_params)
-                            .map_err(|err| TypeckError::Other(err.to_string()))?;
-                        let mut variant_fields = HashMap::new();
-                        for variant in &enum_decl.variants {
-                            let field_tys = variant
-                                .fields
-                                .iter()
-                                .map(|field| match field {
-                                    crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
-                                    crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
-                                })
-                                .collect::<TyResult<Vec<_>>>()?;
-                            variant_fields.insert(variant.name.name.clone(), field_tys);
-                        }
-                        Ok((type_meta, variant_fields))
-                    })();
+                let enum_meta_and_fields = (|| -> TyResult<EnumMetaAndFields> {
+                    let type_meta = self
+                        .bind_type_params_with_meta(&enum_decl.type_params)
+                        .map_err(|err| TypeckError::Other(err.to_string()))?;
+                    let mut variant_fields = HashMap::new();
+                    for variant in &enum_decl.variants {
+                        let field_tys = variant
+                            .fields
+                            .iter()
+                            .map(|field| match field {
+                                crate::ast::VariantField::Named(_, ty) => self.check_type(ty),
+                                crate::ast::VariantField::Unnamed(ty) => self.check_type(ty),
+                            })
+                            .collect::<TyResult<Vec<_>>>()?;
+                        variant_fields.insert(variant.name.name.clone(), field_tys);
+                    }
+                    Ok((type_meta, variant_fields))
+                })();
                 self.env.pop_scope();
                 let (type_meta, variant_fields) = enum_meta_and_fields?;
                 self.enum_variant_field_tys.insert(name, variant_fields);
@@ -535,6 +585,18 @@ impl TypeChecker {
                         .iter()
                         .map(|arg| self.substitute_ty_vars(arg, subst))
                         .collect(),
+                },
+            },
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => Ty {
+                id: ty.id,
+                kind: TyKind::AssocProjection {
+                    base: Box::new(self.substitute_ty_vars(base, subst)),
+                    trait_name: trait_name.clone(),
+                    name: name.clone(),
                 },
             },
             _ => ty.clone(),
@@ -718,6 +780,43 @@ impl TypeChecker {
     }
 
     fn check_path_type(&mut self, path: &Path, explicit_args: Vec<Ty>) -> TyResult<Ty> {
+        if path.segments.len() == 2 && explicit_args.is_empty() {
+            let base_name = &path.segments[0].name;
+            let assoc_name = &path.segments[1].name;
+            if let Some(base) = self.env.lookup(base_name).and_then(Symbol::get_ty).cloned() {
+                let TyKind::Var(var_id) = &base.kind else {
+                    return Err(TypeckError::Other(format!(
+                        "associated type projection `{base_name}::{assoc_name}` currently requires a generic type parameter base"
+                    )));
+                };
+                let bounds = self
+                    .generic_var_bounds
+                    .get(var_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut declaring_traits = bounds.into_iter().filter(|trait_name| {
+                    self.trait_registry
+                        .get(trait_name)
+                        .is_some_and(|info| info.assoc_types.iter().any(|name| name == assoc_name))
+                });
+                let Some(trait_name) = declaring_traits.next() else {
+                    return Err(TypeckError::Other(format!(
+                        "associated type `{assoc_name}` is not declared by a bound on `{base_name}`"
+                    )));
+                };
+                if declaring_traits.next().is_some() {
+                    return Err(TypeckError::Other(format!(
+                        "associated type `{assoc_name}` is ambiguous for `{base_name}`; add an explicit trait binding"
+                    )));
+                }
+                return Ok(self.env.new_ty(TyKind::AssocProjection {
+                    base: Box::new(base),
+                    trait_name,
+                    name: assoc_name.clone(),
+                }));
+            }
+        }
+
         let name = self.path_name(path)?;
 
         if name == "Future" {
@@ -756,6 +855,7 @@ impl TypeChecker {
     /// Lower an AST type annotation into an internal type.
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
+            TypeKind::SelfType => self.env.new_ty(TyKind::SelfType),
             TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
             TypeKind::PathWithArgs { path, args } => {
                 let args = args
@@ -839,6 +939,8 @@ impl TypeChecker {
                         ));
                     }
 
+                    self.validate_dyn_associated_type_bindings(bound, &ident.name)?;
+                    self.ensure_dyn_trait_object_safe(&ident.name, ident.span.lo, ident.span.hi)?;
                     names.push(ident.name.clone());
                 }
 
@@ -861,6 +963,144 @@ impl TypeChecker {
                 self.env.lookup(name).map(|symbol| &symbol.kind),
                 Some(SymbolKind::Trait { .. })
             )
+    }
+
+    fn validate_dyn_associated_type_bindings(
+        &mut self,
+        bound: &TraitBound,
+        trait_name: &str,
+    ) -> TyResult<()> {
+        let Some(info) = self.trait_registry.get(trait_name) else {
+            return Ok(());
+        };
+
+        let required = info.assoc_types.clone();
+        let required_set = required.iter().cloned().collect::<HashSet<_>>();
+        let mut seen = HashSet::new();
+        let mut fixed = HashSet::new();
+
+        for binding in &bound.assoc_bindings {
+            if !seen.insert(binding.name.clone()) {
+                return Err(TypeckError::diagnostic(
+                    "dyn-associated-type",
+                    format!(
+                        "trait object `dyn {trait_name}` fixes associated type `{}` more than once",
+                        binding.name
+                    ),
+                    binding.ty.span.lo,
+                    binding.ty.span.hi,
+                ));
+            }
+            if !required_set.contains(&binding.name) {
+                return Err(TypeckError::diagnostic(
+                    "dyn-associated-type",
+                    format!(
+                        "trait object `dyn {trait_name}` fixes unknown associated type `{}`",
+                        binding.name
+                    ),
+                    binding.ty.span.lo,
+                    binding.ty.span.hi,
+                ));
+            }
+            self.check_type(&binding.ty)?;
+            fixed.insert(binding.name.clone());
+        }
+
+        let mut missing = required
+            .into_iter()
+            .filter(|name| !fixed.contains(name))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            missing.sort();
+            return Err(TypeckError::diagnostic(
+                "dyn-associated-type",
+                format!(
+                    "trait object `dyn {trait_name}` must fix associated types: {}",
+                    missing.join(", ")
+                ),
+                bound.span().lo,
+                bound.span().hi,
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn ensure_dyn_trait_object_safe(&self, name: &str, lo: u32, hi: u32) -> TyResult<()> {
+        let Some(info) = self.trait_registry.get(name) else {
+            return Ok(());
+        };
+
+        let reason = if !info.type_params.is_empty() {
+            Some("traits with type parameters are not object-safe yet".to_string())
+        } else if !info.consts.is_empty() {
+            Some("traits with associated consts are not object-safe".to_string())
+        } else {
+            let mut methods = info.methods.iter().collect::<Vec<_>>();
+            methods.sort_by_key(|(method_name, _)| method_name.as_str());
+            methods.into_iter().find_map(|(method_name, method)| {
+                if !method.has_self {
+                    return Some(format!("method `{method_name}` has no `self` receiver"));
+                }
+                if !method.generic_params.is_empty() {
+                    return Some(format!("method `{method_name}` has generic parameters"));
+                }
+                if method.param_types.iter().any(Self::type_contains_bare_self) {
+                    return Some(format!(
+                        "method `{method_name}` uses `Self` in a parameter type"
+                    ));
+                }
+                if Self::type_contains_unindirected_self(&method.return_type) {
+                    return Some(format!("method `{method_name}` returns `Self` by value"));
+                }
+                None
+            })
+        };
+
+        if let Some(reason) = reason {
+            return Err(TypeckError::diagnostic(
+                "not-object-safe",
+                format!("trait `{name}` is not object-safe: {reason}"),
+                lo,
+                hi,
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn type_contains_bare_self(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::SelfType => true,
+            TyKind::Tuple(types) => types.iter().any(Self::type_contains_bare_self),
+            TyKind::Array(inner, _) | TyKind::Slice(inner) | TyKind::Ptr(inner) => {
+                Self::type_contains_bare_self(inner)
+            }
+            TyKind::Ref(_, inner) | TyKind::Future(inner) => Self::type_contains_bare_self(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::type_contains_bare_self)
+                    || Self::type_contains_bare_self(ret)
+            }
+            TyKind::Adt { args, .. } => args.iter().any(Self::type_contains_bare_self),
+            _ => false,
+        }
+    }
+
+    fn type_contains_unindirected_self(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::SelfType => true,
+            TyKind::Ref(_, _) | TyKind::Ptr(_) => false,
+            TyKind::Tuple(types) => types.iter().any(Self::type_contains_unindirected_self),
+            TyKind::Array(inner, _) | TyKind::Slice(inner) | TyKind::Future(inner) => {
+                Self::type_contains_unindirected_self(inner)
+            }
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::type_contains_unindirected_self)
+                    || Self::type_contains_unindirected_self(ret)
+            }
+            TyKind::Adt { args, .. } => args.iter().any(Self::type_contains_unindirected_self),
+            _ => false,
+        }
     }
 
     fn check_expr(&mut self, expr: &Expr) -> TyResult<Ty> {

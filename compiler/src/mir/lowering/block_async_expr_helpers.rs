@@ -1,10 +1,10 @@
-use super::body_lowering_helpers::lower_body_expr_to_new_block;
 use super::method_call_helpers::lower_method_call_from_locals;
 use super::*;
 
 pub(super) fn lower_block_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> Local {
-    lower_body_expr_to_new_block(ctx, body);
-    Local::new(0, LocalKind::Return)
+    let entry_block = ctx.new_block();
+    ctx.set_terminator(Terminator::Goto(entry_block));
+    ctx.lower_scoped_body_to_block_val(body, entry_block)
 }
 
 pub(super) fn lower_await_expr(ctx: &mut LoweringContext<'_>, inner: &HIRExpr) -> Local {
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn lower_block_expr_returns_return_local_handle() {
+    fn lower_block_expr_returns_scoped_body_value() {
         let (
             mut mir_fn,
             mut lambda_counter,
@@ -163,7 +163,11 @@ mod tests {
             &HIRBody::with_expr(HIRExpr::Lit(HIRLiteral::Int(1))),
         );
 
-        assert_eq!(result, Local::new(0, LocalKind::Return));
+        assert_ne!(result, Local::new(0, LocalKind::Return));
+        assert_eq!(ctx.get_local_type(result), &MIR_I64);
+        assert!(
+            matches!(ctx.mir_fn.basic_blocks[start_block].terminator, Some(Terminator::Goto(target)) if target == ctx.current_block())
+        );
     }
 
     #[test]

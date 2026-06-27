@@ -29,6 +29,38 @@ fn assert_helper_allows_callsite_injection(
 }
 
 impl TypeChecker {
+    fn resolve_associated_projection(&self, ty: &Ty) -> TyResult<Ty> {
+        let TyKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } = &ty.kind
+        else {
+            return Ok(ty.clone());
+        };
+        let base = self.infer.apply_subst(base);
+        if matches!(base.kind, TyKind::Var(_)) {
+            return Ok(Ty::new(
+                ty.id,
+                TyKind::AssocProjection {
+                    base: Box::new(base),
+                    trait_name: trait_name.clone(),
+                    name: name.clone(),
+                },
+            ));
+        }
+        let key = type_key(&base);
+        self.impl_registry
+            .get_trait_impl(trait_name, &key)
+            .and_then(|impl_info| impl_info.assoc_types.get(name))
+            .cloned()
+            .ok_or_else(|| {
+                TypeckError::Other(format!(
+                    "cannot resolve associated type `<{key} as {trait_name}>::{name}` from visible trait impls"
+                ))
+            })
+    }
+
     fn instantiate_method_function_ty(
         &mut self,
         fn_ty: &FunctionTy,
@@ -735,12 +767,14 @@ impl TypeChecker {
                             .to_string(),
                     ));
                 }
-                if matches!(arg_ty.kind, TyKind::Int(IntKind::I64))
+                let expected_ty =
+                    self.resolve_associated_projection(&self.infer.apply_subst(arg_ty))?;
+                if matches!(expected_ty.kind, TyKind::Int(IntKind::I64))
                     && matches!(actual_ty.kind, TyKind::Fn { .. })
                 {
                     continue;
                 }
-                self.infer.unify(arg_ty, &actual_ty)?;
+                self.infer.unify(&expected_ty, &actual_ty)?;
             }
 
             if let Some((name, meta, var_map)) = generic_ctx.as_ref() {
@@ -748,7 +782,7 @@ impl TypeChecker {
                 self.enforce_generic_function_constraints(name, meta, var_map, span.lo, span.hi)?;
             }
 
-            let resolved_ret = self.infer.apply_subst(ret);
+            let resolved_ret = self.resolve_associated_projection(&self.infer.apply_subst(ret))?;
 
             let is_async_call = match &func.kind {
                 ExprKind::Ident(ident) => self.async_functions.contains(&ident.name),
@@ -942,6 +976,11 @@ impl TypeChecker {
                 .lookup_trait_method(&trait_name, receiver_key, method_name)
                 .cloned()
             {
+                if trait_name == "Drop" && method_name == "drop" {
+                    return Err(TypeckError::Other(
+                        "Drop::drop is reserved for compiler-inserted cleanup; use an explicit compatibility release method instead".to_string(),
+                    ));
+                }
                 let instantiated = self.instantiate_method_function_ty(&fn_ty, &HashMap::new());
                 candidates.push(MethodCandidate {
                     label: trait_name,

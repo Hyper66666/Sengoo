@@ -9,6 +9,7 @@ use super::super::{HIRType, HIRTypeKind};
 pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
     match &ast_type.kind {
         ast::TypeKind::Infer => HIRType::new(HIRTypeKind::Error),
+        ast::TypeKind::SelfType => HIRType::named("Self".to_string(), vec![]),
         ast::TypeKind::Path(path) => {
             let name = path
                 .as_simple()

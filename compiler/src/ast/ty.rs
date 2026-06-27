@@ -107,6 +107,9 @@ impl Node for Type {
 /// 类型种类枚举
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
+    /// The implementing type inside a trait or impl declaration.
+    SelfType,
+
     /// 简单路径类型，如  或
     Path(Path),
 
@@ -152,6 +155,13 @@ pub enum TypeKind {
 pub struct TraitBound {
     pub path: Path,
     pub params: Vec<Type>,
+    pub assoc_bindings: Vec<TraitAssocBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitAssocBinding {
+    pub name: String,
+    pub ty: Type,
 }
 
 impl TraitBound {
@@ -159,11 +169,17 @@ impl TraitBound {
         Self {
             path,
             params: Vec::new(),
+            assoc_bindings: Vec::new(),
         }
     }
 
     pub fn with_params(mut self, params: Vec<Type>) -> Self {
         self.params = params;
+        self
+    }
+
+    pub fn with_assoc_bindings(mut self, assoc_bindings: Vec<TraitAssocBinding>) -> Self {
+        self.assoc_bindings = assoc_bindings;
         self
     }
 

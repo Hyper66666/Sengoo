@@ -238,10 +238,12 @@ impl TypeChecker {
                             "unsupported trait bound path in type parameter".to_string(),
                         ))
                     })?;
-                if !matches!(
-                    self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
-                    Some(SymbolKind::Trait { .. })
-                ) {
+                if !self.trait_registry.contains(&trait_name)
+                    && !matches!(
+                        self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
+                        Some(SymbolKind::Trait { .. })
+                    )
+                {
                     return Err(CompileError::from(TypeckError::UndefinedType {
                         name: trait_name,
                     }));
@@ -252,6 +254,9 @@ impl TypeChecker {
             if let Some(default_ty) = &type_param.default {
                 meta.default = Some(self.check_type(default_ty).map_err(CompileError::from)?);
             }
+
+            self.generic_var_bounds
+                .insert(meta.var_id, meta.bounds.clone());
         }
 
         Ok(metas)
@@ -290,7 +295,8 @@ impl TypeChecker {
 
     pub(super) fn check_struct_decl(&mut self, struct_decl: &Struct) -> Result<()> {
         self.env.push_scope();
-        self.bind_type_params_with_meta(&struct_decl.type_params)?;
+        let type_params = self.bind_type_params_with_meta(&struct_decl.type_params)?;
+        let mut field_types = Vec::with_capacity(struct_decl.fields.len());
 
         for field in &struct_decl.fields {
             let field_ty = self.check_type(&field.ty)?;
@@ -299,9 +305,20 @@ impl TypeChecker {
                     "AsyncContext is poll-scoped and cannot be stored in a field".to_string(),
                 )));
             }
+            let field_name = field
+                .name
+                .as_ref()
+                .map(|name| name.name.clone())
+                .unwrap_or_default();
+            field_types.push((field_name, field_ty));
         }
 
         self.env.pop_scope();
+        self.env.register_struct_field_types(
+            struct_decl.name.name.clone(),
+            type_params.into_iter().map(|param| param.var_id).collect(),
+            field_types,
+        );
         Ok(())
     }
 

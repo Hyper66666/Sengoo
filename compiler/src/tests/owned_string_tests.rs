@@ -127,6 +127,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_assignment_move_rejects_use_after_move() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let a: String = string_from_str("a").value;
+    let mut b: String = string_from_str("b").value;
+    b = a;
+    a.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `a`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_user_struct_does_not_get_move_rules() {
     let source = r#"
 struct MyString {
@@ -144,6 +162,135 @@ def main() -> i64 {
     checker
         .check_program(&program)
         .expect("non-canonical string struct should not move-check");
+}
+
+#[test]
+fn user_drop_type_move_rejects_use_after_move() {
+    let source = r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let a: Resource = Resource { handle: 1 };
+    let b = a;
+    a.handle
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("a moved user Drop type should reject later use");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("use of moved value `a`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_move_rejects_reusing_the_same_field() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_move_keeps_sibling_field_available() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.right.len()
+}
+"#,
+    )
+    .expect("moving one owning field should not move its sibling");
+}
+
+#[test]
+fn owned_field_move_rejects_using_the_whole_parent_value() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def consume(value: Pair) -> i64 {
+    value.right.len()
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    consume(pair)
+}
+"#,
+    );
+    assert!(
+        err.contains("use of partially moved value `pair`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_assignment_reinitializes_a_moved_field() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let mut pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left = string_from_str("replacement").value;
+    pair.left.len()
+}
+"#,
+    )
+    .expect("assigning a moved field should reinitialize that field");
 }
 
 #[test]

@@ -11,10 +11,16 @@ impl<'a> LoweringContext<'a> {
         self.set_current_block(target_block);
 
         for stmt in &body.stmts {
+            if self.current_block_is_terminated() {
+                break;
+            }
             self.lower_stmt(stmt);
         }
 
         if let Some(expr) = &body.expr {
+            if self.current_block_is_terminated() {
+                return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
             self.lower_expr(expr)
         } else {
             self.add_local(None, LocalKind::Temp, MIR_UNIT)
@@ -32,11 +38,17 @@ impl<'a> LoweringContext<'a> {
 
         // 降级函数体的所有语句到当前基本块。
         for stmt in &body.stmts {
+            if self.current_block_is_terminated() {
+                break;
+            }
             self.lower_stmt(stmt);
         }
 
         // 若块尾存在表达式，则先降级该表达式并视情况插入 return。
         if let Some(expr) = &body.expr {
+            if self.current_block_is_terminated() {
+                return;
+            }
             let result_local = self.lower_expr(expr);
             if add_return {
                 // Only add return if the current block doesn't already have a
@@ -56,6 +68,7 @@ impl<'a> LoweringContext<'a> {
                     if is_main_with_unit_body {
                         self.set_terminator(Terminator::Return(None));
                     } else {
+                        self.mark_drop_expr_moved(expr);
                         self.set_terminator(Terminator::Return(Some(result_local)));
                     }
                 }
@@ -154,7 +167,19 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::AsyncBlock(body) => lower_async_block_expr(self, body),
             HIRExpr::Try(operand) => lower_try_expr(self, operand),
             HIRExpr::TryBlock(body) => lower_try_block_expr(self, body),
+            HIRExpr::Return(value) => lower_return_expr(self, value.as_deref()),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
+    }
+
+    pub(super) fn lower_scoped_body_to_block_val(
+        &mut self,
+        body: &HIRBody,
+        target_block: usize,
+    ) -> Local {
+        self.push_drop_scope();
+        let result = self.lower_body_to_block_val(body, target_block);
+        self.pop_drop_scope(Some(result));
+        result
     }
 }

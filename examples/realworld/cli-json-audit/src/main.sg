@@ -29,7 +29,6 @@ def audit_score() -> i64 {
     let item_count = root.array_len().unwrap_or(0);
     let first = root.array_get(0).unwrap_or(JsonValue { doc_handle: 0, node_id: 0 });
     let first_score = first.number_i64().unwrap_or(0);
-    let closed_doc = doc.close();
     let values = vec_new_i64();
     values.push(first_score);
     values.push(input_len);
@@ -41,9 +40,7 @@ def audit_score() -> i64 {
     let appended_report = file_append_str(out_file, "items checked\n").unwrap_or(0);
     let report_exists = file_exists(out_file);
     let report_removed = file_remove(out_file);
-    values.free();
-    buffer.free();
-    if made_dir and input_exists and input_len > 0 and read_len == input_len and item_count == 3 and first_score == 10 and closed_doc and contains_read and total > 20 and log_level_set and log_cleared and log_written and status_len > 0 and wrote_report > 0 and appended_report > 0 and report_exists and report_removed { 0; } else { 1; };
+    if made_dir and input_exists and input_len > 0 and read_len == input_len and item_count == 3 and first_score == 10 and contains_read and total > 20 and log_level_set and log_cleared and log_written and status_len > 0 and wrote_report > 0 and appended_report > 0 and report_exists and report_removed { 0; } else { 1; };
 }
 
 def main() -> i64 {

@@ -876,8 +876,11 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
     SengooBufferSlot* slot = &g_buffer_slots[index];
-    if (!slot->alive || slot->generation != generation || !slot->buffer) {
+    if (slot->generation != generation) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (!slot->alive || !slot->buffer) {
+        return SENGOO_FFI_STATUS_OK;
     }
     SengooFfiBuffer* buffer = slot->buffer;
     slot->alive = 0;
@@ -927,6 +930,59 @@ long long sengoo_str_index_of(const char* value, const char* needle) {
         return -1;
     }
     return (long long)(found - value);
+}
+
+long long sengoo_str_trim(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    const unsigned char* start = (const unsigned char*)value;
+    while (*start && isspace(*start)) {
+        start += 1;
+    }
+    const unsigned char* end = start + strlen((const char*)start);
+    while (end > start && isspace(*(end - 1))) {
+        end -= 1;
+    }
+    return sengoo_string_from_bytes_copy((long long)(intptr_t)start, (long long)(end - start));
+}
+
+long long sengoo_str_to_ascii_upper(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)value[i];
+        copy[i] = (char)(c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c);
+    }
+    copy[len] = '\0';
+    long long handle = sengoo_string_from_bytes_copy((long long)(intptr_t)copy, (long long)len);
+    free(copy);
+    return handle;
+}
+
+long long sengoo_str_to_ascii_lower(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)value[i];
+        copy[i] = (char)(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+    }
+    copy[len] = '\0';
+    long long handle = sengoo_string_from_bytes_copy((long long)(intptr_t)copy, (long long)len);
+    free(copy);
+    return handle;
 }
 
 enum {

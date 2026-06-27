@@ -261,11 +261,30 @@ fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Re
 }
 
 fn generate_builtin_derive(derive: &str, target: &DeriveTarget) -> String {
+    if let Some(trait_name) = core_derive_trait_name(derive) {
+        return format!("impl {} for {} {{\n}}", trait_name, target.name);
+    }
+
     let method = format!("__derive_{}", sanitize_ident(derive));
     format!(
         "impl {} {{\n    def {}(self) -> i64 {{\n        1\n    }}\n}}",
         target.name, method
     )
+}
+
+fn core_derive_trait_name(derive: &str) -> Option<&'static str> {
+    match derive.rsplit("::").next().unwrap_or(derive) {
+        "Clone" => Some("Clone"),
+        "Copy" => Some("Copy"),
+        "PartialEq" => Some("PartialEq"),
+        "Eq" => Some("Eq"),
+        "PartialOrd" => Some("PartialOrd"),
+        "Ord" => Some("Ord"),
+        "Hash" => Some("Hash"),
+        "Debug" => Some("Debug"),
+        "Default" => Some("Default"),
+        _ => None,
+    }
 }
 
 fn validate_expanded_source(source: &str) -> Result<()> {

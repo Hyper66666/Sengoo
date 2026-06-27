@@ -1,4 +1,4 @@
-use crate::ast::{DeclKind, TypeKind};
+use crate::ast::{DeclKind, TraitItem, TypeKind};
 use crate::{
     compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker,
 };
@@ -43,6 +43,160 @@ def takes(x: dyn Show) -> i64 {
         })
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["Show"]);
+}
+
+#[test]
+fn trait_associated_type_declaration_parses_without_a_rhs() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+"#;
+
+    let program = Parser::parse(source).expect("trait associated type declaration should parse");
+    let trait_decl = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Trait(trait_decl) => Some(trait_decl),
+            _ => None,
+        })
+        .expect("expected trait declaration");
+
+    assert!(matches!(
+        trait_decl.items.as_slice(),
+        [TraitItem::Type(item)] if item.name.name == "Item"
+    ));
+}
+
+#[test]
+fn impl_associated_type_definition_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("impl associated type definition should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("impl associated type definition should be registered");
+}
+
+#[test]
+fn impl_missing_required_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("missing associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("missing required associated types: Item"),
+        "expected missing associated type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn impl_unknown_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+    type Output = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unknown associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("defines unknown associated types: Output"),
+        "expected unknown associated type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn generic_associated_type_projection_resolves_at_call_site() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+
+def select_item<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+
+def main() -> i64 {
+    select_item(Counter { value: 0 }, 7)
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("T::Item should resolve through the concrete trait impl");
+    compile_to_ir(source).expect("resolved associated type projection should lower to LLVM IR");
+}
+
+#[test]
+fn unbounded_associated_type_projection_is_rejected() {
+    let source = r#"
+def bad<T>(value: T::Item) -> T::Item {
+    value
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unbounded associated projection should be rejected");
+    assert!(
+        err.to_string()
+            .contains("associated type `Item` is not declared by a bound on `T`"),
+        "expected bounded projection diagnostic, got: {err}"
+    );
 }
 
 #[test]
@@ -123,6 +277,249 @@ def takes(x: dyn Show) -> i64 {
     checker
         .check_program(&program)
         .expect("declared dyn trait should typecheck");
+}
+
+#[test]
+fn dyn_trait_with_associated_type_requires_fixed_binding() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse before type checking");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unfixed dyn associated type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[dyn-associated-type]")
+            && message.contains("Iterator")
+            && message.contains("Item"),
+        "expected dyn-associated-type diagnostic for unfixed associated type, got: {message}"
+    );
+}
+
+#[test]
+fn dyn_trait_with_fixed_associated_type_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("fixed associated type binding should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("fixed dyn associated type binding should typecheck");
+}
+
+#[test]
+fn dyn_trait_rejects_associated_function_as_not_object_safe() {
+    let source = r#"
+trait Factory {
+    def make() -> i64 {
+        0
+    }
+}
+
+def takes(x: dyn Factory) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("associated function traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Factory")
+            && message.contains("method `make`"),
+        "expected not-object-safe diagnostic for associated function, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_rejects_generic_method_as_not_object_safe() {
+    let source = r#"
+trait Mapper {
+    def map<T>(self, value: T) -> T {
+        value
+    }
+}
+
+def takes(x: dyn Mapper) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("generic method traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Mapper")
+            && message.contains("method `map`"),
+        "expected not-object-safe diagnostic for generic method, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_allows_self_return_through_reference_indirection() {
+    let source = r#"
+trait Borrowed {
+    def borrowed(&self) -> &Self {
+        self
+    }
+}
+
+def takes(x: dyn Borrowed) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("Self behind a reference should remain object-safe");
+}
+
+#[test]
+fn orphan_rule_rejects_external_trait_for_external_type() {
+    let source = r#"
+impl Drop for i64 {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("external trait for external type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[orphan-rule]") && message.contains("Drop") && message.contains("i64"),
+        "expected orphan-rule diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn compiler_known_core_traits_and_support_types_are_available() {
+    let source = r#"
+def accepts_core_traits<T: Clone + Copy + Debug + Default + Iterator>(value: T) -> i64 {
+    0
+}
+
+def accepts_support_types(ordering: Ordering, formatter: Formatter, hasher: Hasher) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("compiler-known core traits and support types should resolve");
+}
+
+#[test]
+fn builtin_derives_register_core_trait_impls_for_bounds() {
+    let source = r#"
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+struct User {
+    id: i64,
+}
+
+def needs_traits<T: Clone + Copy + PartialEq + Eq + PartialOrd + Ord + Hash + Debug + Default>(value: T) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    needs_traits(User { id: 1 })
+}
+"#;
+
+    let program = Parser::parse(source).expect("derive source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("builtin derives should satisfy core trait bounds");
+}
+
+#[test]
+fn copy_and_drop_impls_are_mutually_exclusive() {
+    let source = r#"
+#[derive(Copy)]
+struct Resource {
+    id: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy and Drop should be mutually exclusive");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-drop-conflict]") && message.contains("Resource"),
+        "expected copy-drop-conflict diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn copy_derive_rejects_non_copy_fields() {
+    let source = r#"
+struct Owned {
+    id: i64,
+}
+
+impl Drop for Owned {
+    def drop(&mut self) {}
+}
+
+#[derive(Copy)]
+struct Wrapper {
+    owned: Owned,
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy should require all fields to be Copy");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-field-not-copy]")
+            && message.contains("Wrapper")
+            && message.contains("owned"),
+        "expected copy-field-not-copy diagnostic, got: {message}"
+    );
 }
 
 #[test]
