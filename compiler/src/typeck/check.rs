@@ -906,6 +906,7 @@ impl TypeChecker {
                         ));
                     }
 
+                    self.validate_dyn_associated_type_bindings(bound, &ident.name)?;
                     self.ensure_dyn_trait_object_safe(&ident.name, ident.span.lo, ident.span.hi)?;
                     names.push(ident.name.clone());
                 }
@@ -931,6 +932,67 @@ impl TypeChecker {
             )
     }
 
+    fn validate_dyn_associated_type_bindings(
+        &mut self,
+        bound: &TraitBound,
+        trait_name: &str,
+    ) -> TyResult<()> {
+        let Some(info) = self.trait_registry.get(trait_name) else {
+            return Ok(());
+        };
+
+        let required = info.assoc_types.clone();
+        let required_set = required.iter().cloned().collect::<HashSet<_>>();
+        let mut seen = HashSet::new();
+        let mut fixed = HashSet::new();
+
+        for binding in &bound.assoc_bindings {
+            if !seen.insert(binding.name.clone()) {
+                return Err(TypeckError::diagnostic(
+                    "dyn-associated-type",
+                    format!(
+                        "trait object `dyn {trait_name}` fixes associated type `{}` more than once",
+                        binding.name
+                    ),
+                    binding.ty.span.lo,
+                    binding.ty.span.hi,
+                ));
+            }
+            if !required_set.contains(&binding.name) {
+                return Err(TypeckError::diagnostic(
+                    "dyn-associated-type",
+                    format!(
+                        "trait object `dyn {trait_name}` fixes unknown associated type `{}`",
+                        binding.name
+                    ),
+                    binding.ty.span.lo,
+                    binding.ty.span.hi,
+                ));
+            }
+            self.check_type(&binding.ty)?;
+            fixed.insert(binding.name.clone());
+        }
+
+        let mut missing = required
+            .into_iter()
+            .filter(|name| !fixed.contains(name))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            missing.sort();
+            return Err(TypeckError::diagnostic(
+                "dyn-associated-type",
+                format!(
+                    "trait object `dyn {trait_name}` must fix associated types: {}",
+                    missing.join(", ")
+                ),
+                bound.span().lo,
+                bound.span().hi,
+            ));
+        }
+
+        Ok(())
+    }
+
     fn ensure_dyn_trait_object_safe(&self, name: &str, lo: u32, hi: u32) -> TyResult<()> {
         let Some(info) = self.trait_registry.get(name) else {
             return Ok(());
@@ -938,8 +1000,6 @@ impl TypeChecker {
 
         let reason = if !info.type_params.is_empty() {
             Some("traits with type parameters are not object-safe yet".to_string())
-        } else if !info.assoc_types.is_empty() {
-            Some("traits with associated types require explicit dyn bindings".to_string())
         } else if !info.consts.is_empty() {
             Some("traits with associated consts are not object-safe".to_string())
         } else {

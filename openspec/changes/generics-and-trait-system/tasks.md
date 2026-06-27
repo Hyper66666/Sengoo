@@ -44,14 +44,17 @@
 - [x] 4.1 Parse `type Item;` in traits and `type Item = ...;` in impls.
   - Verified by `cargo test -p sengoo-compiler associated_type -- --nocapture`;
     impl checking also rejects missing required and unknown associated types.
-- [ ] 4.2 Resolve `T::Item` in generic code; require fixed associated types in
+- [x] 4.2 Resolve `T::Item` in generic code; require fixed associated types in
   `dyn` object types (`dyn Iterator<Item = i64>`).
   - `T::Item` in generic function signatures resolves through the declaring
     trait bound and the concrete impl at call sites; unbounded `T::Item` is
     rejected. Verified by `cargo test -p sengoo-compiler
     associated_type_projection -- --nocapture`.
-  - Remaining: fixed associated-type bindings in `dyn` object types.
-- [ ] 4.3 Tests covering associated-type resolution and the `dyn` fixing rule.
+  - `dyn Trait<Assoc = Type>` parses and type-checks when every required
+    associated type is fixed; unfixed associated types use the stable
+    `dyn-associated-type` diagnostic. Verified by `cargo test -p
+    sengoo-compiler dyn_trait_with_ -- --nocapture`.
+- [x] 4.3 Tests covering associated-type resolution and the `dyn` fixing rule.
 
 ## 5. Core traits and derive
 

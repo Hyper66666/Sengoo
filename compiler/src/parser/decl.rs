@@ -20,13 +20,64 @@ impl<'source> Parser<'source> {
     pub(super) fn parse_trait_bounds(&mut self) -> Result<Vec<TraitBound>> {
         let mut bounds = Vec::new();
         loop {
-            let path = self.parse_path()?;
-            bounds.push(TraitBound::new(path));
+            bounds.push(self.parse_trait_bound()?);
             if self.consume(TokenKind::Plus).is_none() {
                 break;
             }
         }
         Ok(bounds)
+    }
+
+    fn parse_trait_bound(&mut self) -> Result<TraitBound> {
+        let path = self.parse_path()?;
+        let mut bound = TraitBound::new(path);
+
+        if self.consume(TokenKind::Lt).is_none() {
+            return Ok(bound);
+        }
+
+        let mut params = Vec::new();
+        let mut assoc_bindings = Vec::new();
+        if self.consume_type_arg_end() {
+            return Ok(bound);
+        }
+
+        loop {
+            let is_assoc_binding = matches!(
+                self.current().map(|token| &token.kind),
+                Some(TokenKind::Ident)
+            ) && (self.check_peek(TokenKind::Assign)
+                || self.check_peek(TokenKind::Eq));
+
+            if is_assoc_binding {
+                let name = self.expect_ident()?;
+                if self.consume(TokenKind::Assign).is_none()
+                    && self.consume(TokenKind::Eq).is_none()
+                {
+                    return Err(CompileError::ParseError(ParseError::expected_type()));
+                }
+                assoc_bindings.push(TraitAssocBinding {
+                    name: name.name,
+                    ty: self.parse_type()?,
+                });
+            } else {
+                params.push(self.parse_type()?);
+            }
+
+            if self.consume(TokenKind::Comma).is_some() {
+                continue;
+            }
+
+            if self.consume_type_arg_end() {
+                break;
+            }
+
+            return Err(CompileError::ParseError(ParseError::expected_type()));
+        }
+
+        bound.params = params;
+        bound.assoc_bindings = assoc_bindings;
+        Ok(bound)
     }
 
     fn merge_where_bounds(

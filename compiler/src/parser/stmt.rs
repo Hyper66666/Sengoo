@@ -139,7 +139,7 @@ impl<'source> Parser<'source> {
         Ok(args)
     }
 
-    fn consume_type_arg_end(&mut self) -> bool {
+    pub(super) fn consume_type_arg_end(&mut self) -> bool {
         if self.pending_type_arg_gt > 0 {
             self.pending_type_arg_gt -= 1;
             return true;

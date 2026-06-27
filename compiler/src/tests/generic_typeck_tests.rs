@@ -280,6 +280,51 @@ def takes(x: dyn Show) -> i64 {
 }
 
 #[test]
+fn dyn_trait_with_associated_type_requires_fixed_binding() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse before type checking");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unfixed dyn associated type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[dyn-associated-type]")
+            && message.contains("Iterator")
+            && message.contains("Item"),
+        "expected dyn-associated-type diagnostic for unfixed associated type, got: {message}"
+    );
+}
+
+#[test]
+fn dyn_trait_with_fixed_associated_type_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("fixed associated type binding should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("fixed dyn associated type binding should typecheck");
+}
+
+#[test]
 fn dyn_trait_rejects_associated_function_as_not_object_safe() {
     let source = r#"
 trait Factory {
