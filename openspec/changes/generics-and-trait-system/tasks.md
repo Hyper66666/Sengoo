@@ -68,6 +68,11 @@
   - Behavioral derive impl generation remains in 5.2.
 - [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
+  - Builtin derive expansion now emits core trait impl declarations for all
+    listed derive names so derived types satisfy corresponding generic bounds.
+    Verified by `cargo test -p sengoo-compiler
+    builtin_derives_register_core_trait_impls_for_bounds -- --nocapture`.
+  - Remaining: field-aware Clone/compare/hash/debug/default behavior.
 - [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
 

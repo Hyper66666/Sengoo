@@ -443,6 +443,30 @@ def accepts_support_types(ordering: Ordering, formatter: Formatter, hasher: Hash
 }
 
 #[test]
+fn builtin_derives_register_core_trait_impls_for_bounds() {
+    let source = r#"
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+struct User {
+    id: i64,
+}
+
+def needs_traits<T: Clone + Copy + PartialEq + Eq + PartialOrd + Ord + Hash + Debug + Default>(value: T) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    needs_traits(User { id: 1 })
+}
+"#;
+
+    let program = Parser::parse(source).expect("derive source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("builtin derives should satisfy core trait bounds");
+}
+
+#[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {
     let source = r#"
 def id<T>(x: T) -> T {
