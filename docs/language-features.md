@@ -61,7 +61,65 @@ impl i64 {
 let x = (-21).abs();
 ```
 
-## 2.4 Contracts (`requires` / `ensures`)
+## 2.4 Generics, Traits, Associated Types, And Derive
+
+Sengoo supports generic `def`, `struct`, `enum`, and `impl` declarations with
+monomorphized concrete instances. Generic bounds can use direct type parameter
+syntax and `where` clauses:
+
+```sg
+trait Show {
+    def show(self) -> i64;
+}
+
+def score<T: Show>(value: T) -> i64 {
+    value.show()
+}
+```
+
+The compiler checks bounds at instantiation sites. If a concrete type does not
+implement a required trait, type checking reports the stable
+`unsatisfied-trait-bound` diagnostic.
+
+Traits can declare associated types, and generic code can refer to them through
+the bounded type parameter:
+
+```sg
+trait Iterator {
+    type Item;
+}
+
+def choose<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+```
+
+Each `impl Trait for Type` must define the trait's required associated types.
+For trait objects, associated types must be fixed in the object type:
+
+```sg
+def takes_iter(value: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+```
+
+Current `dyn Trait` support is a frontend/type-checking skeleton. Object-safety
+diagnostics and fixed associated-type validation are implemented, but vtable
+representation and runtime dynamic dispatch are still roadmap work.
+
+Core trait names are compiler-known for bounds: `Clone`, `Copy`,
+`PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`, `Display`, `Debug`,
+`Iterator`, and `IntoIterator`. Support types `Ordering`, `Formatter`, and
+`Hasher` resolve in signatures. `#[derive(...)]` currently registers core trait
+impls for the derivable marker surface, while field-aware clone/compare/hash/
+debug/default behavior is still under construction. `Copy` is checked against
+`Drop`: a type cannot implement both, and a `Copy` type cannot contain
+non-`Copy` fields.
+
+Impls follow the package-local orphan rule: an `impl Trait for Type` is allowed
+only when the trait or the target type is defined in the current package.
+
+## 2.5 Contracts (`requires` / `ensures`)
 
 ```sg
 def divide(a: i64, b: i64) -> i64
@@ -91,7 +149,7 @@ sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 sgc run examples/09_method_call.sg -O 2 --contract-checks on
 ```
 
-## 2.5 Enum payload matches
+## 2.6 Enum payload matches
 
 Payload-carrying enum arms can appear in any match position, and one match can
 bind multiple payload-carrying variants:
@@ -112,7 +170,7 @@ def main() -> i64 {
 The native conformance gate also covers functions that return enum values and
 then match on the returned aggregate.
 
-## 2.6 C FFI (`extern "C"`)
+## 2.7 C FFI (`extern "C"`)
 
 Sengoo supports a focused FFI MVP surface:
 
@@ -139,7 +197,7 @@ For end-to-end reproducible commands (Sengoo -> C and C -> Sengoo), see:
 
 - `examples/ffi/README.md`
 
-## 2.7 Async execution
+## 2.8 Async execution
 
 `sgc run` now has a native async path when the entrypoint is `async def main()`.
 
@@ -168,7 +226,7 @@ Current limitations:
 - IO wakeups are limited to the documented reactor subset.
 - user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
 
-## 2.8 Ownership, moves, and automatic drop
+## 2.9 Ownership, moves, and automatic drop
 
 Sengoo manages memory with move-based ownership and compiler-inserted cleanup
 (RAII); there is no garbage collector. A type that has an `impl Drop` is
@@ -196,7 +254,7 @@ process/net handles), and scalar `Rc` handles. Some runtime domains still keep
 compatibility release methods because older examples and direct FFI-style
 stdlib calls use them, but new examples prefer automatic drop.
 
-## 2.9 Text and Strings
+## 2.10 Text and Strings
 
 Sengoo has two practical text surfaces today:
 
@@ -212,7 +270,7 @@ Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
 deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
 locale collation remain future work.
 
-## 2.10 Opt-in shared ownership with `Rc`
+## 2.11 Opt-in shared ownership with `Rc`
 
 `Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
 increments a non-atomic reference count, and compiler-inserted `Drop` releases

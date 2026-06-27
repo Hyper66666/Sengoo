@@ -73,7 +73,7 @@
     Verified by `cargo test -p sengoo-compiler
     builtin_derives_register_core_trait_impls_for_bounds -- --nocapture`.
   - Remaining: field-aware Clone/compare/hash/debug/default behavior.
-- [x] 5.3 Enforce `Copy` â‡?no `Drop` and `Copy` requires all-`Copy` fields.
+- [x] 5.3 Enforce `Copy` and no `Drop`; `Copy` requires all-`Copy` fields.
   - Verified by `cargo test -p sengoo-compiler copy_ -- --nocapture`,
     including `copy-drop-conflict` and `copy-field-not-copy` diagnostics.
 - [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
@@ -87,8 +87,10 @@
     orphan_rule_rejects_external_trait_for_external_type -- --nocapture`;
     `cargo test -p sengoo-compiler --lib` confirms local-trait and local-type
     impls still pass.
-- [ ] 6.2 Document generics, bounds, `dyn`, associated types, and derive in
+- [x] 6.2 Document generics, bounds, `dyn`, associated types, and derive in
   `docs/language-features.md`.
+  - Documents supported generic bounds, associated types, dyn fixed bindings,
+    derive marker impls, Copy/Drop rules, and current dyn/derive limitations.
 - [ ] 6.3 Add `examples/generics/` programs using a real generic function with a
   bound and a `dyn Trait` call.
 - [x] 6.4 Run `openspec validate generics-and-trait-system --strict`.
