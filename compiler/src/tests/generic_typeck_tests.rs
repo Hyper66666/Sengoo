@@ -424,6 +424,25 @@ impl Drop for i64 {
 }
 
 #[test]
+fn compiler_known_core_traits_and_support_types_are_available() {
+    let source = r#"
+def accepts_core_traits<T: Clone + Copy + Debug + Default + Iterator>(value: T) -> i64 {
+    0
+}
+
+def accepts_support_types(ordering: Ordering, formatter: Formatter, hasher: Hasher) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("compiler-known core traits and support types should resolve");
+}
+
+#[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {
     let source = r#"
 def id<T>(x: T) -> T {

@@ -238,10 +238,12 @@ impl TypeChecker {
                             "unsupported trait bound path in type parameter".to_string(),
                         ))
                     })?;
-                if !matches!(
-                    self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
-                    Some(SymbolKind::Trait { .. })
-                ) {
+                if !self.trait_registry.contains(&trait_name)
+                    && !matches!(
+                        self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
+                        Some(SymbolKind::Trait { .. })
+                    )
+                {
                     return Err(CompileError::from(TypeckError::UndefinedType {
                         name: trait_name,
                     }));

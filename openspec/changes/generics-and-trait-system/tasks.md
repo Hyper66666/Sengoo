@@ -58,9 +58,14 @@
 
 ## 5. Core traits and derive
 
-- [ ] 5.1 Define compiler-known core traits (Clone, Copy, PartialEq/Eq,
+- [x] 5.1 Define compiler-known core traits (Clone, Copy, PartialEq/Eq,
   PartialOrd/Ord, Hash, Default, Display, Debug, Iterator, IntoIterator) plus
   `Ordering` and `Formatter`/`Hasher` support types.
+  - Compiler-known trait names now resolve in bounds, `Iterator`/`IntoIterator`
+    include required associated-type names, and support types resolve in
+    signatures. Verified by `cargo test -p sengoo-compiler
+    compiler_known_core_traits_and_support_types_are_available -- --nocapture`.
+  - Behavioral derive impl generation remains in 5.2.
 - [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
 - [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.

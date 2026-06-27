@@ -95,6 +95,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         let mut env = TypeEnv::new();
         let trait_registry = Self::compiler_known_traits(&mut env);
+        Self::compiler_known_support_types(&mut env);
         let infer = TypeInfer::with_env(env.clone());
         Self {
             env,
@@ -127,7 +128,39 @@ impl TypeChecker {
             MethodSig::new(true, Vec::new(), env.unit_ty(), Vec::new()),
         );
         registry.register(drop_trait);
+        for trait_name in [
+            "Clone",
+            "Copy",
+            "PartialEq",
+            "Eq",
+            "PartialOrd",
+            "Ord",
+            "Hash",
+            "Default",
+            "Display",
+            "Debug",
+        ] {
+            registry.register(TraitInfo::new(trait_name.to_string(), Vec::new(), true));
+        }
+        let mut iterator = TraitInfo::new("Iterator".to_string(), Vec::new(), true);
+        iterator.add_assoc_type("Item".to_string());
+        registry.register(iterator);
+
+        let mut into_iterator = TraitInfo::new("IntoIterator".to_string(), Vec::new(), true);
+        into_iterator.add_assoc_type("Item".to_string());
+        into_iterator.add_assoc_type("IntoIter".to_string());
+        registry.register(into_iterator);
         registry
+    }
+
+    fn compiler_known_support_types(env: &mut TypeEnv) {
+        for type_name in ["Ordering", "Formatter", "Hasher"] {
+            let ty = env.new_ty(TyKind::Adt {
+                name: type_name.to_string(),
+                args: Vec::new(),
+            });
+            env.insert_type(type_name.to_string(), ty);
+        }
     }
 
     pub fn warnings(&self) -> &[crate::error::CompileWarning] {
