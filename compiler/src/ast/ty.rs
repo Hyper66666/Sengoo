@@ -107,6 +107,9 @@ impl Node for Type {
 /// 类型种类枚举
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
+    /// The implementing type inside a trait or impl declaration.
+    SelfType,
+
     /// 简单路径类型，如  或
     Path(Path),
 

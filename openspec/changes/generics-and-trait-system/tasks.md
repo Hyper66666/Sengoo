@@ -29,7 +29,10 @@
 - [x] 3.0 Parse, lower, and type-check `dyn Trait` / `dyn A + B` as a frontend
   skeleton while vtable/object-safety/codegen remain open.
   - Verified by `cargo test -p sengoo-compiler dyn_trait -- --nocapture`.
-- [ ] 3.1 Object-safety check with a stable `not-object-safe` diagnostic.
+- [x] 3.1 Object-safety check with a stable `not-object-safe` diagnostic.
+  - Verified by `cargo test -p sengoo-compiler dyn_trait_ -- --nocapture`,
+    covering associated functions, generic methods, undefined traits, and
+    `Self` returned through reference indirection.
 - [ ] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
   slots + `drop` + size/align.
 - [ ] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.

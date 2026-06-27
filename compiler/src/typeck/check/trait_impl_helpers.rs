@@ -73,15 +73,11 @@ impl TypeChecker {
                     let method_generic_meta =
                         self.bind_type_params_with_meta(&method.type_params)?;
                     let mut param_types = Vec::new();
-                    let mut has_self = false;
+                    let has_self = method.self_param.is_some();
 
                     for param in &method.params {
-                        if param.name.name == "self" {
-                            has_self = true;
-                        } else {
-                            let ty = self.check_type(&param.ty)?;
-                            param_types.push(ty);
-                        }
+                        let ty = self.check_type(&param.ty)?;
+                        param_types.push(ty);
                     }
 
                     let ret_ty = if let Some(ret) = &method.return_type {

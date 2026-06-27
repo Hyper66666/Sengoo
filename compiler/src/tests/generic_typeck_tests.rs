@@ -126,6 +126,85 @@ def takes(x: dyn Show) -> i64 {
 }
 
 #[test]
+fn dyn_trait_rejects_associated_function_as_not_object_safe() {
+    let source = r#"
+trait Factory {
+    def make() -> i64 {
+        0
+    }
+}
+
+def takes(x: dyn Factory) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("associated function traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Factory")
+            && message.contains("method `make`"),
+        "expected not-object-safe diagnostic for associated function, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_rejects_generic_method_as_not_object_safe() {
+    let source = r#"
+trait Mapper {
+    def map<T>(self, value: T) -> T {
+        value
+    }
+}
+
+def takes(x: dyn Mapper) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("generic method traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Mapper")
+            && message.contains("method `map`"),
+        "expected not-object-safe diagnostic for generic method, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_allows_self_return_through_reference_indirection() {
+    let source = r#"
+trait Borrowed {
+    def borrowed(&self) -> &Self {
+        self
+    }
+}
+
+def takes(x: dyn Borrowed) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("Self behind a reference should remain object-safe");
+}
+
+#[test]
 fn generic_function_can_be_instantiated_with_different_argument_types() {
     let source = r#"
 def id<T>(x: T) -> T {

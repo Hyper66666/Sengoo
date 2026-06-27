@@ -771,6 +771,7 @@ impl TypeChecker {
     /// Lower an AST type annotation into an internal type.
     fn check_type(&mut self, ty: &Type) -> TyResult<Ty> {
         Ok(match &ty.kind {
+            TypeKind::SelfType => self.env.new_ty(TyKind::SelfType),
             TypeKind::Path(path) => self.check_path_type(path, Vec::new())?,
             TypeKind::PathWithArgs { path, args } => {
                 let args = args
@@ -854,6 +855,7 @@ impl TypeChecker {
                         ));
                     }
 
+                    self.ensure_dyn_trait_object_safe(&ident.name, ident.span.lo, ident.span.hi)?;
                     names.push(ident.name.clone());
                 }
 
@@ -876,6 +878,85 @@ impl TypeChecker {
                 self.env.lookup(name).map(|symbol| &symbol.kind),
                 Some(SymbolKind::Trait { .. })
             )
+    }
+
+    fn ensure_dyn_trait_object_safe(&self, name: &str, lo: u32, hi: u32) -> TyResult<()> {
+        let Some(info) = self.trait_registry.get(name) else {
+            return Ok(());
+        };
+
+        let reason = if !info.type_params.is_empty() {
+            Some("traits with type parameters are not object-safe yet".to_string())
+        } else if !info.assoc_types.is_empty() {
+            Some("traits with associated types require explicit dyn bindings".to_string())
+        } else if !info.consts.is_empty() {
+            Some("traits with associated consts are not object-safe".to_string())
+        } else {
+            let mut methods = info.methods.iter().collect::<Vec<_>>();
+            methods.sort_by_key(|(method_name, _)| method_name.as_str());
+            methods.into_iter().find_map(|(method_name, method)| {
+                if !method.has_self {
+                    return Some(format!("method `{method_name}` has no `self` receiver"));
+                }
+                if !method.generic_params.is_empty() {
+                    return Some(format!("method `{method_name}` has generic parameters"));
+                }
+                if method.param_types.iter().any(Self::type_contains_bare_self) {
+                    return Some(format!(
+                        "method `{method_name}` uses `Self` in a parameter type"
+                    ));
+                }
+                if Self::type_contains_unindirected_self(&method.return_type) {
+                    return Some(format!("method `{method_name}` returns `Self` by value"));
+                }
+                None
+            })
+        };
+
+        if let Some(reason) = reason {
+            return Err(TypeckError::diagnostic(
+                "not-object-safe",
+                format!("trait `{name}` is not object-safe: {reason}"),
+                lo,
+                hi,
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn type_contains_bare_self(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::SelfType => true,
+            TyKind::Tuple(types) => types.iter().any(Self::type_contains_bare_self),
+            TyKind::Array(inner, _) | TyKind::Slice(inner) | TyKind::Ptr(inner) => {
+                Self::type_contains_bare_self(inner)
+            }
+            TyKind::Ref(_, inner) | TyKind::Future(inner) => Self::type_contains_bare_self(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::type_contains_bare_self)
+                    || Self::type_contains_bare_self(ret)
+            }
+            TyKind::Adt { args, .. } => args.iter().any(Self::type_contains_bare_self),
+            _ => false,
+        }
+    }
+
+    fn type_contains_unindirected_self(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::SelfType => true,
+            TyKind::Ref(_, _) | TyKind::Ptr(_) => false,
+            TyKind::Tuple(types) => types.iter().any(Self::type_contains_unindirected_self),
+            TyKind::Array(inner, _) | TyKind::Slice(inner) | TyKind::Future(inner) => {
+                Self::type_contains_unindirected_self(inner)
+            }
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::type_contains_unindirected_self)
+                    || Self::type_contains_unindirected_self(ret)
+            }
+            TyKind::Adt { args, .. } => args.iter().any(Self::type_contains_unindirected_self),
+            _ => false,
+        }
     }
 
     fn check_expr(&mut self, expr: &Expr) -> TyResult<Ty> {

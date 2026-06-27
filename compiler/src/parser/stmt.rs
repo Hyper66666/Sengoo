@@ -268,6 +268,10 @@ impl<'source> Parser<'source> {
                     self.advance();
                     TypeKind::Infer
                 }
+                TokenKind::SelfKw => {
+                    self.advance();
+                    TypeKind::SelfType
+                }
                 TokenKind::Ident => {
                     let path = self.parse_path()?;
                     TypeKind::Path(path)
