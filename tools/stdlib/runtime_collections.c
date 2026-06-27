@@ -5,6 +5,71 @@
 #include <string.h>
 
 typedef struct {
+    size_t strong;
+    long long i64_value;
+} SengooRcBox;
+
+static SengooRcBox* sengoo_rc_from_handle(long long handle) {
+    return (SengooRcBox*)sengoo_handle_to_ptr(handle);
+}
+
+static long long sengoo_rc_new_with_i64(long long value) {
+    SengooRcBox* box = (SengooRcBox*)calloc(1, sizeof(SengooRcBox));
+    if (!box) {
+        return 0;
+    }
+    box->strong = 1;
+    box->i64_value = value;
+    return sengoo_ptr_to_handle(box);
+}
+
+long long sengoo_rc_new_i64(long long value) {
+    return sengoo_rc_new_with_i64(value);
+}
+
+long long sengoo_rc_new_bool(long long value) {
+    return sengoo_rc_new_with_i64(value != 0 ? 1 : 0);
+}
+
+long long sengoo_rc_clone(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    if (!box || box->strong == SIZE_MAX) {
+        return 0;
+    }
+    box->strong += 1;
+    return handle;
+}
+
+long long sengoo_rc_strong_count(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    return box ? (long long)box->strong : 0;
+}
+
+long long sengoo_rc_get_i64(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    return box ? box->i64_value : 0;
+}
+
+long long sengoo_rc_get_bool(long long handle) {
+    return sengoo_rc_get_i64(handle) != 0 ? 1 : 0;
+}
+
+long long sengoo_rc_drop(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    if (!box) {
+        return 1;
+    }
+    if (box->strong == 0) {
+        return 1;
+    }
+    box->strong -= 1;
+    if (box->strong == 0) {
+        free(box);
+    }
+    return 1;
+}
+
+typedef struct {
     char** items;
     size_t len;
     size_t cap;

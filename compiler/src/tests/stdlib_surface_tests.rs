@@ -40,6 +40,15 @@ fn compile_with_stdlib_modules(modules: &[&str], program: &str) -> String {
         .unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
 }
 
+fn llvm_function_section<'a>(ir: &'a str, function_header: &str) -> &'a str {
+    let start = ir
+        .find(function_header)
+        .unwrap_or_else(|| panic!("missing LLVM function header `{function_header}`\n{ir}"));
+    let rest = &ir[start..];
+    let next = rest.find("\n; Function: ").unwrap_or(rest.len());
+    &rest[..next]
+}
+
 #[test]
 fn option_module_imports_and_unwraps() {
     let ir = compile_with_stdlib_modules(
@@ -179,6 +188,50 @@ def main() -> i64 {
             "expected stdlib owning handle auto-drop symbol {symbol}\n{ir}"
         );
     }
+}
+
+#[test]
+fn stdlib_rc_shared_ownership_compiles_and_auto_drops() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let first = rc_new_i64(21);
+    let second = first.clone();
+    first.strong_count() + second.get()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("sengoo_rc_clone"),
+        "Rc clone should lower to runtime refcount increment\n{ir}"
+    );
+    assert!(
+        ir.contains("Rc_i64_Drop_drop"),
+        "Rc<i64> locals should auto-drop through Drop glue\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_drop"),
+        "Rc Drop impl should call the runtime decrement/free helper\n{ir}"
+    );
+
+    let clone_section = llvm_function_section(&ir, "; Function: Rc_i64_clone");
+    assert!(
+        !clone_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::clone has a borrowed receiver and must not auto-drop its receiver parameter\n{clone_section}"
+    );
+    let count_section = llvm_function_section(&ir, "; Function: Rc_i64_strong_count");
+    assert!(
+        !count_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::strong_count has a borrowed receiver and must not auto-drop its receiver parameter\n{count_section}"
+    );
 }
 
 #[test]

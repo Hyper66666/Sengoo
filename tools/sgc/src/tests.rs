@@ -7970,6 +7970,29 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_runtime_rc_clone_counts_until_last_drop() {
+    let output = require_stdlib_runtime_output!(
+        "rc-shared-count",
+        r#"
+def main() -> i64 {
+    let first = rc_new_i64(40);
+    let second = first.clone();
+    let count = first.strong_count();
+    let value = second.get();
+    let flag = rc_new_bool(true);
+    if count == 2 and value == 40 and flag.get() {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
 fn stdlib_surface_runtime_hashmap_iter_sums_all_values() {
     let output = require_stdlib_runtime_output!(
         "hashmap-iter",

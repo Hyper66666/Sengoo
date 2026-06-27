@@ -68,7 +68,14 @@ pub(super) fn lower_function(
         if let Some((_, MIRType::Struct { name, .. })) = ctx.mir_fn.locals.get(i + 1) {
             ctx.type_names.insert(local, name.clone());
         }
-        if !fn_item.name.ends_with("_Drop_drop") {
+        let borrowed_receiver_wrapper = param.name == "self"
+            && fn_item.name.starts_with("Rc_")
+            && (fn_item.name.ends_with("_clone")
+                || fn_item.name.ends_with("_strong_count")
+                || fn_item.name.ends_with("_is_unique")
+                || fn_item.name.ends_with("_get"));
+        if !fn_item.name.ends_with("_Drop_drop") && !param.ty.is_ref() && !borrowed_receiver_wrapper
+        {
             ctx.record_drop_binding_if_needed(local);
         }
         ctx.contract_param_bindings

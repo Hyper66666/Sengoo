@@ -114,7 +114,14 @@
 ## 5. Opt-in shared ownership
 
 - [ ] 5.1 Add `Rc<T>` library type (non-atomic refcount, `clone`, `Drop`).
-- [ ] 5.2 Document `Rc` cycle-leak behavior in `docs/language-features.md`.
+  - Partial: `tools/stdlib/collections.sg` now exposes `Rc<T>` with the
+    verified scalar constructors `rc_new_i64` and `rc_new_bool`; `Rc<i64>` and
+    `Rc<bool>` support `clone`, `get`, `strong_count`, `is_unique`, and
+    compiler-inserted `Drop` backed by a non-atomic C runtime refcount control
+    block. Arbitrary owning `Rc<T>` value storage/deref remains open.
+- [x] 5.2 Document `Rc` cycle-leak behavior in `docs/language-features.md`.
+  - Added the `Rc` shared-ownership section with the current verified API,
+    move-only default reminder, and explicit cycle-leak behavior.
 
 ## 6. Conformance and docs
 

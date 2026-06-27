@@ -195,6 +195,25 @@ Current surface: the verified auto-drop and move-checking path covers owned
 other runtime resources (`Buffer`, `Vec<T>`, `JsonDoc`, process/net handles) are
 landing incrementally, so some examples still call the explicit release methods.
 
+### 2.8.1 Opt-in shared ownership with `Rc`
+
+`Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
+increments a non-atomic reference count, and compiler-inserted `Drop` releases
+the shared allocation only after the last handle leaves scope. Plain non-`Rc`
+owning values remain move-only by default.
+
+Current verified surface:
+
+- `rc_new_i64(value) -> Rc<i64>`
+- `rc_new_bool(value) -> Rc<bool>`
+- `clone()`, `get()`, `strong_count()`, and `is_unique()`
+- automatic `Drop` for `Rc<i64>` and `Rc<bool>`
+
+`Rc` deliberately does not collect cycles. If two or more future `Rc`-backed
+objects retain each other, that cycle leaks until the process exits. Break such
+graphs manually or avoid cyclic ownership; `Rc` is not a tracing garbage
+collector.
+
 ## 3. Non-Invasive Reflection (Opt-In)
 
 Reflection is designed to avoid polluting the default hot path:
