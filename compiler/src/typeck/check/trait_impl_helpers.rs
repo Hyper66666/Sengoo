@@ -304,6 +304,22 @@ impl TypeChecker {
             }
 
             if self
+                .impl_registry
+                .get_trait_impl(&trait_name, &target_key)
+                .is_some()
+            {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "conflicting-impl",
+                    format!(
+                        "conflicting implementations of trait `{trait_name}` for type `{target_key}`"
+                    ),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+
+            if self
                 .trait_registry
                 .get(&trait_name)
                 .map(|info| !info.supertraits.is_empty())

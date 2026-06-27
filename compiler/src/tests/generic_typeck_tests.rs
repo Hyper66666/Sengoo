@@ -424,6 +424,63 @@ impl Drop for i64 {
 }
 
 #[test]
+fn duplicate_trait_impl_for_same_type_is_rejected() {
+    let source = r#"
+trait Greet {
+    def greet(self) -> i64 { 0 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 1 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 2 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("two impls of the same trait for the same type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[conflicting-impl]")
+            && message.contains("Greet")
+            && message.contains("i64"),
+        "expected conflicting-impl diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn distinct_trait_impls_for_same_type_are_accepted() {
+    let source = r#"
+trait Greet {
+    def greet(self) -> i64 { 0 }
+}
+
+trait Wave {
+    def wave(self) -> i64 { 0 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 1 }
+}
+
+impl Wave for i64 {
+    def wave(self) -> i64 { 2 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("distinct traits for the same type should not conflict");
+}
+
+#[test]
 fn compiler_known_core_traits_and_support_types_are_available() {
     let source = r#"
 def accepts_core_traits<T: Clone + Copy + Debug + Default + Iterator>(value: T) -> i64 {
