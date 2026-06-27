@@ -5389,6 +5389,58 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_runtime_release_functions_are_idempotent_for_core_handles() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "release-idempotence",
+        r#"
+import std::ffi;
+import std::json;
+import std::process;
+import std::string;
+
+def main() -> i64 {
+    let text = string_from_str("release").unwrap_or(String { handle: 0 });
+    let text_handle = text.handle;
+    let text_first = sengoo_string_free_status(text_handle) >= 0;
+    let text_second = sengoo_string_free_status(text_handle) >= 0;
+
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let buffer_handle = buffer.handle;
+    let buffer_first = sengoo_ffi_buffer_free(buffer_handle) == 0;
+    let buffer_second = sengoo_ffi_buffer_free(buffer_handle) == 0;
+
+    let doc = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let doc_handle = doc.handle;
+    let doc_first = sengoo_json_doc_close(doc_handle) == 0;
+    let doc_second = sengoo_json_doc_close(doc_handle) == 0;
+
+    let command = process_command("sengoo-no-such-release-idempotence").unwrap_or(ProcessCommand { handle: 0 });
+    let command_handle = command.handle;
+    let command_first = sengoo_process_command_close(command_handle) == 0;
+    let command_second = sengoo_process_command_close(command_handle) == 0;
+
+    if text_first and text_second and buffer_first and buffer_second and doc_first and doc_second and command_first and command_second {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

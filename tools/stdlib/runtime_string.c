@@ -190,8 +190,11 @@ long long sengoo_string_free_status(long long handle) {
         return -(long long)SENGOO_STATUS_INVALID_HANDLE;
     }
     SengooStringSlot* slot = &g_string_slots[index];
-    if (!slot->alive || slot->generation != generation || !slot->owned) {
+    if (slot->generation != generation) {
         return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (!slot->alive || !slot->owned) {
+        return SENGOO_STATUS_OK;
     }
     sengoo_owned_string_destroy(slot->owned);
     slot->owned = NULL;

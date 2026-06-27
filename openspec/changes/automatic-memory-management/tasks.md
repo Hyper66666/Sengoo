@@ -100,6 +100,14 @@
 
 - [ ] 4.1 Make C free functions idempotent in `tools/stdlib/runtime*.c`
   (`Buffer`, collections, `runtime_json`, process, net).
+  - Partial: String and Buffer generation-slot releases now return success on
+    repeated release of the same live-generation handle; JsonDoc and process
+    command/output/handle close paths now keep/recognize a closed shell or slot
+    so repeated close returns success instead of double-freeing. Covered by
+    `tools/sgc/src/tests.rs::stdlib_runtime_release_functions_are_idempotent_for_core_handles`.
+    Pointer-only Vec/HashMap/text collection handles and net fallback handles
+    still need either generation tables or an explicit "not a real handle"
+    carve-out before this can be marked complete.
 - [x] 4.2 Add compiler-known `Drop` impls for `Buffer`, `Vec<T>`, `String`,
   `JsonDoc`, `ProcessHandle`, and net handles.
   - Completed for the current concrete stdlib handle surface: `Buffer`,

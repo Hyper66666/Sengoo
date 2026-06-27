@@ -876,8 +876,11 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
     SengooBufferSlot* slot = &g_buffer_slots[index];
-    if (!slot->alive || slot->generation != generation || !slot->buffer) {
+    if (slot->generation != generation) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (!slot->alive || !slot->buffer) {
+        return SENGOO_FFI_STATUS_OK;
     }
     SengooFfiBuffer* buffer = slot->buffer;
     slot->alive = 0;
