@@ -1,5 +1,5 @@
-use crate::compile_to_mir;
 use crate::mir::{Instruction, Local, MirConstant, MirFunction, Terminator};
+use crate::{compile_to_ir, compile_to_mir};
 use std::fs;
 use std::path::Path;
 
@@ -42,6 +42,17 @@ fn string_drop_calls(function: &MirFunction) -> Vec<Vec<Local>> {
         .iter()
         .filter_map(|inst| match inst {
             Instruction::Call { func, args, .. } if func == "String_drop" => Some(args.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn named_drop_calls(function: &MirFunction, name: &str) -> Vec<Vec<Local>> {
+    function
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, args, .. } if func == name => Some(args.clone()),
             _ => None,
         })
         .collect()
@@ -413,5 +424,113 @@ def choose(flag: bool) -> i64 {
     assert!(
         has_guard_terminator(choose),
         "multi-exit drop glue should guard explicit-return exits"
+    );
+}
+
+#[test]
+fn user_drop_impl_is_called_for_live_owning_local() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { handle: 1 };
+    0
+}
+"#,
+    )
+    .expect("user Drop type should compile to MIR");
+    let main_fn = function(&mir, "main");
+
+    assert_eq!(
+        named_drop_calls(main_fn, "Resource_Drop_drop").len(),
+        1,
+        "a live user Drop value must call its concrete trait impl at function exit"
+    );
+}
+
+#[test]
+fn user_drop_impl_auto_drop_codegen_uses_void_drop_call() {
+    let ir = compile_to_ir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { handle: 1 };
+    0
+}
+"#,
+    )
+    .expect("user Drop auto-drop should lower through LLVM codegen");
+
+    assert!(
+        ir.contains("call void @Resource_Drop_drop("),
+        "main should call the concrete Drop impl with its lowered ABI:\n{ir}"
+    );
+}
+
+#[test]
+fn user_drop_impl_is_called_for_by_value_parameter() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def consume(value: Resource) -> i64 {
+    value.handle
+}
+"#,
+    )
+    .expect("user Drop parameter should compile to MIR");
+    let consume = function(&mir, "consume");
+
+    assert_eq!(
+        named_drop_calls(consume, "Resource_Drop_drop").len(),
+        1,
+        "by-value owning parameters should be dropped by the callee"
+    );
+}
+
+#[test]
+fn drop_impl_does_not_recursively_drop_its_receiver() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+"#,
+    )
+    .expect("user Drop impl should compile to MIR");
+    let drop_fn = function(&mir, "Resource_Drop_drop");
+
+    assert_eq!(
+        named_drop_calls(drop_fn, "Resource_Drop_drop").len(),
+        0,
+        "Drop::drop must not recursively auto-drop its own receiver"
     );
 }

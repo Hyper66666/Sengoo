@@ -50,8 +50,10 @@
     `String_drop` calls at function exits; straight-line single-exit functions
     use the no-flag fast path only when every dropped binding initializes in
     the entry block. Conditionally initialized bindings use runtime flags even
-    when the function has one return. General owning locals and nested scope
-    exits remain open.
+    when the function has one return. User types with `impl Drop` now resolve
+    their concrete `<Type>_Drop_drop` function for live locals and by-value
+    parameters, while `Drop::drop` receivers are not recursively auto-dropped.
+    Nested scope exits remain open.
 - [ ] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Partial: `?` propagation exits use per-binding runtime drop flags, set false
@@ -67,13 +69,18 @@
     exit timing and partial-move flag clearing remain open.
 - [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
 - [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
+  - Partial: the LLVM-text backend now receives unit-typed auto-drop calls for
+    user `impl Drop` functions, avoiding bogus boolean return calls. Cranelift
+    coverage and a true `&mut self` receiver ABI audit remain open.
 - [ ] 3.5 IR/codegen tests asserting drop count and order (extend
   `codegen_*`/`struct_codegen` test lanes).
   - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
     straight-line drop insertion, `?` early-return flags, reverse drop order,
     conditional-init flags, tail-return moves, named-call/method-argument moves,
     assignment moves, explicit `return` exits, explicit drop receivers, and
-    moved binding exclusion.
+    moved binding exclusion. It now also covers user `impl Drop` live locals,
+    by-value parameters, non-recursive `Drop::drop` receivers, and LLVM-text
+    unit-return codegen for user auto-drop calls.
 
 ## 4. Runtime resource migration
 

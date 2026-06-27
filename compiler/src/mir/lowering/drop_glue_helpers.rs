@@ -6,9 +6,6 @@ impl<'a> LoweringContext<'a> {
         let Some(drop_func) = self.drop_func_for_local(local) else {
             return;
         };
-        if !self.is_known_function(drop_func) {
-            return;
-        }
         if self
             .drop_bindings
             .iter()
@@ -45,9 +42,6 @@ impl<'a> LoweringContext<'a> {
         let Some(drop_func) = self.drop_func_for_local(local) else {
             return;
         };
-        if !self.is_known_function(drop_func) {
-            return;
-        }
         if !self
             .drop_bindings
             .iter()
@@ -59,14 +53,17 @@ impl<'a> LoweringContext<'a> {
         self.push_drop_call(self.current_block(), &binding);
     }
 
-    fn drop_func_for_local(&self, local: Local) -> Option<&'static str> {
-        match self.get_local_type(local) {
-            MIRType::Struct { name, .. } if name == "String" => Some("String_drop"),
-            _ => match self.type_names.get(&local).map(String::as_str) {
-                Some("String") => Some("String_drop"),
-                _ => None,
-            },
-        }
+    fn drop_func_for_local(&self, local: Local) -> Option<String> {
+        let type_name = match self.get_local_type(local) {
+            MIRType::Struct { name, .. } => Some(name.as_str()),
+            _ => self.type_names.get(&local).map(String::as_str),
+        }?;
+        let drop_func = if type_name == "String" {
+            "String_drop".to_string()
+        } else {
+            format!("{type_name}_Drop_drop")
+        };
+        self.is_known_function(&drop_func).then_some(drop_func)
     }
 
     pub(super) fn insert_drop_glue(&mut self) {
@@ -112,6 +109,10 @@ impl<'a> LoweringContext<'a> {
             .iter()
             .filter_map(|binding| {
                 let flag = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+                if binding.local.kind == LocalKind::Param {
+                    self.insert_bool_assign_at_block_start(self.mir_fn.start_block, flag, true);
+                    return Some((binding.clone(), flag));
+                }
                 self.insert_bool_assign_at_block_start(self.mir_fn.start_block, flag, false);
                 if let Some((store_id, _)) = self.find_first_store_to(binding.local) {
                     self.insert_bool_assign_after(store_id, flag, true);
@@ -158,12 +159,12 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn push_drop_call(&mut self, block: usize, binding: &DropBinding) {
-        let destination = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+        let destination = self.mir_fn.add_local(LocalKind::Temp, MIR_UNIT);
         self.mir_fn.push_inst_to_block(
             block,
             Instruction::Call {
                 destination,
-                func: binding.drop_func.to_string(),
+                func: binding.drop_func.clone(),
                 args: vec![binding.local],
             },
         );
@@ -192,8 +193,10 @@ impl<'a> LoweringContext<'a> {
 
     fn all_bindings_initialized_in_entry(&self, bindings: &[DropBinding]) -> bool {
         bindings.iter().all(|binding| {
-            self.find_first_store_to(binding.local)
-                .is_some_and(|(_, block)| block == self.mir_fn.start_block)
+            binding.local.kind == LocalKind::Param
+                || self
+                    .find_first_store_to(binding.local)
+                    .is_some_and(|(_, block)| block == self.mir_fn.start_block)
         })
     }
 
