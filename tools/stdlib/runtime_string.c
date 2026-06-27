@@ -1,6 +1,7 @@
 #include "runtime_shared.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -216,6 +217,22 @@ long long sengoo_string_is_empty(long long handle) {
         return -(long long)SENGOO_STATUS_INVALID_HANDLE;
     }
     return owned->len == 0 ? 1 : 0;
+}
+
+static void sengoo_string_write_line(long long handle, FILE* stream) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (owned && owned->data && owned->len > 0) {
+        fwrite(owned->data, 1, owned->len, stream);
+    }
+    fputc('\n', stream);
+}
+
+void sengoo_print_string(long long handle) {
+    sengoo_string_write_line(handle, stdout);
+}
+
+void sengoo_eprint_string(long long handle) {
+    sengoo_string_write_line(handle, stderr);
 }
 
 long long sengoo_string_as_str_ptr(long long handle) {

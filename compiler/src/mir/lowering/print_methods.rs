@@ -1,3 +1,4 @@
+use super::method_call_helpers::lower_method_call_from_locals;
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -34,6 +35,13 @@ impl PrintSink {
             Self::Stderr => "sengoo_eprint_str",
         }
     }
+
+    fn string_func(self) -> &'static str {
+        match self {
+            Self::Stdout => "sengoo_print_string",
+            Self::Stderr => "sengoo_eprint_string",
+        }
+    }
 }
 
 impl<'a> LoweringContext<'a> {
@@ -60,7 +68,41 @@ impl<'a> LoweringContext<'a> {
         self.emit_print_value_to(value_local, value_ty, PrintSink::Stderr);
     }
 
+    /// Whether `type_name` has a user `impl Display` whose `to_string` was
+    /// lowered to the eager `<Type>_Display_to_string` runtime function.
+    fn has_display_to_string(&self, type_name: &str) -> bool {
+        self.is_known_function(&format!("{}_Display_to_string", type_name))
+    }
+
+    /// Print the UTF-8 text of an owned `String` value (`{ handle: i64 }`).
+    fn emit_print_owned_string(&mut self, string_local: Local, sink: PrintSink) {
+        let handle = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Extract {
+            destination: handle,
+            value: string_local,
+            index: 0,
+        });
+        self.emit_runtime_print_call(sink.string_func(), handle);
+    }
+
     fn emit_print_value_to(&mut self, value_local: Local, value_ty: &MIRType, sink: PrintSink) {
+        if let MIRType::Struct { name, .. } = value_ty {
+            let name = name.clone();
+            // The owned `String` prints its own UTF-8 text.
+            if name == "String" {
+                self.emit_print_owned_string(value_local, sink);
+                return;
+            }
+            // Dispatch through a user `Display` impl when one exists, printing the
+            // owned `String` it returns. The temporary is scheduled for the usual
+            // scope-end drop so the produced text is not leaked.
+            if self.has_display_to_string(&name) {
+                let rendered = lower_method_call_from_locals(self, value_local, "to_string", &[]);
+                self.emit_print_owned_string(rendered, sink);
+                self.record_drop_binding_if_needed(rendered);
+                return;
+            }
+        }
         match value_ty {
             MIRType::Struct { name, fields } => {
                 self.emit_print_str_literal(&format!("{} {{ ", name), sink);

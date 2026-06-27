@@ -1,5 +1,6 @@
 use super::*;
 use crate::ast::ExprKind;
+use crate::typeck::r#trait::type_key;
 use std::collections::HashSet;
 
 const ASSERT_HELPERS: &[&str] = &[
@@ -129,12 +130,35 @@ impl TypeChecker {
         match &ty.kind {
             TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Str => Ok(()),
             TyKind::Ref(_, inner) if matches!(inner.kind, TyKind::Str) => Ok(()),
-            TyKind::Adt { name, .. } => self.ensure_struct_printable(name, context, visiting),
-            _ => Err(TypeckError::Other(format!(
-                "print does not support field `{}` of type {}",
-                context, ty.kind
-            ))),
+            TyKind::Adt { name, .. } => {
+                // The owned `String` prints its own text directly.
+                if name == "String" {
+                    return Ok(());
+                }
+                // Any type with a user `Display` impl prints through that impl
+                // rather than requiring every field to be structurally printable.
+                if self.type_implements_display(ty) {
+                    return Ok(());
+                }
+                self.ensure_struct_printable(name, context, visiting)
+            }
+            _ => {
+                if self.type_implements_display(ty) {
+                    return Ok(());
+                }
+                Err(TypeckError::Other(format!(
+                    "print does not support field `{}` of type {}",
+                    context, ty.kind
+                )))
+            }
         }
+    }
+
+    /// Whether `ty` has a user-provided `impl Display`, which lets `print`
+    /// dispatch through that impl instead of the built-in structural printer.
+    fn type_implements_display(&self, ty: &Ty) -> bool {
+        self.impl_registry
+            .implements_trait("Display", &type_key(ty))
     }
 
     fn ensure_struct_printable(

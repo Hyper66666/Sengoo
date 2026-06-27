@@ -136,6 +136,10 @@ impl Codegen {
     pub(super) fn maybe_declare_eprint_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
         let declarations = [
             (
+                "sengoo_print_string",
+                "declare void @sengoo_print_string(i64)\n",
+            ),
+            (
                 "sengoo_eprint_i64",
                 "declare void @sengoo_eprint_i64(i64)\n",
             ),
@@ -150,6 +154,10 @@ impl Codegen {
             (
                 "sengoo_eprint_str",
                 "declare void @sengoo_eprint_str(i8*)\n",
+            ),
+            (
+                "sengoo_eprint_string",
+                "declare void @sengoo_eprint_string(i64)\n",
             ),
         ];
 

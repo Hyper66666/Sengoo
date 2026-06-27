@@ -45,6 +45,11 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Whether `ty` is the compiler-known owned `String` type.
+    fn is_owned_string_ty(ty: &Ty) -> bool {
+        matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String")
+    }
+
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         self.env.push_scope();
         self.bind_type_params_with_meta(&trait_decl.type_params)?;
@@ -163,6 +168,7 @@ impl TypeChecker {
         let is_future_impl = matches!(trait_name.as_deref(), Some("Future"));
         let is_drop_impl = matches!(trait_name.as_deref(), Some("Drop"));
         let is_copy_impl = matches!(trait_name.as_deref(), Some("Copy"));
+        let is_display_impl = matches!(trait_name.as_deref(), Some("Display"));
         if let Some(name) = trait_name.as_deref() {
             if let Err(err) = self.validate_orphan_rule(name, &target_ty, impl_decl.span) {
                 self.env.pop_scope();
@@ -230,6 +236,35 @@ impl TypeChecker {
                 ),
             );
             self.env.pop_scope();
+        }
+
+        if is_display_impl {
+            let to_string = impl_decl
+                .items
+                .iter()
+                .find(|method| method.name.name == "to_string");
+            let contract_ok = match to_string {
+                Some(method) => {
+                    let has_self = method.self_param.is_some();
+                    let returns_string = match &method.return_type {
+                        Some(ret) => Self::is_owned_string_ty(&self.check_type(ret)?),
+                        None => false,
+                    };
+                    has_self && returns_string
+                }
+                None => false,
+            };
+            if !contract_ok {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "display-contract",
+                    format!(
+                        "impl Display for {target_key} must define `def to_string(&self) -> String`"
+                    ),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
         }
 
         if let Some(trait_name) = impl_info.trait_name.clone() {
