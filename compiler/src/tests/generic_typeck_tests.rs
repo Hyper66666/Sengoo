@@ -1,4 +1,4 @@
-use crate::ast::{DeclKind, TypeKind};
+use crate::ast::{DeclKind, TraitItem, TypeKind};
 use crate::{
     compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker,
 };
@@ -43,6 +43,108 @@ def takes(x: dyn Show) -> i64 {
         })
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["Show"]);
+}
+
+#[test]
+fn trait_associated_type_declaration_parses_without_a_rhs() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+"#;
+
+    let program = Parser::parse(source).expect("trait associated type declaration should parse");
+    let trait_decl = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Trait(trait_decl) => Some(trait_decl),
+            _ => None,
+        })
+        .expect("expected trait declaration");
+
+    assert!(matches!(
+        trait_decl.items.as_slice(),
+        [TraitItem::Type(item)] if item.name.name == "Item"
+    ));
+}
+
+#[test]
+fn impl_associated_type_definition_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("impl associated type definition should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("impl associated type definition should be registered");
+}
+
+#[test]
+fn impl_missing_required_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("missing associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("missing required associated types: Item"),
+        "expected missing associated type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn impl_unknown_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+    type Output = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unknown associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("defines unknown associated types: Output"),
+        "expected unknown associated type diagnostic, got: {err}"
+    );
 }
 
 #[test]

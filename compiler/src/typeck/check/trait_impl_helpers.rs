@@ -152,6 +152,11 @@ impl TypeChecker {
 
         let mut impl_info = ImplInfo::new(target_ty.clone(), trait_name, trait_args);
 
+        for item in &impl_decl.associated_types {
+            let ty = self.check_type(&item.ty)?;
+            impl_info.add_assoc_type(item.name.name.clone(), ty);
+        }
+
         for item in &impl_decl.items {
             if is_future_impl {
                 Self::validate_future_poll_contract(item)?;
@@ -219,6 +224,42 @@ impl TypeChecker {
                         trait_name,
                         target_key,
                         missing_methods.join(", ")
+                    ));
+                    return Err(CompileError::TypeckError(err));
+                }
+
+                let mut missing_associated_types = trait_info
+                    .assoc_types
+                    .iter()
+                    .filter(|name| !impl_info.assoc_types.contains_key(*name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !missing_associated_types.is_empty() {
+                    missing_associated_types.sort();
+                    self.env.pop_scope();
+                    let err = TypeckError::Other(format!(
+                        "impl {} for {} is missing required associated types: {}",
+                        trait_name,
+                        target_key,
+                        missing_associated_types.join(", ")
+                    ));
+                    return Err(CompileError::TypeckError(err));
+                }
+
+                let mut unknown_associated_types = impl_info
+                    .assoc_types
+                    .keys()
+                    .filter(|name| !trait_info.assoc_types.contains(*name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !unknown_associated_types.is_empty() {
+                    unknown_associated_types.sort();
+                    self.env.pop_scope();
+                    let err = TypeckError::Other(format!(
+                        "impl {} for {} defines unknown associated types: {}",
+                        trait_name,
+                        target_key,
+                        unknown_associated_types.join(", ")
                     ));
                     return Err(CompileError::TypeckError(err));
                 }

@@ -10,9 +10,9 @@ mod stmt;
 mod ty;
 
 pub use decl::{
-    Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, ExternBlock, ExternFunction,
-    ExternItem, ExternStatic, Function, Impl, Import, ImportKind, Module, Static, Struct,
-    StructField, Trait, TraitItem, TypeAlias, TypeParam, VariantField,
+    AssociatedTypeDecl, Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, ExternBlock,
+    ExternFunction, ExternItem, ExternStatic, Function, Impl, Import, ImportKind, Module, Static,
+    Struct, StructField, Trait, TraitItem, TypeAlias, TypeParam, VariantField,
 };
 pub use expr::{Expr, ExprKind};
 pub use op::{AssignOp, BinOp, UnOp};

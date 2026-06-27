@@ -255,6 +255,18 @@ impl<'source> Parser<'source> {
                     value: Box::new(value),
                     span: self.current_span(),
                 }));
+            } else if self.consume(TokenKind::TypeKw).is_some() {
+                if trait_fn_async {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "`async` is only supported on trait methods".to_string(),
+                    )));
+                }
+                let name = self.expect_ident()?;
+                self.expect(TokenKind::Semicolon)?;
+                items.push(TraitItem::Type(AssociatedTypeDecl {
+                    name,
+                    span: self.current_span(),
+                }));
             } else {
                 return Err(CompileError::ParseError(ParseError::expected_trait_item()));
             }
@@ -310,6 +322,7 @@ impl<'source> Parser<'source> {
         self.expect(TokenKind::LBrace)?;
 
         let mut items = Vec::new();
+        let mut associated_types = Vec::new();
 
         while !self.is_eof() {
             if self.consume(TokenKind::RBrace).is_some() {
@@ -318,6 +331,23 @@ impl<'source> Parser<'source> {
 
             self.consume(TokenKind::PubKw);
             let method_async = self.consume(TokenKind::AsyncKw).is_some();
+            if self.consume(TokenKind::TypeKw).is_some() {
+                if method_async {
+                    return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                        "`async` is only supported on impl methods".to_string(),
+                    )));
+                }
+                let name = self.expect_ident()?;
+                if self.consume(TokenKind::Assign).is_none()
+                    && self.consume(TokenKind::Eq).is_none()
+                {
+                    self.expect(TokenKind::Assign)?;
+                }
+                let ty = self.parse_type()?;
+                self.expect(TokenKind::Semicolon)?;
+                associated_types.push(TypeAlias::new(name, ty, self.current_span()));
+                continue;
+            }
             self.expect(TokenKind::DefKw)?;
 
             let name = self.expect_ident()?;
@@ -384,6 +414,7 @@ impl<'source> Parser<'source> {
             target_type,
             trait_path,
             trait_args,
+            associated_types,
             items,
             span: self.current_span(),
         }))
