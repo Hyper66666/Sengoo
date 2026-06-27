@@ -156,3 +156,9 @@ impl String {
         sengoo_string_eq(self.handle, other.handle) != 0
     }
 }
+
+impl Drop for String {
+    def drop(&mut self) {
+        sengoo_string_free_status(self.handle);
+    }
+}

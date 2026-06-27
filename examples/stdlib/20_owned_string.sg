@@ -38,9 +38,6 @@ def main() -> i64 {
     if copied.is_ok == false || copied.value != 6 {
         return 1;
     }
-    owned.drop();
-    copy.drop();
-    buffer.free();
     print(20);
     0
 }

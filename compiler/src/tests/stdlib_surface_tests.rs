@@ -191,6 +191,25 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_result_unwrap_or_moves_value_without_dropping_it_first() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    buffer.len()
+}
+"#,
+    );
+    let unwrap_or = llvm_function_section(&ir, "define %Buffer @Result_Buffer_i64_unwrap_or");
+
+    assert!(
+        !unwrap_or.contains("Buffer_Drop_drop"),
+        "owned Result.unwrap_or must move its selected value out before drop glue runs\n{unwrap_or}"
+    );
+}
+
+#[test]
 fn stdlib_rc_shared_ownership_compiles_and_auto_drops() {
     let ir = compile_with_stdlib_modules(
         &[

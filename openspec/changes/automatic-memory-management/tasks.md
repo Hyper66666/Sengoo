@@ -48,7 +48,7 @@
 
 - [ ] 3.1 Add a MIR pass that inserts drop calls for owning locals at scope exit.
   - Partial: top-level stdlib `String` let bindings now get MIR-level
-    `String_drop` calls at function exits; straight-line single-exit functions
+    `String_Drop_drop` calls at function exits; straight-line single-exit functions
     use the no-flag fast path only when every dropped binding initializes in
     the entry block. Conditionally initialized bindings use runtime flags even
     when the function has one return. User types with `impl Drop` now resolve
@@ -56,7 +56,9 @@
     parameters, while `Drop::drop` receivers are not recursively auto-dropped.
     Lexical blocks, if branches, loop/while/for bodies, and try blocks now drop
     their own bindings at the scope boundary instead of delaying cleanup until
-    function return.
+    function return. Tail-expression moves now propagate through `if`/block
+    expressions so generic `Result<T, E>::unwrap_or` does not drop an owned
+    selected value before returning it.
 - [x] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Completed for the current MIR drop-glue surface: `?` propagation exits use
@@ -90,6 +92,9 @@
     the lexical scope. Composite owning-field tests now cover reverse field
     drop order, partial-move skip/drop behavior, field moves through calls and
     returns, and field reinitialization restoring scope-exit drop.
+    `stdlib_owned_result_unwrap_or_moves_value_without_dropping_it_first`
+    covers the generic Result branch-move regression that previously freed
+    returned `Buffer`/`JsonDoc` handles before realworld code could use them.
 
 ## 4. Runtime resource migration
 
@@ -101,15 +106,23 @@
     `Vec<i64>`, `Vec<bool>`, `Vec<String>`, `JsonDoc`, `ProcessCommand`,
     `ProcessOutput`, `ProcessHandle`, `TcpStream`, `UdpSocket`, `HttpClient`,
     `HttpServer`, `HttpServerRequest`, and `WsClient` now implement `Drop`
-    and auto-release at local scope exits. Existing `String` auto-drop remains
-    compiler-known. Legacy by-value handle APIs are temporarily treated as
+    and auto-release at local scope exits. `String` now has a real
+    `impl Drop for String` while its old `String.drop()` compatibility method
+    remains available. Legacy by-value handle APIs are temporarily treated as
     idempotent borrow-like wrappers for move checking, and callee parameters of
     those legacy handle types are not auto-dropped, because the current public
     stdlib methods still pass handles by value rather than through `&self`.
     Covered by `stdlib_owned_handles_auto_drop_without_manual_release` plus the
     existing `stdlib_surface` suite.
-- [ ] 4.3 Re-implement `free()/drop()/close()` wrappers as "explicit early drop"
+- [x] 4.3 Re-implement `free()/drop()/close()` wrappers as "explicit early drop"
   that marks the value moved so no double release occurs.
+  - Completed in MIR lowering for the compatibility method names `drop`,
+    `free`, and `close`: calling one of these methods marks the receiver moved
+    so scope-exit auto-drop is suppressed. Verified by
+    `explicit_drop_method_consumes_receiver_for_drop_glue` and by
+    `cargo run -p sgpm -- test --locked --manifest-path
+    examples/realworld/cli-json-audit/Sengoo.toml`, whose smoke test keeps
+    legacy `doc.close()`, `scores.free()`, and `buffer.free()` calls.
 
 ## 5. Opt-in shared ownership
 
@@ -125,10 +138,15 @@
 
 ## 6. Conformance and docs
 
-- [ ] 6.1 Rewrite `examples/stdlib/20_owned_string.sg` and
+- [x] 6.1 Rewrite `examples/stdlib/20_owned_string.sg` and
   `examples/realworld/cli-json-audit/src/main.sg` to use auto-drop (no manual
   release) as new committed examples; keep the originals as compatibility smoke.
-- [ ] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
+  - Completed: both committed examples now omit manual release calls on the
+    owning values they create, while `cli-json-audit/tests/audit_smoke.sg`
+    remains the compatibility smoke for explicit release methods.
+- [x] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
+  - Added the "Automatic drop / move ownership" support row with compiler,
+    stdlib example, realworld, and scalar `Rc` proof points.
 - [x] 6.3 Run `openspec validate automatic-memory-management --strict`.
 
 ## Verification

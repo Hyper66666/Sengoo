@@ -86,13 +86,37 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn mark_drop_expr_moved(&mut self, expr: &HIRExpr) {
-        let Some((local, field_path)) = self.resolve_drop_place(expr) else {
-            return;
-        };
-        if field_path.is_empty() {
-            self.mark_drop_local_moved(local);
-        } else {
-            self.mark_drop_field_moved(local, field_path);
+        match expr {
+            HIRExpr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if let Some(expr) = then_branch.expr.as_deref() {
+                    self.mark_drop_expr_moved(expr);
+                }
+                if let Some(expr) = else_branch
+                    .as_deref()
+                    .and_then(|branch| branch.expr.as_deref())
+                {
+                    self.mark_drop_expr_moved(expr);
+                }
+            }
+            HIRExpr::Block(body) | HIRExpr::TryBlock(body) | HIRExpr::AsyncBlock(body) => {
+                if let Some(expr) = body.expr.as_deref() {
+                    self.mark_drop_expr_moved(expr);
+                }
+            }
+            _ => {
+                let Some((local, field_path)) = self.resolve_drop_place(expr) else {
+                    return;
+                };
+                if field_path.is_empty() {
+                    self.mark_drop_local_moved(local);
+                } else {
+                    self.mark_drop_field_moved(local, field_path);
+                }
+            }
         }
     }
 
@@ -235,7 +259,8 @@ impl<'a> LoweringContext<'a> {
             MIRType::Struct { name, .. } => {
                 matches!(
                     name.as_str(),
-                    "Buffer"
+                    "String"
+                        | "Buffer"
                         | "JsonDoc"
                         | "ProcessCommand"
                         | "ProcessOutput"
@@ -257,11 +282,7 @@ impl<'a> LoweringContext<'a> {
             MIRType::Struct { name, .. } => Some(name.as_str()),
             _ => self.type_names.get(&local).map(String::as_str),
         }?;
-        let drop_func = if type_name == "String" {
-            "String_drop".to_string()
-        } else {
-            format!("{type_name}_Drop_drop")
-        };
+        let drop_func = format!("{type_name}_Drop_drop");
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
@@ -269,11 +290,7 @@ impl<'a> LoweringContext<'a> {
         let MIRType::Struct { name, .. } = ty else {
             return None;
         };
-        let drop_func = if name == "String" {
-            "String_drop".to_string()
-        } else {
-            format!("{name}_Drop_drop")
-        };
+        let drop_func = format!("{name}_Drop_drop");
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
@@ -370,14 +387,14 @@ impl<'a> LoweringContext<'a> {
         let flagged = bindings
             .iter()
             .filter_map(|binding| {
-                let flag = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+                let flag = self.mir_fn.add_local(LocalKind::User, MIR_BOOL);
                 if binding.local.kind == LocalKind::Param {
-                    self.insert_bool_assign_at_block_start(self.mir_fn.start_block, flag, true);
+                    self.insert_bool_store_at_block_start(self.mir_fn.start_block, flag, true);
                     return Some((binding.clone(), flag));
                 }
-                self.insert_bool_assign_at_block_start(self.mir_fn.start_block, flag, false);
+                self.insert_bool_store_at_block_start(self.mir_fn.start_block, flag, false);
                 if let Some((store_id, _)) = self.find_first_store_to(binding.local) {
-                    self.insert_bool_assign_after(store_id, flag, true);
+                    self.insert_bool_store_after(store_id, flag, true);
                     Some((binding.clone(), flag))
                 } else {
                     None
@@ -409,8 +426,16 @@ impl<'a> LoweringContext<'a> {
             self.mir_fn.basic_blocks[drop_block].set_terminator(Terminator::Goto(next));
 
             let guard_block = self.mir_fn.add_block();
+            let guard_value = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+            self.mir_fn.push_inst_to_block(
+                guard_block,
+                Instruction::Load {
+                    destination: guard_value,
+                    source: *flag,
+                },
+            );
             self.mir_fn.basic_blocks[guard_block].set_terminator(Terminator::If {
-                cond: *flag,
+                cond: guard_value,
                 then_block: drop_block,
                 else_block: next,
             });
@@ -454,25 +479,34 @@ impl<'a> LoweringContext<'a> {
         );
     }
 
-    fn insert_bool_assign_at_block_start(&mut self, block: usize, destination: Local, value: bool) {
-        let inst = self.mir_fn.alloc_inst(Instruction::Assign {
-            destination,
+    fn alloc_bool_store(&mut self, destination: Local, value: bool) -> [InstId; 2] {
+        let value_local = self.mir_fn.add_local(LocalKind::Temp, MIR_BOOL);
+        let assign = self.mir_fn.alloc_inst(Instruction::Assign {
+            destination: value_local,
             value: MirConstant::Bool(value),
         });
-        self.mir_fn.basic_blocks[block].instructions.insert(0, inst);
+        let store = self.mir_fn.alloc_inst(Instruction::Store {
+            destination,
+            value: value_local,
+        });
+        [assign, store]
     }
 
-    fn insert_bool_assign_after(&mut self, after: InstId, destination: Local, value: bool) {
+    fn insert_bool_store_at_block_start(&mut self, block: usize, destination: Local, value: bool) {
+        let insts = self.alloc_bool_store(destination, value);
+        self.mir_fn.basic_blocks[block]
+            .instructions
+            .splice(0..0, insts);
+    }
+
+    fn insert_bool_store_after(&mut self, after: InstId, destination: Local, value: bool) {
         let Some((block_id, index)) = self.find_inst_position(after) else {
             return;
         };
-        let inst = self.mir_fn.alloc_inst(Instruction::Assign {
-            destination,
-            value: MirConstant::Bool(value),
-        });
+        let insts = self.alloc_bool_store(destination, value);
         self.mir_fn.basic_blocks[block_id]
             .instructions
-            .insert(index + 1, inst);
+            .splice(index + 1..index + 1, insts);
     }
 
     fn all_bindings_initialized_in_entry(&self, bindings: &[DropBinding]) -> bool {

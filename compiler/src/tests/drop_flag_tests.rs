@@ -41,7 +41,9 @@ fn string_drop_calls(function: &MirFunction) -> Vec<Vec<Local>> {
         .instructions
         .iter()
         .filter_map(|inst| match inst {
-            Instruction::Call { func, args, .. } if func == "String_drop" => Some(args.clone()),
+            Instruction::Call { func, args, .. } if func == "String_Drop_drop" => {
+                Some(args.clone())
+            }
             _ => None,
         })
         .collect()
@@ -205,7 +207,7 @@ def main() -> i64 {
         .instructions
         .iter()
         .filter_map(|id| match main_fn.instruction(*id) {
-            Instruction::Call { func, args, .. } if func == "String_drop" => Some(args[0]),
+            Instruction::Call { func, args, .. } if func == "String_Drop_drop" => Some(args[0]),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -544,9 +546,14 @@ def main() -> i64 {
     let main_fn = function(&mir, "main");
 
     assert_eq!(
-        string_drop_calls(main_fn).len(),
+        named_drop_calls(main_fn, "String_drop").len(),
         1,
-        "the explicit String.drop() call should be the only drop for the receiver"
+        "the explicit String.drop() call should release the receiver through the compatibility method"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        0,
+        "explicit String.drop() marks the receiver moved so auto-drop is suppressed"
     );
 }
 

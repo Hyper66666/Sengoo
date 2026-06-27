@@ -165,7 +165,7 @@ pub(super) fn lower_method_call_from_locals(
     method: &str,
     arg_locals: &[Local],
 ) -> Local {
-    if method == "drop" {
+    if is_explicit_release_method(method) {
         ctx.mark_drop_local_moved(receiver_local);
     }
 
@@ -182,6 +182,10 @@ pub(super) fn lower_method_call_from_locals(
             }
         };
     emit_resolved_method_call(ctx, receiver_local, arg_locals, &resolved_func_name)
+}
+
+fn is_explicit_release_method(method: &str) -> bool {
+    matches!(method, "drop" | "free" | "close")
 }
 
 #[cfg(test)]
