@@ -180,6 +180,55 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_lowers_owned_string_comparison_operators() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let c = string_from_str("beta").unwrap_or(String { handle: 0 });
+    if a == b && a < c && c >= b {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    let main = llvm_function_section(&ir, "define i64 @main");
+    assert!(ir.contains("sengoo_string_eq"));
+    assert!(ir.contains("sengoo_string_compare"));
+    assert!(
+        !main.contains("icmp eq %String") && !main.contains("icmp slt %String"),
+        "owned String operators must lower through runtime comparison helpers\n{main}"
+    );
+}
+
+#[test]
+fn string_module_rejects_owned_string_arithmetic_operators() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib_surface(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let c = a - b;
+    c.len()
+}
+"#,
+    );
+    let err = compile_to_ir(&source).expect_err("String - String must not type-check");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("TypeMismatch") || err.contains("类型不匹配") || err.contains("type"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
 fn string_module_imports_utf8_slice_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

@@ -30,8 +30,9 @@
   - Partial: `&str` already lowers `==`/`!=` through `sengoo_str_eq`.
     Owned `String` now exposes method-level `eq`/`ne` and byte-order
     `lt`/`le`/`gt`/`ge`/`compare` helpers backed by
-    `sengoo_string_compare`. Operator sugar (`String ==`, `String <`) and
-    trait-backed `PartialEq`/`Ord` impls remain open.
+    `sengoo_string_compare`; owned `String` comparison operators
+    `==`/`!=`/`<`/`<=`/`>`/`>=` lower through `sengoo_string_eq` /
+    `sengoo_string_compare`. Trait-backed `PartialEq`/`Ord` impls remain open.
 - [x] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
   - Completed for the current stdlib surface: `&str` exposes the borrowed

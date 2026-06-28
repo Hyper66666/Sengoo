@@ -5604,6 +5604,58 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_comparison_operators_order_owned_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-compare-operators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let eq_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let eq_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let lt_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let lt_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let le_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let le_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let gt_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let gt_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ge_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let ge_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if !(eq_l == eq_r) { return 10; }
+    if !(ne_l != ne_r) { return 11; }
+    if !(lt_l < lt_r) { return 12; }
+    if !(le_l <= le_r) { return 13; }
+    if !(gt_l > gt_r) { return 14; }
+    if !(ge_l >= ge_r) { return 15; }
+    if copied != 2 { return 16; }
+    if wrote != 2 { return 17; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
 fn stdlib_string_get_checks_utf8_boundaries() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-get-utf8",

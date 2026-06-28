@@ -207,7 +207,44 @@ impl TypeChecker {
             ));
         }
 
+        let is_owned_string_pair = matches!(
+            (&left_ty.kind, &right_ty.kind),
+            (
+                TyKind::Adt {
+                    name: left_name, ..
+                },
+                TyKind::Adt {
+                    name: right_name, ..
+                }
+            ) if left_name == "String" && right_name == "String"
+        );
+        if is_owned_string_pair
+            && !matches!(
+                op,
+                BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+            )
+        {
+            return Err(TypeckError::TypeMismatch {
+                expected: right_ty.kind.clone(),
+                found: left_ty.kind.clone(),
+            });
+        }
+
         let types_compatible = match (&left_ty.kind, &right_ty.kind) {
+            (
+                TyKind::Adt {
+                    name: left_name, ..
+                },
+                TyKind::Adt {
+                    name: right_name, ..
+                },
+            ) if left_name == "String" || right_name == "String" => {
+                left_name == right_name
+                    && matches!(
+                        op,
+                        BinOp::Eq | BinOp::NotEq | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+                    )
+            }
             _ if left_ty.kind == right_ty.kind => true,
             (TyKind::Adt { name, .. }, TyKind::Str)
                 if name == "String" && matches!(op, BinOp::Add) =>
