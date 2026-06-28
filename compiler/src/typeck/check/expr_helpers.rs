@@ -209,6 +209,18 @@ impl TypeChecker {
 
         let types_compatible = match (&left_ty.kind, &right_ty.kind) {
             _ if left_ty.kind == right_ty.kind => true,
+            (TyKind::Adt { name, .. }, TyKind::Str)
+                if name == "String" && matches!(op, BinOp::Add) =>
+            {
+                true
+            }
+            (TyKind::Adt { name, .. }, TyKind::Ref(false, inner))
+                if name == "String"
+                    && matches!(inner.kind, TyKind::Str)
+                    && matches!(op, BinOp::Add) =>
+            {
+                true
+            }
             (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
                 matches!(
                     op,

@@ -218,6 +218,22 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_allows_owned_string_plus_str() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let base = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let joined = base + "!";
+    joined.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_concat_str_status"));
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[

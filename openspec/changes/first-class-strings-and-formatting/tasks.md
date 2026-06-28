@@ -21,7 +21,11 @@
 
 ## 2. Ergonomic methods and operators
 
-- [ ] 2.1 `+`/`+=` concatenation (`String + &str`).
+- [~] 2.1 `+`/`+=` concatenation (`String + &str`).
+  - Partial: `String + &str` type-checks, lowers through
+    `sengoo_string_concat_str_status`, and returns a new owned `String`.
+    `+=`, `&str + String`, and an explicit operator-level allocation failure
+    story remain open.
 - [~] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
   - Partial: `&str` already lowers `==`/`!=` through `sengoo_str_eq`.
     Owned `String` now exposes method-level `eq`/`ne` and byte-order

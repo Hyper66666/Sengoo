@@ -15,6 +15,7 @@ extern "C" {
     fn sengoo_string_from_buffer(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_string_clone_status(handle: i64) -> i64;
     fn sengoo_string_push_str_status(handle: i64, value_ptr: i64) -> i64;
+    fn sengoo_string_concat_str_status(handle: i64, value_ptr: i64) -> i64;
     fn sengoo_string_as_str_ptr(handle: i64) -> i64;
     fn sengoo_string_with_capacity(capacity: i64) -> i64;
     fn sengoo_string_push_i64_status(handle: i64, value: i64) -> i64;

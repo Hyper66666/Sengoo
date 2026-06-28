@@ -5713,6 +5713,43 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_plus_str_returns_owned_string() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-plus-str",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let base = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let joined = base + "!";
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = joined.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 3 && wrote == 3 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "hi!");
+}
+
+#[test]
 fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "builtin-eprintln",

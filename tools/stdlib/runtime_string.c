@@ -440,6 +440,24 @@ long long sengoo_string_push_str_status(long long handle, long long value_ptr) {
     return SENGOO_STATUS_OK;
 }
 
+long long sengoo_string_concat_str_status(long long handle, long long value_ptr) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    const char* value = (const char*)sengoo_handle_to_ptr(value_ptr);
+    if (!owned || !value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    long long copy_handle = sengoo_owned_string_from_bytes(owned->data ? owned->data : "", owned->len);
+    if (copy_handle < 0) {
+        return copy_handle;
+    }
+    long long pushed = sengoo_string_push_str_status(copy_handle, value_ptr);
+    if (pushed < 0) {
+        sengoo_string_free_status(copy_handle);
+        return pushed;
+    }
+    return copy_handle;
+}
+
 static long long sengoo_owned_string_append_bytes(
     long long handle, const char* bytes, size_t add_len) {
     SengooOwnedString* owned = sengoo_string_resolve(handle);

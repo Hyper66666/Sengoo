@@ -4,8 +4,19 @@ fn is_string_ptr(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
 }
 
+fn is_owned_string(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Struct { name, .. } if name == "String")
+}
+
 fn is_async_context_type(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Struct { name, .. } if name == "AsyncContext")
+}
+
+fn owned_string_mir_type() -> MIRType {
+    MIRType::Struct {
+        name: "String".to_string(),
+        fields: vec![("handle".to_string(), MIR_I64)],
+    }
 }
 
 pub(super) fn lower_unary_expr(
@@ -73,10 +84,13 @@ pub(super) fn lower_binary_expr(
     let mir_op = ctx.lower_bin_op(op);
 
     if mir_op == MirBinOp::Add {
-        let is_string_concat = {
+        let (is_string_concat, is_owned_string_concat) = {
             let left_ty = ctx.get_local_type(left_local);
             let right_ty = ctx.get_local_type(right_local);
-            is_string_ptr(left_ty) && is_string_ptr(right_ty)
+            (
+                is_string_ptr(left_ty) && is_string_ptr(right_ty),
+                is_owned_string(left_ty) && is_string_ptr(right_ty),
+            )
         };
         if is_string_concat {
             let result_ty = MIRType::Ptr(Box::new(MIRType::Int(8)));
@@ -87,6 +101,34 @@ pub(super) fn lower_binary_expr(
                 args: vec![left_local, right_local],
             });
             return result_local;
+        }
+        if is_owned_string_concat {
+            let left_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Extract {
+                destination: left_handle,
+                value: left_local,
+                index: 0,
+            });
+            let right_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: right_ptr,
+                func: "sengoo_stdlib_str_ptr".to_string(),
+                args: vec![right_local],
+            });
+            let result_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: result_handle,
+                func: "sengoo_string_concat_str_status".to_string(),
+                args: vec![left_handle, right_ptr],
+            });
+            let result = ctx.add_local(None, LocalKind::Temp, owned_string_mir_type());
+            ctx.push_inst(Instruction::Aggregate {
+                destination: result,
+                fields: vec![result_handle],
+                ty: owned_string_mir_type(),
+            });
+            ctx.record_drop_binding_if_needed(result);
+            return result;
         }
     }
 

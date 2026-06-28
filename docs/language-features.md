@@ -268,8 +268,9 @@ Sengoo has two practical text surfaces today:
 - `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
   can be cloned, pushed to, copied into a `Buffer`, and compared with another
   `String` through `eq`/`ne` and byte-order `lt`/`le`/`gt`/`ge`/`compare`
-  methods. `String.get(start, end)` and `str_get(value, start, end)` copy a
-  byte range into a new owned `String` only when both offsets are UTF-8 scalar
+  methods. `String + &str` produces a new owned `String`; `+=` remains future
+  work. `String.get(start, end)` and `str_get(value, start, end)` copy a byte
+  range into a new owned `String` only when both offsets are UTF-8 scalar
   boundaries; invalid ranges return `STATUS_INVALID_ARGUMENT`.
 - `String.bytes()` and `String.chars()` create concrete iterators over a copied
   snapshot. `bytes().next()` returns byte values and `chars().next()` returns
