@@ -35,8 +35,8 @@
   `generics-and-trait-system` core traits).
 - [~] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
   width, precision, and `{{`/`}}`.
-  - Partial: `{}`, scalar `{:?}`, and `{{`/`}}` parse and lower through the
-    owned-`String` builder. Width, precision, positional arguments, and
+  - Partial: `{}`, scalar `{:?}`, positional `{0}` / `{0:?}`, and `{{`/`}}`
+    parse and lower through the owned-`String` builder. Width, precision, and
     structure-aware Debug output remain open.
 - [ ] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.

@@ -42,13 +42,16 @@ impl<'a> LoweringContext<'a> {
         for segment in &segments {
             match segment {
                 FormatSegment::Literal(text) => self.emit_push_str_literal(handle, text),
-                FormatSegment::Placeholder(_) => {
-                    if let Some(arg) = value_args.get(arg_index) {
+                FormatSegment::Placeholder(placeholder) => {
+                    let selected_arg_index = placeholder.position.unwrap_or(arg_index);
+                    if let Some(arg) = value_args.get(selected_arg_index) {
                         let value = self.lower_expr(arg);
                         let value_ty = self.get_local_type(value).clone();
                         self.emit_push_format_value(handle, value, &value_ty);
                     }
-                    arg_index += 1;
+                    if placeholder.position.is_none() {
+                        arg_index += 1;
+                    }
                 }
             }
         }

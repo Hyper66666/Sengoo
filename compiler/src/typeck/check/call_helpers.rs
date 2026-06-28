@@ -178,7 +178,7 @@ impl TypeChecker {
         };
         let segments = crate::format_template::parse_format_template(template)
             .map_err(|err| TypeckError::Other(err.message()))?;
-        let expected = crate::format_template::placeholder_count(&segments);
+        let expected = crate::format_template::required_arg_count(&segments);
         if expected != value_args.len() {
             return Err(TypeckError::ArgumentCountMismatch {
                 expected: expected + 1,

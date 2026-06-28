@@ -180,6 +180,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn format_positional_placeholders_select_arguments_by_index() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let rendered = format("{1}:{0}", 7, 42);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with positional placeholders should compile");
+
+    assert!(
+        ir.contains("@sengoo_string_push_i64_status"),
+        "expected positional placeholders to render i64 args, got:\n{ir}"
+    );
+}
+
+#[test]
 fn format_rejects_unsupported_width_spec() {
     let err = compile_failure(
         r#"

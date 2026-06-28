@@ -1,17 +1,22 @@
 //! Shared parser for the `format`/f-string mini-language template.
 //!
-//! This round supports the empty placeholder `{}` (auto-positional `Display`),
-//! the scalar `{:?}` Debug placeholder, plus the `{{`/`}}` brace escapes. Richer
-//! specs such as `{:>8}` are intentionally rejected here and tracked as a
-//! follow-up.
+//! This round supports `{}`, `{:?}`, positional `{0}` / `{0:?}` placeholders,
+//! plus the `{{`/`}}` brace escapes. Richer specs such as `{:>8}` are
+//! intentionally rejected here and tracked as a follow-up.
 
 /// A single piece of a parsed format template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatSegment {
     /// Literal text to emit verbatim (brace escapes already resolved).
     Literal(String),
-    /// An `{}` placeholder consuming the next positional argument.
-    Placeholder(FormatStyle),
+    /// A placeholder consuming either the next automatic or explicit argument.
+    Placeholder(FormatPlaceholder),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatPlaceholder {
+    pub position: Option<usize>,
+    pub style: FormatStyle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +48,36 @@ impl FormatTemplateError {
     }
 }
 
+fn parse_placeholder_body(body: &str) -> Result<FormatPlaceholder, FormatTemplateError> {
+    if body.is_empty() {
+        return Ok(FormatPlaceholder {
+            position: None,
+            style: FormatStyle::Display,
+        });
+    }
+    if body == ":?" {
+        return Ok(FormatPlaceholder {
+            position: None,
+            style: FormatStyle::Debug,
+        });
+    }
+    if let Ok(position) = body.parse::<usize>() {
+        return Ok(FormatPlaceholder {
+            position: Some(position),
+            style: FormatStyle::Display,
+        });
+    }
+    if let Some(index) = body.strip_suffix(":?") {
+        if let Ok(position) = index.parse::<usize>() {
+            return Ok(FormatPlaceholder {
+                position: Some(position),
+                style: FormatStyle::Debug,
+            });
+        }
+    }
+    Err(FormatTemplateError::UnsupportedSpec(body.to_string()))
+}
+
 /// Parse a format template into its literal/placeholder segments.
 pub fn parse_format_template(template: &str) -> Result<Vec<FormatSegment>, FormatTemplateError> {
     let mut segments = Vec::new();
@@ -70,17 +105,11 @@ pub fn parse_format_template(template: &str) -> Result<Vec<FormatSegment>, Forma
                 if !closed {
                     return Err(FormatTemplateError::UnmatchedBrace);
                 }
-                let style = if body.is_empty() {
-                    FormatStyle::Display
-                } else if body == ":?" {
-                    FormatStyle::Debug
-                } else {
-                    return Err(FormatTemplateError::UnsupportedSpec(body));
-                };
+                let placeholder = parse_placeholder_body(&body)?;
                 if !literal.is_empty() {
                     segments.push(FormatSegment::Literal(std::mem::take(&mut literal)));
                 }
-                segments.push(FormatSegment::Placeholder(style));
+                segments.push(FormatSegment::Placeholder(placeholder));
             }
             '}' => {
                 if chars.peek() == Some(&'}') {
@@ -108,6 +137,31 @@ pub fn placeholder_count(segments: &[FormatSegment]) -> usize {
         .count()
 }
 
+/// Minimum number of value arguments required by the template.
+pub fn required_arg_count(segments: &[FormatSegment]) -> usize {
+    let mut auto_count = 0usize;
+    let mut explicit_required = 0usize;
+    for segment in segments {
+        let FormatSegment::Placeholder(placeholder) = segment else {
+            continue;
+        };
+        if let Some(position) = placeholder.position {
+            explicit_required = explicit_required.max(position + 1);
+        } else {
+            auto_count += 1;
+        }
+    }
+    auto_count.max(explicit_required)
+}
+
+#[cfg(test)]
+fn display_placeholder() -> FormatPlaceholder {
+    FormatPlaceholder {
+        position: None,
+        style: FormatStyle::Display,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,9 +180,9 @@ mod tests {
             parse_format_template("a={} b={}").unwrap(),
             vec![
                 FormatSegment::Literal("a=".to_string()),
-                FormatSegment::Placeholder(FormatStyle::Display),
+                FormatSegment::Placeholder(display_placeholder()),
                 FormatSegment::Literal(" b=".to_string()),
-                FormatSegment::Placeholder(FormatStyle::Display),
+                FormatSegment::Placeholder(display_placeholder()),
             ]
         );
     }
@@ -139,7 +193,7 @@ mod tests {
             parse_format_template("{{{}}}").unwrap(),
             vec![
                 FormatSegment::Literal("{".to_string()),
-                FormatSegment::Placeholder(FormatStyle::Display),
+                FormatSegment::Placeholder(display_placeholder()),
                 FormatSegment::Literal("}".to_string()),
             ]
         );
@@ -161,7 +215,28 @@ mod tests {
     fn parses_debug_placeholder() {
         assert_eq!(
             parse_format_template("{:?}").unwrap(),
-            vec![FormatSegment::Placeholder(FormatStyle::Debug)]
+            vec![FormatSegment::Placeholder(FormatPlaceholder {
+                position: None,
+                style: FormatStyle::Debug
+            })]
+        );
+    }
+
+    #[test]
+    fn parses_positional_placeholders() {
+        assert_eq!(
+            parse_format_template("{1}:{0:?}").unwrap(),
+            vec![
+                FormatSegment::Placeholder(FormatPlaceholder {
+                    position: Some(1),
+                    style: FormatStyle::Display
+                }),
+                FormatSegment::Literal(":".to_string()),
+                FormatSegment::Placeholder(FormatPlaceholder {
+                    position: Some(0),
+                    style: FormatStyle::Debug
+                }),
+            ]
         );
     }
 
@@ -177,5 +252,11 @@ mod tests {
     fn counts_placeholders() {
         let segments = parse_format_template("{} and {}").unwrap();
         assert_eq!(placeholder_count(&segments), 2);
+    }
+
+    #[test]
+    fn counts_required_positional_args() {
+        let segments = parse_format_template("{1}:{0}").unwrap();
+        assert_eq!(required_arg_count(&segments), 2);
     }
 }
