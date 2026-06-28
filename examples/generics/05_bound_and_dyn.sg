@@ -1,0 +1,50 @@
+// examples/generics/05_bound_and_dyn.sg
+//
+// Demonstrates: a generic function with a trait bound plus a dyn Trait call.
+//
+// Run: sgc run examples/generics/05_bound_and_dyn.sg
+// Expected output: 29
+
+trait Showable {
+    def show(self) -> i64 {
+        0
+    }
+}
+
+impl Showable for i64 {
+    def show(self) -> i64 {
+        self
+    }
+}
+
+def require_showable<T: Showable>(value: T) -> i64 {
+    13
+}
+
+trait Shape {
+    def area(&self) -> i64 {
+        0
+    }
+}
+
+struct Square {
+    side: i64,
+}
+
+impl Shape for Square {
+    def area(&self) -> i64 {
+        self.side * self.side
+    }
+}
+
+def describe(shape: &dyn Shape) -> i64 {
+    shape.area()
+}
+
+def main() -> i64 {
+    let sq = Square { side: 4 };
+    let static_value = require_showable(12);
+    let dynamic_value = describe(&sq);
+    print(static_value + dynamic_value);
+    0
+}

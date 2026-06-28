@@ -5040,6 +5040,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/generics/02_option_unwrap.sg",
         "examples/generics/03_result_chain.sg",
         "examples/generics/04_stdlib_collections.sg",
+        "examples/generics/05_bound_and_dyn.sg",
         "examples/stdlib/01_strings.sg",
         "examples/stdlib/02_math.sg",
         "examples/stdlib/03_error.sg",
@@ -5193,6 +5194,15 @@ fn examples_smoke_generics_stdlib_collections_import() {
         "generics-stdlib-collections",
         "examples/generics/04_stdlib_collections.sg",
         "60",
+    );
+}
+
+#[test]
+fn examples_smoke_generics_bound_and_dyn() {
+    assert_example_output(
+        "generics-bound-and-dyn",
+        "examples/generics/05_bound_and_dyn.sg",
+        "29",
     );
 }
 
