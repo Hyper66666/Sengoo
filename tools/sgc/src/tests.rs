@@ -5781,6 +5781,46 @@ def main() -> i64 {
 }
 
 #[test]
+fn display_impl_prints_to_stdout_and_stderr() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "display-print",
+        r#"
+import std::string;
+
+struct Tag {
+    id: i64,
+}
+
+impl Display for Tag {
+    def to_string(&self) -> String {
+        string_from_str("Tag").value
+    }
+}
+
+def main() -> i64 {
+    let out = Tag { id: 1 };
+    let err = Tag { id: 2 };
+    print(out);
+    eprintln(err);
+    0
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "Tag");
+    assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "Tag");
+}
+
+#[test]
 fn stdlib_runtime_release_functions_are_idempotent_for_core_handles() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "release-idempotence",

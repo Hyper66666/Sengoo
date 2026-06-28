@@ -66,12 +66,13 @@
   - Completed for the current format mini-language: invalid templates and
     non-literal templates report `invalid-format-template`; arity mismatches
     report `format-argument-count`. Covered by `compiler/src/tests/format_tests.rs`.
-- [ ] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`
+- [x] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`
   source-compatible.
-  - Partial: `println` now type-checks and lowers through the existing `print`
-    runtime path. `eprintln` supports the current printable primitive/struct
-    surface and writes through native stderr runtime symbols. Trait-backed
-    `Display` remains open.
+  - Completed for the current Display surface: builtin `print`/`println` and
+    `eprintln` type-check user `Display` impls, lower through `to_string() ->
+    String`, and keep primitive printing source-compatible. Compiler IR and
+    native stdout/stderr tests cover the routing; `println` still shares the
+    existing print runtime path.
 - [ ] 3.5 `#[derive(Debug)]` integration for structs/enums.
 
 ## 4. Literals and interpolation

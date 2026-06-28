@@ -234,6 +234,36 @@ def main() -> i64 {
 }
 
 #[test]
+fn display_impl_can_be_printed_through_builtin_prints() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+struct Tag {
+    id: i64,
+}
+
+impl Display for Tag {
+    def to_string(&self) -> String {
+        string_from_str("Tag").value
+    }
+}
+
+def main() -> i64 {
+    let out = Tag { id: 1 };
+    let err = Tag { id: 2 };
+    print(out);
+    eprintln(err);
+    0
+}
+"#,
+    );
+
+    assert!(ir.contains("Tag_Display_to_string"));
+    assert!(ir.contains("sengoo_print_string"));
+    assert!(ir.contains("sengoo_eprint_string"));
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[
