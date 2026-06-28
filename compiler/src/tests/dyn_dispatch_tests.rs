@@ -6,7 +6,8 @@
 //! pair emits a vtable global plus a by-pointer dispatch shim that forwards to
 //! the monomorphic implementation.
 
-use crate::compile_to_ir;
+use crate::codegen::JITCodegen;
+use crate::{compile_to_ir, compile_to_mir};
 
 const DYN_PROGRAM: &str = r#"
 trait Shape {
@@ -99,5 +100,27 @@ fn dyn_receiver_dispatches_through_vtable() {
     assert!(
         ir.contains("inttoptr i64") && ir.contains("to i64 (i8*)*"),
         "expected an indirect call through a materialized function pointer, got:\n{ir}"
+    );
+}
+
+#[test]
+fn jit_codegen_lowers_dyn_dispatch_call_indirect() {
+    let mir = compile_to_mir(DYN_PROGRAM).expect("dyn program should lower to MIR");
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&mir)
+        .expect("JIT codegen should support dyn dispatch MIR");
+
+    assert!(
+        ir.contains("@__vtable$Shape$Square = internal constant"),
+        "JIT IR should emit the dyn vtable global, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("inttoptr i64") && ir.contains("to i64 (i8*)*"),
+        "JIT IR should materialize and call the vtable function pointer, got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("; unhandled instruction"),
+        "JIT IR should lower every dyn dispatch instruction, got:\n{ir}"
     );
 }

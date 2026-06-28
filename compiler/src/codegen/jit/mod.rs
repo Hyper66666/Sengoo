@@ -3,6 +3,7 @@
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
 use super::common;
+use crate::mir::dyn_dispatch::{parse_shim_name, vtable_global_name};
 use crate::mir::{MIRType, MirFunction};
 use std::collections::HashMap;
 
@@ -40,6 +41,7 @@ pub struct JITCodegen {
     /// 临时变量计数器（用于生成唯一名称）
     /// 所有函数的签名（用于类型转换）
     function_signatures: HashMap<String, (Vec<MIRType>, MIRType)>,
+    global_types: HashMap<String, String>,
     phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
     phi_incoming_values: HashMap<(usize, usize, usize), String>,
 }
@@ -55,6 +57,7 @@ impl JITCodegen {
             string_counter: 0,
             current_block_id: 0,
             function_signatures: HashMap::new(),
+            global_types: HashMap::new(),
             phi_incoming_loads_by_block: HashMap::new(),
             phi_incoming_values: HashMap::new(),
         };
@@ -87,6 +90,8 @@ impl JITCodegen {
         // 声明运行时函数
         self.ir.push_str(&self.extern_decls);
         self.ir.push('\n');
+
+        self.emit_dyn_vtables(mir_fns);
 
         // 鐢熸垚鎵€鏈夊嚱鏁?
         for mir_fn in mir_fns {
@@ -130,6 +135,68 @@ impl JITCodegen {
     /// 鑾峰彇鐢熸垚鐨?LLVM IR
     pub fn to_string(&self) -> &str {
         &self.ir
+    }
+
+    fn emit_dyn_vtables(&mut self, mir_fns: &[MirFunction]) {
+        let mut tables: HashMap<(String, String), HashMap<usize, (String, String)>> =
+            HashMap::new();
+
+        for mir_fn in mir_fns {
+            let Some(parsed) = parse_shim_name(&mir_fn.name) else {
+                continue;
+            };
+            let ret = self.mir_type_to_llvm_str(&mir_fn.return_type);
+            let params: Vec<String> = mir_fn
+                .params
+                .iter()
+                .map(|ty| self.mir_type_to_llvm_str(ty))
+                .collect();
+            let fn_ptr_ty = format!("{} ({})*", ret, params.join(", "));
+            tables
+                .entry((parsed.trait_name, parsed.type_prefix))
+                .or_default()
+                .insert(parsed.slot, (mir_fn.name.clone(), fn_ptr_ty));
+        }
+
+        if tables.is_empty() {
+            return;
+        }
+
+        let mut keys: Vec<(String, String)> = tables.keys().cloned().collect();
+        keys.sort();
+
+        self.ir.push_str("; dyn Trait vtables\n");
+        for (trait_name, type_prefix) in keys {
+            let slots = &tables[&(trait_name.clone(), type_prefix.clone())];
+            let slot_count = slots
+                .keys()
+                .copied()
+                .max()
+                .map(|slot| slot + 1)
+                .unwrap_or(0);
+            let mut elements = Vec::with_capacity(slot_count);
+
+            for slot in 0..slot_count {
+                match slots.get(&slot) {
+                    Some((shim_name, fn_ptr_ty)) => elements.push(format!(
+                        "i64 ptrtoint ({} @{} to i64)",
+                        fn_ptr_ty, shim_name
+                    )),
+                    None => elements.push("i64 0".to_string()),
+                }
+            }
+
+            let global_name = vtable_global_name(&trait_name, &type_prefix);
+            let array_ty = format!("[{} x i64]", slot_count);
+            self.ir.push_str(&format!(
+                "@{} = internal constant {} [{}]\n",
+                global_name,
+                array_ty,
+                elements.join(", ")
+            ));
+            self.global_types.insert(global_name, array_ty);
+        }
+        self.ir.push('\n');
     }
 }
 

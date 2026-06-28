@@ -25,6 +25,17 @@ impl JITCodegen {
                             dest, string_ty, str_ref
                         ));
                     }
+                    MirConstant::GlobalRef(name) => {
+                        let value = if let Some(global_ty) = self.global_types.get(name) {
+                            format!("bitcast ({}* @{} to {})", global_ty, name, llvm_ty)
+                        } else {
+                            format!("@{}", name)
+                        };
+                        self.ir.push_str(&format!(
+                            "store {} {}, {}* %local_{}\n",
+                            llvm_ty, value, llvm_ty, destination.id
+                        ));
+                    }
                     _ => {
                         // 甯搁噺璧嬪€?
                         self.ir.push_str(&format!(
@@ -479,6 +490,78 @@ impl JITCodegen {
                     }
                 }
             }
+            mir::Instruction::CallIndirect {
+                destination,
+                func_ptr,
+                args,
+            } => {
+                let dest_ty = self.get_local_type(mir_fn, *destination);
+                let ret_ty = self.mir_type_to_llvm_str(&dest_ty);
+                let dest = self.local_name(*destination);
+
+                let mut arg_tys = Vec::new();
+                let mut arg_strs = Vec::new();
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_ty = self.get_local_type(mir_fn, *arg);
+                    let llvm_arg_ty = self.mir_type_to_llvm_str(&arg_ty);
+                    let arg_value = format!("{}.callind.arg.{}", dest, i);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = load {}, {}* {}\n",
+                        arg_value,
+                        llvm_arg_ty,
+                        llvm_arg_ty,
+                        self.local_reg(*arg)
+                    ));
+                    arg_tys.push(llvm_arg_ty.clone());
+                    arg_strs.push(format!("{} {}", llvm_arg_ty, arg_value));
+                }
+
+                let fn_word_ty = self.get_local_type(mir_fn, *func_ptr);
+                let fn_word_llvm = self.mir_type_to_llvm_str(&fn_word_ty);
+                let fn_word = format!("{}.callind.word", dest);
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    fn_word,
+                    fn_word_llvm,
+                    fn_word_llvm,
+                    self.local_reg(*func_ptr)
+                ));
+
+                let fn_ptr_ty = format!("{} ({})*", ret_ty, arg_tys.join(", "));
+                let callee = format!("{}.callind.fn", dest);
+                let cast_op = if matches!(fn_word_ty, MIRType::Int(_)) {
+                    "inttoptr"
+                } else {
+                    "bitcast"
+                };
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = {} {} {} to {}\n",
+                    callee, cast_op, fn_word_llvm, fn_word, fn_ptr_ty
+                ));
+
+                self.emit_indent();
+                if ret_ty == "void" {
+                    self.ir
+                        .push_str(&format!("call void {}({})\n", callee, arg_strs.join(", ")));
+                } else {
+                    let call_result = format!("{}.callind.result", dest);
+                    self.ir.push_str(&format!(
+                        "{} = call {} {}({})\n",
+                        call_result,
+                        ret_ty,
+                        callee,
+                        arg_strs.join(", ")
+                    ));
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "store {} {}, {}* {}\n",
+                        ret_ty, call_result, ret_ty, dest
+                    ));
+                }
+            }
             mir::Instruction::Nop => {}
             mir::Instruction::Aggregate {
                 destination,
@@ -552,6 +635,40 @@ impl JITCodegen {
                         "store {payload_llvm} {payload_value}, {payload_llvm}* {payload_ptr}\n"
                     ));
                 }
+            }
+            mir::Instruction::Extract {
+                destination,
+                value,
+                index,
+            } => {
+                let source_ty = self.get_local_type(mir_fn, *value);
+                let source_llvm = self.mir_type_to_llvm_str(&source_ty);
+                let destination_ty = self.get_local_type(mir_fn, *destination);
+                let destination_llvm = self.mir_type_to_llvm_str(&destination_ty);
+                let aggregate_value = format!("%.extract.base.{}", destination.id);
+                let extracted_value = format!("%.extract.value.{}", destination.id);
+
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = load {}, {}* {}\n",
+                    aggregate_value,
+                    source_llvm,
+                    source_llvm,
+                    self.local_reg(*value)
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "{} = extractvalue {} {}, {}\n",
+                    extracted_value, source_llvm, aggregate_value, index
+                ));
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {} {}, {}* {}\n",
+                    destination_llvm,
+                    extracted_value,
+                    destination_llvm,
+                    self.local_reg(*destination)
+                ));
             }
             mir::Instruction::ExtractPayload {
                 destination,

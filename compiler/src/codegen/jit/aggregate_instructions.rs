@@ -156,6 +156,46 @@ impl JITCodegen {
                     ));
                 }
             }
+            MIRType::Struct {
+                fields: field_tys, ..
+            } => {
+                let llvm_struct_ty = self.mir_type_to_llvm_str(ty);
+                let mut current = "undef".to_string();
+
+                for (i, field_local) in fields.iter().enumerate() {
+                    let field_ty = field_tys
+                        .get(i)
+                        .map(|(_, ty)| ty.clone())
+                        .unwrap_or_else(|| self.get_local_type(mir_fn, *field_local));
+                    let llvm_field_ty = self.mir_type_to_llvm_str(&field_ty);
+                    let field_value = format!("%.struct.field.{}.{}", destination.id, i);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = load {}, {}* {}\n",
+                        field_value,
+                        llvm_field_ty,
+                        llvm_field_ty,
+                        self.local_reg(*field_local)
+                    ));
+
+                    let inserted = format!("%.struct.insert.{}.{}", destination.id, i);
+                    self.emit_indent();
+                    self.ir.push_str(&format!(
+                        "{} = insertvalue {} {}, {} {}, {}\n",
+                        inserted, llvm_struct_ty, current, llvm_field_ty, field_value, i
+                    ));
+                    current = inserted;
+                }
+
+                self.emit_indent();
+                self.ir.push_str(&format!(
+                    "store {} {}, {}* {}\n",
+                    llvm_struct_ty,
+                    current,
+                    llvm_struct_ty,
+                    self.local_reg(destination)
+                ));
+            }
             _ => {
                 // 鍏朵粬鑱氬悎绫诲瀷锛堢粨鏋勪綋绛夛級
                 let _dest = self.local_name(destination);

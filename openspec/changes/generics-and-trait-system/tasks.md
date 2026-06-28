@@ -41,12 +41,16 @@
 - [~] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
   - Done (LLVM-text): `&Concrete -> &dyn Trait` coercion, by-pointer dispatch
     shims, vtable-slot load + `CallIndirect` for single-trait `&self` methods.
-  - Deferred: Cranelift path; multi-trait `dyn A + B`; value/`&mut self`
-    receivers; `Box<dyn Trait>`.
+  - Done (JIT LLVM-like path): emits dyn vtable globals, struct fat-pointer
+    aggregates/extracts, and `CallIndirect` lowering for single-trait `&self`
+    dispatch.
+  - Deferred: native Cranelift path if re-enabled; multi-trait `dyn A + B`;
+    value/`&mut self` receivers; `Box<dyn Trait>`.
 - [~] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
   `dyn` value runs the concrete `Drop`.
   - Done: IR-level dispatch tests (`tests::dyn_dispatch_tests`) +
-    `examples/traits/03_dyn_dispatch.sg` runs and exits 25.
+    `examples/traits/03_dyn_dispatch.sg` runs and exits 25; JIT codegen
+    regression covers vtable emission and `inttoptr` indirect-call lowering.
   - Deferred: dropping a `dyn` value runs the concrete `Drop`.
 
 ## 4. Associated types
