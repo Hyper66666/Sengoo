@@ -1,6 +1,6 @@
 use super::method_call_helpers::lower_method_call_from_locals;
 use super::*;
-use crate::format_template::{parse_format_template, FormatSegment};
+use crate::format_template::{parse_format_template, FormatAlign, FormatSegment};
 use crate::hir::HIRLiteral;
 
 /// MIR type of the stdlib owned `String` (`struct String { handle: i64 }`).
@@ -47,7 +47,17 @@ impl<'a> LoweringContext<'a> {
                     if let Some(arg) = value_args.get(selected_arg_index) {
                         let value = self.lower_expr(arg);
                         let value_ty = self.get_local_type(value).clone();
-                        self.emit_push_format_value(handle, value, &value_ty);
+                        if placeholder.width.is_some() {
+                            self.emit_push_padded_format_value(
+                                handle,
+                                value,
+                                &value_ty,
+                                placeholder.align,
+                                placeholder.width.unwrap_or(0),
+                            );
+                        } else {
+                            self.emit_push_format_value(handle, value, &value_ty);
+                        }
                     }
                     if placeholder.position.is_none() {
                         arg_index += 1;
@@ -88,6 +98,15 @@ impl<'a> LoweringContext<'a> {
             destination: dest,
             func: func.to_string(),
             args,
+        });
+        dest
+    }
+
+    fn emit_i64_const(&mut self, value: i64) -> Local {
+        let dest = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: dest,
+            value: MirConstant::Int(value),
         });
         dest
     }
@@ -146,5 +165,27 @@ impl<'a> LoweringContext<'a> {
                 ));
             }
         }
+    }
+
+    fn emit_push_padded_format_value(
+        &mut self,
+        handle: Local,
+        value: Local,
+        value_ty: &MIRType,
+        align: FormatAlign,
+        width: usize,
+    ) {
+        let temp_handle = self.emit_new_string_handle();
+        self.emit_push_format_value(temp_handle, value, value_ty);
+        let align_code = match align {
+            FormatAlign::None | FormatAlign::Right => 1,
+        };
+        let align_local = self.emit_i64_const(align_code);
+        let width_local = self.emit_i64_const(width as i64);
+        self.emit_call_i64(
+            "sengoo_string_push_padded_string_status",
+            vec![handle, temp_handle, align_local, width_local],
+        );
+        self.emit_call_i64("sengoo_string_free_status", vec![temp_handle]);
     }
 }

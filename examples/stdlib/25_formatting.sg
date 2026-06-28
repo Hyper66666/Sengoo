@@ -1,6 +1,6 @@
 // examples/stdlib/25_formatting.sg
 //
-// Demonstrates: owned String formatting, positional placeholders, and f-strings.
+// Demonstrates: owned String formatting, positional placeholders, width, and f-strings.
 //
 // Run: sgc run examples/stdlib/25_formatting.sg
 // Expected output: 25
@@ -16,6 +16,11 @@ def main() -> i64 {
     let label = label_result.value;
     let rendered = format("{1}:{0:?}", 7, label);
     if rendered.len() != 6 {
+        return 1;
+    }
+
+    let padded = format("{:>4}", 7);
+    if padded.len() != 4 {
         return 1;
     }
 

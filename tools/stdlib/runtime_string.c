@@ -431,6 +431,54 @@ long long sengoo_string_push_char_status(long long handle, long long codepoint) 
     return sengoo_owned_string_append_bytes(handle, (const char*)buf, n);
 }
 
+static long long sengoo_owned_string_append_repeated_byte(
+    long long handle,
+    char byte,
+    size_t count) {
+    if (count == 0) {
+        return SENGOO_STATUS_OK;
+    }
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (!owned) {
+        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+    size_t new_len = owned->len + count;
+    if (new_len < owned->len) {
+        return -(long long)SENGOO_STATUS_OVERFLOW;
+    }
+    if (!sengoo_owned_string_reserve(owned, sengoo_string_capacity_for_len(new_len))) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    memset(owned->data + owned->len, (unsigned char)byte, count);
+    owned->len = new_len;
+    owned->data[owned->len] = '\0';
+    return SENGOO_STATUS_OK;
+}
+
+long long sengoo_string_push_padded_string_status(
+    long long handle,
+    long long value_handle,
+    long long align,
+    long long width) {
+    SengooOwnedString* value = sengoo_string_resolve(value_handle);
+    if (!value || width < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t value_len = value->len;
+    size_t target_width = (size_t)width;
+    size_t pad = target_width > value_len ? target_width - value_len : 0;
+
+    if (align == 1) {
+        long long padded = sengoo_owned_string_append_repeated_byte(handle, ' ', pad);
+        if (padded < 0) {
+            return padded;
+        }
+        return sengoo_owned_string_append_bytes(handle, value->data ? value->data : "", value_len);
+    }
+
+    return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+}
+
 long long sengoo_string_clear_status(long long handle) {
     SengooOwnedString* owned = sengoo_string_resolve(handle);
     if (!owned) {

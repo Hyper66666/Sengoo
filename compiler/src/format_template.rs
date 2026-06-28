@@ -1,8 +1,8 @@
 //! Shared parser for the `format`/f-string mini-language template.
 //!
 //! This round supports `{}`, `{:?}`, positional `{0}` / `{0:?}` placeholders,
-//! plus the `{{`/`}}` brace escapes. Richer specs such as `{:>8}` are
-//! intentionally rejected here and tracked as a follow-up.
+//! right-aligned width `{:>8}`, plus the `{{`/`}}` brace escapes. Precision
+//! remains a follow-up.
 
 /// A single piece of a parsed format template.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,12 +17,20 @@ pub enum FormatSegment {
 pub struct FormatPlaceholder {
     pub position: Option<usize>,
     pub style: FormatStyle,
+    pub align: FormatAlign,
+    pub width: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatStyle {
     Display,
     Debug,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatAlign {
+    None,
+    Right,
 }
 
 /// Why a format template failed to parse.
@@ -49,32 +57,42 @@ impl FormatTemplateError {
 }
 
 fn parse_placeholder_body(body: &str) -> Result<FormatPlaceholder, FormatTemplateError> {
-    if body.is_empty() {
-        return Ok(FormatPlaceholder {
-            position: None,
-            style: FormatStyle::Display,
-        });
+    let (position_part, spec_part) = body
+        .split_once(':')
+        .map_or((body, ""), |(pos, spec)| (pos, spec));
+    let position = if position_part.is_empty() {
+        None
+    } else {
+        Some(
+            position_part
+                .parse::<usize>()
+                .map_err(|_| FormatTemplateError::UnsupportedSpec(body.to_string()))?,
+        )
+    };
+
+    let mut placeholder = FormatPlaceholder {
+        position,
+        style: FormatStyle::Display,
+        align: FormatAlign::None,
+        width: None,
+    };
+
+    if spec_part.is_empty() {
+        return Ok(placeholder);
     }
-    if body == ":?" {
-        return Ok(FormatPlaceholder {
-            position: None,
-            style: FormatStyle::Debug,
-        });
+    if spec_part == "?" {
+        placeholder.style = FormatStyle::Debug;
+        return Ok(placeholder);
     }
-    if let Ok(position) = body.parse::<usize>() {
-        return Ok(FormatPlaceholder {
-            position: Some(position),
-            style: FormatStyle::Display,
-        });
+    if let Some(width) = spec_part.strip_prefix('>') {
+        let width = width
+            .parse::<usize>()
+            .map_err(|_| FormatTemplateError::UnsupportedSpec(body.to_string()))?;
+        placeholder.align = FormatAlign::Right;
+        placeholder.width = Some(width);
+        return Ok(placeholder);
     }
-    if let Some(index) = body.strip_suffix(":?") {
-        if let Ok(position) = index.parse::<usize>() {
-            return Ok(FormatPlaceholder {
-                position: Some(position),
-                style: FormatStyle::Debug,
-            });
-        }
-    }
+
     Err(FormatTemplateError::UnsupportedSpec(body.to_string()))
 }
 
@@ -159,6 +177,8 @@ fn display_placeholder() -> FormatPlaceholder {
     FormatPlaceholder {
         position: None,
         style: FormatStyle::Display,
+        align: FormatAlign::None,
+        width: None,
     }
 }
 
@@ -217,7 +237,9 @@ mod tests {
             parse_format_template("{:?}").unwrap(),
             vec![FormatSegment::Placeholder(FormatPlaceholder {
                 position: None,
-                style: FormatStyle::Debug
+                style: FormatStyle::Debug,
+                align: FormatAlign::None,
+                width: None,
             })]
         );
     }
@@ -229,22 +251,39 @@ mod tests {
             vec![
                 FormatSegment::Placeholder(FormatPlaceholder {
                     position: Some(1),
-                    style: FormatStyle::Display
+                    style: FormatStyle::Display,
+                    align: FormatAlign::None,
+                    width: None,
                 }),
                 FormatSegment::Literal(":".to_string()),
                 FormatSegment::Placeholder(FormatPlaceholder {
                     position: Some(0),
-                    style: FormatStyle::Debug
+                    style: FormatStyle::Debug,
+                    align: FormatAlign::None,
+                    width: None,
                 }),
             ]
         );
     }
 
     #[test]
-    fn rejects_unsupported_spec() {
+    fn parses_right_aligned_width() {
         assert_eq!(
-            parse_format_template("{:>8}"),
-            Err(FormatTemplateError::UnsupportedSpec(":>8".to_string()))
+            parse_format_template("{:>8}").unwrap(),
+            vec![FormatSegment::Placeholder(FormatPlaceholder {
+                position: None,
+                style: FormatStyle::Display,
+                align: FormatAlign::Right,
+                width: Some(8),
+            })]
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_precision_spec() {
+        assert_eq!(
+            parse_format_template("{:.3}"),
+            Err(FormatTemplateError::UnsupportedSpec(":.3".to_string()))
         );
     }
 

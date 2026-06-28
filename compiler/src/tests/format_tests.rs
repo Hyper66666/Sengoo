@@ -2,8 +2,7 @@
 //!
 //! `format` parses a string-literal template at compile time, validates that
 //! its `{}` / `{:?}` placeholders match the argument count, and lowers to
-//! owned-`String` runtime building. Width/precision/positional specs remain
-//! deferred.
+//! owned-`String` runtime building. Precision remains deferred.
 
 use crate::compile_to_ir;
 use std::fs;
@@ -198,18 +197,20 @@ def main() -> i64 {
 }
 
 #[test]
-fn format_rejects_unsupported_width_spec() {
-    let err = compile_failure(
+fn format_width_placeholder_renders_right_aligned_padding() {
+    let ir = compile_with_stdlib(
         r#"
 def main() -> i64 {
     let rendered = format("{:>8}", 1);
     rendered.len()
 }
 "#,
-    );
+    )
+    .expect("format with right-aligned width should compile");
+
     assert!(
-        err.contains("not supported yet"),
-        "expected an unsupported-spec error, got: {err}"
+        ir.contains("@sengoo_string_push_padded_string_status"),
+        "expected width formatting to route through the padded append helper, got:\n{ir}"
     );
 }
 

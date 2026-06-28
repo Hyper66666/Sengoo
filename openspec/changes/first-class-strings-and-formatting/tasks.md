@@ -35,9 +35,9 @@
   `generics-and-trait-system` core traits).
 - [~] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
   width, precision, and `{{`/`}}`.
-  - Partial: `{}`, scalar `{:?}`, positional `{0}` / `{0:?}`, and `{{`/`}}`
-    parse and lower through the owned-`String` builder. Width, precision, and
-    structure-aware Debug output remain open.
+  - Partial: `{}`, scalar `{:?}`, positional `{0}` / `{0:?}`, right-aligned
+    width `{:>N}`, and `{{`/`}}` parse and lower through the owned-`String`
+    builder. Precision and structure-aware Debug output remain open.
 - [ ] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.
 - [ ] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`
@@ -83,13 +83,15 @@
 - [~] 6.1 Add `examples/stdlib/` programs printing a `String`, a struct via
   `Debug`, and an interpolated `f"..."`.
   - Added `examples/stdlib/25_formatting.sg` covering owned `String`
-    formatting, positional placeholders, scalar `{:?}`, and an interpolated
-    f-string. Struct/enum `Debug` awaits derive/debug rendering.
+    formatting, positional placeholders, scalar `{:?}`, right-aligned width,
+    and an interpolated f-string. Struct/enum `Debug` awaits derive/debug
+    rendering.
 - [~] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
   - Partial: the owned-string row now mentions trim/ASCII case transforms and
     links to the new stdlib/native tests; added a formatting/interpolation row
-    for `{}`, scalar `{:?}`, positional placeholders, Display-backed types, and
-    f-string expansion. Structure-aware Debug, width, and precision remain open.
+    for `{}`, scalar `{:?}`, positional placeholders, right-aligned width,
+    Display-backed types, and f-string expansion. Structure-aware Debug and
+    precision remain open.
 - [x] 6.3 Run `openspec validate first-class-strings-and-formatting --strict`.
 
 ## Verification

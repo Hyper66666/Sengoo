@@ -5398,6 +5398,41 @@ fn examples_smoke_stdlib_formatting_import() {
 }
 
 #[test]
+fn stdlib_format_width_right_aligns_runtime_output() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "format-width-right-align",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = format("{:>4}", 7);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "   7");
+}
+
+#[test]
 fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "builtin-eprintln",
