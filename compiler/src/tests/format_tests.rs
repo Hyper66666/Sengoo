@@ -155,8 +155,24 @@ def main() -> i64 {
 "#,
     );
     assert!(
-        err.contains("ArgumentCountMismatch") || err.contains("argument"),
-        "expected an arity error, got: {err}"
+        err.contains("format-argument-count"),
+        "expected a stable arity diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn format_rejects_bad_template_with_stable_code() {
+    let err = compile_failure(
+        r#"
+def main() -> i64 {
+    let rendered = format("{", 1);
+    rendered.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("invalid-format-template"),
+        "expected a stable invalid-template diagnostic, got: {err}"
     );
 }
 
@@ -316,7 +332,7 @@ def main() -> i64 {
 "#,
     );
     assert!(
-        err.contains("string literal"),
-        "expected a literal-template error, got: {err}"
+        err.contains("invalid-format-template"),
+        "expected a stable literal-template diagnostic, got: {err}"
     );
 }

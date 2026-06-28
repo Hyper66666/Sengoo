@@ -167,23 +167,40 @@ impl TypeChecker {
     /// Returns the owned `String` type the call produces.
     fn check_format_call(&mut self, args: &[Expr]) -> TyResult<Ty> {
         let Some((template_arg, value_args)) = args.split_first() else {
-            return Err(TypeckError::Other(
-                "format requires a string literal template".to_string(),
+            return Err(TypeckError::diagnostic(
+                "invalid-format-template",
+                "format requires a string literal template",
+                0,
+                0,
             ));
         };
         let ExprKind::Literal(crate::ast::Literal::String(template)) = &template_arg.kind else {
-            return Err(TypeckError::Other(
-                "format template must be a string literal".to_string(),
+            return Err(TypeckError::diagnostic(
+                "invalid-format-template",
+                "format template must be a string literal",
+                template_arg.span.lo,
+                template_arg.span.hi,
             ));
         };
-        let segments = crate::format_template::parse_format_template(template)
-            .map_err(|err| TypeckError::Other(err.message()))?;
+        let segments = crate::format_template::parse_format_template(template).map_err(|err| {
+            TypeckError::diagnostic(
+                "invalid-format-template",
+                err.message(),
+                template_arg.span.lo,
+                template_arg.span.hi,
+            )
+        })?;
         let expected = crate::format_template::required_arg_count(&segments);
         if expected != value_args.len() {
-            return Err(TypeckError::ArgumentCountMismatch {
-                expected: expected + 1,
-                found: args.len(),
-            });
+            return Err(TypeckError::diagnostic(
+                "format-argument-count",
+                format!(
+                    "format template requires {expected} value argument(s), found {}",
+                    value_args.len()
+                ),
+                template_arg.span.lo,
+                template_arg.span.hi,
+            ));
         }
         for arg in value_args {
             let arg_ty = self.check_expr(arg)?;

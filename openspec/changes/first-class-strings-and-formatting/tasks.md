@@ -61,8 +61,11 @@
     parse and lower through the owned-`String` builder. Struct `{:?}` renders
     fields in declaration order. Enum Debug and derive-driven Debug
     customization remain open.
-- [ ] 3.3 Compile-time validation of format literals (arity + spec) with a stable
+- [x] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.
+  - Completed for the current format mini-language: invalid templates and
+    non-literal templates report `invalid-format-template`; arity mismatches
+    report `format-argument-count`. Covered by `compiler/src/tests/format_tests.rs`.
 - [ ] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`
   source-compatible.
   - Partial: `println` now type-checks and lowers through the existing `print`
