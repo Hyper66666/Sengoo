@@ -195,6 +195,56 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_return_marks_value_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def return_then_reuse(value: String) -> String {
+    return value;
+    value
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `value`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn user_drop_field_return_marks_only_that_field_moved() {
+    let source = r#"
+struct Token {
+    value: i64,
+}
+
+impl Drop for Token {
+    def drop(&mut self) {
+    }
+}
+
+struct Pair {
+    left: Token,
+    right: Token,
+}
+
+def take_left(pair: Pair) -> Token {
+    return pair.left;
+    pair.left
+}
+"#;
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("returning an owning field should move it");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("use of moved value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn owned_field_move_rejects_reusing_the_same_field() {
     let err = typecheck_fails_with_stdlib(
         r#"

@@ -332,7 +332,17 @@ impl BorrowChecker {
             | ExprKind::Paren(body) => self.check_expr(body),
             ExprKind::TryBlock(block) => self.check_block(block),
             ExprKind::Cast { expr, .. } | ExprKind::Is { expr, .. } => self.check_expr(expr),
-            ExprKind::Return(value) | ExprKind::Break(value) | ExprKind::Yield(value) => {
+            ExprKind::Return(value) => {
+                if let Some(value) = value {
+                    self.check_expr(value);
+                    if let Some(path) = Self::expr_move_path(value) {
+                        if self.move_path_is_movable_owning_value(&path) {
+                            self.mark_moved(&path, value.span);
+                        }
+                    }
+                }
+            }
+            ExprKind::Break(value) | ExprKind::Yield(value) => {
                 if let Some(value) = value {
                     self.check_expr(value);
                 }

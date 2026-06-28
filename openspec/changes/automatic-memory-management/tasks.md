@@ -22,14 +22,15 @@
 
 ## 2. Move / use-after-move checking
 
-- [ ] 2.1 Extend the type checker to mark a local dead after a by-value move
+- [x] 2.1 Extend the type checker to mark a local dead after a by-value move
   (argument, return, assignment, field move-out).
-  - Partial: the owned `String` checker now marks direct let moves, named-call
+  - Completed for the current move-path model: the checker marks direct let moves, named-call
     arguments, method-call arguments, assignment RHS moves, and owning field
-    move-outs. Return moves are handled by MIR drop suppression for function
-    exits; general non-`Copy` values implementing `Drop` now share the same
-    direct let move tracking. A complete typeck-level return-move model remains
-    open.
+    move-outs. A by-value `return` now also marks an owned local or field moved
+    for later diagnostics in the same block, while MIR drop suppression keeps
+    function exits free of double-drop. General non-`Copy` values implementing
+    `Drop` share this tracking. Full NLL-style lifetime analysis remains outside
+    this task.
 - [x] 2.2 Emit a stable `use-after-move` diagnostic and add it to the shared
   `sgc` JSON / `sglsp` code list.
   - Implemented for the current owned `String` move checker; verified by
