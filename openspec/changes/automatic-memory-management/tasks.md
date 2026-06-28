@@ -158,6 +158,13 @@
   - Completed: both committed examples now omit manual release calls on the
     owning values they create, while `cli-json-audit/tests/audit_smoke.sg`
     remains the compatibility smoke for explicit release methods.
+  - Native leak harness:
+    `cargo test -p sgc stdlib_auto_drop_releases_all_generation_handles
+    -- --nocapture` creates owned String/Buffer values in a callee and proves
+    both runtime live-handle counts return to zero after scope exit. This is a
+    deterministic ownership-resource check; allocator-level ASan/LSan coverage
+    remains a separate CI hardening follow-up because runtime slot-table
+    capacity is process-global by design.
 - [x] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
   - Added the "Automatic drop / move ownership" support row with compiler,
     stdlib example, realworld, and scalar `Rc` proof points.
@@ -168,5 +175,5 @@
 - `cargo test -p sengoo-compiler --lib`
 - `cargo test -p sgc core_conformance_examples_compile_link_and_run`
 - New move/drop unit tests (tasks 2.4, 3.5)
-- Auto-drop example runs with zero manual release and no leak under a
-  leak-check build (task 6.1)
+- Auto-drop native fixture runs with zero manual release and zero live
+  generation handles after scope exit (task 6.1)

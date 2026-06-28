@@ -203,6 +203,16 @@ long long sengoo_string_free_status(long long handle) {
     return SENGOO_STATUS_OK;
 }
 
+long long sengoo_string_live_handle_count(void) {
+    size_t live = 0;
+    for (size_t index = 0; index < g_string_slot_count; ++index) {
+        if (g_string_slots[index].alive && g_string_slots[index].owned) {
+            live += 1;
+        }
+    }
+    return (long long)live;
+}
+
 long long sengoo_string_len(long long handle) {
     SengooOwnedString* owned = sengoo_string_resolve(handle);
     if (!owned) {

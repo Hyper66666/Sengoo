@@ -890,6 +890,16 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
     return SENGOO_FFI_STATUS_OK;
 }
 
+long long sengoo_buffer_live_handle_count(void) {
+    size_t live = 0;
+    for (size_t index = 0; index < g_buffer_slot_count; ++index) {
+        if (g_buffer_slots[index].alive && g_buffer_slots[index].buffer) {
+            live += 1;
+        }
+    }
+    return (long long)live;
+}
+
 long long sengoo_str_len(const char* value) {
     return value ? (long long)strlen(value) : 0;
 }

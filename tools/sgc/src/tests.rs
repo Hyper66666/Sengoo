@@ -4926,6 +4926,26 @@ fn assert_example_result(
 }
 
 #[test]
+fn stdlib_auto_drop_releases_all_generation_handles() {
+    let Some(output) = compile_and_run_example_with_args(
+        "auto-drop-live-handles",
+        "tools/sgc/tests/fixtures/auto_drop_live_handles.sg",
+        &[],
+        &[],
+        true,
+    ) else {
+        return;
+    };
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "auto-drop live-handle probe failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn core_conformance_examples_compile_link_and_run() {
     let cases = [
         (
