@@ -5548,6 +5548,62 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_compare_orders_owned_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-compare",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let eq_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let eq_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let lt_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let lt_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let le_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let le_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let gt_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let gt_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ge_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let ge_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let cmp_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let cmp_r = string_from_str("alphabet").unwrap_or(String { handle: 0 });
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if eq_l.eq(eq_r)
+        && ne_l.ne(ne_r)
+        && lt_l.lt(lt_r)
+        && le_l.le(le_r)
+        && gt_l.gt(gt_r)
+        && ge_l.ge(ge_r)
+        && cmp_l.compare(cmp_r) < 0
+        && copied == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
 fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "builtin-eprintln",

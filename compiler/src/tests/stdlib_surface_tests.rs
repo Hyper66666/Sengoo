@@ -157,6 +157,29 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_owned_string_comparison_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let c = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let d = string_from_str("beta").unwrap_or(String { handle: 0 });
+    if a.eq(b) && c.lt(d) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_eq"));
+    assert!(ir.contains("sengoo_string_compare"));
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[

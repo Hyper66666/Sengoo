@@ -22,7 +22,12 @@
 ## 2. Ergonomic methods and operators
 
 - [ ] 2.1 `+`/`+=` concatenation (`String + &str`).
-- [ ] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
+- [~] 2.2 `PartialEq`/`Eq`/`PartialOrd`/`Ord` for `String`/`&str`.
+  - Partial: `&str` already lowers `==`/`!=` through `sengoo_str_eq`.
+    Owned `String` now exposes method-level `eq`/`ne` and byte-order
+    `lt`/`le`/`gt`/`ge`/`compare` helpers backed by
+    `sengoo_string_compare`. Operator sugar (`String ==`, `String <`) and
+    trait-backed `PartialEq`/`Ord` impls remain open.
 - [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
   - Partial: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`, and

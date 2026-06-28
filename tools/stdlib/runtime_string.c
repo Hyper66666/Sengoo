@@ -539,3 +539,29 @@ long long sengoo_string_eq(long long lhs_handle, long long rhs_handle) {
     }
     return memcmp(lhs->data, rhs->data, lhs->len) == 0 ? 1 : 0;
 }
+
+long long sengoo_string_compare(long long lhs_handle, long long rhs_handle) {
+    SengooOwnedString* lhs = sengoo_string_resolve(lhs_handle);
+    SengooOwnedString* rhs = sengoo_string_resolve(rhs_handle);
+    if (!lhs || !rhs) {
+        return 0;
+    }
+    size_t min_len = lhs->len < rhs->len ? lhs->len : rhs->len;
+    int cmp = 0;
+    if (min_len > 0) {
+        cmp = memcmp(lhs->data, rhs->data, min_len);
+    }
+    if (cmp < 0) {
+        return -1;
+    }
+    if (cmp > 0) {
+        return 1;
+    }
+    if (lhs->len < rhs->len) {
+        return -1;
+    }
+    if (lhs->len > rhs->len) {
+        return 1;
+    }
+    return 0;
+}
