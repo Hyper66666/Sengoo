@@ -12,6 +12,12 @@ typedef struct {
 } SengooOwnedString;
 
 typedef struct {
+    unsigned char* data;
+    size_t len;
+    size_t offset;
+} SengooStringIter;
+
+typedef struct {
     SengooOwnedString* owned;
     uint32_t generation;
     unsigned char alive;
@@ -160,6 +166,68 @@ static int sengoo_utf8_is_boundary(const unsigned char* bytes, size_t len, size_
         return 1;
     }
     return (bytes[offset] & 0xC0) != 0x80;
+}
+
+static int sengoo_utf8_decode_next(
+    const unsigned char* bytes,
+    size_t len,
+    size_t* offset,
+    long long* out_codepoint) {
+    if (!bytes || !offset || !out_codepoint || *offset >= len) {
+        return 0;
+    }
+    size_t i = *offset;
+    unsigned char c = bytes[i];
+    if (c <= 0x7F) {
+        *out_codepoint = (long long)c;
+        *offset = i + 1;
+        return 1;
+    }
+    if ((c & 0xE0) == 0xC0 && i + 1 < len) {
+        *out_codepoint = (long long)(((c & 0x1F) << 6) | (bytes[i + 1] & 0x3F));
+        *offset = i + 2;
+        return 1;
+    }
+    if ((c & 0xF0) == 0xE0 && i + 2 < len) {
+        *out_codepoint =
+            (long long)(((c & 0x0F) << 12) | ((bytes[i + 1] & 0x3F) << 6) | (bytes[i + 2] & 0x3F));
+        *offset = i + 3;
+        return 1;
+    }
+    if ((c & 0xF8) == 0xF0 && i + 3 < len) {
+        *out_codepoint = (long long)(((c & 0x07) << 18)
+            | ((bytes[i + 1] & 0x3F) << 12)
+            | ((bytes[i + 2] & 0x3F) << 6)
+            | (bytes[i + 3] & 0x3F));
+        *offset = i + 4;
+        return 1;
+    }
+    return 0;
+}
+
+static long long sengoo_string_iter_new_from_bytes(const char* data, size_t len) {
+    SengooStringIter* iter = (SengooStringIter*)calloc(1, sizeof(SengooStringIter));
+    if (!iter) {
+        return 0;
+    }
+    if (len > 0) {
+        iter->data = (unsigned char*)malloc(len);
+        if (!iter->data) {
+            free(iter);
+            return 0;
+        }
+        memcpy(iter->data, data, len);
+    }
+    iter->len = len;
+    iter->offset = 0;
+    return sengoo_ptr_to_handle(iter);
+}
+
+static SengooStringIter* sengoo_string_iter_from_handle(long long handle) {
+    if (handle <= 0) {
+        return NULL;
+    }
+    return (SengooStringIter*)sengoo_handle_to_ptr(handle);
 }
 
 static int sengoo_owned_string_reserve(SengooOwnedString* owned, size_t min_capacity) {
@@ -564,6 +632,59 @@ long long sengoo_string_slice_status(long long handle, long long start, long lon
         return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
     }
     return sengoo_owned_string_from_bytes(owned->data + start_offset, end_offset - start_offset);
+}
+
+long long sengoo_string_bytes_iter_new(long long handle) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (!owned) {
+        return 0;
+    }
+    return sengoo_string_iter_new_from_bytes(owned->data ? owned->data : "", owned->len);
+}
+
+long long sengoo_string_chars_iter_new(long long handle) {
+    return sengoo_string_bytes_iter_new(handle);
+}
+
+long long sengoo_string_iter_done(long long iter_handle) {
+    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
+    if (!iter) {
+        return 1;
+    }
+    return iter->offset >= iter->len ? 1 : 0;
+}
+
+long long sengoo_string_bytes_iter_next_or_default(long long iter_handle, long long fallback) {
+    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
+    if (!iter || iter->offset >= iter->len) {
+        return fallback;
+    }
+    unsigned char value = iter->data[iter->offset];
+    iter->offset += 1;
+    return (long long)value;
+}
+
+long long sengoo_string_chars_iter_next_or_default(long long iter_handle, long long fallback) {
+    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
+    if (!iter || iter->offset >= iter->len) {
+        return fallback;
+    }
+    long long codepoint = fallback;
+    if (!sengoo_utf8_decode_next(iter->data, iter->len, &iter->offset, &codepoint)) {
+        iter->offset = iter->len;
+        return fallback;
+    }
+    return codepoint;
+}
+
+long long sengoo_string_iter_free_status(long long iter_handle) {
+    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
+    if (!iter) {
+        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+    free(iter->data);
+    free(iter);
+    return SENGOO_STATUS_OK;
 }
 
 long long sengoo_string_eq(long long lhs_handle, long long rhs_handle) {

@@ -5648,6 +5648,71 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_iterators_decode_bytes_and_chars() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-iterators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let bytes_text = string_from_str("hé").unwrap_or(String { handle: 0 });
+    let chars_text = string_from_str("hé").unwrap_or(String { handle: 0 });
+    let mut bytes = bytes_text.bytes();
+    let mut chars = chars_text.chars();
+    let mut byte_count = 0;
+    let mut saw_non_ascii_byte = false;
+    let mut next_byte = bytes.next();
+    while next_byte.is_some() {
+        let value = next_byte.unwrap_or(0);
+        if value > 127 {
+            saw_non_ascii_byte = true;
+        }
+        byte_count = byte_count + 1;
+        next_byte = bytes.next();
+    }
+    let mut char_count = 0;
+    let mut char_sum = 0;
+    let mut next_char = chars.next();
+    while next_char.is_some() {
+        char_sum = char_sum + next_char.unwrap_or(0);
+        char_count = char_count + 1;
+        next_char = chars.next();
+    }
+    let bytes_freed = bytes.free();
+    let chars_freed = chars.free();
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if byte_count <= char_count { return 10; }
+    if saw_non_ascii_byte == false { return 11; }
+    if char_count != 2 { return 12; }
+    if char_sum <= 104 { return 13; }
+    if bytes_freed == false { return 18; }
+    if chars_freed == false { return 19; }
+    if copied != 2 { return 20; }
+    if wrote != 2 { return 21; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
 fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "builtin-eprintln",

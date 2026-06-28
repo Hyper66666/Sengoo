@@ -27,10 +27,24 @@ extern "C" {
     fn sengoo_string_slice_status(handle: i64, start: i64, end: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
     fn sengoo_string_compare(lhs_handle: i64, rhs_handle: i64) -> i64;
+    fn sengoo_string_bytes_iter_new(handle: i64) -> i64;
+    fn sengoo_string_chars_iter_new(handle: i64) -> i64;
+    fn sengoo_string_iter_done(iter_handle: i64) -> i64;
+    fn sengoo_string_bytes_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
+    fn sengoo_string_chars_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
+    fn sengoo_string_iter_free_status(iter_handle: i64) -> i64;
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
 }
 
 struct String {
+    handle: i64,
+}
+
+struct StringBytesIter {
+    handle: i64,
+}
+
+struct StringCharsIter {
     handle: i64,
 }
 
@@ -233,6 +247,14 @@ impl String {
         }
     }
 
+    def bytes(self) -> StringBytesIter {
+        StringBytesIter { handle: sengoo_string_bytes_iter_new(self.handle) }
+    }
+
+    def chars(self) -> StringCharsIter {
+        StringCharsIter { handle: sengoo_string_chars_iter_new(self.handle) }
+    }
+
     def drop(self) -> bool {
         sengoo_string_free_status(self.handle) >= 0
     }
@@ -269,5 +291,33 @@ impl String {
 impl Drop for String {
     def drop(&mut self) {
         sengoo_string_free_status(self.handle);
+    }
+}
+
+impl StringBytesIter {
+    def next(&mut self) -> Option<i64> {
+        if sengoo_string_iter_done(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_string_bytes_iter_next_or_default(self.handle, 0))
+        }
+    }
+
+    def free(self) -> bool {
+        sengoo_string_iter_free_status(self.handle) >= 0
+    }
+}
+
+impl StringCharsIter {
+    def next(&mut self) -> Option<i64> {
+        if sengoo_string_iter_done(self.handle) != 0 {
+            option_none_i64()
+        } else {
+            option_some_i64(sengoo_string_chars_iter_next_or_default(self.handle, 0))
+        }
+    }
+
+    def free(self) -> bool {
+        sengoo_string_iter_free_status(self.handle) >= 0
     }
 }

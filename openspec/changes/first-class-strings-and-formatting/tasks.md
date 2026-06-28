@@ -34,7 +34,11 @@
     `index_of` already existed; this slice adds `str_trim`,
     `str_to_ascii_upper`, and `str_to_ascii_lower` returning owned `String`
     values, plus owned `String.push_char(char)`. `split` remains open.
-- [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
+- [~] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
+  - Partial: owned `String.bytes()` and `String.chars()` now create copied
+    snapshot iterators with inherent `next() -> Option<i64>` and explicit
+    `free()`. `bytes()` yields byte values and `chars()` yields Unicode scalar
+    codepoints. Generic `Iterator<Item = char>` integration remains open.
 - [~] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
   - Partial: `str_get(value, start, end)` and `String.get(start, end)` copy a
@@ -91,7 +95,10 @@
   - Partial: fallible `str_get` / `String.get` return
     `STATUS_INVALID_ARGUMENT` on non-boundary offsets. Infallible index/slice
     syntax remains open.
-- [ ] 5.2 `chars()` decodes UTF-8; reject invalid sequences at construction.
+- [~] 5.2 `chars()` decodes UTF-8; reject invalid sequences at construction.
+  - Partial: `String.chars()` decodes validated UTF-8 into scalar codepoints
+    and construction paths reject invalid UTF-8. Returning source-level `char`
+    through a generic iterator remains open.
 - [x] 5.3 Document ASCII-only case ops and the Unicode follow-up in
   `docs/language-features.md`.
   - Documented in the new "Text and Strings" section.

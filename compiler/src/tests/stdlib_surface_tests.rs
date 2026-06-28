@@ -198,6 +198,26 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_string_bytes_and_chars_iterators() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let bytes_text = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let chars_text = string_from_str("é").unwrap_or(String { handle: 0 });
+    let mut bytes = bytes_text.bytes();
+    let mut chars = chars_text.chars();
+    bytes.next().unwrap_or(0) + chars.next().unwrap_or(0)
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_bytes_iter_new"));
+    assert!(ir.contains("sengoo_string_chars_iter_new"));
+    assert!(ir.contains("sengoo_string_chars_iter_next_or_default"));
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[
