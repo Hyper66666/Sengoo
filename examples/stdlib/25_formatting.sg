@@ -1,11 +1,16 @@
 // examples/stdlib/25_formatting.sg
 //
-// Demonstrates: owned String formatting, positional placeholders, width, and f-strings.
+// Demonstrates: owned String formatting, Debug, positional placeholders, width, precision, and f-strings.
 //
 // Run: sgc run examples/stdlib/25_formatting.sg
 // Expected output: 25
 
 import std::string;
+
+struct Point {
+    x: i64,
+    ok: bool,
+}
 
 def main() -> i64 {
     let label_result = string_from_str("main");
@@ -36,6 +41,12 @@ def main() -> i64 {
 
     let padded_round = format("{:>6.2}", 3.14159);
     if padded_round.len() != 6 {
+        return 1;
+    }
+
+    let point = Point { x: 7, ok: true };
+    let debugged = format("{:?}", point);
+    if debugged.len() != 24 {
         return 1;
     }
 

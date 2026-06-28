@@ -1,6 +1,8 @@
 use super::method_call_helpers::lower_method_call_from_locals;
 use super::*;
-use crate::format_template::{parse_format_template, FormatAlign, FormatSegment};
+use crate::format_template::{
+    parse_format_template, FormatAlign, FormatPlaceholder, FormatSegment, FormatStyle,
+};
 use crate::hir::HIRLiteral;
 
 /// MIR type of the stdlib owned `String` (`struct String { handle: i64 }`).
@@ -52,15 +54,14 @@ impl<'a> LoweringContext<'a> {
                                 handle,
                                 value,
                                 &value_ty,
-                                placeholder.align,
-                                placeholder.width.unwrap_or(0),
-                                placeholder.precision,
+                                placeholder,
                             );
                         } else {
                             self.emit_push_format_value(
                                 handle,
                                 value,
                                 &value_ty,
+                                placeholder.style,
                                 placeholder.precision,
                             );
                         }
@@ -147,6 +148,7 @@ impl<'a> LoweringContext<'a> {
         handle: Local,
         value: Local,
         value_ty: &MIRType,
+        style: FormatStyle,
         precision: Option<usize>,
     ) {
         if precision.is_some() && !matches!(value_ty, MIRType::Float(_)) {
@@ -159,6 +161,10 @@ impl<'a> LoweringContext<'a> {
             let name = name.clone();
             if name == "String" {
                 self.emit_push_owned_string(handle, value);
+                return;
+            }
+            if style == FormatStyle::Debug {
+                self.emit_push_struct_debug_value(handle, value, value_ty);
                 return;
             }
             if self.has_display_to_string(&name) {
@@ -192,22 +198,48 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    fn emit_push_struct_debug_value(&mut self, handle: Local, value: Local, value_ty: &MIRType) {
+        let MIRType::Struct { name, fields } = value_ty else {
+            return;
+        };
+
+        self.emit_push_str_literal(handle, &format!("{} {{ ", name));
+        for (index, (field_name, field_ty)) in fields.iter().enumerate() {
+            if index > 0 {
+                self.emit_push_str_literal(handle, ", ");
+            }
+            self.emit_push_str_literal(handle, &format!("{}: ", field_name));
+            let field_local = self.add_local(None, LocalKind::Temp, field_ty.clone());
+            self.push_inst(Instruction::Extract {
+                destination: field_local,
+                value,
+                index: index as u32,
+            });
+            self.emit_push_format_value(handle, field_local, field_ty, FormatStyle::Debug, None);
+        }
+        self.emit_push_str_literal(handle, " }");
+    }
+
     fn emit_push_padded_format_value(
         &mut self,
         handle: Local,
         value: Local,
         value_ty: &MIRType,
-        align: FormatAlign,
-        width: usize,
-        precision: Option<usize>,
+        placeholder: &FormatPlaceholder,
     ) {
         let temp_handle = self.emit_new_string_handle();
-        self.emit_push_format_value(temp_handle, value, value_ty, precision);
-        let align_code = match align {
+        self.emit_push_format_value(
+            temp_handle,
+            value,
+            value_ty,
+            placeholder.style,
+            placeholder.precision,
+        );
+        let align_code = match placeholder.align {
             FormatAlign::None | FormatAlign::Right => 1,
         };
         let align_local = self.emit_i64_const(align_code);
-        let width_local = self.emit_i64_const(width as i64);
+        let width_local = self.emit_i64_const(placeholder.width.unwrap_or(0) as i64);
         self.emit_call_i64(
             "sengoo_string_push_padded_string_status",
             vec![handle, temp_handle, align_local, width_local],

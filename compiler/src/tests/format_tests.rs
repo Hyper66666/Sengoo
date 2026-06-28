@@ -179,6 +179,31 @@ def main() -> i64 {
 }
 
 #[test]
+fn format_debug_placeholder_renders_struct_fields() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Point {
+    x: i64,
+    ok: bool,
+}
+
+def main() -> i64 {
+    let point = Point { x: 7, ok: true };
+    let rendered = format("{:?}", point);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a Debug struct placeholder should compile");
+
+    assert!(
+        ir.contains("@sengoo_string_push_i64_status")
+            && ir.contains("@sengoo_string_push_bool_status"),
+        "expected Debug struct formatting to render scalar fields, got:\n{ir}"
+    );
+}
+
+#[test]
 fn format_positional_placeholders_select_arguments_by_index() {
     let ir = compile_with_stdlib(
         r#"

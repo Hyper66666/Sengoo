@@ -41,8 +41,9 @@
   width, precision, and `{{`/`}}`.
   - Partial: `{}`, scalar `{:?}`, positional `{0}` / `{0:?}`, right-aligned
     width `{:>N}`, f64 fixed precision `{:.N}` / `{:>W.N}`, and `{{`/`}}`
-    parse and lower through the owned-`String` builder. Structure-aware Debug
-    output remains open.
+    parse and lower through the owned-`String` builder. Struct `{:?}` renders
+    fields in declaration order. Enum Debug and derive-driven Debug
+    customization remain open.
 - [ ] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.
 - [ ] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`
@@ -89,14 +90,14 @@
   `Debug`, and an interpolated `f"..."`.
   - Added `examples/stdlib/25_formatting.sg` covering owned `String`
     formatting, positional placeholders, scalar `{:?}`, right-aligned width,
-    f64 fixed precision, and an interpolated f-string. Struct/enum `Debug`
-    awaits derive/debug rendering.
+    f64 fixed precision, struct `{:?}`, and an interpolated f-string. Enum
+    `Debug` and derive/custom Debug rendering remain open.
 - [~] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
   - Partial: the owned-string row now mentions trim/ASCII case transforms and
     links to the new stdlib/native tests; added a formatting/interpolation row
     for `{}`, scalar `{:?}`, positional placeholders, right-aligned width,
-    Display-backed types, and f-string expansion. Structure-aware Debug and
-    precision remain open.
+    f64 fixed precision, struct `{:?}`, Display-backed types, and f-string
+    expansion. Enum/custom Debug remains open.
 - [x] 6.3 Run `openspec validate first-class-strings-and-formatting --strict`.
 
 ## Verification

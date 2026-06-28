@@ -281,9 +281,10 @@ locale collation remain future work.
 `format` builds an owned `String` from a literal template. The supported subset
 includes `{}`, scalar `{:?}`, positional placeholders such as `{1}`, right
 alignment such as `{:>8}`, f64 fixed precision such as `{:.2}` / `{:>8.2}`, and
-f-string expansion through the same lowering path. Structure-aware Debug,
-general Formatter customization, and source-map-perfect f-string diagnostics
-remain future work.
+f-string expansion through the same lowering path. `{:?}` also renders current
+struct values in field order, for example `Point { x: 7, ok: true }`. Enum
+Debug, derive-driven Debug customization, general Formatter customization, and
+source-map-perfect f-string diagnostics remain future work.
 
 ## 2.11 Opt-in shared ownership with `Rc`
 
