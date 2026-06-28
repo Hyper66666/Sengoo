@@ -3,10 +3,11 @@
 use miette::{IntoDiagnostic, Result};
 
 use sengoo_compiler::ast::{
-    Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, ExprKind, ExternBlock,
-    ExternFunction, ExternItem, ExternStatic, FieldName, FieldValue, Function, Impl, Import,
-    ImportKind, Module, Param, Path as AstPath, Program, SelfParam, Static, Struct, StructField,
-    Trait, TraitBound, TraitItem, Type, TypeAlias, TypeKind, TypeParam, VariantField, Visibility,
+    AssociatedTypeDecl, Class, ClassMember, Const, Decl, DeclKind, Enum, EnumVariant, ExprKind,
+    ExternBlock, ExternFunction, ExternItem, ExternStatic, FieldName, FieldValue, Function, Impl,
+    Import, ImportKind, Module, Param, Path as AstPath, Program, SelfParam, Static, Struct,
+    StructField, Trait, TraitBound, TraitItem, Type, TypeAlias, TypeKind, TypeParam, VariantField,
+    Visibility,
 };
 use sengoo_compiler::Parser as SgParser;
 
@@ -184,6 +185,10 @@ impl Formatter {
         )
     }
 
+    fn format_associated_type_decl(&self, item: &AssociatedTypeDecl, indent: usize) -> String {
+        format!("{}type {};", self.pad(indent), item.name.name)
+    }
+
     fn format_const_decl(&self, c: &Const, indent: usize) -> String {
         format!(
             "{}{}const {}: {} == {};",
@@ -311,8 +316,8 @@ impl Formatter {
                 TraitItem::Const(const_decl) => {
                     lines.push(self.format_const_decl(const_decl, indent + 1))
                 }
-                TraitItem::Type(type_alias) => {
-                    lines.push(self.format_type_alias_decl(type_alias, indent + 1))
+                TraitItem::Type(associated_type) => {
+                    lines.push(self.format_associated_type_decl(associated_type, indent + 1))
                 }
             }
         }
@@ -333,6 +338,9 @@ impl Formatter {
         head.push_str(&self.format_type(&impl_decl.target_type));
 
         let mut lines = vec![format!("{} {{", head)];
+        for associated_type in &impl_decl.associated_types {
+            lines.push(self.format_type_alias_decl(associated_type, indent + 1));
+        }
         for method in &impl_decl.items {
             lines.push(self.format_function(method, indent + 1));
         }
@@ -456,6 +464,7 @@ impl Formatter {
 
     fn format_type(&self, ty: &Type) -> String {
         match &ty.kind {
+            TypeKind::SelfType => "Self".to_string(),
             TypeKind::Path(path) => self.format_path(path),
             TypeKind::PathWithArgs { path, args } => format!(
                 "{}<{}>",
@@ -772,6 +781,32 @@ mod tests {
         assert!(first.contains("struct Pair"));
         assert!(first.contains("enum E"));
         assert!(first.contains("type Id = i64;"));
+    }
+
+    #[test]
+    fn formats_associated_types_and_self_type_without_losing_semantics() {
+        let src = r#"
+trait Iterator {
+    type Item;
+    def duplicate(self) -> Self { self }
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+    def duplicate(self) -> Self { self }
+}
+"#;
+        let first = format_test_source(src, FormatOptions::default());
+        let second = format_test_source(&first, FormatOptions::default());
+
+        assert_eq!(first, second);
+        assert!(first.contains("type Item;"));
+        assert!(first.contains("type Item = i64;"));
+        assert!(first.contains("-> Self"));
     }
 
     #[test]
