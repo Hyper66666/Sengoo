@@ -34,6 +34,10 @@ extern "C" {
     fn sengoo_string_bytes_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
     fn sengoo_string_chars_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
     fn sengoo_string_iter_free_status(iter_handle: i64) -> i64;
+    fn sengoo_string_split_iter_new(handle: i64, delimiter_ptr: i64) -> i64;
+    fn sengoo_string_split_iter_done(iter_handle: i64) -> i64;
+    fn sengoo_string_split_iter_next(iter_handle: i64) -> i64;
+    fn sengoo_string_split_iter_free_status(iter_handle: i64) -> i64;
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
 }
 
@@ -46,6 +50,10 @@ struct StringBytesIter {
 }
 
 struct StringCharsIter {
+    handle: i64,
+}
+
+struct StringSplitIter {
     handle: i64,
 }
 
@@ -256,6 +264,12 @@ impl String {
         StringCharsIter { handle: sengoo_string_chars_iter_new(self.handle) }
     }
 
+    def split(self, delimiter: &str) -> StringSplitIter {
+        StringSplitIter {
+            handle: sengoo_string_split_iter_new(self.handle, sengoo_stdlib_str_ptr(delimiter)),
+        }
+    }
+
     def drop(self) -> bool {
         sengoo_string_free_status(self.handle) >= 0
     }
@@ -320,5 +334,24 @@ impl StringCharsIter {
 
     def free(self) -> bool {
         sengoo_string_iter_free_status(self.handle) >= 0
+    }
+}
+
+impl StringSplitIter {
+    def next(&mut self) -> Option<String> {
+        if sengoo_string_split_iter_done(self.handle) != 0 {
+            option_none_with(String { handle: 0 })
+        } else {
+            let raw = sengoo_string_split_iter_next(self.handle);
+            if raw >= 0 {
+                option_some(String { handle: raw })
+            } else {
+                option_none_with(String { handle: 0 })
+            }
+        }
+    }
+
+    def free(self) -> bool {
+        sengoo_string_split_iter_free_status(self.handle) >= 0
     }
 }

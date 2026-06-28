@@ -5713,6 +5713,54 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_split_iterator_returns_owned_segments() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-split",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let text = string_from_str("a,b,").unwrap_or(String { handle: 0 });
+    let mut parts = text.split(",");
+    let first = parts.next().unwrap_or(String { handle: 0 });
+    let second = parts.next().unwrap_or(String { handle: 0 });
+    let third = parts.next().unwrap_or(String { handle: 0 });
+    let fourth = parts.next();
+    let freed = parts.free();
+    let first_buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let second_buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let first_len = first.copy_to_buffer(first_buffer).unwrap_or(0);
+    let second_len = second.copy_to_buffer(second_buffer).unwrap_or(0);
+    let first_written = io_stdout_write_raw(first_buffer.ptr(), first_len).unwrap_or(0);
+    let second_written = io_stdout_write_raw(second_buffer.ptr(), second_len).unwrap_or(0);
+    if first_len != 1 { return 10; }
+    if second_len != 1 { return 11; }
+    if third.len() != 0 { return 12; }
+    if fourth.is_some() { return 13; }
+    if freed == false { return 14; }
+    if first_written != 1 { return 15; }
+    if second_written != 1 { return 16; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ab");
+}
+
+#[test]
 fn stdlib_string_plus_str_returns_owned_string() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-plus-str",

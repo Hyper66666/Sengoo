@@ -18,6 +18,15 @@ typedef struct {
 } SengooStringIter;
 
 typedef struct {
+    unsigned char* data;
+    size_t len;
+    unsigned char* delimiter;
+    size_t delimiter_len;
+    size_t offset;
+    unsigned char finished;
+} SengooStringSplitIter;
+
+typedef struct {
     SengooOwnedString* owned;
     uint32_t generation;
     unsigned char alive;
@@ -228,6 +237,13 @@ static SengooStringIter* sengoo_string_iter_from_handle(long long handle) {
         return NULL;
     }
     return (SengooStringIter*)sengoo_handle_to_ptr(handle);
+}
+
+static SengooStringSplitIter* sengoo_string_split_iter_from_handle(long long handle) {
+    if (handle <= 0) {
+        return NULL;
+    }
+    return (SengooStringSplitIter*)sengoo_handle_to_ptr(handle);
 }
 
 static int sengoo_owned_string_reserve(SengooOwnedString* owned, size_t min_capacity) {
@@ -701,6 +717,102 @@ long long sengoo_string_iter_free_status(long long iter_handle) {
         return -(long long)SENGOO_STATUS_INVALID_HANDLE;
     }
     free(iter->data);
+    free(iter);
+    return SENGOO_STATUS_OK;
+}
+
+long long sengoo_string_split_iter_new(long long handle, long long delimiter_ptr) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    const char* delimiter = (const char*)sengoo_handle_to_ptr(delimiter_ptr);
+    if (!owned || !delimiter) {
+        return 0;
+    }
+
+    SengooStringSplitIter* iter =
+        (SengooStringSplitIter*)calloc(1, sizeof(SengooStringSplitIter));
+    if (!iter) {
+        return 0;
+    }
+
+    size_t delimiter_len = strlen(delimiter);
+    if (owned->len > 0) {
+        iter->data = (unsigned char*)malloc(owned->len);
+        if (!iter->data) {
+            free(iter);
+            return 0;
+        }
+        memcpy(iter->data, owned->data, owned->len);
+    }
+    if (delimiter_len > 0) {
+        iter->delimiter = (unsigned char*)malloc(delimiter_len);
+        if (!iter->delimiter) {
+            free(iter->data);
+            free(iter);
+            return 0;
+        }
+        memcpy(iter->delimiter, delimiter, delimiter_len);
+    }
+
+    iter->len = owned->len;
+    iter->delimiter_len = delimiter_len;
+    iter->offset = 0;
+    iter->finished = delimiter_len == 0 ? 1 : 0;
+    return sengoo_ptr_to_handle(iter);
+}
+
+long long sengoo_string_split_iter_done(long long iter_handle) {
+    SengooStringSplitIter* iter = sengoo_string_split_iter_from_handle(iter_handle);
+    if (!iter) {
+        return 1;
+    }
+    return iter->finished ? 1 : 0;
+}
+
+static size_t sengoo_string_split_find_delimiter(SengooStringSplitIter* iter) {
+    if (!iter || !iter->delimiter || iter->delimiter_len == 0 || iter->delimiter_len > iter->len) {
+        return SIZE_MAX;
+    }
+    size_t max_start = iter->len - iter->delimiter_len;
+    for (size_t index = iter->offset; index <= max_start; ++index) {
+        if (memcmp(iter->data + index, iter->delimiter, iter->delimiter_len) == 0) {
+            return index;
+        }
+    }
+    return SIZE_MAX;
+}
+
+long long sengoo_string_split_iter_next(long long iter_handle) {
+    SengooStringSplitIter* iter = sengoo_string_split_iter_from_handle(iter_handle);
+    if (!iter || iter->finished) {
+        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+
+    size_t start = iter->offset;
+    size_t end = iter->len;
+    size_t delimiter_at = sengoo_string_split_find_delimiter(iter);
+    if (delimiter_at != SIZE_MAX) {
+        end = delimiter_at;
+        iter->offset = delimiter_at + iter->delimiter_len;
+    } else {
+        iter->finished = 1;
+    }
+
+    if (iter->offset > iter->len) {
+        iter->offset = iter->len;
+        iter->finished = 1;
+    }
+
+    const char* segment = iter->data ? (const char*)(iter->data + start) : "";
+    return sengoo_owned_string_from_bytes(segment, end >= start ? end - start : 0);
+}
+
+long long sengoo_string_split_iter_free_status(long long iter_handle) {
+    SengooStringSplitIter* iter = sengoo_string_split_iter_from_handle(iter_handle);
+    if (!iter) {
+        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+    free(iter->data);
+    free(iter->delimiter);
     free(iter);
     return SENGOO_STATUS_OK;
 }

@@ -218,6 +218,26 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_string_split_iterator() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("a,b,").unwrap_or(String { handle: 0 });
+    let mut parts = text.split(",");
+    let first = parts.next().unwrap_or(String { handle: 0 });
+    let second = parts.next().unwrap_or(String { handle: 0 });
+    let third = parts.next().unwrap_or(String { handle: 0 });
+    first.len() + second.len() + third.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_split_iter_new"));
+    assert!(ir.contains("sengoo_string_split_iter_next"));
+}
+
+#[test]
 fn string_module_allows_owned_string_plus_str() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

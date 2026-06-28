@@ -32,17 +32,19 @@
     `lt`/`le`/`gt`/`ge`/`compare` helpers backed by
     `sengoo_string_compare`. Operator sugar (`String ==`, `String <`) and
     trait-backed `PartialEq`/`Ord` impls remain open.
-- [ ] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
+- [x] 2.3 Methods: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`,
   `split`, `trim`, `to_ascii_upper`, `to_ascii_lower`.
-  - Partial: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`, and
-    `index_of` already existed; this slice adds `str_trim`,
-    `str_to_ascii_upper`, and `str_to_ascii_lower` returning owned `String`
-    values, plus owned `String.push_char(char)`. `split` remains open.
+  - Completed for the current stdlib surface: `&str` exposes the borrowed
+    query helpers plus owned-result trim/ASCII-case transforms, owned `String`
+    exposes `len`/`is_empty`, and `String.split(delimiter)` returns a copied
+    snapshot iterator of owned `String` segments. Empty delimiters conservatively
+    produce an empty iterator until char-splitting semantics are specified.
 - [~] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
   - Partial: owned `String.bytes()` and `String.chars()` now create copied
     snapshot iterators with inherent `next() -> Option<i64>` and explicit
     `free()`. `bytes()` yields byte values and `chars()` yields Unicode scalar
-    codepoints. Generic `Iterator<Item = char>` integration remains open.
+    codepoints. `String.split()` uses the same inherent iterator pattern for
+    owned segments. Generic `Iterator<Item = char>` integration remains open.
 - [~] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
   - Partial: `str_get(value, start, end)` and `String.get(start, end)` copy a
