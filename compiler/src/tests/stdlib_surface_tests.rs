@@ -134,6 +134,29 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_owned_string_push_char() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let built = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let pushed = built.push_char('!');
+    if pushed.is_ok {
+        built.len()
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("declare i64 @sengoo_string_push_char_status(i64, i32)"),
+        "push_char extern should preserve char as an i32 C ABI scalar\n{ir}"
+    );
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[

@@ -8,7 +8,11 @@
     Verified by `examples/stdlib/20_owned_string.sg` and the automatic-memory
     management drop suites.
 - [ ] 1.2 Make `&str` a first-class borrowed view with lifetime tracking.
-- [ ] 1.3 Add `char` (Unicode scalar) type.
+- [x] 1.3 Add `char` (Unicode scalar) type.
+  - Completed for the current scalar surface: char literals type-check as
+    `char`, lower to `i32` in MIR/LLVM/FFI signatures, and `String.push_char`
+    appends a scalar through the UTF-8 runtime builder. `chars()` iteration and
+    boundary-aware string slicing remain tracked below.
 - [x] 1.4 Guarantee `String` construction validates UTF-8.
   - Completed for stdlib construction paths backed by
     `sengoo_owned_string_from_bytes`: `string_from_str`,
@@ -24,7 +28,7 @@
   - Partial: `len`, `is_empty`, `contains`, `starts_with`, `ends_with`, and
     `index_of` already existed; this slice adds `str_trim`,
     `str_to_ascii_upper`, and `str_to_ascii_lower` returning owned `String`
-    values. `split` remains open.
+    values, plus owned `String.push_char(char)`. `split` remains open.
 - [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
 - [ ] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.

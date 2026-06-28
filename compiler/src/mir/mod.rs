@@ -251,6 +251,7 @@ impl From<HIRType> for MIRType {
             HIRTypeKind::Unit => MIRType::Unit,
             HIRTypeKind::Never => MIRType::Never,
             HIRTypeKind::Bool => MIRType::Bool,
+            HIRTypeKind::Char => MIRType::Int(32),
             HIRTypeKind::Str => MIRType::Ptr(Box::new(MIRType::Int(8))),
             HIRTypeKind::Int(ik) => MIRType::Int(ik.bits() as u8),
             HIRTypeKind::Float(fk) => MIRType::Float(fk.bits() as u8),

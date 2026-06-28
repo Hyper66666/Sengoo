@@ -268,6 +268,10 @@ Sengoo has two practical text surfaces today:
 - `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
   can be cloned, pushed to, copied into a `Buffer`, and compared with another
   `String`.
+- `char` is represented as a Unicode scalar value in the source language and
+  lowers to an `i32` C ABI scalar. `String.push_char(value)` appends the scalar
+  as UTF-8 and returns an error-shaped `Result` if the runtime rejects the
+  handle or codepoint.
 
 Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
 `str_to_ascii_lower`, each returning an owned `String`. The case conversion is

@@ -14,8 +14,13 @@ def main() -> i64 {
     }
 
     let label = label_result.value;
+    let pushed = label.push_char('!');
+    if pushed.is_ok == false {
+        return 1;
+    }
+
     let rendered = format("{1}:{0:?}", 7, label);
-    if rendered.len() != 6 {
+    if rendered.len() != 7 {
         return 1;
     }
 

@@ -18,7 +18,7 @@ extern "C" {
     fn sengoo_string_with_capacity(capacity: i64) -> i64;
     fn sengoo_string_push_i64_status(handle: i64, value: i64) -> i64;
     fn sengoo_string_push_bool_status(handle: i64, value: i64) -> i64;
-    fn sengoo_string_push_char_status(handle: i64, codepoint: i64) -> i64;
+    fn sengoo_string_push_char_status(handle: i64, codepoint: char) -> i64;
     fn sengoo_string_push_padded_string_status(handle: i64, value_handle: i64, align: i64, width: i64) -> i64;
     fn sengoo_string_clear_status(handle: i64) -> i64;
     fn sengoo_string_copy_to_buffer(handle: i64, buffer_handle: i64) -> i64;
@@ -187,6 +187,15 @@ impl String {
 
     def push_i64(self, value: i64) -> Result<bool, i64> {
         let raw = sengoo_string_push_i64_status(self.handle, value);
+        if raw >= 0 {
+            result_ok_bool(true)
+        } else {
+            result_err_bool(0 - raw)
+        }
+    }
+
+    def push_char(self, value: char) -> Result<bool, i64> {
+        let raw = sengoo_string_push_char_status(self.handle, value);
         if raw >= 0 {
             result_ok_bool(true)
         } else {

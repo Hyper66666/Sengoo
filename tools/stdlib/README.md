@@ -10,7 +10,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
 - `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared ownership with `RcValue` generic construction, copied-text lists, and string-key maps for scalar i64/bool values.
-- `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
+- `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `push_i64`, `push_char`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
 - `error.sg`: compatibility assertion helpers (prefer `assert.sg` for new code).

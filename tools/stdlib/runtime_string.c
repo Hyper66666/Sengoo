@@ -401,7 +401,7 @@ long long sengoo_string_push_bool_status(long long handle, long long value) {
     return sengoo_owned_string_append_bytes(handle, text, strlen(text));
 }
 
-long long sengoo_string_push_char_status(long long handle, long long codepoint) {
+long long sengoo_string_push_char_status(long long handle, int codepoint) {
     if (codepoint < 0 || codepoint > 0x10FFFF
         || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
         return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
