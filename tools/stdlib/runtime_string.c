@@ -152,6 +152,16 @@ static int sengoo_bytes_are_utf8(const unsigned char* bytes, size_t len) {
     return 1;
 }
 
+static int sengoo_utf8_is_boundary(const unsigned char* bytes, size_t len, size_t offset) {
+    if (offset > len) {
+        return 0;
+    }
+    if (offset == 0 || offset == len) {
+        return 1;
+    }
+    return (bytes[offset] & 0xC0) != 0x80;
+}
+
 static int sengoo_owned_string_reserve(SengooOwnedString* owned, size_t min_capacity) {
     if (owned->cap >= min_capacity) {
         return 1;
@@ -313,6 +323,22 @@ long long sengoo_string_from_buffer(long long buffer_handle, long long used_len)
         return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
     }
     return sengoo_owned_string_from_bytes((const char*)buffer->bytes, (size_t)used_len);
+}
+
+long long sengoo_str_slice_copy(long long value_ptr, long long start, long long end) {
+    const char* value = (const char*)sengoo_handle_to_ptr(value_ptr);
+    if (!value || start < 0 || end < start) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(value);
+    size_t start_offset = (size_t)start;
+    size_t end_offset = (size_t)end;
+    if (end_offset > len
+        || !sengoo_utf8_is_boundary((const unsigned char*)value, len, start_offset)
+        || !sengoo_utf8_is_boundary((const unsigned char*)value, len, end_offset)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    return sengoo_owned_string_from_bytes(value + start_offset, end_offset - start_offset);
 }
 
 long long sengoo_string_clone_status(long long handle) {
@@ -523,6 +549,21 @@ long long sengoo_string_copy_to_buffer(long long handle, long long buffer_handle
         buffer_handle,
         owned->data ? owned->data : "",
         owned->len);
+}
+
+long long sengoo_string_slice_status(long long handle, long long start, long long end) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (!owned || start < 0 || end < start) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t start_offset = (size_t)start;
+    size_t end_offset = (size_t)end;
+    if (end_offset > owned->len
+        || !sengoo_utf8_is_boundary((const unsigned char*)owned->data, owned->len, start_offset)
+        || !sengoo_utf8_is_boundary((const unsigned char*)owned->data, owned->len, end_offset)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    return sengoo_owned_string_from_bytes(owned->data + start_offset, end_offset - start_offset);
 }
 
 long long sengoo_string_eq(long long lhs_handle, long long rhs_handle) {

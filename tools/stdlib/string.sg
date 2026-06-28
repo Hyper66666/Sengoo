@@ -6,6 +6,7 @@ extern "C" {
     fn sengoo_str_trim(value: &str) -> i64;
     fn sengoo_str_to_ascii_upper(value: &str) -> i64;
     fn sengoo_str_to_ascii_lower(value: &str) -> i64;
+    fn sengoo_str_slice_copy(value_ptr: i64, start: i64, end: i64) -> i64;
     fn sengoo_string_new() -> i64;
     fn sengoo_string_free_status(handle: i64) -> i64;
     fn sengoo_string_len(handle: i64) -> i64;
@@ -23,6 +24,7 @@ extern "C" {
     fn sengoo_string_push_padded_string_status(handle: i64, value_handle: i64, align: i64, width: i64) -> i64;
     fn sengoo_string_clear_status(handle: i64) -> i64;
     fn sengoo_string_copy_to_buffer(handle: i64, buffer_handle: i64) -> i64;
+    fn sengoo_string_slice_status(handle: i64, start: i64, end: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
     fn sengoo_string_compare(lhs_handle: i64, rhs_handle: i64) -> i64;
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
@@ -106,6 +108,15 @@ def str_to_ascii_upper(value: &str) -> Result<String, i64> {
 
 def str_to_ascii_lower(value: &str) -> Result<String, i64> {
     let raw = sengoo_str_to_ascii_lower(value);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+def str_get(value: &str, start: i64, end: i64) -> Result<String, i64> {
+    let raw = sengoo_str_slice_copy(sengoo_stdlib_str_ptr(value), start, end);
     if raw >= 0 {
         string_result_ok(String { handle: raw })
     } else {
@@ -211,6 +222,15 @@ impl String {
 
     def copy_to_buffer(self, buffer: Buffer) -> Result<i64, i64> {
         string_copy_result(sengoo_string_copy_to_buffer(self.handle, buffer.handle))
+    }
+
+    def get(self, start: i64, end: i64) -> Result<String, i64> {
+        let raw = sengoo_string_slice_status(self.handle, start, end);
+        if raw >= 0 {
+            string_result_ok(String { handle: raw })
+        } else {
+            string_result_err(0 - raw)
+        }
     }
 
     def drop(self) -> bool {

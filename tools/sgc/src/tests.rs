@@ -5604,6 +5604,50 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_get_checks_utf8_boundaries() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-get-utf8",
+        r#"
+import std::ffi;
+import std::io;
+import std::status;
+import std::string;
+
+def main() -> i64 {
+    let first = str_get("héllo", 0, 1).unwrap_or(String { handle: 0 });
+    let accent = str_get("héllo", 1, 3).unwrap_or(String { handle: 0 });
+    let bad_borrowed = str_get("héllo", 1, 2);
+    let owned = string_from_str("héllo").unwrap_or(String { handle: 0 });
+    let bad_owned = owned.get(1, 2);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = accent.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if first.len() == 1
+        && accent.len() == 2
+        && bad_borrowed.err().unwrap_or(0) == STATUS_INVALID_ARGUMENT()
+        && bad_owned.err().unwrap_or(0) == STATUS_INVALID_ARGUMENT()
+        && copied == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "é");
+}
+
+#[test]
 fn eprintln_builtin_writes_to_stderr_with_native_runtime() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "builtin-eprintln",

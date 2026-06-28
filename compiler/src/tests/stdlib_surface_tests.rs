@@ -180,6 +180,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_utf8_slice_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let borrowed = str_get("hello", 1, 4).unwrap_or(String { handle: 0 });
+    let owned = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let part = owned.get(1, 4).unwrap_or(String { handle: 0 });
+    borrowed.len() + part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_slice_copy"));
+    assert!(ir.contains("sengoo_string_slice_status"));
+}
+
+#[test]
 fn stdlib_owned_handles_auto_drop_without_manual_release() {
     let ir = compile_with_stdlib_modules(
         &[

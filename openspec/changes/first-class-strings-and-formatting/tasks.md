@@ -35,8 +35,12 @@
     `str_to_ascii_upper`, and `str_to_ascii_lower` returning owned `String`
     values, plus owned `String.push_char(char)`. `split` remains open.
 - [ ] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
-- [ ] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
+- [~] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
+  - Partial: `str_get(value, start, end)` and `String.get(start, end)` copy a
+    byte range into an owned `String` only when both offsets are UTF-8 scalar
+    boundaries. Invalid order, out-of-range offsets, and non-boundary offsets
+    return `STATUS_INVALID_ARGUMENT`. Infallible `s[a..b]` syntax remains open.
 
 ## 3. Formatting
 
@@ -83,7 +87,10 @@
 
 ## 5. UTF-8 correctness
 
-- [ ] 5.1 Boundary checks on slice/index; stable status on non-boundary offsets.
+- [~] 5.1 Boundary checks on slice/index; stable status on non-boundary offsets.
+  - Partial: fallible `str_get` / `String.get` return
+    `STATUS_INVALID_ARGUMENT` on non-boundary offsets. Infallible index/slice
+    syntax remains open.
 - [ ] 5.2 `chars()` decodes UTF-8; reject invalid sequences at construction.
 - [x] 5.3 Document ASCII-only case ops and the Unicode follow-up in
   `docs/language-features.md`.
