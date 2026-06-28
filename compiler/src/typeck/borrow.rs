@@ -111,9 +111,9 @@ pub struct BorrowChecker {
     /// Type environment snapshot used by this pass.
     _env: TypeEnv,
     /// Active borrows for current scope.
-    borrows: HashMap<String, Vec<Borrow>>,
+    borrows: HashMap<MovePath, Vec<Borrow>>,
     /// Nested scope borrow snapshots.
-    borrow_stack: Vec<HashMap<String, Vec<Borrow>>>,
+    borrow_stack: Vec<HashMap<MovePath, Vec<Borrow>>>,
     /// Synthetic lifetime id counter.
     lifetime_counter: usize,
     /// Collected errors.
@@ -410,8 +410,9 @@ impl BorrowChecker {
         let move_span = (span.lo as usize, span.hi as usize);
         if let Some(active_borrow) = self
             .borrows
-            .get(&path.root)
-            .and_then(|borrows| borrows.first())
+            .iter()
+            .find(|(borrowed, _)| borrowed.is_prefix_of(path) || path.is_prefix_of(borrowed))
+            .and_then(|(_, borrows)| borrows.first())
         {
             self.errors.push(BorrowError::CannotMoveBorrowed {
                 var: path.display(),
@@ -496,17 +497,20 @@ impl BorrowChecker {
     }
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
-        if let Some(name) = Self::expr_var_name(expr) {
+        if let Some(path) = Self::expr_move_path(expr) {
             let lifetime = self.lifetime_counter;
             self.lifetime_counter += 1;
             let span = (expr.span.lo as usize, expr.span.hi as usize);
 
-            if let Some(existing) = self.borrows.get(&name) {
+            for (borrowed, existing) in &self.borrows {
+                if !borrowed.is_prefix_of(&path) && !path.is_prefix_of(borrowed) {
+                    continue;
+                }
                 for borrow in existing {
                     match (&kind, &borrow.kind) {
                         (BorrowKind::Mutable, BorrowKind::Mutable) => {
                             self.errors.push(BorrowError::MultipleMutableBorrows {
-                                var: name.clone(),
+                                var: path.display(),
                                 first_span: borrow.span,
                                 second_span: span,
                             });
@@ -514,7 +518,7 @@ impl BorrowChecker {
                         (BorrowKind::Mutable, BorrowKind::Immutable)
                         | (BorrowKind::Immutable, BorrowKind::Mutable) => {
                             self.errors.push(BorrowError::MutableWithOtherBorrows {
-                                var: name.clone(),
+                                var: path.display(),
                                 mutable_span: span,
                                 other_span: borrow.span,
                             });
@@ -529,7 +533,7 @@ impl BorrowChecker {
                 lifetime,
                 span,
             };
-            self.borrows.entry(name).or_default().push(borrow);
+            self.borrows.entry(path).or_default().push(borrow);
         }
     }
 
@@ -543,9 +547,10 @@ impl BorrowChecker {
                 };
                 if let Some(kind) = kind {
                     self.add_borrow(operand, kind);
-                    if let Some(source) = Self::expr_var_name(operand) {
+                    if let Some(source) = Self::expr_move_path(operand) {
                         if let Some(existing) = self.borrows.get(&source).cloned() {
-                            self.borrows.insert(name.to_string(), existing);
+                            self.borrows
+                                .insert(MovePath::root(name.to_string()), existing);
                         }
                     }
                 }
@@ -574,14 +579,6 @@ impl BorrowChecker {
         }
     }
 
-    fn expr_var_name(expr: &Expr) -> Option<String> {
-        match &expr.kind {
-            ExprKind::Ident(ident) => Some(ident.name.clone()),
-            ExprKind::Path(path) => path.as_simple().map(|ident| ident.name.clone()),
-            _ => None,
-        }
-    }
-
     fn expr_move_path(expr: &Expr) -> Option<MovePath> {
         match &expr.kind {
             ExprKind::Ident(ident) => Some(MovePath::root(ident.name.clone())),
@@ -598,7 +595,7 @@ impl BorrowChecker {
 
     /// End a borrow lifetime explicitly.
     pub fn end_borrow(&mut self, var: &str, lifetime: usize) {
-        if let Some(borrows) = self.borrows.get_mut(var) {
+        if let Some(borrows) = self.borrows.get_mut(&MovePath::root(var.to_string())) {
             borrows.retain(|b| b.lifetime != lifetime);
         }
     }

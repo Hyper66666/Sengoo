@@ -45,6 +45,9 @@
     whole-parent partial-move rejection, assignment RHS moves, and field
     assignment reinitialization. Moving an owned root while it has an active
     lexical borrow is rejected with the stable `cannot-move-borrowed` code.
+    Borrow tracking now uses the same field-aware move paths: borrowing a field
+    blocks moving that field or its parent while disjoint sibling fields remain
+    independently movable.
 
 ## 3. MIR drop-glue insertion
 

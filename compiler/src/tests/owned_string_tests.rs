@@ -259,6 +259,81 @@ def main() -> i64 {
 }
 
 #[test]
+fn borrowed_owning_field_cannot_be_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair.left;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn parent_with_borrowed_owning_field_cannot_be_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `pair`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn borrowing_one_owning_field_allows_moving_its_sibling() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair.right;
+    0
+}
+"#,
+    )
+    .expect("disjoint sibling fields should not conflict");
+}
+
+#[test]
 fn user_drop_field_return_marks_only_that_field_moved() {
     let source = r#"
 struct Token {
