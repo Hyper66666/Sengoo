@@ -9,7 +9,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, copied-text lists, and string-key maps for scalar i64/bool values.
+- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared ownership with `RcValue` generic construction, copied-text lists, and string-key maps for scalar i64/bool values.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
 - `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
 - `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
@@ -112,6 +112,13 @@ insert, replace existing values when a duplicate key is inserted, and expose
 deterministic key iteration by unsigned byte ordering. Key ordering is byte
 based only; Unicode normalization, locale collation, and case folding are not
 applied.
+
+`Rc<T>` is a single-threaded shared-ownership handle for the verified payloads
+`i64`, `bool`, and `String`. Use `rc_new_i64`, `rc_new_bool`, and
+`rc_new_string` directly, or write generic helpers with `T: RcValue` and
+`value.rc()` when the payload is one of those supported types. Arbitrary
+user-defined `Rc<T>` storage remains deferred until the runtime has a stable
+value layout and drop ABI for user values.
 
 ## String Conversion Helpers
 

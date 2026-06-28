@@ -253,7 +253,8 @@ when the owner goes out of scope.
 
 Current surface: the verified auto-drop and move-checking path covers owned
 `String`, current concrete stdlib handles (`Buffer`, `Vec<T>`, `JsonDoc`,
-process/net handles), and scalar `Rc` handles. Some runtime domains still keep
+process/net handles), and verified `Rc<i64>`/`Rc<bool>`/`Rc<String>` handles.
+Some runtime domains still keep
 compatibility release methods because older examples and direct FFI-style
 stdlib calls use them, but new examples prefer automatic drop.
 
@@ -284,8 +285,14 @@ Current verified surface:
 
 - `rc_new_i64(value) -> Rc<i64>`
 - `rc_new_bool(value) -> Rc<bool>`
+- `rc_new_string(value) -> Rc<String>`
+- `RcValue` for generic `value.rc()` construction over the verified payloads
 - `clone()`, `get()`, `strong_count()`, and `is_unique()`
-- automatic `Drop` for `Rc<i64>` and `Rc<bool>`
+- automatic `Drop` for `Rc<i64>`, `Rc<bool>`, and `Rc<String>`
+
+Arbitrary user-defined `Rc<T>` storage/deref still needs a stable value
+representation and drop ABI. Until then, `RcValue` is the supported generic
+entry point for the concrete payloads backed by the runtime.
 
 `Rc` deliberately does not collect cycles. If two or more future `Rc`-backed
 objects retain each other, that cycle leaks until the process exits. Break such

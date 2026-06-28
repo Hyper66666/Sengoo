@@ -146,8 +146,11 @@
     compiler-inserted `Drop` backed by a non-atomic C runtime refcount control
     block. `Rc<String>` now has a first owning-value slice: construction clones
     the source `String` into the Rc control block, `get` returns a cloned
-    `String`, and final refcount release drops the stored string handle. Covered
-    by compiler surface and native sgc runtime smoke tests. Arbitrary owning
+    `String`, and final refcount release drops the stored string handle. The
+    `RcValue` trait gives generic functions a bound-based construction path
+    for the verified payloads (`value.rc()` / `T: RcValue`) without pretending
+    arbitrary user-defined values have a runtime storage ABI yet. Covered by
+    compiler surface and native sgc runtime smoke tests. Arbitrary owning
     `Rc<T>` value storage/deref remains open.
 - [x] 5.2 Document `Rc` cycle-leak behavior in `docs/language-features.md`.
   - Added the `Rc` shared-ownership section with the current verified API,

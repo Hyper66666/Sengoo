@@ -289,6 +289,48 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_rc_value_trait_allows_generic_shared_ownership_construction() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def share<T: RcValue>(value: T) -> Rc<T> {
+    value.rc()
+}
+
+def main() -> i64 {
+    let first = share(21);
+    let second = first.clone();
+    let flag = share(true);
+    if flag.get() {
+        second.get()
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: share_i64"),
+        "expected generic share<i64> specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("; Function: share_bool"),
+        "expected generic share<bool> specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_new_i64") && ir.contains("sengoo_rc_new_bool"),
+        "expected RcValue impls to dispatch through concrete runtime constructors\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

@@ -8143,6 +8143,32 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_runtime_rc_value_trait_constructs_shared_handles() {
+    let output = require_stdlib_runtime_output!(
+        "rc-value-trait-shared",
+        r#"
+def share<T: RcValue>(value: T) -> Rc<T> {
+    value.rc()
+}
+
+def main() -> i64 {
+    let first = share(40);
+    let second = first.clone();
+    let flag = share(true);
+    let ok = first.strong_count() == 2 and second.get() == 40 and flag.get();
+    if ok {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
 fn stdlib_surface_runtime_hashmap_iter_sums_all_values() {
     let output = require_stdlib_runtime_output!(
         "hashmap-iter",

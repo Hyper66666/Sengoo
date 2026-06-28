@@ -155,6 +155,12 @@ struct VecStringIter {
     handle: i64,
 }
 
+trait RcValue {
+    def rc(self) -> Rc<Self> {
+        Rc { handle: 0, marker: self }
+    }
+}
+
 def bool_to_i64(value: bool) -> i64 {
     if value {
         1
@@ -177,6 +183,24 @@ def rc_new_bool(value: bool) -> Rc<bool> {
 
 def rc_new_string(value: String) -> Rc<String> {
     Rc { handle: sengoo_rc_new_string(value.handle), marker: String { handle: 0 } }
+}
+
+impl RcValue for i64 {
+    def rc(self) -> Rc<i64> {
+        rc_new_i64(self)
+    }
+}
+
+impl RcValue for bool {
+    def rc(self) -> Rc<bool> {
+        rc_new_bool(self)
+    }
+}
+
+impl RcValue for String {
+    def rc(self) -> Rc<String> {
+        rc_new_string(self)
+    }
 }
 
 impl<T> Rc<T> {
