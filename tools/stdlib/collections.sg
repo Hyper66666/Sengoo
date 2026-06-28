@@ -1,10 +1,12 @@
 extern "C" {
     fn sengoo_rc_new_i64(value: i64) -> i64;
     fn sengoo_rc_new_bool(value: i64) -> i64;
+    fn sengoo_rc_new_string(value: i64) -> i64;
     fn sengoo_rc_clone(handle: i64) -> i64;
     fn sengoo_rc_strong_count(handle: i64) -> i64;
     fn sengoo_rc_get_i64(handle: i64) -> i64;
     fn sengoo_rc_get_bool(handle: i64) -> i64;
+    fn sengoo_rc_get_string_clone(handle: i64) -> i64;
     fn sengoo_rc_drop(handle: i64) -> i64;
 
     fn sengoo_vec_new_i64() -> i64;
@@ -173,6 +175,10 @@ def rc_new_bool(value: bool) -> Rc<bool> {
     Rc { handle: sengoo_rc_new_bool(bool_to_i64(value)), marker: value }
 }
 
+def rc_new_string(value: String) -> Rc<String> {
+    Rc { handle: sengoo_rc_new_string(value.handle), marker: String { handle: 0 } }
+}
+
 impl<T> Rc<T> {
     def strong_count(&self) -> i64 {
         sengoo_rc_strong_count(self.handle)
@@ -203,6 +209,16 @@ impl Rc<bool> {
     }
 }
 
+impl Rc<String> {
+    def clone(&self) -> Rc<String> {
+        Rc { handle: sengoo_rc_clone(self.handle), marker: String { handle: 0 } }
+    }
+
+    def get(&self) -> String {
+        String { handle: sengoo_rc_get_string_clone(self.handle) }
+    }
+}
+
 impl Drop for Rc<i64> {
     def drop(&mut self) {
         sengoo_rc_drop(self.handle);
@@ -210,6 +226,12 @@ impl Drop for Rc<i64> {
 }
 
 impl Drop for Rc<bool> {
+    def drop(&mut self) {
+        sengoo_rc_drop(self.handle);
+    }
+}
+
+impl Drop for Rc<String> {
     def drop(&mut self) {
         sengoo_rc_drop(self.handle);
     }

@@ -139,7 +139,11 @@
     verified scalar constructors `rc_new_i64` and `rc_new_bool`; `Rc<i64>` and
     `Rc<bool>` support `clone`, `get`, `strong_count`, `is_unique`, and
     compiler-inserted `Drop` backed by a non-atomic C runtime refcount control
-    block. Arbitrary owning `Rc<T>` value storage/deref remains open.
+    block. `Rc<String>` now has a first owning-value slice: construction clones
+    the source `String` into the Rc control block, `get` returns a cloned
+    `String`, and final refcount release drops the stored string handle. Covered
+    by compiler surface and native sgc runtime smoke tests. Arbitrary owning
+    `Rc<T>` value storage/deref remains open.
 - [x] 5.2 Document `Rc` cycle-leak behavior in `docs/language-features.md`.
   - Added the `Rc` shared-ownership section with the current verified API,
     move-only default reminder, and explicit cycle-leak behavior.

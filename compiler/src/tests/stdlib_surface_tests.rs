@@ -254,6 +254,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_rc_string_shared_ownership_clones_and_auto_drops() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let first = rc_new_string(text);
+    let second = first.clone();
+    let copy = second.get();
+    first.strong_count() + copy.len()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("sengoo_rc_new_string"),
+        "Rc<String> constructor should transfer an owned String handle into the Rc runtime\n{ir}"
+    );
+    assert!(
+        ir.contains("Rc_String_Drop_drop"),
+        "Rc<String> locals should auto-drop through Drop glue\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_drop"),
+        "Rc<String> Drop impl should call the runtime decrement/free helper\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

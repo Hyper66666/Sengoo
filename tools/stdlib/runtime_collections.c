@@ -6,29 +6,47 @@
 
 typedef struct {
     size_t strong;
+    int kind;
     long long i64_value;
 } SengooRcBox;
+
+enum {
+    SENGOO_RC_KIND_I64 = 1,
+    SENGOO_RC_KIND_STRING = 2
+};
+
+extern long long sengoo_string_clone_status(long long handle);
+extern long long sengoo_string_free_status(long long handle);
 
 static SengooRcBox* sengoo_rc_from_handle(long long handle) {
     return (SengooRcBox*)sengoo_handle_to_ptr(handle);
 }
 
-static long long sengoo_rc_new_with_i64(long long value) {
+static long long sengoo_rc_new_with_value(int kind, long long value) {
     SengooRcBox* box = (SengooRcBox*)calloc(1, sizeof(SengooRcBox));
     if (!box) {
         return 0;
     }
     box->strong = 1;
+    box->kind = kind;
     box->i64_value = value;
     return sengoo_ptr_to_handle(box);
 }
 
 long long sengoo_rc_new_i64(long long value) {
-    return sengoo_rc_new_with_i64(value);
+    return sengoo_rc_new_with_value(SENGOO_RC_KIND_I64, value);
 }
 
 long long sengoo_rc_new_bool(long long value) {
-    return sengoo_rc_new_with_i64(value != 0 ? 1 : 0);
+    return sengoo_rc_new_with_value(SENGOO_RC_KIND_I64, value != 0 ? 1 : 0);
+}
+
+long long sengoo_rc_new_string(long long value) {
+    long long owned = sengoo_string_clone_status(value);
+    if (owned <= 0) {
+        return 0;
+    }
+    return sengoo_rc_new_with_value(SENGOO_RC_KIND_STRING, owned);
 }
 
 long long sengoo_rc_clone(long long handle) {
@@ -54,6 +72,14 @@ long long sengoo_rc_get_bool(long long handle) {
     return sengoo_rc_get_i64(handle) != 0 ? 1 : 0;
 }
 
+long long sengoo_rc_get_string_clone(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    if (!box || box->kind != SENGOO_RC_KIND_STRING) {
+        return 0;
+    }
+    return sengoo_string_clone_status(box->i64_value);
+}
+
 long long sengoo_rc_drop(long long handle) {
     SengooRcBox* box = sengoo_rc_from_handle(handle);
     if (!box) {
@@ -64,6 +90,9 @@ long long sengoo_rc_drop(long long handle) {
     }
     box->strong -= 1;
     if (box->strong == 0) {
+        if (box->kind == SENGOO_RC_KIND_STRING) {
+            sengoo_string_free_status(box->i64_value);
+        }
         free(box);
     }
     return 1;

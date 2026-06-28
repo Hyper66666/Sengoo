@@ -8081,6 +8081,28 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_runtime_rc_string_clones_until_last_drop() {
+    let output = require_stdlib_runtime_output!(
+        "rc-string-shared",
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let first = rc_new_string(text);
+    let second = first.clone();
+    let copy = second.get();
+    if first.strong_count() == 2 and copy.len() == 5 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
 fn stdlib_surface_runtime_hashmap_iter_sums_all_values() {
     let output = require_stdlib_runtime_output!(
         "hashmap-iter",
