@@ -5060,6 +5060,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/21_assert.sg",
         "examples/stdlib/22_regex_log.sg",
         "examples/stdlib/23_config_hash.sg",
+        "examples/stdlib/25_formatting.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -5364,6 +5365,15 @@ fn examples_smoke_stdlib_config_hash_import() {
         "stdlib-config-hash",
         "examples/stdlib/23_config_hash.sg",
         "23",
+    );
+}
+
+#[test]
+fn examples_smoke_stdlib_formatting_import() {
+    assert_example_output(
+        "stdlib-formatting",
+        "examples/stdlib/25_formatting.sg",
+        "25",
     );
 }
 

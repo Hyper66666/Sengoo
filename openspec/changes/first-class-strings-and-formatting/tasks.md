@@ -50,7 +50,10 @@
 
 ## 4. Literals and interpolation
 
-- [ ] 4.1 Lexer: `f"..."` interpolation token sequence.
+- [~] 4.1 Lexer: `f"..."` interpolation token sequence.
+  - Implemented as a parser pre-lex source expansion pass rather than a
+    dedicated lexer token sequence: `f"..."` rewrites to `format(...)` while
+    preserving ordinary string/comment contents.
 - [x] 4.2 Lexer: `b"..."` byte strings and `"""..."""` multiline (leading-WS strip).
   - Byte string tokenization is covered in lexer tests; multiline strings now
     scan as one `String` token and strip common leading whitespace.
@@ -58,8 +61,14 @@
   grammar with `numeric-type-system`).
   - Implemented in `compiler/src/lexer/token.rs`; covered by lexer token tests
     and a compile-to-IR print regression for based/suffixed/separated literals.
-- [ ] 4.4 Lower `f"...{e}..."` to `format(...)` in the parser/HIR.
-- [ ] 4.5 Tests for each literal form and interpolation lowering.
+- [x] 4.4 Lower `f"...{e}..."` to `format(...)` in the parser/HIR.
+  - Verified by `compiler/src/parser/fstring_expander.rs` unit tests and
+    `cargo test -p sengoo-compiler format -- --nocapture`.
+- [~] 4.5 Tests for each literal form and interpolation lowering.
+  - Covered: f-string simple/multiple/compound interpolation, brace escapes,
+    empty interpolation rejection, byte strings, multiline strings, based
+    integer literals, and typed suffixes. Remaining: broader source-map/span
+    diagnostics for expanded f-strings.
 
 ## 5. UTF-8 correctness
 
@@ -71,12 +80,16 @@
 
 ## 6. Conformance and docs
 
-- [ ] 6.1 Add `examples/stdlib/` programs printing a `String`, a struct via
+- [~] 6.1 Add `examples/stdlib/` programs printing a `String`, a struct via
   `Debug`, and an interpolated `f"..."`.
-- [ ] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
+  - Added `examples/stdlib/25_formatting.sg` covering owned `String`
+    formatting, positional placeholders, scalar `{:?}`, and an interpolated
+    f-string. Struct/enum `Debug` awaits derive/debug rendering.
+- [~] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` string/formatting rows.
   - Partial: the owned-string row now mentions trim/ASCII case transforms and
-    links to the new stdlib/native tests. Formatting/interpolation rows remain
-    open until Display/Debug/format land.
+    links to the new stdlib/native tests; added a formatting/interpolation row
+    for `{}`, scalar `{:?}`, positional placeholders, Display-backed types, and
+    f-string expansion. Structure-aware Debug, width, and precision remain open.
 - [x] 6.3 Run `openspec validate first-class-strings-and-formatting --strict`.
 
 ## Verification

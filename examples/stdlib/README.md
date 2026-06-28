@@ -29,3 +29,4 @@ Run each file with `sgc run <path>`.
 | [`22_regex_log.sg`](22_regex_log.sg) | Importing `std::regex` and `std::log` helpers for bounded matching and log configuration | `22` |
 | [`23_config_hash.sg`](23_config_hash.sg) | Importing `std::config` and `std::hash` helpers with Buffer output | `23` |
 | [`24_compress.sg`](24_compress.sg) | Importing `std::compress` gzip Buffer helpers for JSON bytes | `24` |
+| [`25_formatting.sg`](25_formatting.sg) | Formatting owned `String` values with positional placeholders and f-strings | `25` |

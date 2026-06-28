@@ -1,0 +1,30 @@
+// examples/stdlib/25_formatting.sg
+//
+// Demonstrates: owned String formatting, positional placeholders, and f-strings.
+//
+// Run: sgc run examples/stdlib/25_formatting.sg
+// Expected output: 25
+
+import std::string;
+
+def main() -> i64 {
+    let label_result = string_from_str("main");
+    if label_result.is_ok == false {
+        return 1;
+    }
+
+    let label = label_result.value;
+    let rendered = format("{1}:{0:?}", 7, label);
+    if rendered.len() != 6 {
+        return 1;
+    }
+
+    let n = 3;
+    let interpolated = f"n={n}";
+    if interpolated.len() != 3 {
+        return 1;
+    }
+
+    print(25);
+    0
+}
