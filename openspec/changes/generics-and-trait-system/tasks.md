@@ -108,11 +108,9 @@
 - [x] 6.3 Add `examples/generics/` programs using a real generic function with a
   bound and a `dyn Trait` call.
   - Added `examples/generics/05_bound_and_dyn.sg`, which exercises concrete
-    instantiation of a bounded generic function and a `&dyn Shape` dispatch in
-    one runnable program. Verified by `cargo test -p sgc
+    instantiation and bound-method dispatch inside a generic function plus a
+    `&dyn Shape` dispatch in one runnable program. Verified by `cargo test -p sgc
     examples_smoke_generics_bound_and_dyn -- --nocapture`.
-  - Note: method dispatch through a generic bound inside the generic body remains
-    a follow-up; current bounds enforce accepted instantiations.
 - [x] 6.4 Run `openspec validate generics-and-trait-system --strict`.
 
 ## Verification

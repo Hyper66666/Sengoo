@@ -1085,6 +1085,17 @@ impl TypeChecker {
             return Ok(self.infer.apply_subst(&fn_ty.return_type));
         }
 
+        // A generic parameter may call methods promised by its declared bounds
+        // even though no concrete impl is selected until monomorphization.
+        if let Some(fn_ty) =
+            self.select_generic_bound_method_candidate(&receiver_ty, method_name, args.len())?
+        {
+            for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
+                self.infer.unify(expected, actual)?;
+            }
+            return Ok(self.infer.apply_subst(&fn_ty.return_type));
+        }
+
         // Then trait impl lookup.
         if let Some(fn_ty) =
             self.select_trait_method_call_candidate(&receiver_key, method_name, args.len())?
@@ -1099,6 +1110,70 @@ impl TypeChecker {
             type_name: receiver_key,
             method_name: method_name.clone(),
         })
+    }
+
+    fn select_generic_bound_method_candidate(
+        &mut self,
+        receiver_ty: &Ty,
+        method_name: &str,
+        arg_count: usize,
+    ) -> TyResult<Option<FunctionTy>> {
+        let receiver_ty = self.infer.apply_subst(receiver_ty);
+        let var_id = match &receiver_ty.kind {
+            TyKind::Var(var_id) => Some(*var_id),
+            TyKind::Ref(_, inner) => match &inner.kind {
+                TyKind::Var(var_id) => Some(*var_id),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(var_id) = var_id else {
+            return Ok(None);
+        };
+        let bounds = self
+            .generic_var_bounds
+            .get(&var_id)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut candidates = Vec::new();
+        for trait_name in bounds {
+            let Some(method_sig) = self
+                .trait_registry
+                .get(&trait_name)
+                .and_then(|trait_info| trait_info.get_method(method_name).cloned())
+            else {
+                continue;
+            };
+            if !method_sig.has_self {
+                continue;
+            }
+            let fn_ty = FunctionTy::with_generic_params(
+                true,
+                method_sig.param_types,
+                method_sig.return_type,
+                method_sig.generic_params,
+            );
+            candidates.push(MethodCandidate {
+                label: trait_name,
+                param_count: fn_ty.param_types.len(),
+                value: self.instantiate_method_function_ty(&fn_ty, &HashMap::new()),
+            });
+        }
+
+        match select_method_candidate(candidates, arg_count) {
+            MethodCandidateMatch::None => Ok(None),
+            MethodCandidateMatch::WrongArity { expected } => {
+                Err(TypeckError::ArgumentCountMismatch {
+                    expected,
+                    found: arg_count,
+                })
+            }
+            MethodCandidateMatch::One(fn_ty) => Ok(Some(fn_ty)),
+            MethodCandidateMatch::Ambiguous { labels } => Err(TypeckError::Other(
+                ambiguous_method_error(method_name, &format!("type variable {var_id}"), &labels),
+            )),
+        }
     }
 
     fn select_trait_method_call_candidate(

@@ -32,6 +32,38 @@ def main() -> i64 {
 }
 
 #[test]
+fn generic_trait_bound_allows_method_calls_inside_generic_body() {
+    let source = r#"
+trait Showable {
+    def show(self) -> i64 {
+        0
+    }
+}
+
+impl Showable for i64 {
+    def show(self) -> i64 {
+        self
+    }
+}
+
+def consume<T: Showable>(x: T) -> i64 {
+    x.show()
+}
+
+def main() -> i64 {
+    consume(42)
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("a trait bound should make its methods available inside the generic body");
+    assert!(
+        ir.contains("Showable") || ir.contains("show"),
+        "IR should retain the selected trait method call:\n{ir}"
+    );
+}
+
+#[test]
 fn generic_trait_bound_rejects_types_without_impl() {
     let source = r#"
 trait Showable {

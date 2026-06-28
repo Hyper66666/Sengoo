@@ -18,7 +18,7 @@ impl Showable for i64 {
 }
 
 def require_showable<T: Showable>(value: T) -> i64 {
-    13
+    value.show() + 1
 }
 
 trait Shape {
