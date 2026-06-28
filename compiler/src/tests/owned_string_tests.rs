@@ -211,6 +211,54 @@ def return_then_reuse(value: String) -> String {
 }
 
 #[test]
+fn stdlib_owned_string_cannot_move_while_borrowed() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = &owner;
+    let moved = owner;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `owner`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn moving_a_borrowed_owner_reports_stable_diagnostic() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = &owner;
+    let moved = owner;
+    0
+}
+"#
+    );
+    let program = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("moving a borrowed owner should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
+    let owner_move = source.rfind("owner;").expect("move site should exist") as u32;
+    assert_eq!(
+        typeck.span(),
+        Some((owner_move, owner_move + "owner;".len() as u32))
+    );
+}
+
+#[test]
 fn user_drop_field_return_marks_only_that_field_moved() {
     let source = r#"
 struct Token {

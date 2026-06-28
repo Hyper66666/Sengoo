@@ -43,7 +43,8 @@
   - Covered by owned `String` negative use-after-move tests, user `Drop` type
     move/use-after-move coverage, field move diagnostics, sibling-field access,
     whole-parent partial-move rejection, assignment RHS moves, and field
-    assignment reinitialization.
+    assignment reinitialization. Moving an owned root while it has an active
+    lexical borrow is rejected with the stable `cannot-move-borrowed` code.
 
 ## 3. MIR drop-glue insertion
 

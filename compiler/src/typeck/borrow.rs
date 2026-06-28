@@ -287,9 +287,9 @@ impl BorrowChecker {
                 self.check_expr(base);
                 self.check_expr(index);
             }
-            ExprKind::Field { .. } => {
+            ExprKind::Field { base, .. } => {
                 if let Some(path) = Self::expr_move_path(expr) {
-                    self.check_move_path_use(&path, expr.span);
+                    self.check_move_path_use(&path, base.span);
                 }
             }
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
@@ -407,9 +407,21 @@ impl BorrowChecker {
     }
 
     fn mark_moved(&mut self, path: &MovePath, span: Span) {
-        let use_span = (span.lo as usize, span.hi as usize);
+        let move_span = (span.lo as usize, span.hi as usize);
+        if let Some(active_borrow) = self
+            .borrows
+            .get(&path.root)
+            .and_then(|borrows| borrows.first())
+        {
+            self.errors.push(BorrowError::CannotMoveBorrowed {
+                var: path.display(),
+                borrow_span: active_borrow.span,
+                move_span,
+            });
+            return;
+        }
         self.moved.insert(path.clone());
-        self.move_spans.insert(path.clone(), use_span);
+        self.move_spans.insert(path.clone(), move_span);
     }
 
     fn check_move_path_use(&mut self, path: &MovePath, span: Span) {

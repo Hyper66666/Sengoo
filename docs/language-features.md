@@ -243,6 +243,9 @@ when the owner goes out of scope.
   returning it all *move* it. After a move the source is dead; reading it is a
   compile error with the stable `use-after-move` diagnostic (also surfaced in
   `sgc --error-format json` and `sglsp`).
+- **An active borrow prevents ownership transfer.** Moving an owned root while
+  it is still borrowed is rejected with the stable `cannot-move-borrowed`
+  diagnostic. The current checker is lexical and intentionally conservative.
 - **`drop` is compiler-called, not user-called.** The compatibility release
   methods (`.drop()` / `.free()` / `.close()`) run cleanup immediately and mark
   the value moved, so the later automatic drop is suppressed and there is no
@@ -490,6 +493,8 @@ Sengoo 采用基于移动的所有权 + 编译器插入清理（RAII）管理内
 - **移动转移所有权。** 绑定（`let b = a`）、按值传递所属值（具名调用与方法调用实参）、
   对所属值赋值，以及返回它，都会*移动*它。移动后源变量失效，再次读取是编译错误，
   诊断码为稳定的 `use-after-move`（同样出现在 `sgc --error-format json` 与 `sglsp`）。
+- **活动借用阻止所有权转移。** 所属根变量仍被借用时，按值移动会以稳定诊断码
+  `cannot-move-borrowed` 被拒绝。当前检查器按词法作用域工作，因此有意保持保守。
 - **drop 由编译器调用，而非用户调用。** 兼容用的释放方法（`.drop()` / `.free()` / `.close()`）
   会立即执行清理并把值标记为已移动，从而抑制后续的自动 drop，不会二次释放。
 

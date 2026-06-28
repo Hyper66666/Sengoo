@@ -97,6 +97,17 @@ pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
     }
 
     let message = format!("borrow check failed:\n- {}", lines.join("\n- "));
+    if let Some(move_span) = errors.iter().find_map(|err| match err {
+        BorrowError::CannotMoveBorrowed { move_span, .. } => Some(*move_span),
+        _ => None,
+    }) {
+        return TypeckError::diagnostic(
+            "cannot-move-borrowed",
+            message,
+            move_span.0 as u32,
+            move_span.1 as u32,
+        );
+    }
     if let Some(use_span) = errors.iter().find_map(|err| match err {
         BorrowError::UseAfterMove { use_span, .. }
         | BorrowError::UseAfterPartialMove { use_span, .. } => Some(*use_span),
