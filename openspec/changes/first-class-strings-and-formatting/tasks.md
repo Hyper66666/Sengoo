@@ -33,8 +33,11 @@
 
 - [ ] 3.1 Add `Formatter`, `Display`, and `Debug` (coordinate with
   `generics-and-trait-system` core traits).
-- [ ] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
+- [~] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
   width, precision, and `{{`/`}}`.
+  - Partial: `{}`, scalar `{:?}`, and `{{`/`}}` parse and lower through the
+    owned-`String` builder. Width, precision, positional arguments, and
+    structure-aware Debug output remain open.
 - [ ] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.
 - [ ] 3.4 `print`/`println`/`eprintln` accepting any `Display`; keep `print(<i64>)`

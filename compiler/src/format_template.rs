@@ -1,8 +1,9 @@
 //! Shared parser for the `format`/f-string mini-language template.
 //!
-//! This round supports the empty placeholder `{}` (auto-positional `Display`)
-//! plus the `{{`/`}}` brace escapes. Non-empty format specs such as `{:?}` or
-//! `{:>8}` are intentionally rejected here and tracked as a follow-up.
+//! This round supports the empty placeholder `{}` (auto-positional `Display`),
+//! the scalar `{:?}` Debug placeholder, plus the `{{`/`}}` brace escapes. Richer
+//! specs such as `{:>8}` are intentionally rejected here and tracked as a
+//! follow-up.
 
 /// A single piece of a parsed format template.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,7 +11,13 @@ pub enum FormatSegment {
     /// Literal text to emit verbatim (brace escapes already resolved).
     Literal(String),
     /// An `{}` placeholder consuming the next positional argument.
-    Placeholder,
+    Placeholder(FormatStyle),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatStyle {
+    Display,
+    Debug,
 }
 
 /// Why a format template failed to parse.
@@ -63,13 +70,17 @@ pub fn parse_format_template(template: &str) -> Result<Vec<FormatSegment>, Forma
                 if !closed {
                     return Err(FormatTemplateError::UnmatchedBrace);
                 }
-                if !body.is_empty() {
+                let style = if body.is_empty() {
+                    FormatStyle::Display
+                } else if body == ":?" {
+                    FormatStyle::Debug
+                } else {
                     return Err(FormatTemplateError::UnsupportedSpec(body));
-                }
+                };
                 if !literal.is_empty() {
                     segments.push(FormatSegment::Literal(std::mem::take(&mut literal)));
                 }
-                segments.push(FormatSegment::Placeholder);
+                segments.push(FormatSegment::Placeholder(style));
             }
             '}' => {
                 if chars.peek() == Some(&'}') {
@@ -93,7 +104,7 @@ pub fn parse_format_template(template: &str) -> Result<Vec<FormatSegment>, Forma
 pub fn placeholder_count(segments: &[FormatSegment]) -> usize {
     segments
         .iter()
-        .filter(|segment| matches!(segment, FormatSegment::Placeholder))
+        .filter(|segment| matches!(segment, FormatSegment::Placeholder(_)))
         .count()
 }
 
@@ -115,9 +126,9 @@ mod tests {
             parse_format_template("a={} b={}").unwrap(),
             vec![
                 FormatSegment::Literal("a=".to_string()),
-                FormatSegment::Placeholder,
+                FormatSegment::Placeholder(FormatStyle::Display),
                 FormatSegment::Literal(" b=".to_string()),
-                FormatSegment::Placeholder,
+                FormatSegment::Placeholder(FormatStyle::Display),
             ]
         );
     }
@@ -128,7 +139,7 @@ mod tests {
             parse_format_template("{{{}}}").unwrap(),
             vec![
                 FormatSegment::Literal("{".to_string()),
-                FormatSegment::Placeholder,
+                FormatSegment::Placeholder(FormatStyle::Display),
                 FormatSegment::Literal("}".to_string()),
             ]
         );
@@ -147,10 +158,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_debug_placeholder() {
+        assert_eq!(
+            parse_format_template("{:?}").unwrap(),
+            vec![FormatSegment::Placeholder(FormatStyle::Debug)]
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_spec() {
         assert_eq!(
-            parse_format_template("{:?}"),
-            Err(FormatTemplateError::UnsupportedSpec(":?".to_string()))
+            parse_format_template("{:>8}"),
+            Err(FormatTemplateError::UnsupportedSpec(":>8".to_string()))
         );
     }
 

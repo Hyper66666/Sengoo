@@ -1,9 +1,9 @@
 //! Tests for the `format(template, args...)` mini-language (G2b core).
 //!
 //! `format` parses a string-literal template at compile time, validates that
-//! its `{}` placeholders match the argument count, and lowers to owned-`String`
-//! runtime building. Only `{}` and the `{{`/`}}` escapes are supported in this
-//! round; richer specs (`{:?}`, width/precision/positional) are deferred.
+//! its `{}` / `{:?}` placeholders match the argument count, and lowers to
+//! owned-`String` runtime building. Width/precision/positional specs remain
+//! deferred.
 
 use crate::compile_to_ir;
 use std::fs;
@@ -162,11 +162,29 @@ def main() -> i64 {
 }
 
 #[test]
-fn format_rejects_unsupported_spec() {
+fn format_debug_placeholder_renders_scalar_arguments() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let rendered = format("value={:?}", 1);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a Debug scalar placeholder should compile");
+
+    assert!(
+        ir.contains("@sengoo_string_push_i64_status"),
+        "expected the debug placeholder to render its i64 arg, got:\n{ir}"
+    );
+}
+
+#[test]
+fn format_rejects_unsupported_width_spec() {
     let err = compile_failure(
         r#"
 def main() -> i64 {
-    let rendered = format("{:?}", 1);
+    let rendered = format("{:>8}", 1);
     rendered.len()
 }
 "#,
