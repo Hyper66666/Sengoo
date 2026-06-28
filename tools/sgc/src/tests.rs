@@ -5433,6 +5433,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_format_precision_renders_f64_output() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "format-precision-f64",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = format("{:.2}", 3.14159);
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "3.14");
+}
+
+#[test]
 fn stdlib_string_push_char_appends_unicode_scalar() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-push-char",

@@ -431,6 +431,29 @@ long long sengoo_string_push_char_status(long long handle, int codepoint) {
     return sengoo_owned_string_append_bytes(handle, (const char*)buf, n);
 }
 
+long long sengoo_string_push_f64_precision_status(
+    long long handle,
+    double value,
+    long long precision) {
+    if (precision < 0 || precision > 15) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    char format[16];
+    int format_written = snprintf(format, sizeof(format), "%%.%lldf", precision);
+    if (format_written < 0 || (size_t)format_written >= sizeof(format)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    char buffer[512];
+    int written = snprintf(buffer, sizeof(buffer), format, value);
+    if (written < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if ((size_t)written >= sizeof(buffer)) {
+        return -(long long)SENGOO_STATUS_BUFFER_TOO_SMALL;
+    }
+    return sengoo_owned_string_append_bytes(handle, buffer, (size_t)written);
+}
+
 static long long sengoo_owned_string_append_repeated_byte(
     long long handle,
     char byte,

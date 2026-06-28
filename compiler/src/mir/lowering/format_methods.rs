@@ -54,9 +54,15 @@ impl<'a> LoweringContext<'a> {
                                 &value_ty,
                                 placeholder.align,
                                 placeholder.width.unwrap_or(0),
+                                placeholder.precision,
                             );
                         } else {
-                            self.emit_push_format_value(handle, value, &value_ty);
+                            self.emit_push_format_value(
+                                handle,
+                                value,
+                                &value_ty,
+                                placeholder.precision,
+                            );
                         }
                     }
                     if placeholder.position.is_none() {
@@ -136,7 +142,19 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Render a single placeholder argument into the string being built.
-    fn emit_push_format_value(&mut self, handle: Local, value: Local, value_ty: &MIRType) {
+    fn emit_push_format_value(
+        &mut self,
+        handle: Local,
+        value: Local,
+        value_ty: &MIRType,
+        precision: Option<usize>,
+    ) {
+        if precision.is_some() && !matches!(value_ty, MIRType::Float(_)) {
+            self.errors.push(
+                "format: precision is currently supported only for f64 arguments".to_string(),
+            );
+            return;
+        }
         if let MIRType::Struct { name, .. } = value_ty {
             let name = name.clone();
             if name == "String" {
@@ -151,6 +169,13 @@ impl<'a> LoweringContext<'a> {
             }
         }
         match value_ty {
+            MIRType::Float(_) => {
+                let precision_local = self.emit_i64_const(precision.unwrap_or(6) as i64);
+                self.emit_call_i64(
+                    "sengoo_string_push_f64_precision_status",
+                    vec![handle, value, precision_local],
+                );
+            }
             MIRType::Int(_) => {
                 self.emit_call_i64("sengoo_string_push_i64_status", vec![handle, value]);
             }
@@ -174,9 +199,10 @@ impl<'a> LoweringContext<'a> {
         value_ty: &MIRType,
         align: FormatAlign,
         width: usize,
+        precision: Option<usize>,
     ) {
         let temp_handle = self.emit_new_string_handle();
-        self.emit_push_format_value(temp_handle, value, value_ty);
+        self.emit_push_format_value(temp_handle, value, value_ty, precision);
         let align_code = match align {
             FormatAlign::None | FormatAlign::Right => 1,
         };

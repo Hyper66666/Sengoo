@@ -2,7 +2,7 @@
 //!
 //! `format` parses a string-literal template at compile time, validates that
 //! its `{}` / `{:?}` placeholders match the argument count, and lowers to
-//! owned-`String` runtime building. Precision remains deferred.
+//! owned-`String` runtime building.
 
 use crate::compile_to_ir;
 use std::fs;
@@ -211,6 +211,24 @@ def main() -> i64 {
     assert!(
         ir.contains("@sengoo_string_push_padded_string_status"),
         "expected width formatting to route through the padded append helper, got:\n{ir}"
+    );
+}
+
+#[test]
+fn format_precision_placeholder_renders_f64_argument() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let rendered = format("{:.2}", 3.14159);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with f64 precision should compile");
+
+    assert!(
+        ir.contains("@sengoo_string_push_f64_precision_status"),
+        "expected precision formatting to route through the f64 precision helper, got:\n{ir}"
     );
 }
 

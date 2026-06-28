@@ -29,6 +29,16 @@ def main() -> i64 {
         return 1;
     }
 
+    let rounded = format("{:.2}", 3.14159);
+    if rounded.len() != 4 {
+        return 1;
+    }
+
+    let padded_round = format("{:>6.2}", 3.14159);
+    if padded_round.len() != 6 {
+        return 1;
+    }
+
     let n = 3;
     let interpolated = f"n={n}";
     if interpolated.len() != 3 {

@@ -278,6 +278,13 @@ Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
 deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
 locale collation remain future work.
 
+`format` builds an owned `String` from a literal template. The supported subset
+includes `{}`, scalar `{:?}`, positional placeholders such as `{1}`, right
+alignment such as `{:>8}`, f64 fixed precision such as `{:.2}` / `{:>8.2}`, and
+f-string expansion through the same lowering path. Structure-aware Debug,
+general Formatter customization, and source-map-perfect f-string diagnostics
+remain future work.
+
 ## 2.11 Opt-in shared ownership with `Rc`
 
 `Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
