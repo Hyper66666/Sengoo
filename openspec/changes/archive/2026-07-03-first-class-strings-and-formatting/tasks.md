@@ -7,15 +7,18 @@
     owned `String` move/use-after-move tests cover the stable diagnostic.
     Verified by `examples/stdlib/20_owned_string.sg` and the automatic-memory
     management drop suites.
-- [~] 1.2 Make `&str` a first-class borrowed view with lifetime tracking.
-  - Partial: string literals type-check as `&str`, stdlib APIs accept borrowed
-    `&str`, and owned `String.as_str() -> &str` now lowers through
-    `sengoo_string_as_str_ptr`. The borrow checker treats `as_str()` as an
-    immutable borrow of the owner, so moving the `String` while the view is live
-    reports `cannot-move-borrowed`. Returning an `as_str()`-derived view through
-    explicit `return view` or a function/method tail expression now fails with
-    stable `borrow-escapes-scope`. Full lifetime escape analysis for arbitrary
-    stored borrowed views and aggregate-contained references remains open.
+- [x] 1.2 Make `&str` a first-class borrowed view with lifetime tracking.
+  - Completed for the current borrowed-view surface: string literals type-check
+    as `&str`, stdlib APIs accept borrowed `&str`, and owned
+    `String.as_str() -> &str` lowers through `sengoo_string_as_str_ptr`. The
+    borrow checker treats `as_str()` as an immutable borrow of the owner, so
+    moving the `String` while the view is live reports `cannot-move-borrowed`.
+    Escape analysis now rejects `as_str()`-derived views leaving the owner
+    scope through explicit `return`, function/method tail expressions,
+    tuple/array aggregates, struct-literal fields, `if`/`else` branch tails,
+    nested blocks, and `match` arm tails, all with stable
+    `borrow-escapes-scope`. Flow-sensitive tracking through arbitrary
+    reassignment chains remains a follow-up outside this change's scope.
 - [x] 1.3 Add `char` (Unicode scalar) type.
   - Completed for the current scalar surface: char literals type-check as
     `char`, lower to `i32` in MIR/LLVM/FFI signatures, and `String.push_char`
@@ -60,14 +63,15 @@
     exposes `len`/`is_empty`, and `String.split(delimiter)` returns a copied
     snapshot iterator of owned `String` segments. Empty delimiters conservatively
     produce an empty iterator until char-splitting semantics are specified.
-- [~] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
-  - Partial: owned `String.bytes()` and `String.chars()` now create copied
-    snapshot iterators with inherent `next() -> Option<i64>` and explicit
-    `free()`. `bytes()` yields byte values and `chars()` yields Unicode scalar
-    codepoints; both also satisfy the current generic `Iterator<Item = i64>`
-    bound surface. `String.split()` uses the same inherent iterator pattern for
-    owned segments. Source-level `Iterator<Item = char>` and
-    `StringSplitIter<Item = String>` integration remain open.
+- [x] 2.4 `chars()` / `bytes()` iterators via the `Iterator` trait.
+  - Completed for the current iterator surface: `String.chars()` yields
+    source-level `char` via `next() -> Option<char>` (with `next_codepoint()`
+    kept for i64 codepoint access), `String.bytes()` yields byte values, and
+    `String.split()` yields owned `String` segments. All three iterators
+    declare their `Iterator` impls with `type Item = char` / `i64` / `String`,
+    and generic bounds that project the associated item
+    (`fn select<I: Iterator>(iter: I, value: I::Item) -> I::Item`) now resolve
+    through MIR specialization for all three item types.
 - [x] 2.5 Byte-boundary-checked slicing: infallible `s[a..b]` plus fallible
   `s.get(a..b)`.
   - Completed for the current exclusive range surface: `str_get(value, start,
@@ -86,16 +90,19 @@
     and `Debug` resolve as compiler-known names, `Display::to_string` is the
     contract used by `print`/`println`/`eprintln` and `{}` formatting, and
     `Debug` is available to builtin derive plus `{:?}` formatting.
-- [~] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
+- [x] 3.2 Implement `format(fmt, args...)` parsing `{}`, `{:?}`, positional,
   width, precision, and `{{`/`}}`.
-  - Partial: `{}`, scalar `{:?}`, positional `{0}` / `{0:?}`, right-aligned
-    width `{:>N}`, f64 fixed precision `{:.N}` / `{:>W.N}`, and `{{`/`}}`
-    parse and lower through the owned-`String` builder. Struct `{:?}` renders
-    fields in declaration order unless a user `Debug.to_string()` is present,
-    in which case that custom Debug body is called. Enum `{:?}` likewise calls
-    a user `Debug.to_string()` when present, otherwise derived enum Debug
-    renders unit and tuple-payload variants. The general `Formatter` object
-    protocol remains open.
+  - Completed for the current format mini-language: `{}`, scalar `{:?}`,
+    positional `{0}` / `{0:?}`, right-aligned width `{:>N}`, f64 fixed
+    precision `{:.N}` / `{:>W.N}`, and `{{`/`}}` parse and lower through the
+    owned-`String` builder. Struct/enum `{:?}` call a user `Debug.to_string()`
+    when present, otherwise derived Debug renders fields/variants. The
+    `Formatter` object protocol is now supported: `std::string` defines
+    `Formatter` with `write_str`/`write_char`/`write_i64`/`write_bool`/
+    `write_f64`/`write_string`/`finish`, and `impl Display/Debug for T` may
+    define `def fmt(&self, f: &mut Formatter)` instead of `to_string` — the
+    compiler synthesizes a `to_string` that drives `fmt` through a `Formatter`
+    buffer, so `{}`/`{:?}`/`print` dispatch keeps working unchanged.
 - [x] 3.3 Compile-time validation of format literals (arity + spec) with a stable
   diagnostic.
   - Completed for the current format mini-language: invalid templates and
@@ -152,8 +159,7 @@
   - Completed for the current scalar-codepoint surface: `String.chars()`
     decodes validated UTF-8 into scalar codepoints, construction paths reject
     invalid UTF-8, and the iterator participates in generic bounds as
-    `Iterator<Item = i64>` codepoints. Returning source-level `char` through a
-    generic iterator remains tracked by 2.4.
+    `Iterator<Item = char>` yielding source-level `char` (see 2.4).
 - [x] 5.3 Document ASCII-only case ops and the Unicode follow-up in
   `docs/language-features.md`.
   - Documented in the new "Text and Strings" section.

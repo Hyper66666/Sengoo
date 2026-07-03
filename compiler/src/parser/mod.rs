@@ -6,6 +6,7 @@ mod attribute_expander;
 mod decl;
 mod derive_expander;
 mod expr;
+mod formatter_protocol;
 mod fstring;
 mod fstring_scan;
 mod macro_expander;
@@ -65,10 +66,11 @@ impl<'source> Parser<'source> {
             attribute_expander::process_surface_attributes(macro_expanded.as_ref())?;
         let expanded_source = derive_expander::expand_derive_macros(attr_filtered.as_ref())?;
         let mut parser = Parser::new(expanded_source.as_ref());
-        let program = parser.parse_program()?;
+        let mut program = parser.parse_program()?;
         if !parser.errors.is_empty() {
             return Err(CompileError::ParseError(parser.errors.remove(0)));
         }
+        formatter_protocol::synthesize_formatter_to_string(&mut program)?;
         Ok(program)
     }
 

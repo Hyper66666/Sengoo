@@ -324,13 +324,32 @@ def main() -> i64 {
     let chars_text = string_from_str("é").unwrap_or(String { handle: 0 });
     let mut bytes = bytes_text.bytes();
     let mut chars = chars_text.chars();
-    bytes.next().unwrap_or(0) + chars.next().unwrap_or(0)
+    let first_char = chars.next().unwrap_or('\0');
+    let mut round_trip = string_new();
+    round_trip.push_char(first_char);
+    bytes.next().unwrap_or(0) + round_trip.len()
 }
 "#,
     );
 
     assert!(ir.contains("sengoo_string_bytes_iter_new"));
     assert!(ir.contains("sengoo_string_chars_iter_new"));
+    assert!(ir.contains("sengoo_string_chars_iter_next_char"));
+}
+
+#[test]
+fn string_chars_iterator_still_exposes_codepoint_next() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("é").unwrap_or(String { handle: 0 });
+    let mut chars = text.chars();
+    chars.next_codepoint().unwrap_or(0)
+}
+"#,
+    );
+
     assert!(ir.contains("sengoo_string_chars_iter_next_or_default"));
 }
 
@@ -366,9 +385,13 @@ def main() -> i64 {
     let text = string_from_str("az").value;
     let bytes = text.bytes();
     let chars = text.chars();
+    let parts = text.split(",");
     let b = select_item(bytes, 65);
-    let c = select_item(chars, 65);
-    b + c
+    let c = select_item(chars, 'A');
+    let s = select_item(parts, string_new());
+    let mut round_trip = string_new();
+    round_trip.push_char(c);
+    b + round_trip.len() + s.len()
 }
 "#,
     );
@@ -379,7 +402,11 @@ def main() -> i64 {
     );
     assert!(
         ir.contains("select_item_StringCharsIter"),
-        "expected StringCharsIter to satisfy Iterator<Item = i64 codepoint>, got:\n{ir}"
+        "expected StringCharsIter to satisfy Iterator<Item = char>, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("select_item_StringSplitIter"),
+        "expected StringSplitIter to satisfy Iterator<Item = String>, got:\n{ir}"
     );
 }
 

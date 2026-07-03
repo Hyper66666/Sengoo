@@ -127,6 +127,79 @@ def main() -> i64 {
 }
 
 #[test]
+fn display_fmt_formatter_protocol_synthesizes_to_string() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Badge {
+    id: i64,
+}
+
+impl Display for Badge {
+    def fmt(&self, f: &mut Formatter) {
+        f.write_str("Badge#");
+        f.write_i64(self.id);
+    }
+}
+
+def main() -> i64 {
+    let b = Badge { id: 7 };
+    let rendered = format("badge={}", b);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a Formatter-protocol Display arg should compile");
+
+    assert!(
+        ir.contains("@Badge_Display_to_string"),
+        "expected a synthesized to_string to be materialized, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("@Badge_Display_fmt"),
+        "expected the user fmt body to be materialized, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("@sengoo_string_push_i64_status"),
+        "expected the fmt body to write through the Formatter buffer, got:\n{ir}"
+    );
+}
+
+#[test]
+fn debug_fmt_formatter_protocol_synthesizes_to_string() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Badge {
+    id: i64,
+}
+
+impl Debug for Badge {
+    def fmt(&self, f: &mut Formatter) {
+        f.write_str("Badge { id: ");
+        f.write_i64(self.id);
+        f.write_char('}');
+    }
+}
+
+def main() -> i64 {
+    let b = Badge { id: 7 };
+    let rendered = format("badge={:?}", b);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a Formatter-protocol Debug arg should compile");
+
+    assert!(
+        ir.contains("@Badge_Debug_to_string"),
+        "expected a synthesized Debug to_string to be materialized, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("@Badge_Debug_fmt"),
+        "expected the user Debug fmt body to be materialized, got:\n{ir}"
+    );
+}
+
+#[test]
 fn format_brace_escapes_emit_literal_braces() {
     let ir = compile_with_stdlib(
         r#"

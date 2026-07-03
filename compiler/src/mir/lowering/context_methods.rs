@@ -186,6 +186,19 @@ impl<'a> LoweringContext<'a> {
             hir_subst.insert(type_param.name.clone(), hir_ty);
         }
 
+        // Associated-type projections (`I::Item`) are lowered to HIR named types
+        // keyed by their full path; bind them from the actual argument types so
+        // the specialized body sees the concrete item type.
+        for (name, mir_ty) in &mir_subst {
+            if !name.contains("::") || hir_subst.contains_key(name) {
+                continue;
+            }
+            let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(mir_ty) else {
+                continue;
+            };
+            hir_subst.insert(name.clone(), hir_ty);
+        }
+
         for ty in hir_subst.values() {
             if matches!(ty.kind, hir::HIRTypeKind::Named { .. }) {
                 self.concrete_type_registry

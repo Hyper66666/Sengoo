@@ -111,9 +111,14 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::BitAnd => {
                     self.advance();
+                    let op = if self.consume(TokenKind::MutKw).is_some() {
+                        UnOp::RefMut
+                    } else {
+                        UnOp::Ref
+                    };
                     let operand = self.parse_simple_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
-                        op: UnOp::Ref,
+                        op,
                         operand: Box::new(operand),
                     }
                 }
@@ -273,9 +278,14 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::BitAnd => {
                     self.advance();
+                    let op = if self.consume(TokenKind::MutKw).is_some() {
+                        UnOp::RefMut
+                    } else {
+                        UnOp::Ref
+                    };
                     let operand = self.parse_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
-                        op: UnOp::Ref,
+                        op,
                         operand: Box::new(operand),
                     }
                 }

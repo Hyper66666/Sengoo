@@ -13,10 +13,10 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
         ast::TypeKind::Path(path) => {
             let name = path
                 .as_simple()
-                .map(|ident| ident.name.as_str())
-                .unwrap_or("");
+                .map(|ident| ident.name.clone())
+                .unwrap_or_else(|| path_to_string(path));
 
-            match name {
+            match name.as_str() {
                 "bool" => HIRType::bool(),
                 "char" => HIRType::char(),
                 "str" => HIRType::str(),
@@ -35,7 +35,7 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
                 "f32" => HIRType::float(FloatKind::F32),
                 "f64" => HIRType::float(FloatKind::F64),
                 "()" | "unit" => HIRType::unit(),
-                _ => HIRType::named(name.to_string(), vec![]),
+                _ => HIRType::named(name, vec![]),
             }
         }
         ast::TypeKind::PathWithArgs { path, args } => {

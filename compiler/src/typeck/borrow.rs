@@ -388,6 +388,32 @@ impl BorrowChecker {
     fn check_borrow_escape_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Paren(inner) => self.check_borrow_escape_expr(inner),
+            ExprKind::Tuple(elems) | ExprKind::Array(elems) => {
+                for elem in elems {
+                    self.check_borrow_escape_expr(elem);
+                }
+            }
+            ExprKind::Struct { fields, .. } => {
+                for field in fields {
+                    self.check_borrow_escape_expr(&field.value);
+                }
+            }
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_borrow_escape_block_tail(then_branch);
+                if let Some(else_expr) = else_branch {
+                    self.check_borrow_escape_expr(else_expr);
+                }
+            }
+            ExprKind::Block(block) => self.check_borrow_escape_block_tail(block),
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    self.check_borrow_escape_expr(&arm.body);
+                }
+            }
             ExprKind::MethodCall {
                 receiver, method, ..
             } if matches!(method.name.as_str(), "borrow" | "as_str") => {
@@ -404,6 +430,7 @@ impl BorrowChecker {
                 let Some(path) = Self::expr_move_path(expr) else {
                     return;
                 };
+                let path = MovePath::root(path.root.clone());
                 if let Some(active_borrow) = self.borrows.get(&path).and_then(|borrows| {
                     borrows
                         .iter()
@@ -415,6 +442,18 @@ impl BorrowChecker {
                         escape_span: (expr.span.lo as usize, expr.span.hi as usize),
                     });
                 }
+            }
+        }
+    }
+
+    fn check_borrow_escape_block_tail(&mut self, block: &Block) {
+        if let Some(Stmt {
+            kind: StmtKind::Expr(expr),
+            ..
+        }) = block.stmts.last()
+        {
+            if !matches!(expr.kind, ExprKind::Return(_)) {
+                self.check_borrow_escape_expr(expr);
             }
         }
     }
@@ -647,6 +686,17 @@ impl BorrowChecker {
                 self.track_borrows_in_expr(name, target);
                 self.track_borrows_in_expr(name, value);
             }
+            ExprKind::Tuple(elems) | ExprKind::Array(elems) => {
+                for elem in elems {
+                    self.track_borrows_in_expr(name, elem);
+                }
+            }
+            ExprKind::Struct { fields, .. } => {
+                for field in fields {
+                    self.track_borrows_in_expr(name, &field.value);
+                }
+            }
+            ExprKind::Paren(inner) => self.track_borrows_in_expr(name, inner),
             _ => {}
         }
     }

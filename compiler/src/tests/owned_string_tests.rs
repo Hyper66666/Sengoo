@@ -196,6 +196,64 @@ def leak() -> &str {
 }
 
 #[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_in_tuple() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak() -> (&str, i64) {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    (view, 1)
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_in_struct_literal() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Holder {
+    view: &str,
+}
+
+def leak() -> Holder {
+    let owner: String = string_from_str("borrowed").value;
+    return Holder { view: owner.as_str() };
+}
+"#,
+    );
+    assert!(
+        err.contains("escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_if_else_tail() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak(flag: bool) -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    if flag {
+        view
+    } else {
+        "fallback"
+    }
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_move_rejects_use_after_move() {
     let err = typecheck_fails_with_stdlib(
         r#"

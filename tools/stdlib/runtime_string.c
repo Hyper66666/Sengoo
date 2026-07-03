@@ -711,6 +711,19 @@ long long sengoo_string_chars_iter_next_or_default(long long iter_handle, long l
     return codepoint;
 }
 
+int sengoo_string_chars_iter_next_char(long long iter_handle, int fallback) {
+    SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
+    if (!iter || iter->offset >= iter->len) {
+        return fallback;
+    }
+    long long codepoint = (long long)(unsigned int)fallback;
+    if (!sengoo_utf8_decode_next(iter->data, iter->len, &iter->offset, &codepoint)) {
+        iter->offset = iter->len;
+        return fallback;
+    }
+    return (int)codepoint;
+}
+
 long long sengoo_string_iter_free_status(long long iter_handle) {
     SengooStringIter* iter = sengoo_string_iter_from_handle(iter_handle);
     if (!iter) {

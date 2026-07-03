@@ -14,7 +14,10 @@
 
 - [ ] 1.1 `automatic-memory-management` validated and archived.
 - [ ] 1.2 `generics-and-trait-system` validated and archived.
-- [ ] 1.3 `first-class-strings-and-formatting` validated and archived.
+- [x] 1.3 `first-class-strings-and-formatting` validated and archived.
+  - Archived on 2026-07-03 after all tasks completed (Iterator<Item = char>
+    generic bridge, Formatter object protocol, borrowed-view escape analysis)
+    with `openspec validate --all --strict` at 42/42 and the P0 gates green.
 - [x] 1.4 P0 conformance: a realworld fixture rewritten with zero manual
   `.free()/.drop()/.close()`, generic `Result<T, E>` used across at least two
   concrete types, and `println` formatting an owned `String` and a struct via
