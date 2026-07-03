@@ -51,9 +51,10 @@
 
 ## 3. MIR drop-glue insertion
 
-- [ ] 3.1 Add a MIR pass that inserts drop calls for owning locals at scope exit.
-  - Partial: top-level stdlib `String` let bindings now get MIR-level
-    `String_Drop_drop` calls at function exits; straight-line single-exit functions
+- [x] 3.1 Add a MIR pass that inserts drop calls for owning locals at scope exit.
+  - Completed for the current owning-value surface: top-level stdlib `String`
+    let bindings get MIR-level `String_Drop_drop` calls at function exits;
+    straight-line single-exit functions
     use the no-flag fast path only when every dropped binding initializes in
     the entry block. Conditionally initialized bindings use runtime flags even
     when the function has one return. User types with `impl Drop` now resolve
@@ -63,7 +64,8 @@
     their own bindings at the scope boundary instead of delaying cleanup until
     function return. Tail-expression moves now propagate through `if`/block
     expressions so generic `Result<T, E>::unwrap_or` does not drop an owned
-    selected value before returning it.
+    selected value before returning it. General recoverable unwinding remains
+    out of scope until Sengoo has recoverable panic semantics.
 - [x] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Completed for the current MIR drop-glue surface: `?` propagation exits use
@@ -79,47 +81,73 @@
     lexical scopes emit cleanup before normal exit, explicit `return`, `?`
     propagation, try-block propagation, `break`, and `continue`. Partial-move
     field-state clearing and field reinitialization are covered.
-- [ ] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
-- [ ] 3.4 Codegen the drop calls in the LLVM-text backend and the Cranelift path.
-  - Partial: the LLVM-text backend now receives unit-typed auto-drop calls for
-    user `impl Drop` functions, avoiding bogus boolean return calls. Cranelift
-    coverage and a true `&mut self` receiver ABI audit remain open.
-- [ ] 3.5 IR/codegen tests asserting drop count and order (extend
+- [x] 3.3 Cover the abort path (best-effort release, no re-entrant unwinding).
+  - Completed: MIR drop glue treats `Unreachable` contract-failure aborts as
+    cleanup exits alongside `Return`, emits initialized-flag-guarded drop
+    chains, and preserves the final `Unreachable` terminator. Covered by
+    `drop_flags_guard_contract_abort_path_for_initialized_binding`.
+- [x] 3.4 Codegen the drop calls in the supported LLVM-text backends.
+  - Completed: the LLVM-text backend now receives unit-typed auto-drop calls
+    for user `impl Drop` functions, avoiding bogus boolean return calls. The
+    `JITCodegen` LLVM-text path has matching coverage for the same concrete
+    user Drop call ABI. The separate `sgc` Cranelift fast-JIT is not a general
+    MIR/drop-glue backend in this change; it evaluates a constant-expression
+    subset before emitting a trivial Cranelift `main`, and
+    `cranelift_fast_jit_rejects_non_constant_runtime_calls` pins that boundary.
+    A future Cranelift MIR backend must add its own drop-glue conformance lane.
+- [x] 3.5 IR/codegen tests asserting drop count and order (extend
   `codegen_*`/`struct_codegen` test lanes).
-  - Partial: `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
+  - Completed for the supported LLVM-text/native path:
+    `compiler/src/tests/drop_flag_tests.rs` covers the MIR shape for
     straight-line drop insertion, `?` early-return flags, reverse drop order,
-    conditional-init flags, tail-return moves, named-call/method-argument moves,
-    assignment moves, explicit `return` exits, explicit drop receivers, and
-    moved binding exclusion. It now also covers user `impl Drop` live locals,
-    by-value parameters, non-recursive `Drop::drop` receivers, and LLVM-text
-    unit-return codegen for user auto-drop calls. Nested block/branch/loop/try
+    conditional-init flags, tail-return moves, named-call/method-argument
+    moves, assignment moves, explicit `return` exits, explicit drop receivers,
+    and moved binding exclusion. It now also covers user `impl Drop` live
+    locals, by-value parameters, non-recursive `Drop::drop` receivers, and
+    LLVM-text unit-return codegen for user auto-drop calls in both LLVM-text
+    codegen and the `JITCodegen` text path. Nested block/branch/loop/try
     tests assert cleanup occurs in the exiting CFG block before control leaves
-    the lexical scope. Composite owning-field tests now cover reverse field
+    the lexical scope, and `for_scope_drops_before_break` covers the distinct
+    `for` lowering path. Composite owning-field tests now cover reverse field
     drop order, partial-move skip/drop behavior, field moves through calls and
     returns, and field reinitialization restoring scope-exit drop.
+    Contract abort cleanup is covered by a runtime-contract-checked
+    postcondition-failure path that drops initialized owned locals before the
+    final `Unreachable` terminator.
     `stdlib_owned_result_unwrap_or_moves_value_without_dropping_it_first`
     covers the generic Result branch-move regression that previously freed
     returned `Buffer`/`JsonDoc` handles before realworld code could use them.
+    Native `sgc` runtime smoke coverage proves stdlib owning handles and
+    generic `Rc<T>` payload resources return to their live-handle baselines
+    after scope exit.
 
 ## 4. Runtime resource migration
 
-- [ ] 4.1 Make C free functions idempotent in `tools/stdlib/runtime*.c`
+- [x] 4.1 Make C free functions idempotent in `tools/stdlib/runtime*.c`
   (`Buffer`, collections, `runtime_json`, process, net).
-  - Partial: String and Buffer generation-slot releases now return success on
+  - Completed: String and Buffer generation-slot releases return success on
     repeated release of the same live-generation handle; JsonDoc and process
     command/output/handle close paths now keep/recognize a closed shell or slot
     so repeated close returns success instead of double-freeing. Covered by
     `tools/sgc/src/tests.rs::stdlib_runtime_release_functions_are_idempotent_for_core_handles`.
-    Pointer-only Vec/HashMap/text collection handles and net fallback handles
-    still need either generation tables or an explicit "not a real handle"
-    carve-out before this can be marked complete.
+    Vec/HashMap/text collection values and iterators now use a shared
+    generation-slot opaque-handle table: release frees the payload/control
+    block, stale handles no longer resolve, repeated release is a no-op, and
+    the conformance test proves the opaque live-handle count returns to zero.
+    Rust native TCP/UDP/HTTP response/HTTP server/request/WebSocket ABI close
+    functions treat an already-absent handle as successfully closed while
+    preserving strict per-`NetRuntime` instance isolation. The C-only net
+    fallback follows the same close contract and is covered by
+    `stdlib_c_fallback_net_release_functions_are_idempotent`.
 - [x] 4.2 Add compiler-known `Drop` impls for `Buffer`, `Vec<T>`, `String`,
   `JsonDoc`, `ProcessHandle`, and net handles.
   - Completed for the current concrete stdlib handle surface: `Buffer`,
     `Vec<i64>`, `Vec<bool>`, `Vec<String>`, `JsonDoc`, `ProcessCommand`,
     `ProcessOutput`, `ProcessHandle`, `TcpStream`, `UdpSocket`, `HttpClient`,
     `HttpServer`, `HttpServerRequest`, and `WsClient` now implement `Drop`
-    and auto-release at local scope exits. `String` now has a real
+    and auto-release at local scope exits. The collection surface also covers
+    all concrete `HashMap<K,V>` combinations, `TextList`, the i64/bool/string
+    text maps, and their heap-backed iterator handles. `String` now has a real
     `impl Drop for String` while its old `String.drop()` compatibility method
     remains available. Legacy by-value handle APIs are temporarily treated as
     idempotent borrow-like wrappers for move checking, and callee parameters of
@@ -139,19 +167,43 @@
 
 ## 5. Opt-in shared ownership
 
-- [ ] 5.1 Add `Rc<T>` library type (non-atomic refcount, `clone`, `Drop`).
-  - Partial: `tools/stdlib/collections.sg` now exposes `Rc<T>` with the
+- [x] 5.1 Add `Rc<T>` library type (non-atomic refcount, `clone`, `Drop`).
+  - Completed for the current source surface: `tools/stdlib/collections.sg`
+    now exposes `Rc<T>` with the
     verified scalar constructors `rc_new_i64` and `rc_new_bool`; `Rc<i64>` and
     `Rc<bool>` support `clone`, `get`, `strong_count`, `is_unique`, and
     compiler-inserted `Drop` backed by a non-atomic C runtime refcount control
     block. `Rc<String>` now has a first owning-value slice: construction clones
     the source `String` into the Rc control block, `get` returns a cloned
-    `String`, and final refcount release drops the stored string handle. The
+    `String`, and final refcount release drops the stored string handle. Generic
+    `rc_new<T>(value)` now lowers through a compiler-only ABI that copies the
+    moved payload bytes into the Rc control block with the concrete MIR
+    size/alignment and records a compiler-generated typed drop thunk; final
+    release invokes that thunk exactly once, so user aggregates containing owned
+    fields release their nested resources after the last clone drops. The
     `RcValue` trait gives generic functions a bound-based construction path
-    for the verified payloads (`value.rc()` / `T: RcValue`) without pretending
-    arbitrary user-defined values have a runtime storage ABI yet. Covered by
-    compiler surface and native sgc runtime smoke tests. Arbitrary owning
-    `Rc<T>` value storage/deref remains open.
+    for the verified scalar/string payloads (`value.rc()` / `T: RcValue`) while
+    the direct `rc_new<T>` path covers arbitrary monomorphized owning payloads.
+    `rc_new<T>` also materializes temporary payload expressions into a hidden
+    stack slot before copying them into the control block, avoiding invalid
+    address-taking IR for expressions such as `rc_new(21)`.
+    `Rc<T>` now has one runtime representation (`handle` only, with no
+    duplicated `marker: T` payload), and generic `clone`/`Drop` impls work
+    through nested `&Rc<T>` calls and monomorphized MIR. `borrow() -> &T` now
+    has a compiler-known read slice for generic payloads: the runtime exposes
+    the payload address, MIR casts it to the concrete shared reference type, and
+    dereferencing that reference reads the shared value; borrowed aggregate
+    scalar fields also project through `(*rc.borrow()).field`. Moving an
+    `Rc<T>` owner while a borrow produced by `borrow()` is live is rejected with
+    the stable `cannot-move-borrowed` diagnostic. Covered by compiler surface
+    and native sgc runtime smoke tests, including
+    `stdlib_surface_runtime_rc_generic_payload_drops_once_after_last_release`,
+    `stdlib_surface_runtime_rc_generic_borrow_reads_shared_payload`,
+    `stdlib_surface_runtime_rc_generic_payload_accepts_temporary_value`, and
+    `stdlib_surface_runtime_rc_generic_borrow_reads_aggregate_field`, plus
+    `rc_owner_cannot_move_while_borrow_is_live`. Projecting owned fields by
+    value through a borrow remains a broader reference-field/lending limitation,
+    not an `Rc<T>` lifecycle blocker.
 - [x] 5.2 Document `Rc` cycle-leak behavior in `docs/language-features.md`.
   - Added the `Rc` shared-ownership section with the current verified API,
     move-only default reminder, and explicit cycle-leak behavior.
@@ -167,10 +219,15 @@
   - Native leak harness:
     `cargo test -p sgc stdlib_auto_drop_releases_all_generation_handles
     -- --nocapture` creates owned String/Buffer values in a callee and proves
-    both runtime live-handle counts return to zero after scope exit. This is a
+    their runtime live-handle counts return to zero after scope exit. The same
+    fixture now creates Vec/HashMap/TextList/string-map values and proves the
+    shared opaque collection-handle count also returns to zero. This is a
     deterministic ownership-resource check; allocator-level ASan/LSan coverage
-    remains a separate CI hardening follow-up because runtime slot-table
-    capacity is process-global by design.
+    remains a separate CI hardening follow-up because slot-table capacity is
+    process-global by design. `Rc<T>` generic payload storage is covered by a
+    native runtime smoke that shares a user aggregate containing `String` and
+    proves the string live-handle count returns to its baseline after the final
+    Rc release.
 - [x] 6.2 Update `examples/realworld/SUPPORT_MATRIX.md` memory-safety row.
   - Added the "Automatic drop / move ownership" support row with compiler,
     stdlib example, realworld, and scalar `Rc` proof points.

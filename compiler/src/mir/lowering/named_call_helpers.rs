@@ -5,6 +5,10 @@ pub(super) fn lower_named_call(
     name: &str,
     arg_locals: &[Local],
 ) -> Local {
+    if name == "rc_new" && arg_locals.len() == 1 {
+        return lower_rc_new_call(ctx, arg_locals[0]);
+    }
+
     let arg_locals = coerce_dyn_call_args(ctx, name, arg_locals);
     let arg_locals = arg_locals.as_slice();
     match ctx.resolve_named_call_target(name, arg_locals) {
@@ -24,6 +28,183 @@ pub(super) fn lower_named_call(
             emit_call_from_plan(ctx, invocation)
         }
     }
+}
+
+fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local {
+    let value_ty = ctx.get_local_type(value_local).clone();
+    let Some(value_hir_ty) = ctx.concrete_type_registry.hir_type_for_mir(&value_ty) else {
+        ctx.errors
+            .push("rc_new<T>: concrete payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let rc_hir_ty = HIRType::named("Rc".to_string(), vec![value_hir_ty]);
+    let rc_name = crate::type_naming::hir_type_instance_name(&rc_hir_ty);
+    ctx.concrete_type_registry
+        .register_instance(rc_name.clone(), rc_hir_ty);
+    let rc_ty = MIRType::Struct {
+        name: rc_name.clone(),
+        fields: vec![("handle".to_string(), MIR_I64)],
+    };
+
+    let drop_thunk = synthesize_rc_drop_thunk(ctx, &value_ty, &rc_name);
+    let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
+
+    let value_ptr = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ptr(Box::new(value_ty.clone())),
+    );
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: payload_source,
+    });
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let erased_value_ptr = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: erased_value_ptr,
+        value: value_ptr,
+        to: i8_ptr.clone(),
+    });
+
+    let (payload_size, _) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size_local,
+        value: MirConstant::Int(payload_size as i64),
+    });
+
+    let drop_fn_local = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Fn {
+            params: vec![i8_ptr.clone()],
+            ret: Box::new(MIR_UNIT),
+        },
+    );
+    ctx.push_inst(Instruction::Assign {
+        destination: drop_fn_local,
+        value: MirConstant::GlobalRef(drop_thunk),
+    });
+    let erased_drop_fn = ctx.add_local(None, LocalKind::Temp, i8_ptr);
+    ctx.push_inst(Instruction::Cast {
+        destination: erased_drop_fn,
+        value: drop_fn_local,
+        to: MIRType::Ptr(Box::new(MIRType::Int(8))),
+    });
+
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: "sengoo_rc_new_copy".to_string(),
+        args: vec![erased_value_ptr, size_local, erased_drop_fn],
+    });
+
+    let result = ctx.add_local(None, LocalKind::Temp, rc_ty.clone());
+    ctx.type_names.insert(result, rc_name);
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle],
+        ty: rc_ty,
+    });
+    ctx.mark_drop_local_moved(payload_source);
+    result
+}
+
+fn materialize_rc_payload_source(
+    ctx: &mut LoweringContext<'_>,
+    value_local: Local,
+    value_ty: &MIRType,
+) -> Local {
+    if ctx.mir_fn.locals[value_local.index()].0.kind == LocalKind::User {
+        return value_local;
+    }
+
+    let slot = ctx.add_local(None, LocalKind::User, value_ty.clone());
+    if let Some(type_name) = ctx.type_names.get(&value_local).cloned() {
+        ctx.type_names.insert(slot, type_name);
+    }
+    ctx.push_inst(Instruction::Store {
+        destination: slot,
+        value: value_local,
+    });
+    slot
+}
+
+fn synthesize_rc_drop_thunk(
+    ctx: &mut LoweringContext<'_>,
+    payload_ty: &MIRType,
+    rc_name: &str,
+) -> String {
+    let thunk_name = format!("__sengoo_rc_drop_{}", rc_name);
+    if ctx.is_known_function(&thunk_name) {
+        return thunk_name;
+    }
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let mut thunk = MirFunction::new(thunk_name.clone(), vec![i8_ptr.clone()], MIR_UNIT);
+    let start_block = thunk.start_block;
+    let mut thunk_ctx = LoweringContext::new(
+        &mut thunk,
+        ctx.lambda_counter,
+        ctx.known_functions_base,
+        ctx.function_sigs_base,
+        ctx.struct_defs,
+        ctx.concrete_type_registry.clone(),
+        ctx.options.clone(),
+        ctx.inherent_method_templates,
+        ctx.trait_method_templates,
+    );
+    thunk_ctx.known_functions_overlay = ctx.known_functions_overlay.clone();
+    thunk_ctx.function_sigs_overlay = ctx.function_sigs_overlay.clone();
+    thunk_ctx.insert_known_function(thunk_name.clone());
+    thunk_ctx.insert_function_sig(
+        thunk_name.clone(),
+        FunctionSig {
+            ret_type: MIR_UNIT,
+            param_count: 1,
+            env: Vec::new(),
+        },
+    );
+    thunk_ctx.set_current_block(start_block);
+
+    let data = Local::new(1, LocalKind::Param);
+    let typed_ptr = thunk_ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ptr(Box::new(payload_ty.clone())),
+    );
+    thunk_ctx.push_inst(Instruction::Cast {
+        destination: typed_ptr,
+        value: data,
+        to: MIRType::Ptr(Box::new(payload_ty.clone())),
+    });
+    let payload = thunk_ctx.add_local(None, LocalKind::Temp, payload_ty.clone());
+    thunk_ctx.push_inst(Instruction::Load {
+        destination: payload,
+        source: typed_ptr,
+    });
+    thunk_ctx.record_drop_binding_if_needed(payload);
+    thunk_ctx
+        .mir_fn
+        .basic_blocks
+        .get_mut(start_block)
+        .expect("rc drop thunk start block exists")
+        .set_terminator(Terminator::Return(None));
+    thunk_ctx.insert_drop_glue();
+
+    let generated = thunk_ctx.mir_fn.clone();
+    ctx.lambda_functions.push(generated);
+    ctx.insert_known_function(thunk_name.clone());
+    ctx.insert_function_sig(
+        thunk_name.clone(),
+        FunctionSig {
+            ret_type: MIR_UNIT,
+            param_count: 1,
+            env: Vec::new(),
+        },
+    );
+    thunk_name
 }
 
 /// Apply `&Concrete -> &dyn Trait` unsize coercions to arguments of `name` whose

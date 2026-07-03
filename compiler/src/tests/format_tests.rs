@@ -220,6 +220,174 @@ def main() -> i64 {
 }
 
 #[test]
+fn format_debug_placeholder_dispatches_custom_debug_impl() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Tag {
+    id: i64,
+}
+
+impl Debug for Tag {
+    def to_string(&self) -> String {
+        string_from_str("Tag(debug)").value
+    }
+}
+
+def main() -> i64 {
+    let tag = Tag { id: 7 };
+    let rendered = format("{:?}", tag);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a custom Debug impl should compile");
+
+    assert!(
+        ir.contains("@Tag_Debug_to_string"),
+        "expected format({{:?}}) to call the user Debug impl, got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("Tag { "),
+        "custom Debug must take precedence over structural fallback, got:\n{ir}"
+    );
+}
+
+#[test]
+fn debug_impl_without_to_string_is_rejected() {
+    let err = compile_failure(
+        r#"
+struct Bare {
+    id: i64,
+}
+
+impl Debug for Bare {
+}
+
+def main() -> i64 {
+    0
+}
+"#,
+    );
+
+    assert!(
+        err.contains("debug-contract"),
+        "expected the Debug contract diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn debug_impl_with_wrong_to_string_return_is_rejected() {
+    let err = compile_failure(
+        r#"
+struct Bad {
+    id: i64,
+}
+
+impl Debug for Bad {
+    def to_string(&self) -> i64 {
+        0
+    }
+}
+
+def main() -> i64 {
+    0
+}
+"#,
+    );
+
+    assert!(
+        err.contains("debug-contract"),
+        "expected the Debug contract diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn derive_debug_enum_renders_variant_name() {
+    let ir = compile_with_stdlib(
+        r#"
+#[derive(Debug)]
+enum Color {
+    Red,
+    Blue,
+}
+
+def main() -> i64 {
+    let color = Color::Blue;
+    let rendered = format("{:?}", color);
+    rendered.len()
+}
+"#,
+    )
+    .expect("derived Debug enum should compile");
+
+    assert!(
+        ir.contains("Color::Blue"),
+        "expected derived Debug enum formatting to append the variant name, got:\n{ir}"
+    );
+}
+
+#[test]
+fn derive_debug_enum_renders_tuple_payload() {
+    let ir = compile_with_stdlib(
+        r#"
+#[derive(Debug)]
+enum Maybe {
+    Empty,
+    Value(i64),
+}
+
+def main() -> i64 {
+    let value = Maybe::Value(42);
+    let rendered = format("{:?}", value);
+    rendered.len()
+}
+"#,
+    )
+    .expect("derived Debug payload enum should compile");
+
+    assert!(
+        ir.contains("Maybe::Value")
+            && ir.contains("c\"(\\00\"")
+            && ir.contains("@sengoo_string_push_i64_status"),
+        "expected derived Debug enum formatting to append payload fields, got:\n{ir}"
+    );
+}
+
+#[test]
+fn format_debug_placeholder_dispatches_custom_enum_debug_impl() {
+    let ir = compile_with_stdlib(
+        r#"
+enum Status {
+    Ready,
+    Done(i64),
+}
+
+impl Debug for Status {
+    def to_string(&self) -> String {
+        string_from_str("Status(debug)").value
+    }
+}
+
+def main() -> i64 {
+    let status = Status::Done(5);
+    let rendered = format("{:?}", status);
+    rendered.len()
+}
+"#,
+    )
+    .expect("format with a custom enum Debug impl should compile");
+
+    assert!(
+        ir.contains("@Status_Debug_to_string"),
+        "expected format({{:?}}) on an enum to call the user Debug impl, got:\n{ir}"
+    );
+    assert!(
+        !ir.contains("Status::Done"),
+        "custom enum Debug must take precedence over structural fallback, got:\n{ir}"
+    );
+}
+
+#[test]
 fn format_positional_placeholders_select_arguments_by_index() {
     let ir = compile_with_stdlib(
         r#"

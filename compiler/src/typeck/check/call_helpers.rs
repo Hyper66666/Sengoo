@@ -86,6 +86,10 @@ impl TypeChecker {
         receiver_ty: &Ty,
         method_name: &str,
     ) -> Option<FunctionTy> {
+        let receiver_ty = match &receiver_ty.kind {
+            TyKind::Ref(_, inner) => inner.as_ref(),
+            _ => receiver_ty,
+        };
         let lookup_key = self.generic_lookup_key(receiver_ty);
         let impls = self.impl_registry.get_inherent_impls(&lookup_key);
 
@@ -133,6 +137,9 @@ impl TypeChecker {
             TyKind::Adt { name, .. } => {
                 // The owned `String` prints its own text directly.
                 if name == "String" {
+                    return Ok(());
+                }
+                if self.enum_variants.contains_key(name) {
                     return Ok(());
                 }
                 // Any type with a user `Display` impl prints through that impl
@@ -807,11 +814,13 @@ impl TypeChecker {
             return Ok(self.env.unit_ty());
         }
 
-        let direct_fn_name = match &func.kind {
-            ExprKind::Ident(ident) => Some(ident.name.clone()),
-            ExprKind::Path(path) if path.segments.len() == 1 => Some(path.segments[0].name.clone()),
-            _ => None,
-        };
+        if let ExprKind::Path(path) = &func.kind {
+            if let Some(result) = self.check_inherent_associated_function(path, args)? {
+                return Ok(result);
+            }
+        }
+
+        let direct_fn_name = Self::direct_callable_name(func);
 
         let mut generic_ctx: Option<(String, GenericFunctionMeta, HashMap<TyVarId, TyVarId>)> =
             None;
@@ -878,13 +887,9 @@ impl TypeChecker {
 
             let resolved_ret = self.resolve_associated_projection(&self.infer.apply_subst(ret))?;
 
-            let is_async_call = match &func.kind {
-                ExprKind::Ident(ident) => self.async_functions.contains(&ident.name),
-                ExprKind::Path(path) if path.segments.len() == 1 => {
-                    self.async_functions.contains(&path.segments[0].name)
-                }
-                _ => false,
-            };
+            let is_async_call = direct_fn_name
+                .as_ref()
+                .is_some_and(|name| self.async_functions.contains(name));
             if is_async_call {
                 Ok(Ty::new(0, TyKind::Future(Box::new(resolved_ret))))
             } else {
@@ -895,6 +900,58 @@ impl TypeChecker {
                 name: "closure".to_string(),
             })
         }
+    }
+
+    fn direct_callable_name(func: &Expr) -> Option<String> {
+        match &func.kind {
+            ExprKind::Ident(ident) => Some(ident.name.clone()),
+            ExprKind::Path(path) if !path.segments.is_empty() => Some(
+                path.segments
+                    .iter()
+                    .map(|segment| segment.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_"),
+            ),
+            _ => None,
+        }
+    }
+
+    fn check_inherent_associated_function(
+        &mut self,
+        path: &crate::ast::Path,
+        args: &[Expr],
+    ) -> TyResult<Option<Ty>> {
+        if path.segments.len() != 2 {
+            return Ok(None);
+        }
+        let type_name = &path.segments[0].name;
+        let method_name = &path.segments[1].name;
+        let target_ty = self.env.new_ty(TyKind::Adt {
+            name: type_name.clone(),
+            args: Vec::new(),
+        });
+        let target_key = type_key(&target_ty);
+        let Some(method_ty) = self
+            .impl_registry
+            .lookup_inherent_method(&target_key, method_name)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        if method_ty.has_self {
+            return Ok(None);
+        }
+        if method_ty.param_types.len() != args.len() {
+            return Err(TypeckError::ArgumentCountMismatch {
+                expected: method_ty.param_types.len(),
+                found: args.len(),
+            });
+        }
+        for (expected, arg) in method_ty.param_types.iter().zip(args) {
+            let actual = self.check_expr(arg)?;
+            self.infer.unify(expected, &actual)?;
+        }
+        Ok(Some(self.infer.apply_subst(&method_ty.return_type)))
     }
 
     fn enforce_generic_function_constraints(
@@ -1050,6 +1107,37 @@ impl TypeChecker {
                 });
             }
             return Ok(self.env.int_ty(crate::typeck::ty::IntKind::I64));
+        }
+
+        if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "String")
+            && method_name == "as_str"
+        {
+            if !args.is_empty() {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 0,
+                    found: args.len(),
+                });
+            }
+            let str_ty = self.env.str_ty();
+            return Ok(self.env.ref_ty(false, str_ty));
+        }
+
+        if method_name == "borrow" && args.is_empty() {
+            let rc_payload = match &receiver_ty.kind {
+                TyKind::Adt { name, args } if name == "Rc" && args.len() == 1 => {
+                    Some(args[0].clone())
+                }
+                TyKind::Ref(_, inner) => match &inner.kind {
+                    TyKind::Adt { name, args } if name == "Rc" && args.len() == 1 => {
+                        Some(args[0].clone())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(payload_ty) = rc_payload {
+                return Ok(self.env.ref_ty(false, payload_ty));
+            }
         }
 
         if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "HttpServer")

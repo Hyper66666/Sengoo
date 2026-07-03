@@ -65,6 +65,137 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_add_assign_str_lowers_to_push_str() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let mut text = string_from_str("hi").value;
+    text += "!";
+    text.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("String += &str should compile");
+    assert!(
+        ir.contains("@sengoo_string_push_str_status")
+            && ir.contains("@sengoo_panic_result_unwrap_i64"),
+        "expected String += &str to lower to checked in-place push_str, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_str_plus_owned_string_builds_owned_string() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let tail = string_from_str("tail").value;
+    let text = "head-" + tail;
+    text.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("&str + String should compile");
+    assert!(
+        ir.contains("@sengoo_string_from_str_copy")
+            && ir.contains("@sengoo_string_as_str_ptr")
+            && ir.contains("@sengoo_string_push_str_status")
+            && ir.contains("@sengoo_panic_result_unwrap_i64"),
+        "expected &str + String to build and append an owned String, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_borrows_owner_and_lowers_to_runtime_pointer() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let text = string_from_str("borrowed").value;
+    let view = text.as_str();
+    view.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("String.as_str should compile");
+    assert!(
+        ir.contains("@sengoo_string_as_str_ptr") && ir.contains("@sengoo_str_len"),
+        "expected String.as_str to lower to a borrowed &str view, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_prevents_owner_move() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    let moved = owner;
+    view.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `owner`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_return() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    return view;
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("returning a borrowed view should fail type checking");
+    let crate::error::CompileError::TypeckError(typeck) = &err else {
+        panic!("expected typeck error, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_tail_expression() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    view
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_move_rejects_use_after_move() {
     let err = typecheck_fails_with_stdlib(
         r#"
@@ -308,6 +439,37 @@ def main() -> i64 {
         err.contains("cannot move borrowed value `pair`"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn rc_owner_cannot_move_while_borrow_is_live() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg"
+        ]),
+        r#"
+def main() -> i64 {
+    let first = rc_new(21);
+    let view = first.borrow();
+    let moved = first;
+    *view
+}
+"#
+    );
+    let program = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("moving an Rc owner while a borrow is live should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
 }
 
 #[test]

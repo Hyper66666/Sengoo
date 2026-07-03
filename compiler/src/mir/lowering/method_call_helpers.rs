@@ -1,4 +1,7 @@
-use super::method_builtin_helpers::try_lower_string_len_method_call;
+use super::method_builtin_helpers::{
+    try_lower_rc_borrow_method_call, try_lower_string_as_str_method_call,
+    try_lower_string_len_method_call,
+};
 use super::*;
 use crate::mir::method_dispatch_helpers::{build_method_dispatch_plan, MethodDispatchPlan};
 use crate::mir::trait_dispatch_helpers::resolve_known_trait_method_name;
@@ -92,8 +95,9 @@ pub(super) fn resolve_method_call_target_with_ctx(
     arg_locals: &[Local],
 ) -> Result<String, String> {
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
-    let explicit_type_name = ctx.type_names.get(&receiver_local).map(String::as_str);
-    let dispatch_plan = build_method_dispatch_plan(explicit_type_name, &receiver_ty, method);
+    let explicit_type_name = ctx.type_names.get(&receiver_local).cloned();
+    let dispatch_plan =
+        build_method_dispatch_plan(explicit_type_name.as_deref(), &receiver_ty, method);
 
     let known_function_entries: Vec<(String, usize)> = ctx
         .known_function_names()
@@ -107,10 +111,28 @@ pub(super) fn resolve_method_call_target_with_ctx(
         })
         .collect();
 
-    resolve_method_call_name_with_ctx(
+    let direct = resolve_method_call_name_with_ctx(
         ctx,
         &dispatch_plan,
         &receiver_ty,
+        method,
+        arg_locals,
+        known_function_entries
+            .iter()
+            .map(|(name, arity)| (name.as_str(), *arity)),
+    );
+    if direct.is_ok() {
+        return direct;
+    }
+
+    let (MIRType::Ptr(inner) | MIRType::Ref(inner)) = &receiver_ty else {
+        return direct;
+    };
+    let deref_plan = build_method_dispatch_plan(explicit_type_name.as_deref(), inner, method);
+    resolve_method_call_name_with_ctx(
+        ctx,
+        &deref_plan,
+        inner,
         method,
         arg_locals,
         known_function_entries
@@ -170,6 +192,14 @@ pub(super) fn lower_method_call_from_locals(
     }
 
     if let Some(result_local) = try_lower_string_len_method_call(ctx, receiver_local, method) {
+        return result_local;
+    }
+
+    if let Some(result_local) = try_lower_string_as_str_method_call(ctx, receiver_local, method) {
+        return result_local;
+    }
+
+    if let Some(result_local) = try_lower_rc_borrow_method_call(ctx, receiver_local, method) {
         return result_local;
     }
 

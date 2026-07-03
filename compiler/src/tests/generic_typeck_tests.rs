@@ -984,3 +984,363 @@ def main() -> i64 {
         ir
     );
 }
+
+#[test]
+fn derive_default_struct_static_constructor_returns_zeroed_fields() {
+    let source = r#"
+#[derive(Default)]
+struct Defaults {
+    count: i64,
+    ready: bool,
+}
+
+def main() -> i64 {
+    let value = Defaults::default();
+    if value.ready {
+        0
+    } else {
+        value.count
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Default constructor should compile");
+    assert!(
+        ir.contains("; Function: Defaults_default"),
+        "expected generated Defaults_default function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_clone_struct_method_copies_scalar_fields() {
+    let source = r#"
+#[derive(Clone)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let first = Point { x: 20, y: 1 };
+    let second = first.clone();
+    second.x + second.y
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Clone method should compile");
+    assert!(
+        ir.contains("; Function: Point_clone"),
+        "expected generated Point_clone function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derives_include_public_struct_fields() {
+    let source = r#"
+#[derive(Clone, Default, PartialEq)]
+struct PublicPoint {
+    pub x: i64,
+    pub ready: bool,
+}
+
+def main() -> i64 {
+    let first = PublicPoint { x: 41, ready: true };
+    let second = first.clone();
+    let fallback = PublicPoint::default();
+    if second.eq(&first) && second.ready {
+        second.x + fallback.x + 1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derives should retain public fields");
+    assert!(ir.contains("; Function: PublicPoint_clone"));
+    assert!(ir.contains("; Function: PublicPoint_default"));
+    assert!(ir.contains("; Function: PublicPoint_eq"));
+}
+
+#[test]
+fn derive_clone_struct_method_clones_nested_fields() {
+    let source = r#"
+#[derive(Clone)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Clone)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let first = Outer { inner: Inner { value: 41 }, flag: true };
+    let second = first.clone();
+    if second.flag {
+        second.inner.value + 1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Clone method should compile");
+    assert!(
+        ir.contains("; Function: Outer_clone") && ir.contains("call %Inner @Inner_clone"),
+        "expected generated Outer_clone to call Inner_clone\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_method_compares_scalar_fields() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 20, y: 1 };
+    let right = Point { x: 20, y: 1 };
+    if left.eq(&right) {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived PartialEq method should compile");
+    assert!(
+        ir.contains("; Function: Point_eq"),
+        "expected generated Point_eq function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_operator_uses_generated_eq_method() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 20, y: 1 };
+    let right = Point { x: 20, y: 1 };
+    if left == right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived PartialEq operator should compile");
+    assert!(
+        ir.contains("call i1 @Point_eq"),
+        "expected == to call generated Point_eq method\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_operator_compares_nested_fields() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(PartialEq)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let left = Outer { inner: Inner { value: 41 }, flag: true };
+    let right = Outer { inner: Inner { value: 41 }, flag: true };
+    if left == right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested PartialEq should compile");
+    assert!(
+        ir.contains("call i1 @Outer_eq") && ir.contains("call i1 @Inner_eq"),
+        "expected nested equality to call both generated eq methods\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_method_compares_scalar_fields_lexicographically() {
+    let source = r#"
+#[derive(Ord)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 1, y: 9 };
+    let right = Point { x: 2, y: 0 };
+    if left.compare(&right) < 0 {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Ord compare method should compile");
+    assert!(
+        ir.contains("; Function: Point_compare"),
+        "expected generated Point_compare function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_operator_uses_generated_compare_method() {
+    let source = r#"
+#[derive(Ord)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 1, y: 9 };
+    let right = Point { x: 2, y: 0 };
+    if left < right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Ord comparison operator should compile");
+    assert!(
+        ir.contains("call i64 @Point_compare"),
+        "expected < to call generated Point_compare method\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_operator_compares_nested_fields() {
+    let source = r#"
+#[derive(Ord)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Ord)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let left = Outer { inner: Inner { value: 1 }, flag: false };
+    let right = Outer { inner: Inner { value: 2 }, flag: false };
+    if left < right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Ord comparison should compile");
+    assert!(
+        ir.contains("call i64 @Outer_compare") && ir.contains("call i64 @Inner_compare"),
+        "expected nested ordering to call both generated compare methods\n{ir}"
+    );
+}
+
+#[test]
+fn derive_default_struct_static_constructor_uses_nested_default_fields() {
+    let source = r#"
+#[derive(Default)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Default)]
+struct Outer {
+    inner: Inner,
+    ready: bool,
+}
+
+def main() -> i64 {
+    let value = Outer::default();
+    if value.ready {
+        0
+    } else {
+        value.inner.value
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Default constructor should compile");
+    assert!(
+        ir.contains("; Function: Outer_default") && ir.contains("call %Inner @Inner_default"),
+        "expected generated Outer_default to call Inner_default\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_struct_method_combines_scalar_fields() {
+    let source = r#"
+#[derive(Hash)]
+struct Key {
+    a: i64,
+    b: i64,
+}
+
+def main() -> i64 {
+    let key = Key { a: 7, b: 11 };
+    key.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Hash method should compile");
+    assert!(
+        ir.contains("; Function: Key_hash"),
+        "expected generated Key_hash function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_struct_method_combines_nested_hash_fields() {
+    let source = r#"
+#[derive(Hash)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Hash)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let key = Outer { inner: Inner { value: 7 }, flag: true };
+    key.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Hash method should compile");
+    assert!(
+        ir.contains("; Function: Outer_hash") && ir.contains("call i64 @Inner_hash"),
+        "expected generated Outer_hash to call Inner_hash\n{ir}"
+    );
+}

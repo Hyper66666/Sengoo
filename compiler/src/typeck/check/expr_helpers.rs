@@ -258,6 +258,13 @@ impl TypeChecker {
             {
                 true
             }
+            (TyKind::Ref(false, inner), TyKind::Adt { name, .. })
+                if matches!(inner.kind, TyKind::Str)
+                    && name == "String"
+                    && matches!(op, BinOp::Add) =>
+            {
+                true
+            }
             (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
                 matches!(
                     op,
@@ -318,6 +325,13 @@ impl TypeChecker {
                 };
                 self.env.float_ty(wider)
             }
+            (TyKind::Ref(false, inner), TyKind::Adt { name, .. })
+                if matches!(inner.kind, TyKind::Str)
+                    && name == "String"
+                    && matches!(op, BinOp::Add) =>
+            {
+                right_ty.clone()
+            }
             _ => left_ty.clone(),
         };
 
@@ -361,13 +375,19 @@ impl TypeChecker {
 
     pub(super) fn check_assign_op(
         &mut self,
-        _op: &AssignOp,
+        op: &AssignOp,
         target: &Expr,
         value: &Expr,
     ) -> TyResult<Ty> {
         self.ensure_assignable_target(target)?;
         let target_ty = self.check_expr(target)?;
         let value_ty = self.check_expr(value)?;
+        if matches!(op, AssignOp::AddAssign)
+            && matches!(&target_ty.kind, TyKind::Adt { name, .. } if name == "String")
+            && matches!(&value_ty.kind, TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str))
+        {
+            return Ok(self.env.unit_ty());
+        }
         self.infer.unify(&target_ty, &value_ty)?;
         Ok(self.env.unit_ty())
     }
@@ -407,6 +427,36 @@ impl TypeChecker {
 
     pub(super) fn check_index(&mut self, base: &Expr, index: &Expr) -> TyResult<Ty> {
         let base_ty = self.check_expr(base)?;
+
+        if let ExprKind::Range {
+            start: Some(start),
+            end: Some(end),
+            inclusive: false,
+        } = &index.kind
+        {
+            let start_ty = self.check_expr(start)?;
+            let end_ty = self.check_expr(end)?;
+            if !start_ty.is_int() || !end_ty.is_int() {
+                let (span_lo, span_hi) = expression_subject_span(index);
+                return Err(TypeckError::diagnostic(
+                    "invalid-string-slice-index",
+                    "string slice bounds must be integers".to_string(),
+                    span_lo,
+                    span_hi,
+                ));
+            }
+
+            let is_string_slice_base = matches!(&base_ty.kind, TyKind::Adt { name, .. } if name == "String")
+                || matches!(&base_ty.kind, TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str))
+                || matches!(&base_ty.kind, TyKind::Str);
+            if is_string_slice_base {
+                return Ok(self.env.new_ty(TyKind::Adt {
+                    name: "String".to_string(),
+                    args: Vec::new(),
+                }));
+            }
+        }
+
         let index_ty = self.check_expr(index)?;
 
         if !index_ty.is_int() {

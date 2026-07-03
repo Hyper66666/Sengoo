@@ -244,4 +244,26 @@ def main() -> i64 {
         let value = run_with_cranelift_fast_jit(source).expect("cranelift fast-jit should run");
         assert_eq!(value, 42);
     }
+
+    #[test]
+    fn cranelift_fast_jit_rejects_non_constant_runtime_calls() {
+        let source = r#"
+def make() -> i64 {
+    7
+}
+
+def main() -> i64 {
+    make()
+}
+"#;
+
+        let error =
+            run_with_cranelift_fast_jit(source).expect_err("fast-jit should stay constant-only");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported expression in cranelift fast-jit mode"),
+            "unexpected fast-jit error: {error}"
+        );
+    }
 }

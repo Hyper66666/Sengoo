@@ -57,6 +57,14 @@ impl ConcreteTypeRegistry {
             .insert(instance_name, ty);
     }
 
+    pub(crate) fn hir_type_for_instance_name(&self, instance_name: &str) -> Option<HIRType> {
+        self.inner
+            .borrow()
+            .hir_by_instance_name
+            .get(instance_name)
+            .cloned()
+    }
+
     pub(crate) fn hir_type_for_mir(&self, ty: &MIRType) -> Option<HIRType> {
         match ty {
             MIRType::Unit => Some(HIRType::unit()),

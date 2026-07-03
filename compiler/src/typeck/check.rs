@@ -14,7 +14,7 @@ use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
 use crate::typeck::ffi as ffi_check;
 use crate::typeck::infer::TypeInfer;
 use crate::typeck::r#trait::{
-    type_key, FunctionTy, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
+    type_key, FunctionTy, ImplInfo, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
 };
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
@@ -82,6 +82,7 @@ pub struct TypeChecker {
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
     try_block_mode_stack: Vec<try_helpers::TryBlockMode>,
+    expected_return_types: Vec<Ty>,
     warnings: Vec<crate::error::CompileWarning>,
     deprecated_decls: HashMap<String, crate::parser::DeprecatedDecl>,
     trait_default_methods: HashMap<String, HashMap<String, Function>>,
@@ -102,12 +103,13 @@ impl TypeChecker {
         let mut env = TypeEnv::new();
         let trait_registry = Self::compiler_known_traits(&mut env);
         Self::compiler_known_support_types(&mut env);
+        let impl_registry = Self::compiler_known_impls(&mut env);
         let infer = TypeInfer::with_env(env.clone());
         Self {
             env,
             infer,
             trait_registry,
-            impl_registry: ImplRegistry::new(),
+            impl_registry,
             struct_field_defs: HashMap::new(),
             enum_variants: HashMap::new(),
             enum_variant_field_tys: HashMap::new(),
@@ -120,6 +122,7 @@ impl TypeChecker {
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
             try_block_mode_stack: Vec::new(),
+            expected_return_types: Vec::new(),
             warnings: Vec::new(),
             deprecated_decls: HashMap::new(),
             trait_default_methods: HashMap::new(),
@@ -169,6 +172,19 @@ impl TypeChecker {
             });
             env.insert_type(type_name.to_string(), ty);
         }
+    }
+
+    fn compiler_known_impls(env: &mut TypeEnv) -> ImplRegistry {
+        let mut registry = ImplRegistry::new();
+        let str_ty = env.new_ty(TyKind::Str);
+        let str_ref_ty = env.new_ty(TyKind::Ref(false, Box::new(str_ty.clone())));
+        for trait_name in ["PartialEq", "Eq", "PartialOrd", "Ord"] {
+            for (key, ty) in [("str", str_ty.clone()), ("&str", str_ref_ty.clone())] {
+                let info = ImplInfo::new(ty, Some(trait_name.to_string()), Vec::new());
+                registry.register_trait_impl(trait_name.to_string(), key.to_string(), info);
+            }
+        }
+        registry
     }
 
     pub fn warnings(&self) -> &[crate::error::CompileWarning] {
@@ -1210,6 +1226,16 @@ impl TypeChecker {
                     .unwrap_or_default();
 
                 if !type_params.is_empty() {
+                    let lexical_type_args = type_params
+                        .iter()
+                        .filter_map(|param| {
+                            self.env
+                                .lookup(&param.name.name)
+                                .and_then(|symbol| symbol.get_ty())
+                                .cloned()
+                                .map(|ty| (param.name.name.clone(), ty))
+                        })
+                        .collect::<HashMap<_, _>>();
                     self.env.push_scope();
                     let result = (|| -> TyResult<Ty> {
                         let generic_meta = self
@@ -1224,7 +1250,7 @@ impl TypeChecker {
                         self.check_struct_literal_fields(&name, fields, &field_types)?;
 
                         let mut args = Vec::with_capacity(generic_meta.len());
-                        for param in &generic_meta {
+                        for (param_index, param) in generic_meta.iter().enumerate() {
                             let placeholder = Ty::new(0, TyKind::Var(param.var_id));
                             let mut concrete_ty = self.infer.apply_subst(&placeholder);
                             if matches!(concrete_ty.kind, TyKind::Var(var_id) if var_id == param.var_id)
@@ -1232,6 +1258,24 @@ impl TypeChecker {
                                 if let Some(default_ty) = &param.default {
                                     concrete_ty =
                                         self.substitute_ty_vars(default_ty, &HashMap::new());
+                                } else if let Some(lexical_ty) = lexical_type_args.get(&param.name)
+                                {
+                                    concrete_ty = lexical_ty.clone();
+                                } else if let Some(expected_arg) =
+                                    self.expected_return_types.last().and_then(|expected| {
+                                        let TyKind::Adt {
+                                            name: expected_name,
+                                            args,
+                                        } = &expected.kind
+                                        else {
+                                            return None;
+                                        };
+                                        (expected_name == &name)
+                                            .then(|| args.get(param_index).cloned())
+                                            .flatten()
+                                    })
+                                {
+                                    concrete_ty = expected_arg;
                                 } else {
                                     return Err(TypeckError::Other(format!(
                                         "cannot infer generic argument `{}` for struct `{}` literal",
@@ -1283,6 +1327,7 @@ impl TypeChecker {
             }
             ExprKind::Try(operand) => self.check_try_expr(operand),
             ExprKind::TryBlock(block) => self.check_try_block_expr(block),
+            ExprKind::Paren(inner) => self.check_expr(inner),
             _ => Ok(self.env.error_ty()),
         }
     }

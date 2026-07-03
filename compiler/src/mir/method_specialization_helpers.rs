@@ -20,9 +20,24 @@ pub(crate) fn bind_method_specialization_subst(
     receiver_ty: &MIRType,
     actual_arg_types: &[MIRType],
     struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &ConcreteTypeRegistry,
 ) -> Option<HashMap<String, MIRType>> {
     let mut mir_subst = HashMap::new();
     bind_mir_subst_from_hir_type(target_type, receiver_ty, struct_defs, &mut mir_subst);
+    bind_registered_hir_pair(
+        target_type,
+        receiver_ty,
+        struct_defs,
+        concrete_type_registry,
+        &mut mir_subst,
+    );
+    bind_single_arg_receiver_name(
+        target_type,
+        receiver_ty,
+        struct_defs,
+        concrete_type_registry,
+        &mut mir_subst,
+    );
 
     let explicit_params = explicit_hir_method_params(&method.params);
     if explicit_params.len() != actual_arg_types.len() {
@@ -30,9 +45,123 @@ pub(crate) fn bind_method_specialization_subst(
     }
     for (param, actual_ty) in explicit_params.iter().zip(actual_arg_types.iter()) {
         bind_mir_subst_from_hir_type(&param.ty, actual_ty, struct_defs, &mut mir_subst);
+        bind_registered_hir_pair(
+            &param.ty,
+            actual_ty,
+            struct_defs,
+            concrete_type_registry,
+            &mut mir_subst,
+        );
     }
 
     Some(mir_subst)
+}
+
+fn bind_single_arg_receiver_name(
+    target_type: &HIRType,
+    receiver_ty: &MIRType,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &ConcreteTypeRegistry,
+    subst: &mut HashMap<String, MIRType>,
+) {
+    let (
+        HIRTypeKind::Named {
+            name: target_name,
+            args,
+        },
+        MIRType::Struct {
+            name: receiver_name,
+            ..
+        },
+    ) = (&target_type.kind, receiver_ty)
+    else {
+        return;
+    };
+    let [template_arg] = args.as_slice() else {
+        return;
+    };
+    let HIRTypeKind::Named {
+        name: template_name,
+        args: template_args,
+    } = &template_arg.kind
+    else {
+        return;
+    };
+    if !template_args.is_empty() || struct_defs.contains_key(template_name) {
+        return;
+    }
+    let Some(instance_name) = receiver_name.strip_prefix(&format!("{target_name}_")) else {
+        return;
+    };
+    let Some(actual_hir) = concrete_type_registry.hir_type_for_instance_name(instance_name) else {
+        return;
+    };
+    subst.entry(template_name.clone()).or_insert_with(|| {
+        crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_subst(
+            &actual_hir,
+            struct_defs,
+            &HashMap::new(),
+        )
+    });
+}
+
+fn bind_registered_hir_pair(
+    template: &HIRType,
+    actual_mir: &MIRType,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    concrete_type_registry: &ConcreteTypeRegistry,
+    subst: &mut HashMap<String, MIRType>,
+) {
+    let Some(actual_hir) = concrete_type_registry.hir_type_for_mir(actual_mir) else {
+        return;
+    };
+    bind_hir_pair(template, &actual_hir, struct_defs, subst);
+}
+
+fn bind_hir_pair(
+    template: &HIRType,
+    actual: &HIRType,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    subst: &mut HashMap<String, MIRType>,
+) {
+    match (&template.kind, &actual.kind) {
+        (
+            HIRTypeKind::Named {
+                name,
+                args: template_args,
+            },
+            _,
+        ) if template_args.is_empty() && !struct_defs.contains_key(name) => {
+            subst.entry(name.clone()).or_insert_with(|| {
+                crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_subst(
+                    actual,
+                    struct_defs,
+                    &HashMap::new(),
+                )
+            });
+        }
+        (
+            HIRTypeKind::Named {
+                name: template_name,
+                args: template_args,
+            },
+            HIRTypeKind::Named {
+                name: actual_name,
+                args: actual_args,
+            },
+        ) if template_name == actual_name => {
+            for (template_arg, actual_arg) in template_args.iter().zip(actual_args.iter()) {
+                bind_hir_pair(template_arg, actual_arg, struct_defs, subst);
+            }
+        }
+        (HIRTypeKind::Ref(_, template_inner), HIRTypeKind::Ref(_, actual_inner))
+        | (HIRTypeKind::Ref(_, template_inner), HIRTypeKind::Ptr(actual_inner))
+        | (HIRTypeKind::Ptr(template_inner), HIRTypeKind::Ref(_, actual_inner))
+        | (HIRTypeKind::Ptr(template_inner), HIRTypeKind::Ptr(actual_inner)) => {
+            bind_hir_pair(template_inner, actual_inner, struct_defs, subst);
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn realize_method_specialization(
@@ -87,6 +216,7 @@ pub(crate) fn prepare_method_specialization(
         receiver_ty,
         actual_arg_types,
         struct_defs,
+        concrete_type_registry,
     )?;
     realize_method_specialization(
         target_type,

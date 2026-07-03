@@ -51,6 +51,58 @@ fn lower_i64_status_to_bool(
     bool_result
 }
 
+pub(super) fn unwrap_nonnegative_i64_or_panic(
+    ctx: &mut LoweringContext<'_>,
+    value: Local,
+) -> Local {
+    let ok = lower_i64_status_to_bool(ctx, value, MirBinOp::Ge, 0);
+    let ok_block = ctx.new_block();
+    let err_block = ctx.new_block();
+    let join_block = ctx.new_block();
+    ctx.set_terminator(Terminator::If {
+        cond: ok,
+        then_block: ok_block,
+        else_block: err_block,
+    });
+
+    ctx.set_current_block(ok_block);
+    ctx.set_terminator(Terminator::Goto(join_block));
+    let ok_end = ctx.current_block();
+
+    ctx.set_current_block(err_block);
+    let panic_value = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: panic_value,
+        func: "sengoo_panic_result_unwrap_i64".to_string(),
+        args: vec![],
+    });
+    ctx.set_terminator(Terminator::Goto(join_block));
+    let err_end = ctx.current_block();
+
+    ctx.set_current_block(join_block);
+    let unwrapped = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Phi {
+        destination: unwrapped,
+        incoming: vec![(value, ok_end), (panic_value, err_end)],
+    });
+    unwrapped
+}
+
+fn wrap_owned_string_handle_status_or_panic(
+    ctx: &mut LoweringContext<'_>,
+    raw_handle: Local,
+) -> Local {
+    let handle = unwrap_nonnegative_i64_or_panic(ctx, raw_handle);
+    let result = ctx.add_local(None, LocalKind::Temp, owned_string_mir_type());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle],
+        ty: owned_string_mir_type(),
+    });
+    ctx.record_drop_binding_if_needed(result);
+    result
+}
+
 pub(super) fn lower_unary_expr(
     ctx: &mut LoweringContext<'_>,
     op: &hir::HIRUnaryOp,
@@ -115,13 +167,104 @@ pub(super) fn lower_binary_expr(
     let right_local = ctx.lower_expr(right);
     let mir_op = ctx.lower_bin_op(op);
 
+    if matches!(mir_op, MirBinOp::Eq | MirBinOp::Ne) {
+        let derived_eq_func = match (
+            ctx.get_local_type(left_local),
+            ctx.get_local_type(right_local),
+        ) {
+            (
+                MIRType::Struct {
+                    name: left_name, ..
+                },
+                MIRType::Struct {
+                    name: right_name, ..
+                },
+            ) if left_name == right_name && left_name != "String" => {
+                let candidate = format!("{}_eq", left_name);
+                ctx.is_known_function(&candidate).then_some(candidate)
+            }
+            _ => None,
+        };
+
+        if let Some(func) = derived_eq_func {
+            let right_ptr = ctx.add_local(
+                None,
+                LocalKind::Temp,
+                MIRType::Ptr(Box::new(ctx.get_local_type(right_local).clone())),
+            );
+            ctx.push_inst(Instruction::AddrOf {
+                destination: right_ptr,
+                source: right_local,
+            });
+            let eq_result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+            ctx.push_inst(Instruction::Call {
+                destination: eq_result,
+                func,
+                args: vec![left_local, right_ptr],
+            });
+            if mir_op == MirBinOp::Eq {
+                return eq_result;
+            }
+            let not_result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+            ctx.push_inst(Instruction::Unary {
+                destination: not_result,
+                op: MirUnOp::Not,
+                operand: eq_result,
+            });
+            return not_result;
+        }
+    }
+
+    if matches!(
+        mir_op,
+        MirBinOp::Lt | MirBinOp::Le | MirBinOp::Gt | MirBinOp::Ge
+    ) {
+        let derived_compare_func = match (
+            ctx.get_local_type(left_local),
+            ctx.get_local_type(right_local),
+        ) {
+            (
+                MIRType::Struct {
+                    name: left_name, ..
+                },
+                MIRType::Struct {
+                    name: right_name, ..
+                },
+            ) if left_name == right_name && left_name != "String" => {
+                let candidate = format!("{}_compare", left_name);
+                ctx.is_known_function(&candidate).then_some(candidate)
+            }
+            _ => None,
+        };
+
+        if let Some(func) = derived_compare_func {
+            let right_ptr = ctx.add_local(
+                None,
+                LocalKind::Temp,
+                MIRType::Ptr(Box::new(ctx.get_local_type(right_local).clone())),
+            );
+            ctx.push_inst(Instruction::AddrOf {
+                destination: right_ptr,
+                source: right_local,
+            });
+            let compare_result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: compare_result,
+                func,
+                args: vec![left_local, right_ptr],
+            });
+            return lower_i64_status_to_bool(ctx, compare_result, mir_op, 0);
+        }
+    }
+
     if mir_op == MirBinOp::Add {
-        let (is_string_concat, is_owned_string_concat) = {
+        let (is_string_concat, is_owned_string_concat, is_str_plus_owned_string) = {
             let left_ty = ctx.get_local_type(left_local);
             let right_ty = ctx.get_local_type(right_local);
             (
                 is_string_ptr(left_ty) && is_string_ptr(right_ty),
                 is_owned_string(left_ty) && is_string_ptr(right_ty),
+                is_string_ptr(left_ty) && is_owned_string(right_ty),
             )
         };
         if is_string_concat {
@@ -148,6 +291,36 @@ pub(super) fn lower_binary_expr(
                 func: "sengoo_string_concat_str_status".to_string(),
                 args: vec![left_handle, right_ptr],
             });
+            return wrap_owned_string_handle_status_or_panic(ctx, result_handle);
+        }
+        if is_str_plus_owned_string {
+            let left_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: left_ptr,
+                func: "sengoo_stdlib_str_ptr".to_string(),
+                args: vec![left_local],
+            });
+            let result_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: result_handle,
+                func: "sengoo_string_from_str_copy".to_string(),
+                args: vec![left_ptr],
+            });
+            let result_handle = unwrap_nonnegative_i64_or_panic(ctx, result_handle);
+            let right_handle = extract_owned_string_handle(ctx, right_local);
+            let right_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: right_ptr,
+                func: "sengoo_string_as_str_ptr".to_string(),
+                args: vec![right_handle],
+            });
+            let _status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Call {
+                destination: _status,
+                func: "sengoo_string_push_str_status".to_string(),
+                args: vec![result_handle, right_ptr],
+            });
+            let _status = unwrap_nonnegative_i64_or_panic(ctx, _status);
             let result = ctx.add_local(None, LocalKind::Temp, owned_string_mir_type());
             ctx.push_inst(Instruction::Aggregate {
                 destination: result,
@@ -159,13 +332,23 @@ pub(super) fn lower_binary_expr(
         }
     }
 
-    if mir_op == MirBinOp::Eq || mir_op == MirBinOp::Ne {
+    if mir_op.is_comparison() {
         let is_string_cmp = {
             let left_ty = ctx.get_local_type(left_local);
             let right_ty = ctx.get_local_type(right_local);
             is_string_ptr(left_ty) && is_string_ptr(right_ty)
         };
         if is_string_cmp {
+            if mir_op != MirBinOp::Eq && mir_op != MirBinOp::Ne {
+                let compare_result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Call {
+                    destination: compare_result,
+                    func: "sengoo_str_compare".to_string(),
+                    args: vec![left_local, right_local],
+                });
+                return lower_i64_status_to_bool(ctx, compare_result, mir_op, 0);
+            }
+
             let call_result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
             ctx.push_inst(Instruction::Call {
                 destination: call_result,

@@ -29,6 +29,13 @@ struct DeriveTarget {
     name: String,
     kind: DeriveTargetKind,
     insert_after: usize,
+    fields: Vec<DeriveField>,
+}
+
+#[derive(Debug, Clone)]
+struct DeriveField {
+    name: String,
+    ty: String,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +60,7 @@ pub(super) fn expand_derive_macros(source: &str) -> Result<Cow<'_, str>> {
 
     for invocation in &invocations {
         for derive in &invocation.derives {
-            let generated = execute_derive_macro(derive, &invocation.target)?;
+            let generated = execute_derive_macro(derive, &invocation.target, &invocation.derives)?;
             if generated.trim().is_empty() {
                 return Err(parse_error(format!(
                     "derive macro `{derive}` generated empty output for {} `{}`",
@@ -212,15 +219,20 @@ fn find_derive_target(source: &str, bytes: &[u8], from: usize) -> Result<DeriveT
     let (name_start, name_end) = parse_ident_range(bytes, cursor)
         .ok_or_else(|| parse_error("failed to resolve derive target type name"))?;
     let insert_after = find_declaration_end(bytes, kind_start)?;
+    let fields = match kind {
+        DeriveTargetKind::Struct => parse_struct_fields(source, bytes, name_end)?,
+        DeriveTargetKind::Enum | DeriveTargetKind::Class => Vec::new(),
+    };
 
     Ok(DeriveTarget {
         name: source[name_start..name_end].to_string(),
         kind,
         insert_after,
+        fields,
     })
 }
 
-fn execute_derive_macro(derive: &str, target: &DeriveTarget) -> Result<String> {
+fn execute_derive_macro(derive: &str, target: &DeriveTarget, derives: &[String]) -> Result<String> {
     let env_key = format!("SENGOO_DERIVE_{}", to_env_macro_key(derive));
     if let Ok(command) = env::var(&env_key) {
         if !command.trim().is_empty() {
@@ -228,7 +240,7 @@ fn execute_derive_macro(derive: &str, target: &DeriveTarget) -> Result<String> {
         }
     }
 
-    Ok(generate_builtin_derive(derive, target))
+    Ok(generate_builtin_derive(derive, target, derives))
 }
 
 fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Result<String> {
@@ -260,7 +272,104 @@ fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Re
     Ok(generated)
 }
 
-fn generate_builtin_derive(derive: &str, target: &DeriveTarget) -> String {
+fn generate_builtin_derive(derive: &str, target: &DeriveTarget, derives: &[String]) -> String {
+    if derive.rsplit("::").next().unwrap_or(derive) == "Clone"
+        && matches!(target.kind, DeriveTargetKind::Struct)
+    {
+        let fields = target
+            .fields
+            .iter()
+            .map(|field| format!("{}: {}", field.name, clone_expr_for_field(field)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "impl Clone for {} {{\n}}\nimpl {} {{\n    def clone(&self) -> {} {{\n        {} {{ {} }}\n    }}\n}}",
+            target.name, target.name, target.name, target.name, fields
+        );
+    }
+
+    if derive.rsplit("::").next().unwrap_or(derive) == "PartialEq"
+        && matches!(target.kind, DeriveTargetKind::Struct)
+    {
+        let body = if target.fields.is_empty() {
+            "true".to_string()
+        } else {
+            target
+                .fields
+                .iter()
+                .map(|field| format!("self.{} == other.{}", field.name, field.name))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        };
+        return format!(
+            "impl PartialEq for {} {{\n}}\nimpl {} {{\n    def eq(&self, other: &{}) -> bool {{\n        {}\n    }}\n}}",
+            target.name, target.name, target.name, body
+        );
+    }
+
+    if matches!(
+        derive.rsplit("::").next().unwrap_or(derive),
+        "PartialOrd" | "Ord"
+    ) && matches!(target.kind, DeriveTargetKind::Struct)
+    {
+        let derive_name = derive.rsplit("::").next().unwrap_or(derive);
+        let has_partial_ord = derives
+            .iter()
+            .any(|item| item.rsplit("::").next().unwrap_or(item) == "PartialOrd");
+        if derive_name == "Ord" && has_partial_ord {
+            return format!("impl Ord for {} {{\n}}", target.name);
+        }
+        let impls = if derive_name == "PartialOrd" {
+            format!("impl PartialOrd for {} {{\n}}", target.name)
+        } else {
+            format!("impl Ord for {} {{\n}}", target.name)
+        };
+        let compare_body = lexicographic_compare_body(&target.fields);
+        return format!(
+            "{}\nimpl {} {{\n    def compare(&self, other: &{}) -> i64 {{\n{}\n    }}\n    def lt(&self, other: &{}) -> bool {{\n        self.compare(other) < 0\n    }}\n    def le(&self, other: &{}) -> bool {{\n        self.compare(other) <= 0\n    }}\n    def gt(&self, other: &{}) -> bool {{\n        self.compare(other) > 0\n    }}\n    def ge(&self, other: &{}) -> bool {{\n        self.compare(other) >= 0\n    }}\n}}",
+            impls,
+            target.name,
+            target.name,
+            compare_body,
+            target.name,
+            target.name,
+            target.name,
+            target.name
+        );
+    }
+
+    if derive.rsplit("::").next().unwrap_or(derive) == "Hash"
+        && matches!(target.kind, DeriveTargetKind::Struct)
+    {
+        let hash_body = hash_body(&target.fields);
+        return format!(
+            "impl Hash for {} {{\n}}\nimpl {} {{\n    def hash(&self) -> i64 {{\n{}\n    }}\n}}",
+            target.name, target.name, hash_body
+        );
+    }
+
+    if derive.rsplit("::").next().unwrap_or(derive) == "Default"
+        && matches!(target.kind, DeriveTargetKind::Struct)
+    {
+        let fields = target
+            .fields
+            .iter()
+            .map(|field| format!("{}: {}", field.name, default_expr_for_type(&field.ty)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "impl Default for {} {{\n}}\nimpl {} {{\n    def default() -> {} {{\n        {} {{ {} }}\n    }}\n}}",
+            target.name, target.name, target.name, target.name, fields
+        );
+    }
+
+    if derive.rsplit("::").next().unwrap_or(derive) == "Debug" {
+        return format!(
+            "impl Debug for {} {{\n    def __derived_debug_marker(&self) -> i64 {{\n        1\n    }}\n}}",
+            target.name
+        );
+    }
+
     if let Some(trait_name) = core_derive_trait_name(derive) {
         return format!("impl {} for {} {{\n}}", trait_name, target.name);
     }
@@ -269,6 +378,149 @@ fn generate_builtin_derive(derive: &str, target: &DeriveTarget) -> String {
     format!(
         "impl {} {{\n    def {}(self) -> i64 {{\n        1\n    }}\n}}",
         target.name, method
+    )
+}
+
+fn parse_struct_fields(source: &str, bytes: &[u8], from: usize) -> Result<Vec<DeriveField>> {
+    let mut cursor = skip_ws_and_comments(bytes, from);
+    if bytes.get(cursor) == Some(&b'<') {
+        let (_, _, after_generics) = parse_balanced(bytes, cursor, b'<', b'>')?;
+        cursor = skip_ws_and_comments(bytes, after_generics);
+    }
+    if bytes.get(cursor) != Some(&b'{') {
+        return Ok(Vec::new());
+    }
+
+    let (body_start, body_end, _) = parse_balanced(bytes, cursor, b'{', b'}')?;
+    let body = &source[body_start..body_end];
+    let mut fields = Vec::new();
+    for raw_field in split_top_level_commas(body) {
+        let trimmed = raw_field.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let field = trimmed.strip_prefix("pub ").unwrap_or(trimmed).trim_start();
+        let Some((name, ty)) = field.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if !is_ident(name) {
+            continue;
+        }
+        fields.push(DeriveField {
+            name: name.to_string(),
+            ty: ty.trim().to_string(),
+        });
+    }
+    Ok(fields)
+}
+
+fn split_top_level_commas(value: &str) -> Vec<&str> {
+    let bytes = value.as_bytes();
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if let Some(next) = skip_quoted_literal(bytes, i) {
+            i = next;
+            continue;
+        }
+        match bytes[i] {
+            b'<' | b'(' | b'[' | b'{' => depth += 1,
+            b'>' | b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                parts.push(&value[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    parts.push(&value[start..]);
+    parts
+}
+
+fn clone_expr_for_field(field: &DeriveField) -> String {
+    if type_is_copy_scalar(&field.ty) {
+        format!("self.{}", field.name)
+    } else {
+        format!("self.{}.clone()", field.name)
+    }
+}
+
+fn default_expr_for_type(ty: &str) -> String {
+    let ty = ty.trim();
+    match ty {
+        "bool" => "false".to_string(),
+        "f64" | "f32" => "0.0".to_string(),
+        "char" => "'\\0'".to_string(),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" => "0".to_string(),
+        _ if is_ident(ty) => format!("{ty}::default()"),
+        _ => "0".to_string(),
+    }
+}
+
+fn lexicographic_compare_body(fields: &[DeriveField]) -> String {
+    if fields.is_empty() {
+        return "        0".to_string();
+    }
+
+    let mut lines = Vec::new();
+    for field in fields {
+        lines.push(format!("        if self.{0} < other.{0} {{", field.name));
+        lines.push("            return -1;".to_string());
+        lines.push("        }".to_string());
+        lines.push(format!("        if self.{0} > other.{0} {{", field.name));
+        lines.push("            return 1;".to_string());
+        lines.push("        }".to_string());
+    }
+    lines.push("        0".to_string());
+    lines.join("\n")
+}
+
+fn hash_body(fields: &[DeriveField]) -> String {
+    let mut lines = vec!["        let mut h = 1469598103934665603;".to_string()];
+    for field in fields {
+        lines.push(format!(
+            "        h = (h * 1099511628211) + {};",
+            hash_expr_for_field(field)
+        ));
+    }
+    lines.push("        h".to_string());
+    lines.join("\n")
+}
+
+fn hash_expr_for_field(field: &DeriveField) -> String {
+    match field.ty.trim() {
+        "bool" => format!("if self.{} {{ 1 }} else {{ 0 }}", field.name),
+        "char" => format!("self.{}", field.name),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" => format!("self.{}", field.name),
+        _ => format!("self.{}.hash()", field.name),
+    }
+}
+
+fn type_is_copy_scalar(ty: &str) -> bool {
+    matches!(
+        ty.trim(),
+        "bool"
+            | "char"
+            | "f64"
+            | "f32"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
     )
 }
 
@@ -538,6 +790,21 @@ struct User {
         assert!(!expanded.contains("#[derive"));
         assert!(expanded.contains("impl User"));
         assert!(expanded.contains("__derive_auto"));
+    }
+
+    #[test]
+    fn derive_partial_ord_and_ord_do_not_duplicate_impls_or_methods() {
+        let source = r#"
+#[derive(PartialOrd, Ord)]
+struct User {
+    id: i64,
+}
+"#;
+
+        let expanded = expand_derive_macros(source).expect("derive expansion should succeed");
+        assert_eq!(expanded.matches("impl PartialOrd for User").count(), 1);
+        assert_eq!(expanded.matches("impl Ord for User").count(), 1);
+        assert_eq!(expanded.matches("def compare(&self").count(), 1);
     }
 
     #[test]

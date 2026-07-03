@@ -105,6 +105,7 @@ use self::match_expr_helpers::lower_match_expr;
 use self::method_expr_helpers::lower_method_call_expr;
 use self::op_expr_helpers::{
     lower_binary_expr, lower_logical_and_expr, lower_logical_or_expr, lower_unary_expr,
+    unwrap_nonnegative_i64_or_panic,
 };
 use self::pointer_expr_helpers::{lower_deref_expr, lower_ref_expr};
 use self::return_expr_helpers::lower_return_expr;

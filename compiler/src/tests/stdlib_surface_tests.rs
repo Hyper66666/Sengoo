@@ -207,6 +207,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_and_str_satisfy_comparison_trait_bounds() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def accepts_comparison<T: PartialEq + Eq + PartialOrd + Ord>(value: T) -> i64 {
+    1
+}
+
+def main() -> i64 {
+    let owned = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let order_bonus = if "alpha" < "beta" {
+        1
+    } else {
+        0
+    };
+    accepts_comparison(owned) + accepts_comparison("borrowed") + order_bonus
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("@accepts_comparison_String"),
+        "owned String should satisfy comparison trait bounds through stdlib marker impls\n{ir}"
+    );
+    assert!(
+        ir.contains("@accepts_comparison_ref_str"),
+        "&str should satisfy comparison trait bounds through compiler-known impls\n{ir}"
+    );
+    assert!(
+        ir.contains("@sengoo_str_compare"),
+        "&str ordering operators should lower through the runtime compare helper\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_rejects_owned_string_arithmetic_operators() {
     let source = format!(
         "{}\n\n{}",
@@ -244,6 +279,39 @@ def main() -> i64 {
 
     assert!(ir.contains("sengoo_str_slice_copy"));
     assert!(ir.contains("sengoo_string_slice_status"));
+}
+
+#[test]
+fn string_range_index_lowers_to_infallible_owned_slice() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let part = text[1..4];
+    part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_slice_status"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
+}
+
+#[test]
+fn str_range_index_lowers_to_infallible_owned_slice() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let part = "hello"[1..4];
+    part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_slice_copy"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
 }
 
 #[test]
@@ -287,6 +355,35 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_iterators_satisfy_iterator_associated_item_bounds() {
+    let ir = compile_with_stdlib(
+        r#"
+def select_item<I: Iterator>(iter: I, value: I::Item) -> I::Item {
+    value
+}
+
+def main() -> i64 {
+    let text = string_from_str("az").value;
+    let bytes = text.bytes();
+    let chars = text.chars();
+    let b = select_item(bytes, 65);
+    let c = select_item(chars, 65);
+    b + c
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("select_item_StringBytesIter"),
+        "expected StringBytesIter to satisfy Iterator<Item = i64>, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("select_item_StringCharsIter"),
+        "expected StringCharsIter to satisfy Iterator<Item = i64 codepoint>, got:\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_allows_owned_string_plus_str() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],
@@ -300,6 +397,7 @@ def main() -> i64 {
     );
 
     assert!(ir.contains("sengoo_string_concat_str_status"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
 }
 
 #[test]
@@ -526,6 +624,39 @@ def main() -> i64 {
     assert!(
         ir.contains("sengoo_rc_new_i64") && ir.contains("sengoo_rc_new_bool"),
         "expected RcValue impls to dispatch through concrete runtime constructors\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_rc_clone_uses_one_generic_handle_representation() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def clone_shared<T>(value: &Rc<T>) -> Rc<T> {
+    value.clone()
+}
+
+def main() -> i64 {
+    let first = rc_new_i64(21);
+    let second = clone_shared(&first);
+    first.strong_count() + second.get()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: clone_shared_i64"),
+        "expected generic Rc<T> clone helper specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_clone"),
+        "generic Rc<T>::clone should increment the shared runtime control block\n{ir}"
     );
 }
 

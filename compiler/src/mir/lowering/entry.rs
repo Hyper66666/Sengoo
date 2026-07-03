@@ -41,6 +41,9 @@ pub fn lower_hir_with_options(
                 known_named_types.insert(struct_item.name.clone());
                 struct_defs.insert(struct_item.name.clone(), struct_item);
             }
+            HIRItem::Enum(enum_item) => {
+                known_named_types.insert(enum_item.name.clone());
+            }
             _ => {}
         }
     }

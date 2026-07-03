@@ -80,19 +80,54 @@
     signatures. Verified by `cargo test -p sengoo-compiler
     compiler_known_core_traits_and_support_types_are_available -- --nocapture`.
   - Behavioral derive impl generation remains in 5.2.
-- [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
+- [~] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
   - Builtin derive expansion now emits core trait impl declarations for all
     listed derive names so derived types satisfy corresponding generic bounds.
     Verified by `cargo test -p sengoo-compiler
     builtin_derives_register_core_trait_impls_for_bounds -- --nocapture`.
-  - Remaining: field-aware Clone/compare/hash/debug/default behavior.
+  - Debug now has field-aware formatter behavior for structs and discriminant
+    lowering for unit/tuple-payload enums.
+  - Clone now generates a real inherent `clone(&self) -> Type` method for
+    named structs with scalar/copyable field copies and nested fields whose
+    own `clone()` is available, while preserving the `impl Clone for Type {}`
+    bound marker. Verified by `cargo test -p sengoo-compiler derive_clone --
+    --nocapture`.
+  - PartialEq now generates a real inherent `eq(&self, other: &Type) -> bool`
+    method for named structs, comparing fields in declaration order; struct
+    `==`/`!=` lowering uses that generated method when available. Verified by
+    `cargo test -p sengoo-compiler derive_ -- --nocapture`.
+  - Default now generates a real inherent `Type::default()` constructor for
+    named structs with scalar zero/false field defaults and nested fields whose
+    own `Type::default()` is available, while preserving the `impl Default for
+    Type {}` bound marker. This also adds the parser/typeck path needed for
+    `Type::method()` associated-function calls. Verified by `cargo test -p
+    sengoo-compiler derive_default -- --nocapture`.
+  - PartialOrd/Ord now generate lexicographic `compare/lt/le/gt/ge` helpers
+    for scalar fields and nested fields with ordering operators, and struct
+    `< <= > >=` lowering uses the generated `compare` method when available.
+    Verified by `cargo test -p sengoo-compiler derive_ord -- --nocapture`.
+  - Hash now generates a deterministic `hash() -> i64` helper for scalar fields
+    and nested fields whose own `hash()` is available. Verified by
+    `cargo test -p sengoo-compiler derive_hash -- --nocapture`.
+  - Struct and enum custom `Debug.to_string()` bodies now satisfy the `Debug`
+    contract and take precedence over structural `{:?}` formatting; derived
+    Debug keeps the built-in structural enum/struct formatting path. Remaining:
+    the full `Hasher` object protocol, generic collection-field derives beyond
+    the currently generated method calls, and the general `Formatter` object
+    protocol.
 - [x] 5.3 Enforce `Copy` and no `Drop`; `Copy` requires all-`Copy` fields.
   - Verified by `cargo test -p sengoo-compiler copy_ -- --nocapture`,
     including `copy-drop-conflict` and `copy-field-not-copy` diagnostics.
-- [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
-  - Copy/Drop exclusivity and non-Copy field coverage exists; remaining tests
-    must cover field-aware behavior for every supported derive.
+- [x] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
+  - Completed for the current derive surface: marker impl bounds for all core derives, Copy/Drop exclusivity,
+    Copy non-Copy field rejection, Debug struct/unit enum/tuple enum
+    formatting, Clone scalar struct copy, PartialEq scalar struct method and
+    `==` operator lowering, PartialOrd/Ord scalar struct method and `<`
+    operator lowering, Hash scalar struct helper, Default scalar struct
+    constructor, plus nested-field Clone/PartialEq/Ord/Hash/Default regressions.
+    Full Hasher/custom Debug protocol tests remain tied to the deferred
+    protocol work in 5.2.
 
 ## 6. Orphan rule and docs
 

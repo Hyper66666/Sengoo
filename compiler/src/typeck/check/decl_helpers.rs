@@ -136,15 +136,21 @@ impl TypeChecker {
         }
 
         let propagation = Self::propagation_from_ty(&ret_ty);
-        let body_ty = if fn_decl.is_async {
+        self.expected_return_types.push(ret_ty.clone());
+        let body_result = if fn_decl.is_async {
             self.async_context_depth += 1;
-            let result =
-                self.with_propagation(propagation.clone(), |this| this.check_block(&fn_decl.body));
+            let result = self.with_propagation(propagation.clone(), |this| {
+                this.check_function_body_block(&fn_decl.body)
+            });
             self.async_context_depth = self.async_context_depth.saturating_sub(1);
-            result?
+            result
         } else {
-            self.with_propagation(propagation, |this| this.check_block(&fn_decl.body))?
+            self.with_propagation(propagation, |this| {
+                this.check_function_body_block(&fn_decl.body)
+            })
         };
+        self.expected_return_types.pop();
+        let body_ty = body_result?;
 
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
@@ -411,7 +417,10 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        let body_ty = self.check_block(&method.body)?;
+        self.expected_return_types.push(ret_ty.clone());
+        let body_result = self.check_function_body_block(&method.body);
+        self.expected_return_types.pop();
+        let body_ty = body_result?;
         self.infer
             .unify(&body_ty, &ret_ty)
             .map_err(CompileError::from)?;

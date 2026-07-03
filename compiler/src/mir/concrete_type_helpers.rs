@@ -244,6 +244,31 @@ pub(crate) fn collect_concrete_named_types_from_items(
                     collect_concrete_named_types_from_type(&field.ty, known_named_types, &mut out);
                 }
             }
+            HIRItem::Enum(enum_item) => {
+                for variant in &enum_item.variants {
+                    match variant {
+                        crate::hir::HIRVariant::Tuple(_, fields) => {
+                            for field_ty in fields {
+                                collect_concrete_named_types_from_type(
+                                    field_ty,
+                                    known_named_types,
+                                    &mut out,
+                                );
+                            }
+                        }
+                        crate::hir::HIRVariant::Struct(_, fields) => {
+                            for field in fields {
+                                collect_concrete_named_types_from_type(
+                                    &field.ty,
+                                    known_named_types,
+                                    &mut out,
+                                );
+                            }
+                        }
+                        crate::hir::HIRVariant::Unit(_) => {}
+                    }
+                }
+            }
             _ => {}
         }
     }

@@ -55,6 +55,7 @@ fn realworld_sources_check_through_sgc_command() {
         None,
     );
     assert_sgc_check(&realworld("http-client-status").join("src/main.sg"), None);
+    assert_sgc_check(&realworld("p0-foundations").join("src/main.sg"), None);
 
     let workspace_doc_loop = realworld("workspace-doc-loop");
     let module_map = format!(

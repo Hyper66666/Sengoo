@@ -271,7 +271,18 @@ impl<'a> LoweringContext<'a> {
                         | "HttpServer"
                         | "HttpServerRequest"
                         | "WsClient"
+                        | "TextList"
+                        | "TextListIter"
+                        | "StringMapI64"
+                        | "StringMapBool"
+                        | "StringMapKeyIter"
+                        | "StringMapString"
+                        | "StringMapStringKeyIter"
+                        | "VecStringIter"
                 ) || name.starts_with("Vec_")
+                    || name.starts_with("VecIter_")
+                    || name.starts_with("HashMap_")
+                    || name.starts_with("HashMapIter_")
             }
             _ => false,
         }
@@ -356,24 +367,25 @@ impl<'a> LoweringContext<'a> {
             return;
         }
 
-        let return_blocks = self
+        let cleanup_exits = self
             .mir_fn
             .basic_blocks
             .iter()
-            .filter_map(|block| match block.terminator {
-                Some(Terminator::Return(value)) => Some((block.id, value)),
+            .filter_map(|block| match &block.terminator {
+                Some(Terminator::Return(value)) => Some((block.id, Terminator::Return(*value))),
+                Some(Terminator::Unreachable) => Some((block.id, Terminator::Unreachable)),
                 _ => None,
             })
             .collect::<Vec<_>>();
 
-        if return_blocks.is_empty() {
+        if cleanup_exits.is_empty() {
             return;
         }
 
-        if return_blocks.len() == 1 && self.all_bindings_initialized_in_entry(&bindings) {
-            self.insert_straight_line_drops(return_blocks[0].0, &bindings);
+        if cleanup_exits.len() == 1 && self.all_bindings_initialized_in_entry(&bindings) {
+            self.insert_straight_line_drops(cleanup_exits[0].0, &bindings);
         } else {
-            self.insert_flagged_drops(&return_blocks, &bindings);
+            self.insert_flagged_drops(&cleanup_exits, &bindings);
         }
     }
 
@@ -383,7 +395,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn insert_flagged_drops(&mut self, exits: &[(usize, Option<Local>)], bindings: &[DropBinding]) {
+    fn insert_flagged_drops(&mut self, exits: &[(usize, Terminator)], bindings: &[DropBinding]) {
         let flagged = bindings
             .iter()
             .filter_map(|binding| {
@@ -405,19 +417,19 @@ impl<'a> LoweringContext<'a> {
             return;
         }
 
-        for (exit_block, return_value) in exits.iter().copied() {
-            self.rewrite_return_with_flagged_drops(exit_block, return_value, &flagged);
+        for (exit_block, final_terminator) in exits.iter().cloned() {
+            self.rewrite_exit_with_flagged_drops(exit_block, final_terminator, &flagged);
         }
     }
 
-    fn rewrite_return_with_flagged_drops(
+    fn rewrite_exit_with_flagged_drops(
         &mut self,
         exit_block: usize,
-        return_value: Option<Local>,
+        final_terminator: Terminator,
         flagged: &[(DropBinding, Local)],
     ) {
         let final_return = self.mir_fn.add_block();
-        self.mir_fn.basic_blocks[final_return].set_terminator(Terminator::Return(return_value));
+        self.mir_fn.basic_blocks[final_return].set_terminator(final_terminator);
 
         let mut next = final_return;
         for (binding, flag) in flagged {

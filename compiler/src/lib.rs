@@ -169,6 +169,14 @@ pub fn collect_compile_warnings(source: &str) -> Result<Vec<CompileWarning>> {
 
 /// Compile Sengoo source to MIR functions (without code generation).
 pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
+    compile_to_mir_with_options(source, CompileOptions::default())
+}
+
+/// Compile Sengoo source to MIR functions (without code generation) using explicit options.
+pub fn compile_to_mir_with_options(
+    source: &str,
+    options: CompileOptions,
+) -> Result<Vec<mir::MirFunction>> {
     // 1. Parse source code.
     let program = Parser::parse(source)?;
 
@@ -184,7 +192,11 @@ pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
     // 4. MIR lowering.
     let mut mir_fns = lower_hir_with_options(
         &hir_module.items,
-        mir::MirLowerOptions::new(false, true, async_functions.clone()),
+        mir::MirLowerOptions::new(
+            options.runtime_contract_checks,
+            true,
+            async_functions.clone(),
+        ),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);

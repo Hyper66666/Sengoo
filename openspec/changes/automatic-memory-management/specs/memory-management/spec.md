@@ -81,3 +81,18 @@ than making reference counting the default.
 - **THEN** the underlying value is released only after the last `Rc` handle is
   dropped
 - **AND** the default (non-`Rc`) types remain move-only with single ownership
+
+#### Scenario: User-defined owning payload is shared through Rc
+
+- **WHEN** a user-defined aggregate containing a `Drop` field is moved into
+  `Rc<T>`, borrowed through one clone, and all clones leave scope
+- **THEN** every clone observes the same payload address and value
+- **AND** the aggregate drop glue runs exactly once after the final clone
+- **AND** no payload or control-block handle remains live
+
+#### Scenario: Rc borrow keeps its owner live
+
+- **WHEN** a program borrows `&T` from an `Rc<T>` and attempts to move or drop
+  the last owning `Rc<T>` before the borrow ends
+- **THEN** type checking rejects the move with the existing
+  `cannot-move-borrowed` diagnostic

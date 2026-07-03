@@ -103,18 +103,31 @@ def takes_iter(value: dyn Iterator<Item = i64>) -> i64 {
 }
 ```
 
-Current `dyn Trait` support is a frontend/type-checking skeleton. Object-safety
-diagnostics and fixed associated-type validation are implemented, but vtable
-representation and runtime dynamic dispatch are still roadmap work.
+Current `dyn Trait` support includes parsing/type checking, object-safety
+diagnostics, fixed associated-type validation, and LLVM-text/JIT dynamic
+dispatch for single-trait `&self` receivers through a fat pointer plus vtable.
+Multi-trait dyn objects, owning `Box<dyn Trait>`, dyn drop slots, and the native
+Cranelift path remain roadmap work.
 
 Core trait names are compiler-known for bounds: `Clone`, `Copy`,
 `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`, `Display`, `Debug`,
 `Iterator`, and `IntoIterator`. Support types `Ordering`, `Formatter`, and
 `Hasher` resolve in signatures. `#[derive(...)]` currently registers core trait
-impls for the derivable marker surface, while field-aware clone/compare/hash/
-debug/default behavior is still under construction. `Copy` is checked against
-`Drop`: a type cannot implement both, and a `Copy` type cannot contain
-non-`Copy` fields.
+impls for the derivable marker surface. Debug formatting is field-aware for
+structs and basic enums; `#[derive(Clone)]` and `#[derive(PartialEq)]` on named
+structs generate field-aware `clone(&self)` and `eq(&self, other: &Self)`
+methods, with struct `==`/`!=` lowering through the generated equality method;
+`#[derive(PartialOrd)]` / `#[derive(Ord)]` on named scalar-field structs
+generate lexicographic `compare/lt/le/gt/ge` helpers, with `< <= > >=`
+lowering through `compare`; `#[derive(Hash)]` generates a deterministic
+`hash() -> i64` helper; and `#[derive(Default)]` on named structs generates a
+callable `Type::default()` constructor. Scalar fields are handled directly, and
+nested fields work when their own derived helper is available. The full
+`Hasher` object protocol, generic collection-field derives beyond the generated
+method calls, and the general Formatter object protocol are still under
+construction. `Copy` is
+checked against `Drop`: a type cannot implement both, and a `Copy` type cannot
+contain non-`Copy` fields.
 
 Impls follow the package-local orphan rule: an `impl Trait for Type` is allowed
 only when the trait or the target type is defined in the current package.
@@ -245,7 +258,9 @@ when the owner goes out of scope.
   `sgc --error-format json` and `sglsp`).
 - **An active borrow prevents ownership transfer.** Moving an owned root while
   it is still borrowed is rejected with the stable `cannot-move-borrowed`
-  diagnostic. The current checker is lexical and intentionally conservative.
+  diagnostic. Returning a borrowed view derived from a local owner is rejected
+  with `borrow-escapes-scope`. The current checker is lexical and intentionally
+  conservative.
 - **`drop` is compiler-called, not user-called.** The compatibility release
   methods (`.drop()` / `.free()` / `.close()`) run cleanup immediately and mark
   the value moved, so the later automatic drop is suppressed and there is no
@@ -253,30 +268,38 @@ when the owner goes out of scope.
 
 Current surface: the verified auto-drop and move-checking path covers owned
 `String`, current concrete stdlib handles (`Buffer`, `Vec<T>`, `JsonDoc`,
-process/net handles), and verified `Rc<i64>`/`Rc<bool>`/`Rc<String>` handles.
-Some runtime domains still keep
+process/net handles), verified `Rc<i64>`/`Rc<bool>`/`Rc<String>` handles, and
+compiler-lowered `Rc<T>` storage for monomorphized owning payloads. Some runtime domains still keep
 compatibility release methods because older examples and direct FFI-style
 stdlib calls use them, but new examples prefer automatic drop.
+Drop glue is verified on the LLVM-text/native path and the compiler crate's
+LLVM-text JIT emitter; the separate Cranelift fast-JIT remains a constant-only
+accelerator rather than a general MIR/drop-glue backend.
 
 ## 2.10 Text and Strings
 
 Sengoo has two practical text surfaces today:
 
 - `&str` is the borrowed literal/view type. It supports length, concatenation,
-  equality/inequality, `contains`, `starts_with`, `ends_with`, and `index_of`
-  through the stdlib string helpers.
+  equality/inequality, comparison trait bounds, `contains`, `starts_with`,
+  `ends_with`, and `index_of` through the stdlib string helpers.
 - `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
   can be cloned, pushed to, copied into a `Buffer`, and compared with another
   `String` through `eq`/`ne` and byte-order `lt`/`le`/`gt`/`ge`/`compare`
-  methods. `String + &str` produces a new owned `String`; `+=` remains future
-  work. `String.get(start, end)` and `str_get(value, start, end)` copy a byte
-  range into a new owned `String` only when both offsets are UTF-8 scalar
-  boundaries; invalid ranges return `STATUS_INVALID_ARGUMENT`.
+  methods plus `PartialEq`/`Eq`/`PartialOrd`/`Ord` bounds. `String + &str`
+  produces a new owned `String`, and `String += &str` appends in place.
+  `String.get(start, end)` and `str_get(value, start, end)` copy a byte range
+  into a new owned `String` only when both offsets are UTF-8 scalar boundaries;
+  invalid ranges return `STATUS_INVALID_ARGUMENT`. The infallible
+  `value[start..end]` syntax is available for `String` and `&str`, returns an
+  owned `String`, and panics on invalid ranges.
 - `String.bytes()` and `String.chars()` create concrete iterators over a copied
   snapshot. `bytes().next()` returns byte values and `chars().next()` returns
-  Unicode scalar codepoints as `Option<i64>`. These iterators currently use an
-  explicit `free()` method; trait-generic `Iterator<Item = char>` remains
-  future work.
+  Unicode scalar codepoints as `Option<i64>`. `bytes()` and `chars()` satisfy
+  the current generic `Iterator<Item = i64>` bound surface. These iterators
+  currently use an explicit `free()` method; source-level
+  `Iterator<Item = char>` and split iterators as `Iterator<Item = String>`
+  remain future work.
 - `char` is represented as a Unicode scalar value in the source language and
   lowers to an `i32` C ABI scalar. `String.push_char(value)` appends the scalar
   as UTF-8 and returns an error-shaped `Result` if the runtime rejects the
@@ -291,9 +314,11 @@ locale collation remain future work.
 includes `{}`, scalar `{:?}`, positional placeholders such as `{1}`, right
 alignment such as `{:>8}`, f64 fixed precision such as `{:.2}` / `{:>8.2}`, and
 f-string expansion through the same lowering path. `{:?}` also renders current
-struct values in field order, for example `Point { x: 7, ok: true }`. Enum
-Debug, derive-driven Debug customization, general Formatter customization, and
-source-map-perfect f-string diagnostics remain future work.
+struct values in field order, for example `Point { x: 7, ok: true }`, and a
+user `impl Debug for Type { def to_string(&self) -> String { ... } }` takes
+precedence over that structural fallback for structs and enums. Derived enum
+Debug renders unit and tuple-payload variants. General Formatter customization
+and source-map-perfect f-string diagnostics remain future work.
 
 ## 2.11 Opt-in shared ownership with `Rc`
 
@@ -307,13 +332,24 @@ Current verified surface:
 - `rc_new_i64(value) -> Rc<i64>`
 - `rc_new_bool(value) -> Rc<bool>`
 - `rc_new_string(value) -> Rc<String>`
+- `rc_new<T>(value) -> Rc<T>` for compiler-lowered monomorphized payloads
 - `RcValue` for generic `value.rc()` construction over the verified payloads
 - `clone()`, `get()`, `strong_count()`, and `is_unique()`
-- automatic `Drop` for `Rc<i64>`, `Rc<bool>`, and `Rc<String>`
+- automatic `Drop` for `Rc<i64>`, `Rc<bool>`, `Rc<String>`, and generic `Rc<T>`
 
-Arbitrary user-defined `Rc<T>` storage/deref still needs a stable value
-representation and drop ABI. Until then, `RcValue` is the supported generic
-entry point for the concrete payloads backed by the runtime.
+Generic `Rc<T>` stores a moved payload in the runtime control block and invokes
+a compiler-generated typed drop thunk when the final clone is released.
+Temporary payload expressions are materialized into hidden storage before the
+runtime copy, so `rc_new(21)` follows the same move/copy path as
+`let value = 21; rc_new(value)`.
+`borrow() -> &T` has an initial compiler-known read path for generic payloads:
+the runtime exposes the shared payload address and the compiler casts it to the
+monomorphized reference type. Borrowed aggregate scalar fields can be read via
+`(*rc.borrow()).field`. Moving an `Rc<T>` owner while a borrow produced by
+`borrow()` is live is rejected with the stable `cannot-move-borrowed`
+diagnostic. Richer projection of owned fields through borrows remains a broader
+reference-field/lending limitation. `RcValue` remains the ergonomic generic
+entry point for the concrete scalar/string helpers backed by the runtime.
 
 `Rc` deliberately does not collect cycles. If two or more future `Rc`-backed
 objects retain each other, that cycle leaks until the process exits. Break such

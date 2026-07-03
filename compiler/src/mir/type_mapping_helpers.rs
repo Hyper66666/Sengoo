@@ -177,7 +177,7 @@ pub(crate) fn bind_mir_subst_from_hir_type(
             }
         }
         HIRTypeKind::Ref(_, inner) => {
-            if let MIRType::Ref(actual_inner) = actual {
+            if let MIRType::Ref(actual_inner) | MIRType::Ptr(actual_inner) = actual {
                 bind_mir_subst_from_hir_type(inner, actual_inner, struct_defs, subst);
             }
         }

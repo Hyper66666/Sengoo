@@ -41,6 +41,10 @@ typedef struct {
 
 long long sengoo_ptr_to_handle(void* ptr);
 void* sengoo_handle_to_ptr(long long handle);
+long long sengoo_opaque_handle_new(void* ptr);
+void* sengoo_opaque_handle_get(long long handle);
+void* sengoo_opaque_handle_take(long long handle);
+long long sengoo_opaque_live_handle_count(void);
 SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle);
 long long sengoo_copy_bytes_to_managed_buffer(long long buffer_handle, const char* bytes, size_t len);
 long long sengoo_buffer_live_handle_count(void);

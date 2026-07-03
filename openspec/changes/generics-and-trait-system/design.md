@@ -53,8 +53,8 @@ The core traits are compiler-known so codegen and stdlib can rely on them:
 | `Clone` | `clone(&self) -> Self` | yes |
 | `Copy` | marker (implies bitwise copy, no `Drop`) | yes |
 | `PartialEq`/`Eq` | `eq(&self, other: &Self) -> bool` | yes |
-| `PartialOrd`/`Ord` | `cmp(&self, other: &Self) -> Ordering` | yes |
-| `Hash` | `hash<H: Hasher>(&self, h: &mut H)` | yes |
+| `PartialOrd`/`Ord` | `cmp(&self, other: &Self) -> Ordering`; current derive helper also exposes `compare/lt/le/gt/ge` | yes |
+| `Hash` | `hash<H: Hasher>(&self, h: &mut H)`; current derive helper exposes deterministic `hash() -> i64` until the Hasher protocol lands | yes |
 | `Default` | `default() -> Self` | yes |
 | `Display` | `fmt(&self, f: &mut Formatter) -> Result` | no (user intent) |
 | `Debug` | `fmt(&self, f: &mut Formatter) -> Result` | yes |

@@ -77,6 +77,14 @@ pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
                 "cannot move borrowed value `{}` (borrow {:?}, move {:?})",
                 var, borrow_span, move_span
             )),
+            BorrowError::BorrowEscapesScope {
+                var,
+                borrow_span,
+                escape_span,
+            } => lines.push(format!(
+                "borrowed view `{}` escapes its owner scope (borrow {:?}, escape {:?})",
+                var, borrow_span, escape_span
+            )),
             BorrowError::UseAfterMove {
                 var,
                 use_span,
@@ -106,6 +114,17 @@ pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
             message,
             move_span.0 as u32,
             move_span.1 as u32,
+        );
+    }
+    if let Some(escape_span) = errors.iter().find_map(|err| match err {
+        BorrowError::BorrowEscapesScope { escape_span, .. } => Some(*escape_span),
+        _ => None,
+    }) {
+        return TypeckError::diagnostic(
+            "borrow-escapes-scope",
+            message,
+            escape_span.0 as u32,
+            escape_span.1 as u32,
         );
     }
     if let Some(use_span) = errors.iter().find_map(|err| match err {

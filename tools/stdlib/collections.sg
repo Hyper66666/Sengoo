@@ -99,7 +99,6 @@ extern "C" {
 
 struct Rc<T> {
     handle: i64,
-    marker: T,
 }
 
 struct Vec<T> {
@@ -157,7 +156,7 @@ struct VecStringIter {
 
 trait RcValue {
     def rc(self) -> Rc<Self> {
-        Rc { handle: 0, marker: self }
+        Rc { handle: 0 }
     }
 }
 
@@ -174,15 +173,19 @@ def i64_to_bool(value: i64) -> bool {
 }
 
 def rc_new_i64(value: i64) -> Rc<i64> {
-    Rc { handle: sengoo_rc_new_i64(value), marker: value }
+    Rc { handle: sengoo_rc_new_i64(value) }
 }
 
 def rc_new_bool(value: bool) -> Rc<bool> {
-    Rc { handle: sengoo_rc_new_bool(bool_to_i64(value)), marker: value }
+    Rc { handle: sengoo_rc_new_bool(bool_to_i64(value)) }
 }
 
 def rc_new_string(value: String) -> Rc<String> {
-    Rc { handle: sengoo_rc_new_string(value.handle), marker: String { handle: 0 } }
+    Rc { handle: sengoo_rc_new_string(value.handle) }
+}
+
+def rc_new<T>(value: T) -> Rc<T> {
+    Rc { handle: 0 }
 }
 
 impl RcValue for i64 {
@@ -204,6 +207,10 @@ impl RcValue for String {
 }
 
 impl<T> Rc<T> {
+    def clone(&self) -> Rc<T> {
+        Rc { handle: sengoo_rc_clone(self.handle) }
+    }
+
     def strong_count(&self) -> i64 {
         sengoo_rc_strong_count(self.handle)
     }
@@ -214,48 +221,24 @@ impl<T> Rc<T> {
 }
 
 impl Rc<i64> {
-    def clone(&self) -> Rc<i64> {
-        Rc { handle: sengoo_rc_clone(self.handle), marker: self.marker }
-    }
-
     def get(&self) -> i64 {
         sengoo_rc_get_i64(self.handle)
     }
 }
 
 impl Rc<bool> {
-    def clone(&self) -> Rc<bool> {
-        Rc { handle: sengoo_rc_clone(self.handle), marker: self.marker }
-    }
-
     def get(&self) -> bool {
         i64_to_bool(sengoo_rc_get_bool(self.handle))
     }
 }
 
 impl Rc<String> {
-    def clone(&self) -> Rc<String> {
-        Rc { handle: sengoo_rc_clone(self.handle), marker: String { handle: 0 } }
-    }
-
     def get(&self) -> String {
         String { handle: sengoo_rc_get_string_clone(self.handle) }
     }
 }
 
-impl Drop for Rc<i64> {
-    def drop(&mut self) {
-        sengoo_rc_drop(self.handle);
-    }
-}
-
-impl Drop for Rc<bool> {
-    def drop(&mut self) {
-        sengoo_rc_drop(self.handle);
-    }
-}
-
-impl Drop for Rc<String> {
+impl<T> Drop for Rc<T> {
     def drop(&mut self) {
         sengoo_rc_drop(self.handle);
     }
@@ -270,6 +253,8 @@ def collections_copy_result(value: i64) -> Result<i64, i64> {
 }
 
 trait Iterator {
+    type Item;
+
     def next(self) -> Option<i64> {
         option_none_i64()
     }
@@ -357,6 +342,102 @@ impl Drop for Vec<bool> {
 impl Drop for Vec<String> {
     def drop(&mut self) {
         sengoo_vec_string_free_status(self.handle);
+    }
+}
+
+impl Drop for VecIter<i64> {
+    def drop(&mut self) {
+        sengoo_vec_iter_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for VecIter<bool> {
+    def drop(&mut self) {
+        sengoo_vec_iter_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMap<i64, i64> {
+    def drop(&mut self) {
+        sengoo_hashmap_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMap<bool, bool> {
+    def drop(&mut self) {
+        sengoo_hashmap_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMap<i64, bool> {
+    def drop(&mut self) {
+        sengoo_hashmap_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMap<bool, i64> {
+    def drop(&mut self) {
+        sengoo_hashmap_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMapIter<i64> {
+    def drop(&mut self) {
+        sengoo_hashmap_iter_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for HashMapIter<bool> {
+    def drop(&mut self) {
+        sengoo_hashmap_iter_free_i64_status(self.handle);
+    }
+}
+
+impl Drop for TextList {
+    def drop(&mut self) {
+        sengoo_text_list_free_status(self.handle);
+    }
+}
+
+impl Drop for TextListIter {
+    def drop(&mut self) {
+        sengoo_text_list_iter_free_status(self.handle);
+    }
+}
+
+impl Drop for StringMapI64 {
+    def drop(&mut self) {
+        sengoo_string_map_free_status(self.handle);
+    }
+}
+
+impl Drop for StringMapBool {
+    def drop(&mut self) {
+        sengoo_string_map_free_status(self.handle);
+    }
+}
+
+impl Drop for StringMapKeyIter {
+    def drop(&mut self) {
+        sengoo_string_map_key_iter_free_status(self.handle);
+    }
+}
+
+impl Drop for VecStringIter {
+    def drop(&mut self) {
+        sengoo_vec_string_iter_free_status(self.handle);
+    }
+}
+
+impl Drop for StringMapString {
+    def drop(&mut self) {
+        sengoo_string_map_string_free_status(self.handle);
+    }
+}
+
+impl Drop for StringMapStringKeyIter {
+    def drop(&mut self) {
+        sengoo_string_map_string_key_iter_free_status(self.handle);
     }
 }
 
@@ -502,6 +583,8 @@ impl VecIter<bool> {
 }
 
 impl Iterator for VecIter<i64> {
+    type Item = i64;
+
     def next(self) -> Option<i64> {
         if sengoo_vec_iter_done_i64(self.handle) != 0 {
             option_none_i64()
@@ -740,6 +823,8 @@ impl HashMapIter<bool> {
 }
 
 impl Iterator for HashMapIter<i64> {
+    type Item = i64;
+
     def next(self) -> Option<i64> {
         if sengoo_hashmap_iter_done_i64(self.handle) != 0 {
             option_none_i64()

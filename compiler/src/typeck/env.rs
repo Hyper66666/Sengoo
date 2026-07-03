@@ -360,6 +360,17 @@ impl TypeEnv {
                     | "HttpServer"
                     | "HttpServerRequest"
                     | "WsClient"
+                    | "HashMap"
+                    | "HashMapIter"
+                    | "VecIter"
+                    | "TextList"
+                    | "TextListIter"
+                    | "StringMapI64"
+                    | "StringMapBool"
+                    | "StringMapKeyIter"
+                    | "StringMapString"
+                    | "StringMapStringKeyIter"
+                    | "VecStringIter"
             ),
             _ => false,
         }

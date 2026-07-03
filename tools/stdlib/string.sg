@@ -309,6 +309,26 @@ impl Drop for String {
     }
 }
 
+impl PartialEq for String {
+}
+
+impl Eq for String {
+}
+
+impl PartialOrd for String {
+}
+
+impl Ord for String {
+}
+
+impl Iterator for StringBytesIter {
+    type Item = i64;
+}
+
+impl Iterator for StringCharsIter {
+    type Item = i64;
+}
+
 impl StringBytesIter {
     def next(&mut self) -> Option<i64> {
         if sengoo_string_iter_done(self.handle) != 0 {

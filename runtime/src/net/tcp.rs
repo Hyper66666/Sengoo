@@ -172,7 +172,11 @@ pub unsafe extern "C" fn sengoo_tcp_recv(
 #[no_mangle]
 pub extern "C" fn sengoo_tcp_close(handle: u64) -> i64 {
     reset_last_error();
-    net_runtime().tcp_close(handle).unwrap_or_else(fail_bool)
+    match net_runtime().tcp_close(handle) {
+        Ok(value) => value,
+        Err(NetErrorCode::HandleNotFound) => 1,
+        Err(code) => fail_bool(code),
+    }
 }
 
 #[no_mangle]

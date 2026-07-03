@@ -92,6 +92,12 @@ pub enum BorrowError {
         borrow_span: (usize, usize),
         move_span: (usize, usize),
     },
+    /// A borrowed view would outlive the owner scope that produced it.
+    BorrowEscapesScope {
+        var: String,
+        borrow_span: (usize, usize),
+        escape_span: (usize, usize),
+    },
     /// Use of a `String` value after it was moved.
     UseAfterMove {
         var: String,
@@ -154,6 +160,10 @@ impl BorrowChecker {
         self.finish()
     }
 
+    pub(crate) fn check_function_block(&mut self, block: &Block) {
+        self.check_block_inner(block, true);
+    }
+
     /// Check one statement.
     pub fn check_stmt(&mut self, stmt: &Stmt) -> std::result::Result<(), Vec<BorrowError>> {
         match &stmt.kind {
@@ -212,9 +222,20 @@ impl BorrowChecker {
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) {
+        self.check_block_inner(block, false);
+    }
+
+    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool) {
         self.push_scope();
-        for stmt in &block.stmts {
+        for (index, stmt) in block.stmts.iter().enumerate() {
             let _ = self.check_stmt(stmt);
+            if reject_tail_escape && index + 1 == block.stmts.len() {
+                if let StmtKind::Expr(expr) = &stmt.kind {
+                    if !matches!(expr.kind, ExprKind::Return(_)) {
+                        self.check_borrow_escape_expr(expr);
+                    }
+                }
+            }
         }
         self.pop_scope();
     }
@@ -246,6 +267,9 @@ impl BorrowChecker {
                 args,
                 ..
             } => {
+                if matches!(method.name.as_str(), "borrow" | "as_str") {
+                    self.add_borrow(receiver, BorrowKind::Immutable);
+                }
                 self.check_expr(receiver);
                 self.check_owned_string_invalidation(receiver, &method.name);
                 for arg in args {
@@ -335,6 +359,7 @@ impl BorrowChecker {
             ExprKind::Return(value) => {
                 if let Some(value) = value {
                     self.check_expr(value);
+                    self.check_borrow_escape_expr(value);
                     if let Some(path) = Self::expr_move_path(value) {
                         if self.move_path_is_movable_owning_value(&path) {
                             self.mark_moved(&path, value.span);
@@ -360,9 +385,46 @@ impl BorrowChecker {
         }
     }
 
+    fn check_borrow_escape_expr(&mut self, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Paren(inner) => self.check_borrow_escape_expr(inner),
+            ExprKind::MethodCall {
+                receiver, method, ..
+            } if matches!(method.name.as_str(), "borrow" | "as_str") => {
+                let var = Self::expr_move_path(receiver)
+                    .map(|path| path.display())
+                    .unwrap_or_else(|| "<temporary>".to_string());
+                self.errors.push(BorrowError::BorrowEscapesScope {
+                    var,
+                    borrow_span: (receiver.span.lo as usize, receiver.span.hi as usize),
+                    escape_span: (expr.span.lo as usize, expr.span.hi as usize),
+                });
+            }
+            _ => {
+                let Some(path) = Self::expr_move_path(expr) else {
+                    return;
+                };
+                if let Some(active_borrow) = self.borrows.get(&path).and_then(|borrows| {
+                    borrows
+                        .iter()
+                        .find(|borrow| matches!(borrow.kind, BorrowKind::Immutable))
+                }) {
+                    self.errors.push(BorrowError::BorrowEscapesScope {
+                        var: path.display(),
+                        borrow_span: active_borrow.span,
+                        escape_span: (expr.span.lo as usize, expr.span.hi as usize),
+                    });
+                }
+            }
+        }
+    }
+
     fn ty_is_movable_owning_value(&self, ty: &Ty) -> bool {
         if ty.is_copy_value() {
             return false;
+        }
+        if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if name == "Rc") {
+            return true;
         }
         if self._env.is_legacy_idempotent_handle_type(ty) {
             return false;
@@ -566,6 +628,16 @@ impl BorrowChecker {
                 }
             }
             ExprKind::MethodCall { receiver, args, .. } => {
+                if matches!(&expr.kind, ExprKind::MethodCall { method, .. } if matches!(method.name.as_str(), "borrow" | "as_str"))
+                {
+                    self.add_borrow(receiver, BorrowKind::Immutable);
+                    if let Some(source) = Self::expr_move_path(receiver) {
+                        if let Some(existing) = self.borrows.get(&source).cloned() {
+                            self.borrows
+                                .insert(MovePath::root(name.to_string()), existing);
+                        }
+                    }
+                }
                 self.track_borrows_in_expr(name, receiver);
                 for arg in args {
                     self.track_borrows_in_expr(name, arg);

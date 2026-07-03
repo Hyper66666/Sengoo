@@ -5656,6 +5656,44 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_str_comparison_operators_order_borrowed_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "str-compare-operators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if !("alpha" < "beta") { return 10; }
+    if !("alpha" <= "alpha") { return 11; }
+    if !("beta" > "alpha") { return 12; }
+    if !("beta" >= "beta") { return 13; }
+    if copied != 2 { return 14; }
+    if wrote != 2 { return 15; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
 fn stdlib_string_get_checks_utf8_boundaries() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-get-utf8",
@@ -5697,6 +5735,43 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "é");
+}
+
+#[test]
+fn stdlib_string_range_index_returns_owned_slice() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-range-index",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let borrowed = "hello"[1..4];
+    let owned_text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let owned = owned_text[1..4];
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = borrowed.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if borrowed.len() == 3 && owned.len() == 3 && copied == 3 && wrote == 3 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ell");
 }
 
 #[test]
@@ -5929,8 +6004,14 @@ import std::ffi;
 import std::json;
 import std::process;
 import std::string;
+import std::collections;
+
+extern "C" {
+    fn sengoo_opaque_live_handle_count() -> i64;
+}
 
 def main() -> i64 {
+    let opaque_before = sengoo_opaque_live_handle_count();
     let text = string_from_str("release").unwrap_or(String { handle: 0 });
     let text_handle = text.handle;
     let text_first = sengoo_string_free_status(text_handle) >= 0;
@@ -5951,13 +6032,80 @@ def main() -> i64 {
     let command_first = sengoo_process_command_close(command_handle) == 0;
     let command_second = sengoo_process_command_close(command_handle) == 0;
 
-    if text_first and text_second and buffer_first and buffer_second and doc_first and doc_second and command_first and command_second {
+    let vec = vec_new_i64();
+    let vec_handle = vec.handle;
+    let vec_first = sengoo_vec_free_i64_status(vec_handle) == 1;
+    let vec_second = sengoo_vec_free_i64_status(vec_handle) == 1;
+
+    let map = hashmap_new_i64_i64();
+    let map_handle = map.handle;
+    let map_first = sengoo_hashmap_free_i64_status(map_handle) == 1;
+    let map_second = sengoo_hashmap_free_i64_status(map_handle) == 1;
+
+    let list = text_list_new();
+    let list_handle = list.handle;
+    let list_first = sengoo_text_list_free_status(list_handle) == 1;
+    let list_second = sengoo_text_list_free_status(list_handle) == 1;
+
+    let text_map = string_map_i64_new();
+    let text_map_handle = text_map.handle;
+    let text_map_first = sengoo_string_map_free_status(text_map_handle) == 1;
+    let text_map_second = sengoo_string_map_free_status(text_map_handle) == 1;
+
+    let string_vec = vec_new_string();
+    let string_vec_handle = string_vec.handle;
+    let string_vec_first = sengoo_vec_string_free_status(string_vec_handle) == 1;
+    let string_vec_second = sengoo_vec_string_free_status(string_vec_handle) == 1;
+
+    let string_string_map = string_map_string_new();
+    let string_string_map_handle = string_string_map.handle;
+    let string_string_map_first = sengoo_string_map_string_free_status(string_string_map_handle) == 1;
+    let string_string_map_second = sengoo_string_map_string_free_status(string_string_map_handle) == 1;
+    let opaque_after = sengoo_opaque_live_handle_count();
+
+    if opaque_before == 0 and opaque_after == 0 and text_first and text_second and buffer_first and buffer_second and doc_first and doc_second and command_first and command_second and vec_first and vec_second and map_first and map_second and list_first and list_second and text_map_first and text_map_second and string_vec_first and string_vec_second and string_string_map_first and string_string_map_second {
         42
     } else {
         1
     }
 }
 "#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_c_fallback_net_release_functions_are_idempotent() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "fallback-net-release-idempotence",
+        r#"
+import std::net;
+
+def main() -> i64 {
+    let closes = sengoo_tcp_close(0) == 1
+        and sengoo_udp_close(0) == 1
+        and sengoo_http_close(0) == 1
+        and sengoo_http_server_close(0) == 1
+        and sengoo_http_request_close(0) == 1
+        and sengoo_ws_close(0) == 1;
+    if closes {
+        42
+    } else {
+        1
+    }
+}
+"#,
+        "",
     ) else {
         return;
     };
@@ -8649,6 +8797,134 @@ def main() -> i64 {
     let flag = share(true);
     let ok = first.strong_count() == 2 and second.get() == 40 and flag.get();
     if ok {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_payload_drops_once_after_last_release() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Pair {
+    text: String,
+}
+
+def make_shared_pair() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let pair = Pair { text: text };
+    let first = rc_new(pair);
+    let second = first.clone();
+    first.strong_count() + second.strong_count()
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let count = make_shared_pair();
+    let after = sengoo_string_live_handle_count();
+    if count == 4 and after == before {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_borrow_reads_shared_payload() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-borrow",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def observe(first: &Rc<i64>, second: &Rc<i64>) -> i64 {
+    let a = first.borrow();
+    let b = second.borrow();
+    (*a) + (*b)
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let payload = 21;
+    let first = rc_new(payload);
+    let second = first.clone();
+    let observed = observe(&first, &second);
+    let count = first.strong_count();
+    if observed == 42 and count == 2 {
+        let mid = sengoo_string_live_handle_count();
+        if mid == before {
+            42
+        } else {
+            2
+        }
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_payload_accepts_temporary_value() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-temp",
+        r#"
+def main() -> i64 {
+    let first = rc_new(21);
+    let second = first.clone();
+    let a = first.borrow();
+    let b = second.borrow();
+    if (*a) + (*b) == 42 and first.strong_count() == 2 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_borrow_reads_aggregate_field() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-borrow-field",
+        r#"
+struct Pair {
+    value: i64,
+}
+
+def observe(first: &Rc<Pair>, second: &Rc<Pair>) -> i64 {
+    let a = first.borrow();
+    let b = second.borrow();
+    (*a).value + (*b).value
+}
+
+def main() -> i64 {
+    let first = rc_new(Pair { value: 21 });
+    let second = first.clone();
+    if observe(&first, &second) == 42 {
         42
     } else {
         1

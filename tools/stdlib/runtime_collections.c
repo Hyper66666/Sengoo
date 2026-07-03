@@ -8,11 +8,15 @@ typedef struct {
     size_t strong;
     int kind;
     long long i64_value;
+    void* payload;
+    size_t payload_size;
+    void (*drop_payload)(void*);
 } SengooRcBox;
 
 enum {
     SENGOO_RC_KIND_I64 = 1,
-    SENGOO_RC_KIND_STRING = 2
+    SENGOO_RC_KIND_STRING = 2,
+    SENGOO_RC_KIND_COPY = 3
 };
 
 extern long long sengoo_string_clone_status(long long handle);
@@ -49,6 +53,29 @@ long long sengoo_rc_new_string(long long value) {
     return sengoo_rc_new_with_value(SENGOO_RC_KIND_STRING, owned);
 }
 
+long long sengoo_rc_new_copy(void* value, long long size, void* drop_fn) {
+    if (!value || size < 0) {
+        return 0;
+    }
+    SengooRcBox* box = (SengooRcBox*)calloc(1, sizeof(SengooRcBox));
+    if (!box) {
+        return 0;
+    }
+    box->payload_size = (size_t)size;
+    if (box->payload_size > 0) {
+        box->payload = malloc(box->payload_size);
+        if (!box->payload) {
+            free(box);
+            return 0;
+        }
+        memcpy(box->payload, value, box->payload_size);
+    }
+    box->strong = 1;
+    box->kind = SENGOO_RC_KIND_COPY;
+    box->drop_payload = (void (*)(void*))drop_fn;
+    return sengoo_ptr_to_handle(box);
+}
+
 long long sengoo_rc_clone(long long handle) {
     SengooRcBox* box = sengoo_rc_from_handle(handle);
     if (!box || box->strong == SIZE_MAX) {
@@ -80,6 +107,17 @@ long long sengoo_rc_get_string_clone(long long handle) {
     return sengoo_string_clone_status(box->i64_value);
 }
 
+void* sengoo_rc_borrow_ptr(long long handle) {
+    SengooRcBox* box = sengoo_rc_from_handle(handle);
+    if (!box) {
+        return NULL;
+    }
+    if (box->kind == SENGOO_RC_KIND_COPY) {
+        return box->payload;
+    }
+    return &box->i64_value;
+}
+
 long long sengoo_rc_drop(long long handle) {
     SengooRcBox* box = sengoo_rc_from_handle(handle);
     if (!box) {
@@ -92,6 +130,11 @@ long long sengoo_rc_drop(long long handle) {
     if (box->strong == 0) {
         if (box->kind == SENGOO_RC_KIND_STRING) {
             sengoo_string_free_status(box->i64_value);
+        } else if (box->kind == SENGOO_RC_KIND_COPY) {
+            if (box->drop_payload && box->payload) {
+                box->drop_payload(box->payload);
+            }
+            free(box->payload);
         }
         free(box);
     }
@@ -105,16 +148,16 @@ typedef struct {
 } SengooTextList;
 
 typedef struct {
-    SengooTextList* list;
+    long long list_handle;
     size_t index;
 } SengooTextListIter;
 
 static SengooTextList* sengoo_text_list_from_handle(long long handle) {
-    return (SengooTextList*)sengoo_handle_to_ptr(handle);
+    return (SengooTextList*)sengoo_opaque_handle_get(handle);
 }
 
 static SengooTextListIter* sengoo_text_list_iter_from_handle(long long handle) {
-    return (SengooTextListIter*)sengoo_handle_to_ptr(handle);
+    return (SengooTextListIter*)sengoo_opaque_handle_get(handle);
 }
 
 char* sengoo_copy_cstr_from_handle(long long value_ptr) {
@@ -159,7 +202,11 @@ long long sengoo_text_list_new(void) {
     if (!list) {
         return 0;
     }
-    return sengoo_ptr_to_handle(list);
+    long long handle = sengoo_opaque_handle_new(list);
+    if (handle == 0) {
+        free(list);
+    }
+    return handle;
 }
 
 long long sengoo_text_list_len(long long handle) {
@@ -181,11 +228,13 @@ long long sengoo_text_list_clear_status(long long handle) {
 }
 
 long long sengoo_text_list_free_status(long long handle) {
-    SengooTextList* list = sengoo_text_list_from_handle(handle);
+    SengooTextList* list = (SengooTextList*)sengoo_opaque_handle_take(handle);
     if (!list) {
         return 1;
     }
-    sengoo_text_list_clear_status(handle);
+    for (size_t i = 0; i < list->len; ++i) {
+        free(list->items[i]);
+    }
     free(list->items);
     free(list);
     return 1;
@@ -268,25 +317,31 @@ long long sengoo_text_list_iter_new(long long list_handle) {
     if (!iter) {
         return 0;
     }
-    iter->list = list;
+    iter->list_handle = list_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 long long sengoo_text_list_iter_done(long long iter_handle) {
     SengooTextListIter* iter = sengoo_text_list_iter_from_handle(iter_handle);
-    return (!iter || !iter->list || iter->index >= iter->list->len) ? 1 : 0;
+    SengooTextList* list = iter ? sengoo_text_list_from_handle(iter->list_handle) : NULL;
+    return (!iter || !list || iter->index >= list->len) ? 1 : 0;
 }
 
 long long sengoo_text_list_iter_next_copy(long long iter_handle, long long out_buffer) {
     SengooTextListIter* iter = sengoo_text_list_iter_from_handle(iter_handle);
-    if (!iter || !iter->list) {
+    SengooTextList* list = iter ? sengoo_text_list_from_handle(iter->list_handle) : NULL;
+    if (!iter || !list) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
-    if (iter->index >= iter->list->len) {
+    if (iter->index >= list->len) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
-    const char* value = iter->list->items[iter->index];
+    const char* value = list->items[iter->index];
     long long copied = sengoo_copy_bytes_to_managed_buffer(out_buffer, value, strlen(value));
     if (copied >= 0) {
         iter->index += 1;
@@ -304,10 +359,7 @@ long long sengoo_text_list_iter_reset_status(long long iter_handle) {
 }
 
 long long sengoo_text_list_iter_free_status(long long iter_handle) {
-    SengooTextListIter* iter = sengoo_text_list_iter_from_handle(iter_handle);
-    if (iter) {
-        free(iter);
-    }
+    free(sengoo_opaque_handle_take(iter_handle));
     return 1;
 }
 
@@ -324,16 +376,16 @@ typedef struct {
 } SengooStringMap;
 
 typedef struct {
-    SengooStringMap* map;
+    long long map_handle;
     size_t index;
 } SengooStringMapKeyIter;
 
 static SengooStringMap* sengoo_string_map_from_handle(long long handle) {
-    return (SengooStringMap*)sengoo_handle_to_ptr(handle);
+    return (SengooStringMap*)sengoo_opaque_handle_get(handle);
 }
 
 static SengooStringMapKeyIter* sengoo_string_map_key_iter_from_handle(long long handle) {
-    return (SengooStringMapKeyIter*)sengoo_handle_to_ptr(handle);
+    return (SengooStringMapKeyIter*)sengoo_opaque_handle_get(handle);
 }
 
 static int sengoo_string_map_reserve(SengooStringMap* map, size_t min_cap) {
@@ -425,7 +477,11 @@ long long sengoo_string_map_new(void) {
     if (!map) {
         return 0;
     }
-    return sengoo_ptr_to_handle(map);
+    long long handle = sengoo_opaque_handle_new(map);
+    if (handle == 0) {
+        free(map);
+    }
+    return handle;
 }
 
 long long sengoo_string_map_len(long long handle) {
@@ -447,11 +503,13 @@ long long sengoo_string_map_clear_status(long long handle) {
 }
 
 long long sengoo_string_map_free_status(long long handle) {
-    SengooStringMap* map = sengoo_string_map_from_handle(handle);
+    SengooStringMap* map = (SengooStringMap*)sengoo_opaque_handle_take(handle);
     if (!map) {
         return 1;
     }
-    sengoo_string_map_clear_status(handle);
+    for (size_t i = 0; i < map->len; ++i) {
+        free(map->entries[i].key);
+    }
     free(map->entries);
     free(map);
     return 1;
@@ -529,25 +587,31 @@ long long sengoo_string_map_key_iter_new(long long map_handle) {
     if (!iter) {
         return 0;
     }
-    iter->map = map;
+    iter->map_handle = map_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 long long sengoo_string_map_key_iter_done(long long iter_handle) {
     SengooStringMapKeyIter* iter = sengoo_string_map_key_iter_from_handle(iter_handle);
-    return (!iter || !iter->map || iter->index >= iter->map->len) ? 1 : 0;
+    SengooStringMap* map = iter ? sengoo_string_map_from_handle(iter->map_handle) : NULL;
+    return (!iter || !map || iter->index >= map->len) ? 1 : 0;
 }
 
 long long sengoo_string_map_key_iter_next_copy(long long iter_handle, long long out_buffer) {
     SengooStringMapKeyIter* iter = sengoo_string_map_key_iter_from_handle(iter_handle);
-    if (!iter || !iter->map) {
+    SengooStringMap* map = iter ? sengoo_string_map_from_handle(iter->map_handle) : NULL;
+    if (!iter || !map) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
-    if (iter->index >= iter->map->len) {
+    if (iter->index >= map->len) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
-    const char* key = iter->map->entries[iter->index].key;
+    const char* key = map->entries[iter->index].key;
     long long copied = sengoo_copy_bytes_to_managed_buffer(out_buffer, key, strlen(key));
     if (copied >= 0) {
         iter->index += 1;
@@ -565,10 +629,7 @@ long long sengoo_string_map_key_iter_reset_status(long long iter_handle) {
 }
 
 long long sengoo_string_map_key_iter_free_status(long long iter_handle) {
-    SengooStringMapKeyIter* iter = sengoo_string_map_key_iter_from_handle(iter_handle);
-    if (iter) {
-        free(iter);
-    }
+    free(sengoo_opaque_handle_take(iter_handle));
     return 1;
 }
 
@@ -583,16 +644,16 @@ typedef struct {
 } SengooStringVec;
 
 typedef struct {
-    SengooStringVec* vec;
+    long long vec_handle;
     size_t index;
 } SengooStringVecIter;
 
 static SengooStringVec* sengoo_string_vec_from_handle(long long handle) {
-    return (SengooStringVec*)sengoo_handle_to_ptr(handle);
+    return (SengooStringVec*)sengoo_opaque_handle_get(handle);
 }
 
 static SengooStringVecIter* sengoo_string_vec_iter_from_handle(long long handle) {
-    return (SengooStringVecIter*)sengoo_handle_to_ptr(handle);
+    return (SengooStringVecIter*)sengoo_opaque_handle_get(handle);
 }
 
 static int sengoo_string_vec_reserve(SengooStringVec* vec, size_t min_cap) {
@@ -634,7 +695,11 @@ long long sengoo_vec_new_string(void) {
     if (!vec) {
         return 0;
     }
-    return sengoo_ptr_to_handle(vec);
+    long long handle = sengoo_opaque_handle_new(vec);
+    if (handle == 0) {
+        free(vec);
+    }
+    return handle;
 }
 
 long long sengoo_vec_string_len(long long handle) {
@@ -652,7 +717,7 @@ long long sengoo_vec_string_clear_status(long long handle) {
 }
 
 long long sengoo_vec_string_free_status(long long handle) {
-    SengooStringVec* vec = sengoo_string_vec_from_handle(handle);
+    SengooStringVec* vec = (SengooStringVec*)sengoo_opaque_handle_take(handle);
     if (!vec) {
         return 1;
     }
@@ -711,25 +776,31 @@ long long sengoo_vec_string_iter_new(long long vec_handle) {
     if (!iter) {
         return 0;
     }
-    iter->vec = vec;
+    iter->vec_handle = vec_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 long long sengoo_vec_string_iter_done(long long iter_handle) {
     SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
-    return (!iter || !iter->vec || iter->index >= iter->vec->len) ? 1 : 0;
+    SengooStringVec* vec = iter ? sengoo_string_vec_from_handle(iter->vec_handle) : NULL;
+    return (!iter || !vec || iter->index >= vec->len) ? 1 : 0;
 }
 
 long long sengoo_vec_string_iter_next_clone(long long iter_handle) {
     SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
-    if (!iter || !iter->vec) {
+    SengooStringVec* vec = iter ? sengoo_string_vec_from_handle(iter->vec_handle) : NULL;
+    if (!iter || !vec) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
-    if (iter->index >= iter->vec->len) {
+    if (iter->index >= vec->len) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
-    long long cloned = sengoo_string_clone_status(iter->vec->items[iter->index]);
+    long long cloned = sengoo_string_clone_status(vec->items[iter->index]);
     if (cloned >= 0) {
         iter->index += 1;
     }
@@ -746,10 +817,7 @@ long long sengoo_vec_string_iter_reset_status(long long iter_handle) {
 }
 
 long long sengoo_vec_string_iter_free_status(long long iter_handle) {
-    SengooStringVecIter* iter = sengoo_string_vec_iter_from_handle(iter_handle);
-    if (iter) {
-        free(iter);
-    }
+    free(sengoo_opaque_handle_take(iter_handle));
     return 1;
 }
 
@@ -765,16 +833,16 @@ typedef struct {
 } SengooStringMapString;
 
 typedef struct {
-    SengooStringMapString* map;
+    long long map_handle;
     size_t index;
 } SengooStringMapStringKeyIter;
 
 static SengooStringMapString* sengoo_string_map_string_from_handle(long long handle) {
-    return (SengooStringMapString*)sengoo_handle_to_ptr(handle);
+    return (SengooStringMapString*)sengoo_opaque_handle_get(handle);
 }
 
 static SengooStringMapStringKeyIter* sengoo_string_map_string_key_iter_from_handle(long long handle) {
-    return (SengooStringMapStringKeyIter*)sengoo_handle_to_ptr(handle);
+    return (SengooStringMapStringKeyIter*)sengoo_opaque_handle_get(handle);
 }
 
 static int sengoo_string_map_string_reserve(SengooStringMapString* map, size_t min_cap) {
@@ -844,7 +912,11 @@ long long sengoo_string_map_string_new(void) {
     if (!map) {
         return 0;
     }
-    return sengoo_ptr_to_handle(map);
+    long long handle = sengoo_opaque_handle_new(map);
+    if (handle == 0) {
+        free(map);
+    }
+    return handle;
 }
 
 long long sengoo_string_map_string_len(long long handle) {
@@ -862,7 +934,7 @@ long long sengoo_string_map_string_clear_status(long long handle) {
 }
 
 long long sengoo_string_map_string_free_status(long long handle) {
-    SengooStringMapString* map = sengoo_string_map_string_from_handle(handle);
+    SengooStringMapString* map = (SengooStringMapString*)sengoo_opaque_handle_take(handle);
     if (!map) {
         return 1;
     }
@@ -959,25 +1031,31 @@ long long sengoo_string_map_string_key_iter_new(long long map_handle) {
     if (!iter) {
         return 0;
     }
-    iter->map = map;
+    iter->map_handle = map_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 long long sengoo_string_map_string_key_iter_done(long long iter_handle) {
     SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
-    return (!iter || !iter->map || iter->index >= iter->map->len) ? 1 : 0;
+    SengooStringMapString* map = iter ? sengoo_string_map_string_from_handle(iter->map_handle) : NULL;
+    return (!iter || !map || iter->index >= map->len) ? 1 : 0;
 }
 
 long long sengoo_string_map_string_key_iter_next_string(long long iter_handle) {
     SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
-    if (!iter || !iter->map) {
+    SengooStringMapString* map = iter ? sengoo_string_map_string_from_handle(iter->map_handle) : NULL;
+    if (!iter || !map) {
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
-    if (iter->index >= iter->map->len) {
+    if (iter->index >= map->len) {
         return -SENGOO_STATUS_NOT_FOUND;
     }
-    const char* key = iter->map->entries[iter->index].key;
+    const char* key = map->entries[iter->index].key;
     long long cloned = sengoo_string_from_bytes_copy((long long)(intptr_t)key, (long long)strlen(key));
     if (cloned >= 0) {
         iter->index += 1;
@@ -995,9 +1073,6 @@ long long sengoo_string_map_string_key_iter_reset_status(long long iter_handle) 
 }
 
 long long sengoo_string_map_string_key_iter_free_status(long long iter_handle) {
-    SengooStringMapStringKeyIter* iter = sengoo_string_map_string_key_iter_from_handle(iter_handle);
-    if (iter) {
-        free(iter);
-    }
+    free(sengoo_opaque_handle_take(iter_handle));
     return 1;
 }

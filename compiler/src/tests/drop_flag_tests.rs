@@ -1,5 +1,6 @@
+use crate::codegen::JITCodegen;
 use crate::mir::{Instruction, Local, MirConstant, MirFunction, Terminator};
-use crate::{compile_to_ir, compile_to_mir};
+use crate::{compile_to_ir, compile_to_mir, compile_to_mir_with_options, CompileOptions};
 use std::fs;
 use std::path::Path;
 
@@ -149,6 +150,48 @@ def checked() -> Result<i64, i64> {
     assert!(
         has_guard_terminator(checked),
         "multi-exit drop glue should guard drop calls with the drop flag"
+    );
+}
+
+#[test]
+fn drop_flags_guard_contract_abort_path_for_initialized_binding() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def checked(x: i64) -> i64
+ensures result > x
+{
+    let text: String = string_from_str("abort").value;
+    x - 1
+}
+"#
+    );
+    let mir = compile_to_mir_with_options(
+        &source,
+        CompileOptions {
+            runtime_contract_checks: true,
+            ..CompileOptions::default()
+        },
+    )
+    .expect("contract-checked source should compile to MIR");
+    let checked = function(&mir, "checked");
+
+    assert!(
+        checked
+            .basic_blocks
+            .iter()
+            .any(|block| matches!(block.terminator, Some(Terminator::Unreachable))),
+        "contract failure should lower to an unreachable abort block"
+    );
+    assert_eq!(
+        string_drop_calls(checked).len(),
+        2,
+        "both the normal return and contract-abort exit should run guarded drop glue"
+    );
+    assert!(
+        has_guard_terminator(checked),
+        "abort-path cleanup must be guarded by the initialized drop flag"
     );
 }
 
@@ -665,6 +708,37 @@ def main() -> i64 {
 }
 
 #[test]
+fn user_drop_impl_auto_drop_jit_codegen_uses_void_drop_call() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    value: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { value: 7 };
+    0
+}
+"#,
+    )
+    .expect("user Drop auto-drop should compile to MIR");
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&mir)
+        .expect("user Drop auto-drop should lower through JIT codegen");
+
+    assert!(
+        ir.contains("call void @Resource_Drop_drop("),
+        "JIT codegen should call the concrete Drop impl with its lowered ABI:\n{ir}"
+    );
+}
+
+#[test]
 fn user_drop_impl_is_called_for_by_value_parameter() {
     let mir = compile_to_mir(
         r#"
@@ -893,6 +967,45 @@ def main(flag: bool) -> i64 {
             Instruction::Call { func, .. } if func == "Resource_Drop_drop"
         )),
         "while-local Resource must be dropped before continue"
+    );
+}
+
+#[test]
+fn for_scope_drops_before_break() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    for value in 0..3 {
+        let resource = Resource { handle: value };
+        break;
+    }
+    0
+}
+"#,
+    )
+    .expect("for break cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let break_block = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| matches!(block.terminator, Some(Terminator::Break { .. })))
+        .expect("for body should contain a break terminator");
+
+    assert!(
+        break_block.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "for-local Resource must be dropped before break"
     );
 }
 

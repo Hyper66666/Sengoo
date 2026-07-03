@@ -1,9 +1,11 @@
 import std::string;
 import std::ffi;
+import std::collections;
 
 extern "C" {
     fn sengoo_string_live_handle_count() -> i64;
     fn sengoo_buffer_live_handle_count() -> i64;
+    fn sengoo_opaque_live_handle_count() -> i64;
 }
 
 def exercise() -> i64 {
@@ -17,7 +19,20 @@ def exercise() -> i64 {
         return 11;
     }
     let buffer = buffer_out.value;
-    owned.len() + buffer.capacity()
+    let numbers = vec_new_i64();
+    let scores = hashmap_new_i64_i64();
+    let names = text_list_new();
+    let counts = string_map_i64_new();
+    let flags = string_map_bool_new();
+    let labels = string_map_string_new();
+    owned.len()
+        + buffer.capacity()
+        + numbers.len()
+        + scores.len()
+        + names.len()
+        + counts.len()
+        + flags.len()
+        + labels.len()
 }
 
 def main() -> i64 {
@@ -25,5 +40,7 @@ def main() -> i64 {
     if exercised != 37 {
         return exercised;
     }
-    sengoo_string_live_handle_count() + sengoo_buffer_live_handle_count()
+    sengoo_string_live_handle_count()
+        + sengoo_buffer_live_handle_count()
+        + sengoo_opaque_live_handle_count()
 }

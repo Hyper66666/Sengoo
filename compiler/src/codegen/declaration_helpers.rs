@@ -53,6 +53,9 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
 
+        self.declarations
+            .push_str("declare i64 @sengoo_str_compare(i8*, i8*)\n");
+
         self.declarations.push('\n');
 
         self.declarations
@@ -742,6 +745,40 @@ impl Codegen {
             .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
         self.declarations
             .push_str("declare i64 @sengoo_async_task_status(i64)\n");
+    }
+
+    pub(super) fn maybe_declare_rc_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let needs_rc_copy = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_rc_new_copy",
+                _ => false,
+            })
+        });
+        let needs_rc_borrow = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_rc_borrow_ptr",
+                _ => false,
+            })
+        });
+        let copy_decl = "declare i64 @sengoo_rc_new_copy(i8*, i64, i8*)\n";
+        let borrow_decl = "declare i8* @sengoo_rc_borrow_ptr(i64)\n";
+        if (needs_rc_copy || needs_rc_borrow)
+            && !self
+                .declarations
+                .contains("; Sengoo generic Rc runtime functions\n")
+        {
+            self.declarations
+                .push_str("; Sengoo generic Rc runtime functions\n");
+        }
+        if needs_rc_copy && !self.declarations.contains(copy_decl) {
+            self.declarations.push_str(copy_decl);
+        }
+        if needs_rc_borrow && !self.declarations.contains(borrow_decl) {
+            self.declarations.push_str(borrow_decl);
+        }
+        if needs_rc_copy || needs_rc_borrow {
+            self.declarations.push('\n');
+        }
     }
 }
 

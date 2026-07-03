@@ -12,6 +12,22 @@ struct Point {
     ok: bool,
 }
 
+struct CustomTag {
+    id: i64,
+}
+
+impl Debug for CustomTag {
+    def to_string(&self) -> String {
+        string_from_str("custom").value
+    }
+}
+
+#[derive(Debug)]
+enum MaybeNumber {
+    Empty,
+    Value(i64),
+}
+
 def main() -> i64 {
     let label_result = string_from_str("main");
     if label_result.is_ok == false {
@@ -47,6 +63,18 @@ def main() -> i64 {
     let point = Point { x: 7, ok: true };
     let debugged = format("{:?}", point);
     if debugged.len() != 24 {
+        return 1;
+    }
+
+    let custom = CustomTag { id: 9 };
+    let custom_debug = format("{:?}", custom);
+    if custom_debug.len() != 6 {
+        return 1;
+    }
+
+    let payload = MaybeNumber::Value(42);
+    let payload_debug = format("{:?}", payload);
+    if payload_debug.len() != 22 {
         return 1;
     }
 

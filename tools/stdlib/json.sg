@@ -178,7 +178,9 @@ impl JsonDoc {
 
 impl Drop for JsonDoc {
     def drop(&mut self) {
-        sengoo_json_doc_close(self.handle);
+        if self.handle != 0 {
+            sengoo_json_doc_close(self.handle);
+        }
     }
 }
 

@@ -92,6 +92,31 @@ pub(super) fn lower_assign_op_expr(
                 destination: current_val,
                 source: target_local,
             });
+            if matches!(op, hir::HIRBinaryOp::Add)
+                && matches!(&target_ty, MIRType::Struct { name, .. } if name == "String")
+                && matches!(ctx.get_local_type(value_local), MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
+            {
+                let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Extract {
+                    destination: handle,
+                    value: current_val,
+                    index: 0,
+                });
+                let value_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Call {
+                    destination: value_ptr,
+                    func: "sengoo_stdlib_str_ptr".to_string(),
+                    args: vec![value_local],
+                });
+                let _status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Call {
+                    destination: _status,
+                    func: "sengoo_string_push_str_status".to_string(),
+                    args: vec![handle, value_ptr],
+                });
+                unwrap_nonnegative_i64_or_panic(ctx, _status);
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
             let mir_op = ctx.lower_bin_op(op);
             let result = ctx.add_local(None, LocalKind::Temp, target_ty);
             ctx.push_inst(Instruction::Binary {

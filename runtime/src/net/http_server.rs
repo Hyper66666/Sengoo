@@ -1113,9 +1113,11 @@ pub extern "C" fn sengoo_http_server_serve_once(handle: u64, timeout_ms: u32) ->
 #[no_mangle]
 pub extern "C" fn sengoo_http_server_close(handle: u64) -> i64 {
     reset_last_error();
-    net_runtime()
-        .http_server_close(handle)
-        .unwrap_or_else(fail_bool)
+    match net_runtime().http_server_close(handle) {
+        Ok(value) => value,
+        Err(NetErrorCode::HandleNotFound) => 1,
+        Err(code) => fail_bool(code),
+    }
 }
 
 #[no_mangle]
@@ -1635,6 +1637,7 @@ pub extern "C" fn sengoo_http_request_close(handle: u64) -> i64 {
             let _ = write_http_response(&mut entry.stream, &gateway_timeout_response());
             1
         }
+        Err(NetErrorCode::HandleNotFound) => 1,
         Err(code) => fail_bool(code),
     }
 }

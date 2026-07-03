@@ -90,6 +90,7 @@ impl Codegen {
         self.maybe_declare_concurrent_async_runtime_functions(mir_fns);
         self.maybe_declare_async_task_runtime_functions(mir_fns);
         self.maybe_declare_eprint_runtime_functions(mir_fns);
+        self.maybe_declare_rc_runtime_functions(mir_fns);
         self.emit_string_constants();
         self.emit_struct_types(mir_fns);
         self.emit_dyn_vtables(mir_fns);
