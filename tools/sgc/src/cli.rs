@@ -6,10 +6,11 @@ use crate::{
     cmd_bench_compile, cmd_bench_incremental, cmd_bench_reflection, cmd_bench_run, cmd_build,
     cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, cmd_test,
     current_error_format, dispatch_build_via_daemon, dispatch_run_via_daemon,
-    frontend_trace_enabled, parse_frontend_jobs_arg, reflection_options_from_cli,
-    resolve_daemon_addr, resolve_test_root, set_error_format, ContractChecksMode,
-    DaemonDispatchOutcome, ErrorFormat, FrontendJobs, ReflectionMode, RunEngine, TestOptions,
-    TestOutputFormat, DEFAULT_DAEMON_ADDR,
+    frontend_trace_enabled, parse_frontend_jobs_arg,
+    portable_backends::{build_bytecode, build_wasm, run_bytecode},
+    propagate_run_exit_code, reflection_options_from_cli, resolve_daemon_addr, resolve_test_root,
+    set_error_format, ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs,
+    ReflectionMode, RunEngine, TestOptions, TestOutputFormat, DEFAULT_DAEMON_ADDR,
 };
 
 pub(crate) const SGC_VERSION: &str = concat!(
@@ -99,7 +100,7 @@ pub(crate) enum Commands {
         #[arg(long = "reflect-symbol")]
         reflect_symbol: Vec<String>,
 
-        /// Target triple for native builds (reference triples only).
+        /// Build target: native, wasm, bytecode, or a reference native triple.
         #[arg(long)]
         target: Option<String>,
 
@@ -174,6 +175,10 @@ pub(crate) enum Commands {
         /// Emit native debug metadata and pass -g to clang object compilation.
         #[arg(short = 'g', long = "debug-info")]
         debug_info: bool,
+
+        /// Execution target: native or bytecode.
+        #[arg(long)]
+        target: Option<String>,
 
         /// Arguments passed to program (reserved).
         #[arg(trailing_var_arg = true)]
@@ -352,6 +357,28 @@ async fn dispatch(command: Commands) -> Result<()> {
             timings_json,
             debug_info,
         } => {
+            if matches!(target.as_deref(), Some("wasm" | "bytecode")) {
+                if daemon {
+                    miette::bail!("portable targets do not support daemon dispatch");
+                }
+                if emit_llvm {
+                    miette::bail!("--emit-llvm cannot be combined with a portable target");
+                }
+                if debug_info {
+                    miette::bail!("portable targets do not support native debug metadata");
+                }
+                return match target.as_deref() {
+                    Some("wasm") => build_wasm(&input, output.as_deref(), opt_level).map(|_| ()),
+                    Some("bytecode") => {
+                        build_bytecode(&input, output.as_deref(), opt_level).map(|_| ())
+                    }
+                    _ => unreachable!(),
+                };
+            }
+            let native_target = match target.as_deref() {
+                Some("native") => None,
+                other => other,
+            };
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
                 let outcome = dispatch_build_via_daemon(
@@ -386,7 +413,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 frontend_jobs,
                 frontend_trace_enabled(frontend_trace),
                 reflection_options_from_cli(reflect, &reflect_module, &reflect_symbol),
-                target.as_deref(),
+                native_target,
                 timings_json.as_deref(),
                 debug_info,
             )
@@ -407,8 +434,42 @@ async fn dispatch(command: Commands) -> Result<()> {
             reflect_module,
             reflect_symbol,
             debug_info,
+            target,
             args,
         } => {
+            if let Some(target) = target.as_deref() {
+                match target {
+                    "bytecode" => {
+                        if daemon {
+                            miette::bail!("bytecode execution does not support daemon dispatch");
+                        }
+                        if !args.is_empty() {
+                            miette::bail!(
+                                "bytecode execution does not support program arguments yet"
+                            );
+                        }
+                        if debug_info {
+                            miette::bail!(
+                                "bytecode execution does not support native debug metadata"
+                            );
+                        }
+                        let exit_code = i32::try_from(run_bytecode(&input, opt_level)?)
+                            .map_err(|_| miette::miette!("bytecode main result is not an i32"))?;
+                        return propagate_run_exit_code(exit_code);
+                    }
+                    "native" => {}
+                    "wasm" => {
+                        miette::bail!(
+                            "`sgc run --target wasm` is not available; build a .wasm artifact and run it with a WebAssembly runtime"
+                        );
+                    }
+                    other => {
+                        miette::bail!(
+                            "unsupported run target `{other}`; expected `native` or `bytecode`"
+                        );
+                    }
+                }
+            }
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
                 let outcome = dispatch_run_via_daemon(
