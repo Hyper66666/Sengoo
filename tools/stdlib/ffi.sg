@@ -355,3 +355,9 @@ impl Buffer {
         sengoo_ffi_buffer_free(self.handle) == 0
     }
 }
+
+impl Drop for Buffer {
+    def drop(&mut self) {
+        sengoo_ffi_buffer_free(self.handle);
+    }
+}

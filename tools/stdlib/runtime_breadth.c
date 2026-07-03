@@ -1028,6 +1028,11 @@ static long long sengoo_net_fallback_bool_error(int code) {
     return 0;
 }
 
+static long long sengoo_net_fallback_close(void) {
+    sengoo_net_fallback_last_error = SENGOO_NET_ERR_OK;
+    return 1;
+}
+
 static const char* sengoo_net_fallback_error_name(long long code) {
     switch (code) {
         case SENGOO_NET_ERR_OK: return "ok";
@@ -1110,7 +1115,7 @@ long long sengoo_tcp_recv(long long handle, long long buffer, long long capacity
 
 long long sengoo_tcp_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 long long sengoo_tcp_poll_readable(long long handle) {
@@ -1148,7 +1153,7 @@ long long sengoo_udp_recv(long long handle, long long buffer, long long capacity
 
 long long sengoo_udp_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 long long sengoo_http_get(long long url, long long timeout_ms) {
@@ -1194,7 +1199,7 @@ long long sengoo_http_body_copy(long long handle, long long buffer, long long ca
 
 long long sengoo_http_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 long long sengoo_http_server_bind(long long host, long long port) {
@@ -1263,7 +1268,7 @@ long long sengoo_http_server_serve_once(long long handle, long long timeout_ms) 
 
 long long sengoo_http_server_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 long long sengoo_http_server_next_request(long long handle, long long timeout_ms) {
@@ -1298,7 +1303,11 @@ long long sengoo_http_server_next_request_async__start(long long handle, long lo
         return 0;
     }
     future->error = SENGOO_STATUS_UNSUPPORTED;
-    return (long long)(intptr_t)future;
+    long long future_handle = sengoo_opaque_handle_new(future);
+    if (future_handle == 0) {
+        free(future);
+    }
+    return future_handle;
 }
 
 long long sengoo_http_server_next_request_async__poll(long long handle) {
@@ -1311,9 +1320,9 @@ SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(
     result.is_ok = 0;
     result.value.handle = 0;
     result.error = SENGOO_STATUS_INVALID_HANDLE;
-    if (handle != 0) {
-        SengooHttpServerNextRequestFallbackFuture* future =
-            (SengooHttpServerNextRequestFallbackFuture*)(intptr_t)handle;
+    SengooHttpServerNextRequestFallbackFuture* future =
+        (SengooHttpServerNextRequestFallbackFuture*)sengoo_opaque_handle_take(handle);
+    if (future) {
         result.error = future->error;
         free(future);
     }
@@ -1321,17 +1330,12 @@ SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(
 }
 
 unsigned char sengoo_http_server_next_request_async__cancel(long long handle) {
-    if (handle == 0) {
-        return 0;
-    }
-    free((void*)(intptr_t)handle);
+    free(sengoo_opaque_handle_take(handle));
     return 1;
 }
 
 void sengoo_http_server_next_request_async__drop(long long handle) {
-    if (handle != 0) {
-        free((void*)(intptr_t)handle);
-    }
+    free(sengoo_opaque_handle_take(handle));
 }
 
 long long sengoo_http_request_method_len(long long handle) {
@@ -1443,7 +1447,7 @@ long long sengoo_http_request_respond_with_content_type(
 
 long long sengoo_http_request_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 long long sengoo_ws_connect(long long url, long long timeout_ms) {
@@ -1469,7 +1473,7 @@ long long sengoo_ws_recv_text(long long handle, long long buffer, long long capa
 
 long long sengoo_ws_close(long long handle) {
     (void)handle;
-    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+    return sengoo_net_fallback_close();
 }
 
 #endif /* SENGOO_NATIVE_NET_RUNTIME */

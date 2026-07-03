@@ -40,6 +40,15 @@ fn compile_with_stdlib_modules(modules: &[&str], program: &str) -> String {
         .unwrap_or_else(|err| panic!("stdlib surface program should compile: {err}"))
 }
 
+fn llvm_function_section<'a>(ir: &'a str, function_header: &str) -> &'a str {
+    let start = ir
+        .find(function_header)
+        .unwrap_or_else(|| panic!("missing LLVM function header `{function_header}`\n{ir}"));
+    let rest = &ir[start..];
+    let next = rest.find("\n; Function: ").unwrap_or(rest.len());
+    &rest[..next]
+}
+
 #[test]
 fn option_module_imports_and_unwraps() {
     let ir = compile_with_stdlib_modules(
@@ -125,6 +134,533 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_imports_owned_string_push_char() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let built = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let pushed = built.push_char('!');
+    if pushed.is_ok {
+        built.len()
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("declare i64 @sengoo_string_push_char_status(i64, i32)"),
+        "push_char extern should preserve char as an i32 C ABI scalar\n{ir}"
+    );
+}
+
+#[test]
+fn string_module_imports_owned_string_comparison_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let c = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let d = string_from_str("beta").unwrap_or(String { handle: 0 });
+    if a.eq(b) && c.lt(d) {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_eq"));
+    assert!(ir.contains("sengoo_string_compare"));
+}
+
+#[test]
+fn string_module_lowers_owned_string_comparison_operators() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let c = string_from_str("beta").unwrap_or(String { handle: 0 });
+    if a == b && a < c && c >= b {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    let main = llvm_function_section(&ir, "define i64 @main");
+    assert!(ir.contains("sengoo_string_eq"));
+    assert!(ir.contains("sengoo_string_compare"));
+    assert!(
+        !main.contains("icmp eq %String") && !main.contains("icmp slt %String"),
+        "owned String operators must lower through runtime comparison helpers\n{main}"
+    );
+}
+
+#[test]
+fn string_and_str_satisfy_comparison_trait_bounds() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def accepts_comparison<T: PartialEq + Eq + PartialOrd + Ord>(value: T) -> i64 {
+    1
+}
+
+def main() -> i64 {
+    let owned = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let order_bonus = if "alpha" < "beta" {
+        1
+    } else {
+        0
+    };
+    accepts_comparison(owned) + accepts_comparison("borrowed") + order_bonus
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("@accepts_comparison_String"),
+        "owned String should satisfy comparison trait bounds through stdlib marker impls\n{ir}"
+    );
+    assert!(
+        ir.contains("@accepts_comparison_ref_str"),
+        "&str should satisfy comparison trait bounds through compiler-known impls\n{ir}"
+    );
+    assert!(
+        ir.contains("@sengoo_str_compare"),
+        "&str ordering operators should lower through the runtime compare helper\n{ir}"
+    );
+}
+
+#[test]
+fn string_module_rejects_owned_string_arithmetic_operators() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib_surface(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let a = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let b = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let c = a - b;
+    c.len()
+}
+"#,
+    );
+    let err = compile_to_ir(&source).expect_err("String - String must not type-check");
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("TypeMismatch") || err.contains("类型不匹配") || err.contains("type"),
+        "unexpected diagnostic: {err}"
+    );
+}
+
+#[test]
+fn string_module_imports_utf8_slice_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let borrowed = str_get("hello", 1, 4).unwrap_or(String { handle: 0 });
+    let owned = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let part = owned.get(1, 4).unwrap_or(String { handle: 0 });
+    borrowed.len() + part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_slice_copy"));
+    assert!(ir.contains("sengoo_string_slice_status"));
+}
+
+#[test]
+fn string_range_index_lowers_to_infallible_owned_slice() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let part = text[1..4];
+    part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_slice_status"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
+}
+
+#[test]
+fn str_range_index_lowers_to_infallible_owned_slice() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let part = "hello"[1..4];
+    part.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_slice_copy"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
+}
+
+#[test]
+fn string_module_imports_string_bytes_and_chars_iterators() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let bytes_text = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let chars_text = string_from_str("é").unwrap_or(String { handle: 0 });
+    let mut bytes = bytes_text.bytes();
+    let mut chars = chars_text.chars();
+    bytes.next().unwrap_or(0) + chars.next().unwrap_or(0)
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_bytes_iter_new"));
+    assert!(ir.contains("sengoo_string_chars_iter_new"));
+    assert!(ir.contains("sengoo_string_chars_iter_next_or_default"));
+}
+
+#[test]
+fn string_module_imports_string_split_iterator() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("a,b,").unwrap_or(String { handle: 0 });
+    let mut parts = text.split(",");
+    let first = parts.next().unwrap_or(String { handle: 0 });
+    let second = parts.next().unwrap_or(String { handle: 0 });
+    let third = parts.next().unwrap_or(String { handle: 0 });
+    first.len() + second.len() + third.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_split_iter_new"));
+    assert!(ir.contains("sengoo_string_split_iter_next"));
+}
+
+#[test]
+fn string_iterators_satisfy_iterator_associated_item_bounds() {
+    let ir = compile_with_stdlib(
+        r#"
+def select_item<I: Iterator>(iter: I, value: I::Item) -> I::Item {
+    value
+}
+
+def main() -> i64 {
+    let text = string_from_str("az").value;
+    let bytes = text.bytes();
+    let chars = text.chars();
+    let b = select_item(bytes, 65);
+    let c = select_item(chars, 65);
+    b + c
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("select_item_StringBytesIter"),
+        "expected StringBytesIter to satisfy Iterator<Item = i64>, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("select_item_StringCharsIter"),
+        "expected StringCharsIter to satisfy Iterator<Item = i64 codepoint>, got:\n{ir}"
+    );
+}
+
+#[test]
+fn string_module_allows_owned_string_plus_str() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let base = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let joined = base + "!";
+    joined.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_string_concat_str_status"));
+    assert!(ir.contains("sengoo_panic_result_unwrap_i64"));
+}
+
+#[test]
+fn display_impl_can_be_printed_through_builtin_prints() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+struct Tag {
+    id: i64,
+}
+
+impl Display for Tag {
+    def to_string(&self) -> String {
+        string_from_str("Tag").value
+    }
+}
+
+def main() -> i64 {
+    let out = Tag { id: 1 };
+    let err = Tag { id: 2 };
+    print(out);
+    eprintln(err);
+    0
+}
+"#,
+    );
+
+    assert!(ir.contains("Tag_Display_to_string"));
+    assert!(ir.contains("sengoo_print_string"));
+    assert!(ir.contains("sengoo_eprint_string"));
+}
+
+#[test]
+fn stdlib_owned_handles_auto_drop_without_manual_release() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "string.sg",
+            "collections.sg",
+            "json.sg",
+            "process.sg",
+            "net.sg",
+        ],
+        r##"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let vec = vec_new_i64();
+    let strings = vec_new_string();
+    let doc = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let command = process_command("sengoo-missing-owned-drop").unwrap_or(ProcessCommand { handle: 0 });
+    let output = ProcessOutput { handle: 0 };
+    let process = ProcessHandle { handle: 0 };
+    let stream = TcpStream { handle: 0 };
+    let socket = UdpSocket { handle: 0 };
+    let client = HttpClient { handle: 0 };
+    let server = HttpServer { handle: 0 };
+    let request = HttpServerRequest { handle: 0 };
+
+    buffer.len() + vec.len() + strings.len() + doc.root().node_id + command.handle
+        + output.handle + process.handle + stream.handle + socket.handle
+        + client.handle + server.handle + request.handle
+}
+"##,
+    );
+
+    for symbol in [
+        "Buffer_Drop_drop",
+        "Vec_i64_Drop_drop",
+        "Vec_String_Drop_drop",
+        "JsonDoc_Drop_drop",
+        "ProcessCommand_Drop_drop",
+        "ProcessOutput_Drop_drop",
+        "ProcessHandle_Drop_drop",
+        "TcpStream_Drop_drop",
+        "UdpSocket_Drop_drop",
+        "HttpClient_Drop_drop",
+        "HttpServer_Drop_drop",
+        "HttpServerRequest_Drop_drop",
+    ] {
+        assert!(
+            ir.contains(symbol),
+            "expected stdlib owning handle auto-drop symbol {symbol}\n{ir}"
+        );
+    }
+}
+
+#[test]
+fn stdlib_owned_result_unwrap_or_moves_value_without_dropping_it_first() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "status.sg"],
+        r#"
+def main() -> i64 {
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    buffer.len()
+}
+"#,
+    );
+    let unwrap_or = llvm_function_section(&ir, "define %Buffer @Result_Buffer_i64_unwrap_or");
+
+    assert!(
+        !unwrap_or.contains("Buffer_Drop_drop"),
+        "owned Result.unwrap_or must move its selected value out before drop glue runs\n{unwrap_or}"
+    );
+}
+
+#[test]
+fn stdlib_rc_shared_ownership_compiles_and_auto_drops() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let first = rc_new_i64(21);
+    let second = first.clone();
+    first.strong_count() + second.get()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("sengoo_rc_clone"),
+        "Rc clone should lower to runtime refcount increment\n{ir}"
+    );
+    assert!(
+        ir.contains("Rc_i64_Drop_drop"),
+        "Rc<i64> locals should auto-drop through Drop glue\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_drop"),
+        "Rc Drop impl should call the runtime decrement/free helper\n{ir}"
+    );
+
+    let clone_section = llvm_function_section(&ir, "; Function: Rc_i64_clone");
+    assert!(
+        !clone_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::clone has a borrowed receiver and must not auto-drop its receiver parameter\n{clone_section}"
+    );
+    let count_section = llvm_function_section(&ir, "; Function: Rc_i64_strong_count");
+    assert!(
+        !count_section.contains("@Rc_i64_Drop_drop"),
+        "Rc::strong_count has a borrowed receiver and must not auto-drop its receiver parameter\n{count_section}"
+    );
+}
+
+#[test]
+fn stdlib_rc_string_shared_ownership_clones_and_auto_drops() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let first = rc_new_string(text);
+    let second = first.clone();
+    let copy = second.get();
+    first.strong_count() + copy.len()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("sengoo_rc_new_string"),
+        "Rc<String> constructor should transfer an owned String handle into the Rc runtime\n{ir}"
+    );
+    assert!(
+        ir.contains("Rc_String_Drop_drop"),
+        "Rc<String> locals should auto-drop through Drop glue\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_drop"),
+        "Rc<String> Drop impl should call the runtime decrement/free helper\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_rc_value_trait_allows_generic_shared_ownership_construction() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def share<T: RcValue>(value: T) -> Rc<T> {
+    value.rc()
+}
+
+def main() -> i64 {
+    let first = share(21);
+    let second = first.clone();
+    let flag = share(true);
+    if flag.get() {
+        second.get()
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: share_i64"),
+        "expected generic share<i64> specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("; Function: share_bool"),
+        "expected generic share<bool> specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_new_i64") && ir.contains("sengoo_rc_new_bool"),
+        "expected RcValue impls to dispatch through concrete runtime constructors\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_rc_clone_uses_one_generic_handle_representation() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ],
+        r#"
+def clone_shared<T>(value: &Rc<T>) -> Rc<T> {
+    value.clone()
+}
+
+def main() -> i64 {
+    let first = rc_new_i64(21);
+    let second = clone_shared(&first);
+    first.strong_count() + second.get()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: clone_shared_i64"),
+        "expected generic Rc<T> clone helper specialization\n{ir}"
+    );
+    assert!(
+        ir.contains("sengoo_rc_clone"),
+        "generic Rc<T>::clone should increment the shared runtime control block\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_imports_search_helpers() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],
@@ -148,6 +684,26 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_str_starts_with"));
     assert!(ir.contains("sengoo_str_ends_with"));
     assert!(ir.contains("sengoo_str_index_of"));
+}
+
+#[test]
+fn string_module_imports_trim_and_ascii_case_helpers() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+def main() -> i64 {
+    let trimmed = str_trim("  sengoo\n").unwrap_or(String { handle: 0 });
+    let upper = str_to_ascii_upper("senGoo").unwrap_or(String { handle: 0 });
+    let lower = str_to_ascii_lower("SenGOO").unwrap_or(String { handle: 0 });
+    trimmed.len() + upper.len() + lower.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_str_trim"));
+    assert!(ir.contains("sengoo_str_to_ascii_upper"));
+    assert!(ir.contains("sengoo_str_to_ascii_lower"));
+    assert!(ir.contains("String_Drop_drop"));
 }
 
 #[test]

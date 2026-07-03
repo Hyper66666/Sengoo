@@ -1,0 +1,31 @@
+// examples/traits/03_dyn_dispatch.sg
+//
+// Demonstrates: dynamic dispatch through a `&dyn Trait` trait object.
+//
+// Run: sgc run examples/traits/03_dyn_dispatch.sg
+// Expected exit code: 25
+
+trait Shape {
+    def area(&self) -> i64 {
+        0
+    }
+}
+
+struct Square {
+    side: i64,
+}
+
+impl Shape for Square {
+    def area(&self) -> i64 {
+        self.side * self.side
+    }
+}
+
+def describe(shape: &dyn Shape) -> i64 {
+    shape.area()
+}
+
+def main() -> i64 {
+    let sq = Square { side: 5 };
+    describe(&sq)
+}

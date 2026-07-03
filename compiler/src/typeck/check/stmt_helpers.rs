@@ -1,10 +1,21 @@
 use super::*;
 use crate::typeck::BorrowChecker;
-use std::collections::HashSet;
 
 impl TypeChecker {
     /// 检查块表达式，按顺序检查所有语句并返回最终类型。
     pub(super) fn check_block(&mut self, block: &Block) -> TyResult<Ty> {
+        self.check_block_inner(block, false)
+    }
+
+    pub(super) fn check_function_body_block(&mut self, block: &Block) -> TyResult<Ty> {
+        self.check_block_inner(block, true)
+    }
+
+    fn check_block_inner(
+        &mut self,
+        block: &Block,
+        reject_tail_borrow_escape: bool,
+    ) -> TyResult<Ty> {
         self.env.push_scope();
 
         let mut result_ty = self.env.unit_ty();
@@ -14,9 +25,12 @@ impl TypeChecker {
             }
         }
 
-        let mut borrow_checker =
-            BorrowChecker::new_with_move_only_types(self.env.clone(), self.move_only_type_keys());
-        borrow_checker.check_block(block);
+        let mut borrow_checker = BorrowChecker::new(self.env.clone());
+        if reject_tail_borrow_escape {
+            borrow_checker.check_function_block(block);
+        } else {
+            borrow_checker.check_block(block);
+        }
         if let Err(errs) = borrow_checker.finish() {
             return Err(crate::typeck::format_borrow_errors(&errs));
         }
@@ -50,9 +64,10 @@ impl TypeChecker {
                     ));
                 }
                 self.infer.unify(&var_ty, &value_ty)?;
+                let resolved_var_ty = self.infer.apply_subst(&var_ty);
 
                 self.env
-                    .insert_var_with_mutability(name.name.clone(), var_ty, *is_mut);
+                    .insert_var_with_mutability(name.name.clone(), resolved_var_ty, *is_mut);
                 Ok(None)
             }
             StmtKind::Const { name, ty, value } => {
@@ -204,13 +219,5 @@ impl TypeChecker {
     /// 检查continue语句，返回never类型。
     pub(super) fn check_continue(&mut self) -> TyResult<Ty> {
         Ok(self.env.never_ty())
-    }
-}
-
-impl TypeChecker {
-    fn move_only_type_keys(&self) -> HashSet<String> {
-        let mut keys = self.drop_move_only_type_keys.clone();
-        keys.extend(self.impl_registry.trait_impl_type_keys("Drop"));
-        keys
     }
 }

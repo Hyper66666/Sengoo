@@ -133,6 +133,7 @@ fn bind_method_specialization_subst_infers_from_args() {
         name: "Vec_i64".to_string(),
         fields: vec![],
     };
+    let registry = ConcreteTypeRegistry::default();
 
     let subst = bind_method_specialization_subst(
         &target_type,
@@ -140,6 +141,7 @@ fn bind_method_specialization_subst_infers_from_args() {
         &receiver_ty,
         &[MIR_I64],
         &struct_defs,
+        &registry,
     )
     .expect("specialization should bind T from explicit arg types");
 
@@ -159,11 +161,88 @@ fn bind_method_specialization_subst_rejects_wrong_arity() {
         name: "Vec_i64".to_string(),
         fields: vec![],
     };
+    let registry = ConcreteTypeRegistry::default();
 
-    let subst =
-        bind_method_specialization_subst(&target_type, &method, &receiver_ty, &[], &struct_defs);
+    let subst = bind_method_specialization_subst(
+        &target_type,
+        &method,
+        &receiver_ty,
+        &[],
+        &struct_defs,
+        &registry,
+    );
 
     assert!(subst.is_none());
+}
+
+#[test]
+fn bind_method_specialization_subst_infers_single_arg_receiver_from_registered_name() {
+    let rc_def = crate::hir::HIRStruct {
+        name: "Rc".to_string(),
+        type_params: vec![HIRTypeParam {
+            name: "T".to_string(),
+            bounds: Vec::new(),
+            default: None,
+        }],
+        fields: Vec::new(),
+        is_pub: false,
+    };
+    let pair_def = crate::hir::HIRStruct {
+        name: "Pair".to_string(),
+        type_params: Vec::new(),
+        fields: Vec::new(),
+        is_pub: false,
+    };
+    let struct_defs = HashMap::from([
+        (rc_def.name.clone(), &rc_def),
+        (pair_def.name.clone(), &pair_def),
+    ]);
+    let target_type = HIRType::named(
+        "Rc".to_string(),
+        vec![HIRType::named("T".to_string(), vec![])],
+    );
+    let method = crate::hir::HIRFunction {
+        name: "Rc_clone".to_string(),
+        type_params: Vec::new(),
+        params: vec![crate::hir::HIRParam::new(
+            "self".to_string(),
+            crate::symbol::SymbolId::INVALID,
+            HIRType::reference(false, target_type.clone()),
+        )],
+        return_type: target_type.clone(),
+        precondition: None,
+        postcondition: None,
+        body: crate::hir::HIRBody::new(),
+        is_async: false,
+        abi: None,
+        is_unsafe: false,
+        no_mangle: false,
+        export_name: None,
+        is_pub: false,
+    };
+    let receiver_ty = MIRType::Struct {
+        name: "Rc_Pair".to_string(),
+        fields: vec![("handle".to_string(), MIR_I64)],
+    };
+    let registry = ConcreteTypeRegistry::new(&struct_defs, &HashMap::new());
+
+    let subst = bind_method_specialization_subst(
+        &target_type,
+        &method,
+        &receiver_ty,
+        &[],
+        &struct_defs,
+        &registry,
+    )
+    .expect("registered receiver instance suffix should bind Rc<T>");
+
+    assert_eq!(
+        subst.get("T"),
+        Some(&MIRType::Struct {
+            name: "Pair".to_string(),
+            fields: Vec::new(),
+        })
+    );
 }
 
 #[test]

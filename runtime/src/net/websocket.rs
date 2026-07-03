@@ -401,5 +401,9 @@ pub extern "C" fn sengoo_ws_recv_text(
 #[no_mangle]
 pub extern "C" fn sengoo_ws_close(handle: u64) -> i64 {
     reset_last_error();
-    net_runtime().ws_close(handle).unwrap_or_else(fail_bool)
+    match net_runtime().ws_close(handle) {
+        Ok(value) => value,
+        Err(NetErrorCode::HandleNotFound) => 1,
+        Err(code) => fail_bool(code),
+    }
 }

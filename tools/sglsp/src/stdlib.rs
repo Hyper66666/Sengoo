@@ -411,6 +411,8 @@ import std::status;
 
         assert!(collection_names.contains(&("Iterator", "trait")));
         assert!(collection_names.contains(&("next", "trait method")));
+        assert!(collection_names.contains(&("RcValue", "trait")));
+        assert!(collection_names.contains(&("rc", "trait method")));
     }
 
     #[test]

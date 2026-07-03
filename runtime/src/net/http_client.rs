@@ -195,5 +195,9 @@ pub extern "C" fn sengoo_http_body_copy(handle: u64, buffer: *mut u8, capacity: 
 #[no_mangle]
 pub extern "C" fn sengoo_http_close(handle: u64) -> i64 {
     reset_last_error();
-    net_runtime().http_close(handle).unwrap_or_else(fail_bool)
+    match net_runtime().http_close(handle) {
+        Ok(value) => value,
+        Err(NetErrorCode::HandleNotFound) => 1,
+        Err(code) => fail_bool(code),
+    }
 }

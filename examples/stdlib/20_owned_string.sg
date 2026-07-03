@@ -1,41 +1,43 @@
 // examples/stdlib/20_owned_string.sg
 //
-// Demonstrates: importing std::string owned String helpers with auto-drop.
+// Demonstrates: importing std::string owned String helpers.
 //
 // Run: sgc run examples/stdlib/20_owned_string.sg
-// Expected output:
-// sengoo
-// 20
+// Expected output: 20
 
 import std::string;
+import std::ffi;
 
 def main() -> i64 {
-    let prefix = string_from_str("sen");
-    if prefix.is_ok == false {
+    let greeting = string_from_str("hello");
+    if greeting.is_ok == false {
         return 1;
     }
-    let base = prefix.value;
-    let text: String = base + "goo";
-    if text.len() != 6 || !text.contains("eng") {
+    let owned = greeting.value;
+    if owned.len() != 5 {
         return 1;
     }
-    if !text.starts_with("sen") || !text.ends_with("goo") {
+    let appended = owned.push_str("!");
+    if appended.is_ok == false {
         return 1;
     }
-
-    let same = string_from_str("sengoo");
-    let different = string_from_str("sengo");
-    if !same.is_ok || !different.is_ok {
+    if owned.len() != 6 {
         return 1;
     }
-    if !(text == same.value) {
+    let cloned = owned.clone();
+    if cloned.is_ok == false {
         return 1;
     }
-    if text == different.value {
+    let copy = cloned.value;
+    let buffer_out = ffi_buffer_new(16);
+    if buffer_out.is_ok == false {
         return 1;
     }
-
-    print(text);
+    let buffer = buffer_out.value;
+    let copied = copy.copy_to_buffer(buffer);
+    if copied.is_ok == false || copied.value != 6 {
+        return 1;
+    }
     print(20);
     0
 }

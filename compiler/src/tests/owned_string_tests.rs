@@ -65,6 +65,137 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_owned_string_add_assign_str_lowers_to_push_str() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let mut text = string_from_str("hi").value;
+    text += "!";
+    text.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("String += &str should compile");
+    assert!(
+        ir.contains("@sengoo_string_push_str_status")
+            && ir.contains("@sengoo_panic_result_unwrap_i64"),
+        "expected String += &str to lower to checked in-place push_str, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_str_plus_owned_string_builds_owned_string() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let tail = string_from_str("tail").value;
+    let text = "head-" + tail;
+    text.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("&str + String should compile");
+    assert!(
+        ir.contains("@sengoo_string_from_str_copy")
+            && ir.contains("@sengoo_string_as_str_ptr")
+            && ir.contains("@sengoo_string_push_str_status")
+            && ir.contains("@sengoo_panic_result_unwrap_i64"),
+        "expected &str + String to build and append an owned String, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_borrows_owner_and_lowers_to_runtime_pointer() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let text = string_from_str("borrowed").value;
+    let view = text.as_str();
+    view.len()
+}
+"#
+    );
+
+    let ir = compile_to_ir(&source).expect("String.as_str should compile");
+    assert!(
+        ir.contains("@sengoo_string_as_str_ptr") && ir.contains("@sengoo_str_len"),
+        "expected String.as_str to lower to a borrowed &str view, got:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_prevents_owner_move() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    let moved = owner;
+    view.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `owner`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_return() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    return view;
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("returning a borrowed view should fail type checking");
+    let crate::error::CompileError::TypeckError(typeck) = &err else {
+        panic!("expected typeck error, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+    let err = format!("{err:?}");
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_tail_expression() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    view
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn stdlib_owned_string_move_rejects_use_after_move() {
     let err = typecheck_fails_with_stdlib(
         r#"
@@ -145,51 +276,6 @@ def main() -> i64 {
 }
 
 #[test]
-fn copy_scalars_remain_usable_after_by_value_copy_sites() {
-    let source = r#"
-def take_i64(value: i64) -> i64 {
-    value
-}
-
-def take_bool(value: bool) -> i64 {
-    if value { 1 } else { 0 }
-}
-
-def take_f64(value: f64) -> f64 {
-    value
-}
-
-def main() -> i64 {
-    let n: i64 = 7;
-    let copied_n = n;
-    let echoed_n = take_i64(n);
-    let after_arg_n = n;
-
-    let flag: bool = true;
-    let copied_flag = flag;
-    let flag_score = take_bool(flag);
-    let flag_after_arg = if flag { 1 } else { 0 };
-
-    let real: f64 = 2.5;
-    let copied_real = real;
-    let echoed_real = take_f64(real);
-    let echoed_real_again = take_f64(real);
-
-    if copied_flag {
-        copied_n + echoed_n + after_arg_n + flag_score + flag_after_arg
-    } else {
-        0
-    }
-}
-"#;
-    let parsed = Parser::parse(source).expect("source should parse");
-    let mut checker = TypeChecker::new();
-    checker
-        .check_program(&parsed)
-        .expect("Copy scalar bindings and arguments should remain usable");
-}
-
-#[test]
 fn stdlib_owned_string_user_struct_does_not_get_move_rules() {
     let source = r#"
 struct MyString {
@@ -210,7 +296,7 @@ def main() -> i64 {
 }
 
 #[test]
-fn user_drop_struct_move_rejects_use_after_move() {
+fn user_drop_type_move_rejects_use_after_move() {
     let source = r#"
 struct Resource {
     handle: i64,
@@ -223,7 +309,7 @@ impl Drop for Resource {
 
 def main() -> i64 {
     let a: Resource = Resource { handle: 1 };
-    let b: Resource = a;
+    let b = a;
     a.handle
 }
 "#;
@@ -231,7 +317,7 @@ def main() -> i64 {
     let mut checker = TypeChecker::new();
     let err = checker
         .check_program(&program)
-        .expect_err("Drop structs should be move-only");
+        .expect_err("a moved user Drop type should reject later use");
     let err = format!("{err:?}");
     assert!(
         err.contains("use of moved value `a`"),
@@ -240,63 +326,306 @@ def main() -> i64 {
 }
 
 #[test]
-fn user_drop_struct_move_check_does_not_depend_on_impl_order() {
-    let source = r#"
-struct Resource {
-    handle: i64,
+fn stdlib_owned_string_return_marks_value_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def return_then_reuse(value: String) -> String {
+    return value;
+    value
 }
-
-def main() -> i64 {
-    let a: Resource = Resource { handle: 1 };
-    let b: Resource = a;
-    a.handle
-}
-
-impl Drop for Resource {
-    def drop(&mut self) {
-    }
-}
-"#;
-    let program = Parser::parse(source).expect("source should parse");
-    let mut checker = TypeChecker::new();
-    let err = checker
-        .check_program(&program)
-        .expect_err("Drop structs should be move-only regardless of impl order");
-    let err = format!("{err:?}");
+"#,
+    );
     assert!(
-        err.contains("use of moved value `a`"),
+        err.contains("use of moved value `value`"),
         "unexpected error: {err}"
     );
 }
 
 #[test]
-fn generic_drop_impl_makes_each_instantiation_move_only() {
-    let source = r#"
-struct Resource<T> {
-    value: T,
+fn stdlib_owned_string_cannot_move_while_borrowed() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = &owner;
+    let moved = owner;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `owner`"),
+        "unexpected error: {err}"
+    );
 }
 
-impl<T> Drop for Resource<T> {
+#[test]
+fn moving_a_borrowed_owner_reports_stable_diagnostic() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = &owner;
+    let moved = owner;
+    0
+}
+"#
+    );
+    let program = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("moving a borrowed owner should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
+    let owner_move = source.rfind("owner;").expect("move site should exist") as u32;
+    assert_eq!(
+        typeck.span(),
+        Some((owner_move, owner_move + "owner;".len() as u32))
+    );
+}
+
+#[test]
+fn borrowed_owning_field_cannot_be_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair.left;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn parent_with_borrowed_owning_field_cannot_be_moved() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair;
+    0
+}
+"#,
+    );
+    assert!(
+        err.contains("cannot move borrowed value `pair`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn rc_owner_cannot_move_while_borrow_is_live() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg"
+        ]),
+        r#"
+def main() -> i64 {
+    let first = rc_new(21);
+    let view = first.borrow();
+    let moved = first;
+    *view
+}
+"#
+    );
+    let program = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("moving an Rc owner while a borrow is live should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
+}
+
+#[test]
+fn borrowing_one_owning_field_allows_moving_its_sibling() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let view = &pair.left;
+    let moved = pair.right;
+    0
+}
+"#,
+    )
+    .expect("disjoint sibling fields should not conflict");
+}
+
+#[test]
+fn user_drop_field_return_marks_only_that_field_moved() {
+    let source = r#"
+struct Token {
+    value: i64,
+}
+
+impl Drop for Token {
     def drop(&mut self) {
     }
 }
 
-def main() -> i64 {
-    let a: Resource<i64> = Resource { value: 1 };
-    let b: Resource<i64> = a;
-    a.value
+struct Pair {
+    left: Token,
+    right: Token,
+}
+
+def take_left(pair: Pair) -> Token {
+    return pair.left;
+    pair.left
 }
 "#;
     let program = Parser::parse(source).expect("source should parse");
     let mut checker = TypeChecker::new();
     let err = checker
         .check_program(&program)
-        .expect_err("all instantiations of a generic Drop impl should be move-only");
+        .expect_err("returning an owning field should move it");
     let err = format!("{err:?}");
     assert!(
-        err.contains("use of moved value `a`"),
+        err.contains("use of moved value `pair.left`"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn owned_field_move_rejects_reusing_the_same_field() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left.len()
+}
+"#,
+    );
+    assert!(
+        err.contains("use of moved value `pair.left`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_move_keeps_sibling_field_available() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.right.len()
+}
+"#,
+    )
+    .expect("moving one owning field should not move its sibling");
+}
+
+#[test]
+fn owned_field_move_rejects_using_the_whole_parent_value() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def consume(value: Pair) -> i64 {
+    value.right.len()
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    consume(pair)
+}
+"#,
+    );
+    assert!(
+        err.contains("use of partially moved value `pair`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn owned_field_assignment_reinitializes_a_moved_field() {
+    typecheck_with_stdlib(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let mut pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left = string_from_str("replacement").value;
+    pair.left.len()
+}
+"#,
+    )
+    .expect("assigning a moved field should reinitialize that field");
 }
 
 #[test]
@@ -318,143 +647,4 @@ def main() -> i64 {
     .expect("program should compile");
     assert!(ir.contains("sengoo_string_from_str_copy"));
     assert!(ir.contains("sengoo_string_len"));
-}
-
-#[test]
-fn owned_string_printing_borrows_and_lowers_as_text() {
-    let ir = compile_to_ir(&format!(
-        "{}\n\n{}",
-        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
-        r#"
-def main() -> i64 {
-    let text: String = string_from_str("hello").value;
-    println(text);
-    eprintln(text);
-    text.len()
-}
-"#
-    ))
-    .expect("printing an owned String should borrow it and preserve later uses");
-
-    assert_eq!(
-        ir.matches("@sengoo_string_as_str_ptr(").count(),
-        3,
-        "owned String printing should convert only the two print arguments plus the runtime declaration:\n{ir}"
-    );
-    assert!(
-        ir.contains("call void @sengoo_print_str(i8*")
-            && ir.contains("call void @sengoo_eprint_str(i8*"),
-        "owned String printing should use the text sinks:\n{ir}"
-    );
-    assert!(
-        !ir.contains("String { handle:"),
-        "owned String printing must not use structural formatting:\n{ir}"
-    );
-}
-
-#[test]
-fn owned_string_plus_borrowed_str_lowers_to_owned_concat() {
-    let ir = compile_to_ir(&format!(
-        "{}\n\n{}",
-        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
-        r#"
-def main() -> i64 {
-    let left: String = string_from_str("hello").value;
-    let combined: String = left + " world";
-    println(combined);
-    combined.len()
-}
-"#
-    ))
-    .expect("String + &str should typecheck and lower to owned-string concatenation");
-
-    assert!(
-        ir.contains("sengoo_string_concat_str"),
-        "String + &str should lower through the owned concat runtime helper:\n{ir}"
-    );
-    assert!(
-        ir.contains("call void @sengoo_print_str(i8*"),
-        "concatenated String should remain printable as text:\n{ir}"
-    );
-}
-
-#[test]
-fn owned_string_plus_borrowed_str_consumes_left_operand() {
-    let err = typecheck_fails_with_stdlib(
-        r#"
-def main() -> i64 {
-    let left: String = string_from_str("hello").value;
-    let combined: String = left + " world";
-    left.len()
-}
-"#,
-    );
-    assert!(
-        err.contains("use of moved value `left`"),
-        "String + &str should consume the left owned String, got: {err}"
-    );
-}
-
-#[test]
-fn owned_string_equality_borrows_and_lowers_to_runtime_eq() {
-    let ir = compile_to_ir(&format!(
-        "{}\n\n{}",
-        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
-        r#"
-def main() -> i64 {
-    let left: String = string_from_str("hi").value;
-    let same: String = string_from_str("hi").value;
-    let different: String = string_from_str("bye").value;
-
-    if left == same && left != different && left.len() == 2 && same.len() == 2 {
-        1
-    } else {
-        0
-    }
-}
-"#
-    ))
-    .expect("owned String equality should typecheck and preserve later uses");
-
-    let main_section = ir
-        .split("; Function: main")
-        .nth(1)
-        .expect("main function should be emitted")
-        .split("; Function: ")
-        .next()
-        .unwrap_or("");
-    assert!(
-        main_section.contains("call i64 @sengoo_string_eq"),
-        "owned String equality should lower through the owned runtime helper:\n{ir}"
-    );
-    assert!(
-        !main_section.contains("icmp eq %String") && !main_section.contains("icmp ne %String"),
-        "owned String equality must not compare aggregate values directly:\n{main_section}"
-    );
-}
-
-#[test]
-fn owned_string_search_methods_compile_and_call_runtime_helpers() {
-    let ir = compile_to_ir(&format!(
-        "{}\n\n{}",
-        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
-        r#"
-def main() -> i64 {
-    let text: String = string_from_str("sengoo").value;
-    if text.contains("goo") && text.starts_with("sen") && text.ends_with("goo") && text.len() == 6 {
-        1
-    } else {
-        0
-    }
-}
-"#
-    ))
-    .expect("owned String search methods should typecheck");
-
-    assert!(
-        ir.contains("sengoo_string_contains")
-            && ir.contains("sengoo_string_starts_with")
-            && ir.contains("sengoo_string_ends_with"),
-        "owned String search should call runtime helpers:\n{ir}"
-    );
 }

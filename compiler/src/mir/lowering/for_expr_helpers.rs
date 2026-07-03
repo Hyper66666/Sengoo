@@ -114,7 +114,9 @@ pub(super) fn lower_range_for_expr(
     });
 
     ctx.push_loop(exit_block, inc_block);
+    ctx.push_drop_scope();
     ctx.lower_body_to_block_with_return(body, body_block, false);
+    ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
     if let Some(block) = ctx.mir_fn.block_mut(body_block) {
@@ -216,6 +218,7 @@ pub(super) fn lower_array_for_expr(
     });
 
     ctx.push_loop(exit_block, inc_block);
+    ctx.push_drop_scope();
     ctx.set_current_block(body_block);
 
     let index_for_addr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
@@ -245,6 +248,7 @@ pub(super) fn lower_array_for_expr(
     });
 
     ctx.lower_body_to_block_with_return(body, body_block, false);
+    ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
     if let Some(block) = ctx.mir_fn.block_mut(body_block) {

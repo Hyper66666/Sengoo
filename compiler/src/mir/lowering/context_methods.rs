@@ -1,5 +1,14 @@
 use super::*;
 
+/// Upper bound on how deeply generic specializations may nest while lowering.
+/// Polymorphic recursion (`f<T>` calling `f<Wrap<T>>`) grows the type argument
+/// without bound, producing infinitely many ever-larger specializations; this
+/// limit turns that into a stable `monomorphization-overflow` diagnostic instead
+/// of an unbounded (and increasingly expensive) lowering. Real programs nest
+/// monomorphization only a handful of levels, so this bound is never reached by
+/// well-formed code.
+const MONOMORPHIZATION_DEPTH_LIMIT: usize = 16;
+
 impl<'a> LoweringContext<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
@@ -47,7 +56,9 @@ impl<'a> LoweringContext<'a> {
             future_origins: HashMap::new(),
             try_scope_stack: Vec::new(),
             drop_bindings: Vec::new(),
+            drop_scope_markers: Vec::new(),
             moved_drop_locals: HashSet::new(),
+            moved_drop_fields: HashSet::new(),
         }
     }
 
@@ -88,7 +99,18 @@ impl<'a> LoweringContext<'a> {
         );
         self.insert_known_function(specialized.name.clone());
 
-        match lower_function(
+        let depth = self.concrete_type_registry.enter_specialization();
+        if depth > MONOMORPHIZATION_DEPTH_LIMIT {
+            self.concrete_type_registry.leave_specialization();
+            self.errors.push(format!(
+                "[monomorphization-overflow] exceeded the monomorphization depth limit ({}) while \
+                 specializing `{}`; this usually indicates unbounded polymorphic recursion",
+                MONOMORPHIZATION_DEPTH_LIMIT, specialized.name,
+            ));
+            return None;
+        }
+
+        let lowered = lower_function(
             &specialized,
             self.lambda_counter,
             self.known_functions_base,
@@ -100,7 +122,10 @@ impl<'a> LoweringContext<'a> {
             self.trait_method_templates,
             self.known_functions_overlay.clone(),
             self.function_sigs_overlay.clone(),
-        ) {
+        );
+        self.concrete_type_registry.leave_specialization();
+
+        match lowered {
             Ok((mir_fn, nested)) => {
                 self.lambda_functions.push(mir_fn);
                 self.lambda_functions.extend(nested);
@@ -133,6 +158,13 @@ impl<'a> LoweringContext<'a> {
         let mut mir_subst = HashMap::new();
         for (param, actual_ty) in template.params.iter().zip(actual_arg_types.iter()) {
             bind_mir_subst_from_hir_type(&param.ty, actual_ty, self.struct_defs, &mut mir_subst);
+            bind_registered_generic_args(
+                &param.ty,
+                actual_ty,
+                self.struct_defs,
+                &self.concrete_type_registry,
+                &mut mir_subst,
+            );
         }
 
         let mut hir_subst = HashMap::new();
@@ -164,6 +196,12 @@ impl<'a> LoweringContext<'a> {
         let mut specialized =
             crate::mir::hir_specialization_helpers::substitute_hir_function(&template, &hir_subst);
         specialized.type_params.clear();
+        if matches!(specialized.return_type.kind, hir::HIRTypeKind::Named { .. }) {
+            self.concrete_type_registry.register_instance(
+                crate::type_naming::hir_type_instance_name(&specialized.return_type),
+                specialized.return_type.clone(),
+            );
+        }
         let suffixes = template
             .type_params
             .iter()
@@ -261,6 +299,19 @@ impl<'a> LoweringContext<'a> {
                 .iter()
                 .all(|type_param| subst.contains_key(&type_param.name))
         {
+            let return_ty = self.mir_fn.return_type.clone();
+            if let Some(HIRType {
+                kind:
+                    hir::HIRTypeKind::Named {
+                        name: return_name, ..
+                    },
+                ..
+            }) = self.concrete_type_registry.hir_type_for_mir(&return_ty)
+            {
+                if return_name == name {
+                    return Some(return_ty);
+                }
+            }
             return None;
         }
 
@@ -326,6 +377,61 @@ impl<'a> LoweringContext<'a> {
         let name = format!("$__async_block{}", self.lambda_counter);
         *self.lambda_counter += 1;
         name
+    }
+}
+
+fn bind_registered_generic_args(
+    template: &HIRType,
+    actual_mir: &MIRType,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    registry: &ConcreteTypeRegistry,
+    subst: &mut HashMap<String, MIRType>,
+) {
+    let Some(actual_hir) = registry.hir_type_for_mir(actual_mir) else {
+        return;
+    };
+    bind_registered_hir_pair(template, &actual_hir, struct_defs, subst);
+}
+
+fn bind_registered_hir_pair(
+    template: &HIRType,
+    actual: &HIRType,
+    struct_defs: &HashMap<String, &hir::HIRStruct>,
+    subst: &mut HashMap<String, MIRType>,
+) {
+    match (&template.kind, &actual.kind) {
+        (
+            hir::HIRTypeKind::Named {
+                name,
+                args: template_args,
+            },
+            _,
+        ) if template_args.is_empty() && !struct_defs.contains_key(name) => {
+            subst.entry(name.clone()).or_insert_with(|| {
+                hir_type_to_mir_with_structs_and_subst(actual, struct_defs, &HashMap::new())
+            });
+        }
+        (
+            hir::HIRTypeKind::Named {
+                name: template_name,
+                args: template_args,
+            },
+            hir::HIRTypeKind::Named {
+                name: actual_name,
+                args: actual_args,
+            },
+        ) if template_name == actual_name => {
+            for (template_arg, actual_arg) in template_args.iter().zip(actual_args.iter()) {
+                bind_registered_hir_pair(template_arg, actual_arg, struct_defs, subst);
+            }
+        }
+        (hir::HIRTypeKind::Ref(_, template_inner), hir::HIRTypeKind::Ref(_, actual_inner))
+        | (hir::HIRTypeKind::Ref(_, template_inner), hir::HIRTypeKind::Ptr(actual_inner))
+        | (hir::HIRTypeKind::Ptr(template_inner), hir::HIRTypeKind::Ref(_, actual_inner))
+        | (hir::HIRTypeKind::Ptr(template_inner), hir::HIRTypeKind::Ptr(actual_inner)) => {
+            bind_registered_hir_pair(template_inner, actual_inner, struct_defs, subst);
+        }
+        _ => {}
     }
 }
 

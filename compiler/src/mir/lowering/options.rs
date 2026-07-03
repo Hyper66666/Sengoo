@@ -1,4 +1,5 @@
 use crate::hir;
+use crate::mir::dyn_dispatch::DynMethodSlot;
 use crate::mir::EnumDefMap;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -21,6 +22,16 @@ pub struct MirLowerOptions {
     pub(crate) generic_function_templates: Rc<HashMap<String, hir::HIRFunction>>,
     pub(crate) enum_defs: Rc<EnumDefMap>,
     pub(crate) assert_callsite: Rc<AssertCallsiteContext>,
+    /// Per-trait ordered (sorted) object-safe method names. Defines the vtable
+    /// slot layout for `dyn Trait` dynamic dispatch; shared by both the dispatch
+    /// site and shim/vtable synthesis.
+    pub(crate) trait_method_order: Rc<HashMap<String, Vec<DynMethodSlot>>>,
+    /// Per-function expected `dyn Trait` parameter traits, indexed by explicit
+    /// parameter position (`Some(trait)` when that parameter is `&dyn Trait`).
+    pub(crate) dyn_param_traits: Rc<HashMap<String, Vec<Option<String>>>>,
+    /// `(trait, concrete_type_prefix)` pairs discovered at `&Concrete -> &dyn Trait`
+    /// coercion sites; consumed after lowering to synthesize vtable shims.
+    pub(crate) dyn_vtable_requests: Rc<RefCell<HashSet<(String, String)>>>,
 }
 
 impl Default for MirLowerOptions {
@@ -32,6 +43,9 @@ impl Default for MirLowerOptions {
             generic_function_templates: Rc::new(HashMap::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
             assert_callsite: Rc::new(AssertCallsiteContext::default()),
+            trait_method_order: Rc::new(HashMap::new()),
+            dyn_param_traits: Rc::new(HashMap::new()),
+            dyn_vtable_requests: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 }
@@ -56,7 +70,20 @@ impl MirLowerOptions {
             generic_function_templates: Rc::new(HashMap::new()),
             enum_defs: Rc::new(EnumDefMap::new()),
             assert_callsite: Rc::new(AssertCallsiteContext::default()),
+            trait_method_order: Rc::new(HashMap::new()),
+            dyn_param_traits: Rc::new(HashMap::new()),
+            dyn_vtable_requests: Rc::new(RefCell::new(HashSet::new())),
         }
+    }
+
+    pub(crate) fn with_dyn_dispatch_metadata(
+        mut self,
+        trait_method_order: HashMap<String, Vec<DynMethodSlot>>,
+        dyn_param_traits: HashMap<String, Vec<Option<String>>>,
+    ) -> Self {
+        self.trait_method_order = Rc::new(trait_method_order);
+        self.dyn_param_traits = Rc::new(dyn_param_traits);
+        self
     }
 
     pub fn with_assert_callsite_context(mut self, context: AssertCallsiteContext) -> Self {

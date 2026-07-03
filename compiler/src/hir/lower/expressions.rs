@@ -115,8 +115,14 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                     symbol: ident.symbol,
                 }
             } else {
+                let name = path
+                    .segments
+                    .iter()
+                    .map(|segment| segment.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_");
                 HIRExpr::Var {
-                    name: String::new(),
+                    name,
                     symbol: SymbolId::INVALID,
                 }
             }

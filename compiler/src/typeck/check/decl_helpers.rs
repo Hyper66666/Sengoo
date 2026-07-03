@@ -136,15 +136,21 @@ impl TypeChecker {
         }
 
         let propagation = Self::propagation_from_ty(&ret_ty);
-        let body_ty = if fn_decl.is_async {
+        self.expected_return_types.push(ret_ty.clone());
+        let body_result = if fn_decl.is_async {
             self.async_context_depth += 1;
-            let result =
-                self.with_propagation(propagation.clone(), |this| this.check_block(&fn_decl.body));
+            let result = self.with_propagation(propagation.clone(), |this| {
+                this.check_function_body_block(&fn_decl.body)
+            });
             self.async_context_depth = self.async_context_depth.saturating_sub(1);
-            result?
+            result
         } else {
-            self.with_propagation(propagation, |this| this.check_block(&fn_decl.body))?
+            self.with_propagation(propagation, |this| {
+                this.check_function_body_block(&fn_decl.body)
+            })
         };
+        self.expected_return_types.pop();
+        let body_ty = body_result?;
 
         let is_main_with_implicit_return = fn_decl.name.name == "main"
             && matches!(body_ty.kind, TyKind::Unit)
@@ -238,10 +244,12 @@ impl TypeChecker {
                             "unsupported trait bound path in type parameter".to_string(),
                         ))
                     })?;
-                if !matches!(
-                    self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
-                    Some(SymbolKind::Trait { .. })
-                ) {
+                if !self.trait_registry.contains(&trait_name)
+                    && !matches!(
+                        self.env.lookup(&trait_name).map(|symbol| &symbol.kind),
+                        Some(SymbolKind::Trait { .. })
+                    )
+                {
                     return Err(CompileError::from(TypeckError::UndefinedType {
                         name: trait_name,
                     }));
@@ -249,9 +257,24 @@ impl TypeChecker {
                 meta.bounds.push(trait_name);
             }
 
+            // A bound `T: Sub` also makes every supertrait of `Sub` available on
+            // `T`, so expand the recorded bound set with transitive supertraits.
+            let mut expanded = Vec::new();
+            for bound in &meta.bounds {
+                for supertrait in self.transitive_supertraits(bound) {
+                    if !meta.bounds.contains(&supertrait) && !expanded.contains(&supertrait) {
+                        expanded.push(supertrait);
+                    }
+                }
+            }
+            meta.bounds.extend(expanded);
+
             if let Some(default_ty) = &type_param.default {
                 meta.default = Some(self.check_type(default_ty).map_err(CompileError::from)?);
             }
+
+            self.generic_var_bounds
+                .insert(meta.var_id, meta.bounds.clone());
         }
 
         Ok(metas)
@@ -290,7 +313,8 @@ impl TypeChecker {
 
     pub(super) fn check_struct_decl(&mut self, struct_decl: &Struct) -> Result<()> {
         self.env.push_scope();
-        self.bind_type_params_with_meta(&struct_decl.type_params)?;
+        let type_params = self.bind_type_params_with_meta(&struct_decl.type_params)?;
+        let mut field_types = Vec::with_capacity(struct_decl.fields.len());
 
         for field in &struct_decl.fields {
             let field_ty = self.check_type(&field.ty)?;
@@ -299,9 +323,20 @@ impl TypeChecker {
                     "AsyncContext is poll-scoped and cannot be stored in a field".to_string(),
                 )));
             }
+            let field_name = field
+                .name
+                .as_ref()
+                .map(|name| name.name.clone())
+                .unwrap_or_default();
+            field_types.push((field_name, field_ty));
         }
 
         self.env.pop_scope();
+        self.env.register_struct_field_types(
+            struct_decl.name.name.clone(),
+            type_params.into_iter().map(|param| param.var_id).collect(),
+            field_types,
+        );
         Ok(())
     }
 
@@ -382,7 +417,10 @@ impl TypeChecker {
             self.env.unit_ty()
         };
 
-        let body_ty = self.check_block(&method.body)?;
+        self.expected_return_types.push(ret_ty.clone());
+        let body_result = self.check_function_body_block(&method.body);
+        self.expected_return_types.pop();
+        let body_ty = body_result?;
         self.infer
             .unify(&body_ty, &ret_ty)
             .map_err(CompileError::from)?;

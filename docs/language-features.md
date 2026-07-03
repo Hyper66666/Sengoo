@@ -61,7 +61,78 @@ impl i64 {
 let x = (-21).abs();
 ```
 
-## 2.4 Contracts (`requires` / `ensures`)
+## 2.4 Generics, Traits, Associated Types, And Derive
+
+Sengoo supports generic `def`, `struct`, `enum`, and `impl` declarations with
+monomorphized concrete instances. Generic bounds can use direct type parameter
+syntax and `where` clauses:
+
+```sg
+trait Show {
+    def show(self) -> i64;
+}
+
+def score<T: Show>(value: T) -> i64 {
+    value.show()
+}
+```
+
+The compiler checks bounds at instantiation sites. If a concrete type does not
+implement a required trait, type checking reports the stable
+`unsatisfied-trait-bound` diagnostic.
+
+Traits can declare associated types, and generic code can refer to them through
+the bounded type parameter:
+
+```sg
+trait Iterator {
+    type Item;
+}
+
+def choose<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+```
+
+Each `impl Trait for Type` must define the trait's required associated types.
+For trait objects, associated types must be fixed in the object type:
+
+```sg
+def takes_iter(value: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+```
+
+Current `dyn Trait` support includes parsing/type checking, object-safety
+diagnostics, fixed associated-type validation, and LLVM-text/JIT dynamic
+dispatch for single-trait `&self` receivers through a fat pointer plus vtable.
+Multi-trait dyn objects, owning `Box<dyn Trait>`, dyn drop slots, and the native
+Cranelift path remain roadmap work.
+
+Core trait names are compiler-known for bounds: `Clone`, `Copy`,
+`PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`, `Display`, `Debug`,
+`Iterator`, and `IntoIterator`. Support types `Ordering`, `Formatter`, and
+`Hasher` resolve in signatures. `#[derive(...)]` currently registers core trait
+impls for the derivable marker surface. Debug formatting is field-aware for
+structs and basic enums; `#[derive(Clone)]` and `#[derive(PartialEq)]` on named
+structs generate field-aware `clone(&self)` and `eq(&self, other: &Self)`
+methods, with struct `==`/`!=` lowering through the generated equality method;
+`#[derive(PartialOrd)]` / `#[derive(Ord)]` on named scalar-field structs
+generate lexicographic `compare/lt/le/gt/ge` helpers, with `< <= > >=`
+lowering through `compare`; `#[derive(Hash)]` generates a deterministic
+`hash() -> i64` helper; and `#[derive(Default)]` on named structs generates a
+callable `Type::default()` constructor. Scalar fields are handled directly, and
+nested fields work when their own derived helper is available. The full
+`Hasher` object protocol, generic collection-field derives beyond the generated
+method calls, and the general Formatter object protocol are still under
+construction. `Copy` is
+checked against `Drop`: a type cannot implement both, and a `Copy` type cannot
+contain non-`Copy` fields.
+
+Impls follow the package-local orphan rule: an `impl Trait for Type` is allowed
+only when the trait or the target type is defined in the current package.
+
+## 2.5 Contracts (`requires` / `ensures`)
 
 ```sg
 def divide(a: i64, b: i64) -> i64
@@ -91,7 +162,7 @@ sgc run examples/09_method_call.sg -O 1 --contract-checks auto
 sgc run examples/09_method_call.sg -O 2 --contract-checks on
 ```
 
-## 2.5 Enum payload matches
+## 2.6 Enum payload matches
 
 Payload-carrying enum arms can appear in any match position, and one match can
 bind multiple payload-carrying variants:
@@ -112,7 +183,7 @@ def main() -> i64 {
 The native conformance gate also covers functions that return enum values and
 then match on the returned aggregate.
 
-## 2.6 C FFI (`extern "C"`)
+## 2.7 C FFI (`extern "C"`)
 
 Sengoo supports a focused FFI MVP surface:
 
@@ -139,7 +210,7 @@ For end-to-end reproducible commands (Sengoo -> C and C -> Sengoo), see:
 
 - `examples/ffi/README.md`
 
-## 2.7 Async execution
+## 2.8 Async execution
 
 `sgc run` now has a native async path when the entrypoint is `async def main()`.
 
@@ -168,57 +239,122 @@ Current limitations:
 - IO wakeups are limited to the documented reactor subset.
 - user-defined awaitables are limited to the documented `Poll<T>` / `AsyncContext` subset.
 
-## 2.8 Ownership and Drop Subset
+## 2.9 Ownership, moves, and automatic drop
 
-The current P0 memory-management lane is additive and intentionally narrow while
-the full `Drop` trait and generic ownership model are being completed.
+Sengoo manages memory with move-based ownership and compiler-inserted cleanup
+(RAII); there is no garbage collector. A type that has an `impl Drop` is
+*affine*: it has a single owner, and the compiler runs cleanup automatically
+when the owner goes out of scope.
 
-Current compiler-enforced behavior:
+- **Drop order is reverse declaration order.** When a scope exits, the owning
+  locals that still hold a value are dropped last-declared-first. Early exits
+  (`return`, `?` propagation) drop exactly the locals that are live on that path,
+  tracked with per-binding drop flags, and a value already moved out is not
+  dropped again.
+- **Moves transfer ownership.** Binding (`let b = a`), passing an owned value by
+  value (named-call and method-call arguments), assigning an owned value, and
+  returning it all *move* it. After a move the source is dead; reading it is a
+  compile error with the stable `use-after-move` diagnostic (also surfaced in
+  `sgc --error-format json` and `sglsp`).
+- **An active borrow prevents ownership transfer.** Moving an owned root while
+  it is still borrowed is rejected with the stable `cannot-move-borrowed`
+  diagnostic. Returning a borrowed view derived from a local owner is rejected
+  with `borrow-escapes-scope`. The current checker is lexical and intentionally
+  conservative.
+- **`drop` is compiler-called, not user-called.** The compatibility release
+  methods (`.drop()` / `.free()` / `.close()`) run cleanup immediately and mark
+  the value moved, so the later automatic drop is suppressed and there is no
+  double free.
 
-- Primitive integer scalars, float scalars, `bool`, and borrowed references such
-  as `&str` / `&T` are `Copy`: copying them into another local or passing them by
-  value does not mark the source as moved, and they do not receive drop glue.
-- The stdlib-owned `String` type is treated as move-only in the implemented
-  subset. Moving it through a direct `let` binding, by-value call argument,
-  assignment RHS, owned tail return, or explicit `String.drop()` receiver makes
-  the source unusable and reports the stable `use-after-move` diagnostic.
-- Top-level live `String` owners receive compiler-inserted `String_drop` calls at
-  function exits. Straight-line single-exit functions use a no-flag fast path.
-  Conditional initialization and multiple return exits use runtime drop flags so
-  only initialized, still-owned bindings are dropped.
-- Drop order for the implemented top-level owner scope is reverse declaration
-  order. This applies to normal returns and `?` propagation exits.
+Current surface: the verified auto-drop and move-checking path covers owned
+`String`, current concrete stdlib handles (`Buffer`, `Vec<T>`, `JsonDoc`,
+process/net handles), verified `Rc<i64>`/`Rc<bool>`/`Rc<String>` handles, and
+compiler-lowered `Rc<T>` storage for monomorphized owning payloads. Some runtime domains still keep
+compatibility release methods because older examples and direct FFI-style
+stdlib calls use them, but new examples prefer automatic drop.
+Drop glue is verified on the LLVM-text/native path and the compiler crate's
+LLVM-text JIT emitter; the separate Cranelift fast-JIT remains a constant-only
+accelerator rather than a general MIR/drop-glue backend.
 
-Still open in `automatic-memory-management`: the compiler-known `Drop` trait,
-general owning locals beyond `String`, partial moves, nested lexical-scope exit
-timing, abort-path cleanup, and automatic drop impls for `Buffer`, generic
-collections, JSON/process/net handles, and other runtime resources.
+## 2.10 Text and Strings
 
-## 2.9 Numeric Model Subset
+Sengoo has two practical text surfaces today:
 
-Sengoo's numeric type system already carries explicit integer widths through the
-front end and LLVM-text backend for the supported scalar subset:
+- `&str` is the borrowed literal/view type. It supports length, concatenation,
+  equality/inequality, comparison trait bounds, `contains`, `starts_with`,
+  `ends_with`, and `index_of` through the stdlib string helpers.
+- `String` is an owning UTF-8 runtime handle. It is move-only, auto-dropped,
+  can be cloned, pushed to, copied into a `Buffer`, and compared with another
+  `String` through `eq`/`ne` and byte-order `lt`/`le`/`gt`/`ge`/`compare`
+  methods plus `PartialEq`/`Eq`/`PartialOrd`/`Ord` bounds. `String + &str`
+  produces a new owned `String`, and `String += &str` appends in place.
+  `String.get(start, end)` and `str_get(value, start, end)` copy a byte range
+  into a new owned `String` only when both offsets are UTF-8 scalar boundaries;
+  invalid ranges return `STATUS_INVALID_ARGUMENT`. The infallible
+  `value[start..end]` syntax is available for `String` and `&str`, returns an
+  owned `String`, and panics on invalid ranges.
+- `String.bytes()` and `String.chars()` create concrete iterators over a copied
+  snapshot. `bytes().next()` returns byte values and `chars().next()` returns
+  Unicode scalar codepoints as `Option<i64>`. `bytes()` and `chars()` satisfy
+  the current generic `Iterator<Item = i64>` bound surface. These iterators
+  currently use an explicit `free()` method; source-level
+  `Iterator<Item = char>` and split iterators as `Iterator<Item = String>`
+  remain future work.
+- `char` is represented as a Unicode scalar value in the source language and
+  lowers to an `i32` C ABI scalar. `String.push_char(value)` appends the scalar
+  as UTF-8 and returns an error-shaped `Result` if the runtime rejects the
+  handle or codepoint.
 
-- signed integer types: `i8`, `i16`, `i32`, `i64`, `isize`
-- unsigned integer types: `u8`, `u16`, `u32`, `u64`, `usize`
-- float types: `f32`, `f64`
-- typed integer suffixes and based literals such as `42i64`, `7u8`, `0b1010`,
-  `0o52`, and digit separators such as `1_000`
-- casts through `as` lower to real LLVM cast instructions for the covered
-  scalar cases, including signed widening and bool widening
+Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
+`str_to_ascii_lower`, each returning an owned `String`. The case conversion is
+deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
+locale collation remain future work.
 
-`std::math` exposes the current i64 overflow helper subset:
+`format` builds an owned `String` from a literal template. The supported subset
+includes `{}`, scalar `{:?}`, positional placeholders such as `{1}`, right
+alignment such as `{:>8}`, f64 fixed precision such as `{:.2}` / `{:>8.2}`, and
+f-string expansion through the same lowering path. `{:?}` also renders current
+struct values in field order, for example `Point { x: 7, ok: true }`, and a
+user `impl Debug for Type { def to_string(&self) -> String { ... } }` takes
+precedence over that structural fallback for structs and enums. Derived enum
+Debug renders unit and tuple-payload variants. General Formatter customization
+and source-map-perfect f-string diagnostics remain future work.
 
-- `i64_min()` / `i64_max()`
-- `wrapping_add_i64`, `wrapping_sub_i64`, `wrapping_mul_i64`
-- `checked_add_i64`, `checked_sub_i64`, `checked_mul_i64`, returning
-  `Option<i64>`
-- `saturating_add_i64`, `saturating_sub_i64`, `saturating_mul_i64`
+## 2.11 Opt-in shared ownership with `Rc`
 
-Still open in `numeric-type-system`: debug-build overflow traps, release-mode
-overflow documentation across all operators, helper methods for every integer
-width, float math/parse/format completeness, operator traits, and lossless
-`From`/`Into` conversions.
+`Rc<T>` is the single-threaded shared-ownership escape hatch. Cloning an `Rc`
+increments a non-atomic reference count, and compiler-inserted `Drop` releases
+the shared allocation only after the last handle leaves scope. Plain non-`Rc`
+owning values remain move-only by default.
+
+Current verified surface:
+
+- `rc_new_i64(value) -> Rc<i64>`
+- `rc_new_bool(value) -> Rc<bool>`
+- `rc_new_string(value) -> Rc<String>`
+- `rc_new<T>(value) -> Rc<T>` for compiler-lowered monomorphized payloads
+- `RcValue` for generic `value.rc()` construction over the verified payloads
+- `clone()`, `get()`, `strong_count()`, and `is_unique()`
+- automatic `Drop` for `Rc<i64>`, `Rc<bool>`, `Rc<String>`, and generic `Rc<T>`
+
+Generic `Rc<T>` stores a moved payload in the runtime control block and invokes
+a compiler-generated typed drop thunk when the final clone is released.
+Temporary payload expressions are materialized into hidden storage before the
+runtime copy, so `rc_new(21)` follows the same move/copy path as
+`let value = 21; rc_new(value)`.
+`borrow() -> &T` has an initial compiler-known read path for generic payloads:
+the runtime exposes the shared payload address and the compiler casts it to the
+monomorphized reference type. Borrowed aggregate scalar fields can be read via
+`(*rc.borrow()).field`. Moving an `Rc<T>` owner while a borrow produced by
+`borrow()` is live is rejected with the stable `cannot-move-borrowed`
+diagnostic. Richer projection of owned fields through borrows remains a broader
+reference-field/lending limitation. `RcValue` remains the ergonomic generic
+entry point for the concrete scalar/string helpers backed by the runtime.
+
+`Rc` deliberately does not collect cycles. If two or more future `Rc`-backed
+objects retain each other, that cycle leaks until the process exits. Break such
+graphs manually or avoid cyclic ownership; `Rc` is not a tracing garbage
+collector.
 
 ## 3. Non-Invasive Reflection (Opt-In)
 
@@ -409,6 +545,26 @@ pub extern "C" fn sengoo_add(a: i64, b: i64) -> i64 {
 可直接复现的双向调用命令（Sengoo -> C / C -> Sengoo）见：
 
 - `examples/ffi/README.md`
+
+## 2.6 所有权、移动与自动 drop
+
+Sengoo 采用基于移动的所有权 + 编译器插入清理（RAII）管理内存，没有垃圾回收器。
+带有 `impl Drop` 的类型是*仿射*的：只有唯一所有者，所有者离开作用域时编译器自动执行清理。
+
+- **drop 顺序为声明逆序。** 作用域退出时，仍持有值的所属局部按“后声明先 drop”清理；
+  提前退出（`return`、`?` 传播）只 drop 该路径上仍存活的局部，使用每绑定的 drop 标志跟踪，
+  已移动走的值不会重复 drop。
+- **移动转移所有权。** 绑定（`let b = a`）、按值传递所属值（具名调用与方法调用实参）、
+  对所属值赋值，以及返回它，都会*移动*它。移动后源变量失效，再次读取是编译错误，
+  诊断码为稳定的 `use-after-move`（同样出现在 `sgc --error-format json` 与 `sglsp`）。
+- **活动借用阻止所有权转移。** 所属根变量仍被借用时，按值移动会以稳定诊断码
+  `cannot-move-borrowed` 被拒绝。当前检查器按词法作用域工作，因此有意保持保守。
+- **drop 由编译器调用，而非用户调用。** 兼容用的释放方法（`.drop()` / `.free()` / `.close()`）
+  会立即执行清理并把值标记为已移动，从而抑制后续的自动 drop，不会二次释放。
+
+当前覆盖面：已验证的自动 drop 与移动检查路径覆盖所属 `String`；通用 `Copy`/移动分析、
+部分移动，以及其余运行时资源（`Buffer`、`Vec<T>`、`JsonDoc`、进程/网络句柄）的自动 drop
+正在逐步落地，因此部分示例仍调用显式释放方法。
 
 ## 3. 非侵入式反射（按需开启）
 

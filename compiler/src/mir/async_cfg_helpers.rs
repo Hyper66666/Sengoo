@@ -356,6 +356,12 @@ fn instruction_user_uses(inst: &Instruction) -> HashSet<Local> {
                 push_user_local(&mut uses, *arg);
             }
         }
+        Instruction::CallIndirect { func_ptr, args, .. } => {
+            push_user_local(&mut uses, *func_ptr);
+            for arg in args {
+                push_user_local(&mut uses, *arg);
+            }
+        }
         Instruction::Discriminant { source, .. } | Instruction::ExtractPayload { source, .. } => {
             push_user_local(&mut uses, *source)
         }

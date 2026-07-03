@@ -1,4 +1,4 @@
-use crate::ast::{DeclKind, TypeKind};
+use crate::ast::{DeclKind, TraitItem, TypeKind};
 use crate::{
     compile_to_ir, lower_ast, lower_hir_with_options, MirLowerOptions, Parser, TypeChecker,
 };
@@ -43,6 +43,160 @@ def takes(x: dyn Show) -> i64 {
         })
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["Show"]);
+}
+
+#[test]
+fn trait_associated_type_declaration_parses_without_a_rhs() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+"#;
+
+    let program = Parser::parse(source).expect("trait associated type declaration should parse");
+    let trait_decl = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Trait(trait_decl) => Some(trait_decl),
+            _ => None,
+        })
+        .expect("expected trait declaration");
+
+    assert!(matches!(
+        trait_decl.items.as_slice(),
+        [TraitItem::Type(item)] if item.name.name == "Item"
+    ));
+}
+
+#[test]
+fn impl_associated_type_definition_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("impl associated type definition should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("impl associated type definition should be registered");
+}
+
+#[test]
+fn impl_missing_required_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("missing associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("missing required associated types: Item"),
+        "expected missing associated type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn impl_unknown_associated_type_is_rejected() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+    type Output = i64;
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unknown associated type should be rejected");
+    assert!(
+        err.to_string()
+            .contains("defines unknown associated types: Output"),
+        "expected unknown associated type diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn generic_associated_type_projection_resolves_at_call_site() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+struct Counter {
+    value: i64,
+}
+
+impl Iterator for Counter {
+    type Item = i64;
+}
+
+def select_item<T: Iterator>(owner: T, value: T::Item) -> T::Item {
+    value
+}
+
+def main() -> i64 {
+    select_item(Counter { value: 0 }, 7)
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("T::Item should resolve through the concrete trait impl");
+    compile_to_ir(source).expect("resolved associated type projection should lower to LLVM IR");
+}
+
+#[test]
+fn unbounded_associated_type_projection_is_rejected() {
+    let source = r#"
+def bad<T>(value: T::Item) -> T::Item {
+    value
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unbounded associated projection should be rejected");
+    assert!(
+        err.to_string()
+            .contains("associated type `Item` is not declared by a bound on `T`"),
+        "expected bounded projection diagnostic, got: {err}"
+    );
 }
 
 #[test]
@@ -123,6 +277,338 @@ def takes(x: dyn Show) -> i64 {
     checker
         .check_program(&program)
         .expect("declared dyn trait should typecheck");
+}
+
+#[test]
+fn dyn_trait_with_associated_type_requires_fixed_binding() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse before type checking");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("unfixed dyn associated type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[dyn-associated-type]")
+            && message.contains("Iterator")
+            && message.contains("Item"),
+        "expected dyn-associated-type diagnostic for unfixed associated type, got: {message}"
+    );
+}
+
+#[test]
+fn dyn_trait_with_fixed_associated_type_typechecks() {
+    let source = r#"
+trait Iterator {
+    type Item;
+}
+
+def takes(x: dyn Iterator<Item = i64>) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("fixed associated type binding should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("fixed dyn associated type binding should typecheck");
+}
+
+#[test]
+fn dyn_trait_rejects_associated_function_as_not_object_safe() {
+    let source = r#"
+trait Factory {
+    def make() -> i64 {
+        0
+    }
+}
+
+def takes(x: dyn Factory) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("associated function traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Factory")
+            && message.contains("method `make`"),
+        "expected not-object-safe diagnostic for associated function, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_rejects_generic_method_as_not_object_safe() {
+    let source = r#"
+trait Mapper {
+    def map<T>(self, value: T) -> T {
+        value
+    }
+}
+
+def takes(x: dyn Mapper) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("generic method traits should not be dyn-safe yet");
+    let message = err.to_string();
+    assert!(
+        message.contains("[not-object-safe]")
+            && message.contains("Mapper")
+            && message.contains("method `map`"),
+        "expected not-object-safe diagnostic for generic method, got: {}",
+        message
+    );
+}
+
+#[test]
+fn dyn_trait_allows_self_return_through_reference_indirection() {
+    let source = r#"
+trait Borrowed {
+    def borrowed(&self) -> &Self {
+        self
+    }
+}
+
+def takes(x: dyn Borrowed) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("Self behind a reference should remain object-safe");
+}
+
+#[test]
+fn orphan_rule_rejects_external_trait_for_external_type() {
+    let source = r#"
+impl Drop for i64 {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("external trait for external type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[orphan-rule]") && message.contains("Drop") && message.contains("i64"),
+        "expected orphan-rule diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn duplicate_trait_impl_for_same_type_is_rejected() {
+    let source = r#"
+trait Greet {
+    def greet(self) -> i64 { 0 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 1 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 2 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("two impls of the same trait for the same type should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[conflicting-impl]")
+            && message.contains("Greet")
+            && message.contains("i64"),
+        "expected conflicting-impl diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn distinct_trait_impls_for_same_type_are_accepted() {
+    let source = r#"
+trait Greet {
+    def greet(self) -> i64 { 0 }
+}
+
+trait Wave {
+    def wave(self) -> i64 { 0 }
+}
+
+impl Greet for i64 {
+    def greet(self) -> i64 { 1 }
+}
+
+impl Wave for i64 {
+    def wave(self) -> i64 { 2 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("distinct traits for the same type should not conflict");
+}
+
+#[test]
+fn polymorphic_recursion_reports_monomorphization_overflow() {
+    // `deepen<T>` recurses as `deepen<Wrap<T>>`, growing the type argument
+    // without bound. Monomorphization must stop with a stable diagnostic rather
+    // than recursing until the compiler stack overflows.
+    let source = r#"
+struct Wrap<T> {
+    inner: T,
+}
+
+def deepen<T>(value: T, n: i64) -> i64 {
+    if n <= 0 {
+        0
+    } else {
+        deepen(Wrap { inner: value }, n - 1)
+    }
+}
+
+def main() -> i64 {
+    deepen(0, 1000)
+}
+"#;
+
+    let result = compile_to_ir(source);
+    let err = result.expect_err("unbounded polymorphic recursion should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[monomorphization-overflow]"),
+        "expected monomorphization-overflow diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn compiler_known_core_traits_and_support_types_are_available() {
+    let source = r#"
+def accepts_core_traits<T: Clone + Copy + Debug + Default + Iterator>(value: T) -> i64 {
+    0
+}
+
+def accepts_support_types(ordering: Ordering, formatter: Formatter, hasher: Hasher) -> i64 {
+    0
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("compiler-known core traits and support types should resolve");
+}
+
+#[test]
+fn builtin_derives_register_core_trait_impls_for_bounds() {
+    let source = r#"
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+struct User {
+    id: i64,
+}
+
+def needs_traits<T: Clone + Copy + PartialEq + Eq + PartialOrd + Ord + Hash + Debug + Default>(value: T) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    needs_traits(User { id: 1 })
+}
+"#;
+
+    let program = Parser::parse(source).expect("derive source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("builtin derives should satisfy core trait bounds");
+}
+
+#[test]
+fn copy_and_drop_impls_are_mutually_exclusive() {
+    let source = r#"
+#[derive(Copy)]
+struct Resource {
+    id: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {}
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy and Drop should be mutually exclusive");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-drop-conflict]") && message.contains("Resource"),
+        "expected copy-drop-conflict diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn copy_derive_rejects_non_copy_fields() {
+    let source = r#"
+struct Owned {
+    id: i64,
+}
+
+impl Drop for Owned {
+    def drop(&mut self) {}
+}
+
+#[derive(Copy)]
+struct Wrapper {
+    owned: Owned,
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("Copy should require all fields to be Copy");
+    let message = err.to_string();
+    assert!(
+        message.contains("[copy-field-not-copy]")
+            && message.contains("Wrapper")
+            && message.contains("owned"),
+        "expected copy-field-not-copy diagnostic, got: {message}"
+    );
 }
 
 #[test]
@@ -496,5 +982,365 @@ def main() -> i64 {
         ir.contains("; Function: main"),
         "expected generic enum program to lower to IR\n{}",
         ir
+    );
+}
+
+#[test]
+fn derive_default_struct_static_constructor_returns_zeroed_fields() {
+    let source = r#"
+#[derive(Default)]
+struct Defaults {
+    count: i64,
+    ready: bool,
+}
+
+def main() -> i64 {
+    let value = Defaults::default();
+    if value.ready {
+        0
+    } else {
+        value.count
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Default constructor should compile");
+    assert!(
+        ir.contains("; Function: Defaults_default"),
+        "expected generated Defaults_default function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_clone_struct_method_copies_scalar_fields() {
+    let source = r#"
+#[derive(Clone)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let first = Point { x: 20, y: 1 };
+    let second = first.clone();
+    second.x + second.y
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Clone method should compile");
+    assert!(
+        ir.contains("; Function: Point_clone"),
+        "expected generated Point_clone function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derives_include_public_struct_fields() {
+    let source = r#"
+#[derive(Clone, Default, PartialEq)]
+struct PublicPoint {
+    pub x: i64,
+    pub ready: bool,
+}
+
+def main() -> i64 {
+    let first = PublicPoint { x: 41, ready: true };
+    let second = first.clone();
+    let fallback = PublicPoint::default();
+    if second.eq(&first) && second.ready {
+        second.x + fallback.x + 1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derives should retain public fields");
+    assert!(ir.contains("; Function: PublicPoint_clone"));
+    assert!(ir.contains("; Function: PublicPoint_default"));
+    assert!(ir.contains("; Function: PublicPoint_eq"));
+}
+
+#[test]
+fn derive_clone_struct_method_clones_nested_fields() {
+    let source = r#"
+#[derive(Clone)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Clone)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let first = Outer { inner: Inner { value: 41 }, flag: true };
+    let second = first.clone();
+    if second.flag {
+        second.inner.value + 1
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Clone method should compile");
+    assert!(
+        ir.contains("; Function: Outer_clone") && ir.contains("call %Inner @Inner_clone"),
+        "expected generated Outer_clone to call Inner_clone\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_method_compares_scalar_fields() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 20, y: 1 };
+    let right = Point { x: 20, y: 1 };
+    if left.eq(&right) {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived PartialEq method should compile");
+    assert!(
+        ir.contains("; Function: Point_eq"),
+        "expected generated Point_eq function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_operator_uses_generated_eq_method() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 20, y: 1 };
+    let right = Point { x: 20, y: 1 };
+    if left == right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived PartialEq operator should compile");
+    assert!(
+        ir.contains("call i1 @Point_eq"),
+        "expected == to call generated Point_eq method\n{ir}"
+    );
+}
+
+#[test]
+fn derive_partial_eq_struct_operator_compares_nested_fields() {
+    let source = r#"
+#[derive(PartialEq)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(PartialEq)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let left = Outer { inner: Inner { value: 41 }, flag: true };
+    let right = Outer { inner: Inner { value: 41 }, flag: true };
+    if left == right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested PartialEq should compile");
+    assert!(
+        ir.contains("call i1 @Outer_eq") && ir.contains("call i1 @Inner_eq"),
+        "expected nested equality to call both generated eq methods\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_method_compares_scalar_fields_lexicographically() {
+    let source = r#"
+#[derive(Ord)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 1, y: 9 };
+    let right = Point { x: 2, y: 0 };
+    if left.compare(&right) < 0 {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Ord compare method should compile");
+    assert!(
+        ir.contains("; Function: Point_compare"),
+        "expected generated Point_compare function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_operator_uses_generated_compare_method() {
+    let source = r#"
+#[derive(Ord)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let left = Point { x: 1, y: 9 };
+    let right = Point { x: 2, y: 0 };
+    if left < right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Ord comparison operator should compile");
+    assert!(
+        ir.contains("call i64 @Point_compare"),
+        "expected < to call generated Point_compare method\n{ir}"
+    );
+}
+
+#[test]
+fn derive_ord_struct_operator_compares_nested_fields() {
+    let source = r#"
+#[derive(Ord)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Ord)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let left = Outer { inner: Inner { value: 1 }, flag: false };
+    let right = Outer { inner: Inner { value: 2 }, flag: false };
+    if left < right {
+        42
+    } else {
+        0
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Ord comparison should compile");
+    assert!(
+        ir.contains("call i64 @Outer_compare") && ir.contains("call i64 @Inner_compare"),
+        "expected nested ordering to call both generated compare methods\n{ir}"
+    );
+}
+
+#[test]
+fn derive_default_struct_static_constructor_uses_nested_default_fields() {
+    let source = r#"
+#[derive(Default)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Default)]
+struct Outer {
+    inner: Inner,
+    ready: bool,
+}
+
+def main() -> i64 {
+    let value = Outer::default();
+    if value.ready {
+        0
+    } else {
+        value.inner.value
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Default constructor should compile");
+    assert!(
+        ir.contains("; Function: Outer_default") && ir.contains("call %Inner @Inner_default"),
+        "expected generated Outer_default to call Inner_default\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_struct_method_combines_scalar_fields() {
+    let source = r#"
+#[derive(Hash)]
+struct Key {
+    a: i64,
+    b: i64,
+}
+
+def main() -> i64 {
+    let key = Key { a: 7, b: 11 };
+    key.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Hash method should compile");
+    assert!(
+        ir.contains("; Function: Key_hash"),
+        "expected generated Key_hash function in IR\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_struct_method_combines_nested_hash_fields() {
+    let source = r#"
+#[derive(Hash)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Hash)]
+struct Outer {
+    inner: Inner,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let key = Outer { inner: Inner { value: 7 }, flag: true };
+    key.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived nested Hash method should compile");
+    assert!(
+        ir.contains("; Function: Outer_hash") && ir.contains("call i64 @Inner_hash"),
+        "expected generated Outer_hash to call Inner_hash\n{ir}"
     );
 }

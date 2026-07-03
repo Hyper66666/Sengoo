@@ -1,26 +1,28 @@
 ## 0. Program setup
 
-- [ ] 0.1 Create the eleven child changes named in `proposal.md`, each with its
+- [x] 0.1 Create the eleven child changes named in `proposal.md`, each with its
   own capability delta, tasks, and archive gate.
-- [ ] 0.2 Freeze the cross-pillar contract in `design.md` (memory model,
+- [x] 0.2 Freeze the cross-pillar contract in `design.md` (memory model,
   monomorphization + `dyn`, core trait set, transition strategy); any later
   change to a frozen decision must update `design.md` before code edits.
-- [ ] 0.3 Link every child proposal back to this umbrella and record owner/status.
-- [ ] 0.4 Snapshot the `examples/realworld/SUPPORT_MATRIX.md` rows this program
+- [x] 0.3 Link every child proposal back to this umbrella and record owner/status.
+- [x] 0.4 Snapshot the `examples/realworld/SUPPORT_MATRIX.md` rows this program
   intends to move (memory safety, generics, strings, numerics, concurrency).
-- [ ] 0.5 Run `openspec validate language-maturity-roadmap --strict`.
+- [x] 0.5 Run `openspec validate language-maturity-roadmap --strict`.
 
 ## 1. P0 gate — language foundations
 
 - [ ] 1.1 `automatic-memory-management` validated and archived.
 - [ ] 1.2 `generics-and-trait-system` validated and archived.
 - [ ] 1.3 `first-class-strings-and-formatting` validated and archived.
-- [ ] 1.4 P0 conformance: a realworld fixture rewritten with zero manual
+- [x] 1.4 P0 conformance: a realworld fixture rewritten with zero manual
   `.free()/.drop()/.close()`, generic `Result<T, E>` used across at least two
   concrete types, and `println` formatting an owned `String` and a struct via
   `Display`.
-  - Partial: owned `String` now prints as text and remains usable after
-    `println`; struct `Display` and the full realworld fixture remain open.
+  - Added `examples/realworld/p0-foundations/src/main.sg`, wired into
+    `tools/sgc/tests/realworld.rs::realworld_sources_check_through_sgc_command`,
+    and verified locally with
+    `cargo run -p sgc -- check examples/realworld/p0-foundations/src/main.sg`.
 
 ## 2. P1 gate — usable surface
 

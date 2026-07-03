@@ -226,6 +226,12 @@ impl ProcessCommand {
     }
 }
 
+impl Drop for ProcessCommand {
+    def drop(&mut self) {
+        sengoo_process_command_close(self.handle);
+    }
+}
+
 impl ProcessHandle {
     def wait(self, timeout_ms: i64) -> Result<i64, i64> {
         process_status_i64_result(sengoo_process_handle_wait(self.handle, timeout_ms))
@@ -245,6 +251,12 @@ impl ProcessHandle {
 
     def close(self) -> bool {
         sengoo_process_handle_close(self.handle) == 0
+    }
+}
+
+impl Drop for ProcessHandle {
+    def drop(&mut self) {
+        sengoo_process_handle_close(self.handle);
     }
 }
 
@@ -283,5 +295,11 @@ impl ProcessOutput {
 
     def close(self) -> bool {
         sengoo_process_output_close(self.handle) == 0
+    }
+}
+
+impl Drop for ProcessOutput {
+    def drop(&mut self) {
+        sengoo_process_output_close(self.handle);
     }
 }

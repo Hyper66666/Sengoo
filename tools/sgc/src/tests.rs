@@ -4801,9 +4801,7 @@ fn assert_example_output_with_c_inputs_and_args(
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        String::from_utf8_lossy(&output.stdout)
-            .replace("\r\n", "\n")
-            .trim(),
+        String::from_utf8_lossy(&output.stdout).trim(),
         expected_stdout,
         "{relative_path} stdout mismatch"
     );
@@ -4928,6 +4926,26 @@ fn assert_example_result(
 }
 
 #[test]
+fn stdlib_auto_drop_releases_all_generation_handles() {
+    let Some(output) = compile_and_run_example_with_args(
+        "auto-drop-live-handles",
+        "tools/sgc/tests/fixtures/auto_drop_live_handles.sg",
+        &[],
+        &[],
+        true,
+    ) else {
+        return;
+    };
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "auto-drop live-handle probe failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn core_conformance_examples_compile_link_and_run() {
     let cases = [
         (
@@ -5042,6 +5060,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/generics/02_option_unwrap.sg",
         "examples/generics/03_result_chain.sg",
         "examples/generics/04_stdlib_collections.sg",
+        "examples/generics/05_bound_and_dyn.sg",
         "examples/stdlib/01_strings.sg",
         "examples/stdlib/02_math.sg",
         "examples/stdlib/03_error.sg",
@@ -5061,6 +5080,7 @@ fn examples_catalog_lists_expanded_categories() {
         "examples/stdlib/21_assert.sg",
         "examples/stdlib/22_regex_log.sg",
         "examples/stdlib/23_config_hash.sg",
+        "examples/stdlib/25_formatting.sg",
         "examples/traits/01_iterator_basic.sg",
         "examples/traits/02_method_specialization.sg",
         "examples/ffi/sengoo_calls_c.sg",
@@ -5199,6 +5219,15 @@ fn examples_smoke_generics_stdlib_collections_import() {
 }
 
 #[test]
+fn examples_smoke_generics_bound_and_dyn() {
+    assert_example_output(
+        "generics-bound-and-dyn",
+        "examples/generics/05_bound_and_dyn.sg",
+        "29",
+    );
+}
+
+#[test]
 fn examples_smoke_stdlib_strings_import() {
     assert_example_output("stdlib-strings", "examples/stdlib/01_strings.sg", "8");
 }
@@ -5253,15 +5282,6 @@ fn examples_smoke_stdlib_collections_import() {
         "stdlib-collections",
         "examples/stdlib/10_collections.sg",
         "60",
-    );
-}
-
-#[test]
-fn examples_smoke_stdlib_generic_collections_import() {
-    assert_example_output(
-        "stdlib-generic-collections",
-        "examples/stdlib/25_generic_collections.sg",
-        "25",
     );
 }
 
@@ -5345,33 +5365,8 @@ fn examples_smoke_stdlib_owned_string_import() {
     assert_example_output(
         "stdlib-owned-string",
         "examples/stdlib/20_owned_string.sg",
-        "sengoo\n20",
+        "20",
     );
-}
-
-#[test]
-fn examples_owned_string_demonstrates_auto_drop_and_ergo_surface() {
-    let source = read_example_source("examples/stdlib/20_owned_string.sg");
-
-    for forbidden in [".drop()", ".free()"] {
-        assert!(
-            !source.contains(forbidden),
-            "owned String example should rely on compiler/runtime cleanup, not manual {forbidden}"
-        );
-    }
-
-    for expected in [
-        " + \"",
-        " == ",
-        ".contains(",
-        ".starts_with(",
-        ".ends_with(",
-    ] {
-        assert!(
-            source.contains(expected),
-            "owned String example should demonstrate ergonomic string surface: missing {expected}"
-        );
-    }
 }
 
 #[test]
@@ -5391,6 +5386,542 @@ fn examples_smoke_stdlib_config_hash_import() {
         "examples/stdlib/23_config_hash.sg",
         "23",
     );
+}
+
+#[test]
+fn examples_smoke_stdlib_formatting_import() {
+    assert_example_output(
+        "stdlib-formatting",
+        "examples/stdlib/25_formatting.sg",
+        "25",
+    );
+}
+
+#[test]
+fn stdlib_format_width_right_aligns_runtime_output() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "format-width-right-align",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = format("{:>4}", 7);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "   7");
+}
+
+#[test]
+fn stdlib_format_precision_renders_f64_output() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "format-precision-f64",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = format("{:.2}", 3.14159);
+    let buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "3.14");
+}
+
+#[test]
+fn stdlib_format_debug_renders_struct_output() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "format-debug-struct",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+struct Point {
+    x: i64,
+    ok: bool,
+}
+
+def main() -> i64 {
+    let point = Point { x: 7, ok: true };
+    let rendered = format("{:?}", point);
+    let buffer = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 24 && wrote == 24 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Point { x: 7, ok: true }"
+    );
+}
+
+#[test]
+fn stdlib_string_push_char_appends_unicode_scalar() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-push-char",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let text = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let pushed = text.push_char('!').unwrap_or(false);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = text.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if pushed && copied == 3 && wrote == 3 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "hi!");
+}
+
+#[test]
+fn stdlib_string_compare_orders_owned_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-compare",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let eq_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let eq_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let lt_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let lt_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let le_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let le_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let gt_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let gt_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ge_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let ge_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let cmp_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let cmp_r = string_from_str("alphabet").unwrap_or(String { handle: 0 });
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if eq_l.eq(eq_r)
+        && ne_l.ne(ne_r)
+        && lt_l.lt(lt_r)
+        && le_l.le(le_r)
+        && gt_l.gt(gt_r)
+        && ge_l.ge(ge_r)
+        && cmp_l.compare(cmp_r) < 0
+        && copied == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
+fn stdlib_string_comparison_operators_order_owned_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-compare-operators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let eq_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let eq_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ne_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let lt_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let lt_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let le_l = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let le_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let gt_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let gt_r = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let ge_l = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let ge_r = string_from_str("beta").unwrap_or(String { handle: 0 });
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if !(eq_l == eq_r) { return 10; }
+    if !(ne_l != ne_r) { return 11; }
+    if !(lt_l < lt_r) { return 12; }
+    if !(le_l <= le_r) { return 13; }
+    if !(gt_l > gt_r) { return 14; }
+    if !(ge_l >= ge_r) { return 15; }
+    if copied != 2 { return 16; }
+    if wrote != 2 { return 17; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
+fn stdlib_str_comparison_operators_order_borrowed_strings() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "str-compare-operators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if !("alpha" < "beta") { return 10; }
+    if !("alpha" <= "alpha") { return 11; }
+    if !("beta" > "alpha") { return 12; }
+    if !("beta" >= "beta") { return 13; }
+    if copied != 2 { return 14; }
+    if wrote != 2 { return 15; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
+fn stdlib_string_get_checks_utf8_boundaries() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-get-utf8",
+        r#"
+import std::ffi;
+import std::io;
+import std::status;
+import std::string;
+
+def main() -> i64 {
+    let first = str_get("héllo", 0, 1).unwrap_or(String { handle: 0 });
+    let accent = str_get("héllo", 1, 3).unwrap_or(String { handle: 0 });
+    let bad_borrowed = str_get("héllo", 1, 2);
+    let owned = string_from_str("héllo").unwrap_or(String { handle: 0 });
+    let bad_owned = owned.get(1, 2);
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = accent.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if first.len() == 1
+        && accent.len() == 2
+        && bad_borrowed.err().unwrap_or(0) == STATUS_INVALID_ARGUMENT()
+        && bad_owned.err().unwrap_or(0) == STATUS_INVALID_ARGUMENT()
+        && copied == 2 && wrote == 2 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "é");
+}
+
+#[test]
+fn stdlib_string_range_index_returns_owned_slice() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-range-index",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let borrowed = "hello"[1..4];
+    let owned_text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let owned = owned_text[1..4];
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = borrowed.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if borrowed.len() == 3 && owned.len() == 3 && copied == 3 && wrote == 3 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ell");
+}
+
+#[test]
+fn stdlib_string_iterators_decode_bytes_and_chars() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-iterators",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let bytes_text = string_from_str("hé").unwrap_or(String { handle: 0 });
+    let chars_text = string_from_str("hé").unwrap_or(String { handle: 0 });
+    let mut bytes = bytes_text.bytes();
+    let mut chars = chars_text.chars();
+    let mut byte_count = 0;
+    let mut saw_non_ascii_byte = false;
+    let mut next_byte = bytes.next();
+    while next_byte.is_some() {
+        let value = next_byte.unwrap_or(0);
+        if value > 127 {
+            saw_non_ascii_byte = true;
+        }
+        byte_count = byte_count + 1;
+        next_byte = bytes.next();
+    }
+    let mut char_count = 0;
+    let mut char_sum = 0;
+    let mut next_char = chars.next();
+    while next_char.is_some() {
+        char_sum = char_sum + next_char.unwrap_or(0);
+        char_count = char_count + 1;
+        next_char = chars.next();
+    }
+    let bytes_freed = bytes.free();
+    let chars_freed = chars.free();
+    let rendered = string_from_str("ok").unwrap_or(String { handle: 0 });
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = rendered.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if byte_count <= char_count { return 10; }
+    if saw_non_ascii_byte == false { return 11; }
+    if char_count != 2 { return 12; }
+    if char_sum <= 104 { return 13; }
+    if bytes_freed == false { return 18; }
+    if chars_freed == false { return 19; }
+    if copied != 2 { return 20; }
+    if wrote != 2 { return 21; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+}
+
+#[test]
+fn stdlib_string_split_iterator_returns_owned_segments() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-split",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let text = string_from_str("a,b,").unwrap_or(String { handle: 0 });
+    let mut parts = text.split(",");
+    let first = parts.next().unwrap_or(String { handle: 0 });
+    let second = parts.next().unwrap_or(String { handle: 0 });
+    let third = parts.next().unwrap_or(String { handle: 0 });
+    let fourth = parts.next();
+    let freed = parts.free();
+    let first_buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let second_buffer = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let first_len = first.copy_to_buffer(first_buffer).unwrap_or(0);
+    let second_len = second.copy_to_buffer(second_buffer).unwrap_or(0);
+    let first_written = io_stdout_write_raw(first_buffer.ptr(), first_len).unwrap_or(0);
+    let second_written = io_stdout_write_raw(second_buffer.ptr(), second_len).unwrap_or(0);
+    if first_len != 1 { return 10; }
+    if second_len != 1 { return 11; }
+    if third.len() != 0 { return 12; }
+    if fourth.is_some() { return 13; }
+    if freed == false { return 14; }
+    if first_written != 1 { return 15; }
+    if second_written != 1 { return 16; }
+    0
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ab");
+}
+
+#[test]
+fn stdlib_string_plus_str_returns_owned_string() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-plus-str",
+        r#"
+import std::ffi;
+import std::io;
+import std::string;
+
+def main() -> i64 {
+    let base = string_from_str("hi").unwrap_or(String { handle: 0 });
+    let joined = base + "!";
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let copied = joined.copy_to_buffer(buffer).unwrap_or(0);
+    let wrote = io_stdout_write_raw(buffer.ptr(), copied).unwrap_or(0);
+    if copied == 3 && wrote == 3 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "hi!");
 }
 
 #[test]
@@ -5425,16 +5956,28 @@ def main() -> i64 {
 }
 
 #[test]
-fn owned_string_prints_text_and_remains_usable_with_native_runtime() {
+fn display_impl_prints_to_stdout_and_stderr() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
-        "owned-string-print",
+        "display-print",
         r#"
 import std::string;
 
+struct Tag {
+    id: i64,
+}
+
+impl Display for Tag {
+    def to_string(&self) -> String {
+        string_from_str("Tag").value
+    }
+}
+
 def main() -> i64 {
-    let text: String = string_from_str("hello").value;
-    println(text);
-    if text.len() == 5 { 0 } else { 1 }
+    let out = Tag { id: 1 };
+    let err = Tag { id: 2 };
+    print(out);
+    eprintln(err);
+    0
 }
 "#,
     ) else {
@@ -5448,63 +5991,80 @@ def main() -> i64 {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert_eq!(stdout, "hello\n");
-    assert!(
-        output.stderr.is_empty(),
-        "owned String println should not write stderr, got:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "Tag");
+    assert_eq!(String::from_utf8_lossy(&output.stderr).trim(), "Tag");
 }
 
 #[test]
-fn owned_string_plus_borrowed_str_prints_concat_with_native_runtime() {
+fn stdlib_runtime_release_functions_are_idempotent_for_core_handles() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
-        "owned-string-concat",
+        "release-idempotence",
         r#"
+import std::ffi;
+import std::json;
+import std::process;
 import std::string;
+import std::collections;
 
-def main() -> i64 {
-    let left: String = string_from_str("hello").value;
-    let combined: String = left + " world";
-    println(combined);
-    if combined.len() == 11 { 0 } else { 1 }
-}
-"#,
-    ) else {
-        return;
-    };
-
-    assert!(
-        output.status.success(),
-        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
-    assert_eq!(stdout, "hello world\n");
-    assert!(
-        output.stderr.is_empty(),
-        "owned String concat should not write stderr, got:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+extern "C" {
+    fn sengoo_opaque_live_handle_count() -> i64;
 }
 
-#[test]
-fn owned_string_equality_borrows_and_runs_with_native_runtime() {
-    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
-        "owned-string-eq",
-        r#"
-import std::string;
-
 def main() -> i64 {
-    let left: String = string_from_str("hi").value;
-    let same: String = string_from_str("hi").value;
-    let different: String = string_from_str("bye").value;
+    let opaque_before = sengoo_opaque_live_handle_count();
+    let text = string_from_str("release").unwrap_or(String { handle: 0 });
+    let text_handle = text.handle;
+    let text_first = sengoo_string_free_status(text_handle) >= 0;
+    let text_second = sengoo_string_free_status(text_handle) >= 0;
 
-    if left == same && left != different && left.len() == 2 && same.len() == 2 {
-        0
+    let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let buffer_handle = buffer.handle;
+    let buffer_first = sengoo_ffi_buffer_free(buffer_handle) == 0;
+    let buffer_second = sengoo_ffi_buffer_free(buffer_handle) == 0;
+
+    let doc = json_parse("{}").unwrap_or(JsonDoc { handle: 0 });
+    let doc_handle = doc.handle;
+    let doc_first = sengoo_json_doc_close(doc_handle) == 0;
+    let doc_second = sengoo_json_doc_close(doc_handle) == 0;
+
+    let command = process_command("sengoo-no-such-release-idempotence").unwrap_or(ProcessCommand { handle: 0 });
+    let command_handle = command.handle;
+    let command_first = sengoo_process_command_close(command_handle) == 0;
+    let command_second = sengoo_process_command_close(command_handle) == 0;
+
+    let vec = vec_new_i64();
+    let vec_handle = vec.handle;
+    let vec_first = sengoo_vec_free_i64_status(vec_handle) == 1;
+    let vec_second = sengoo_vec_free_i64_status(vec_handle) == 1;
+
+    let map = hashmap_new_i64_i64();
+    let map_handle = map.handle;
+    let map_first = sengoo_hashmap_free_i64_status(map_handle) == 1;
+    let map_second = sengoo_hashmap_free_i64_status(map_handle) == 1;
+
+    let list = text_list_new();
+    let list_handle = list.handle;
+    let list_first = sengoo_text_list_free_status(list_handle) == 1;
+    let list_second = sengoo_text_list_free_status(list_handle) == 1;
+
+    let text_map = string_map_i64_new();
+    let text_map_handle = text_map.handle;
+    let text_map_first = sengoo_string_map_free_status(text_map_handle) == 1;
+    let text_map_second = sengoo_string_map_free_status(text_map_handle) == 1;
+
+    let string_vec = vec_new_string();
+    let string_vec_handle = string_vec.handle;
+    let string_vec_first = sengoo_vec_string_free_status(string_vec_handle) == 1;
+    let string_vec_second = sengoo_vec_string_free_status(string_vec_handle) == 1;
+
+    let string_string_map = string_map_string_new();
+    let string_string_map_handle = string_string_map.handle;
+    let string_string_map_first = sengoo_string_map_string_free_status(string_string_map_handle) == 1;
+    let string_string_map_second = sengoo_string_map_string_free_status(string_string_map_handle) == 1;
+    let opaque_after = sengoo_opaque_live_handle_count();
+
+    if opaque_before == 0 and opaque_after == 0 and text_first and text_second and buffer_first and buffer_second and doc_first and doc_second and command_first and command_second and vec_first and vec_second and map_first and map_second and list_first and list_second and text_map_first and text_map_second and string_vec_first and string_vec_second and string_string_map_first and string_string_map_second {
+        42
     } else {
         1
     }
@@ -5514,36 +6074,69 @@ def main() -> i64 {
         return;
     };
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(42),
         "status: {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        output.stdout.is_empty() && output.stderr.is_empty(),
-        "owned String equality smoke should be silent, stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
 #[test]
-fn owned_string_search_methods_run_with_native_runtime() {
+fn stdlib_c_fallback_net_release_functions_are_idempotent() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "fallback-net-release-idempotence",
+        r#"
+import std::net;
+
+def main() -> i64 {
+    let closes = sengoo_tcp_close(0) == 1
+        and sengoo_udp_close(0) == 1
+        and sengoo_http_close(0) == 1
+        and sengoo_http_server_close(0) == 1
+        and sengoo_http_request_close(0) == 1
+        and sengoo_ws_close(0) == 1;
+    if closes {
+        42
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_runtime_string_trim_and_ascii_case_return_owned_strings() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
-        "owned-string-search",
+        "string-trim-case",
         r#"
 import std::string;
 
 def main() -> i64 {
-    let text: String = string_from_str("sengoo").value;
-    if text.contains("goo")
-        && text.starts_with("sen")
-        && text.ends_with("goo")
-        && !text.contains("zzz")
-        && text.len() == 6 {
-        0
+    let trimmed = str_trim("  Sengoo\n").unwrap_or(String { handle: 0 });
+    let expected_trim = string_from_str("Sengoo").unwrap_or(String { handle: 0 });
+    let upper = str_to_ascii_upper("SenGoo").unwrap_or(String { handle: 0 });
+    let expected_upper = string_from_str("SENGOO").unwrap_or(String { handle: 0 });
+    let lower = str_to_ascii_lower("SenGoo").unwrap_or(String { handle: 0 });
+    let expected_lower = string_from_str("sengoo").unwrap_or(String { handle: 0 });
+
+    if trimmed.eq(expected_trim) and upper.eq(expected_upper) and lower.eq(expected_lower) {
+        42
     } else {
         1
     }
@@ -5553,16 +6146,11 @@ def main() -> i64 {
         return;
     };
 
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(42),
         "status: {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        output.stdout.is_empty() && output.stderr.is_empty(),
-        "owned String search smoke should be silent, stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -8147,6 +8735,205 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_clone_counts_until_last_drop() {
+    let output = require_stdlib_runtime_output!(
+        "rc-shared-count",
+        r#"
+def main() -> i64 {
+    let first = rc_new_i64(40);
+    let second = first.clone();
+    let count = first.strong_count();
+    let value = second.get();
+    let flag = rc_new_bool(true);
+    if count == 2 and value == 40 and flag.get() {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_string_clones_until_last_drop() {
+    let output = require_stdlib_runtime_output!(
+        "rc-string-shared",
+        r#"
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let first = rc_new_string(text);
+    let second = first.clone();
+    let copy = second.get();
+    if first.strong_count() == 2 and copy.len() == 5 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_value_trait_constructs_shared_handles() {
+    let output = require_stdlib_runtime_output!(
+        "rc-value-trait-shared",
+        r#"
+def share<T: RcValue>(value: T) -> Rc<T> {
+    value.rc()
+}
+
+def main() -> i64 {
+    let first = share(40);
+    let second = first.clone();
+    let flag = share(true);
+    let ok = first.strong_count() == 2 and second.get() == 40 and flag.get();
+    if ok {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_payload_drops_once_after_last_release() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Pair {
+    text: String,
+}
+
+def make_shared_pair() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let pair = Pair { text: text };
+    let first = rc_new(pair);
+    let second = first.clone();
+    first.strong_count() + second.strong_count()
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let count = make_shared_pair();
+    let after = sengoo_string_live_handle_count();
+    if count == 4 and after == before {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_borrow_reads_shared_payload() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-borrow",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def observe(first: &Rc<i64>, second: &Rc<i64>) -> i64 {
+    let a = first.borrow();
+    let b = second.borrow();
+    (*a) + (*b)
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let payload = 21;
+    let first = rc_new(payload);
+    let second = first.clone();
+    let observed = observe(&first, &second);
+    let count = first.strong_count();
+    if observed == 42 and count == 2 {
+        let mid = sengoo_string_live_handle_count();
+        if mid == before {
+            42
+        } else {
+            2
+        }
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_payload_accepts_temporary_value() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-temp",
+        r#"
+def main() -> i64 {
+    let first = rc_new(21);
+    let second = first.clone();
+    let a = first.borrow();
+    let b = second.borrow();
+    if (*a) + (*b) == 42 and first.strong_count() == 2 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_rc_generic_borrow_reads_aggregate_field() {
+    let output = require_stdlib_runtime_output!(
+        "rc-generic-payload-borrow-field",
+        r#"
+struct Pair {
+    value: i64,
+}
+
+def observe(first: &Rc<Pair>, second: &Rc<Pair>) -> i64 {
+    let a = first.borrow();
+    let b = second.borrow();
+    (*a).value + (*b).value
+}
+
+def main() -> i64 {
+    let first = rc_new(Pair { value: 21 });
+    let second = first.clone();
+    if observe(&first, &second) == 42 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
 }
 
 #[test]

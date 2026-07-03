@@ -13,9 +13,7 @@ pub(super) fn lower_assign_expr(
             if value_local == target_local {
                 return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
-            if matches!(value, HIRExpr::Var { .. }) {
-                ctx.mark_drop_local_moved(value_local);
-            }
+            ctx.mark_drop_expr_moved(value);
             ctx.drop_local_now_if_initialized(target_local);
             if let Some(type_name) = ctx.type_names.get(&value_local).cloned() {
                 ctx.type_names.insert(target_local, type_name);
@@ -25,6 +23,24 @@ pub(super) fn lower_assign_expr(
                 value: value_local,
             });
             ctx.mark_drop_local_reinitialized(target_local);
+        }
+        HIRExpr::Field { .. } => {
+            let Some((root, field_path)) = ctx.resolve_drop_place(target) else {
+                ctx.errors.push("unsupported assignment target".to_string());
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            };
+            ctx.mark_drop_expr_moved(value);
+            ctx.drop_field_now_if_initialized(root, &field_path);
+            let Some(rebuilt) = ctx.rebuild_drop_place_with_value(root, &field_path, value_local)
+            else {
+                ctx.errors.push("unsupported assignment target".to_string());
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            };
+            ctx.push_inst(Instruction::Store {
+                destination: root,
+                value: rebuilt,
+            });
+            ctx.mark_drop_field_reinitialized(root, &field_path);
         }
         HIRExpr::Index { base, index } => {
             let base_local = ctx.lower_expr(base);
@@ -76,6 +92,31 @@ pub(super) fn lower_assign_op_expr(
                 destination: current_val,
                 source: target_local,
             });
+            if matches!(op, hir::HIRBinaryOp::Add)
+                && matches!(&target_ty, MIRType::Struct { name, .. } if name == "String")
+                && matches!(ctx.get_local_type(value_local), MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
+            {
+                let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Extract {
+                    destination: handle,
+                    value: current_val,
+                    index: 0,
+                });
+                let value_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Call {
+                    destination: value_ptr,
+                    func: "sengoo_stdlib_str_ptr".to_string(),
+                    args: vec![value_local],
+                });
+                let _status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+                ctx.push_inst(Instruction::Call {
+                    destination: _status,
+                    func: "sengoo_string_push_str_status".to_string(),
+                    args: vec![handle, value_ptr],
+                });
+                unwrap_nonnegative_i64_or_panic(ctx, _status);
+                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+            }
             let mir_op = ctx.lower_bin_op(op);
             let result = ctx.add_local(None, LocalKind::Temp, target_ty);
             ctx.push_inst(Instruction::Binary {

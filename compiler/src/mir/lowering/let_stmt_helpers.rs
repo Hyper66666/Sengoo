@@ -89,9 +89,7 @@ pub(super) fn lower_let_stmt(
             }
         } else {
             let value_ty = ctx.get_local_type(value_local).clone();
-            if matches!(value_expr, HIRExpr::Var { .. }) {
-                ctx.mark_drop_local_moved(value_local);
-            }
+            ctx.mark_drop_expr_moved(value_expr);
             let value_info_opt = ctx
                 .mir_fn
                 .locals

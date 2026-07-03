@@ -98,6 +98,23 @@ long long sengoo_str_eq(const char* lhs, const char* rhs) {
     return strcmp(lhs, rhs) == 0 ? 1 : 0;
 }
 
+long long sengoo_str_compare(const char* lhs, const char* rhs) {
+    if (!lhs || !rhs) {
+        if (lhs == rhs) {
+            return 0;
+        }
+        return lhs ? 1 : -1;
+    }
+    int cmp = strcmp(lhs, rhs);
+    if (cmp < 0) {
+        return -1;
+    }
+    if (cmp > 0) {
+        return 1;
+    }
+    return 0;
+}
+
 long long sengoo_f64_eq(double lhs, double rhs) {
     return lhs == rhs ? 1 : 0;
 }
@@ -876,8 +893,11 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
     SengooBufferSlot* slot = &g_buffer_slots[index];
-    if (!slot->alive || slot->generation != generation || !slot->buffer) {
+    if (slot->generation != generation) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
+    }
+    if (!slot->alive || !slot->buffer) {
+        return SENGOO_FFI_STATUS_OK;
     }
     SengooFfiBuffer* buffer = slot->buffer;
     slot->alive = 0;
@@ -885,6 +905,16 @@ long long sengoo_ffi_buffer_free(long long buffer_handle) {
     free(buffer->bytes);
     free(buffer);
     return SENGOO_FFI_STATUS_OK;
+}
+
+long long sengoo_buffer_live_handle_count(void) {
+    size_t live = 0;
+    for (size_t index = 0; index < g_buffer_slot_count; ++index) {
+        if (g_buffer_slots[index].alive && g_buffer_slots[index].buffer) {
+            live += 1;
+        }
+    }
+    return (long long)live;
 }
 
 long long sengoo_str_len(const char* value) {
@@ -927,6 +957,59 @@ long long sengoo_str_index_of(const char* value, const char* needle) {
         return -1;
     }
     return (long long)(found - value);
+}
+
+long long sengoo_str_trim(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    const unsigned char* start = (const unsigned char*)value;
+    while (*start && isspace(*start)) {
+        start += 1;
+    }
+    const unsigned char* end = start + strlen((const char*)start);
+    while (end > start && isspace(*(end - 1))) {
+        end -= 1;
+    }
+    return sengoo_string_from_bytes_copy((long long)(intptr_t)start, (long long)(end - start));
+}
+
+long long sengoo_str_to_ascii_upper(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)value[i];
+        copy[i] = (char)(c >= 'a' && c <= 'z' ? c - ('a' - 'A') : c);
+    }
+    copy[len] = '\0';
+    long long handle = sengoo_string_from_bytes_copy((long long)(intptr_t)copy, (long long)len);
+    free(copy);
+    return handle;
+}
+
+long long sengoo_str_to_ascii_lower(const char* value) {
+    if (!value) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t len = strlen(value);
+    char* copy = (char*)malloc(len + 1);
+    if (!copy) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)value[i];
+        copy[i] = (char)(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+    }
+    copy[len] = '\0';
+    long long handle = sengoo_string_from_bytes_copy((long long)(intptr_t)copy, (long long)len);
+    free(copy);
+    return handle;
 }
 
 enum {
@@ -3605,13 +3688,137 @@ void* sengoo_handle_to_ptr(long long handle) {
 }
 
 typedef struct {
+    void* ptr;
+    uint32_t generation;
+    int alive;
+} SengooOpaqueHandleSlot;
+
+static SengooOpaqueHandleSlot* g_opaque_handle_slots = NULL;
+static size_t g_opaque_handle_slot_count = 0;
+static size_t g_opaque_handle_slot_capacity = 0;
+
+static int sengoo_opaque_handle_ensure_capacity(size_t min_capacity) {
+    if (g_opaque_handle_slot_capacity >= min_capacity) {
+        return 1;
+    }
+    size_t new_capacity = g_opaque_handle_slot_capacity == 0 ? 16 : g_opaque_handle_slot_capacity;
+    while (new_capacity < min_capacity) {
+        if (new_capacity > SIZE_MAX / 2) {
+            return 0;
+        }
+        new_capacity *= 2;
+    }
+    SengooOpaqueHandleSlot* next = (SengooOpaqueHandleSlot*)realloc(
+        g_opaque_handle_slots,
+        new_capacity * sizeof(SengooOpaqueHandleSlot));
+    if (!next) {
+        return 0;
+    }
+    memset(
+        next + g_opaque_handle_slot_capacity,
+        0,
+        (new_capacity - g_opaque_handle_slot_capacity) * sizeof(SengooOpaqueHandleSlot));
+    g_opaque_handle_slots = next;
+    g_opaque_handle_slot_capacity = new_capacity;
+    return 1;
+}
+
+static int sengoo_opaque_handle_decode(
+    long long handle,
+    size_t* out_index,
+    uint32_t* out_generation
+) {
+    if (handle <= 0 || !out_index || !out_generation) {
+        return 0;
+    }
+    uint32_t raw_index = (uint32_t)((unsigned long long)handle & 0xffffffffULL);
+    uint32_t generation = (uint32_t)((unsigned long long)handle >> 32);
+    if (raw_index == 0 || generation == 0) {
+        return 0;
+    }
+    size_t index = (size_t)(raw_index - 1);
+    if (index >= g_opaque_handle_slot_count) {
+        return 0;
+    }
+    *out_index = index;
+    *out_generation = generation;
+    return 1;
+}
+
+long long sengoo_opaque_handle_new(void* ptr) {
+    if (!ptr) {
+        return 0;
+    }
+    size_t index = g_opaque_handle_slot_count;
+    for (size_t i = 0; i < g_opaque_handle_slot_count; ++i) {
+        if (!g_opaque_handle_slots[i].alive) {
+            index = i;
+            break;
+        }
+    }
+    if (index == g_opaque_handle_slot_count) {
+        if (!sengoo_opaque_handle_ensure_capacity(g_opaque_handle_slot_count + 1)) {
+            return 0;
+        }
+        g_opaque_handle_slot_count += 1;
+    }
+    SengooOpaqueHandleSlot* slot = &g_opaque_handle_slots[index];
+    slot->ptr = ptr;
+    slot->alive = 1;
+    slot->generation += 1;
+    if (slot->generation == 0) {
+        slot->generation = 1;
+    }
+    return ((long long)slot->generation << 32) | (long long)(index + 1);
+}
+
+void* sengoo_opaque_handle_get(long long handle) {
+    size_t index = 0;
+    uint32_t generation = 0;
+    if (!sengoo_opaque_handle_decode(handle, &index, &generation)) {
+        return NULL;
+    }
+    SengooOpaqueHandleSlot* slot = &g_opaque_handle_slots[index];
+    if (!slot->alive || slot->generation != generation) {
+        return NULL;
+    }
+    return slot->ptr;
+}
+
+void* sengoo_opaque_handle_take(long long handle) {
+    size_t index = 0;
+    uint32_t generation = 0;
+    if (!sengoo_opaque_handle_decode(handle, &index, &generation)) {
+        return NULL;
+    }
+    SengooOpaqueHandleSlot* slot = &g_opaque_handle_slots[index];
+    if (!slot->alive || slot->generation != generation) {
+        return NULL;
+    }
+    void* ptr = slot->ptr;
+    slot->ptr = NULL;
+    slot->alive = 0;
+    return ptr;
+}
+
+long long sengoo_opaque_live_handle_count(void) {
+    long long count = 0;
+    for (size_t i = 0; i < g_opaque_handle_slot_count; ++i) {
+        if (g_opaque_handle_slots[i].alive) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+typedef struct {
     long long* data;
     long long len;
     long long cap;
 } SengooVecI64;
 
 static SengooVecI64* sengoo_vec_from_handle(long long handle) {
-    return (SengooVecI64*)sengoo_handle_to_ptr(handle);
+    return (SengooVecI64*)sengoo_opaque_handle_get(handle);
 }
 
 static int sengoo_vec_reserve(SengooVecI64* vec, long long min_cap) {
@@ -3649,19 +3856,21 @@ long long sengoo_vec_new_i64(void) {
         return 0;
     }
 
-    return sengoo_ptr_to_handle(vec);
+    long long handle = sengoo_opaque_handle_new(vec);
+    if (handle == 0) {
+        free(vec->data);
+        free(vec);
+    }
+    return handle;
 }
 
 void sengoo_vec_free_i64(long long handle) {
-    SengooVecI64* vec = sengoo_vec_from_handle(handle);
+    SengooVecI64* vec = (SengooVecI64*)sengoo_opaque_handle_take(handle);
     if (!vec) {
         return;
     }
 
     free(vec->data);
-    vec->data = NULL;
-    vec->len = 0;
-    vec->cap = 0;
     free(vec);
 }
 
@@ -3770,7 +3979,7 @@ typedef struct {
 } SengooHashMapI64;
 
 static SengooHashMapI64* sengoo_hashmap_from_handle(long long handle) {
-    return (SengooHashMapI64*)sengoo_handle_to_ptr(handle);
+    return (SengooHashMapI64*)sengoo_opaque_handle_get(handle);
 }
 
 static uint64_t sengoo_hashmap_hash_i64(long long key) {
@@ -3915,20 +4124,21 @@ long long sengoo_hashmap_new_i64(void) {
         return 0;
     }
 
-    return sengoo_ptr_to_handle(map);
+    long long handle = sengoo_opaque_handle_new(map);
+    if (handle == 0) {
+        free(map->entries);
+        free(map);
+    }
+    return handle;
 }
 
 void sengoo_hashmap_free_i64(long long handle) {
-    SengooHashMapI64* map = sengoo_hashmap_from_handle(handle);
+    SengooHashMapI64* map = (SengooHashMapI64*)sengoo_opaque_handle_take(handle);
     if (!map) {
         return;
     }
 
     free(map->entries);
-    map->entries = NULL;
-    map->len = 0;
-    map->used = 0;
-    map->cap = 0;
     free(map);
 }
 
@@ -4026,12 +4236,12 @@ long long sengoo_hashmap_remove_i64(long long handle, long long key) {
 }
 
 typedef struct {
-    SengooHashMapI64* map;
+    long long map_handle;
     long long index;
 } SengooHashMapIterI64;
 
 static SengooHashMapIterI64* sengoo_hashmap_iter_from_handle(long long handle) {
-    return (SengooHashMapIterI64*)sengoo_handle_to_ptr(handle);
+    return (SengooHashMapIterI64*)sengoo_opaque_handle_get(handle);
 }
 
 long long sengoo_hashmap_iter_new_i64(long long map_handle) {
@@ -4045,17 +4255,17 @@ long long sengoo_hashmap_iter_new_i64(long long map_handle) {
         return 0;
     }
 
-    iter->map = map;
+    iter->map_handle = map_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 void sengoo_hashmap_iter_free_i64(long long iter_handle) {
-    SengooHashMapIterI64* iter = sengoo_hashmap_iter_from_handle(iter_handle);
-    if (!iter) {
-        return;
-    }
-    free(iter);
+    free(sengoo_opaque_handle_take(iter_handle));
 }
 
 void sengoo_hashmap_iter_reset_i64(long long iter_handle) {
@@ -4068,12 +4278,13 @@ void sengoo_hashmap_iter_reset_i64(long long iter_handle) {
 
 long long sengoo_hashmap_iter_done_i64(long long iter_handle) {
     SengooHashMapIterI64* iter = sengoo_hashmap_iter_from_handle(iter_handle);
-    if (!iter || !iter->map) {
+    SengooHashMapI64* map = iter ? sengoo_hashmap_from_handle(iter->map_handle) : NULL;
+    if (!iter || !map) {
         return 1;
     }
 
-    while (iter->index < iter->map->cap) {
-        if (iter->map->entries[iter->index].state == 1) {
+    while (iter->index < map->cap) {
+        if (map->entries[iter->index].state == 1) {
             return 0;
         }
         iter->index += 1;
@@ -4083,12 +4294,13 @@ long long sengoo_hashmap_iter_done_i64(long long iter_handle) {
 
 long long sengoo_hashmap_iter_next_i64(long long iter_handle, long long* out_value) {
     SengooHashMapIterI64* iter = sengoo_hashmap_iter_from_handle(iter_handle);
-    if (!iter || !iter->map || !out_value) {
+    SengooHashMapI64* map = iter ? sengoo_hashmap_from_handle(iter->map_handle) : NULL;
+    if (!iter || !map || !out_value) {
         return 0;
     }
 
-    while (iter->index < iter->map->cap) {
-        SengooHashMapEntryI64* entry = &iter->map->entries[iter->index];
+    while (iter->index < map->cap) {
+        SengooHashMapEntryI64* entry = &map->entries[iter->index];
         iter->index += 1;
         if (entry->state == 1) {
             *out_value = entry->value;
@@ -4108,12 +4320,12 @@ long long sengoo_hashmap_iter_next_or_default_i64(long long iter_handle, long lo
 }
 
 typedef struct {
-    SengooVecI64* vec;
+    long long vec_handle;
     long long index;
 } SengooVecIterI64;
 
 static SengooVecIterI64* sengoo_vec_iter_from_handle(long long handle) {
-    return (SengooVecIterI64*)sengoo_handle_to_ptr(handle);
+    return (SengooVecIterI64*)sengoo_opaque_handle_get(handle);
 }
 
 long long sengoo_vec_iter_new_i64(long long vec_handle) {
@@ -4127,17 +4339,17 @@ long long sengoo_vec_iter_new_i64(long long vec_handle) {
         return 0;
     }
 
-    iter->vec = vec;
+    iter->vec_handle = vec_handle;
     iter->index = 0;
-    return sengoo_ptr_to_handle(iter);
+    long long handle = sengoo_opaque_handle_new(iter);
+    if (handle == 0) {
+        free(iter);
+    }
+    return handle;
 }
 
 void sengoo_vec_iter_free_i64(long long iter_handle) {
-    SengooVecIterI64* iter = sengoo_vec_iter_from_handle(iter_handle);
-    if (!iter) {
-        return;
-    }
-    free(iter);
+    free(sengoo_opaque_handle_take(iter_handle));
 }
 
 void sengoo_vec_iter_reset_i64(long long iter_handle) {
@@ -4150,15 +4362,16 @@ void sengoo_vec_iter_reset_i64(long long iter_handle) {
 
 long long sengoo_vec_iter_next_i64(long long iter_handle, long long* out_value) {
     SengooVecIterI64* iter = sengoo_vec_iter_from_handle(iter_handle);
-    if (!iter || !iter->vec || !out_value) {
+    SengooVecI64* vec = iter ? sengoo_vec_from_handle(iter->vec_handle) : NULL;
+    if (!iter || !vec || !out_value) {
         return 0;
     }
 
-    if (iter->index >= iter->vec->len) {
+    if (iter->index >= vec->len) {
         return 0;
     }
 
-    *out_value = iter->vec->data[iter->index];
+    *out_value = vec->data[iter->index];
     iter->index += 1;
     return 1;
 }
@@ -4327,10 +4540,11 @@ long long sengoo_hashmap_get_or_default_i64(long long handle, long long key, lon
 
 long long sengoo_vec_iter_done_i64(long long iter_handle) {
     SengooVecIterI64* iter = sengoo_vec_iter_from_handle(iter_handle);
-    if (!iter || !iter->vec) {
+    SengooVecI64* vec = iter ? sengoo_vec_from_handle(iter->vec_handle) : NULL;
+    if (!iter || !vec) {
         return 1;
     }
-    return iter->index >= iter->vec->len;
+    return iter->index >= vec->len;
 }
 
 long long sengoo_vec_iter_next_or_default_i64(long long iter_handle, long long fallback) {

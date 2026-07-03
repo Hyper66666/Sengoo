@@ -21,6 +21,7 @@ declare void @sengoo_print_str(i8*)
 declare i64 @sengoo_str_len(i8*)
 declare i8* @sengoo_str_concat(i8*, i8*)
 declare i64 @sengoo_str_eq(i8*, i8*)
+declare i64 @sengoo_str_compare(i8*, i8*)
 
 ; Sengoo async runtime functions
 declare i64 @sengoo_async_frame_alloc(i64)

@@ -44,6 +44,16 @@ Conditionally-initialized locals use drop flags (a hidden bool per fallible
 local) so a value initialized on only one branch is dropped on exactly the paths
 where it is live.
 
+### Decision 2a - Backend scope for P0 drop glue
+
+This change's codegen requirement is the production LLVM-text path used by
+`sgc` native builds plus the compiler crate's `JITCodegen` LLVM-text emitter.
+The `sgc` Cranelift fast-JIT is intentionally not treated as a general MIR
+backend here: it evaluates a constant-expression subset and emits a trivial
+Cranelift `main`, so it has no function calls, aggregates, ownership, or drop
+scope machinery to lower. A future real Cranelift MIR backend must add its own
+drop-glue conformance tests before claiming parity.
+
 ### Decision 3 — Move and use-after-move checking
 
 A non-`Copy` value is moved when passed by value, returned, or assigned. After a
@@ -66,6 +76,34 @@ functions become idempotent (guard against a zero/again handle) so the
 the escape hatch for shared ownership and for breaking ownership trees; cycles
 through `Rc` leak by definition and that is documented. `Arc<T>` (atomic) is
 specified in `concurrency-safety-and-async-io`.
+
+`Rc<T>` SHALL use one representation for every monomorphized payload rather
+than storing a second `marker: T` value in each handle:
+
+```sg
+struct Rc<T> {
+    handle: i64,
+}
+
+impl<T> Rc<T> {
+    def new(value: T) -> Rc<T>;
+    def clone(&self) -> Rc<T>;
+    def borrow(&self) -> &T;
+    def strong_count(&self) -> i64;
+}
+```
+
+The compiler lowers `Rc<T>::new` with the concrete size/alignment of `T` and a
+per-`T` drop thunk. The runtime control block copies the moved payload into
+aligned storage and records that thunk. The final `Rc<T>` release invokes the
+thunk exactly once and then frees both payload storage and the control block.
+`borrow()` returns a reference into that storage; normal lexical borrow checks
+therefore prevent moving/dropping the last `Rc<T>` while the reference is live.
+Until associated constructors are stabilized, the implemented source spelling is
+`rc_new<T>(value)` for generic payloads plus the existing `rc_new_i64`,
+`rc_new_bool`, and `rc_new_string` compatibility constructors. Value-returning
+`get()` helpers remain scalar/string conveniences, while generic
+`borrow() -> &T` is the remaining API slice for this decision.
 
 ## Risks / Trade-offs
 

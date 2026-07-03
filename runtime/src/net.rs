@@ -514,6 +514,7 @@ mod tests {
         );
         assert_eq!(&out[..received as usize], msg);
         assert_eq!(sengoo_tcp_close(handle), 1);
+        assert_eq!(sengoo_tcp_close(handle), 1);
 
         server.join().expect("server join");
     }
@@ -827,6 +828,7 @@ mod tests {
         );
         assert_eq!(&out[..received as usize], msg);
         assert_eq!(sengoo_udp_close(handle), 1);
+        assert_eq!(sengoo_udp_close(handle), 1);
 
         worker.join().expect("udp worker join");
     }
@@ -857,6 +859,7 @@ mod tests {
         let copied = sengoo_http_body_copy(handle, out.as_mut_ptr(), out.len());
         assert_eq!(copied, 5);
         assert_eq!(&out[..copied as usize], b"hello");
+        assert_eq!(sengoo_http_close(handle), 1);
         assert_eq!(sengoo_http_close(handle), 1);
 
         worker.join().expect("http worker join");
@@ -959,6 +962,7 @@ mod tests {
         assert_eq!(received, 4);
         assert_eq!(&out[..received as usize], msg);
 
+        assert_eq!(sengoo_ws_close(handle), 1);
         assert_eq!(sengoo_ws_close(handle), 1);
         worker.join().expect("ws worker join");
     }
@@ -1074,6 +1078,7 @@ mod tests {
         assert_eq!(status2, 200);
         assert_eq!(body2, b"hello bob");
 
+        assert_eq!(sengoo_http_server_close(server), 1);
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 
@@ -1677,13 +1682,10 @@ mod tests {
 
         assert_eq!(
             sengoo_http_request_close(request),
-            0,
-            "closing twice must report handle errors"
+            1,
+            "closing an already released request must be idempotent"
         );
-        assert_eq!(
-            sengoo_net_last_error(),
-            i64::from(SENGOO_NET_ERR_HANDLE_NOT_FOUND)
-        );
+        assert_eq!(sengoo_net_last_error(), i64::from(SENGOO_NET_ERR_OK));
 
         assert_eq!(sengoo_http_server_close(server), 1);
     }

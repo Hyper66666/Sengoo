@@ -161,6 +161,11 @@ impl<'source> Parser<'source> {
                     self.advance();
                     self.intern_named_ident("async", span)
                 }
+                TokenKind::DefaultKw => {
+                    let span = token.span;
+                    self.advance();
+                    self.intern_named_ident("default", span)
+                }
                 _ => break,
             };
             segments.push(segment);
@@ -310,10 +315,17 @@ impl<'source> Parser<'source> {
     pub(super) fn expect_ident(&mut self) -> Result<Ident> {
         if let Some(token) = self.current() {
             // 允许 `self` 作为特殊标识符被消费。
-            let is_ident = token.kind == TokenKind::Ident || token.kind == TokenKind::SelfLowerKw;
+            let is_ident = matches!(
+                token.kind,
+                TokenKind::Ident | TokenKind::SelfLowerKw | TokenKind::DefaultKw
+            );
             if is_ident {
                 let span = token.span;
+                let is_default = token.kind == TokenKind::DefaultKw;
                 self.advance();
+                if is_default {
+                    return Ok(self.intern_named_ident("default", span));
+                }
                 return Ok(self.intern_ident(span));
             }
         }

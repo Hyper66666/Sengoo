@@ -176,6 +176,14 @@ impl JsonDoc {
     }
 }
 
+impl Drop for JsonDoc {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_json_doc_close(self.handle);
+        }
+    }
+}
+
 impl JsonValue {
     def kind(self) -> Result<i64, i64> {
         json_i64_result(sengoo_json_value_kind(self.doc_handle, self.node_id))

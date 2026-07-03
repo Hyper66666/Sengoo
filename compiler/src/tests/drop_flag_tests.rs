@@ -1,6 +1,6 @@
+use crate::codegen::JITCodegen;
 use crate::mir::{Instruction, Local, MirConstant, MirFunction, Terminator};
-use crate::{compile_to_ir, compile_to_mir};
-use std::collections::HashSet;
+use crate::{compile_to_ir, compile_to_mir, compile_to_mir_with_options, CompileOptions};
 use std::fs;
 use std::path::Path;
 
@@ -38,15 +38,24 @@ fn function<'a>(mir_fns: &'a [MirFunction], name: &str) -> &'a MirFunction {
 }
 
 fn string_drop_calls(function: &MirFunction) -> Vec<Vec<Local>> {
-    drop_calls(function, "String_drop")
-}
-
-fn drop_calls(function: &MirFunction, drop_func: &str) -> Vec<Vec<Local>> {
     function
         .instructions
         .iter()
         .filter_map(|inst| match inst {
-            Instruction::Call { func, args, .. } if func == drop_func => Some(args.clone()),
+            Instruction::Call { func, args, .. } if func == "String_Drop_drop" => {
+                Some(args.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn named_drop_calls(function: &MirFunction, name: &str) -> Vec<Vec<Local>> {
+    function
+        .instructions
+        .iter()
+        .filter_map(|inst| match inst {
+            Instruction::Call { func, args, .. } if func == name => Some(args.clone()),
             _ => None,
         })
         .collect()
@@ -75,24 +84,13 @@ fn has_guard_terminator(function: &MirFunction) -> bool {
         .any(|block| matches!(block.terminator, Some(Terminator::If { .. })))
 }
 
-fn assert_unique_ssa_definitions(ir: &str) {
-    let mut defs = HashSet::new();
-    for line in ir.lines().map(str::trim) {
-        if line.starts_with("define ") {
-            defs.clear();
-            continue;
-        }
-        let Some((name, _)) = line.split_once(" = ") else {
-            continue;
-        };
-        if !name.starts_with('%') {
-            continue;
-        }
-        assert!(
-            defs.insert(name.to_string()),
-            "LLVM IR redefined SSA value {name}:\n{ir}"
-        );
-    }
+fn extracted_field_index(function: &MirFunction, local: Local) -> Option<u32> {
+    function.instructions.iter().find_map(|inst| match inst {
+        Instruction::Extract {
+            destination, index, ..
+        } if *destination == local => Some(*index),
+        _ => None,
+    })
 }
 
 #[test]
@@ -114,81 +112,6 @@ def main() -> i64 {
         0,
         "single-exit drop glue should not allocate drop flags"
     );
-}
-
-#[test]
-fn user_drop_impl_inserts_trait_drop_call_at_exit() {
-    let mir =
-        compile_to_mir(user_drop_impl_source()).expect("user Drop impl should compile to MIR");
-    let main_fn = function(&mir, "main");
-
-    let calls = drop_calls(main_fn, "Resource_Drop_drop");
-    assert_eq!(
-        calls.len(),
-        1,
-        "main should drop the Resource binding through the Drop impl once"
-    );
-}
-
-#[test]
-fn user_drop_impl_codegen_emits_void_drop_call() {
-    let ir = compile_to_ir(user_drop_impl_source()).expect("user Drop impl should compile to IR");
-    assert!(
-        ir.contains("call void @Resource_Drop_drop("),
-        "IR should call the user Drop impl as a void destructor, got:\n{ir}"
-    );
-}
-
-#[test]
-fn generic_user_drop_impl_inserts_specialized_drop_call() {
-    let source = r#"
-struct Resource<T> {
-    value: T,
-}
-
-impl<T> Drop for Resource<T> {
-    def drop(&mut self) {
-    }
-}
-
-def main() -> i64 {
-    let resource: Resource<i64> = Resource { value: 7 };
-    0
-}
-"#;
-    let mir = compile_to_mir(source).expect("generic user Drop impl should compile to MIR");
-    let main_fn = function(&mir, "main");
-
-    let calls = drop_calls(main_fn, "Resource_i64_Drop_drop");
-    assert_eq!(
-        calls.len(),
-        1,
-        "main should call the specialized generic Drop impl exactly once"
-    );
-
-    let ir = compile_to_ir(source).expect("generic user Drop impl should compile to IR");
-    assert!(
-        ir.contains("call void @Resource_i64_Drop_drop("),
-        "IR should call the specialized generic Drop impl as a void destructor, got:\n{ir}"
-    );
-}
-
-fn user_drop_impl_source() -> &'static str {
-    r#"
-struct Resource {
-    handle: i64,
-}
-
-impl Drop for Resource {
-    def drop(&mut self) {
-    }
-}
-
-def main() -> i64 {
-    let resource: Resource = Resource { handle: 7 };
-    0
-}
-"#
 }
 
 #[test]
@@ -227,6 +150,48 @@ def checked() -> Result<i64, i64> {
     assert!(
         has_guard_terminator(checked),
         "multi-exit drop glue should guard drop calls with the drop flag"
+    );
+}
+
+#[test]
+fn drop_flags_guard_contract_abort_path_for_initialized_binding() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def checked(x: i64) -> i64
+ensures result > x
+{
+    let text: String = string_from_str("abort").value;
+    x - 1
+}
+"#
+    );
+    let mir = compile_to_mir_with_options(
+        &source,
+        CompileOptions {
+            runtime_contract_checks: true,
+            ..CompileOptions::default()
+        },
+    )
+    .expect("contract-checked source should compile to MIR");
+    let checked = function(&mir, "checked");
+
+    assert!(
+        checked
+            .basic_blocks
+            .iter()
+            .any(|block| matches!(block.terminator, Some(Terminator::Unreachable))),
+        "contract failure should lower to an unreachable abort block"
+    );
+    assert_eq!(
+        string_drop_calls(checked).len(),
+        2,
+        "both the normal return and contract-abort exit should run guarded drop glue"
+    );
+    assert!(
+        has_guard_terminator(checked),
+        "abort-path cleanup must be guarded by the initialized drop flag"
     );
 }
 
@@ -285,7 +250,7 @@ def main() -> i64 {
         .instructions
         .iter()
         .filter_map(|id| match main_fn.instruction(*id) {
-            Instruction::Call { func, args, .. } if func == "String_drop" => Some(args[0]),
+            Instruction::Call { func, args, .. } if func == "String_Drop_drop" => Some(args[0]),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -317,6 +282,180 @@ def main() -> i64 {
 }
 
 #[test]
+fn composite_owning_fields_are_dropped_in_reverse_declaration_order() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1, 0],
+        "composite fields should be dropped in reverse declaration order"
+    );
+}
+
+#[test]
+fn partial_move_drops_only_the_remaining_composite_field() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "the moved-out field must be skipped while the sibling field is dropped"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        2,
+        "the moved binding and the one remaining field should each be dropped once"
+    );
+}
+
+#[test]
+fn field_moved_into_call_is_not_dropped_by_the_caller() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def consume(value: String) -> i64 {
+    value.len()
+}
+
+def main() -> i64 {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    consume(pair.left)
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "only the sibling field should remain owned by the caller"
+    );
+    assert_eq!(string_drop_calls(main_fn).len(), 1);
+}
+
+#[test]
+fn returned_field_is_not_dropped_before_leaving_the_function() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def take_left() -> String {
+    let pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    pair.left
+}
+"#,
+    );
+    let take_left = function(&mir, "take_left");
+    let field_order = string_drop_calls(take_left)
+        .iter()
+        .filter_map(|args| extracted_field_index(take_left, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1],
+        "the returned field must move out while its sibling is dropped"
+    );
+    assert_eq!(string_drop_calls(take_left).len(), 1);
+}
+
+#[test]
+fn reinitialized_moved_field_is_dropped_again_at_scope_exit() {
+    let mir = compile_with_owned_string(
+        r#"
+struct Pair {
+    left: String,
+    right: String,
+}
+
+def main() -> i64 {
+    let mut pair = Pair {
+        left: string_from_str("left").value,
+        right: string_from_str("right").value,
+    };
+    let moved = pair.left;
+    pair.left = string_from_str("replacement").value;
+    0
+}
+"#,
+    );
+    let main_fn = function(&mir, "main");
+    let field_order = string_drop_calls(main_fn)
+        .iter()
+        .filter_map(|args| extracted_field_index(main_fn, args[0]))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        field_order,
+        vec![1, 0],
+        "both fields should be live again and dropped in reverse order"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        3,
+        "the moved binding plus both reconstituted fields should be dropped"
+    );
+}
+
+#[test]
 fn assignment_moved_owned_binding_is_excluded_from_drop_glue() {
     let mir = compile_with_owned_string(
         r#"
@@ -343,7 +482,7 @@ def main() -> i64 {
 }
 
 #[test]
-fn conditional_init_uses_flags_even_with_single_function_return() {
+fn conditional_init_drops_at_branch_exit_without_function_flag() {
     let mir = compile_with_owned_string(
         r#"
 def choose(flag: bool) -> i64 {
@@ -364,40 +503,10 @@ def choose(flag: bool) -> i64 {
         "the branch-local String should still be dropped on the initialized path"
     );
     assert_eq!(
-        bool_assigns(choose, false),
-        1,
-        "conditional initialization needs a false entry flag"
+        bool_assigns(choose, false) + bool_assigns(choose, true),
+        0,
+        "lexical branch cleanup should not allocate a function-lifetime drop flag"
     );
-    assert_eq!(
-        bool_assigns(choose, true),
-        1,
-        "the flag should be set only after the branch-local String initializes"
-    );
-    assert!(
-        has_guard_terminator(choose),
-        "single-return conditional init must use guarded drop glue"
-    );
-}
-
-#[test]
-fn conditional_init_drop_flags_codegen_unique_ssa_names() {
-    let ir = compile_to_ir(&format!(
-        "{}\n\n{}",
-        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
-        r#"
-def choose(flag: bool) -> i64 {
-    if flag {
-        let text: String = string_from_str("branch").value;
-        text.len()
-    } else {
-        0
-    }
-}
-"#,
-    ))
-    .expect("conditional owned String source should compile to IR");
-
-    assert_unique_ssa_definitions(&ir);
 }
 
 #[test]
@@ -480,9 +589,14 @@ def main() -> i64 {
     let main_fn = function(&mir, "main");
 
     assert_eq!(
-        string_drop_calls(main_fn).len(),
+        named_drop_calls(main_fn, "String_drop").len(),
         1,
-        "the explicit String.drop() call should be the only drop for the receiver"
+        "the explicit String.drop() call should release the receiver through the compatibility method"
+    );
+    assert_eq!(
+        string_drop_calls(main_fn).len(),
+        0,
+        "explicit String.drop() marks the receiver moved so auto-drop is suppressed"
     );
 }
 
@@ -534,5 +648,517 @@ def choose(flag: bool) -> i64 {
     assert!(
         has_guard_terminator(choose),
         "multi-exit drop glue should guard explicit-return exits"
+    );
+}
+
+#[test]
+fn user_drop_impl_is_called_for_live_owning_local() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { handle: 1 };
+    0
+}
+"#,
+    )
+    .expect("user Drop type should compile to MIR");
+    let main_fn = function(&mir, "main");
+
+    assert_eq!(
+        named_drop_calls(main_fn, "Resource_Drop_drop").len(),
+        1,
+        "a live user Drop value must call its concrete trait impl at function exit"
+    );
+}
+
+#[test]
+fn user_drop_impl_auto_drop_codegen_uses_void_drop_call() {
+    let ir = compile_to_ir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { handle: 1 };
+    0
+}
+"#,
+    )
+    .expect("user Drop auto-drop should lower through LLVM codegen");
+
+    assert!(
+        ir.contains("call void @Resource_Drop_drop("),
+        "main should call the concrete Drop impl with its lowered ABI:\n{ir}"
+    );
+}
+
+#[test]
+fn user_drop_impl_auto_drop_jit_codegen_uses_void_drop_call() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    value: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    let resource = Resource { value: 7 };
+    0
+}
+"#,
+    )
+    .expect("user Drop auto-drop should compile to MIR");
+    let mut jit = JITCodegen::new();
+    let ir = jit
+        .generate(&mir)
+        .expect("user Drop auto-drop should lower through JIT codegen");
+
+    assert!(
+        ir.contains("call void @Resource_Drop_drop("),
+        "JIT codegen should call the concrete Drop impl with its lowered ABI:\n{ir}"
+    );
+}
+
+#[test]
+fn user_drop_impl_is_called_for_by_value_parameter() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def consume(value: Resource) -> i64 {
+    value.handle
+}
+"#,
+    )
+    .expect("user Drop parameter should compile to MIR");
+    let consume = function(&mir, "consume");
+
+    assert_eq!(
+        named_drop_calls(consume, "Resource_Drop_drop").len(),
+        1,
+        "by-value owning parameters should be dropped by the callee"
+    );
+}
+
+#[test]
+fn drop_impl_does_not_recursively_drop_its_receiver() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+"#,
+    )
+    .expect("user Drop impl should compile to MIR");
+    let drop_fn = function(&mir, "Resource_Drop_drop");
+
+    assert_eq!(
+        named_drop_calls(drop_fn, "Resource_Drop_drop").len(),
+        0,
+        "Drop::drop must not recursively auto-drop its own receiver"
+    );
+}
+
+#[test]
+fn nested_if_scope_drops_before_joining_outer_control_flow() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def after_scope() -> i64 {
+    7
+}
+
+def main(flag: bool) -> i64 {
+    if flag {
+        let resource = Resource { handle: 1 };
+        resource.handle
+    } else {
+        0
+    };
+    after_scope()
+}
+"#,
+    )
+    .expect("nested owning scope should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let then_block = main_fn
+        .basic_blocks
+        .iter()
+        .find_map(|block| match block.terminator {
+            Some(Terminator::If { then_block, .. }) => Some(then_block),
+            _ => None,
+        })
+        .expect("main should contain the source if branch");
+
+    assert!(
+        main_fn.basic_blocks[then_block]
+            .instructions
+            .iter()
+            .any(|id| matches!(
+                main_fn.instruction(*id),
+                Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+            )),
+        "the branch-local Resource must be dropped before the then branch joins outer control flow"
+    );
+}
+
+#[test]
+fn nested_if_scope_drops_before_explicit_return() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main(flag: bool) -> i64 {
+    if flag {
+        let resource = Resource { handle: 1 };
+        return resource.handle;
+    }
+    0
+}
+"#,
+    )
+    .expect("nested return cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let explicit_return_block = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| {
+            matches!(block.terminator, Some(Terminator::Return(Some(_))))
+                && block.instructions.iter().any(|id| {
+                    matches!(
+                        main_fn.instruction(*id),
+                        Instruction::Store { destination, .. }
+                            if matches!(
+                                main_fn.locals.get(destination.index()),
+                                Some((_, crate::mir::MIRType::Struct { name, .. })) if name == "Resource"
+                            )
+                    )
+                })
+        })
+        .expect("then branch should contain the explicit return");
+
+    assert!(
+        explicit_return_block.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "branch-local Resource must be dropped before its explicit return"
+    );
+}
+
+#[test]
+fn loop_scope_drops_before_break() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    loop {
+        let resource = Resource { handle: 1 };
+        break;
+    }
+    0
+}
+"#,
+    )
+    .expect("loop break cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let break_block = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| matches!(block.terminator, Some(Terminator::Break { .. })))
+        .expect("loop body should contain a break terminator");
+
+    assert!(
+        break_block.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "loop-local Resource must be dropped before break"
+    );
+}
+
+#[test]
+fn while_scope_drops_before_continue() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main(flag: bool) -> i64 {
+    while flag {
+        let resource = Resource { handle: 1 };
+        continue;
+    }
+    0
+}
+"#,
+    )
+    .expect("while continue cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let continue_block = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| matches!(block.terminator, Some(Terminator::Continue { .. })))
+        .expect("while body should contain a continue terminator");
+
+    assert!(
+        continue_block.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "while-local Resource must be dropped before continue"
+    );
+}
+
+#[test]
+fn for_scope_drops_before_break() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def main() -> i64 {
+    for value in 0..3 {
+        let resource = Resource { handle: value };
+        break;
+    }
+    0
+}
+"#,
+    )
+    .expect("for break cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let break_block = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| matches!(block.terminator, Some(Terminator::Break { .. })))
+        .expect("for body should contain a break terminator");
+
+    assert!(
+        break_block.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "for-local Resource must be dropped before break"
+    );
+}
+
+#[test]
+fn nested_scope_drops_before_question_mark_return() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+def may_fail() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 9 }
+}
+
+def checked(flag: bool) -> Result<i64, i64> {
+    if flag {
+        let resource = Resource { handle: 1 };
+        let value = may_fail()?;
+        value + resource.handle
+    } else {
+        0
+    };
+    Result { is_ok: true, value: 0, error: 0 }
+}
+"#,
+    )
+    .expect("nested question-mark cleanup should compile to MIR");
+    let checked = function(&mir, "checked");
+    let fail_return = checked.basic_blocks.iter().find(|block| {
+        matches!(block.terminator, Some(Terminator::Return(Some(_))))
+            && block.instructions.iter().any(|id| {
+                matches!(
+                    checked.instruction(*id),
+                    Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+                )
+            })
+    });
+
+    assert!(
+        fail_return.is_some(),
+        "the `?` failure return must drop the branch-local Resource first"
+    );
+}
+
+#[test]
+fn explicit_block_scope_drops_before_following_statement() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def after_scope() -> i64 {
+    7
+}
+
+def main() -> i64 {
+    {
+        let resource = Resource { handle: 1 };
+        resource.handle
+    };
+    after_scope()
+}
+"#,
+    )
+    .expect("explicit block cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+    let block_with_resource = main_fn
+        .basic_blocks
+        .iter()
+        .find(|block| {
+            block.instructions.iter().any(|id| {
+                matches!(
+                    main_fn.instruction(*id),
+                    Instruction::Store { destination, .. }
+                        if matches!(
+                            main_fn.locals.get(destination.index()),
+                            Some((_, crate::mir::MIRType::Struct { name, .. })) if name == "Resource"
+                        )
+                )
+            })
+        })
+        .expect("explicit block should contain the Resource binding");
+
+    assert!(
+        block_with_resource.instructions.iter().any(|id| matches!(
+            main_fn.instruction(*id),
+            Instruction::Call { func, .. } if func == "Resource_Drop_drop"
+        )),
+        "explicit block-local Resource must be dropped before later statements"
+    );
+}
+
+#[test]
+fn try_block_scope_drops_on_success_and_question_mark_failure() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+struct Result<T, E> {
+    is_ok: bool,
+    value: T,
+    error: E,
+}
+
+def may_fail() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 9 }
+}
+
+def main() -> i64 {
+    let outcome = try {
+        let resource = Resource { handle: 1 };
+        let value = may_fail()?;
+        value + resource.handle
+    };
+    if outcome.is_ok {
+        outcome.value
+    } else {
+        0
+    }
+}
+"#,
+    )
+    .expect("try-block cleanup should compile to MIR");
+    let main_fn = function(&mir, "main");
+
+    assert_eq!(
+        named_drop_calls(main_fn, "Resource_Drop_drop").len(),
+        2,
+        "try-block Resource must be dropped on both success and propagated failure paths"
     );
 }

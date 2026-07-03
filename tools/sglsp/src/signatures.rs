@@ -54,6 +54,7 @@ fn trait_bound_label(bound: &TraitBound) -> String {
 
 fn type_snippet(ty: &Type) -> String {
     match &ty.kind {
+        TypeKind::SelfType => "Self".to_string(),
         TypeKind::Path(path) => path_label(path),
         TypeKind::PathWithArgs { path, args } => format!(
             "{}<{}>",
@@ -326,4 +327,31 @@ pub(super) fn active_call_site(content: &str, offset: usize) -> Option<(String, 
     }
 
     Some((name, active_param))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sengoo_compiler::ast::TraitItem;
+
+    #[test]
+    fn signature_type_snippet_preserves_self_type() {
+        let program = SgParser::parse("trait CloneLike { def clone_like(self) -> Self { self } }")
+            .expect("trait source should parse");
+        let return_type = program
+            .decls
+            .iter()
+            .find_map(|decl| match &decl.kind {
+                DeclKind::Trait(trait_decl) => {
+                    trait_decl.items.iter().find_map(|item| match item {
+                        TraitItem::Function(function) => function.return_type.as_ref(),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .expect("trait method should have a return type");
+
+        assert_eq!(type_snippet(return_type), "Self");
+    }
 }

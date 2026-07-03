@@ -5,6 +5,9 @@ pub(super) fn lower_break_expr(ctx: &mut LoweringContext<'_>, value: Option<&HIR
         if let Some(v) = value {
             ctx.lower_expr(v);
         }
+        if let Some(depth) = ctx.get_loop_drop_scope_depth() {
+            ctx.emit_drop_scopes_from_depth(depth);
+        }
         ctx.set_terminator(Terminator::Break { target });
         ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
     } else {
@@ -15,6 +18,9 @@ pub(super) fn lower_break_expr(ctx: &mut LoweringContext<'_>, value: Option<&HIR
 
 pub(super) fn lower_continue_expr(ctx: &mut LoweringContext<'_>) -> Local {
     if let Some(target) = ctx.get_continue_target() {
+        if let Some(depth) = ctx.get_loop_drop_scope_depth() {
+            ctx.emit_drop_scopes_from_depth(depth);
+        }
         ctx.set_terminator(Terminator::Continue { target });
         ctx.add_local(None, LocalKind::Temp, MIR_UNIT)
     } else {

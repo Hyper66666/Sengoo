@@ -44,9 +44,20 @@ pub(super) fn lower_index_expr(
     index: &HIRExpr,
 ) -> Local {
     let base_local = ctx.lower_expr(base);
-    let index_local = ctx.lower_expr(index);
-
     let base_ty = ctx.get_local_type(base_local).clone();
+
+    if let HIRExpr::Range {
+        start: Some(start),
+        end: Some(end),
+        inclusive: false,
+    } = index
+    {
+        if is_owned_string_mir_type(&base_ty) || is_str_ptr_mir_type(&base_ty) {
+            return lower_string_range_index_expr(ctx, base_local, &base_ty, start, end);
+        }
+    }
+
+    let index_local = ctx.lower_expr(index);
     let elem_ty = match base_ty {
         MIRType::Array(elem, _) => *elem,
         _ => MIR_UNIT,
@@ -72,13 +83,133 @@ pub(super) fn lower_index_expr(
     result_local
 }
 
+fn is_owned_string_mir_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Struct { name, .. } if name == "String")
+}
+
+fn is_str_ptr_mir_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
+}
+
+fn owned_string_mir_type() -> MIRType {
+    MIRType::Struct {
+        name: "String".to_string(),
+        fields: vec![("handle".to_string(), MIR_I64)],
+    }
+}
+
+fn lower_string_range_index_expr(
+    ctx: &mut LoweringContext<'_>,
+    base_local: Local,
+    base_ty: &MIRType,
+    start: &HIRExpr,
+    end: &HIRExpr,
+) -> Local {
+    let start_local = ctx.lower_expr(start);
+    let end_local = ctx.lower_expr(end);
+    let raw_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+
+    if is_owned_string_mir_type(base_ty) {
+        let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        ctx.push_inst(Instruction::Extract {
+            destination: handle,
+            value: base_local,
+            index: 0,
+        });
+        ctx.push_inst(Instruction::Call {
+            destination: raw_handle,
+            func: "sengoo_string_slice_status".to_string(),
+            args: vec![handle, start_local, end_local],
+        });
+    } else {
+        let value_ptr = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        ctx.push_inst(Instruction::Call {
+            destination: value_ptr,
+            func: "sengoo_stdlib_str_ptr".to_string(),
+            args: vec![base_local],
+        });
+        ctx.push_inst(Instruction::Call {
+            destination: raw_handle,
+            func: "sengoo_str_slice_copy".to_string(),
+            args: vec![value_ptr, start_local, end_local],
+        });
+    }
+
+    wrap_string_slice_status_or_panic(ctx, raw_handle)
+}
+
+fn wrap_string_slice_status_or_panic(ctx: &mut LoweringContext<'_>, raw_handle: Local) -> Local {
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let ok = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: ok,
+        op: MirBinOp::Ge,
+        left: raw_handle,
+        right: zero,
+    });
+
+    let ok_block = ctx.new_block();
+    let err_block = ctx.new_block();
+    let join_block = ctx.new_block();
+    ctx.set_terminator(Terminator::If {
+        cond: ok,
+        then_block: ok_block,
+        else_block: err_block,
+    });
+
+    ctx.set_current_block(ok_block);
+    ctx.set_terminator(Terminator::Goto(join_block));
+    let ok_end = ctx.current_block();
+
+    ctx.set_current_block(err_block);
+    let panic_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: panic_handle,
+        func: "sengoo_panic_result_unwrap_i64".to_string(),
+        args: vec![],
+    });
+    ctx.set_terminator(Terminator::Goto(join_block));
+    let err_end = ctx.current_block();
+
+    ctx.set_current_block(join_block);
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    let incoming = vec![(raw_handle, ok_end), (panic_handle, err_end)];
+    ctx.push_inst(Instruction::Phi {
+        destination: handle,
+        incoming,
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, owned_string_mir_type());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle],
+        ty: owned_string_mir_type(),
+    });
+    ctx.record_drop_binding_if_needed(result);
+    result
+}
+
 pub(super) fn lower_field_expr(
     ctx: &mut LoweringContext<'_>,
     base_local: Local,
     field: &str,
 ) -> Local {
-    let base_ty = ctx.get_local_type(base_local);
-    let field_index = match base_ty {
+    let base_ty = ctx.get_local_type(base_local).clone();
+    let (base_local, base_ty) = match base_ty {
+        MIRType::Ptr(inner) | MIRType::Ref(inner) => {
+            let loaded = ctx.add_local(None, LocalKind::Temp, (*inner).clone());
+            ctx.push_inst(Instruction::Load {
+                destination: loaded,
+                source: base_local,
+            });
+            (loaded, (*inner).clone())
+        }
+        ty => (base_local, ty),
+    };
+    let field_index = match &base_ty {
         MIRType::Struct { fields, .. } => fields
             .iter()
             .position(|(name, _)| name == field)

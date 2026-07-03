@@ -75,6 +75,19 @@ impl Ty {
         matches!(self.kind, TyKind::Ref(..))
     }
 
+    /// Whether values of this type use copy semantics instead of move/drop.
+    ///
+    /// This is the compiler-known baseline for the memory-management roadmap:
+    /// integer and floating-point scalars, booleans, and references are `Copy`.
+    /// User-defined `Copy` impls and derived Copy are introduced by the
+    /// generics/trait roadmap, so ADTs remain non-Copy here.
+    pub fn is_copy_value(&self) -> bool {
+        matches!(
+            self.kind,
+            TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Byte | TyKind::Ref(..)
+        )
+    }
+
     /// 是否为可变引用
     pub fn is_mut_ref(&self) -> bool {
         matches!(self.kind, TyKind::Ref(true, _))
@@ -163,6 +176,11 @@ pub enum TyKind {
     Adt { name: String, args: Vec<Ty> },
     /// Trait 对象 `dyn Trait`
     Dyn(Vec<String>),
+    AssocProjection {
+        base: Box<Ty>,
+        trait_name: String,
+        name: String,
+    },
     /// impl Trait
     ImplTrait(Vec<String>),
     /// Future type (async function return type)
@@ -224,6 +242,7 @@ impl fmt::Display for TyKind {
                 write!(f, ">")
             }
             TyKind::Dyn(traits) => write!(f, "dyn {}", traits.join(" + ")),
+            TyKind::AssocProjection { base, name, .. } => write!(f, "{}::{}", base, name),
             TyKind::ImplTrait(traits) => write!(f, "impl {}", traits.join(" + ")),
             TyKind::Future(inner) => write!(f, "Future<{}>", inner),
             TyKind::SelfType => write!(f, "Self"),
@@ -614,5 +633,40 @@ impl Default for Subst {
     /// 生产代码请始终从 env 获取 [`Rc`] 句柄传入 [`Self::new`]。
     fn default() -> Self {
         Self::new(Rc::new(RefCell::new(TyInterner::new())))
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+
+    #[test]
+    fn scalar_and_reference_types_are_copy() {
+        let int_ty = Ty::new(0, TyKind::Int(IntKind::I64));
+        let float_ty = Ty::new(1, TyKind::Float(FloatKind::F64));
+        let bool_ty = Ty::new(2, TyKind::Bool);
+        let ref_ty = Ty::new(3, TyKind::Ref(false, Box::new(Ty::new(4, TyKind::Str))));
+
+        assert!(int_ty.is_copy_value());
+        assert!(float_ty.is_copy_value());
+        assert!(bool_ty.is_copy_value());
+        assert!(ref_ty.is_copy_value());
+    }
+
+    #[test]
+    fn owning_and_unsized_values_are_not_copy_by_default() {
+        let string_ty = Ty::new(
+            0,
+            TyKind::Adt {
+                name: "String".to_string(),
+                args: vec![],
+            },
+        );
+        let str_ty = Ty::new(1, TyKind::Str);
+        let bytes_ty = Ty::new(2, TyKind::Bytes);
+
+        assert!(!string_ty.is_copy_value());
+        assert!(!str_ty.is_copy_value());
+        assert!(!bytes_ty.is_copy_value());
     }
 }

@@ -68,7 +68,7 @@ impl<'a> LoweringContext<'a> {
                     if is_main_with_unit_body {
                         self.set_terminator(Terminator::Return(None));
                     } else {
-                        self.mark_drop_local_moved(result_local);
+                        self.mark_drop_expr_moved(expr);
                         self.set_terminator(Terminator::Return(Some(result_local)));
                     }
                 }
@@ -170,5 +170,16 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::Return(value) => lower_return_expr(self, value.as_deref()),
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
+    }
+
+    pub(super) fn lower_scoped_body_to_block_val(
+        &mut self,
+        body: &HIRBody,
+        target_block: usize,
+    ) -> Local {
+        self.push_drop_scope();
+        let result = self.lower_body_to_block_val(body, target_block);
+        self.pop_drop_scope(Some(result));
+        result
     }
 }

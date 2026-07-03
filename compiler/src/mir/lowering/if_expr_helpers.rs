@@ -17,7 +17,7 @@ pub(super) fn lower_if_expr(
         else_block,
     });
 
-    let then_val = ctx.lower_body_to_block_val(then_branch, then_block);
+    let then_val = ctx.lower_scoped_body_to_block_val(then_branch, then_block);
     let then_end = ctx.current_block();
     if let Some(block) = ctx.mir_fn.block_mut(then_end) {
         if block.terminator.is_none() {
@@ -26,7 +26,7 @@ pub(super) fn lower_if_expr(
     }
 
     if let Some(e) = else_branch {
-        let else_val = ctx.lower_body_to_block_val(e, else_block);
+        let else_val = ctx.lower_scoped_body_to_block_val(e, else_block);
         let else_end = ctx.current_block();
         if let Some(block) = ctx.mir_fn.block_mut(else_end) {
             if block.terminator.is_none() {

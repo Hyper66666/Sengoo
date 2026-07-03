@@ -53,6 +53,9 @@ impl Codegen {
         self.declarations
             .push_str("declare i64 @sengoo_str_eq(i8*, i8*)\n");
 
+        self.declarations
+            .push_str("declare i64 @sengoo_str_compare(i8*, i8*)\n");
+
         self.declarations.push('\n');
 
         self.declarations
@@ -136,6 +139,10 @@ impl Codegen {
     pub(super) fn maybe_declare_eprint_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
         let declarations = [
             (
+                "sengoo_print_string",
+                "declare void @sengoo_print_string(i64)\n",
+            ),
+            (
                 "sengoo_eprint_i64",
                 "declare void @sengoo_eprint_i64(i64)\n",
             ),
@@ -150,6 +157,10 @@ impl Codegen {
             (
                 "sengoo_eprint_str",
                 "declare void @sengoo_eprint_str(i8*)\n",
+            ),
+            (
+                "sengoo_eprint_string",
+                "declare void @sengoo_eprint_string(i64)\n",
             ),
         ];
 
@@ -169,41 +180,6 @@ impl Codegen {
 
         for (name, decl) in declarations {
             if needed.contains(name) && !self.declarations.contains(decl) {
-                self.declarations.push_str(decl);
-            }
-        }
-    }
-
-    pub(super) fn maybe_declare_owned_string_view_runtime_function(
-        &mut self,
-        mir_fns: &[MirFunction],
-    ) {
-        let declarations = [
-            (
-                "sengoo_string_as_str_ptr",
-                "declare i8* @sengoo_string_as_str_ptr(i64)\n",
-            ),
-            (
-                "sengoo_string_concat_str",
-                "declare i64 @sengoo_string_concat_str(i64, i8*)\n",
-            ),
-        ];
-
-        for (name, decl) in declarations {
-            let needed = mir_fns.iter().any(|mir_fn| {
-                mir_fn.instructions.iter().any(|inst| {
-                    matches!(
-                        inst,
-                        mir::Instruction::Call { func, .. } if func == name
-                    )
-                }) || mir_fn.basic_blocks.iter().any(|block| {
-                    matches!(
-                        &block.terminator,
-                        Some(mir::Terminator::Call { func, .. }) if func == name
-                    )
-                })
-            });
-            if needed && !self.declarations.contains(decl) {
                 self.declarations.push_str(decl);
             }
         }
@@ -769,6 +745,40 @@ impl Codegen {
             .push_str("declare i1 @sengoo_async_cancel_task(i64)\n");
         self.declarations
             .push_str("declare i64 @sengoo_async_task_status(i64)\n");
+    }
+
+    pub(super) fn maybe_declare_rc_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let needs_rc_copy = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_rc_new_copy",
+                _ => false,
+            })
+        });
+        let needs_rc_borrow = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_rc_borrow_ptr",
+                _ => false,
+            })
+        });
+        let copy_decl = "declare i64 @sengoo_rc_new_copy(i8*, i64, i8*)\n";
+        let borrow_decl = "declare i8* @sengoo_rc_borrow_ptr(i64)\n";
+        if (needs_rc_copy || needs_rc_borrow)
+            && !self
+                .declarations
+                .contains("; Sengoo generic Rc runtime functions\n")
+        {
+            self.declarations
+                .push_str("; Sengoo generic Rc runtime functions\n");
+        }
+        if needs_rc_copy && !self.declarations.contains(copy_decl) {
+            self.declarations.push_str(copy_decl);
+        }
+        if needs_rc_borrow && !self.declarations.contains(borrow_decl) {
+            self.declarations.push_str(borrow_decl);
+        }
+        if needs_rc_copy || needs_rc_borrow {
+            self.declarations.push('\n');
+        }
     }
 }
 

@@ -29,54 +29,123 @@
 - [x] 3.0 Parse, lower, and type-check `dyn Trait` / `dyn A + B` as a frontend
   skeleton while vtable/object-safety/codegen remain open.
   - Verified by `cargo test -p sengoo-compiler dyn_trait -- --nocapture`.
-- [ ] 3.1 Object-safety check with a stable `not-object-safe` diagnostic.
-- [ ] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
+- [x] 3.1 Object-safety check with a stable `not-object-safe` diagnostic.
+  - Verified by `cargo test -p sengoo-compiler dyn_trait_ -- --nocapture`,
+    covering associated functions, generic methods, undefined traits, and
+    `Self` returned through reference indirection.
+- [~] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
   slots + `drop` + size/align.
-- [ ] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
-- [ ] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
+  - Done: `%__dyn_Trait = { i8*, i8* }` fat pointer; one `[N x i64]` vtable
+    global per `(trait, concrete)` pair with deterministic method slots.
+  - Deferred: `drop` slot + size/align entries (needs dyn-value Drop).
+- [~] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
+  - Done (LLVM-text): `&Concrete -> &dyn Trait` coercion, by-pointer dispatch
+    shims, vtable-slot load + `CallIndirect` for single-trait `&self` methods.
+  - Done (JIT LLVM-like path): emits dyn vtable globals, struct fat-pointer
+    aggregates/extracts, and `CallIndirect` lowering for single-trait `&self`
+    dispatch.
+  - Deferred: native Cranelift path if re-enabled; multi-trait `dyn A + B`;
+    value/`&mut self` receivers; `Box<dyn Trait>`.
+- [~] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
   `dyn` value runs the concrete `Drop`.
+  - Done: IR-level dispatch tests (`tests::dyn_dispatch_tests`) +
+    `examples/traits/03_dyn_dispatch.sg` runs and exits 25; JIT codegen
+    regression covers vtable emission and `inttoptr` indirect-call lowering.
+  - Deferred: dropping a `dyn` value runs the concrete `Drop`.
 
 ## 4. Associated types
 
-- [ ] 4.1 Parse `type Item;` in traits and `type Item = ...;` in impls.
-- [ ] 4.2 Resolve `T::Item` in generic code; require fixed associated types in
+- [x] 4.1 Parse `type Item;` in traits and `type Item = ...;` in impls.
+  - Verified by `cargo test -p sengoo-compiler associated_type -- --nocapture`;
+    impl checking also rejects missing required and unknown associated types.
+- [x] 4.2 Resolve `T::Item` in generic code; require fixed associated types in
   `dyn` object types (`dyn Iterator<Item = i64>`).
-- [ ] 4.3 Tests covering associated-type resolution and the `dyn` fixing rule.
+  - `T::Item` in generic function signatures resolves through the declaring
+    trait bound and the concrete impl at call sites; unbounded `T::Item` is
+    rejected. Verified by `cargo test -p sengoo-compiler
+    associated_type_projection -- --nocapture`.
+  - `dyn Trait<Assoc = Type>` parses and type-checks when every required
+    associated type is fixed; unfixed associated types use the stable
+    `dyn-associated-type` diagnostic. Verified by `cargo test -p
+    sengoo-compiler dyn_trait_with_ -- --nocapture`.
+- [x] 4.3 Tests covering associated-type resolution and the `dyn` fixing rule.
 
 ## 5. Core traits and derive
 
-- [ ] 5.1 Define compiler-known core traits (Clone, Copy, PartialEq/Eq,
+- [x] 5.1 Define compiler-known core traits (Clone, Copy, PartialEq/Eq,
   PartialOrd/Ord, Hash, Default, Display, Debug, Iterator, IntoIterator) plus
   `Ordering` and `Formatter`/`Hasher` support types.
-  - Partial: `Copy` is now a compiler-known marker trait and its name is
-    reserved from user redeclaration with stable `copy-trait-reserved`.
-    Remaining core traits and support types are open.
-- [ ] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
+  - Compiler-known trait names now resolve in bounds, `Iterator`/`IntoIterator`
+    include required associated-type names, and support types resolve in
+    signatures. Verified by `cargo test -p sengoo-compiler
+    compiler_known_core_traits_and_support_types_are_available -- --nocapture`.
+  - Behavioral derive impl generation remains in 5.2.
+- [~] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
-  - Partial: built-in `#[derive(Copy)]` now expands to `impl Copy for Type {}`
-    and reuses the compiler's Copy/Drop and field-Copy validation. Clone,
-    equality/ordering, Hash, Debug, and Default derive remain open.
-- [ ] 5.3 Enforce `Copy` ⇔ no `Drop` and `Copy` requires all-`Copy` fields.
-  - Partial: a type cannot implement both compiler-known `Copy` and `Drop`;
-    either source order produces stable `copy-drop-conflict`, including generic
-    impl constructors. Concrete struct `impl Copy` now recursively rejects
-    non-`Copy` fields with stable `copy-field-not-copy` and accepts fields whose
-    ADT type has its own `Copy` impl. Generic field bounds and derive-generated
-    `Copy` remain open.
-- [ ] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
-  - Partial: compiler tests cover reserved `Copy` and both declaration orders
-    of the `Copy`/`Drop` conflict, plus non-`Copy` field rejection and nested
-    ADT-with-`Copy` acceptance. `derive(Copy)` expansion and field-diagnostic
-    reuse are covered. Remaining derives and generic-bound field tests remain
-    open.
+  - Builtin derive expansion now emits core trait impl declarations for all
+    listed derive names so derived types satisfy corresponding generic bounds.
+    Verified by `cargo test -p sengoo-compiler
+    builtin_derives_register_core_trait_impls_for_bounds -- --nocapture`.
+  - Debug now has field-aware formatter behavior for structs and discriminant
+    lowering for unit/tuple-payload enums.
+  - Clone now generates a real inherent `clone(&self) -> Type` method for
+    named structs with scalar/copyable field copies and nested fields whose
+    own `clone()` is available, while preserving the `impl Clone for Type {}`
+    bound marker. Verified by `cargo test -p sengoo-compiler derive_clone --
+    --nocapture`.
+  - PartialEq now generates a real inherent `eq(&self, other: &Type) -> bool`
+    method for named structs, comparing fields in declaration order; struct
+    `==`/`!=` lowering uses that generated method when available. Verified by
+    `cargo test -p sengoo-compiler derive_ -- --nocapture`.
+  - Default now generates a real inherent `Type::default()` constructor for
+    named structs with scalar zero/false field defaults and nested fields whose
+    own `Type::default()` is available, while preserving the `impl Default for
+    Type {}` bound marker. This also adds the parser/typeck path needed for
+    `Type::method()` associated-function calls. Verified by `cargo test -p
+    sengoo-compiler derive_default -- --nocapture`.
+  - PartialOrd/Ord now generate lexicographic `compare/lt/le/gt/ge` helpers
+    for scalar fields and nested fields with ordering operators, and struct
+    `< <= > >=` lowering uses the generated `compare` method when available.
+    Verified by `cargo test -p sengoo-compiler derive_ord -- --nocapture`.
+  - Hash now generates a deterministic `hash() -> i64` helper for scalar fields
+    and nested fields whose own `hash()` is available. Verified by
+    `cargo test -p sengoo-compiler derive_hash -- --nocapture`.
+  - Struct and enum custom `Debug.to_string()` bodies now satisfy the `Debug`
+    contract and take precedence over structural `{:?}` formatting; derived
+    Debug keeps the built-in structural enum/struct formatting path. Remaining:
+    the full `Hasher` object protocol, generic collection-field derives beyond
+    the currently generated method calls, and the general `Formatter` object
+    protocol.
+- [x] 5.3 Enforce `Copy` and no `Drop`; `Copy` requires all-`Copy` fields.
+  - Verified by `cargo test -p sengoo-compiler copy_ -- --nocapture`,
+    including `copy-drop-conflict` and `copy-field-not-copy` diagnostics.
+- [x] 5.4 Tests for each derive and for the `Copy`/`Drop` exclusivity rule.
+  - Completed for the current derive surface: marker impl bounds for all core derives, Copy/Drop exclusivity,
+    Copy non-Copy field rejection, Debug struct/unit enum/tuple enum
+    formatting, Clone scalar struct copy, PartialEq scalar struct method and
+    `==` operator lowering, PartialOrd/Ord scalar struct method and `<`
+    operator lowering, Hash scalar struct helper, Default scalar struct
+    constructor, plus nested-field Clone/PartialEq/Ord/Hash/Default regressions.
+    Full Hasher/custom Debug protocol tests remain tied to the deferred
+    protocol work in 5.2.
 
 ## 6. Orphan rule and docs
 
-- [ ] 6.1 Enforce the package-local orphan rule with a stable diagnostic.
-- [ ] 6.2 Document generics, bounds, `dyn`, associated types, and derive in
+- [x] 6.1 Enforce the package-local orphan rule with a stable diagnostic.
+  - Verified by `cargo test -p sengoo-compiler
+    orphan_rule_rejects_external_trait_for_external_type -- --nocapture`;
+    `cargo test -p sengoo-compiler --lib` confirms local-trait and local-type
+    impls still pass.
+- [x] 6.2 Document generics, bounds, `dyn`, associated types, and derive in
   `docs/language-features.md`.
-- [ ] 6.3 Add `examples/generics/` programs using a real generic function with a
+  - Documents supported generic bounds, associated types, dyn fixed bindings,
+    derive marker impls, Copy/Drop rules, and current dyn/derive limitations.
+- [x] 6.3 Add `examples/generics/` programs using a real generic function with a
   bound and a `dyn Trait` call.
+  - Added `examples/generics/05_bound_and_dyn.sg`, which exercises concrete
+    instantiation and bound-method dispatch inside a generic function plus a
+    `&dyn Shape` dispatch in one runnable program. Verified by `cargo test -p sgc
+    examples_smoke_generics_bound_and_dyn -- --nocapture`.
 - [x] 6.4 Run `openspec validate generics-and-trait-system --strict`.
 
 ## Verification

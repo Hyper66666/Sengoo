@@ -5,7 +5,7 @@ Run each file with `sgc run <path>`.
 | File | Demonstrates | Expected output |
 |---|---|---:|
 | [`01_strings.sg`](01_strings.sg) | Importing `std::string` helpers for append, repeat, equality, search, and empty checks | `8` |
-| [`02_math.sg`](02_math.sg) | Importing `std::math` helpers for integer bounds, signs, powers, common divisors, and i64 overflow helpers | `104` |
+| [`02_math.sg`](02_math.sg) | Importing `std::math` helpers for integer bounds, signs, powers, and common divisors | `50` |
 | [`03_error.sg`](03_error.sg) | Importing `std::error` assertion helpers for booleans, integers, strings, and floats | `7` |
 | [`04_option_result.sg`](04_option_result.sg) | Importing `std::option` and `std::result` bool constructors, unwrap helpers, and projections | `7` |
 | [`05_file.sg`](05_file.sg) | Importing `std::file` helpers for write, append, read, length, existence, and removal | `15` |
@@ -29,4 +29,4 @@ Run each file with `sgc run <path>`.
 | [`22_regex_log.sg`](22_regex_log.sg) | Importing `std::regex` and `std::log` helpers for bounded matching and log configuration | `22` |
 | [`23_config_hash.sg`](23_config_hash.sg) | Importing `std::config` and `std::hash` helpers with Buffer output | `23` |
 | [`24_compress.sg`](24_compress.sg) | Importing `std::compress` gzip Buffer helpers for JSON bytes | `24` |
-| [`25_generic_collections.sg`](25_generic_collections.sg) | Importing `std::collections` helpers for `Vec<String>` and the `HashMap<String, i64>` string-key surface | `25` |
+| [`25_formatting.sg`](25_formatting.sg) | Formatting owned `String` values with positional placeholders, right-aligned width, and f-strings | `25` |

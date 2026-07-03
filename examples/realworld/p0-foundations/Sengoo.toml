@@ -1,0 +1,8 @@
+[package]
+name = "p0-foundations"
+version = "0.1.0"
+edition = "2026"
+description = "Realworld P0 language-foundations conformance fixture."
+
+[bin]
+path = "src/main.sg"

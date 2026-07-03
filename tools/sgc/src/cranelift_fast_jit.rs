@@ -4,281 +4,47 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module};
 use miette::Result;
-use sengoo_compiler::mir::{self, MIRType, MirBinOp, MirConstant, MirFunction};
+use sengoo_compiler::ast::{BinOp, Block, DeclKind, Expr, ExprKind, Literal, StmtKind, UnOp};
+use sengoo_compiler::Parser;
 use std::collections::HashMap;
 
-pub(crate) fn run_with_cranelift_fast_jit(source: &str) -> Result<i64> {
-    run_with_optional_host_probe(source, None)
+enum EvalFlow {
+    Value(i64),
+    Return(i64),
 }
 
-#[cfg(test)]
-pub(crate) fn run_with_cranelift_fast_jit_with_host_probe<F>(
-    source: &str,
-    probe_name: &str,
-    mut probe: F,
-) -> Result<i64>
-where
-    F: FnMut() -> i64,
-{
-    run_with_optional_host_probe(
-        source,
-        Some(HostProbe {
-            name: probe_name,
-            callback: &mut probe,
-        }),
-    )
-}
-
-fn run_with_optional_host_probe(source: &str, probe: Option<HostProbe<'_>>) -> Result<i64> {
-    let (mir_fns, _ffi_codegen) =
-        crate::pipeline::compile_source_to_mir_bundle_for_fast_jit(source, 1)
-            .map_err(|e| miette::miette!("cranelift fast-jit MIR frontend failed: {}", e))?;
-
-    let value = MirFastInterpreter::new(&mir_fns, probe).run_main()?;
-    execute_constant_with_cranelift(value)
-}
-
-struct HostProbe<'a> {
-    name: &'a str,
-    callback: &'a mut dyn FnMut() -> i64,
-}
-
-#[derive(Clone, Debug)]
-enum MirValue {
-    Unit,
-    I64(i64),
-    Bool(bool),
-    Aggregate(Vec<MirValue>),
-}
-
-impl MirValue {
-    fn as_i64(&self) -> Result<i64> {
+impl EvalFlow {
+    fn into_value(self) -> Result<i64> {
         match self {
-            Self::I64(value) => Ok(*value),
-            Self::Bool(value) => Ok(i64::from(*value)),
-            Self::Unit => Ok(0),
-            Self::Aggregate(_) => Err(miette::miette!(
-                "cranelift fast-jit cannot return aggregate values yet"
-            )),
+            Self::Value(value) | Self::Return(value) => Ok(value),
         }
-    }
-
-    fn truthy(&self) -> Result<bool> {
-        Ok(self.as_i64()? != 0)
     }
 }
 
-struct MirFastInterpreter<'a, 'probe> {
-    functions: HashMap<&'a str, &'a MirFunction>,
-    probe: Option<HostProbe<'probe>>,
-}
+pub(crate) fn run_with_cranelift_fast_jit(source: &str) -> Result<i64> {
+    let program = Parser::parse(source)
+        .map_err(|e| miette::miette!("cranelift fast-jit parse failed: {}", e))?;
 
-impl<'a, 'probe> MirFastInterpreter<'a, 'probe> {
-    fn new(mir_fns: &'a [MirFunction], probe: Option<HostProbe<'probe>>) -> Self {
-        Self {
-            functions: mir_fns
-                .iter()
-                .map(|function| (function.name.as_str(), function))
-                .collect(),
-            probe,
-        }
+    let main_decl = program
+        .decls
+        .iter()
+        .find_map(|decl| match &decl.kind {
+            DeclKind::Function(function) if function.name.name == "main" => Some(function),
+            _ => None,
+        })
+        .ok_or_else(|| miette::miette!("cranelift fast-jit requires a `main` function"))?;
+
+    if !main_decl.params.is_empty() || main_decl.self_param.is_some() {
+        return Err(miette::miette!(
+            "cranelift fast-jit requires `main` without parameters"
+        ));
     }
 
-    fn run_main(mut self) -> Result<i64> {
-        let value = self.call_function("main", Vec::new())?;
-        value.as_i64()
-    }
-
-    fn call_function(&mut self, name: &str, args: Vec<MirValue>) -> Result<MirValue> {
-        if self.probe.as_ref().is_some_and(|probe| probe.name == name) {
-            let probe = self.probe.as_mut().expect("probe presence checked above");
-            return Ok(MirValue::I64((probe.callback)()));
-        }
-
-        let function = *self
-            .functions
-            .get(name)
-            .ok_or_else(|| miette::miette!("cranelift fast-jit cannot resolve `{}`", name))?;
-        self.execute_function(function, args)
-    }
-
-    fn execute_function(
-        &mut self,
-        function: &MirFunction,
-        args: Vec<MirValue>,
-    ) -> Result<MirValue> {
-        let mut locals = function
-            .locals
-            .iter()
-            .map(|(_, ty)| default_value_for_type(ty))
-            .collect::<Vec<_>>();
-        for (index, value) in args.into_iter().enumerate() {
-            let local_index = index + 1;
-            if local_index < locals.len() {
-                locals[local_index] = value;
-            }
-        }
-
-        let mut block_id = function.start_block;
-        loop {
-            let block = function.basic_blocks.get(block_id).ok_or_else(|| {
-                miette::miette!("cranelift fast-jit missing MIR block {}", block_id)
-            })?;
-            for instruction in function.block_instructions(block) {
-                self.execute_instruction(function, instruction, &mut locals)?;
-            }
-
-            match block.terminator.as_ref() {
-                Some(mir::Terminator::Return(Some(local))) => {
-                    return Ok(local_value(&locals, *local)?.clone());
-                }
-                Some(mir::Terminator::Return(None)) => return Ok(MirValue::Unit),
-                Some(mir::Terminator::Goto(target)) => block_id = *target,
-                Some(mir::Terminator::If {
-                    cond,
-                    then_block,
-                    else_block,
-                }) => {
-                    block_id = if local_value(&locals, *cond)?.truthy()? {
-                        *then_block
-                    } else {
-                        *else_block
-                    };
-                }
-                Some(mir::Terminator::Call {
-                    func,
-                    args,
-                    destination,
-                    target,
-                }) => {
-                    let call_args = args
-                        .iter()
-                        .map(|arg| call_arg_value(&locals, arg))
-                        .collect::<Result<Vec<_>>>()?;
-                    let value = self.call_function(func, call_args)?;
-                    assign_local(&mut locals, *destination, value)?;
-                    block_id = *target;
-                }
-                Some(other) => {
-                    return Err(miette::miette!(
-                        "cranelift fast-jit unsupported MIR terminator: {:?}",
-                        other
-                    ))
-                }
-                None => {
-                    return Err(miette::miette!(
-                        "cranelift fast-jit block {} has no terminator",
-                        block_id
-                    ))
-                }
-            }
-        }
-    }
-
-    fn execute_instruction(
-        &mut self,
-        _function: &MirFunction,
-        instruction: &mir::Instruction,
-        locals: &mut [MirValue],
-    ) -> Result<()> {
-        match instruction {
-            mir::Instruction::Assign { destination, value } => {
-                assign_local(locals, *destination, constant_to_value(value)?)?;
-            }
-            mir::Instruction::Unary {
-                destination,
-                op,
-                operand,
-            } => {
-                let value = local_value(locals, *operand)?.as_i64()?;
-                let result = match op {
-                    mir::MirUnOp::Neg => -value,
-                    mir::MirUnOp::Not => i64::from(value == 0),
-                    mir::MirUnOp::BitNot => !value,
-                };
-                assign_local(locals, *destination, MirValue::I64(result))?;
-            }
-            mir::Instruction::Binary {
-                destination,
-                op,
-                left,
-                right,
-            } => {
-                let lhs = local_value(locals, *left)?.as_i64()?;
-                let rhs = local_value(locals, *right)?.as_i64()?;
-                assign_local(
-                    locals,
-                    *destination,
-                    MirValue::I64(eval_binary(*op, lhs, rhs)?),
-                )?;
-            }
-            mir::Instruction::Aggregate {
-                destination,
-                fields,
-                ..
-            } => {
-                let values = fields
-                    .iter()
-                    .map(|local| local_value(locals, *local).cloned())
-                    .collect::<Result<Vec<_>>>()?;
-                assign_local(locals, *destination, MirValue::Aggregate(values))?;
-            }
-            mir::Instruction::Extract {
-                destination,
-                value,
-                index,
-            } => {
-                let MirValue::Aggregate(fields) = local_value(locals, *value)? else {
-                    return Err(miette::miette!(
-                        "cranelift fast-jit extract requires an aggregate"
-                    ));
-                };
-                let field = fields.get(*index as usize).cloned().ok_or_else(|| {
-                    miette::miette!("cranelift fast-jit extract index {} out of range", index)
-                })?;
-                assign_local(locals, *destination, field)?;
-            }
-            mir::Instruction::Call {
-                destination,
-                func,
-                args,
-            } => {
-                let call_args = args
-                    .iter()
-                    .map(|local| local_value(locals, *local).cloned())
-                    .collect::<Result<Vec<_>>>()?;
-                let value = self.call_function(func, call_args)?;
-                assign_local(locals, *destination, value)?;
-            }
-            mir::Instruction::Cast {
-                destination, value, ..
-            }
-            | mir::Instruction::Bitcast {
-                destination, value, ..
-            }
-            | mir::Instruction::Load {
-                destination,
-                source: value,
-            }
-            | mir::Instruction::AddrOf {
-                destination,
-                source: value,
-            } => {
-                assign_local(locals, *destination, local_value(locals, *value)?.clone())?;
-            }
-            mir::Instruction::Store { destination, value } => {
-                assign_local(locals, *destination, local_value(locals, *value)?.clone())?;
-            }
-            mir::Instruction::Nop => {}
-            other => {
-                return Err(miette::miette!(
-                    "cranelift fast-jit unsupported MIR instruction: {:?}",
-                    other
-                ))
-            }
-        }
-        Ok(())
-    }
+    let mut env = HashMap::new();
+    let value = match eval_block(&main_decl.body, &mut env)? {
+        EvalFlow::Value(value) | EvalFlow::Return(value) => value,
+    };
+    execute_constant_with_cranelift(value)
 }
 
 fn execute_constant_with_cranelift(value: i64) -> Result<i64> {
@@ -321,86 +87,149 @@ fn execute_constant_with_cranelift(value: i64) -> Result<i64> {
     Ok(main_fn())
 }
 
-fn assign_local(locals: &mut [MirValue], local: mir::Local, value: MirValue) -> Result<()> {
-    let slot = locals
-        .get_mut(local.index())
-        .ok_or_else(|| miette::miette!("cranelift fast-jit missing local {}", local.index()))?;
-    *slot = value;
-    Ok(())
-}
+fn eval_block(block: &Block, env: &mut HashMap<String, i64>) -> Result<EvalFlow> {
+    let mut scoped = env.clone();
+    let mut last_value = 0_i64;
 
-fn local_value(locals: &[MirValue], local: mir::Local) -> Result<&MirValue> {
-    locals
-        .get(local.index())
-        .ok_or_else(|| miette::miette!("cranelift fast-jit missing local {}", local.index()))
-}
-
-fn call_arg_value(locals: &[MirValue], arg: &mir::CallArg) -> Result<MirValue> {
-    match arg {
-        mir::CallArg::Local(local) => Ok(local_value(locals, *local)?.clone()),
-        mir::CallArg::Constant(constant) => constant_to_value(constant),
-    }
-}
-
-fn default_value_for_type(ty: &MIRType) -> MirValue {
-    match ty {
-        MIRType::Bool => MirValue::Bool(false),
-        MIRType::Struct { fields, .. } => MirValue::Aggregate(
-            fields
-                .iter()
-                .map(|(_, field_ty)| default_value_for_type(field_ty))
-                .collect(),
-        ),
-        MIRType::Tuple(fields) => {
-            MirValue::Aggregate(fields.iter().map(default_value_for_type).collect())
+    for stmt in &block.stmts {
+        match &stmt.kind {
+            StmtKind::Let { name, value, .. } => {
+                let value = value.as_ref().ok_or_else(|| {
+                    miette::miette!(
+                        "cranelift fast-jit requires explicit initializer for `{}`",
+                        name.name
+                    )
+                })?;
+                let evaluated = eval_expr(value, &mut scoped)?.into_value()?;
+                scoped.insert(name.name.clone(), evaluated);
+            }
+            StmtKind::Const { name, value, .. } => {
+                let evaluated = eval_expr(value, &mut scoped)?.into_value()?;
+                scoped.insert(name.name.clone(), evaluated);
+            }
+            StmtKind::Expr(expr) => match eval_expr(expr, &mut scoped)? {
+                EvalFlow::Value(value) => last_value = value,
+                EvalFlow::Return(value) => {
+                    *env = scoped;
+                    return Ok(EvalFlow::Return(value));
+                }
+            },
+            StmtKind::Item(_) => {
+                return Err(miette::miette!(
+                    "cranelift fast-jit does not support nested item declarations"
+                ))
+            }
         }
-        MIRType::Unit | MIRType::Never => MirValue::Unit,
-        _ => MirValue::I64(0),
     }
+
+    *env = scoped;
+    Ok(EvalFlow::Value(last_value))
 }
 
-fn constant_to_value(value: &MirConstant) -> Result<MirValue> {
-    match value {
-        MirConstant::Unit => Ok(MirValue::Unit),
-        MirConstant::Bool(value) => Ok(MirValue::Bool(*value)),
-        MirConstant::Int(value) => Ok(MirValue::I64(*value)),
-        MirConstant::Uint(value) => Ok(MirValue::I64(*value as i64)),
-        MirConstant::Char(value) => Ok(MirValue::I64(*value as i64)),
-        MirConstant::GlobalRef(_) => Ok(MirValue::I64(0)),
-        other => Err(miette::miette!(
-            "cranelift fast-jit unsupported constant: {:?}",
-            other
+fn eval_expr(expr: &Expr, env: &mut HashMap<String, i64>) -> Result<EvalFlow> {
+    match &expr.kind {
+        ExprKind::Literal(Literal::Int(value)) => Ok(EvalFlow::Value(*value)),
+        ExprKind::Literal(Literal::Bool(value)) => Ok(EvalFlow::Value(if *value { 1 } else { 0 })),
+        ExprKind::Ident(ident) => env
+            .get(&ident.name)
+            .copied()
+            .map(EvalFlow::Value)
+            .ok_or_else(|| miette::miette!("unknown variable `{}` in fast-jit mode", ident.name)),
+        ExprKind::Path(path) => {
+            let ident = path
+                .as_simple()
+                .ok_or_else(|| miette::miette!("fast-jit supports only simple paths"))?;
+            env.get(&ident.name)
+                .copied()
+                .map(EvalFlow::Value)
+                .ok_or_else(|| miette::miette!("unknown path `{}` in fast-jit mode", ident.name))
+        }
+        ExprKind::Paren(inner) => eval_expr(inner, env),
+        ExprKind::Unary { op, operand } => {
+            let value = eval_expr(operand, env)?.into_value()?;
+            let result = match op {
+                UnOp::Plus => value,
+                UnOp::Neg => -value,
+                UnOp::BitNot => !value,
+                UnOp::Not => {
+                    if value == 0 {
+                        1
+                    } else {
+                        0
+                    }
+                }
+                _ => {
+                    return Err(miette::miette!(
+                        "unsupported unary operator `{}` in fast-jit mode",
+                        op
+                    ))
+                }
+            };
+            Ok(EvalFlow::Value(result))
+        }
+        ExprKind::Binary { op, left, right } => {
+            let lhs = eval_expr(left, env)?.into_value()?;
+            let rhs = eval_expr(right, env)?.into_value()?;
+            let result = match op {
+                BinOp::Add => lhs.saturating_add(rhs),
+                BinOp::Sub => lhs.saturating_sub(rhs),
+                BinOp::Mul => lhs.saturating_mul(rhs),
+                BinOp::Div => lhs / rhs,
+                BinOp::Mod => lhs % rhs,
+                BinOp::BitAnd => lhs & rhs,
+                BinOp::BitOr => lhs | rhs,
+                BinOp::BitXor => lhs ^ rhs,
+                BinOp::Shl => lhs << rhs,
+                BinOp::Shr => lhs >> rhs,
+                BinOp::Eq => i64::from(lhs == rhs),
+                BinOp::NotEq => i64::from(lhs != rhs),
+                BinOp::Lt => i64::from(lhs < rhs),
+                BinOp::Le => i64::from(lhs <= rhs),
+                BinOp::Gt => i64::from(lhs > rhs),
+                BinOp::Ge => i64::from(lhs >= rhs),
+                BinOp::And => i64::from(lhs != 0 && rhs != 0),
+                BinOp::Or => i64::from(lhs != 0 || rhs != 0),
+                _ => {
+                    return Err(miette::miette!(
+                        "unsupported binary operator `{}` in fast-jit mode",
+                        op
+                    ))
+                }
+            };
+            Ok(EvalFlow::Value(result))
+        }
+        ExprKind::Block(block) => eval_block(block, env),
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            let cond_value = eval_expr(cond, env)?.into_value()?;
+            if cond_value != 0 {
+                eval_block(then_branch, env)
+            } else if let Some(else_branch) = else_branch {
+                eval_expr(else_branch, env)
+            } else {
+                Ok(EvalFlow::Value(0))
+            }
+        }
+        ExprKind::Return(value) => {
+            let value = if let Some(value) = value {
+                eval_expr(value, env)?.into_value()?
+            } else {
+                0
+            };
+            Ok(EvalFlow::Return(value))
+        }
+        _ => Err(miette::miette!(
+            "unsupported expression in cranelift fast-jit mode"
         )),
     }
 }
 
-fn eval_binary(op: MirBinOp, lhs: i64, rhs: i64) -> Result<i64> {
-    Ok(match op {
-        MirBinOp::Add => lhs.saturating_add(rhs),
-        MirBinOp::Sub => lhs.saturating_sub(rhs),
-        MirBinOp::Mul => lhs.saturating_mul(rhs),
-        MirBinOp::Div => lhs / rhs,
-        MirBinOp::Rem => lhs % rhs,
-        MirBinOp::BitAnd => lhs & rhs,
-        MirBinOp::BitOr => lhs | rhs,
-        MirBinOp::BitXor => lhs ^ rhs,
-        MirBinOp::Shl => lhs << rhs,
-        MirBinOp::Shr => lhs >> rhs,
-        MirBinOp::LogAnd => i64::from(lhs != 0 && rhs != 0),
-        MirBinOp::LogOr => i64::from(lhs != 0 || rhs != 0),
-        MirBinOp::Eq => i64::from(lhs == rhs),
-        MirBinOp::Ne => i64::from(lhs != rhs),
-        MirBinOp::Lt => i64::from(lhs < rhs),
-        MirBinOp::Gt => i64::from(lhs > rhs),
-        MirBinOp::Le => i64::from(lhs <= rhs),
-        MirBinOp::Ge => i64::from(lhs >= rhs),
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{run_with_cranelift_fast_jit, run_with_cranelift_fast_jit_with_host_probe};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use super::run_with_cranelift_fast_jit;
 
     #[test]
     fn cranelift_fast_jit_runs_simple_main() {
@@ -417,39 +246,24 @@ def main() -> i64 {
     }
 
     #[test]
-    fn cranelift_fast_jit_runs_user_drop_from_mir() {
-        static DROP_PROBE_COUNT: AtomicUsize = AtomicUsize::new(0);
-        DROP_PROBE_COUNT.store(0, Ordering::SeqCst);
-
+    fn cranelift_fast_jit_rejects_non_constant_runtime_calls() {
         let source = r#"
-extern "C" {
-    fn sg_test_drop_probe() -> i64;
-}
-
-struct Resource {
-    handle: i64,
-}
-
-impl Drop for Resource {
-    def drop(&mut self) {
-        sg_test_drop_probe();
-    }
+def make() -> i64 {
+    7
 }
 
 def main() -> i64 {
-    let resource: Resource = Resource { handle: 7 };
-    42
+    make()
 }
 "#;
 
-        let value =
-            run_with_cranelift_fast_jit_with_host_probe(source, "sg_test_drop_probe", || {
-                DROP_PROBE_COUNT.fetch_add(1, Ordering::SeqCst);
-                0
-            })
-            .expect("cranelift fast-jit should execute MIR drop glue");
-
-        assert_eq!(value, 42);
-        assert_eq!(DROP_PROBE_COUNT.load(Ordering::SeqCst), 1);
+        let error =
+            run_with_cranelift_fast_jit(source).expect_err("fast-jit should stay constant-only");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported expression in cranelift fast-jit mode"),
+            "unexpected fast-jit error: {error}"
+        );
     }
 }

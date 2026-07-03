@@ -138,6 +138,15 @@ pub enum Instruction {
         args: Vec<Local>,
     },
 
+    /// 间接函数调用：通过运行时函数指针局部变量调用。
+    /// 用于 `dyn Trait` 的虚表（vtable）动态分发。
+    CallIndirect {
+        destination: Local,
+        /// 持有函数指针的局部变量
+        func_ptr: Local,
+        args: Vec<Local>,
+    },
+
     /// 内联函数调用
     Intrinsic {
         destination: Option<Local>,
@@ -210,6 +219,7 @@ impl Instruction {
             | Instruction::Bitcast { destination, .. }
             | Instruction::Aggregate { destination, .. }
             | Instruction::Call { destination, .. }
+            | Instruction::CallIndirect { destination, .. }
             | Instruction::Discriminant { destination, .. }
             | Instruction::EnumConstruct { destination, .. }
             | Instruction::ExtractPayload { destination, .. }
