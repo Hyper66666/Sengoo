@@ -350,6 +350,21 @@ pub enum TokenKind {
     // 字符
     #[regex(r"'[^'\\]*(?:\\.[^'\\]*)*'", |lex| Some(parse_char(&lex.slice()[1..lex.slice().len()-1])))]
     Char(Option<char>),
+
+    // f-string（插值字符串）：载荷携带模板与每个插值表达式
+    // 在 token 内的字节区间，供 parser 精确回溯原始位置。
+    // 载荷为 `None` 表示字面量未闭合（畸形）。
+    #[token("f\"", lex_fstring)]
+    FString(Option<FStringLiteral>),
+}
+
+/// f-string 字面量的词法载荷。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FStringLiteral {
+    /// 已解码的模板文本；插值位置以 `{}` 占位，`{{`/`}}` 原样保留。
+    pub template: String,
+    /// 每个插值表达式相对 token 起点（`f` 处）的字节区间。
+    pub interpolations: Vec<Span>,
 }
 
 /// 字面量类型
@@ -761,6 +776,126 @@ fn unescape_string(s: &str) -> String {
     }
 
     result
+}
+
+/// f-string 前缀 `f"` 的字节长度，用于换算 token 内相对偏移。
+const FSTRING_PREFIX_LEN: usize = 2;
+
+/// 词法回调：扫描 `f"..."` 剩余部分。
+///
+/// 成功时消费至闭合引号并返回模板与插值区间；未闭合（行尾或 EOF）
+/// 时消费到行尾并返回 `None`，由 parser 汇报诊断。
+fn lex_fstring(lex: &mut logos::Lexer<TokenKind>) -> Option<FStringLiteral> {
+    let remainder = lex.remainder();
+    match scan_fstring_body(remainder) {
+        Some((literal, consumed)) => {
+            lex.bump(consumed);
+            Some(literal)
+        }
+        None => {
+            let line_end = remainder.find('\n').unwrap_or(remainder.len());
+            lex.bump(line_end);
+            None
+        }
+    }
+}
+
+/// 扫描 f-string 正文（`f"` 之后的文本），返回载荷与消费的字节数。
+fn scan_fstring_body(remainder: &str) -> Option<(FStringLiteral, usize)> {
+    let bytes = remainder.as_bytes();
+    let mut raw_template = String::new();
+    let mut interpolations = Vec::new();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let literal = FStringLiteral {
+                    template: unescape_string(&raw_template),
+                    interpolations,
+                };
+                return Some((literal, i + 1));
+            }
+            b'\n' => return None,
+            b'\\' => {
+                raw_template.push('\\');
+                i += 1;
+                if let Some(c) = remainder[i..].chars().next() {
+                    raw_template.push(c);
+                    i += c.len_utf8();
+                }
+            }
+            b'{' if bytes.get(i + 1) == Some(&b'{') => {
+                raw_template.push_str("{{");
+                i += 2;
+            }
+            b'}' if bytes.get(i + 1) == Some(&b'}') => {
+                raw_template.push_str("}}");
+                i += 2;
+            }
+            b'{' => {
+                i += 1;
+                let expr_lo = i;
+                let expr_hi = scan_interpolation_end(bytes, &mut i)?;
+                interpolations.push(Span::new(
+                    (expr_lo + FSTRING_PREFIX_LEN) as u32,
+                    (expr_hi + FSTRING_PREFIX_LEN) as u32,
+                ));
+                raw_template.push_str("{}");
+            }
+            _ => {
+                let c = remainder[i..].chars().next()?;
+                raw_template.push(c);
+                i += c.len_utf8();
+            }
+        }
+    }
+
+    None
+}
+
+/// 扫描插值表达式直到深度为 0 的闭合 `}`，返回其字节下标。
+/// 表达式内部的嵌套花括号与字符串/字符字面量会被正确跳过。
+fn scan_interpolation_end(bytes: &[u8], i: &mut usize) -> Option<usize> {
+    let mut depth = 0usize;
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b'}' if depth == 0 => {
+                let end = *i;
+                *i += 1;
+                return Some(end);
+            }
+            b'{' => {
+                depth += 1;
+                *i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                *i += 1;
+            }
+            quote @ (b'"' | b'\'') => skip_fstring_quoted(bytes, i, quote)?,
+            b'\n' => return None,
+            _ => *i += 1,
+        }
+    }
+    None
+}
+
+/// 跳过插值内部的字符串/字符字面量。
+fn skip_fstring_quoted(bytes: &[u8], i: &mut usize, quote: u8) -> Option<()> {
+    *i += 1;
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b'\\' => *i += 2,
+            b'\n' => return None,
+            b if b == quote => {
+                *i += 1;
+                return Some(());
+            }
+            _ => *i += 1,
+        }
+    }
+    None
 }
 
 /// 解析字符字面量

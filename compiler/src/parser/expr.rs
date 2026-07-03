@@ -75,6 +75,12 @@ impl<'source> Parser<'source> {
                     self.advance();
                     ExprKind::Literal(Literal::Char(*c))
                 }
+                TokenKind::FString(payload) => {
+                    let payload = payload.clone();
+                    let span = token.span;
+                    self.advance();
+                    return self.parse_fstring_expr(span, payload);
+                }
                 TokenKind::TrueKw => {
                     self.advance();
                     ExprKind::Literal(Literal::Bool(true))
@@ -220,6 +226,12 @@ impl<'source> Parser<'source> {
                 TokenKind::Char(Some(c)) => {
                     self.advance();
                     ExprKind::Literal(Literal::Char(*c))
+                }
+                TokenKind::FString(payload) => {
+                    let payload = payload.clone();
+                    let span = token.span;
+                    self.advance();
+                    return self.parse_fstring_expr(span, payload);
                 }
                 TokenKind::TrueKw => {
                     self.advance();

@@ -6,7 +6,8 @@ mod attribute_expander;
 mod decl;
 mod derive_expander;
 mod expr;
-mod fstring_expander;
+mod fstring;
+mod fstring_scan;
 mod macro_expander;
 mod pat;
 mod stmt;
@@ -59,8 +60,7 @@ impl<'source> Parser<'source> {
 
     /// 解析源码并返回 AST。
     pub fn parse(source: &str) -> Result<Program> {
-        let fstring_expanded = fstring_expander::expand_fstrings(source)?;
-        let macro_expanded = macro_expander::expand_declarative_macros(fstring_expanded.as_ref())?;
+        let macro_expanded = macro_expander::expand_declarative_macros(source)?;
         let attr_filtered =
             attribute_expander::process_surface_attributes(macro_expanded.as_ref())?;
         let expanded_source = derive_expander::expand_derive_macros(attr_filtered.as_ref())?;

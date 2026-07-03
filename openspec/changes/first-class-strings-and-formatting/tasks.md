@@ -117,10 +117,11 @@
 
 ## 4. Literals and interpolation
 
-- [~] 4.1 Lexer: `f"..."` interpolation token sequence.
-  - Implemented as a parser pre-lex source expansion pass rather than a
-    dedicated lexer token sequence: `f"..."` rewrites to `format(...)` while
-    preserving ordinary string/comment contents.
+- [x] 4.1 Lexer: `f"..."` interpolation token sequence.
+  - Implemented as a dedicated `TokenKind::FString` lexer token whose payload
+    carries the decoded template plus the byte span of every interpolation
+    expression; the parser lowers it to `format(...)` with each interpolation
+    parsed at its original source offset (`compiler/src/parser/fstring.rs`).
 - [x] 4.2 Lexer: `b"..."` byte strings and `"""..."""` multiline (leading-WS strip).
   - Byte string tokenization is covered in lexer tests; multiline strings now
     scan as one `String` token and strip common leading whitespace.
@@ -129,13 +130,16 @@
   - Implemented in `compiler/src/lexer/token.rs`; covered by lexer token tests
     and a compile-to-IR print regression for based/suffixed/separated literals.
 - [x] 4.4 Lower `f"...{e}..."` to `format(...)` in the parser/HIR.
-  - Verified by `compiler/src/parser/fstring_expander.rs` unit tests and
+  - Verified by `compiler/src/parser/fstring.rs` unit tests and
     `cargo test -p sengoo-compiler format -- --nocapture`.
-- [~] 4.5 Tests for each literal form and interpolation lowering.
+- [x] 4.5 Tests for each literal form and interpolation lowering.
   - Covered: f-string simple/multiple/compound interpolation, brace escapes,
     empty interpolation rejection, byte strings, multiline strings, based
-    integer literals, and typed suffixes. Remaining: broader source-map/span
-    diagnostics for expanded f-strings.
+    integer literals, and typed suffixes. Source-map/span diagnostics are now
+    exact: interpolation expression spans, empty-interpolation errors, and
+    malformed-expression errors all point at the original `{...}` text
+    (`parser::fstring::tests` span assertions), and unterminated f-strings
+    surface a stable spanned diagnostic.
 
 ## 5. UTF-8 correctness
 
