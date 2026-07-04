@@ -74,7 +74,10 @@ pub(super) fn lower_function(
                 || fn_item.name.ends_with("_strong_count")
                 || fn_item.name.ends_with("_is_unique")
                 || fn_item.name.ends_with("_get"));
-        if !fn_item.name.ends_with("_Drop_drop") && !param.ty.is_ref() && !borrowed_receiver_wrapper
+        if !fn_item.name.ends_with("_Drop_drop")
+            && !param.ty.is_ref()
+            && !borrowed_receiver_wrapper
+            && crate::mir::dyn_dispatch::dyn_trait_of_hir_param(&param.ty).is_none()
         {
             ctx.record_drop_binding_if_needed(local);
         }

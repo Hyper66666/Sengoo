@@ -32,6 +32,9 @@ pub struct MirLowerOptions {
     /// `(trait, concrete_type_prefix)` pairs discovered at `&Concrete -> &dyn Trait`
     /// coercion sites; consumed after lowering to synthesize vtable shims.
     pub(crate) dyn_vtable_requests: Rc<RefCell<HashSet<(String, String)>>>,
+    /// Trait names whose owned `dyn Trait` values need a scope-exit drop helper
+    /// (`__dyn_Trait_Drop_drop`) that dispatches through the vtable drop slot.
+    pub(crate) dyn_owned_drop_requests: Rc<RefCell<HashSet<String>>>,
 }
 
 impl Default for MirLowerOptions {
@@ -46,6 +49,7 @@ impl Default for MirLowerOptions {
             trait_method_order: Rc::new(HashMap::new()),
             dyn_param_traits: Rc::new(HashMap::new()),
             dyn_vtable_requests: Rc::new(RefCell::new(HashSet::new())),
+            dyn_owned_drop_requests: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 }
@@ -73,6 +77,7 @@ impl MirLowerOptions {
             trait_method_order: Rc::new(HashMap::new()),
             dyn_param_traits: Rc::new(HashMap::new()),
             dyn_vtable_requests: Rc::new(RefCell::new(HashSet::new())),
+            dyn_owned_drop_requests: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 

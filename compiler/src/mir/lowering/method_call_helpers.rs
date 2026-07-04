@@ -88,12 +88,15 @@ where
     )
 }
 
+/// Resolve a method call target. The `bool` in the result reports whether the
+/// receiver was resolved through the deref plan (pointer receiver, by-value
+/// callee), meaning the caller must load the receiver before the call.
 pub(super) fn resolve_method_call_target_with_ctx(
     ctx: &mut LoweringContext<'_>,
     receiver_local: Local,
     method: &str,
     arg_locals: &[Local],
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
     let explicit_type_name = ctx.type_names.get(&receiver_local).cloned();
     let dispatch_plan =
@@ -121,12 +124,12 @@ pub(super) fn resolve_method_call_target_with_ctx(
             .iter()
             .map(|(name, arity)| (name.as_str(), *arity)),
     );
-    if direct.is_ok() {
-        return direct;
+    if let Ok(name) = direct {
+        return Ok((name, false));
     }
 
     let (MIRType::Ptr(inner) | MIRType::Ref(inner)) = &receiver_ty else {
-        return direct;
+        return direct.map(|name| (name, false));
     };
     let deref_plan = build_method_dispatch_plan(explicit_type_name.as_deref(), inner, method);
     resolve_method_call_name_with_ctx(
@@ -139,6 +142,30 @@ pub(super) fn resolve_method_call_target_with_ctx(
             .iter()
             .map(|(name, arity)| (name.as_str(), *arity)),
     )
+    .map(|name| (name, true))
+}
+
+/// Load a pointer receiver into a by-value local so the call ABI matches
+/// method definitions, which always take `self` by value.
+fn load_deref_receiver(ctx: &mut LoweringContext<'_>, receiver_local: Local) -> Local {
+    let receiver_ty = ctx.get_local_type(receiver_local).clone();
+    let (MIRType::Ptr(inner) | MIRType::Ref(inner)) = &receiver_ty else {
+        return receiver_local;
+    };
+    let inner_ty = (**inner).clone();
+    let struct_type_name = match &inner_ty {
+        MIRType::Struct { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    let loaded = ctx.add_local(None, LocalKind::Temp, inner_ty);
+    if let Some(name) = struct_type_name {
+        ctx.type_names.insert(loaded, name);
+    }
+    ctx.push_inst(Instruction::Load {
+        destination: loaded,
+        source: receiver_local,
+    });
+    loaded
 }
 
 pub(super) fn emit_resolved_method_call(
@@ -204,24 +231,60 @@ pub(super) fn lower_method_call_from_locals(
     }
 
     if let Some(result_local) =
+        try_lower_owned_dyn_explicit_drop(ctx, receiver_local, method, arg_locals)
+    {
+        return result_local;
+    }
+
+    if let Some(result_local) =
         try_lower_dyn_method_dispatch(ctx, receiver_local, method, arg_locals)
     {
         return result_local;
     }
 
-    let resolved_func_name =
+    let (resolved_func_name, receiver_needs_load) =
         match resolve_method_call_target_with_ctx(ctx, receiver_local, method, arg_locals) {
-            Ok(name) => name,
+            Ok(resolved) => resolved,
             Err(error) => {
                 ctx.errors.push(error);
                 return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
             }
         };
+    let receiver_local = if receiver_needs_load {
+        load_deref_receiver(ctx, receiver_local)
+    } else {
+        receiver_local
+    };
     emit_resolved_method_call(ctx, receiver_local, arg_locals, &resolved_func_name)
 }
 
 fn is_explicit_release_method(method: &str) -> bool {
     matches!(method, "drop" | "free" | "close")
+}
+
+/// Lower an explicit `value.drop()` on an owned `dyn Trait` value: dispatch
+/// through the per-trait owned drop helper (vtable drop slot) and suppress the
+/// scope-exit drop for the receiver.
+fn try_lower_owned_dyn_explicit_drop(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    method: &str,
+    arg_locals: &[Local],
+) -> Option<Local> {
+    if method != "drop" || !arg_locals.is_empty() {
+        return None;
+    }
+    let receiver_ty = ctx.get_local_type(receiver_local).clone();
+    let trait_name = crate::mir::dyn_dispatch::dyn_trait_of_type(&receiver_ty)?.to_string();
+    let helper = super::named_call_helpers::ensure_owned_dyn_drop_helper(ctx, &trait_name);
+    ctx.mark_drop_local_moved(receiver_local);
+    let destination = ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    ctx.push_inst(Instruction::Call {
+        destination,
+        func: helper,
+        args: vec![receiver_local],
+    });
+    Some(destination)
 }
 
 /// Lower a method call on a `&dyn Trait` receiver into a vtable-backed indirect
@@ -245,7 +308,12 @@ fn try_lower_dyn_method_dispatch(
             slots
                 .iter()
                 .position(|slot| slot.name == method)
-                .map(|index| (index, slots[index].ret.clone()))
+                .map(|index| {
+                    (
+                        crate::mir::dyn_dispatch::VTABLE_METHOD_BASE + index,
+                        slots[index].ret.clone(),
+                    )
+                })
         });
     let (slot, ret_ty) = match resolved {
         Some(found) => found,
@@ -455,7 +523,7 @@ mod tests {
 
         let result = resolve_method_call_target_with_ctx(&mut ctx, receiver, "sum", &[]);
 
-        assert_eq!(result.unwrap(), "Point_sum");
+        assert_eq!(result.unwrap(), ("Point_sum".to_string(), false));
     }
     #[test]
     fn emit_resolved_method_call_tracks_struct_return_type_name() {

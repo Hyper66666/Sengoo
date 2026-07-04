@@ -1041,6 +1041,32 @@ impl TypeChecker {
             .all(|t| self.impl_registry.implements_trait(t, &concrete_key))
     }
 
+    /// Whether `actual` can be unsize-coerced to `expected` as an *owned* trait
+    /// object, i.e. `Concrete -> dyn Trait` (by value) where `Concrete`
+    /// implements every listed trait. The owned dyn value takes over drop
+    /// responsibility and destroys the payload through the vtable drop slot.
+    pub(super) fn is_owned_dyn_unsize_coercion(&self, expected: &Ty, actual: &Ty) -> bool {
+        use crate::typeck::r#trait::type_key;
+        let expected = self.infer.apply_subst(expected);
+        let TyKind::Dyn(traits) = &expected.kind else {
+            return false;
+        };
+        if traits.is_empty() {
+            return false;
+        }
+        let concrete = self.infer.apply_subst(actual);
+        if matches!(
+            concrete.kind,
+            TyKind::Dyn(_) | TyKind::Var(_) | TyKind::Ref(_, _)
+        ) {
+            return false;
+        }
+        let concrete_key = type_key(&concrete);
+        traits
+            .iter()
+            .all(|t| self.impl_registry.implements_trait(t, &concrete_key))
+    }
+
     /// Type check a method call by resolving candidates against the receiver type.
     pub(super) fn check_method_call(
         &mut self,
@@ -1071,6 +1097,14 @@ impl TypeChecker {
             _ => None,
         };
         if let Some(traits) = dyn_traits {
+            // Explicit early drop of an owned `dyn Trait` value: dispatched
+            // through the vtable drop slot, not a trait method.
+            if method_name == "drop"
+                && args.is_empty()
+                && matches!(receiver_ty.kind, TyKind::Dyn(_))
+            {
+                return Ok(self.env.unit_ty());
+            }
             for trait_name in &traits {
                 let Some(trait_info) = self.trait_registry.get(trait_name) else {
                     continue;

@@ -105,9 +105,12 @@ def takes_iter(value: dyn Iterator<Item = i64>) -> i64 {
 
 Current `dyn Trait` support includes parsing/type checking, object-safety
 diagnostics, fixed associated-type validation, and LLVM-text/JIT dynamic
-dispatch for single-trait `&self` receivers through a fat pointer plus vtable.
-Multi-trait dyn objects, owning `Box<dyn Trait>`, dyn drop slots, and the native
-Cranelift path remain roadmap work.
+dispatch for single-trait `&self` and `&mut self` receivers through a fat
+pointer plus vtable. Vtables carry `drop`, size, and align prefix slots, and
+the compiler emits erased drop thunks for concrete implementations, but
+source-level owned `dyn Trait` drop/early-drop lowering is still incomplete.
+Multi-trait dyn objects, owning `Box<dyn Trait>`, value receivers, and the
+native Cranelift path remain roadmap work.
 
 Core trait names are compiler-known for bounds: `Clone`, `Copy`,
 `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`, `Display`, `Debug`,
@@ -122,10 +125,13 @@ generate lexicographic `compare/lt/le/gt/ge` helpers, with `< <= > >=`
 lowering through `compare`; `#[derive(Hash)]` generates a deterministic
 `hash() -> i64` helper; and `#[derive(Default)]` on named structs generates a
 callable `Type::default()` constructor. Scalar fields are handled directly, and
-nested fields work when their own derived helper is available. The full
-`Hasher` object protocol, generic collection-field derives beyond the generated
-method calls, and the general Formatter object protocol are still under
-construction. `Copy` is
+nested fields work when their own derived helper is available. Custom
+`impl Hash` bodies may define `hash_into(&self, h: &mut Hasher)`; the compiler
+synthesizes `hash() -> i64` by creating a runtime-backed `Hasher`, driving
+`hash_into`, and consuming `finish()`. `#[derive(Hash)]` still emits its direct
+deterministic `hash()` helper rather than a generated `hash_into` body. Generic
+collection-field derives beyond the generated method calls and the general
+Formatter object protocol are still under construction. `Copy` is
 checked against `Drop`: a type cannot implement both, and a `Copy` type cannot
 contain non-`Copy` fields.
 

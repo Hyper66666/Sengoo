@@ -28,6 +28,14 @@ extern "C" {
     fn sengoo_string_slice_status(handle: i64, start: i64, end: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
     fn sengoo_string_compare(lhs_handle: i64, rhs_handle: i64) -> i64;
+    fn sengoo_str_hash(value: &str) -> i64;
+    fn sengoo_hasher_new() -> i64;
+    fn sengoo_hasher_free_status(handle: i64) -> i64;
+    fn sengoo_hasher_write_i64(handle: i64, value: i64) -> i64;
+    fn sengoo_hasher_write_bool(handle: i64, value: i64) -> i64;
+    fn sengoo_hasher_write_str(handle: i64, value: &str) -> i64;
+    fn sengoo_hasher_write_string(handle: i64, string_handle: i64) -> i64;
+    fn sengoo_hasher_finish(handle: i64) -> i64;
     fn sengoo_string_bytes_iter_new(handle: i64) -> i64;
     fn sengoo_string_chars_iter_new(handle: i64) -> i64;
     fn sengoo_string_iter_done(iter_handle: i64) -> i64;
@@ -62,8 +70,16 @@ struct Formatter {
     handle: i64,
 }
 
+struct Hasher {
+    handle: i64,
+}
+
 def formatter_new() -> Formatter {
     Formatter { handle: sengoo_string_new() }
+}
+
+def hasher_new() -> Hasher {
+    Hasher { handle: sengoo_hasher_new() }
 }
 
 impl Formatter {
@@ -94,6 +110,37 @@ impl Formatter {
 
     def finish(self) -> String {
         String { handle: self.handle }
+    }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        sengoo_hasher_write_i64(self.handle, value) >= 0
+    }
+
+    def write_bool(&mut self, value: bool) -> bool {
+        let raw = if value { 1 } else { 0 };
+        sengoo_hasher_write_bool(self.handle, raw) >= 0
+    }
+
+    def write_str(&mut self, text: &str) -> bool {
+        sengoo_hasher_write_str(self.handle, text) >= 0
+    }
+
+    def write_string(&mut self, value: String) -> bool {
+        sengoo_hasher_write_string(self.handle, value.handle) >= 0
+    }
+
+    def finish(self) -> i64 {
+        let state = sengoo_hasher_finish(self.handle);
+        sengoo_hasher_free_status(self.handle);
+        state
+    }
+}
+
+impl Hash for String {
+    def hash_into(&self, h: &mut Hasher) {
+        sengoo_hasher_write_string(h.handle, self.handle);
     }
 }
 

@@ -1,5 +1,8 @@
 use super::*;
-use crate::mir::dyn_dispatch::{parse_shim_name, vtable_global_name};
+use crate::mir::dyn_dispatch::{
+    parse_drop_method_metadata, parse_shim_name, vtable_global_name, VTABLE_ALIGN_SLOT,
+    VTABLE_METHOD_BASE, VTABLE_SIZE_SLOT,
+};
 
 impl Codegen {
     /// Emit one `[N x i64]` vtable global per `(trait, concrete type)` pair that
@@ -11,12 +14,19 @@ impl Codegen {
         // (trait, type_prefix) -> slot -> (shim_name, fn_ptr_type_string)
         let mut tables: HashMap<(String, String), HashMap<usize, (String, String)>> =
             HashMap::new();
+        let mut layouts: HashMap<(String, String), (u64, u64)> = HashMap::new();
 
         for mir_fn in mir_fns {
             let Some(parsed) = parse_shim_name(&mir_fn.name) else {
                 continue;
             };
             let fn_ptr_ty = self.shim_fn_pointer_type(mir_fn);
+            if let Some((size, align)) = parse_drop_method_metadata(&parsed.method) {
+                layouts.insert(
+                    (parsed.trait_name.clone(), parsed.type_prefix.clone()),
+                    (size, align),
+                );
+            }
             tables
                 .entry((parsed.trait_name, parsed.type_prefix))
                 .or_default()
@@ -34,16 +44,32 @@ impl Codegen {
         self.ir.push_str("\n; dyn Trait vtables\n");
         for (trait_name, type_prefix) in keys {
             let slots = &tables[&(trait_name.clone(), type_prefix.clone())];
-            let slot_count = slots.keys().copied().max().map(|m| m + 1).unwrap_or(0);
+            let slot_count = slots
+                .keys()
+                .copied()
+                .max()
+                .map(|m| m + 1)
+                .unwrap_or(0)
+                .max(VTABLE_METHOD_BASE);
+            let (size, align) = layouts
+                .get(&(trait_name.clone(), type_prefix.clone()))
+                .copied()
+                .unwrap_or((0, 1));
 
             let mut elements: Vec<String> = Vec::with_capacity(slot_count);
             for slot in 0..slot_count {
-                match slots.get(&slot) {
-                    Some((shim_name, fn_ptr_ty)) => elements.push(format!(
-                        "i64 ptrtoint ({} @{} to i64)",
-                        fn_ptr_ty, shim_name
-                    )),
-                    None => elements.push("i64 0".to_string()),
+                if slot == VTABLE_SIZE_SLOT {
+                    elements.push(format!("i64 {size}"));
+                } else if slot == VTABLE_ALIGN_SLOT {
+                    elements.push(format!("i64 {align}"));
+                } else {
+                    match slots.get(&slot) {
+                        Some((shim_name, fn_ptr_ty)) => elements.push(format!(
+                            "i64 ptrtoint ({} @{} to i64)",
+                            fn_ptr_ty, shim_name
+                        )),
+                        None => elements.push("i64 0".to_string()),
+                    }
                 }
             }
 

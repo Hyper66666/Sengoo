@@ -66,6 +66,11 @@
     expressions so generic `Result<T, E>::unwrap_or` does not drop an owned
     selected value before returning it. General recoverable unwinding remains
     out of scope until Sengoo has recoverable panic semantics.
+  - Cross-note: `p0-gate-closure` added dyn vtable drop metadata and erased
+    drop thunks, but source-level owned `dyn Trait` values are not yet a
+    complete owning-value surface. Scope-exit/explicit drop through a dyn
+    vtable remains tracked there instead of being counted as closed by this
+    AMM change.
 - [x] 3.2 Cover early `return`, `?`, `break`, `continue`, and conditional init
   with per-local drop flags.
   - Completed for the current MIR drop-glue surface: `?` propagation exits use

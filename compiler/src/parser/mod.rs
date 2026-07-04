@@ -9,6 +9,7 @@ mod expr;
 mod formatter_protocol;
 mod fstring;
 mod fstring_scan;
+mod hasher_protocol;
 mod macro_expander;
 mod pat;
 mod stmt;
@@ -71,6 +72,7 @@ impl<'source> Parser<'source> {
             return Err(CompileError::ParseError(parser.errors.remove(0)));
         }
         formatter_protocol::synthesize_formatter_to_string(&mut program)?;
+        hasher_protocol::synthesize_hash_from_hash_into(&mut program)?;
         Ok(program)
     }
 

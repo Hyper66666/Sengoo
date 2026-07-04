@@ -14,6 +14,7 @@
 #include "runtime_shared.h"
 
 extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
+extern long long sengoo_string_as_str_ptr(long long handle);
 
 #ifdef _WIN32
 #include <direct.h>
@@ -113,6 +114,105 @@ long long sengoo_str_compare(const char* lhs, const char* rhs) {
         return 1;
     }
     return 0;
+}
+
+long long sengoo_str_hash(const char* value) {
+    uint64_t state = 1469598103934665603ULL;
+    if (!value) {
+        return (long long)state;
+    }
+    const unsigned char* cursor = (const unsigned char*)value;
+    while (*cursor) {
+        state ^= (uint64_t)(*cursor);
+        state *= 1099511628211ULL;
+        cursor++;
+    }
+    return (long long)state;
+}
+
+typedef struct SengooHasher {
+    uint64_t state;
+} SengooHasher;
+
+static void sengoo_hasher_mix_byte(SengooHasher* hasher, unsigned char value) {
+    hasher->state ^= (uint64_t)value;
+    hasher->state *= 1099511628211ULL;
+}
+
+static void sengoo_hasher_mix_i64(SengooHasher* hasher, long long value) {
+    uint64_t raw = (uint64_t)value;
+    for (int i = 0; i < 8; ++i) {
+        sengoo_hasher_mix_byte(hasher, (unsigned char)((raw >> (i * 8)) & 0xffU));
+    }
+}
+
+static SengooHasher* sengoo_hasher_from_handle(long long handle) {
+    return (SengooHasher*)sengoo_opaque_handle_get(handle);
+}
+
+long long sengoo_hasher_new(void) {
+    SengooHasher* hasher = (SengooHasher*)malloc(sizeof(SengooHasher));
+    if (!hasher) {
+        return 0;
+    }
+    hasher->state = 1469598103934665603ULL;
+    long long handle = sengoo_opaque_handle_new(hasher);
+    if (handle <= 0) {
+        free(hasher);
+        return 0;
+    }
+    return handle;
+}
+
+long long sengoo_hasher_free_status(long long handle) {
+    void* hasher = sengoo_opaque_handle_take(handle);
+    if (!hasher) {
+        return -2002;
+    }
+    free(hasher);
+    return 0;
+}
+
+long long sengoo_hasher_write_i64(long long handle, long long value) {
+    SengooHasher* hasher = sengoo_hasher_from_handle(handle);
+    if (!hasher) {
+        return -2002;
+    }
+    sengoo_hasher_mix_i64(hasher, value);
+    return 0;
+}
+
+long long sengoo_hasher_write_bool(long long handle, long long value) {
+    return sengoo_hasher_write_i64(handle, value ? 1 : 0);
+}
+
+long long sengoo_hasher_write_str(long long handle, const char* value) {
+    SengooHasher* hasher = sengoo_hasher_from_handle(handle);
+    if (!hasher) {
+        return -2002;
+    }
+    const unsigned char* cursor = (const unsigned char*)(value ? value : "");
+    while (*cursor) {
+        sengoo_hasher_mix_byte(hasher, *cursor);
+        cursor++;
+    }
+    return 0;
+}
+
+long long sengoo_hasher_write_string(long long handle, long long string_handle) {
+    long long raw = sengoo_string_as_str_ptr(string_handle);
+    if (raw <= 0) {
+        return -2002;
+    }
+    return sengoo_hasher_write_str(handle, (const char*)(intptr_t)raw);
+}
+
+long long sengoo_hasher_finish(long long handle) {
+    SengooHasher* hasher = sengoo_hasher_from_handle(handle);
+    if (!hasher) {
+        return 0;
+    }
+    return (long long)hasher->state;
 }
 
 long long sengoo_f64_eq(double lhs, double rhs) {

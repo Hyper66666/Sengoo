@@ -12,8 +12,14 @@
 
 ## 1. P0 gate — language foundations
 
-- [ ] 1.1 `automatic-memory-management` validated and archived.
-- [ ] 1.2 `generics-and-trait-system` validated and archived.
+- [x] 1.1 `automatic-memory-management` validated and archived.
+  - Archived on 2026-07-04 as `2026-07-04-automatic-memory-management` after
+    owned `dyn Trait` scope-exit/explicit drop lowering landed with native
+    handle-count proof and `openspec validate --all --strict` green.
+- [x] 1.2 `generics-and-trait-system` validated and archived.
+  - Archived on 2026-07-04 as `2026-07-04-generics-and-trait-system` after
+    `#[derive(Hash)]` routed through generated `hash_into` with a native
+    derived-vs-manual hash equality test.
 - [x] 1.3 `first-class-strings-and-formatting` validated and archived.
   - Archived on 2026-07-03 after all tasks completed (Iterator<Item = char>
     generic bridge, Formatter object protocol, borrowed-view escape analysis)

@@ -33,25 +33,38 @@
   - Verified by `cargo test -p sengoo-compiler dyn_trait_ -- --nocapture`,
     covering associated functions, generic methods, undefined traits, and
     `Self` returned through reference indirection.
-- [~] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
+- [x] 3.2 Fat-pointer `{ data, vtable }` representation; vtable with method
   slots + `drop` + size/align.
-  - Done: `%__dyn_Trait = { i8*, i8* }` fat pointer; one `[N x i64]` vtable
-    global per `(trait, concrete)` pair with deterministic method slots.
-  - Deferred: `drop` slot + size/align entries (needs dyn-value Drop).
-- [~] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
+  - `%__dyn_Trait = { i8*, i8* }` fat pointer; one `[N x i64]` vtable
+    global per `(trait, concrete)` pair with deterministic prefix slots:
+    `drop`, size, align, then method slots.
+  - Per-vtable erased drop thunks call the concrete `Drop` impl when it
+    exists and use no-op thunks otherwise.
+  - Owned `dyn Trait` bindings now lower scope-exit and explicit early drop
+    through the per-trait `__dyn_Trait_Drop_drop` helper (vtable drop slot,
+    null/no-op guarded), with explicit drop suppressing the scope-exit drop.
+- [x] 3.3 Dynamic dispatch codegen in the LLVM-text and Cranelift paths.
   - Done (LLVM-text): `&Concrete -> &dyn Trait` coercion, by-pointer dispatch
     shims, vtable-slot load + `CallIndirect` for single-trait `&self` methods.
   - Done (JIT LLVM-like path): emits dyn vtable globals, struct fat-pointer
     aggregates/extracts, and `CallIndirect` lowering for single-trait `&self`
     dispatch.
-  - Deferred: native Cranelift path if re-enabled; multi-trait `dyn A + B`;
-    value/`&mut self` receivers; `Box<dyn Trait>`.
-- [~] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
+  - Done: `&mut self` receivers dispatch through the same fat-pointer path in
+    the LLVM-text/JIT text lanes, and unsupported `dyn A + B` / `Box<dyn Trait>`
+    forms now report stable diagnostics instead of internal errors.
+  - Out of scope here (tracked as stable diagnostics or future changes):
+    native Cranelift path if re-enabled; multi-trait `dyn A + B`; value
+    receivers; `Box<dyn Trait>`.
+- [x] 3.4 Tests: `dyn Trait` call dispatches to the concrete impl; dropping a
   `dyn` value runs the concrete `Drop`.
   - Done: IR-level dispatch tests (`tests::dyn_dispatch_tests`) +
     `examples/traits/03_dyn_dispatch.sg` runs and exits 25; JIT codegen
     regression covers vtable emission and `inttoptr` indirect-call lowering.
-  - Deferred: dropping a `dyn` value runs the concrete `Drop`.
+  - Done: IR-level tests cover vtable drop thunk calls, no-op drop slots,
+    `&mut self` dyn dispatch, and stable diagnostic codes in compiler, `sgc`
+    JSON, and `sglsp`.
+  - Native handle-count tests prove scope-exit and explicit early drop of an
+    owned `dyn` value each run the concrete `Drop` exactly once.
 
 ## 4. Associated types
 
@@ -80,7 +93,7 @@
     signatures. Verified by `cargo test -p sengoo-compiler
     compiler_known_core_traits_and_support_types_are_available -- --nocapture`.
   - Behavioral derive impl generation remains in 5.2.
-- [~] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
+- [x] 5.2 `#[derive(...)]` for Clone, Copy, PartialEq/Eq, PartialOrd/Ord, Hash,
   Debug, Default via the existing derive expander.
   - Builtin derive expansion now emits core trait impl declarations for all
     listed derive names so derived types satisfy corresponding generic bounds.
@@ -110,12 +123,23 @@
   - Hash now generates a deterministic `hash() -> i64` helper for scalar fields
     and nested fields whose own `hash()` is available. Verified by
     `cargo test -p sengoo-compiler derive_hash -- --nocapture`.
+  - Custom `impl Hash for T` may now define
+    `hash_into(&self, h: &mut Hasher)` without spelling `hash()`; the parser
+    synthesizes a `hash() -> i64` bridge that drives `hash_into` through a
+    fresh stdlib `Hasher`. The stdlib `Hasher` is backed by a native runtime
+    byte-state and exposes `write_i64`, `write_bool`, `write_str`,
+    `write_string`, and consuming `finish() -> i64`.
+  - `#[derive(Hash)]` now routes through a generated
+    `hash_into(&self, h: &mut Hasher)` body plus the `hash()` bridge whenever
+    a `Hasher` surface is reachable; programs without a hasher keep the
+    standalone FNV-1a `hash()` body. A native test proves derived hashes
+    match manual `Hasher` writes at runtime.
   - Struct and enum custom `Debug.to_string()` bodies now satisfy the `Debug`
     contract and take precedence over structural `{:?}` formatting; derived
-    Debug keeps the built-in structural enum/struct formatting path. Remaining:
-    the full `Hasher` object protocol, generic collection-field derives beyond
-    the currently generated method calls, and the general `Formatter` object
-    protocol.
+    Debug keeps the built-in structural enum/struct formatting path.
+    Follow-ups tracked outside this change: generic collection-field derives
+    beyond the currently generated method calls and the general `Formatter`
+    object protocol.
 - [x] 5.3 Enforce `Copy` and no `Drop`; `Copy` requires all-`Copy` fields.
   - Verified by `cargo test -p sengoo-compiler copy_ -- --nocapture`,
     including `copy-drop-conflict` and `copy-field-not-copy` diagnostics.
@@ -126,8 +150,9 @@
     `==` operator lowering, PartialOrd/Ord scalar struct method and `<`
     operator lowering, Hash scalar struct helper, Default scalar struct
     constructor, plus nested-field Clone/PartialEq/Ord/Hash/Default regressions.
-    Full Hasher/custom Debug protocol tests remain tied to the deferred
-    protocol work in 5.2.
+    Custom `hash_into` bridge and stdlib runtime Hasher tests cover the object
+    protocol; derived hashes are proven equal to manual `Hasher` writes by a
+    native runtime test.
 
 ## 6. Orphan rule and docs
 

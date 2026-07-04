@@ -111,6 +111,63 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
     result
 }
 
+/// Coerce an owned concrete value into an owned `dyn Trait` fat pointer. The
+/// value is materialized into a stack slot the fat pointer's data field points
+/// at; the slot's own drop responsibility transfers to the dyn value, which
+/// drops through the vtable drop slot via the per-trait owned drop helper.
+pub(super) fn emit_owned_dyn_coercion(
+    ctx: &mut LoweringContext<'_>,
+    value_local: Local,
+    trait_name: &str,
+) -> Local {
+    let value_ty = ctx.get_local_type(value_local).clone();
+    let slot = materialize_rc_payload_source(ctx, value_local, &value_ty);
+    ctx.mark_drop_local_moved(slot);
+
+    let value_ref = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ref(Box::new(value_ty.clone())),
+    );
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ref,
+        source: slot,
+    });
+
+    ensure_owned_dyn_drop_helper(ctx, trait_name);
+    emit_dyn_coercion(ctx, value_ref, trait_name)
+}
+
+/// Register (and make known) the per-trait owned `dyn Trait` drop helper
+/// `__dyn_Trait_Drop_drop`, synthesized after lowering from the recorded
+/// requests. Its name matches the generic `{type}_Drop_drop` drop-glue lookup
+/// for locals of the fat-pointer struct type.
+pub(super) fn ensure_owned_dyn_drop_helper(
+    ctx: &mut LoweringContext<'_>,
+    trait_name: &str,
+) -> String {
+    let helper = format!(
+        "{}_Drop_drop",
+        crate::mir::dyn_dispatch::dyn_struct_name(trait_name)
+    );
+    ctx.options
+        .dyn_owned_drop_requests
+        .borrow_mut()
+        .insert(trait_name.to_string());
+    if !ctx.is_known_function(&helper) {
+        ctx.insert_known_function(helper.clone());
+        ctx.insert_function_sig(
+            helper.clone(),
+            FunctionSig {
+                ret_type: MIR_UNIT,
+                param_count: 1,
+                env: Vec::new(),
+            },
+        );
+    }
+    helper
+}
+
 fn materialize_rc_payload_source(
     ctx: &mut LoweringContext<'_>,
     value_local: Local,

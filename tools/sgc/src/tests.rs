@@ -1075,6 +1075,18 @@ fn render_compile_error_json_extracts_stable_diagnostic_code() {
 }
 
 #[test]
+fn render_compile_error_json_extracts_dyn_stable_diagnostic_codes() {
+    for code in ["dyn-multi-trait-unsupported", "dyn-box-unsupported"] {
+        let raw = format!("typecheck failed: [{code}] unsupported dyn form");
+        let json = super::render_compile_error_json(Some("tests/dyn.sg"), &raw);
+        let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+        assert_eq!(value["code"], code);
+        assert!(value["message"].as_str().unwrap_or("").contains(code));
+    }
+}
+
+#[test]
 fn render_compile_error_json_extracts_attribute_code() {
     let raw = "parse error: unsupported attribute: unsupported cfg predicate `target_arch`";
     let json = super::render_compile_error_json(Some("tests/attrs.sg"), raw);
@@ -5604,6 +5616,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_hash_uses_runtime_byte_state() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-hash-runtime-state",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let mut left = hasher_new();
+    left.write_str("ab");
+    let left_hash = left.finish();
+    let mut right = hasher_new();
+    right.write_str("ac");
+    let right_hash = right.finish();
+    if left_hash == right_hash {
+        2
+    } else {
+        0
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_string_comparison_operators_order_owned_strings() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-compare-operators",
@@ -8834,6 +8881,146 @@ def main() -> i64 {
     let count = make_shared_pair();
     let after = sengoo_string_live_handle_count();
     if count == 4 and after == before {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_owned_dyn_scope_exit_drop_releases_handle() {
+    let output = require_stdlib_runtime_output!(
+        "owned-dyn-scope-exit-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+}
+
+trait Speak {
+    def speak(&self) -> i64 {
+        0
+    }
+}
+
+struct Guard {
+    handle: i64,
+}
+
+impl Drop for Guard {
+    def drop(&mut self) {
+        sengoo_string_free_status(self.handle);
+    }
+}
+
+impl Speak for Guard {
+    def speak(&self) -> i64 {
+        1
+    }
+}
+
+def scoped(handle: i64) -> i64 {
+    let g = Guard { handle: handle };
+    let s: dyn Speak = g;
+    s.speak()
+}
+
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let handle = text.handle;
+    let before = sengoo_string_live_handle_count();
+    let spoke = scoped(handle);
+    let after = sengoo_string_live_handle_count();
+    if spoke == 1 and after == before - 1 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_owned_dyn_explicit_drop_releases_handle() {
+    let output = require_stdlib_runtime_output!(
+        "owned-dyn-explicit-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+}
+
+trait Speak {
+    def speak(&self) -> i64 {
+        0
+    }
+}
+
+struct Guard {
+    handle: i64,
+}
+
+impl Drop for Guard {
+    def drop(&mut self) {
+        sengoo_string_free_status(self.handle);
+    }
+}
+
+impl Speak for Guard {
+    def speak(&self) -> i64 {
+        1
+    }
+}
+
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let handle = text.handle;
+    let before = sengoo_string_live_handle_count();
+    let g = Guard { handle: handle };
+    let s: dyn Speak = g;
+    s.drop();
+    let after = sengoo_string_live_handle_count();
+    if after == before - 1 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_derived_hash_matches_manual_hash_into() {
+    let output = require_stdlib_runtime_output!(
+        "derived-hash-runtime-state-consistency",
+        r#"
+#[derive(Hash)]
+struct Point {
+    x: i64,
+    y: i64,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let p = Point { x: 7, y: 11, flag: true };
+    let derived = p.hash();
+    let mut h = hasher_new();
+    h.write_i64(7);
+    h.write_i64(11);
+    h.write_bool(true);
+    let manual = h.finish();
+    if derived == manual and derived != 0 {
         42
     } else {
         1

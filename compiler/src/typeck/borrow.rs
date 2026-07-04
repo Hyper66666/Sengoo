@@ -335,6 +335,7 @@ impl BorrowChecker {
                 self.maybe_move_assignment_value(target, value);
                 if let Some(path) = Self::expr_move_path(target) {
                     self.reinitialize_move_path(&path);
+                    self.track_borrow_alias_for_path(&path, value);
                 }
             }
             ExprKind::AssignOp { target, value, .. } => {
@@ -697,7 +698,61 @@ impl BorrowChecker {
                 }
             }
             ExprKind::Paren(inner) => self.track_borrows_in_expr(name, inner),
+            ExprKind::Ident(_) | ExprKind::Path(_) | ExprKind::Field { .. } => {
+                self.track_borrow_alias(name, expr);
+            }
             _ => {}
+        }
+    }
+
+    fn track_borrow_alias(&mut self, name: &str, expr: &Expr) {
+        let target = MovePath::root(name.to_string());
+        self.track_borrow_alias_for_path(&target, expr);
+    }
+
+    fn track_borrow_alias_for_path(&mut self, target: &MovePath, expr: &Expr) {
+        match &expr.kind {
+            ExprKind::Unary { op, operand } => {
+                let kind = match op {
+                    UnOp::Ref => Some(BorrowKind::Immutable),
+                    UnOp::RefMut => Some(BorrowKind::Mutable),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    self.add_borrow(operand, kind);
+                    if let Some(source) = Self::expr_move_path(operand) {
+                        if let Some(existing) = self.borrows.get(&source).cloned() {
+                            self.borrows.insert(target.clone(), existing);
+                            return;
+                        }
+                    }
+                }
+            }
+            ExprKind::MethodCall {
+                receiver, method, ..
+            } if matches!(method.name.as_str(), "borrow" | "as_str") => {
+                self.add_borrow(receiver, BorrowKind::Immutable);
+                if let Some(source) = Self::expr_move_path(receiver) {
+                    if let Some(existing) = self.borrows.get(&source).cloned() {
+                        self.borrows.insert(target.clone(), existing);
+                        return;
+                    }
+                }
+            }
+            ExprKind::Paren(inner) => {
+                self.track_borrow_alias_for_path(target, inner);
+                return;
+            }
+            _ => {}
+        }
+        let Some(source) = Self::expr_move_path(expr) else {
+            self.borrows.remove(target);
+            return;
+        };
+        if let Some(existing) = self.borrows.get(&source).cloned() {
+            self.borrows.insert(target.clone(), existing);
+        } else {
+            self.borrows.remove(target);
         }
     }
 

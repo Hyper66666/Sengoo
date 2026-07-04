@@ -63,7 +63,9 @@ impl TypeChecker {
                         "AsyncContext is poll-scoped and cannot be stored".to_string(),
                     ));
                 }
-                self.infer.unify(&var_ty, &value_ty)?;
+                if !self.is_owned_dyn_unsize_coercion(&var_ty, &value_ty) {
+                    self.infer.unify(&var_ty, &value_ty)?;
+                }
                 let resolved_var_ty = self.infer.apply_subst(&var_ty);
 
                 self.env

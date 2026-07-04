@@ -23,6 +23,11 @@ pub(crate) const DYN_STRUCT_PREFIX: &str = "__dyn_";
 /// so it keeps trait/type/method components unambiguous when parsed back.
 const SEP: char = '$';
 
+pub(crate) const VTABLE_DROP_SLOT: usize = 0;
+pub(crate) const VTABLE_SIZE_SLOT: usize = 1;
+pub(crate) const VTABLE_ALIGN_SLOT: usize = 2;
+pub(crate) const VTABLE_METHOD_BASE: usize = 3;
+
 /// Name of the fat-pointer struct type for `&dyn Trait`.
 pub(crate) fn dyn_struct_name(trait_name: &str) -> String {
     format!("{DYN_STRUCT_PREFIX}{trait_name}")
@@ -70,6 +75,20 @@ pub(crate) fn vtable_shim_name(
     format!("__dynshim{SEP}{trait_name}{SEP}{type_prefix}{SEP}{slot}{SEP}{method}")
 }
 
+pub(crate) fn vtable_drop_shim_name(
+    trait_name: &str,
+    type_prefix: &str,
+    size: u64,
+    align: u64,
+) -> String {
+    vtable_shim_name(
+        trait_name,
+        type_prefix,
+        VTABLE_DROP_SLOT,
+        &format!("__drop_s{size}_a{align}"),
+    )
+}
+
 /// One vtable slot of a trait: the method name and its MIR return type. The
 /// slot index (position in the per-trait vector) is the vtable index used by
 /// both the dispatch site and shim/vtable synthesis.
@@ -101,6 +120,7 @@ pub(crate) struct ParsedShimName {
     pub trait_name: String,
     pub type_prefix: String,
     pub slot: usize,
+    pub method: String,
 }
 
 /// Parse a shim function name produced by [`vtable_shim_name`].
@@ -112,11 +132,17 @@ pub(crate) fn parse_shim_name(name: &str) -> Option<ParsedShimName> {
     let trait_name = parts.next()?.to_string();
     let type_prefix = parts.next()?.to_string();
     let slot = parts.next()?.parse::<usize>().ok()?;
-    // Remaining field is the method name; presence confirms a well-formed shim.
-    parts.next()?;
+    let method = parts.next()?.to_string();
     Some(ParsedShimName {
         trait_name,
         type_prefix,
         slot,
+        method,
     })
+}
+
+pub(crate) fn parse_drop_method_metadata(method: &str) -> Option<(u64, u64)> {
+    let rest = method.strip_prefix("__drop_s")?;
+    let (size, align) = rest.split_once("_a")?;
+    Some((size.parse().ok()?, align.parse().ok()?))
 }

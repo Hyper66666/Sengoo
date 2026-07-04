@@ -1344,3 +1344,111 @@ def main() -> i64 {
         "expected generated Outer_hash to call Inner_hash\n{ir}"
     );
 }
+
+#[test]
+fn custom_hash_into_impl_synthesizes_hash_bridge() {
+    let source = r#"
+struct Hasher {
+    state: i64,
+}
+
+def hasher_new() -> Hasher {
+    Hasher { state: 0 }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        self.state = self.state + value;
+        true
+    }
+
+    def finish(self) -> i64 {
+        self.state
+    }
+}
+
+struct Key {
+    id: i64,
+}
+
+impl Hash for Key {
+    def hash_into(&self, h: &mut Hasher) {
+        h.write_i64(self.id);
+    }
+}
+
+def use_hash<T: Hash>(value: T) -> i64 {
+    value.hash()
+}
+
+def main() -> i64 {
+    use_hash(Key { id: 7 })
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("hash_into protocol should synthesize hash bridge");
+    assert!(
+        ir.contains("; Function: Key_Hash_hash") && ir.contains("call void @Key_Hash_hash_into"),
+        "expected Hash.hash bridge to drive hash_into, got:\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_routes_through_hash_into_when_hasher_in_scope() {
+    let source = r#"
+struct Hasher {
+    state: i64,
+}
+
+def hasher_new() -> Hasher {
+    Hasher { state: 0 }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        self.state = self.state + value;
+        true
+    }
+
+    def write_bool(&mut self, value: bool) -> bool {
+        self.state = self.state + (if value { 1 } else { 0 });
+        true
+    }
+
+    def finish(self) -> i64 {
+        self.state
+    }
+}
+
+#[derive(Hash)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Hash)]
+struct Key {
+    inner: Inner,
+    flag: bool,
+}
+
+def use_hash<T: Hash>(value: T) -> i64 {
+    value.hash()
+}
+
+def main() -> i64 {
+    use_hash(Key { inner: Inner { value: 7 }, flag: true }) + Key { inner: Inner { value: 7 }, flag: true }.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Hash should route through hash_into");
+    assert!(
+        ir.contains("; Function: Key_Hash_hash_into")
+            && ir.contains("call void @Inner_Hash_hash_into")
+            && ir.contains("call void @Key_Hash_hash_into"),
+        "expected derived hash_into bodies driving nested hash_into, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("; Function: Key_Hash_hash"),
+        "expected synthesized hash bridge for derived hash_into, got:\n{ir}"
+    );
+}

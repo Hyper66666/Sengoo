@@ -80,6 +80,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn string_module_hasher_protocol_satisfies_hash_bridge() {
+    let ir = compile_with_stdlib_modules(
+        &["option.sg", "result.sg", "ffi.sg", "string.sg"],
+        r#"
+struct Key {
+    id: i64,
+}
+
+impl Hash for Key {
+    def hash_into(&self, h: &mut Hasher) {
+        h.write_i64(self.id);
+        h.write_bool(true);
+        h.write_str("key");
+    }
+}
+
+def use_hash<T: Hash>(value: T) -> i64 {
+    value.hash()
+}
+
+def main() -> i64 {
+    use_hash(Key { id: 7 })
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("; Function: Key_Hash_hash")
+            && ir.contains("call void @Key_Hash_hash_into")
+            && ir.contains("call %Hasher @hasher_new"),
+        "expected stdlib Hasher protocol bridge in IR\n{ir}"
+    );
+}
+
+#[test]
 fn string_module_imports_and_runs_str_len() {
     let ir = compile_with_stdlib_modules(
         &["option.sg", "result.sg", "ffi.sg", "string.sg"],

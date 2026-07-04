@@ -23,6 +23,24 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 type TyResult<T> = std::result::Result<T, TypeckError>;
 type EnumMetaAndFields = (Vec<GenericTypeParamMeta>, HashMap<String, Vec<Ty>>);
 
+fn type_contains_dyn_trait(ty: &Ty) -> bool {
+    match &ty.kind {
+        TyKind::Dyn(_) => true,
+        TyKind::Ref(_, inner)
+        | TyKind::Ptr(inner)
+        | TyKind::Array(inner, _)
+        | TyKind::Slice(inner)
+        | TyKind::Future(inner) => type_contains_dyn_trait(inner),
+        TyKind::Tuple(items) => items.iter().any(type_contains_dyn_trait),
+        TyKind::Fn { params, ret, .. } => {
+            params.iter().any(type_contains_dyn_trait) || type_contains_dyn_trait(ret)
+        }
+        TyKind::AssocProjection { base, .. } => type_contains_dyn_trait(base),
+        TyKind::Adt { args, .. } => args.iter().any(type_contains_dyn_trait),
+        _ => false,
+    }
+}
+
 mod call_helpers;
 mod class_hierarchy_helpers;
 mod contract_helpers;
@@ -146,13 +164,23 @@ impl TypeChecker {
             "Eq",
             "PartialOrd",
             "Ord",
-            "Hash",
             "Default",
             "Display",
             "Debug",
         ] {
             registry.register(TraitInfo::new(trait_name.to_string(), Vec::new(), true));
         }
+        let mut hash_trait = TraitInfo::new("Hash".to_string(), Vec::new(), true);
+        hash_trait.add_method(
+            "hash".to_string(),
+            MethodSig::new(
+                true,
+                Vec::new(),
+                env.int_ty(crate::typeck::ty::IntKind::I64),
+                Vec::new(),
+            ),
+        );
+        registry.register(hash_trait);
         let mut iterator = TraitInfo::new("Iterator".to_string(), Vec::new(), true);
         iterator.add_assoc_type("Item".to_string());
         registry.register(iterator);
@@ -851,6 +879,15 @@ impl TypeChecker {
 
         let name = self.path_name(path)?;
 
+        if name == "Box" && explicit_args.iter().any(type_contains_dyn_trait) {
+            return Err(TypeckError::diagnostic(
+                "dyn-box-unsupported",
+                "`Box<dyn Trait>` is not supported yet",
+                path.span.lo,
+                path.span.hi,
+            ));
+        }
+
         if name == "Future" {
             if explicit_args.len() != 1 {
                 return Err(TypeckError::Other(format!(
@@ -937,6 +974,14 @@ impl TypeChecker {
                     return Err(TypeckError::diagnostic(
                         "invalid-dyn-trait",
                         "`dyn` requires at least one trait bound",
+                        ty.span.lo,
+                        ty.span.hi,
+                    ));
+                }
+                if trait_bounds.len() > 1 {
+                    return Err(TypeckError::diagnostic(
+                        "dyn-multi-trait-unsupported",
+                        "`dyn A + B` trait objects are not supported yet",
                         ty.span.lo,
                         ty.span.hi,
                     ));
