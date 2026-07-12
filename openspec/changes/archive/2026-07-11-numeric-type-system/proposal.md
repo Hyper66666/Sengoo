@@ -15,11 +15,18 @@ behavior precisely. This change makes Sengoo's numeric layer complete and
 predictable. It depends on `generics-and-trait-system` for numeric traits and
 coordinates literal suffix grammar with `first-class-strings-and-formatting`.
 
+Most of this surface now exists on the LLVM-text path. The remaining work is
+target-width correctness, complete edge-case evidence, and documentation. Per
+`design.md`, LLVM-text plus clang is the production semantic reference;
+Cranelift remains an explicitly experimental primitive fast path and full
+Cranelift parity is not an archive requirement.
+
 ## Proposal
 
 - **Integer types**: `i8/i16/i32/i64`, `u8/u16/u32/u64`, and pointer-sized
-  `isize/usize`, with explicit, lossless-or-checked conversions (`as` casts with
-  documented truncation, plus checked `try_into`-style conversions).
+  `isize/usize`, with explicit conversions. `as` follows documented truncation
+  and sign rules; the v1 checked surface is the concrete
+  `checked_<source>_to_<target>(value) -> Result<Target, i64>` family.
 - **Overflow semantics**: defined per operation — debug builds trap on
   overflow, release builds wrap, and explicit `wrapping_*` / `checked_*` /
   `saturating_*` methods are available regardless of build mode.
@@ -45,3 +52,8 @@ coordinates literal suffix grammar with `first-class-strings-and-formatting`.
 - Arbitrary-precision integers / decimals / rationals (a library, proposable
   later).
 - SIMD vector types.
+- Generic `TryFrom`/`TryInto` traits. They may replace or wrap the concrete
+  checked function family in a later compatibility change.
+- Full Cranelift MIR/backend parity. Accepted Cranelift programs must remain
+  correct and unsupported programs must fail explicitly, but production parity
+  is owned by a later backend promotion change.

@@ -134,6 +134,8 @@ impl Node for Block {
 pub enum Literal {
     /// 整数
     Int(i64),
+    /// Unsigned integer.
+    Uint(u64),
     /// 浮点数
     Float(f64),
     /// 字符串
@@ -158,6 +160,10 @@ impl Literal {
 
     pub fn int(value: i64) -> ExprKind {
         ExprKind::Literal(Literal::Int(value))
+    }
+
+    pub fn uint(value: u64) -> ExprKind {
+        ExprKind::Literal(Literal::Uint(value))
     }
 
     pub fn float(value: f64) -> ExprKind {

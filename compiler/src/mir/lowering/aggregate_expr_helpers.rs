@@ -248,7 +248,14 @@ pub(super) fn lower_struct_expr(
     ctx: &mut LoweringContext<'_>,
     name: &str,
     fields: &[(String, HIRExpr)],
+    concrete_type: Option<&HIRType>,
 ) -> Local {
+    if let Some(concrete) = concrete_type {
+        ctx.concrete_type_registry.register_instance(
+            crate::type_naming::hir_type_instance_name(concrete),
+            concrete.clone(),
+        );
+    }
     let lowered_fields: Vec<(String, Local)> = fields
         .iter()
         .map(|(field_name, expr)| (field_name.clone(), ctx.lower_expr(expr)))
@@ -258,8 +265,16 @@ pub(super) fn lower_struct_expr(
         .map(|(field_name, local)| (field_name.clone(), *local))
         .collect();
 
-    let struct_ty = ctx
-        .infer_struct_literal_type(name, &field_locals_by_name)
+    let struct_ty = concrete_type
+        .map(|ty| {
+            crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+                ty,
+                ctx.struct_defs,
+                &ctx.options.enum_defs,
+                &HashMap::new(),
+            )
+        })
+        .or_else(|| ctx.infer_struct_literal_type(name, &field_locals_by_name))
         .unwrap_or_else(|| MIRType::Struct {
             name: name.to_string(),
             fields: lowered_fields
@@ -476,7 +491,7 @@ mod tests {
             ("right".to_string(), HIRExpr::Lit(HIRLiteral::Bool(true))),
             ("left".to_string(), HIRExpr::Lit(HIRLiteral::Int(7))),
         ];
-        let result = lower_struct_expr(&mut ctx, "Pair", &fields);
+        let result = lower_struct_expr(&mut ctx, "Pair", &fields, None);
 
         assert_eq!(
             ctx.type_names.get(&result).map(String::as_str),

@@ -107,6 +107,39 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_unsigned_integer_above_i64_max() {
+        let tokens = Lexer::tokenize("18446744073709551615u64 0xffff_ffff_ffff_ffffu64");
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Int(Some(18_446_744_073_709_551_615))
+        ));
+        assert!(matches!(
+            tokens[1].kind,
+            TokenKind::Int(Some(18_446_744_073_709_551_615))
+        ));
+    }
+
+    #[test]
+    fn integer_tokens_stop_before_range_and_method_dots() {
+        let source = "0..3 1.wrap(true)";
+        let tokens = Lexer::new(source).collect::<Vec<_>>();
+        let spellings = tokens
+            .iter()
+            .map(|token| &source[token.span.lo as usize..token.span.hi as usize])
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            spellings,
+            vec!["0", "..", "3", "1", ".", "wrap", "(", "true", ")"],
+            "{tokens:#?}"
+        );
+        assert!(matches!(tokens[0].kind, TokenKind::Int(Some(0))));
+        assert_eq!(tokens[1].kind, TokenKind::DotDot);
+        assert!(matches!(tokens[3].kind, TokenKind::Int(Some(1))));
+        assert_eq!(tokens[4].kind, TokenKind::Dot);
+    }
+
+    #[test]
     fn test_tokenize_keywords() {
         let tokens = Lexer::tokenize("fn let if else");
         assert!(tokens[0].is_keyword(Keyword::Fn));

@@ -267,11 +267,21 @@ impl BorrowChecker {
                 args,
                 ..
             } => {
-                if matches!(method.name.as_str(), "borrow" | "as_str") {
+                if matches!(method.name.as_str(), "borrow" | "as_str")
+                    || (method.name == "get"
+                        && self.receiver_is_vec(receiver)
+                        && self.method_call_returns_ref(expr))
+                    || (matches!(method.name.as_str(), "iter" | "iter_keys")
+                        && self.method_call_returns_borrowing_iter(expr))
+                    || (matches!(method.name.as_str(), "front" | "back")
+                        && self.receiver_is_vec(receiver)
+                        && self.method_call_returns_ref(expr))
+                {
                     self.add_borrow(receiver, BorrowKind::Immutable);
                 }
                 self.check_expr(receiver);
                 self.check_owned_string_invalidation(receiver, &method.name);
+                self.check_vec_borrow_invalidation(receiver, &method.name);
                 for arg in args {
                     self.check_expr(arg);
                     self.maybe_move_string_arg(arg);
@@ -417,7 +427,13 @@ impl BorrowChecker {
             }
             ExprKind::MethodCall {
                 receiver, method, ..
-            } if matches!(method.name.as_str(), "borrow" | "as_str") => {
+            } if matches!(method.name.as_str(), "borrow" | "as_str")
+                || (method.name == "get"
+                    && self.receiver_is_vec(receiver)
+                    && self.method_call_returns_ref(expr))
+                || (matches!(method.name.as_str(), "iter" | "iter_keys")
+                    && self.method_call_returns_borrowing_iter(expr)) =>
+            {
                 let var = Self::expr_move_path(receiver)
                     .map(|path| path.display())
                     .unwrap_or_else(|| "<temporary>".to_string());
@@ -668,7 +684,7 @@ impl BorrowChecker {
                 }
             }
             ExprKind::MethodCall { receiver, args, .. } => {
-                if matches!(&expr.kind, ExprKind::MethodCall { method, .. } if matches!(method.name.as_str(), "borrow" | "as_str"))
+                if matches!(&expr.kind, ExprKind::MethodCall { method, .. } if matches!(method.name.as_str(), "borrow" | "as_str") || (method.name == "get" && self.receiver_is_vec(receiver) && self.method_call_returns_ref(expr)) || (matches!(method.name.as_str(), "iter" | "iter_keys") && self.method_call_returns_borrowing_iter(expr)))
                 {
                     self.add_borrow(receiver, BorrowKind::Immutable);
                     if let Some(source) = Self::expr_move_path(receiver) {
@@ -703,6 +719,67 @@ impl BorrowChecker {
             }
             _ => {}
         }
+    }
+
+    fn receiver_is_vec(&self, receiver: &Expr) -> bool {
+        let Some(path) = Self::expr_move_path(receiver) else {
+            return false;
+        };
+        self.move_path_ty(&path).is_some_and(
+            |ty| matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Vec" | "VecDeque" | "HashMap" | "BTreeMap" | "BTreeSet")),
+        )
+    }
+
+    fn method_call_returns_ref(&self, call: &Expr) -> bool {
+        self._env
+            .resolved_method_return_type(call.span)
+            .is_some_and(|ty| matches!(ty.kind, crate::typeck::ty::TyKind::Ref { .. }))
+    }
+
+    fn method_call_returns_borrowing_iter(&self, call: &Expr) -> bool {
+        self._env
+            .resolved_method_return_type(call.span)
+            .is_some_and(|ty| {
+                matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "RawVecIter" | "RawMapKeyIter"))
+            })
+    }
+
+    fn check_vec_borrow_invalidation(&mut self, receiver: &Expr, method_name: &str) {
+        if !self.receiver_is_vec(receiver)
+            || !matches!(
+                method_name,
+                "push"
+                    | "set"
+                    | "insert"
+                    | "pop"
+                    | "remove"
+                    | "clear"
+                    | "free"
+                    | "drop"
+                    | "push_front"
+                    | "push_back"
+                    | "pop_front"
+                    | "pop_back"
+            )
+        {
+            return;
+        }
+        let Some(path) = Self::expr_move_path(receiver) else {
+            return;
+        };
+        let Some(active_borrow) = self
+            .borrows
+            .iter()
+            .find(|(borrowed, _)| borrowed.is_prefix_of(&path) || path.is_prefix_of(borrowed))
+            .and_then(|(_, borrows)| borrows.first())
+        else {
+            return;
+        };
+        self.errors.push(BorrowError::CannotMoveBorrowed {
+            var: path.display(),
+            borrow_span: active_borrow.span,
+            move_span: (receiver.span.lo as usize, receiver.span.hi as usize),
+        });
     }
 
     fn track_borrow_alias(&mut self, name: &str, expr: &Expr) {

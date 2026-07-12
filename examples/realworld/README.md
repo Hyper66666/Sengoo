@@ -41,6 +41,10 @@ cd examples/realworld/package-release-loop
 cd examples/realworld/workspace-doc-loop
 ```
 
+```powershell
+cd examples/realworld/workspace-audit
+```
+
 Packages:
 
 - `async-channel-smoke`: async package smoke using public `std::async`
@@ -59,6 +63,9 @@ Packages:
   metadata, local registry publish, and locked command stability.
 - `workspace-doc-loop`: dual-target package with a library entry, package
   tests, docs, and process invocation.
+- `workspace-audit`: flagship maturity fixture with a library/bin package,
+  fixture-backed tests, status-returning file/report workflow, and no manual
+  resource-release calls in application source.
 
 Use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) as the support and gap reference for
 runtime, stdlib, package, doc, test, and LSP behavior.

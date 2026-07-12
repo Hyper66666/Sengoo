@@ -324,15 +324,22 @@ pub enum TokenKind {
     Ident,
 
     // 整数
-    #[regex(r"0b[01][01_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"0o[0-7][0-7_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"0x[0-9a-fA-F][0-9a-fA-F_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"[0-9][0-9_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    Int(Option<i64>),
+    #[regex(r"0b[01]+(_[01]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"0o[0-7]+(_[0-7]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"0x[0-9a-fA-F]+(_[0-9a-fA-F]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"[0-9]+(_[0-9]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    Int(Option<u64>),
 
     // 浮点数
-    #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(f32|f64)?", |lex| parse_float_literal(lex.slice()))]
+    #[regex(r"[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*([eE][+-]?[0-9]+(_[0-9]+)*)?(f32|f64)?", |lex| parse_float_literal(lex.slice()), priority = 3)]
     Float(Option<f64>),
+
+    // A numeric-looking token that did not match the valid grammar above.
+    // Keeping the whole spelling in one token lets the parser report a stable
+    // numeric diagnostic instead of silently splitting `42u128` into `42` and
+    // an identifier or dropping malformed digits.
+    #[regex(r"[0-9][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 1)]
+    InvalidNumber(String),
 
     // 字符串
     #[token("\"\"\"", lex_multiline_string)]
@@ -370,7 +377,7 @@ pub struct FStringLiteral {
 /// 字面量类型
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralKind {
-    Int(i64),
+    Int(u64),
     Float(f64),
     String(String),
     RawString(String),
@@ -706,7 +713,7 @@ fn parse_float_literal(slice: &str) -> Option<f64> {
     digits.replace('_', "").parse::<f64>().ok()
 }
 
-fn parse_int_literal(slice: &str) -> Option<i64> {
+fn parse_int_literal(slice: &str) -> Option<u64> {
     const SUFFIXES: &[&str] = &[
         "isize", "usize", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8",
     ];
@@ -716,13 +723,13 @@ fn parse_int_literal(slice: &str) -> Option<i64> {
         .unwrap_or(slice);
     let normalized = digits.replace('_', "");
     if let Some(rest) = normalized.strip_prefix("0b") {
-        i64::from_str_radix(rest, 2).ok()
+        u64::from_str_radix(rest, 2).ok()
     } else if let Some(rest) = normalized.strip_prefix("0o") {
-        i64::from_str_radix(rest, 8).ok()
+        u64::from_str_radix(rest, 8).ok()
     } else if let Some(rest) = normalized.strip_prefix("0x") {
-        i64::from_str_radix(rest, 16).ok()
+        u64::from_str_radix(rest, 16).ok()
     } else {
-        normalized.parse::<i64>().ok()
+        normalized.parse::<u64>().ok()
     }
 }
 

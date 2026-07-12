@@ -1,6 +1,6 @@
 // examples/stdlib/02_math.sg
 //
-// Demonstrates: importing std::math integer helper functions.
+// Demonstrates: importing std::math integer and f64 helper functions.
 //
 // Run: sgc run examples/stdlib/02_math.sg
 // Expected output: 50
@@ -16,6 +16,107 @@ def main() -> i64 {
         + gcd_i64(18, 12)
         + lcm_i64(4, 6)
         + pow_i64(2, 3);
+
+    let f = max_f64(abs_f64(-1.5), min_f64(3.0, 2.0));
+    let root = sqrt_f64(9.0);
+    let power = pow_f64(2.0, 3.0);
+    let log_roundtrip = ln_f64(exp_f64(1.0));
+    let rounded = floor_f64(2.8) + ceil_f64(2.2) + round_f64(2.6);
+    let trig = sin_f64(0.0) + cos_f64(0.0) + tan_f64(0.0);
+    let f32_value = max_f32(abs_f32(-1.5f32), min_f32(3.0f32, 2.0f32));
+    let f32_root = sqrt_f32(9.0f32);
+    let f32_power = pow_f32(2.0f32, 3.0f32);
+    let f32_roundtrip = ln_f32(exp_f32(1.0f32));
+    let f32_rounded = floor_f32(2.8f32) + ceil_f32(2.2f32) + round_f32(2.6f32);
+    let f32_trig = sin_f32(0.0f32) + cos_f32(0.0f32) + tan_f32(0.0f32);
+    let max = 9223372036854775807;
+    let i32_max = 2147483647i32;
+    let i32_min = -2147483648i32;
+    let i16_max = 32767i16;
+    let i16_min = -32768i16;
+    let i8_max = 127i8;
+    let i8_min = -128i8;
+    let u32_max = 4294967295u32;
+    let u64_max = 18446744073709551615u64;
+    let usize_max = 18446744073709551615usize;
+    let isize_max = 9223372036854775807isize;
+    let isize_min = 0isize - 9223372036854775807isize - 1isize;
+    let u16_max = 65535u16;
+    let u8_max = 255u8;
+    let numeric_ok = is_finite_f64(f)
+        && numeric_abs(0i16 - 5i16) == 5i16
+        && numeric_min(9u32, 4u32) == 4u32
+        && numeric_max(1.5f32, 2.5f32) == 2.5f32
+        && numeric_clamp(12.0, 0.0, 10.0) == 10.0
+        && !is_nan_f64(f)
+        && !is_infinite_f64(f)
+        && root == 3.0
+        && power == 8.0
+        && log_roundtrip > 0.999
+        && log_roundtrip < 1.001
+        && rounded == 8.0
+        && trig == 1.0
+        && is_finite_f32(f32_value)
+        && !is_nan_f32(f32_value)
+        && !is_infinite_f32(f32_value)
+        && f32_root == 3.0f32
+        && f32_power == 8.0f32
+        && f32_roundtrip > 0.999f32
+        && f32_roundtrip < 1.001f32
+        && f32_rounded == 8.0f32
+        && f32_trig == 1.0f32
+        && 40.checked_add(2).unwrap_or(0) == 42
+        && max.checked_add(1).is_none()
+        && max.saturating_add(1) == max
+        && max.wrapping_add(1) < 0
+        && (40i32).checked_add(2i32).unwrap_or(0i32) == 42i32
+        && i32_max.checked_add(1i32).is_none()
+        && i32_max.saturating_add(1i32) == i32_max
+        && i32_min.saturating_sub(1i32) == i32_min
+        && i32_max.wrapping_add(1i32) < 0i32
+        && (40i16).checked_add(2i16).unwrap_or(0i16) == 42i16
+        && i16_max.checked_add(1i16).is_none()
+        && i16_max.saturating_add(1i16) == i16_max
+        && i16_min.saturating_sub(1i16) == i16_min
+        && i16_max.wrapping_add(1i16) < 0i16
+        && (40i8).checked_add(2i8).unwrap_or(0i8) == 42i8
+        && i8_max.checked_add(1i8).is_none()
+        && i8_max.saturating_add(1i8) == i8_max
+        && i8_min.saturating_sub(1i8) == i8_min
+        && i8_max.wrapping_add(1i8) < 0i8
+        && (40u32).checked_add(2u32).unwrap_or(0u32) == 42u32
+        && u32_max.checked_add(1u32).is_none()
+        && u32_max.saturating_add(1u32) == u32_max
+        && (0u32).saturating_sub(1u32) == 0u32
+        && u32_max.wrapping_add(1u32) == 0u32
+        && (40u64).checked_add(2u64).unwrap_or(0u64) == 42u64
+        && u64_max.checked_add(1u64).is_none()
+        && u64_max.saturating_add(1u64) == u64_max
+        && (0u64).saturating_sub(1u64) == 0u64
+        && u64_max.wrapping_add(1u64) == 0u64
+        && (40usize).checked_add(2usize).unwrap_or(0usize) == 42usize
+        && usize_max.checked_add(1usize).is_none()
+        && usize_max.saturating_add(1usize) == usize_max
+        && (0usize).saturating_sub(1usize) == 0usize
+        && usize_max.wrapping_add(1usize) == 0usize
+        && (40isize).checked_add(2isize).unwrap_or(0isize) == 42isize
+        && isize_max.checked_add(1isize).is_none()
+        && isize_max.saturating_add(1isize) == isize_max
+        && isize_min.saturating_sub(1isize) == isize_min
+        && isize_max.wrapping_add(1isize) < 0isize
+        && (40u16).checked_add(2u16).unwrap_or(0u16) == 42u16
+        && u16_max.checked_add(1u16).is_none()
+        && u16_max.saturating_add(1u16) == u16_max
+        && (0u16).saturating_sub(1u16) == 0u16
+        && u16_max.wrapping_add(1u16) == 0u16
+        && (40u8).checked_add(2u8).unwrap_or(0u8) == 42u8
+        && u8_max.checked_add(1u8).is_none()
+        && u8_max.saturating_add(1u8) == u8_max
+        && (0u8).saturating_sub(1u8) == 0u8
+        && u8_max.wrapping_add(1u8) == 0u8;
+    if !numeric_ok {
+        print(0);
+    }
 
     print(score);
     0

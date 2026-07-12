@@ -41,3 +41,24 @@ sgc --error-format json check src/main.sg
 ## Realworld fixtures
 
 The `examples/realworld/*` packages are the canonical smoke targets for IDE + CLI parity. Start with `cli-json-audit` when validating JSON-related tooling.
+
+## Debug from VS Code
+
+The `vscode-sengoo` extension contributes a `type: "sengoo"` debug entry. Press
+F5 on a `.sg` file, or add a launch configuration with:
+
+```json
+{
+  "type": "sengoo",
+  "request": "launch",
+  "name": "Debug Sengoo file",
+  "program": "${file}",
+  "mode": "run",
+  "cwd": "${workspaceFolder}"
+}
+```
+
+That path is a lightweight `sgc run` / build-and-run DAP wrapper. For native
+source breakpoints, stepping, and local-variable inspection, use the
+`cppvsdbg`/`lldb` launch configurations in `docs/debugging-native.md`; those
+build with `sgc build -O 0 --debug-info` before attaching the native debugger.

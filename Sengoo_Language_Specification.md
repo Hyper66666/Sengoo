@@ -4263,3 +4263,11 @@ Sengoo 1000k stage split:
 
 - Hot-path runtime (`Sengoo vs Python`): `bench/demos/hotpath-risk-scoring/results/1771254169774-risk-scoring-demo.json`
 - Reflection ergonomics (`Sengoo auto vs C++ manual`): `bench/demos/reflection-auto-vs-cpp/results/1771255074700-reflection-auto-vs-cpp.json`
+<!--
+Historical design draft.
+
+This file is preserved as project context and is not the authoritative language
+reference. Parts of it are encoding-corrupted and parts describe planned
+features that are not implemented. Use docs/language-reference.md as the
+current source of truth for supported language behavior.
+-->

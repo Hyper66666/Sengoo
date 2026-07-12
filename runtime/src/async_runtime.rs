@@ -41,10 +41,20 @@ pub use concurrent::{
     sengoo_async_channel_send_i64__result, sengoo_async_channel_send_i64__start,
     sengoo_async_channel_sender_clone, sengoo_async_channel_sender_close,
     sengoo_async_channel_sender_drop, sengoo_async_mutex_close, sengoo_async_mutex_drop,
-    sengoo_async_mutex_lock_i64__cancel, sengoo_async_mutex_lock_i64__drop,
-    sengoo_async_mutex_lock_i64__poll, sengoo_async_mutex_lock_i64__result,
-    sengoo_async_mutex_lock_i64__start, sengoo_async_mutex_new_i64, sengoo_async_mutex_unlock_i64,
+    sengoo_async_mutex_guard_get_i64, sengoo_async_mutex_guard_set_i64,
+    sengoo_async_mutex_guard_unlock_i64, sengoo_async_mutex_lock_i64__cancel,
+    sengoo_async_mutex_lock_i64__drop, sengoo_async_mutex_lock_i64__poll,
+    sengoo_async_mutex_lock_i64__result, sengoo_async_mutex_lock_i64__start,
+    sengoo_async_mutex_new_i64, sengoo_async_mutex_unlock_i64,
     sengoo_async_runtime_enable_thread_pool, sengoo_async_runtime_thread_pool_enabled,
+    sengoo_async_rwlock_close, sengoo_async_rwlock_drop, sengoo_async_rwlock_new_i64,
+    sengoo_async_rwlock_read_guard_get_i64, sengoo_async_rwlock_read_guard_unlock_i64,
+    sengoo_async_rwlock_try_read_i64, sengoo_async_rwlock_try_write_i64,
+    sengoo_async_rwlock_write_guard_get_i64, sengoo_async_rwlock_write_guard_set_i64,
+    sengoo_async_rwlock_write_guard_unlock_i64, sengoo_async_shared_counter_clone_i64,
+    sengoo_async_shared_counter_drop, sengoo_async_shared_counter_get_i64,
+    sengoo_async_shared_counter_job_drop, sengoo_async_shared_counter_join_i64,
+    sengoo_async_shared_counter_new_i64, sengoo_async_shared_counter_spawn_add_i64,
     sengoo_async_spawn_blocking_i64__cancel, sengoo_async_spawn_blocking_i64__drop,
     sengoo_async_spawn_blocking_i64__poll, sengoo_async_spawn_blocking_i64__result,
     sengoo_async_spawn_blocking_i64__start, ChannelRecvI64Result, ChannelSendI64Result,
@@ -448,7 +458,7 @@ unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
 #[cfg(all(test, feature = "native-bridge"))]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 
     unsafe extern "C" {
         fn sengoo_async_run_main_i64() -> i64;
@@ -1287,6 +1297,94 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_executor_steals_work_from_a_busy_worker_queue() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(2), 1);
+
+        let blocker_started = Arc::new(AtomicBool::new(false));
+        let release_blocker = Arc::new(AtomicBool::new(false));
+        let blocker = thread_pool::test_only_submit_to_worker(
+            {
+                let blocker_started = blocker_started.clone();
+                let release_blocker = release_blocker.clone();
+                move || {
+                    blocker_started.store(true, Ordering::Release);
+                    while !release_blocker.load(Ordering::Acquire) {
+                        std::thread::yield_now();
+                    }
+                    1
+                }
+            },
+            0,
+        )
+        .expect("blocking job should be accepted");
+
+        while !blocker_started.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+
+        let mut stolen_jobs = Vec::new();
+        for value in 2..=5 {
+            stolen_jobs.push(
+                thread_pool::test_only_submit_to_worker(move || value, 0)
+                    .expect("queued job should be accepted"),
+            );
+        }
+        for job in &stolen_jobs {
+            while !job.completed.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+        }
+
+        assert!(
+            thread_pool::test_only_steal_count() > 0,
+            "an idle worker should steal jobs from the busy worker queue"
+        );
+        assert_eq!(
+            stolen_jobs
+                .iter()
+                .map(|job| job.result.lock().expect("job result poisoned").unwrap_or(0))
+                .sum::<i64>(),
+            14
+        );
+
+        release_blocker.store(true, Ordering::Release);
+        while !blocker.completed.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        thread_pool::test_only_disable_thread_pool();
+        assert!(!sengoo_async_runtime_thread_pool_enabled());
+    }
+
+    #[test]
+    fn concurrent_shared_counter_joins_workers_deterministically() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(4), 1);
+
+        let counter = concurrent::sengoo_async_shared_counter_new_i64(2);
+        assert_ne!(counter, 0);
+        let mut jobs = Vec::new();
+        for _ in 0..8 {
+            let job =
+                unsafe { concurrent::sengoo_async_shared_counter_spawn_add_i64(counter, 1, 5) };
+            assert_ne!(job, 0);
+            jobs.push(job);
+        }
+        for job in jobs {
+            assert!(unsafe { concurrent::sengoo_async_shared_counter_join_i64(job) } >= 2);
+            unsafe { concurrent::sengoo_async_shared_counter_job_drop(job) };
+        }
+
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_shared_counter_get_i64(counter) },
+            42
+        );
+        unsafe { concurrent::sengoo_async_shared_counter_drop(counter) };
+    }
+
+    #[test]
     fn concurrent_channel_send_recv_round_trip() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         thread_pool::test_only_disable_thread_pool();
@@ -1345,6 +1443,106 @@ mod tests {
         assert_eq!(lock_result.value, 5);
         assert_eq!(unsafe { sengoo_async_mutex_unlock_i64(mutex, 9) }, 0);
         unsafe { sengoo_async_mutex_drop(mutex) };
+    }
+
+    #[test]
+    fn concurrent_mutex_rejects_double_unlock_without_corrupting_next_lock() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        let mutex = sengoo_async_mutex_new_i64(5);
+        let first_lock = sengoo_async_mutex_lock_i64__start(mutex);
+        while unsafe { sengoo_async_mutex_lock_i64__poll(first_lock) } == 0 {}
+        let first_result = unsafe { sengoo_async_mutex_lock_i64__result(first_lock) };
+        assert!(first_result.is_ok);
+        assert_eq!(unsafe { sengoo_async_mutex_guard_get_i64(mutex) }, 5);
+        assert_eq!(unsafe { sengoo_async_mutex_guard_set_i64(mutex, 9) }, 0);
+        assert_eq!(unsafe { sengoo_async_mutex_guard_get_i64(mutex) }, 9);
+        assert_eq!(unsafe { sengoo_async_mutex_guard_unlock_i64(mutex) }, 0);
+        assert_eq!(
+            unsafe { sengoo_async_mutex_guard_unlock_i64(mutex) },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+
+        let second_lock = sengoo_async_mutex_lock_i64__start(mutex);
+        while unsafe { sengoo_async_mutex_lock_i64__poll(second_lock) } == 0 {}
+        let second_result = unsafe { sengoo_async_mutex_lock_i64__result(second_lock) };
+        assert!(second_result.is_ok);
+        assert_eq!(second_result.value, 9);
+        assert_eq!(unsafe { sengoo_async_mutex_unlock_i64(mutex, 11) }, 0);
+        unsafe { sengoo_async_mutex_drop(mutex) };
+    }
+
+    #[test]
+    fn concurrent_rwlock_guards_support_readers_writer_and_safe_duplicate_unlock() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        let lock = sengoo_async_rwlock_new_i64(5);
+
+        let first_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        let second_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        assert!(first_reader > 0);
+        assert!(second_reader > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, first_reader) },
+            5
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_try_write_i64(lock) },
+            -concurrent::STATUS_LOCK_UNAVAILABLE
+        );
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, first_reader) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, first_reader) },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_try_write_i64(lock) },
+            -concurrent::STATUS_LOCK_UNAVAILABLE
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, second_reader) },
+            0
+        );
+
+        let writer = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
+        assert!(writer > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_set_i64(lock, writer, 9) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_try_read_i64(lock) },
+            -concurrent::STATUS_LOCK_UNAVAILABLE
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+
+        let final_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        assert!(final_reader > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, final_reader) },
+            9
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, final_reader) },
+            0
+        );
+        unsafe { sengoo_async_rwlock_close(lock) };
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_try_read_i64(lock) },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        unsafe { sengoo_async_rwlock_drop(lock) };
     }
 
     #[test]

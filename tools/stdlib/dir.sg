@@ -8,6 +8,7 @@ extern "C" {
     fn sengoo_dir_entry_name(path: i64, index: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_dir_walk_new(root: i64, max_depth: i64) -> i64;
     fn sengoo_dir_walk_next(handle: i64, buffer: i64) -> i64;
+    fn sengoo_dir_walk_next_string(handle: i64) -> i64;
     fn sengoo_dir_walk_close(handle: i64) -> i64;
     fn sengoo_dir_entry_name_string(path: i64, index: i64) -> i64;
     fn sengoo_dir_copy_tree(source: i64, destination: i64, max_depth: i64, max_entries: i64) -> i64;
@@ -17,6 +18,9 @@ extern "C" {
 struct DirWalk {
     handle: i64,
 }
+
+impl !Send for DirWalk {}
+impl !Sync for DirWalk {}
 
 def dir_bool_result(status: i64) -> Result<bool, i64> {
     if status == 0 {
@@ -131,11 +135,31 @@ def dir_walk(root: &str, max_depth: i64) -> Result<DirWalk, i64> {
 }
 
 impl DirWalk {
-    def next(self, buffer: Buffer) -> Result<i64, i64> {
+    def next(&self, buffer: Buffer) -> Result<i64, i64> {
         dir_status_i64_result(sengoo_dir_walk_next(self.handle, buffer.handle))
     }
 
-    def close(self) -> bool {
+    def next_string(&self) -> Result<String, i64> {
+        dir_string_result(sengoo_dir_walk_next_string(self.handle))
+    }
+
+    def close(&self) -> bool {
         sengoo_dir_walk_close(self.handle) == 0
+    }
+}
+
+impl Drop for DirWalk {
+    def drop(&mut self) {
+        sengoo_dir_walk_close(self.handle);
+    }
+}
+
+def dir_string_result(value: i64) -> Result<String, i64> {
+    if value > 0 {
+        Result { is_ok: true, value: String { handle: value }, error: 0 }
+    } else if value == 0 {
+        Result { is_ok: false, value: String { handle: 0 }, error: STATUS_NOT_FOUND() }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: status_from_raw_ffi(value) }
     }
 }

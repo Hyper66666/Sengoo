@@ -11,13 +11,17 @@ mod enum_index;
 mod expressions;
 mod types;
 
-use expressions::{lower_body, lower_expr};
+use expressions::{lower_body, lower_expr, with_coverage_markers};
 use types::lower_type;
 
 /// 将 AST 程序转换为 HIR 模块
 pub fn lower_ast(program: &Program, type_env: &TypeEnv) -> Module {
     let enum_index = enum_index::build_enum_variant_index(program);
     enum_index::with_enum_index(enum_index, || lower_ast_inner(program, type_env))
+}
+
+pub fn lower_ast_with_coverage(program: &Program, type_env: &TypeEnv) -> Module {
+    with_coverage_markers(true, || lower_ast(program, type_env))
 }
 
 fn lower_ast_inner(program: &Program, type_env: &TypeEnv) -> Module {
@@ -161,11 +165,12 @@ fn lower_function_with_self(
     if let Some(_self_param) = &fn_decl.self_param {
         if let Some(ty) = &self_type {
             // self 参数的类型是 impl 块的目标类型
-            params.push(HIRParam::new(
-                "self".to_string(),
-                SymbolId::INVALID,
-                ty.clone(),
-            ));
+            let self_param = if _self_param.is_ref() {
+                HIRParam::borrowed("self".to_string(), SymbolId::INVALID, ty.clone())
+            } else {
+                HIRParam::new("self".to_string(), SymbolId::INVALID, ty.clone())
+            };
+            params.push(self_param);
         }
     }
 

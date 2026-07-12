@@ -1,80 +1,91 @@
 ## Why
 
-Sengoo has a working compiler/toolchain baseline: AOT through textual LLVM IR +
-clang (with a Cranelift fast path), a static type checker plus borrow checker,
-structs/enums/generic structs/traits/closures, `match` + `?`/`try`, a
-cooperative async runtime, C FFI, Python interop, reflection, and a broad
-tooling surface (`sgc`, `sgpm`, `sgfmt`, `sglsp`, VS Code extension). The
-`mainstream-usable-loop` and `six-pillar-gap-closure` programs proved the
-package workflow is real.
+Sengoo has moved beyond a syntax prototype. The repository now contains a
+native compiler, ownership and automatic `Drop`, monomorphized generics and
+traits, first-class strings and formatting, a broad scripting stdlib, async
+runtime primitives, `sgc`/`sgpm`/`sglsp`/`sgfmt`, executable language-reference
+examples, and realworld package fixtures.
 
-The remaining gap is no longer "does the workflow exist" — it is "is the
-*language itself* mainstream-usable end to end". Concretely, three structural
-language gaps still force unsafe and verbose code, and a set of ecosystem gaps
-still block confident adoption:
+The remaining problem is not feature count. It is that the default adoption
+path is still fragmented:
 
-- **Memory model is not self-consistent.** The spec promises RC + cycle GC, but
-  the implementation has a borrow checker for references while runtime heap
-  resources (`Vec`, `String`, `Buffer`, `JsonDoc`, handles) require manual
-  `.free()` / `.drop()` / `.close()` (see `examples/stdlib/20_owned_string.sg`
-  and `examples/realworld/cli-json-audit/src/main.sg`). The default is not
-  memory-safe.
-- **Generics + traits are too weak.** The stdlib is forced to hand-specialize
-  per scalar (`Vec<i64>`, `Vec<bool>`, `StringMapI64`...) and user generic types
-  only work through concrete impls (`impl Result<i64, i64>`). There are no
-  general trait bounds, no trait objects, no core traits (Clone/Eq/Ord/Hash/
-  Display/Iterator).
-- **Strings are not first-class.** `print` only prints integers, there is no
-  formatting/interpolation, no `+` concat ergonomics, and Unicode is byte-order
-  only. Spec literal forms (f-string, byte string, multiline, numeric suffixes,
-  `0o`/`0b`) are unimplemented.
-- **Ecosystem/distribution gaps**: i64-centric numeric story, no general
-  containers, single-thread cooperative concurrency with an unproven
-  cross-platform IO reactor, no real debugger stepping, no public package
-  registry or prebuilt binary distribution, only LLVM/Cranelift backends (no
-  WASM/bytecode), and a language spec that is a stale design draft.
+- substantial work exists only in a large, divergent local worktree rather
+  than a clean, reviewable mainline;
+- many public surfaces remain scalar-specialized or platform-specific;
+- active OpenSpec tasks lag behind implemented `sgpm`, compiler, debugger, and
+  runtime behavior;
+- releases are not yet proven by real version tags and a Windows/Linux/macOS
+  install matrix;
+- alternative backends compete for attention before the native ABI and default
+  library are stable.
+
+Continuing to add breadth would increase maintenance cost without making a new
+user more successful. This revision turns the roadmap into a default-path
+readiness program with explicit milestones and evidence gates.
+
+## Product target
+
+The first mainstream-usable Sengoo release targets:
+
+- local CLI and automation programs;
+- internal tools and build tooling;
+- Python-adjacent native hot paths;
+- lightweight network services after the concurrency lane closes.
+
+It is not a promise to match the ecosystem breadth of Rust, Go, Python, or
+TypeScript in one release. The goal is a coherent, installable, debuggable,
+package-managed default path that an external team can use without repository
+knowledge or scalar-only compatibility APIs.
 
 ## Proposal
 
-Deliver a phased, three-tier (P0/P1/P2) language-maturity program. This is the
-umbrella OpenSpec lane; like `six-pillar-gap-closure`, it owns the cross-pillar
-contract and sequencing while each pillar lands as an independently reviewable,
-revertible, and archivable **child change** with its own capability delta,
-tasks, and verification.
+Deliver the remaining work through independently archivable execution lanes:
 
-The umbrella is not done until every required child change is validated and
-archived. An accepted-risk matrix row cannot replace an unimplemented pillar.
+| Phase | Change | Outcome |
+| --- | --- | --- |
+| 0 | `mainline-release-baseline` | Clean mainline, fact/spec reconciliation, repeatable green baseline |
+| 1 | `numeric-type-system` | Complete documented numeric semantics on the production backend |
+| 1 | `generic-collections` | True generic owning collections and iterator pipeline |
+| 1 | `debugger-and-test-framework` | Statement stepping and live scalar/composite inspection |
+| 2 | `package-registry-and-distribution` | Registry e2e plus installable signed releases on three desktop OS families |
+| 3 | `concurrency-safety-and-async-io` | Generic shared-state primitives, structured tasks, and cross-platform reactor evidence |
+| 4 | `production-hardening-v1` | Fuzz/sanitizer/leak/soak/ABI/performance and ecosystem release gates |
+| Post-v1 | `wasm-and-bytecode-backends` | Alternative targets only after the native MIR/runtime ABI is versioned |
 
-| Tier | Child change | Capability | Primary scope |
-| --- | --- | --- | --- |
-| P0 | `automatic-memory-management` | `memory-management` | One coherent model: ownership + automatic `Drop` insertion (RAII), eliminating manual `.free()/.drop()/.close()` |
-| P0 | `generics-and-trait-system` | `generics-and-traits` | Real monomorphization, trait bounds `T: Trait`, trait objects `dyn`, associated types, core traits |
-| P0 | `first-class-strings-and-formatting` | `strings-and-formatting` | First-class `String`/`&str`, formatting + interpolation, `print`/`println` of any `Display`, UTF-8 correctness |
-| P1 | `numeric-type-system` | `numeric-types` | Integer widths + signedness, defined overflow semantics, float math/parse/format |
-| P1 | `generic-collections` | `generic-collections` | Generic `Vec<T>`/`HashMap<K,V>`/`HashSet`/`BTreeMap` + iterator adapters on top of P0 generics |
-| P1 | `concurrency-safety-and-async-io` | `concurrency-and-async-io` | `Send`/`Sync` data-race model, multi-threaded executor, cross-platform IO reactor |
-| P1 | `debugger-and-test-framework` | `debug-and-test-tooling` | Real source-level debugging (step/inspect) + richer test framework (fixtures, parametrization, coverage) |
-| P2 | `package-registry-and-distribution` | `package-registry-distribution` | Public registry protocol, prebuilt binary distribution, macOS channel |
-| P2 | `wasm-and-bytecode-backends` | `backend-targets` | WASM backend and a portable bytecode VM as promised by the spec |
-| P2 | `authoritative-language-reference` | `language-reference` | Accurate, versioned, implementation-synced language reference replacing the stale draft |
-| P2 | `flagship-reference-application` | `flagship-application` | A non-trivial real application written in Sengoo as proof of usability |
+The already archived P0 changes (`automatic-memory-management`,
+`generics-and-trait-system`, and `first-class-strings-and-formatting`) remain the
+foundation. The archived language reference and flagship application remain
+evidence, but both are refreshed when the default-library and concurrency gates
+close.
 
-### Sequencing
+## Direction changes
 
-P0 is foundational: `generic-collections`, `numeric-type-system`, and the
-stdlib rewrite all depend on `generics-and-trait-system` and
-`automatic-memory-management`; `strings-and-formatting` depends on the memory
-model for owned `String`. P1 builds the usable surface on top of P0. P2 is
-adoption/ecosystem and can proceed in parallel once P0 stabilizes the language.
+- LLVM-text plus clang is the production backend for the first mainstream
+  release. Cranelift remains an explicitly experimental fast path until it can
+  run the conformance suite; numeric completion does not require full backend
+  duplication.
+- Generic collection representation and ownership callbacks are designed
+  before more scalar wrappers are added.
+- Executor correctness, cancellation, backpressure, and `Send` safety are
+  release requirements. Work stealing is an optimization, not a semantic gate.
+- Registry/release usability lands before WASM or a bytecode VM.
+- WASM and bytecode remain tracked, but implementation begins only after a
+  stable native ABI checkpoint and a fresh go/no-go review.
 
-See `design.md` for the cross-pillar dependency graph and the decision record
-(notably choosing ownership + `Drop` over RC + cycle GC).
+## Impact
+
+- Updates the existing language-maturity umbrella and six active child changes.
+- Adds `mainline-release-baseline` and `production-hardening-v1` child changes.
+- Adds missing designs for generic collections, numeric backend tiers, registry
+  protocol ownership, and deferred backend criteria.
+- Does not change source-language behavior by itself.
 
 ## Non-goals
 
-- Self-hosting the compiler in Sengoo.
-- Removing or breaking existing Buffer/handle stdlib APIs during the transition;
-  new safe APIs are added alongside and old names stay source-compatible until a
-  later, separately-proposed deprecation.
-- Launching a hosted commercial package registry service (the P2 child specifies
-  the protocol and a reference server, not an operated service).
+- Self-hosting the compiler.
+- Adding new syntax, GUI/game features, HTTP/2, or more stdlib breadth before
+  the default-path gates close.
+- Claiming a production-hosted public registry as complete merely because a
+  reference server exists.
+- Treating test counts or accepted-risk matrix rows as substitutes for a real
+  install/build/run scenario.

@@ -205,7 +205,7 @@ impl<'a> LoweringContext<'a> {
                     vec![handle, value, precision_local],
                 );
             }
-            MIRType::Int(_) => {
+            MIRType::Int(_) | MIRType::UInt(_) => {
                 self.emit_call_i64("sengoo_string_push_i64_status", vec![handle, value]);
             }
             MIRType::Bool => {

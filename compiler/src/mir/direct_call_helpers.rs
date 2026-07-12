@@ -124,6 +124,7 @@ pub(crate) fn collect_direct_calls_in_expr(expr: &HIRExpr, out: &mut HashSet<Str
 
 pub(crate) fn collect_direct_calls_in_stmt(stmt: &HIRStmt, out: &mut HashSet<String>) {
     match stmt {
+        HIRStmt::Coverage { .. } => {}
         HIRStmt::Let { value, .. } => {
             if let Some(value) = value {
                 collect_direct_calls_in_expr(value, out);

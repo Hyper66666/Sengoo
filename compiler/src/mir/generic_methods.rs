@@ -2,6 +2,7 @@ use super::MIRType;
 use crate::hir::{self, HIRItem, HIRParam, HIRTrait, HIRTraitItem, HIRType};
 use crate::method_resolution::explicit_hir_method_param_count;
 use crate::symbol::SymbolId;
+use crate::type_naming::hir_type_instance_name;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -74,6 +75,10 @@ impl ConcreteTypeRegistry {
             MIRType::Int(16) => Some(HIRType::int(crate::hir::IntKind::I16)),
             MIRType::Int(32) => Some(HIRType::int(crate::hir::IntKind::I32)),
             MIRType::Int(64) => Some(HIRType::int(crate::hir::IntKind::I64)),
+            MIRType::UInt(8) => Some(HIRType::int(crate::hir::IntKind::U8)),
+            MIRType::UInt(16) => Some(HIRType::int(crate::hir::IntKind::U16)),
+            MIRType::UInt(32) => Some(HIRType::int(crate::hir::IntKind::U32)),
+            MIRType::UInt(64) => Some(HIRType::int(crate::hir::IntKind::U64)),
             MIRType::Float(32) => Some(HIRType::float(crate::hir::FloatKind::F32)),
             MIRType::Float(64) => Some(HIRType::float(crate::hir::FloatKind::F64)),
             MIRType::Ptr(inner) => {
@@ -137,6 +142,7 @@ pub(crate) fn collect_inherent_method_templates(items: &[HIRItem]) -> Vec<Inhere
 pub(crate) struct TraitMethodTemplate {
     pub(crate) target_type: HIRType,
     pub(crate) trait_name: String,
+    pub(crate) trait_args: Vec<HIRType>,
     pub(crate) method: hir::HIRFunction,
 }
 
@@ -158,6 +164,40 @@ pub(crate) struct TraitMethodLoweringPlan {
     pub(crate) eager_methods: Vec<EagerTraitMethod>,
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) implemented_method_names: HashSet<String>,
+}
+
+pub(crate) fn trait_impl_method_prefix(
+    type_prefix: &str,
+    trait_name: &str,
+    trait_args: &[HIRType],
+) -> String {
+    if trait_args.is_empty() {
+        format!("{}_{}", type_prefix, trait_name)
+    } else {
+        format!(
+            "{}_{}_{}",
+            type_prefix,
+            trait_name,
+            trait_args
+                .iter()
+                .map(hir_type_instance_name)
+                .collect::<Vec<_>>()
+                .join("_")
+        )
+    }
+}
+
+pub(crate) fn trait_impl_method_name(
+    type_prefix: &str,
+    trait_name: &str,
+    trait_args: &[HIRType],
+    method_name: &str,
+) -> String {
+    format!(
+        "{}_{}",
+        trait_impl_method_prefix(type_prefix, trait_name, trait_args),
+        method_name
+    )
 }
 
 impl TraitMethodLoweringPlan {
@@ -199,7 +239,12 @@ pub(crate) fn collect_trait_method_templates_for_impl(
 
         if method.type_params.is_empty() {
             let mut eager_method = method.clone();
-            eager_method.name = format!("{}_{}_{}", type_prefix, trait_name, original_method_name);
+            eager_method.name = trait_impl_method_name(
+                type_prefix,
+                trait_name,
+                &impl_item.trait_args,
+                original_method_name,
+            );
             eager_methods.push(EagerTraitMethod {
                 explicit_param_count: explicit_hir_method_param_count(&eager_method),
                 function: eager_method,
@@ -212,6 +257,7 @@ pub(crate) fn collect_trait_method_templates_for_impl(
         templates.push(TraitMethodTemplate {
             target_type: impl_item.target_type.clone(),
             trait_name: trait_name.clone(),
+            trait_args: impl_item.trait_args.clone(),
             method: template_method,
         });
     }
@@ -238,7 +284,12 @@ pub(crate) fn collect_trait_method_templates_for_impl(
 
             if trait_fn.type_params.is_empty() {
                 let eager_function = hir::HIRFunction {
-                    name: format!("{}_{}_{}", type_prefix, trait_name, trait_fn.name),
+                    name: trait_impl_method_name(
+                        type_prefix,
+                        trait_name,
+                        &impl_item.trait_args,
+                        &trait_fn.name,
+                    ),
                     type_params: Vec::new(),
                     params,
                     return_type: trait_fn.return_type.clone(),
@@ -262,6 +313,7 @@ pub(crate) fn collect_trait_method_templates_for_impl(
             templates.push(TraitMethodTemplate {
                 target_type: impl_item.target_type.clone(),
                 trait_name: trait_name.clone(),
+                trait_args: impl_item.trait_args.clone(),
                 method: hir::HIRFunction {
                     name: trait_fn.name.clone(),
                     type_params: trait_fn.type_params.clone(),

@@ -2851,7 +2851,12 @@ fn realworld_locked_project_loop_keeps_lockfiles_current() {
     let fake_sgc = fake_sgc(&dir);
     let fake_sgfmt = fake_sgfmt(&dir);
 
-    for fixture in ["cli-json-audit", "http-client-status", "workspace-doc-loop"] {
+    for fixture in [
+        "cli-json-audit",
+        "http-client-status",
+        "workspace-doc-loop",
+        "workspace-audit",
+    ] {
         let package = dir.join(fixture);
         copy_dir_filtered(&realworld_fixture(fixture), &package);
 

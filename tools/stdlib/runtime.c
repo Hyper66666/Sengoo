@@ -3,7 +3,9 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +48,27 @@ void sengoo_print_str(const char* s) {
     } else {
         printf("\n");
     }
+}
+
+static void sengoo_coverage_write(char kind, long long line) {
+    const char* report_path = getenv("SENGOO_COVERAGE_REPORT");
+    if (!report_path || !*report_path || line <= 0) {
+        return;
+    }
+    FILE* report = fopen(report_path, "ab");
+    if (!report) {
+        return;
+    }
+    fprintf(report, "%c:%lld\n", kind, line);
+    fclose(report);
+}
+
+void sengoo_coverage_register(long long line) {
+    sengoo_coverage_write('E', line);
+}
+
+void sengoo_coverage_hit(long long line) {
+    sengoo_coverage_write('H', line);
 }
 
 void sengoo_eprint_i64(long long val) {
@@ -221,6 +244,227 @@ long long sengoo_f64_eq(double lhs, double rhs) {
 
 long long sengoo_f64_ne(double lhs, double rhs) {
     return lhs != rhs ? 1 : 0;
+}
+
+long long sengoo_f64_is_nan(double value) {
+    return value != value ? 1 : 0;
+}
+
+long long sengoo_f64_is_finite(double value) {
+    return value == value && value <= DBL_MAX && value >= -DBL_MAX ? 1 : 0;
+}
+
+long long sengoo_f64_is_infinite(double value) {
+    return value == value && (value > DBL_MAX || value < -DBL_MAX) ? 1 : 0;
+}
+
+long long sengoo_f32_is_nan(float value) {
+    return isnan(value) ? 1 : 0;
+}
+
+long long sengoo_f32_is_finite(float value) {
+    return isfinite(value) ? 1 : 0;
+}
+
+long long sengoo_f32_is_infinite(float value) {
+    return isinf(value) ? 1 : 0;
+}
+
+float sengoo_f32_sqrt(float value) {
+    return sqrtf(value);
+}
+
+float sengoo_f32_pow(float base, float exp) {
+    return powf(base, exp);
+}
+
+float sengoo_f32_exp(float value) {
+    return expf(value);
+}
+
+float sengoo_f32_ln(float value) {
+    return logf(value);
+}
+
+float sengoo_f32_floor(float value) {
+    return floorf(value);
+}
+
+float sengoo_f32_ceil(float value) {
+    return ceilf(value);
+}
+
+float sengoo_f32_round(float value) {
+    return roundf(value);
+}
+
+float sengoo_f32_sin(float value) {
+    return sinf(value);
+}
+
+float sengoo_f32_cos(float value) {
+    return cosf(value);
+}
+
+float sengoo_f32_tan(float value) {
+    return tanf(value);
+}
+
+double sengoo_f64_sqrt(double value) {
+    return sqrt(value);
+}
+
+double sengoo_f64_pow(double base, double exp) {
+    return pow(base, exp);
+}
+
+double sengoo_f64_exp(double value) {
+    return exp(value);
+}
+
+double sengoo_f64_ln(double value) {
+    return log(value);
+}
+
+double sengoo_f64_floor(double value) {
+    return floor(value);
+}
+
+double sengoo_f64_ceil(double value) {
+    return ceil(value);
+}
+
+double sengoo_f64_round(double value) {
+    return round(value);
+}
+
+double sengoo_f64_sin(double value) {
+    return sin(value);
+}
+
+double sengoo_f64_cos(double value) {
+    return cos(value);
+}
+
+double sengoo_f64_tan(double value) {
+    return tan(value);
+}
+
+long long sengoo_i64_checked_add_ok(long long lhs, long long rhs) {
+    if (rhs > 0 && lhs > LLONG_MAX - rhs) {
+        return 0;
+    }
+    if (rhs < 0 && lhs < LLONG_MIN - rhs) {
+        return 0;
+    }
+    return 1;
+}
+
+long long sengoo_i64_checked_sub_ok(long long lhs, long long rhs) {
+    if (rhs > 0 && lhs < LLONG_MIN + rhs) {
+        return 0;
+    }
+    if (rhs < 0 && lhs > LLONG_MAX + rhs) {
+        return 0;
+    }
+    return 1;
+}
+
+long long sengoo_i64_checked_mul_ok(long long lhs, long long rhs) {
+    if (lhs == 0 || rhs == 0) {
+        return 1;
+    }
+    if (lhs > 0) {
+        if (rhs > 0) {
+            return lhs <= LLONG_MAX / rhs;
+        }
+        return rhs >= LLONG_MIN / lhs;
+    }
+    if (rhs > 0) {
+        return lhs >= LLONG_MIN / rhs;
+    }
+    return rhs >= LLONG_MAX / lhs;
+}
+
+long long sengoo_i64_wrapping_add(long long lhs, long long rhs) {
+    uint64_t result = (uint64_t)lhs + (uint64_t)rhs;
+    return (long long)result;
+}
+
+long long sengoo_i64_wrapping_sub(long long lhs, long long rhs) {
+    uint64_t result = (uint64_t)lhs - (uint64_t)rhs;
+    return (long long)result;
+}
+
+long long sengoo_i64_wrapping_mul(long long lhs, long long rhs) {
+    uint64_t result = (uint64_t)lhs * (uint64_t)rhs;
+    return (long long)result;
+}
+
+long long sengoo_i64_saturating_add(long long lhs, long long rhs) {
+    if (sengoo_i64_checked_add_ok(lhs, rhs)) {
+        return lhs + rhs;
+    }
+    return rhs > 0 ? LLONG_MAX : LLONG_MIN;
+}
+
+long long sengoo_i64_saturating_sub(long long lhs, long long rhs) {
+    if (sengoo_i64_checked_sub_ok(lhs, rhs)) {
+        return lhs - rhs;
+    }
+    return rhs > 0 ? LLONG_MIN : LLONG_MAX;
+}
+
+long long sengoo_i64_saturating_mul(long long lhs, long long rhs) {
+    if (sengoo_i64_checked_mul_ok(lhs, rhs)) {
+        return lhs * rhs;
+    }
+    return ((lhs < 0) == (rhs < 0)) ? LLONG_MAX : LLONG_MIN;
+}
+
+long long sengoo_u64_checked_add_ok(unsigned long long lhs, unsigned long long rhs) {
+    return lhs <= ULLONG_MAX - rhs;
+}
+
+long long sengoo_u64_checked_sub_ok(unsigned long long lhs, unsigned long long rhs) {
+    return lhs >= rhs;
+}
+
+long long sengoo_u64_checked_mul_ok(unsigned long long lhs, unsigned long long rhs) {
+    return rhs == 0 || lhs <= ULLONG_MAX / rhs;
+}
+
+unsigned long long sengoo_u64_wrapping_add(unsigned long long lhs, unsigned long long rhs) {
+    return lhs + rhs;
+}
+
+unsigned long long sengoo_u64_wrapping_sub(unsigned long long lhs, unsigned long long rhs) {
+    return lhs - rhs;
+}
+
+unsigned long long sengoo_u64_wrapping_mul(unsigned long long lhs, unsigned long long rhs) {
+    return lhs * rhs;
+}
+
+unsigned long long sengoo_u64_saturating_add(unsigned long long lhs, unsigned long long rhs) {
+    if (sengoo_u64_checked_add_ok(lhs, rhs)) {
+        return lhs + rhs;
+    }
+    return ULLONG_MAX;
+}
+
+unsigned long long sengoo_u64_saturating_sub(unsigned long long lhs, unsigned long long rhs) {
+    if (lhs >= rhs) {
+        return lhs - rhs;
+    }
+    return 0;
+}
+
+unsigned long long sengoo_u64_saturating_mul(unsigned long long lhs, unsigned long long rhs) {
+    if (sengoo_u64_checked_mul_ok(lhs, rhs)) {
+        return lhs * rhs;
+    }
+    return ULLONG_MAX;
 }
 
 enum {
@@ -1183,6 +1427,61 @@ long long sengoo_strconv_parse_i64(long long data_ptr, long long len) {
     return (long long)acc;
 }
 
+double sengoo_strconv_parse_f64(long long data_ptr, long long len) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    const char* data = (const char*)(intptr_t)data_ptr;
+    if (len < 0 || (len > 0 && !data)) {
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+        return 0.0;
+    }
+
+    size_t n = (size_t)len;
+    char* copy = (char*)malloc(n + 1);
+    if (!copy) {
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INTERNAL);
+        return 0.0;
+    }
+    if (n > 0) {
+        memcpy(copy, data, n);
+    }
+    copy[n] = '\0';
+
+    char* start = copy;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    if (*start == '\0') {
+        free(copy);
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+        return 0.0;
+    }
+
+    errno = 0;
+    char* end = NULL;
+    double value = strtod(start, &end);
+    if (end == start) {
+        free(copy);
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+        return 0.0;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != '\0') {
+        free(copy);
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INVALID);
+        return 0.0;
+    }
+    if (errno == ERANGE) {
+        free(copy);
+        sengoo_strconv_set_error(SENGOO_STRCONV_ERR_OVERFLOW);
+        return 0.0;
+    }
+
+    free(copy);
+    return value;
+}
+
 long long sengoo_strconv_format_i64(long long value, long long buffer_ptr, long long capacity) {
     sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
     char* out = (char*)(intptr_t)buffer_ptr;
@@ -1192,6 +1491,32 @@ long long sengoo_strconv_format_i64(long long value, long long buffer_ptr, long 
 
     char temp[32];
     int written = snprintf(temp, sizeof(temp), "%lld", value);
+    if (written < 0 || (size_t)written >= sizeof(temp)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INTERNAL) - 1;
+    }
+    if ((unsigned long long)written > (unsigned long long)capacity || (written > 0 && !out)) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    if (written > 0) {
+        memcpy(out, temp, (size_t)written);
+    }
+    return (long long)written;
+}
+
+long long sengoo_strconv_format_f64(
+    double value,
+    long long precision,
+    long long buffer_ptr,
+    long long capacity) {
+    sengoo_strconv_last_error = SENGOO_STRCONV_STATUS_OK;
+    char* out = (char*)(intptr_t)buffer_ptr;
+    if (capacity < 0 || precision < 0 || precision > 15) {
+        return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_BUFFER) - 1;
+    }
+
+    char temp[128];
+    int written = snprintf(temp, sizeof(temp), "%.*f", (int)precision, value);
     if (written < 0 || (size_t)written >= sizeof(temp)) {
         return sengoo_strconv_set_error(SENGOO_STRCONV_ERR_INTERNAL) - 1;
     }
@@ -2466,7 +2791,7 @@ typedef struct {
 } SengooDirWalk;
 
 static SengooDirWalk* sengoo_dir_walk_from_handle(long long handle) {
-    return (SengooDirWalk*)sengoo_handle_to_ptr(handle);
+    return (SengooDirWalk*)sengoo_opaque_handle_get(handle);
 }
 
 static int sengoo_dir_walk_push(SengooDirWalk* walk, const char* path) {
@@ -2630,7 +2955,12 @@ long long sengoo_dir_walk_new(long long root_ptr, long long max_depth) {
         sengoo_dir_walk_free(walk);
         return -SENGOO_STATUS_IO;
     }
-    return sengoo_ptr_to_handle(walk);
+    long long handle = sengoo_opaque_handle_new(walk);
+    if (handle == 0) {
+        sengoo_dir_walk_free(walk);
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+    return handle;
 }
 
 long long sengoo_dir_walk_next(long long handle, long long buffer_handle) {
@@ -2653,10 +2983,28 @@ long long sengoo_dir_walk_next(long long handle, long long buffer_handle) {
     return copied;
 }
 
-long long sengoo_dir_walk_close(long long handle) {
+long long sengoo_string_from_str_copy(long long value_ptr);
+
+long long sengoo_dir_walk_next_string(long long handle) {
     SengooDirWalk* walk = sengoo_dir_walk_from_handle(handle);
     if (!walk) {
         return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (walk->index >= walk->len) {
+        return 0;
+    }
+    const char* path = walk->paths[walk->index];
+    long long value = sengoo_string_from_str_copy(sengoo_ptr_to_handle((void*)path));
+    if (value >= 0) {
+        walk->index += 1;
+    }
+    return value;
+}
+
+long long sengoo_dir_walk_close(long long handle) {
+    SengooDirWalk* walk = (SengooDirWalk*)sengoo_opaque_handle_take(handle);
+    if (!walk) {
+        return 0;
     }
     sengoo_dir_walk_free(walk);
     return 0;
@@ -3698,6 +4046,20 @@ long long sengoo_panic_result_unwrap_i64(void) {
     exit(1);
 }
 
+void sengoo_panic_integer_overflow(long long overflow) {
+    if (overflow) {
+        fprintf(stderr, "Integer overflow\n");
+        exit(1);
+    }
+}
+
+void sengoo_panic_division_by_zero(long long divisor) {
+    if (divisor == 0) {
+        fprintf(stderr, "Division by zero\n");
+        exit(1);
+    }
+}
+
 void* sengoo_alloc(long long size, long long align) {
     if (size < 0) {
         return NULL;
@@ -4014,6 +4376,24 @@ long long sengoo_vec_set_i64(long long handle, long long index, long long value)
     }
 
     vec->data[index] = value;
+    return 1;
+}
+
+long long sengoo_vec_insert_i64(long long handle, long long index, long long value) {
+    SengooVecI64* vec = sengoo_vec_from_handle(handle);
+    if (!vec || index < 0 || index > vec->len) {
+        return 0;
+    }
+
+    if (vec->len >= vec->cap && !sengoo_vec_reserve(vec, vec->len + 1)) {
+        return 0;
+    }
+
+    for (long long i = vec->len; i > index; --i) {
+        vec->data[i] = vec->data[i - 1];
+    }
+    vec->data[index] = value;
+    vec->len += 1;
     return 1;
 }
 
@@ -4338,6 +4718,7 @@ long long sengoo_hashmap_remove_i64(long long handle, long long key) {
 typedef struct {
     long long map_handle;
     long long index;
+    long long yielded;
 } SengooHashMapIterI64;
 
 static SengooHashMapIterI64* sengoo_hashmap_iter_from_handle(long long handle) {
@@ -4357,6 +4738,7 @@ long long sengoo_hashmap_iter_new_i64(long long map_handle) {
 
     iter->map_handle = map_handle;
     iter->index = 0;
+    iter->yielded = 0;
     long long handle = sengoo_opaque_handle_new(iter);
     if (handle == 0) {
         free(iter);
@@ -4374,6 +4756,12 @@ void sengoo_hashmap_iter_reset_i64(long long iter_handle) {
         return;
     }
     iter->index = 0;
+    iter->yielded = 0;
+}
+
+long long sengoo_hashmap_iter_index_i64(long long iter_handle) {
+    SengooHashMapIterI64* iter = sengoo_hashmap_iter_from_handle(iter_handle);
+    return iter ? iter->yielded : 0;
 }
 
 long long sengoo_hashmap_iter_done_i64(long long iter_handle) {
@@ -4404,6 +4792,7 @@ long long sengoo_hashmap_iter_next_i64(long long iter_handle, long long* out_val
         iter->index += 1;
         if (entry->state == 1) {
             *out_value = entry->value;
+            iter->yielded += 1;
             return 1;
         }
     }
@@ -4417,6 +4806,47 @@ long long sengoo_hashmap_iter_next_or_default_i64(long long iter_handle, long lo
         return fallback;
     }
     return value;
+}
+
+long long sengoo_hashmap_key_iter_new_i64(long long map_handle) {
+    return sengoo_hashmap_iter_new_i64(map_handle);
+}
+
+long long sengoo_hashmap_key_iter_done_i64(long long iter_handle) {
+    return sengoo_hashmap_iter_done_i64(iter_handle);
+}
+
+long long sengoo_hashmap_key_iter_index_i64(long long iter_handle) {
+    return sengoo_hashmap_iter_index_i64(iter_handle);
+}
+
+long long sengoo_hashmap_key_iter_next_or_default_i64(long long iter_handle, long long fallback) {
+    SengooHashMapIterI64* iter = sengoo_hashmap_iter_from_handle(iter_handle);
+    SengooHashMapI64* map = iter ? sengoo_hashmap_from_handle(iter->map_handle) : NULL;
+    if (!iter || !map) {
+        return fallback;
+    }
+
+    while (iter->index < map->cap) {
+        SengooHashMapEntryI64* entry = &map->entries[iter->index];
+        iter->index += 1;
+        if (entry->state == 1) {
+            iter->yielded += 1;
+            return entry->key;
+        }
+    }
+
+    return fallback;
+}
+
+long long sengoo_hashmap_key_iter_reset_i64_status(long long iter_handle) {
+    sengoo_hashmap_iter_reset_i64(iter_handle);
+    return 1;
+}
+
+long long sengoo_hashmap_key_iter_free_i64_status(long long iter_handle) {
+    sengoo_hashmap_iter_free_i64(iter_handle);
+    return 1;
 }
 
 typedef struct {
@@ -4458,6 +4888,11 @@ void sengoo_vec_iter_reset_i64(long long iter_handle) {
         return;
     }
     iter->index = 0;
+}
+
+long long sengoo_vec_iter_index_i64(long long iter_handle) {
+    SengooVecIterI64* iter = sengoo_vec_iter_from_handle(iter_handle);
+    return iter ? iter->index : 0;
 }
 
 long long sengoo_vec_iter_next_i64(long long iter_handle, long long* out_value) {

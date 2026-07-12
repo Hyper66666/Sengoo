@@ -72,6 +72,25 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_run_main_i64()\n");
         self.declarations.push('\n');
 
+        if self.integer_overflow_mode == IntegerOverflowMode::DebugChecked {
+            self.declarations
+                .push_str("; LLVM integer overflow check intrinsics\n");
+            for width in [8_u8, 16, 32, 64] {
+                for signedness in ["s", "u"] {
+                    for op in ["add", "sub", "mul"] {
+                        self.declarations.push_str(&format!(
+                            "declare {{ i{width}, i1 }} @llvm.{signedness}{op}.with.overflow.i{width}(i{width}, i{width})\n"
+                        ));
+                    }
+                }
+            }
+            self.declarations
+                .push_str("declare void @sengoo_panic_integer_overflow(i64)\n");
+            self.declarations
+                .push_str("declare void @sengoo_panic_division_by_zero(i64)\n");
+            self.declarations.push('\n');
+        }
+
         self.declare_user_extern_functions();
     }
 
@@ -113,6 +132,48 @@ impl Codegen {
                 .push_str(&format!("declare {} @{}({})\n", ret, decl.name, params));
         }
 
+        self.declarations.push('\n');
+    }
+
+    /// Declare only the saturating conversion intrinsics referenced by this module.
+    pub(super) fn maybe_declare_saturating_float_to_int_intrinsics(
+        &mut self,
+        mir_fns: &[MirFunction],
+    ) {
+        let mut needed = std::collections::BTreeSet::new();
+        for mir_fn in mir_fns {
+            for inst in &mir_fn.instructions {
+                let mir::Instruction::Cast { value, to, .. } = inst else {
+                    continue;
+                };
+                let Some((_, source_ty)) = mir_fn.locals.get(value.index()) else {
+                    continue;
+                };
+                let (operation, int_width, float_width) = match (source_ty, to) {
+                    (MIRType::Float(float_width), MIRType::Int(int_width)) => {
+                        ("fptosi", *int_width, *float_width)
+                    }
+                    (MIRType::Float(float_width), MIRType::UInt(int_width)) => {
+                        ("fptoui", *int_width, *float_width)
+                    }
+                    _ => continue,
+                };
+                needed.insert((operation, int_width, float_width));
+            }
+        }
+
+        if needed.is_empty() {
+            return;
+        }
+
+        self.declarations
+            .push_str("; LLVM saturating float-to-integer intrinsics\n");
+        for (operation, int_width, float_width) in needed {
+            let float_ty = if float_width == 32 { "float" } else { "double" };
+            self.declarations.push_str(&format!(
+                "declare i{int_width} @llvm.{operation}.sat.i{int_width}.f{float_width}({float_ty})\n"
+            ));
+        }
         self.declarations.push('\n');
     }
 
@@ -747,6 +808,40 @@ impl Codegen {
             .push_str("declare i64 @sengoo_async_task_status(i64)\n");
     }
 
+    pub(super) fn maybe_declare_coverage_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let mut needed = std::collections::BTreeSet::new();
+        for mir_fn in mir_fns {
+            for inst in &mir_fn.instructions {
+                if let mir::Instruction::Call { func, .. } = inst {
+                    if matches!(
+                        func.as_str(),
+                        "sengoo_coverage_register" | "sengoo_coverage_hit"
+                    ) {
+                        needed.insert(func.as_str());
+                    }
+                }
+            }
+        }
+
+        for (name, declaration) in [
+            (
+                "sengoo_coverage_register",
+                "declare void @sengoo_coverage_register(i64)\n",
+            ),
+            (
+                "sengoo_coverage_hit",
+                "declare void @sengoo_coverage_hit(i64)\n",
+            ),
+        ] {
+            if needed.contains(name) && !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
+            }
+        }
+        if !needed.is_empty() {
+            self.declarations.push('\n');
+        }
+    }
+
     pub(super) fn maybe_declare_rc_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
         let needs_rc_copy = mir_fns.iter().any(|mir_fn| {
             mir_fn.instructions.iter().any(|inst| match inst {
@@ -760,9 +855,130 @@ impl Codegen {
                 _ => false,
             })
         });
+        let needs_raw_vec = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_new_parts",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_push = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_push",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_set = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_set",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_insert = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_insert",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_get = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_get",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_pop = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_pop",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_remove = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_remove",
+                _ => false,
+            })
+        });
+        let needs_raw_vec_iter_next = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_iter_next",
+                _ => false,
+            })
+        });
+        let needs_raw_hashmap_new = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_new_parts",
+                _ => false,
+            })
+        });
+        let needs_raw_hashmap_insert = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_insert",
+                _ => false,
+            })
+        });
+        let needs_raw_hashmap_get = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_get",
+                _ => false,
+            })
+        });
+        let needs_raw_hashmap_contains = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_contains",
+                _ => false,
+            })
+        });
+        let needs_raw_hashmap_remove = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_remove",
+                _ => false,
+            })
+        });
+        let needs_raw_btreemap_new = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_btreemap_new_parts",
+                _ => false,
+            })
+        });
+        let needs_raw_map_key_iter_next = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_map_key_iter_next",
+                _ => false,
+            })
+        });
         let copy_decl = "declare i64 @sengoo_rc_new_copy(i8*, i64, i8*)\n";
         let borrow_decl = "declare i8* @sengoo_rc_borrow_ptr(i64)\n";
-        if (needs_rc_copy || needs_rc_borrow)
+        let raw_vec_decl = "declare i64 @sengoo_raw_vec_new_parts(i64, i64, i8*, i8*)\n";
+        let raw_vec_push_decl = "declare i64 @sengoo_raw_vec_push(i64, i8*)\n";
+        let raw_vec_set_decl = "declare i64 @sengoo_raw_vec_set(i64, i64, i8*)\n";
+        let raw_vec_insert_decl = "declare i64 @sengoo_raw_vec_insert(i64, i64, i8*)\n";
+        let raw_vec_get_decl = "declare i8* @sengoo_raw_vec_get(i64, i64)\n";
+        let raw_vec_pop_decl = "declare i64 @sengoo_raw_vec_pop(i64, i8*)\n";
+        let raw_vec_remove_decl = "declare i64 @sengoo_raw_vec_remove(i64, i64, i8*)\n";
+        let raw_vec_iter_next_decl = "declare i8* @sengoo_raw_vec_iter_next(i64)\n";
+        let raw_hashmap_new_decl =
+            "declare i64 @sengoo_raw_hashmap_new_parts(i64, i64, i8*, i8*, i8*, i8*, i64, i64, i8*, i8*)\n";
+        let raw_hashmap_insert_decl = "declare i64 @sengoo_raw_hashmap_insert(i64, i8*, i8*)\n";
+        let raw_hashmap_get_decl = "declare i8* @sengoo_raw_hashmap_get(i64, i8*)\n";
+        let raw_hashmap_contains_decl = "declare i64 @sengoo_raw_hashmap_contains(i64, i8*)\n";
+        let raw_hashmap_remove_decl = "declare i64 @sengoo_raw_hashmap_remove(i64, i8*, i8*)\n";
+        let raw_btreemap_new_decl =
+            "declare i64 @sengoo_raw_btreemap_new_parts(i64, i64, i8*, i8*, i8*, i64, i64, i8*, i8*)\n";
+        let raw_map_key_iter_next_decl = "declare i8* @sengoo_raw_map_key_iter_next(i64)\n";
+        let needs_raw_vec_values = needs_raw_vec_push
+            || needs_raw_vec_set
+            || needs_raw_vec_insert
+            || needs_raw_vec_get
+            || needs_raw_vec_pop
+            || needs_raw_vec_remove
+            || needs_raw_vec_iter_next
+            || needs_raw_hashmap_new
+            || needs_raw_hashmap_insert
+            || needs_raw_hashmap_get
+            || needs_raw_hashmap_contains
+            || needs_raw_hashmap_remove
+            || needs_raw_btreemap_new
+            || needs_raw_map_key_iter_next;
+        if (needs_rc_copy || needs_rc_borrow || needs_raw_vec || needs_raw_vec_values)
             && !self
                 .declarations
                 .contains("; Sengoo generic Rc runtime functions\n")
@@ -776,7 +992,52 @@ impl Codegen {
         if needs_rc_borrow && !self.declarations.contains(borrow_decl) {
             self.declarations.push_str(borrow_decl);
         }
-        if needs_rc_copy || needs_rc_borrow {
+        if needs_raw_vec && !self.declarations.contains(raw_vec_decl) {
+            self.declarations.push_str(raw_vec_decl);
+        }
+        if needs_raw_vec_push && !self.declarations.contains(raw_vec_push_decl) {
+            self.declarations.push_str(raw_vec_push_decl);
+        }
+        if needs_raw_vec_set && !self.declarations.contains(raw_vec_set_decl) {
+            self.declarations.push_str(raw_vec_set_decl);
+        }
+        if needs_raw_vec_insert && !self.declarations.contains(raw_vec_insert_decl) {
+            self.declarations.push_str(raw_vec_insert_decl);
+        }
+        if needs_raw_vec_get && !self.declarations.contains(raw_vec_get_decl) {
+            self.declarations.push_str(raw_vec_get_decl);
+        }
+        if needs_raw_vec_pop && !self.declarations.contains(raw_vec_pop_decl) {
+            self.declarations.push_str(raw_vec_pop_decl);
+        }
+        if needs_raw_vec_remove && !self.declarations.contains(raw_vec_remove_decl) {
+            self.declarations.push_str(raw_vec_remove_decl);
+        }
+        if needs_raw_vec_iter_next && !self.declarations.contains(raw_vec_iter_next_decl) {
+            self.declarations.push_str(raw_vec_iter_next_decl);
+        }
+        if needs_raw_hashmap_new && !self.declarations.contains(raw_hashmap_new_decl) {
+            self.declarations.push_str(raw_hashmap_new_decl);
+        }
+        if needs_raw_hashmap_insert && !self.declarations.contains(raw_hashmap_insert_decl) {
+            self.declarations.push_str(raw_hashmap_insert_decl);
+        }
+        if needs_raw_hashmap_get && !self.declarations.contains(raw_hashmap_get_decl) {
+            self.declarations.push_str(raw_hashmap_get_decl);
+        }
+        if needs_raw_hashmap_contains && !self.declarations.contains(raw_hashmap_contains_decl) {
+            self.declarations.push_str(raw_hashmap_contains_decl);
+        }
+        if needs_raw_hashmap_remove && !self.declarations.contains(raw_hashmap_remove_decl) {
+            self.declarations.push_str(raw_hashmap_remove_decl);
+        }
+        if needs_raw_btreemap_new && !self.declarations.contains(raw_btreemap_new_decl) {
+            self.declarations.push_str(raw_btreemap_new_decl);
+        }
+        if needs_raw_map_key_iter_next && !self.declarations.contains(raw_map_key_iter_next_decl) {
+            self.declarations.push_str(raw_map_key_iter_next_decl);
+        }
+        if needs_rc_copy || needs_rc_borrow || needs_raw_vec || needs_raw_vec_values {
             self.declarations.push('\n');
         }
     }

@@ -14,7 +14,8 @@ use crate::typeck::env::{Symbol, SymbolKind, TypeEnv};
 use crate::typeck::ffi as ffi_check;
 use crate::typeck::infer::TypeInfer;
 use crate::typeck::r#trait::{
-    type_key, FunctionTy, ImplInfo, ImplRegistry, MethodSig, TraitInfo, TraitRegistry,
+    operator_trait_contract, type_key, FunctionTy, ImplInfo, ImplRegistry, MethodSig, TraitInfo,
+    TraitRegistry,
 };
 use crate::typeck::ty::{FloatKind, IntKind, Ty, TyKind, TyVarId, TypeckError};
 use crate::Result;
@@ -65,7 +66,14 @@ struct GenericTypeParamMeta {
     name: String,
     var_id: TyVarId,
     bounds: Vec<String>,
+    trait_bounds: Vec<GenericTraitBoundMeta>,
     default: Option<Ty>,
+}
+
+#[derive(Debug, Clone)]
+struct GenericTraitBoundMeta {
+    trait_name: String,
+    args: Vec<Ty>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +104,7 @@ pub struct TypeChecker {
     generic_function_metas: HashMap<String, GenericFunctionMeta>,
     generic_type_metas: HashMap<String, GenericTypeMeta>,
     generic_var_bounds: HashMap<TyVarId, Vec<String>>,
+    generic_var_trait_bounds: HashMap<TyVarId, Vec<GenericTraitBoundMeta>>,
     async_context_depth: usize,
     async_functions: HashSet<String>,
     propagation_stack: Vec<try_helpers::PropagationContext>,
@@ -136,6 +145,7 @@ impl TypeChecker {
             generic_function_metas: HashMap::new(),
             generic_type_metas: HashMap::new(),
             generic_var_bounds: HashMap::new(),
+            generic_var_trait_bounds: HashMap::new(),
             async_context_depth: 0,
             async_functions: HashSet::new(),
             propagation_stack: Vec::new(),
@@ -167,6 +177,14 @@ impl TypeChecker {
             "Default",
             "Display",
             "Debug",
+            "Send",
+            "Sync",
+            "Add",
+            "Sub",
+            "Mul",
+            "Div",
+            "Rem",
+            "Neg",
         ] {
             registry.register(TraitInfo::new(trait_name.to_string(), Vec::new(), true));
         }
@@ -211,6 +229,36 @@ impl TypeChecker {
                 let info = ImplInfo::new(ty, Some(trait_name.to_string()), Vec::new());
                 registry.register_trait_impl(trait_name.to_string(), key.to_string(), info);
             }
+        }
+        let mut numeric_types = [
+            IntKind::I8,
+            IntKind::I16,
+            IntKind::I32,
+            IntKind::I64,
+            IntKind::ISize,
+            IntKind::U8,
+            IntKind::U16,
+            IntKind::U32,
+            IntKind::U64,
+            IntKind::USize,
+        ]
+        .into_iter()
+        .map(|kind| env.int_ty(kind))
+        .collect::<Vec<_>>();
+        numeric_types.push(env.float_ty(FloatKind::F32));
+        numeric_types.push(env.float_ty(FloatKind::F64));
+        for ty in numeric_types {
+            let key = type_key(&ty);
+            for trait_name in ["Add", "Sub", "Mul", "Div", "Rem"] {
+                let info = ImplInfo::new(
+                    ty.clone(),
+                    Some(trait_name.to_string()),
+                    vec![ty.clone(), ty.clone()],
+                );
+                registry.register_trait_impl(trait_name.to_string(), key.clone(), info);
+            }
+            let info = ImplInfo::new(ty.clone(), Some("Neg".to_string()), vec![ty]);
+            registry.register_trait_impl("Neg".to_string(), key, info);
         }
         registry
     }
@@ -282,6 +330,8 @@ impl TypeChecker {
         self.load_deprecated_decls();
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.generic_var_bounds.clear();
+        self.generic_var_trait_bounds.clear();
         self.pending_supertrait_links.clear();
         self.pending_supertrait_obligations.clear();
         for decl in &program.decls {
@@ -290,7 +340,20 @@ impl TypeChecker {
 
         self.prepare_class_hierarchy(program)?;
 
+        // Auto-marker opt-outs must be visible while every function body is
+        // checked, regardless of where the impl appears in source order.
         for decl in &program.decls {
+            if let DeclKind::Impl(impl_decl) = &decl.kind {
+                if impl_decl.is_negative {
+                    self.check_impl_decl(impl_decl)?;
+                }
+            }
+        }
+
+        for decl in &program.decls {
+            if matches!(&decl.kind, DeclKind::Impl(impl_decl) if impl_decl.is_negative) {
+                continue;
+            }
             self.check_decl(decl)?;
         }
 
@@ -306,6 +369,8 @@ impl TypeChecker {
     ) -> Result<()> {
         self.generic_function_metas.clear();
         self.generic_type_metas.clear();
+        self.generic_var_bounds.clear();
+        self.generic_var_trait_bounds.clear();
         self.pending_supertrait_links.clear();
         self.pending_supertrait_obligations.clear();
         for decl in &program.decls {
@@ -315,6 +380,17 @@ impl TypeChecker {
         self.prepare_class_hierarchy(program)?;
 
         for decl in &program.decls {
+            if let DeclKind::Impl(impl_decl) = &decl.kind {
+                if impl_decl.is_negative {
+                    self.check_impl_decl(impl_decl)?;
+                }
+            }
+        }
+
+        for decl in &program.decls {
+            if matches!(&decl.kind, DeclKind::Impl(impl_decl) if impl_decl.is_negative) {
+                continue;
+            }
             self.check_decl_with_filtered_function_bodies(decl, checked_function_names)?;
         }
 
@@ -908,14 +984,14 @@ impl TypeChecker {
             return Err(TypeckError::Other(format!("type {} is not generic", name)));
         }
 
+        if let Some(ty) = self.builtin_type_by_name(&name) {
+            return Ok(ty);
+        }
+
         if let Some(symbol) = self.env.lookup(&name) {
             if let Some(ty) = symbol.get_ty() {
                 return Ok(ty.clone());
             }
-        }
-
-        if let Some(ty) = self.builtin_type_by_name(&name) {
-            return Ok(ty);
         }
 
         Err(TypeckError::UndefinedType { name })
@@ -1180,6 +1256,55 @@ impl TypeChecker {
         }
     }
 
+    fn type_is_fully_concrete(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Var(_) | TyKind::Inferred | TyKind::SelfType | TyKind::Error => false,
+            TyKind::Tuple(items) => items.iter().all(Self::type_is_fully_concrete),
+            TyKind::Array(inner, _)
+            | TyKind::Slice(inner)
+            | TyKind::Ref(_, inner)
+            | TyKind::Ptr(inner)
+            | TyKind::Future(inner) => Self::type_is_fully_concrete(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().all(Self::type_is_fully_concrete) && Self::type_is_fully_concrete(ret)
+            }
+            TyKind::Adt { args, .. } => args.iter().all(Self::type_is_fully_concrete),
+            TyKind::AssocProjection { .. } => false,
+            _ => true,
+        }
+    }
+
+    fn check_expr_with_expected(&mut self, expr: &Expr, expected: &Ty) -> TyResult<Ty> {
+        match &expr.kind {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let ty =
+                    self.check_method_call(receiver, method, args, Some(expected), expr.span)?;
+                if matches!(
+                    method.name.as_str(),
+                    "get" | "front" | "back" | "iter" | "iter_keys"
+                ) {
+                    self.env.record_method_return_type(expr.span, ty.clone());
+                }
+                Ok(ty)
+            }
+            ExprKind::Paren(inner) => self.check_expr_with_expected(inner, expected),
+            ExprKind::Call { func, args } => {
+                self.check_call_with_expected(func, args, expr.span, Some(expected))
+            }
+            ExprKind::Struct { .. } => {
+                self.expected_return_types.push(expected.clone());
+                let result = self.check_expr(expr);
+                self.expected_return_types.pop();
+                result
+            }
+            _ => self.check_expr(expr),
+        }
+    }
+
     fn check_expr(&mut self, expr: &Expr) -> TyResult<Ty> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.check_literal(lit),
@@ -1190,12 +1315,21 @@ impl TypeChecker {
             ExprKind::AssignOp { op, target, value } => self.check_assign_op(op, target, value),
             ExprKind::Index { base, index } => self.check_index(base, index),
             ExprKind::Field { base, field } => self.check_field(base, field),
-            ExprKind::Call { func, args } => self.check_call(func, args),
+            ExprKind::Call { func, args } => self.check_call(func, args, expr.span),
             ExprKind::MethodCall {
                 receiver,
                 method,
                 args,
-            } => self.check_method_call(receiver, method, args),
+            } => {
+                let ty = self.check_method_call(receiver, method, args, None, expr.span)?;
+                if matches!(
+                    method.name.as_str(),
+                    "get" | "front" | "back" | "iter" | "iter_keys"
+                ) {
+                    self.env.record_method_return_type(expr.span, ty.clone());
+                }
+                Ok(ty)
+            }
             ExprKind::Tuple(elems) => self.check_tuple(elems),
             ExprKind::Array(elems) => self.check_array(elems),
             ExprKind::Block(block) => self.check_block(block),
@@ -1270,7 +1404,7 @@ impl TypeChecker {
                     .cloned()
                     .unwrap_or_default();
 
-                if !type_params.is_empty() {
+                let result = if !type_params.is_empty() {
                     let lexical_type_args = type_params
                         .iter()
                         .filter_map(|param| {
@@ -1330,7 +1464,9 @@ impl TypeChecker {
                             }
                             for bound in &param.bounds {
                                 let concrete_key = type_key(&concrete_ty);
-                                if !self.impl_registry.implements_trait(bound, &concrete_key) {
+                                if !self.impl_registry.implements_trait(bound, &concrete_key)
+                                    && !self.type_satisfies_auto_marker_bound(bound, &concrete_ty)
+                                {
                                     let span = path.segments.last().map(|segment| segment.span);
                                     let (span_lo, span_hi) =
                                         span.map(|span| (span.lo, span.hi)).unwrap_or((0, 0));
@@ -1368,10 +1504,18 @@ impl TypeChecker {
                     } else {
                         Err(TypeckError::UndefinedType { name })
                     }
+                };
+                if let Ok(resolved) = &result {
+                    if Self::type_is_fully_concrete(resolved) {
+                        self.env
+                            .record_struct_literal_type(expr.span.lo, resolved.clone());
+                    }
                 }
+                result
             }
             ExprKind::Try(operand) => self.check_try_expr(operand),
             ExprKind::TryBlock(block) => self.check_try_block_expr(block),
+            ExprKind::Cast { expr, ty } => self.check_cast(expr, ty),
             ExprKind::Paren(inner) => self.check_expr(inner),
             _ => Ok(self.env.error_ty()),
         }
@@ -1502,21 +1646,93 @@ impl TypeChecker {
 
     pub(super) fn is_cross_thread_send_ty(&self, ty: &Ty) -> bool {
         let resolved = self.infer.apply_subst(ty);
-        self.ty_is_cross_thread_send(&resolved)
+        self.ty_satisfies_auto_marker("Send", &resolved, &mut HashSet::new())
     }
 
-    fn ty_is_cross_thread_send(&self, ty: &Ty) -> bool {
+    pub(super) fn type_satisfies_auto_marker_bound(&self, trait_name: &str, ty: &Ty) -> bool {
+        if !matches!(trait_name, "Send" | "Sync") {
+            return false;
+        }
+        let resolved = self.infer.apply_subst(ty);
+        self.ty_satisfies_auto_marker(trait_name, &resolved, &mut HashSet::new())
+    }
+
+    pub(super) fn has_negative_auto_marker_impl(&self, trait_name: &str, ty: &Ty) -> bool {
+        self.impl_registry
+            .negative_trait_impls(trait_name)
+            .iter()
+            .any(|pattern| self.match_generic_impl_target(pattern, ty, &mut HashMap::new()))
+    }
+
+    pub(super) fn negative_auto_marker_impl_overlaps(&self, trait_name: &str, ty: &Ty) -> bool {
+        self.has_negative_auto_marker_impl(trait_name, ty)
+            || self
+                .impl_registry
+                .negative_trait_impls(trait_name)
+                .iter()
+                .any(|pattern| self.match_generic_impl_target(ty, pattern, &mut HashMap::new()))
+    }
+
+    fn ty_satisfies_auto_marker(
+        &self,
+        trait_name: &str,
+        ty: &Ty,
+        visiting_adts: &mut HashSet<String>,
+    ) -> bool {
         match &ty.kind {
             TyKind::Int(_) | TyKind::Bool | TyKind::Float(_) | TyKind::Unit | TyKind::Str => true,
             TyKind::Tuple(types) => types
                 .iter()
-                .all(|inner| self.ty_is_cross_thread_send(inner)),
-            TyKind::Array(elem, _) | TyKind::Slice(elem) => self.ty_is_cross_thread_send(elem),
+                .all(|inner| self.ty_satisfies_auto_marker(trait_name, inner, visiting_adts)),
+            TyKind::Array(elem, _) | TyKind::Slice(elem) => {
+                self.ty_satisfies_auto_marker(trait_name, elem, visiting_adts)
+            }
             TyKind::Adt { name, args } => {
+                if self.has_negative_auto_marker_impl(trait_name, ty) {
+                    return false;
+                }
                 if Self::is_non_send_runtime_adt(name) {
                     return false;
                 }
-                args.iter().all(|inner| self.ty_is_cross_thread_send(inner))
+                if !args
+                    .iter()
+                    .all(|inner| self.ty_satisfies_auto_marker(trait_name, inner, visiting_adts))
+                {
+                    return false;
+                }
+                if !visiting_adts.insert(name.clone()) {
+                    return true;
+                }
+                let fields_are_send = self.env.struct_field_types_for(ty).is_none_or(|fields| {
+                    fields.iter().all(|(_, field_ty)| {
+                        self.ty_satisfies_auto_marker(trait_name, field_ty, visiting_adts)
+                    })
+                });
+                let enum_payloads = self.enum_variant_field_tys.get(name).map(|variants| {
+                    let subst = self
+                        .generic_type_metas
+                        .get(name)
+                        .map(|meta| {
+                            meta.params
+                                .iter()
+                                .map(|param| param.var_id)
+                                .zip(args.iter().cloned())
+                                .collect::<HashMap<_, _>>()
+                        })
+                        .unwrap_or_default();
+                    variants
+                        .values()
+                        .flat_map(|fields| fields.iter())
+                        .map(|field_ty| self.substitute_ty_vars(field_ty, &subst))
+                        .collect::<Vec<_>>()
+                });
+                let enum_payloads_are_send = enum_payloads.is_none_or(|fields| {
+                    fields.iter().all(|field_ty| {
+                        self.ty_satisfies_auto_marker(trait_name, field_ty, visiting_adts)
+                    })
+                });
+                visiting_adts.remove(name);
+                fields_are_send && enum_payloads_are_send
             }
             TyKind::Future(_) | TyKind::Ref(_, _) | TyKind::Ptr(_) => false,
             TyKind::Fn { .. } => true,
@@ -1525,19 +1741,7 @@ impl TypeChecker {
     }
 
     fn is_non_send_runtime_adt(name: &str) -> bool {
-        matches!(
-            name,
-            "Buffer"
-                | "AsyncContext"
-                | "JsonValue"
-                | "ProcessHandle"
-                | "ProcessCommand"
-                | "ProcessOutput"
-                | "DirHandle"
-                | "FileHandle"
-                | "FfiLibrary"
-                | "FfiSymbol"
-        )
+        name == "AsyncContext"
     }
 
     pub(super) fn cross_thread_send_error(binding: &str) -> TypeckError {

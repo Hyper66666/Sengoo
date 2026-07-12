@@ -10,12 +10,14 @@ pub(crate) struct MethodDispatchPlan {
 pub(crate) fn receiver_type_prefix(receiver_ty: &MIRType) -> String {
     match receiver_ty {
         MIRType::Int(bits) => format!("i{}", bits),
+        MIRType::UInt(bits) => format!("u{}", bits),
         MIRType::Float(bits) => format!("f{}", bits),
         MIRType::Bool => "bool".to_string(),
         MIRType::Array(_, _) => "array".to_string(),
         MIRType::Tuple(_) => "tuple".to_string(),
         MIRType::Ptr(inner) | MIRType::Ref(inner) => match inner.as_ref() {
             MIRType::Int(bits) => format!("i{}_ptr", bits),
+            MIRType::UInt(bits) => format!("u{}_ptr", bits),
             MIRType::Float(bits) => format!("f{}_ptr", bits),
             MIRType::Bool => "bool_ptr".to_string(),
             _ => "ptr".to_string(),
@@ -36,12 +38,14 @@ pub(crate) fn method_dispatch_name(
     } else {
         match receiver_ty {
             MIRType::Int(bits) => format!("i{}_{}", bits, method),
+            MIRType::UInt(bits) => format!("u{}_{}", bits, method),
             MIRType::Float(bits) => format!("f{}_{}", bits, method),
             MIRType::Bool => format!("bool_{}", method),
             MIRType::Array(_, _) => format!("array_{}", method),
             MIRType::Tuple(_) => format!("tuple_{}", method),
             MIRType::Ptr(inner) | MIRType::Ref(inner) => match inner.as_ref() {
                 MIRType::Int(bits) => format!("i{}_ptr_{}", bits, method),
+                MIRType::UInt(bits) => format!("u{}_ptr_{}", bits, method),
                 MIRType::Float(bits) => format!("f{}_ptr_{}", bits, method),
                 MIRType::Bool => format!("bool_ptr_{}", method),
                 _ => format!("ptr_{}", method),
@@ -62,6 +66,7 @@ pub(crate) fn receiver_type_display(
     } else {
         match receiver_ty {
             MIRType::Int(bits) => format!("i{}", bits),
+            MIRType::UInt(bits) => format!("u{}", bits),
             MIRType::Float(bits) => format!("f{}", bits),
             MIRType::Bool => "bool".to_string(),
             MIRType::Array(_, _) => "array".to_string(),

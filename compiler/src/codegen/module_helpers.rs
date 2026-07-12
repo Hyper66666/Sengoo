@@ -8,7 +8,7 @@ impl Codegen {
 
         self.declarations.push_str("; String Constants\n");
         for (i, s) in self.strings.iter().enumerate() {
-            let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"");
+            let escaped = common::escape_llvm_c_string(s);
             self.declarations.push_str(&format!(
                 "@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
                 i,
@@ -95,5 +95,17 @@ mod tests {
         assert_eq!(first, "@.str.0");
         assert_eq!(second, "@.str.1");
         assert_eq!(cg.strings, vec!["hello".to_string(), "hello".to_string()]);
+    }
+
+    #[test]
+    fn emit_string_constants_uses_llvm_byte_escapes() {
+        let mut cg = Codegen::new();
+        cg.add_string("quote=\" slash=\\ newline=\n");
+        cg.emit_string_constants();
+
+        assert!(cg
+            .declarations
+            .contains("quote=\\22 slash=\\5C newline=\\0A"));
+        assert!(!cg.declarations.contains("\\\""));
     }
 }

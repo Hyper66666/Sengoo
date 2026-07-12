@@ -17,7 +17,7 @@ pub use item::{
     HIRFunction, HIRImpl, HIRItem, HIRParam, HIRStatic, HIRStruct, HIRTrait, HIRTraitItem,
     HIRTypeParam, HIRTypeParamBound, HIRVariant,
 };
-pub use lower::lower_ast;
+pub use lower::{lower_ast, lower_ast_with_coverage};
 pub use pattern::{HIRMatchArm, HIRPattern};
 pub use stmt::HIRStmt;
 pub use ty::{FloatKind, HIRType, HIRTypeKind, IntKind};

@@ -30,6 +30,7 @@ pub(super) fn lower_call_expr(
     func: &HIRExpr,
     args: &[HIRExpr],
     site_lo: Option<u32>,
+    expected_return_type: Option<&HIRType>,
 ) -> Local {
     if let HIRExpr::Var { name, .. } = func {
         if name == "format" {
@@ -58,7 +59,15 @@ pub(super) fn lower_call_expr(
                 site_lo,
                 &mut arg_locals,
             );
-            lower_named_call(ctx, name, &arg_locals)
+            let expected_mir = expected_return_type.map(|ty| {
+                crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+                    ty,
+                    ctx.struct_defs,
+                    &ctx.options.enum_defs,
+                    &HashMap::new(),
+                )
+            });
+            lower_named_call(ctx, name, &arg_locals, expected_mir.as_ref())
         }
         _ => lower_non_named_call(ctx, &arg_locals),
     };
@@ -109,7 +118,7 @@ mod tests {
             name: "worker".to_string(),
             symbol: SymbolId::new(1),
         };
-        let result = lower_call_expr(&mut ctx, &func, &[], None);
+        let result = lower_call_expr(&mut ctx, &func, &[], None, None);
 
         assert_eq!(
             ctx.get_local_type(result),

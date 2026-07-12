@@ -33,11 +33,11 @@ def result_err_bool(error: i64) -> Result<bool, i64> {
 }
 
 impl<T, E> Result<T, E> {
-    def is_ok(self) -> bool {
+    def is_ok(&self) -> bool {
         self.is_ok
     }
 
-    def is_err(self) -> bool {
+    def is_err(&self) -> bool {
         if self.is_ok {
             false
         } else {

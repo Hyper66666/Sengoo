@@ -15,12 +15,16 @@ pub(crate) mod type_naming;
 pub mod typeck;
 
 pub use ast::*;
-pub use codegen::{jit::JITCodegen, Codegen, DebugInfoConfig, FfiCodegenConfig};
+pub use codegen::{
+    jit::JITCodegen, Codegen, DebugInfoConfig, FfiCodegenConfig, IntegerOverflowMode,
+};
 pub use error::{CompileError, CompileWarning, Result};
-pub use hir::lower_ast;
+pub use hir::{lower_ast, lower_ast_with_coverage};
 pub use lexer::{Keyword, Lexer, LiteralKind, Span, Symbol, Token, TokenKind};
 pub use mir::opt::MirOptLevel;
-pub use mir::{lower_hir, lower_hir_with_options, AssertCallsiteContext, MirLowerOptions};
+pub use mir::{
+    lower_hir, lower_hir_with_options, AssertCallsiteContext, CoverageContext, MirLowerOptions,
+};
 pub use parser::Parser;
 pub use symbol::{SymbolId, SymbolInterner};
 pub use typeck::TypeChecker;
@@ -43,6 +47,56 @@ impl Default for CompileOptions {
         Self {
             mir_opt_level: MirOptLevel::O2,
             runtime_contract_checks: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetPointerWidth {
+    Bits32,
+    Bits64,
+}
+
+impl TargetPointerWidth {
+    pub const fn bits(self) -> u8 {
+        match self {
+            Self::Bits32 => 32,
+            Self::Bits64 => 64,
+        }
+    }
+
+    pub fn from_target_triple(triple: &str) -> Option<Self> {
+        let architecture = triple.split('-').next()?.to_ascii_lowercase();
+        if architecture == "x86"
+            || architecture.starts_with('i') && architecture.ends_with("86")
+            || architecture.starts_with("arm")
+            || architecture.starts_with("thumb")
+            || architecture == "wasm32"
+            || architecture == "riscv32"
+            || architecture == "powerpc"
+            || architecture.starts_with("mips") && !architecture.contains("64")
+        {
+            Some(Self::Bits32)
+        } else if architecture == "x86_64"
+            || architecture == "aarch64"
+            || architecture == "wasm64"
+            || architecture == "riscv64"
+            || architecture == "powerpc64"
+            || architecture == "powerpc64le"
+            || architecture == "s390x"
+            || architecture.contains("mips64")
+        {
+            Some(Self::Bits64)
+        } else {
+            None
+        }
+    }
+
+    pub const fn host() -> Self {
+        if usize::BITS == 32 {
+            Self::Bits32
+        } else {
+            Self::Bits64
         }
     }
 }
@@ -112,8 +166,39 @@ pub fn collect_native_link_libraries(hir_module: &hir::Module) -> Vec<String> {
 
 /// Compile Sengoo source to LLVM IR using explicit options.
 pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Result<String> {
+    compile_to_ir_inner(source, options, None, TargetPointerWidth::host())
+}
+
+/// Compile Sengoo source for an explicit target triple.
+///
+/// Pointer-sized integers are lowered according to the selected target without
+/// requiring the generated program to run on the build host.
+pub fn compile_to_ir_for_target(
+    source: &str,
+    options: CompileOptions,
+    target_triple: &str,
+) -> Result<String> {
+    let pointer_width = TargetPointerWidth::from_target_triple(target_triple).ok_or_else(|| {
+        CompileError::Codegen(format!(
+            "unsupported target architecture in triple `{target_triple}`"
+        ))
+    })?;
+    compile_to_ir_inner(
+        source,
+        options,
+        Some(target_triple.to_string()),
+        pointer_width,
+    )
+}
+
+fn compile_to_ir_inner(
+    source: &str,
+    options: CompileOptions,
+    target_triple: Option<String>,
+    pointer_width: TargetPointerWidth,
+) -> Result<String> {
     // 1. Parse source code.
-    let program = Parser::parse(source)?;
+    let program = Parser::parse_with_pointer_width(source, pointer_width.bits())?;
 
     // 2. Type checking.
     let mut checker = TypeChecker::new();
@@ -132,7 +217,8 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
             options.runtime_contract_checks,
             true,
             async_functions.clone(),
-        ),
+        )
+        .with_target_pointer_width(pointer_width.bits()),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);
@@ -150,7 +236,16 @@ pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Resu
     pipeline.run(&mut mir_fns);
 
     // 6. Code generation (MIR -> LLVM IR).
-    let mut codegen = Codegen::with_ffi(ffi_codegen);
+    let overflow_mode = match options.mir_opt_level {
+        MirOptLevel::O0 | MirOptLevel::O1 => IntegerOverflowMode::DebugChecked,
+        MirOptLevel::O2 | MirOptLevel::O3 => IntegerOverflowMode::ReleaseWrapping,
+    };
+    let mut codegen = Codegen::with_ffi_target_debug_and_overflow(
+        ffi_codegen,
+        target_triple,
+        DebugInfoConfig::disabled(),
+        overflow_mode,
+    );
     codegen.codegen(&mir_fns).map_err(CompileError::Codegen)
 }
 

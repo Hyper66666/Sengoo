@@ -1,66 +1,83 @@
 ## ADDED Requirements
 
-### Requirement: The P0–P2 language-maturity program SHALL be delivered through independently archived child changes
+### Requirement: The maturity program SHALL use independently archived execution lanes
 
-The umbrella SHALL coordinate one required child change per pillar so that each
-canonical capability delta stays independently reviewable, revertible, and
-archivable. The umbrella SHALL NOT substitute its aggregate requirements for a
-child capability delta.
+The program SHALL assign each capability to one child change with its own
+design, tasks, tests, and archive gate. `language-maturity-roadmap` SHALL be the
+only active coordinator for this program.
 
-#### Scenario: A pillar begins implementation
+#### Scenario: A lane starts implementation
 
-- **WHEN** implementation work begins for one of the eleven pillars
-- **THEN** the pillar has the child change id listed in `proposal.md`
-- **AND** that child change owns its capability delta, design decisions, tasks,
-  tests, and archive gate
-- **AND** any active upstream change owning the same capability is archived first
-  or recorded as an explicit blocker
+- **WHEN** implementation begins for a roadmap capability
+- **THEN** the owning child change is named in `proposal.md`
+- **AND** dependencies and shared-file ownership are recorded
+- **AND** overlapping active changes are archived, superseded, or recorded as
+  blockers before code is changed
 
-#### Scenario: The umbrella is proposed for archive
+### Requirement: Mainline reconciliation SHALL precede new capability work
 
-- **WHEN** `language-maturity-roadmap` is proposed for archive
-- **THEN** all eleven required child changes have already passed `--strict`
-  validation and been archived
-- **AND** no accepted-risk or deferred matrix row stands in for an unimplemented
-  pillar
+The program SHALL preserve and integrate the current development state into a
+clean, reviewable mainline before later phases claim completion.
 
-### Requirement: The program SHALL standardize one coherent default memory model
+#### Scenario: Phase 1 implementation is proposed
 
-The program SHALL adopt move-based ownership with compiler-inserted `Drop` as
-the single default memory model and SHALL record any deviation from that
-decision in `design.md` before code lands.
+- **WHEN** numeric, collections, or debugger implementation begins under this
+  roadmap
+- **THEN** `mainline-release-baseline` has passed its integration and truth-
+  reconciliation gates
+- **AND** verification is run from the integrated branch rather than an obsolete
+  divergent worktree
 
-#### Scenario: Idiomatic code releases resources without manual calls
+### Requirement: Backend capability tiers SHALL define support claims
 
-- **WHEN** the P0 gate is evaluated
-- **THEN** at least one realworld fixture compiles and runs with zero manual
-  `.free()`, `.drop()`, or `.close()` calls
-- **AND** the released resources include a heap container, an owned string, and a
-  runtime handle (file, buffer, or json document)
+Every backend SHALL be classified as production, experimental, or deferred.
+Only production backends define release-blocking language behavior.
 
-### Requirement: Transitions SHALL be additive and source-compatible
+#### Scenario: An experimental backend receives an unsupported program
 
-Each child change SHALL add safe APIs alongside existing Buffer/handle APIs and
-SHALL keep existing public names source-compatible for the duration of this
-program.
+- **WHEN** the program uses a capability outside the backend's documented
+  subset
+- **THEN** the backend rejects it explicitly
+- **AND** the rejection is not treated as a language-semantics failure
+- **AND** public documentation does not imply production parity
 
-#### Scenario: Existing example still compiles after a child lands
+### Requirement: The mainstream default release SHALL close the complete user path
 
-- **WHEN** a child change introduces a new safe API for an existing capability
-- **THEN** the previously committed examples and realworld fixtures that used the
-  old handle/Buffer API still compile and run unchanged
-- **AND** any deprecation is proposed only in a later, separate change
+The first mainstream-default milestone SHALL include generic owning collections,
+documented numeric semantics, source-level debugging, registry-backed locked
+dependencies, installable releases, safe generic concurrency, and production
+hardening evidence.
 
-### Requirement: The program SHALL update the public support matrix on closure
+#### Scenario: An external user exercises the default path
 
-On umbrella archive, the program SHALL move the affected capabilities from
-"subset"/"deferred" to "Supported" with proof, so the support matrix stays the
-single source of truth.
+- **WHEN** a user starts from a clean supported host
+- **THEN** they can install Sengoo, create or fetch a package, resolve locked
+  dependencies, build, test, debug, and run it without a source checkout
+- **AND** the package can use generic collections and automatic resource release
+- **AND** failures have stable diagnostics rather than silent fallback
 
-#### Scenario: Support matrix reflects delivered capabilities
+### Requirement: Public support claims SHALL be evidence-tiered
 
-- **WHEN** the umbrella is archived
-- **THEN** `examples/realworld/SUPPORT_MATRIX.md` lists memory safety, generics,
-  strings, numerics, and concurrency rows as Supported with linked proof
-  examples/tests
-- **AND** `README.md` no longer describes these as MVP-only limitations
+The support matrix SHALL distinguish unit, native integration, realworld, and
+release-host evidence, and SHALL keep platform-limited capabilities explicitly
+platform-specific.
+
+#### Scenario: A capability is promoted to Supported
+
+- **WHEN** a roadmap capability is changed from subset/deferred/platform-
+  specific to Supported
+- **THEN** the support-matrix row links evidence matching the scope of the claim
+- **AND** skipped or unavailable host tests do not count as passing evidence
+
+### Requirement: Alternative backends SHALL wait for a stable ABI checkpoint
+
+WASM and bytecode implementation SHALL begin only after the native MIR/runtime
+ABI is versioned and the default-library, release, concurrency, and production-
+hardening entry gates pass.
+
+#### Scenario: Alternative backend work is scheduled
+
+- **WHEN** WASM or bytecode implementation is proposed
+- **THEN** the stable-ABI entry review is recorded
+- **AND** WASM and bytecode have separate owner changes and conformance gates
+- **AND** neither backend blocks the earlier mainstream-default release

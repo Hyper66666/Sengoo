@@ -5,6 +5,7 @@ use crate::method_resolution::{
     ambiguous_method_error, explicit_hir_method_param_count, select_method_candidate,
     MethodCandidate, MethodCandidateMatch,
 };
+use crate::mir::generic_methods::trait_impl_method_prefix;
 use crate::mir::hir_specialization_helpers::substitute_hir_function;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::impl_specialization_helpers::impl_type_prefix;
@@ -243,16 +244,16 @@ pub(crate) fn build_trait_method_candidate(
             .map(hir_type_instance_name)
             .collect();
         specialized.name = format!(
-            "{}_{}_{}_{}",
-            concrete_prefix,
-            template.trait_name,
+            "{}_{}_{}",
+            trait_impl_method_prefix(concrete_prefix, &template.trait_name, &template.trait_args),
             template.method.name,
             suffixes.join("_")
         );
     } else {
         specialized.name = format!(
-            "{}_{}_{}",
-            concrete_prefix, template.trait_name, template.method.name,
+            "{}_{}",
+            trait_impl_method_prefix(concrete_prefix, &template.trait_name, &template.trait_args),
+            template.method.name,
         );
     }
 

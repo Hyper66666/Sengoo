@@ -9,6 +9,9 @@ struct AsyncContext {
     handle: i64,
 }
 
+impl !Send for AsyncContext {}
+impl !Sync for AsyncContext {}
+
 trait Future<T> {
     def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
         Poll { is_ready: false, value: 0 }

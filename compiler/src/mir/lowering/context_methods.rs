@@ -147,6 +147,7 @@ impl<'a> LoweringContext<'a> {
         &mut self,
         name: &str,
         arg_locals: &[Local],
+        expected_return_type: Option<&MIRType>,
     ) -> Option<CallTargetPlan> {
         let template = self.options.generic_function_templates.get(name)?.clone();
         if template.params.len() != arg_locals.len() {
@@ -166,6 +167,21 @@ impl<'a> LoweringContext<'a> {
                 &mut mir_subst,
             );
         }
+        if let Some(expected) = expected_return_type {
+            bind_mir_subst_from_hir_type(
+                &template.return_type,
+                expected,
+                self.struct_defs,
+                &mut mir_subst,
+            );
+            bind_registered_generic_args(
+                &template.return_type,
+                expected,
+                self.struct_defs,
+                &self.concrete_type_registry,
+                &mut mir_subst,
+            );
+        }
 
         let mut hir_subst = HashMap::new();
         for type_param in &template.type_params {
@@ -178,8 +194,8 @@ impl<'a> LoweringContext<'a> {
             };
             let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(mir_ty) else {
                 self.errors.push(format!(
-                    "generic function {}: concrete type argument for {} could not be resolved during MIR lowering",
-                    name, type_param.name
+                    "generic function {}: concrete type argument for {} could not be resolved during MIR lowering: {:?}",
+                    name, type_param.name, mir_ty
                 ));
                 return None;
             };

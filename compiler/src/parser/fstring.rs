@@ -55,7 +55,7 @@ impl<'source> Parser<'source> {
         // 用空白前缀把插值文本对齐到原始偏移，使子解析产出的所有
         // span（含内部子表达式）与原始源码逐字节对应。
         let mut padded = String::with_capacity(span.hi as usize);
-        padded.extend(std::iter::repeat(' ').take(span.lo as usize));
+        padded.extend(std::iter::repeat_n(' ', span.lo as usize));
         padded.push_str(text);
 
         let mut sub = Parser::new(&padded);

@@ -2,7 +2,7 @@
 //!
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
-use super::common;
+use super::{common, IntegerOverflowMode};
 use crate::mir::dyn_dispatch::{
     parse_drop_method_metadata, parse_shim_name, vtable_global_name, VTABLE_ALIGN_SLOT,
     VTABLE_METHOD_BASE, VTABLE_SIZE_SLOT,
@@ -47,11 +47,17 @@ pub struct JITCodegen {
     global_types: HashMap<String, String>,
     phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
     phi_incoming_values: HashMap<(usize, usize, usize), String>,
+    integer_overflow_mode: IntegerOverflowMode,
+    overflow_check_counter: usize,
 }
 
 impl JITCodegen {
     /// 鍒涘缓鏂扮殑浠ｇ爜鐢熸垚鍣?
     pub fn new() -> Self {
+        Self::with_integer_overflow_mode(IntegerOverflowMode::ReleaseWrapping)
+    }
+
+    pub fn with_integer_overflow_mode(integer_overflow_mode: IntegerOverflowMode) -> Self {
         let mut cg = Self {
             ir: String::new(),
             indent: 0,
@@ -63,6 +69,8 @@ impl JITCodegen {
             global_types: HashMap::new(),
             phi_incoming_loads_by_block: HashMap::new(),
             phi_incoming_values: HashMap::new(),
+            integer_overflow_mode,
+            overflow_check_counter: 0,
         };
         cg.emit_header();
         cg
@@ -115,7 +123,7 @@ impl JITCodegen {
             self.ir.push_str("; String Constants\n");
             for (i, s) in self.strings.iter().enumerate() {
                 // 转义字符串
-                let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = common::escape_llvm_c_string(s);
                 self.ir.push_str(&format!(
                     "@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
                     i,

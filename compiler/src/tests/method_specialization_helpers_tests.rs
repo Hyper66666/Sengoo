@@ -65,6 +65,7 @@ fn generic_trait_template() -> TraitMethodTemplate {
             vec![HIRType::named("T".to_string(), vec![])],
         ),
         trait_name: "Iterable".to_string(),
+        trait_args: Vec::new(),
         method: HIRFunction {
             name: "next".to_string(),
             type_params: vec![HIRTypeParam {
@@ -98,6 +99,7 @@ fn nongeneric_trait_template() -> TraitMethodTemplate {
     TraitMethodTemplate {
         target_type: HIRType::named("Vec".to_string(), vec![]),
         trait_name: "Sized".to_string(),
+        trait_args: Vec::new(),
         method: HIRFunction {
             name: "len".to_string(),
             type_params: vec![],

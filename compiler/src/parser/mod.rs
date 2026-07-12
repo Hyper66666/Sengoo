@@ -41,11 +41,17 @@ pub struct Parser<'source> {
     /// 解析类型参数时拆分嵌套泛型 `>>` 产生的虚拟 `>` Token 数量。
     pending_type_arg_gt: usize,
     interner: SymbolInterner,
+    target_pointer_width: u8,
 }
 
 impl<'source> Parser<'source> {
     /// 从源码创建解析器。
     pub fn new(source: &'source str) -> Self {
+        Self::new_with_pointer_width(source, usize::BITS as u8)
+    }
+
+    pub fn new_with_pointer_width(source: &'source str, target_pointer_width: u8) -> Self {
+        debug_assert!(matches!(target_pointer_width, 32 | 64));
         Self {
             tokens: Vec::with_capacity(64),
             pos: 0,
@@ -57,16 +63,29 @@ impl<'source> Parser<'source> {
             in_condition_context: false,
             pending_type_arg_gt: 0,
             interner: SymbolInterner::default(),
+            target_pointer_width,
         }
     }
 
     /// 解析源码并返回 AST。
     pub fn parse(source: &str) -> Result<Program> {
+        Self::parse_with_pointer_width(source, usize::BITS as u8)
+    }
+
+    pub fn parse_with_pointer_width(source: &str, target_pointer_width: u8) -> Result<Program> {
+        if !matches!(target_pointer_width, 32 | 64) {
+            return Err(CompileError::LexError(
+                crate::error::LexError::InvalidNumber(format!(
+                    "unsupported target pointer width `{target_pointer_width}`"
+                )),
+            ));
+        }
         let macro_expanded = macro_expander::expand_declarative_macros(source)?;
         let attr_filtered =
             attribute_expander::process_surface_attributes(macro_expanded.as_ref())?;
         let expanded_source = derive_expander::expand_derive_macros(attr_filtered.as_ref())?;
-        let mut parser = Parser::new(expanded_source.as_ref());
+        let mut parser =
+            Parser::new_with_pointer_width(expanded_source.as_ref(), target_pointer_width);
         let mut program = parser.parse_program()?;
         if !parser.errors.is_empty() {
             return Err(CompileError::ParseError(parser.errors.remove(0)));
@@ -88,7 +107,7 @@ impl<'source> Parser<'source> {
                     self.errors.push(e.with_span(span));
                     self.recover_to_decl();
                 }
-                Err(_) => break,
+                Err(error) => return Err(error),
             }
         }
 

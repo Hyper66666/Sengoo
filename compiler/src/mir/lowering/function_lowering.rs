@@ -63,20 +63,15 @@ pub(super) fn lower_function(
     // 为函数参数创建局部变量并绑定到符号。
     for (i, param) in fn_item.params.iter().enumerate() {
         let local = Local::new(i + 1, LocalKind::Param);
+        ctx.mir_fn.set_local_debug_name(local, param.name.clone());
         ctx.local_names.insert(param.name.clone(), local);
         ctx.bind_local_symbol(param.symbol, local);
         if let Some((_, MIRType::Struct { name, .. })) = ctx.mir_fn.locals.get(i + 1) {
             ctx.type_names.insert(local, name.clone());
         }
-        let borrowed_receiver_wrapper = param.name == "self"
-            && fn_item.name.starts_with("Rc_")
-            && (fn_item.name.ends_with("_clone")
-                || fn_item.name.ends_with("_strong_count")
-                || fn_item.name.ends_with("_is_unique")
-                || fn_item.name.ends_with("_get"));
         if !fn_item.name.ends_with("_Drop_drop")
             && !param.ty.is_ref()
-            && !borrowed_receiver_wrapper
+            && !param.is_borrowed
             && crate::mir::dyn_dispatch::dyn_trait_of_hir_param(&param.ty).is_none()
         {
             ctx.record_drop_binding_if_needed(local);

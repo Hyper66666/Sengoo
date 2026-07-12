@@ -20,6 +20,7 @@ use crate::mir::async_origin_helpers::{
 use crate::mir::build_enum_defs;
 use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
+use crate::mir::hir_specialization_helpers::hir_type_is_concrete;
 use crate::mir::impl_specialization_helpers::{
     expand_impl_variants, impl_type_prefix, resolve_inherent_method_specialization,
 };
@@ -58,6 +59,7 @@ mod call_invocation_helpers;
 mod call_target_helpers;
 mod context_methods;
 mod contract_methods;
+mod coverage_helpers;
 mod drop_glue_helpers;
 mod entry;
 mod enum_expr_helpers;
@@ -112,7 +114,7 @@ use self::return_expr_helpers::lower_return_expr;
 use self::try_expr_helpers::{lower_try_block_expr, lower_try_expr};
 use self::while_expr_helpers::lower_while_expr;
 pub use entry::{lower_hir, lower_hir_with_options};
-pub use options::{AssertCallsiteContext, MirLowerOptions};
+pub use options::{AssertCallsiteContext, CoverageContext, MirLowerOptions};
 
 /// 循环上下文，记录 `break/continue` 目标基本块。
 #[derive(Debug, Clone, Copy)]

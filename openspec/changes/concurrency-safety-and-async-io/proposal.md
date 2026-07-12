@@ -6,7 +6,8 @@ single-thread cooperative scheduler with an optional blocking thread pool, and:
 - there is **no data-race safety model** (no `Send`/`Sync` equivalent), so true
   multi-threaded sharing is unsafe by construction;
 - the async IO reactor is documented as platform-specific and unproven on POSIX
-  ("owned-fd all-host readiness" is Deferred in `SUPPORT_MATRIX.md`);
+  ("owned-fd all-host readiness" is Deferred in
+  `examples/realworld/SUPPORT_MATRIX.md`);
 - `select` is limited to 2..8 homogeneous operands and user-defined futures are
   a restricted subset.
 
@@ -21,11 +22,13 @@ marker traits, `Future` trait).
   with documented negative cases), enforced at thread-spawn and shared-state
   boundaries. `Arc<T>` (atomic refcount) for thread-safe shared ownership, and
   `Mutex<T>`/`RwLock<T>` for shared mutation.
-- **Multi-threaded executor**: a work-stealing executor option alongside the
-  cooperative scheduler, with `spawn` requiring `Send` futures.
-- **Cross-platform async IO reactor**: timer, socket, and file-descriptor
-  readiness on Linux (epoll/poll) and Windows (IOCP/handles), proven by tests on
-  a reference host, closing the "owned-fd all-host readiness" deferral.
+- **Multi-threaded executor**: a selectable executor alongside the cooperative
+  scheduler, with `spawn` requiring `Send` futures. The release contract fixes
+  correctness, cancellation, backpressure, and deterministic join behavior;
+  work stealing is an optional optimization justified by benchmarks.
+- **Cross-platform async IO reactor**: timer, socket, and owned-handle readiness
+  on Linux, Windows, and the supported macOS release channel, proven by
+  reference-host tests without busy polling.
 - **General `Future` trait** with a documented `poll` contract, removing the
   user-future subset restrictions where sound.
 - **Channels**: `channel<T>()` (mpsc) for message passing between tasks/threads.
@@ -35,8 +38,9 @@ marker traits, `Future` trait).
 ## What changes
 
 - ADDED: `Send`/`Sync` model + enforcement; `Arc<T>`, `Mutex<T>`, `RwLock<T>`.
-- ADDED: multi-threaded work-stealing executor.
-- ADDED: cross-platform IO reactor for timers/sockets/fds (Linux + Windows).
+- ADDED: multi-threaded executor with algorithm-independent public semantics.
+- ADDED: cross-platform IO reactor for timers/sockets/owned handles on supported
+  release hosts.
 - ADDED: general `Future` trait and channels; structured task groups.
 - MODIFIED: relax `select` and user-future restrictions where sound, keeping
   negative tests for unsound escapes.
@@ -45,5 +49,5 @@ marker traits, `Future` trait).
 
 - A specific async ecosystem (HTTP frameworks, etc.) — only the runtime + safety
   primitives.
-- macOS reactor parity (tracked with `package-registry-and-distribution`'s macOS
-  channel; Linux + Windows ship here).
+- Scheduler-specific performance promises before stable reference benchmarks;
+  work stealing remains optional.

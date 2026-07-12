@@ -296,6 +296,7 @@ impl<'source> Parser<'source> {
         // 先解析第一个类型。对 `impl Type { ... }` 来说，它就是目标类型。
         // 对 `impl Trait for Type { ... }` 来说，这里实际上是 trait 路径，
         // 真正的目标类型在 `for` 之后。
+        let is_negative = self.consume(TokenKind::Not).is_some();
         let first_type = self.parse_type()?;
 
         let (target_type, trait_path, trait_args) = if self.consume(TokenKind::ForKw).is_some() {
@@ -316,6 +317,12 @@ impl<'source> Parser<'source> {
             // `impl Type` 表示固有 impl，不带 trait。
             (first_type, None, Vec::new())
         };
+
+        if is_negative && trait_path.is_none() {
+            return Err(CompileError::ParseError(ParseError::InvalidPattern(
+                "negative impl syntax requires `impl !Trait for Type {}`".to_string(),
+            )));
+        }
 
         self.parse_optional_where_clause(&mut type_params, &[TokenKind::LBrace])?;
 
@@ -414,6 +421,7 @@ impl<'source> Parser<'source> {
             target_type,
             trait_path,
             trait_args,
+            is_negative,
             associated_types,
             items,
             span: self.current_span(),

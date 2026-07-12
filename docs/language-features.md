@@ -61,6 +61,103 @@ impl i64 {
 let x = (-21).abs();
 ```
 
+## Numeric Scalar Model
+
+The P1 numeric model has one production semantic reference (LLVM-text plus
+clang) and an explicitly experimental Cranelift primitive fast path.
+
+Supported today:
+
+- `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `isize`, `usize`,
+  `f32`, and `f64` can appear in source-level type annotations where the
+  existing type checker and production code generator carry their width.
+  `isize`/`usize` follow the selected target triple, including 32-bit range
+  checking, MIR layout, casts, overflow helpers, and diagnostics.
+- Explicit `as` casts are accepted for integer/float conversions and
+  `bool` <-> integer conversions. Integer narrowing truncates to the
+  destination width, signed integer widening sign-extends, unsigned integer
+  widening zero-extends, signed integer/float casts use signed conversions, and
+  unsigned integer/float casts use unsigned conversions. Float casts use
+  IEEE-sized extension/truncation. `bool` <-> float and `char` casts are
+  rejected until the backends have dedicated lowering for them.
+  Float-to-integer casts are saturating and defined for every input: `NaN`
+  becomes zero, negative values converted to unsigned become zero, and values
+  outside the destination range clamp to its minimum or maximum.
+- Signed integer literal suffixes (`i8`, `i16`, `i32`, `i64`, `isize`),
+  unsigned integer suffixes (`u8`, `u16`, `u32`, `u64`, `usize`), and float
+  suffixes (`f32`, `f64`) are parsed by desugaring the literal through the
+  explicit `as` cast pipeline. Based integer literals (`0x`, `0o`, `0b`) and
+  `_` digit separators are accepted by the lexer. Unsigned literal tokens carry
+  `u64` payloads, so suffixed `u64`/`usize` values above `i64::MAX` compile;
+  unsuffixed values above `i64::MAX` are rejected with a diagnostic requiring
+  an unsigned suffix.
+- Mixed-width signed integer arithmetic widens operands to a common signed
+  integer width. Mixed-width fixed unsigned integer arithmetic widens operands
+  to a common unsigned width. Unsigned comparison, division, remainder, and
+  right shift lower to unsigned LLVM/JIT opcodes.
+- `std::math` exposes f32/f64 absolute/min/max, root/power/exponential/log,
+  floor/ceil/round, core trig helpers, and predicates for `NaN`, finite, and
+  infinite values.
+- `std::math` exposes `checked_<source>_to_<target>` for every non-identity
+  pair across the ten integer types. Failed magnitude narrowing reports
+  `STATUS_OVERFLOW`; negative signed-to-unsigned conversions report
+  `STATUS_INVALID_ARGUMENT`. Pointer-sized destinations use the selected
+  target width rather than host limits.
+- `std::math` adds explicit `i64` overflow helpers as inherent methods:
+  `wrapping_add/sub/mul`, `checked_add/sub/mul -> Option<i64>`, and
+  `saturating_add/sub/mul`. The same method family is also available on
+  `i32`, `i16`, `i8`, `isize`, `u64`, `usize`, `u32`, `u16`, and `u8`; the
+  small-width implementations use widened arithmetic plus casts, while
+  `u64` routes through runtime helpers, while `isize`/`usize` derive their
+  bounds from the selected target width so checked and saturating behavior is
+  correct on both 32-bit and 64-bit targets.
+- LLVM-text codegen receives an integer overflow mode from compiler options.
+  `O0/O1` currently materialize `llvm.*.with.overflow` checks for integer
+  `+`, `-`, and `*` and pass the overflow flag to the runtime trap helper;
+  `O0/O1` also check integer `/` and `%` divisors through the runtime
+  zero-divisor trap helper. The legacy JIT IR path mirrors those debug helper
+  calls. `O2/O3` keep plain wrapping/division IR and do not emit unused
+  debug-only overflow helper declarations. The opt-in
+  `sgc run --cranelift-fast-jit` path now directly emits and executes the
+  primitive bool/integer subset as Cranelift IR: O0/O1 arithmetic traps on
+  overflow, O2/O3 wraps, and division by zero traps in an isolated process.
+- `std::strconv` exposes `Result`-returning `f32`/`f64` parse and
+  fixed-precision format helpers alongside the existing `i64` helpers.
+- `std::math` defines `Add/Sub/Mul/Div/Rem<Rhs, Output>` and `Neg<Output>`;
+  the final type parameter is Sengoo's currently expressible equivalent of an
+  associated `Output`. User-defined arithmetic operators select a unique static
+  trait impl, including inside generic functions with an exact operator bound.
+  Missing impls, ambiguous outputs, malformed operator traits, and method/output
+  mismatches have stable diagnostics. Primitive arithmetic retains its direct
+  intrinsic path as a compiler-known implementation of the same contract, so
+  primitive types also satisfy exact generic operator bounds.
+- `std::math` defines mirrored `Into<T>` and `From<T>` widening traits. Since
+  `from` is reserved by import syntax, the associated constructor is spelled
+  `Target::from_value(source)`. `.into()` uses an annotated `let`, the enclosing
+  return type, or a concrete function parameter to select its target. The
+  portable lossless matrix covers signed widening, unsigned widening,
+  unsigned-to-signed destinations that represent every source value on all
+  supported targets, `f32 -> f64`, and safe `isize`/`usize` transitions.
+  Target-dependent `u32 -> isize` intentionally has no `From`/`Into` impl.
+  Semantic target identity is preserved even where MIR shares an ABI width
+  (`i64` versus `isize`, `u64` versus `usize`). Narrowing intentionally has no
+  `From`/`Into` impl and remains explicit through `as` or checked helpers.
+- `std::math` also exposes trait-bound `numeric_abs`, `numeric_min`,
+  `numeric_max`, and `numeric_clamp` helpers for every supported signed,
+  unsigned, pointer-sized integer and f32/f64 family. These monomorphize through
+  `NumericOrder<T>` and coexist with the source-compatible `abs_i64`,
+  `min_i64`, `max_i64`, and `clamp_i64` entry points.
+
+Backend and extension policy:
+
+- LLVM-text plus clang is the production semantic reference. The Cranelift
+  fast JIT accepts only its documented primitive subset and rejects calls,
+  aggregates, floats, and other unsupported constructs explicitly.
+- Operator traits use an explicit `Output` parameter until qualified
+  `Self::Output` syntax is added by a future language change.
+- Arbitrary-precision integers, decimals, SIMD, and full Cranelift MIR parity
+  are separate future capabilities rather than gaps in this numeric contract.
+
 ## 2.4 Generics, Traits, Associated Types, And Derive
 
 Sengoo supports generic `def`, `struct`, `enum`, and `impl` declarations with
@@ -279,8 +376,9 @@ compiler-lowered `Rc<T>` storage for monomorphized owning payloads. Some runtime
 compatibility release methods because older examples and direct FFI-style
 stdlib calls use them, but new examples prefer automatic drop.
 Drop glue is verified on the LLVM-text/native path and the compiler crate's
-LLVM-text JIT emitter; the separate Cranelift fast-JIT remains a constant-only
-accelerator rather than a general MIR/drop-glue backend.
+LLVM-text JIT emitter. The separate Cranelift fast-JIT now executes a genuine
+primitive bool/integer IR subset, but it is not yet a general MIR backend and
+does not support calls, aggregates, floats, runtime handles, or drop glue.
 
 ## 2.10 Text and Strings
 

@@ -51,6 +51,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
         module,
         "option"
             | "result"
+            | "math"
             | "collections"
             | "json"
             | "status"
@@ -84,7 +85,7 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
         "collections" | "json" | "status" => &["ffi", "string"],
         "string" => &["ffi"],
-        "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
+        "math" | "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
         "path" | "dir" => &["status", "string"],
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],

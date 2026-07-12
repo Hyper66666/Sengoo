@@ -45,6 +45,7 @@ pub(crate) fn async_frame_slot_count(ty: &MIRType) -> Result<usize, CompileError
     match &storage_ty {
         MIRType::Bool
         | MIRType::Int(8 | 16 | 32 | 64)
+        | MIRType::UInt(8 | 16 | 32 | 64)
         | MIRType::Float(32 | 64)
         | MIRType::Ref(_)
         | MIRType::Ptr(_)
@@ -126,6 +127,7 @@ pub(crate) fn describe_async_frame_type(ty: &MIRType) -> String {
         MIRType::Never => "never".to_string(),
         MIRType::Bool => "bool".to_string(),
         MIRType::Int(bits) => format!("i{}", bits),
+        MIRType::UInt(bits) => format!("u{}", bits),
         MIRType::Float(bits) => format!("f{}", bits),
         MIRType::Ref(inner) => format!("&{}", describe_async_frame_type(inner)),
         MIRType::Ptr(inner) => format!("*{}", describe_async_frame_type(inner)),
@@ -155,8 +157,10 @@ pub(crate) fn unsupported_async_frame_type(ty: &MIRType, reason: &str) -> Compil
 pub(crate) fn classify_async_frame_type(ty: &MIRType) -> Result<AsyncFrameValueKind, CompileError> {
     match ty {
         MIRType::Bool => Ok(AsyncFrameValueKind::Bool),
-        MIRType::Int(8 | 16 | 32) => Ok(AsyncFrameValueKind::NarrowInt),
-        MIRType::Int(64) | MIRType::Future(_) => Ok(AsyncFrameValueKind::I64),
+        MIRType::Int(8 | 16 | 32) | MIRType::UInt(8 | 16 | 32) => {
+            Ok(AsyncFrameValueKind::NarrowInt)
+        }
+        MIRType::Int(64) | MIRType::UInt(64) | MIRType::Future(_) => Ok(AsyncFrameValueKind::I64),
         MIRType::Float(32) => Ok(AsyncFrameValueKind::Float32),
         MIRType::Float(64) => Ok(AsyncFrameValueKind::Float64),
         MIRType::Ref(_) | MIRType::Ptr(_) => Ok(AsyncFrameValueKind::PointerLike),

@@ -6,6 +6,40 @@ use crate::typeck::ty::{Ty, TyVarId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OperatorTraitContract {
+    pub trait_name: &'static str,
+    pub method_name: &'static str,
+    pub symbol: &'static str,
+    pub has_rhs: bool,
+}
+
+pub(crate) fn operator_trait_contract(name: &str) -> Option<OperatorTraitContract> {
+    let (method_name, symbol, has_rhs) = match name {
+        "Add" => ("add", "+", true),
+        "Sub" => ("sub", "-", true),
+        "Mul" => ("mul", "*", true),
+        "Div" => ("div", "/", true),
+        "Rem" => ("rem", "%", true),
+        "Neg" => ("neg", "-", false),
+        _ => return None,
+    };
+    Some(OperatorTraitContract {
+        trait_name: match name {
+            "Add" => "Add",
+            "Sub" => "Sub",
+            "Mul" => "Mul",
+            "Div" => "Div",
+            "Rem" => "Rem",
+            "Neg" => "Neg",
+            _ => unreachable!(),
+        },
+        method_name,
+        symbol,
+        has_rhs,
+    })
+}
+
 /// Trait 信息
 #[derive(Debug, Clone)]
 pub struct TraitInfo {
@@ -251,8 +285,10 @@ impl Default for TraitRegistry {
 pub struct ImplRegistry {
     /// 固有 impl (type_key -> Vec<ImplInfo>)
     inherent_impls: HashMap<String, Vec<ImplInfo>>,
-    /// Trait impl (trait_name -> type_key -> ImplInfo)
-    trait_impls: HashMap<String, HashMap<String, ImplInfo>>,
+    /// Trait impl (trait_name -> type_key -> impl variants).
+    trait_impls: HashMap<String, HashMap<String, Vec<ImplInfo>>>,
+    /// Source-level auto-marker opt-outs (`impl !Send/!Sync for Type`).
+    negative_trait_impls: HashMap<String, Vec<Ty>>,
 }
 
 impl ImplRegistry {
@@ -260,6 +296,7 @@ impl ImplRegistry {
         Self {
             inherent_impls: HashMap::new(),
             trait_impls: HashMap::new(),
+            negative_trait_impls: HashMap::new(),
         }
     }
 
@@ -273,7 +310,23 @@ impl ImplRegistry {
         self.trait_impls
             .entry(trait_name)
             .or_default()
-            .insert(type_key, info);
+            .entry(type_key)
+            .or_default()
+            .push(info);
+    }
+
+    pub fn register_negative_trait_impl(&mut self, trait_name: String, target_type: Ty) {
+        self.negative_trait_impls
+            .entry(trait_name)
+            .or_default()
+            .push(target_type);
+    }
+
+    pub fn negative_trait_impls(&self, trait_name: &str) -> &[Ty] {
+        self.negative_trait_impls
+            .get(trait_name)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     /// 查找固有 impl 的方法
@@ -295,14 +348,41 @@ impl ImplRegistry {
         self.trait_impls
             .get(trait_name)
             .and_then(|type_map| type_map.get(type_key))
-            .and_then(|impl_info| impl_info.get_method(method_name))
+            .and_then(|impls| {
+                impls
+                    .iter()
+                    .find_map(|impl_info| impl_info.get_method(method_name))
+            })
+    }
+
+    pub fn lookup_trait_methods(
+        &self,
+        trait_name: &str,
+        type_key: &str,
+        method_name: &str,
+    ) -> Vec<(&ImplInfo, &FunctionTy)> {
+        self.trait_impls
+            .get(trait_name)
+            .and_then(|type_map| type_map.get(type_key))
+            .map(|impls| {
+                impls
+                    .iter()
+                    .filter_map(|impl_info| {
+                        impl_info
+                            .get_method(method_name)
+                            .map(|method| (impl_info, method))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// 检查类型是否实现了指定 Trait
     pub fn implements_trait(&self, trait_name: &str, type_key: &str) -> bool {
         self.trait_impls
             .get(trait_name)
-            .map(|type_map| type_map.contains_key(type_key))
+            .and_then(|type_map| type_map.get(type_key))
+            .map(|impls| !impls.is_empty())
             .unwrap_or(false)
     }
 
@@ -310,6 +390,28 @@ impl ImplRegistry {
         self.trait_impls
             .get(trait_name)
             .and_then(|type_map| type_map.get(type_key))
+            .and_then(|impls| impls.first())
+    }
+
+    pub fn get_trait_impls(&self, trait_name: &str, type_key: &str) -> &[ImplInfo] {
+        self.trait_impls
+            .get(trait_name)
+            .and_then(|type_map| type_map.get(type_key))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn has_trait_impl_with_args(
+        &self,
+        trait_name: &str,
+        type_key: &str,
+        trait_args: &[Ty],
+    ) -> bool {
+        self.trait_impls
+            .get(trait_name)
+            .and_then(|type_map| type_map.get(type_key))
+            .map(|impls| impls.iter().any(|info| info.trait_args == trait_args))
+            .unwrap_or(false)
     }
 
     /// 获取类型的所有固有 impl
@@ -328,6 +430,21 @@ impl Default for ImplRegistry {
 }
 
 /// 生成类型的键（用于 HashMap）
+pub fn trait_args_key(args: &[Ty]) -> String {
+    if args.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<{}>",
+            args.iter().map(type_key).collect::<Vec<_>>().join(",")
+        )
+    }
+}
+
+pub fn trait_impl_label(trait_name: &str, args: &[Ty]) -> String {
+    format!("{}{}", trait_name, trait_args_key(args))
+}
+
 pub fn type_key(ty: &Ty) -> String {
     match &ty.kind {
         crate::typeck::ty::TyKind::Unit => "()".to_string(),

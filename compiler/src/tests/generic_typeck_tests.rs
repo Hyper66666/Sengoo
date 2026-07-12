@@ -481,6 +481,59 @@ impl Wave for i64 {
 }
 
 #[test]
+fn same_generic_trait_for_same_type_with_distinct_args_is_accepted() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+
+impl Convert<u64> for i32 {
+    def convert(self) -> u64 { self as u64 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("generic trait impls with distinct trait args should not conflict");
+}
+
+#[test]
+fn duplicate_generic_trait_impl_for_same_type_and_args_is_rejected() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("duplicate generic trait impl should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[conflicting-impl]")
+            && message.contains("Convert<i64>")
+            && message.contains("i32"),
+        "expected generic conflicting-impl diagnostic, got: {message}"
+    );
+}
+
+#[test]
 fn polymorphic_recursion_reports_monomorphization_overflow() {
     // `deepen<T>` recurses as `deepen<Wrap<T>>`, growing the type argument
     // without bound. Monomorphization must stop with a stable diagnostic rather
@@ -1450,5 +1503,56 @@ def main() -> i64 {
     assert!(
         ir.contains("; Function: Key_Hash_hash"),
         "expected synthesized hash bridge for derived hash_into, got:\n{ir}"
+    );
+}
+
+#[test]
+fn zero_argument_generic_constructor_infers_type_from_expected_return() {
+    let source = r#"
+struct Holder<T> {
+    handle: i64,
+}
+
+def holder_new<T>() -> Holder<T> {
+    Holder { handle: 0 }
+}
+
+def main() -> i64 {
+    let holder: Holder<i64> = holder_new();
+    holder.handle
+}
+"#;
+
+    compile_to_ir(source)
+        .expect("expected return type should infer a zero-argument constructor type parameter");
+}
+
+#[test]
+fn phantom_generic_struct_literals_keep_distinct_mir_instance_names() {
+    let source = r#"
+struct Phantom<T> {
+    handle: i64,
+}
+
+def make_i64() -> Phantom<i64> {
+    Phantom { handle: 1 }
+}
+
+def make_bool() -> Phantom<bool> {
+    Phantom { handle: 2 }
+}
+
+def main() -> i64 {
+    make_i64().handle + make_bool().handle
+}
+"#;
+    let ir = compile_to_ir(source).expect("phantom generic instances should compile");
+    assert!(
+        ir.contains("%Phantom_i64 = type"),
+        "missing i64 instance:\n{ir}"
+    );
+    assert!(
+        ir.contains("%Phantom_bool = type"),
+        "missing bool instance:\n{ir}"
     );
 }

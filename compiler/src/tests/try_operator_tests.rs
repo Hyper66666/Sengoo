@@ -221,3 +221,42 @@ def main() -> i64 { 0 }
         "expected branch/unpack for ?, got:\n{ir}"
     );
 }
+
+#[test]
+fn result_question_rebuilds_failure_for_a_different_success_type() {
+    let ir = compile_to_ir(
+        r#"
+struct Result<T, E> { is_ok: bool, value: T, error: E }
+struct Token { value: i64 }
+
+def fail_token() -> Result<Token, i64> {
+    Result {
+        is_ok: false,
+        value: Token { value: 0 },
+        error: 9,
+    }
+}
+
+def bridge() -> Result<i64, i64> {
+    let token = fail_token()?;
+    Result { is_ok: true, value: token.value, error: 0 }
+}
+
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("? should rebuild the error container for the caller's success type");
+
+    let bridge = ir
+        .split("; Function: bridge")
+        .nth(1)
+        .expect("bridge should be emitted");
+    assert!(
+        bridge.contains("ret %Result_i64_i64"),
+        "bridge must return its declared Result<i64, i64> on every path:\n{bridge}"
+    );
+    assert!(
+        !bridge.contains("ret %Result_Token_i64"),
+        "the failure path must not return the operand container unchanged:\n{bridge}"
+    );
+}

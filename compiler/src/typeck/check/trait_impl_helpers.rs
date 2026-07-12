@@ -50,9 +50,172 @@ impl TypeChecker {
         matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String")
     }
 
+    fn validate_operator_trait_declaration_contract(
+        trait_info: &TraitInfo,
+        type_params: &[GenericTypeParamMeta],
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        let Some(contract) = operator_trait_contract(&trait_info.name) else {
+            return Ok(());
+        };
+        let expected_type_params = if contract.has_rhs { 2 } else { 1 };
+        if type_params.len() != expected_type_params {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "operator trait `{}` must declare {} type parameter(s): {}",
+                    contract.trait_name,
+                    expected_type_params,
+                    if contract.has_rhs {
+                        "`Rhs, Output`"
+                    } else {
+                        "`Output`"
+                    }
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+
+        let Some(method) = trait_info.get_method(contract.method_name) else {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "operator trait `{}` must define `def {}(...)`",
+                    contract.trait_name, contract.method_name
+                ),
+                span.lo,
+                span.hi,
+            ));
+        };
+        let expected_params = usize::from(contract.has_rhs);
+        if !method.has_self || method.param_types.len() != expected_params {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "operator trait `{}` method `{}` must take `self`{}",
+                    contract.trait_name,
+                    contract.method_name,
+                    if contract.has_rhs {
+                        " and exactly one `Rhs` argument"
+                    } else {
+                        " and no explicit arguments"
+                    }
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+
+        if contract.has_rhs {
+            let rhs_var = type_params[0].var_id;
+            if !matches!(method.param_types[0].kind, TyKind::Var(var_id) if var_id == rhs_var) {
+                return Err(TypeckError::diagnostic(
+                    "operator-trait-contract",
+                    format!(
+                        "operator trait `{}` method `{}` must accept its first trait parameter as `Rhs`",
+                        contract.trait_name, contract.method_name
+                    ),
+                    span.lo,
+                    span.hi,
+                ));
+            }
+        }
+
+        let output_var = type_params[type_params.len() - 1].var_id;
+        if !matches!(method.return_type.kind, TyKind::Var(var_id) if var_id == output_var) {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "operator trait `{}` method `{}` must return its final `Output` type parameter",
+                    contract.trait_name, contract.method_name
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_operator_trait_impl_contract(
+        impl_info: &ImplInfo,
+        target_key: &str,
+        span: crate::lexer::Span,
+    ) -> TyResult<()> {
+        let Some(trait_name) = impl_info.trait_name.as_deref() else {
+            return Ok(());
+        };
+        let Some(contract) = operator_trait_contract(trait_name) else {
+            return Ok(());
+        };
+        let expected_trait_args = if contract.has_rhs { 2 } else { 1 };
+        if impl_info.trait_args.len() != expected_trait_args {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "impl `{}` for `{target_key}` must provide {} trait argument(s): {}",
+                    contract.trait_name,
+                    expected_trait_args,
+                    if contract.has_rhs {
+                        "`Rhs, Output`"
+                    } else {
+                        "`Output`"
+                    }
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+
+        let Some(method) = impl_info.get_method(contract.method_name) else {
+            return Ok(());
+        };
+        let expected_params = usize::from(contract.has_rhs);
+        if !method.has_self || method.param_types.len() != expected_params {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-contract",
+                format!(
+                    "impl `{}` for `{target_key}` method `{}` has the wrong receiver or argument count",
+                    contract.trait_name, contract.method_name
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+        if contract.has_rhs
+            && type_key(&method.param_types[0]) != type_key(&impl_info.trait_args[0])
+        {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-rhs-mismatch",
+                format!(
+                    "impl `{}` for `{target_key}` declares Rhs `{}` but method `{}` accepts `{}`",
+                    contract.trait_name,
+                    impl_info.trait_args[0],
+                    contract.method_name,
+                    method.param_types[0]
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+        let output = &impl_info.trait_args[impl_info.trait_args.len() - 1];
+        if type_key(&method.return_type) != type_key(output) {
+            return Err(TypeckError::diagnostic(
+                "operator-trait-output-mismatch",
+                format!(
+                    "impl `{}` for `{target_key}` declares Output `{output}` but method `{}` returns `{}`",
+                    contract.trait_name, contract.method_name, method.return_type
+                ),
+                span.lo,
+                span.hi,
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
         self.env.push_scope();
-        self.bind_type_params_with_meta(&trait_decl.type_params)?;
+        let trait_type_params = self.bind_type_params_with_meta(&trait_decl.type_params)?;
 
         let mut trait_info = TraitInfo::new(
             trait_decl.name.name.clone(),
@@ -142,6 +305,14 @@ impl TypeChecker {
             }
         }
 
+        if let Err(error) = Self::validate_operator_trait_declaration_contract(
+            &trait_info,
+            &trait_type_params,
+            trait_decl.span,
+        ) {
+            self.env.pop_scope();
+            return Err(CompileError::from(error));
+        }
         self.trait_registry.register(trait_info);
 
         self.env.pop_scope();
@@ -175,6 +346,66 @@ impl TypeChecker {
                 self.env.pop_scope();
                 return Err(CompileError::from(err));
             }
+        }
+
+        if impl_decl.is_negative {
+            let Some(trait_name) = trait_name.clone() else {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "negative-impl-requires-trait",
+                    "negative impl syntax requires `impl !Trait for Type {}`",
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            };
+            if !matches!(trait_name.as_str(), "Send" | "Sync") {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "negative-impl-non-marker",
+                    "negative impls are only supported for marker traits `Send` and `Sync`",
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+            if !impl_decl.trait_args.is_empty() {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "negative-impl-trait-args",
+                    format!("negative impl `!{trait_name}` must not have trait arguments"),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+            if !impl_decl.items.is_empty() || !impl_decl.associated_types.is_empty() {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "negative-impl-items",
+                    format!(
+                        "negative impl `!{trait_name}` for `{target_key}` must not define methods or associated types"
+                    ),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+            if self
+                .impl_registry
+                .implements_trait(&trait_name, &target_key)
+                || self.negative_auto_marker_impl_overlaps(&trait_name, &target_ty)
+            {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "positive-negative-impl-conflict",
+                    format!(
+                        "conflicting positive and negative implementations of trait `{trait_name}` for type `{target_key}`"
+                    ),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
+            self.impl_registry
+                .register_negative_trait_impl(trait_name, target_ty);
+            self.env.pop_scope();
+            return Ok(());
         }
         if is_copy_impl {
             if let Err(err) = self.validate_copy_impl(&target_ty, &target_key, impl_decl.span) {
@@ -213,7 +444,7 @@ impl TypeChecker {
             self.env.push_scope();
             let method_generic_meta = self.bind_type_params_with_meta(&item.type_params)?;
             let mut param_types = Vec::new();
-            let mut has_self = false;
+            let mut has_self = item.self_param.is_some();
             for param in &item.params {
                 if param.name.name == "self" {
                     has_self = true;
@@ -237,6 +468,13 @@ impl TypeChecker {
                 ),
             );
             self.env.pop_scope();
+        }
+
+        if let Err(error) =
+            Self::validate_operator_trait_impl_contract(&impl_info, &target_key, impl_decl.span)
+        {
+            self.env.pop_scope();
+            return Err(CompileError::from(error));
         }
 
         if is_display_impl || is_debug_impl {
@@ -280,6 +518,17 @@ impl TypeChecker {
         }
 
         if let Some(trait_name) = impl_info.trait_name.clone() {
+            if self.negative_auto_marker_impl_overlaps(&trait_name, &target_ty) {
+                self.env.pop_scope();
+                return Err(CompileError::from(TypeckError::diagnostic(
+                    "positive-negative-impl-conflict",
+                    format!(
+                        "conflicting positive and negative implementations of trait `{trait_name}` for type `{target_key}`"
+                    ),
+                    impl_decl.span.lo,
+                    impl_decl.span.hi,
+                )));
+            }
             if let Some(trait_info) = self.trait_registry.get(&trait_name) {
                 let mut missing_methods = Vec::new();
 
@@ -350,16 +599,18 @@ impl TypeChecker {
                 }
             }
 
-            if self
-                .impl_registry
-                .get_trait_impl(&trait_name, &target_key)
-                .is_some()
-            {
+            if self.impl_registry.has_trait_impl_with_args(
+                &trait_name,
+                &target_key,
+                &impl_info.trait_args,
+            ) {
                 self.env.pop_scope();
+                let trait_label =
+                    crate::typeck::r#trait::trait_impl_label(&trait_name, &impl_info.trait_args);
                 return Err(CompileError::from(TypeckError::diagnostic(
                     "conflicting-impl",
                     format!(
-                        "conflicting implementations of trait `{trait_name}` for type `{target_key}`"
+                        "conflicting implementations of trait `{trait_label}` for type `{target_key}`"
                     ),
                     impl_decl.span.lo,
                     impl_decl.span.hi,

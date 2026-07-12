@@ -69,6 +69,7 @@ impl<'a> LoweringContext<'a> {
                         self.set_terminator(Terminator::Return(None));
                     } else {
                         self.mark_drop_expr_moved(expr);
+                        self.mark_drop_local_moved(result_local);
                         self.set_terminator(Terminator::Return(Some(result_local)));
                     }
                 }
@@ -92,6 +93,7 @@ impl<'a> LoweringContext<'a> {
     /// 将单条HIR语句降级为MIR指令序列。
     fn lower_stmt(&mut self, stmt: &HIRStmt) {
         match stmt {
+            HIRStmt::Coverage { site_lo } => self.emit_coverage_hit(*site_lo),
             HIRStmt::Let {
                 name,
                 symbol,
@@ -130,7 +132,8 @@ impl<'a> LoweringContext<'a> {
                 func,
                 args,
                 site_lo,
-            } => lower_call_expr(self, func, args, *site_lo),
+                expected_return_type,
+            } => lower_call_expr(self, func, args, *site_lo, expected_return_type.as_ref()),
             HIRExpr::EnumConstruct {
                 enum_name,
                 variant_name,
@@ -148,7 +151,11 @@ impl<'a> LoweringContext<'a> {
             HIRExpr::Array(elems) => lower_array_expr(self, elems),
             HIRExpr::Tuple(elems) => lower_tuple_expr(self, elems),
             HIRExpr::Index { base, index } => lower_index_expr(self, base, index),
-            HIRExpr::Struct { name, fields } => lower_struct_expr(self, name, fields),
+            HIRExpr::Struct {
+                name,
+                fields,
+                concrete_type,
+            } => lower_struct_expr(self, name, fields, concrete_type.as_ref()),
 
             HIRExpr::Field { base, field } => {
                 let base_local = self.lower_expr(base);
@@ -162,12 +169,26 @@ impl<'a> LoweringContext<'a> {
                 receiver,
                 method,
                 args,
-            } => lower_method_call_expr(self, receiver, method, args),
+                expected_return_type,
+            } => {
+                lower_method_call_expr(self, receiver, method, args, expected_return_type.as_ref())
+            }
             HIRExpr::Await(inner) => lower_await_expr(self, inner),
             HIRExpr::AsyncBlock(body) => lower_async_block_expr(self, body),
             HIRExpr::Try(operand) => lower_try_expr(self, operand),
             HIRExpr::TryBlock(body) => lower_try_block_expr(self, body),
             HIRExpr::Return(value) => lower_return_expr(self, value.as_deref()),
+            HIRExpr::Cast(inner, ty) => {
+                let value = self.lower_expr(inner);
+                let target_ty = self.hir_type_to_mir(ty);
+                let destination = self.add_local(None, LocalKind::Temp, target_ty.clone());
+                self.push_inst(Instruction::Cast {
+                    destination,
+                    value,
+                    to: target_ty,
+                });
+                destination
+            }
             _ => self.add_local(None, LocalKind::Temp, MIR_UNIT),
         }
     }

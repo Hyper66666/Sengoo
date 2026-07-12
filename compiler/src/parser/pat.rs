@@ -59,7 +59,13 @@ impl<'source> Parser<'source> {
                 // 解析字面量模式。
                 TokenKind::Int(Some(n)) => {
                     self.advance();
-                    PatternKind::Literal(Literal::Int(*n))
+                    let signed = i64::try_from(*n).map_err(|_| {
+                        CompileError::ParseError(ParseError::InvalidPatternAt {
+                            message: "integer pattern exceeds i64".to_string(),
+                            span: (token.span.lo as usize, token.span.len() as usize).into(),
+                        })
+                    })?;
+                    PatternKind::Literal(Literal::Int(signed))
                 }
                 TokenKind::Float(Some(f)) => {
                     self.advance();

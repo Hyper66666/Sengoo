@@ -26,6 +26,11 @@ struct DbResult {
     handle: i64,
 }
 
+impl !Send for Db {}
+impl !Sync for Db {}
+impl !Send for DbResult {}
+impl !Sync for DbResult {}
+
 def db_last_error_code() -> i64 {
     sengoo_db_last_error_code()
 }

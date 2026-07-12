@@ -261,6 +261,17 @@ impl TypeChecker {
         })
     }
 
+    fn is_shared_state_spawn_call(name: Option<&str>, path: Option<&[String]>) -> bool {
+        if name == Some("spawn_shared_counter_i64") {
+            return true;
+        }
+        path.is_some_and(|segments| {
+            segments.len() == 2
+                && segments[0] == "async"
+                && segments[1] == "spawn_shared_counter_i64"
+        })
+    }
+
     fn runtime_async_wrapper_future_ty(&mut self, func_name: &str) -> Option<Ty> {
         match func_name {
             "spawn_blocking_future_i64" => Some(Ty::new(
@@ -453,7 +464,40 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn check_call(&mut self, func: &Expr, args: &[Expr]) -> TyResult<Ty> {
+    fn check_shared_state_send_argument(&mut self, args: &[Expr]) -> TyResult<()> {
+        let Some(shared) = args.first() else {
+            return Ok(());
+        };
+        let shared_ty = self.check_expr(shared)?;
+        if !self.is_cross_thread_send_ty(&shared_ty) {
+            return Err(TypeckError::Other(
+                "cross-thread shared state argument is not Send".to_string(),
+            ));
+        }
+        if !self.type_satisfies_auto_marker_bound("Sync", &shared_ty) {
+            return Err(TypeckError::Other(
+                "cross-thread shared state argument is not Sync".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_call(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        call_span: crate::lexer::Span,
+    ) -> TyResult<Ty> {
+        self.check_call_with_expected(func, args, call_span, None)
+    }
+
+    pub(super) fn check_call_with_expected(
+        &mut self,
+        func: &Expr,
+        args: &[Expr],
+        call_span: crate::lexer::Span,
+        expected_return: Option<&Ty>,
+    ) -> TyResult<Ty> {
         if let ExprKind::Path(path) = &func.kind {
             if let Some(result) = self.check_enum_variant_constructor(path, args) {
                 return result;
@@ -479,6 +523,9 @@ impl TypeChecker {
 
         if Self::is_spawn_blocking_work_call(builtin_name, path_segments.as_deref()) {
             self.check_spawn_blocking_i64_send_captures(args)?;
+        }
+        if Self::is_shared_state_spawn_call(builtin_name, path_segments.as_deref()) {
+            self.check_shared_state_send_argument(args)?;
         }
 
         if builtin_name == Some("sengoo_http_server_next_request_async__start") {
@@ -815,7 +862,7 @@ impl TypeChecker {
         }
 
         if let ExprKind::Path(path) = &func.kind {
-            if let Some(result) = self.check_inherent_associated_function(path, args)? {
+            if let Some(result) = self.check_associated_function(path, args, call_span.lo)? {
                 return Ok(result);
             }
         }
@@ -858,7 +905,9 @@ impl TypeChecker {
             }
 
             for (arg_ty, arg_expr) in params.iter().take(args.len()).zip(args.iter()) {
-                let actual_ty = self.check_expr(arg_expr)?;
+                let expected_ty =
+                    self.resolve_associated_projection(&self.infer.apply_subst(arg_ty))?;
+                let actual_ty = self.check_expr_with_expected(arg_expr, &expected_ty)?;
                 // Passing an unawaited Future as a function argument is an escape.
                 // The caller must `await` it at the call-site first.
                 if self.contains_future_escape_ty(&actual_ty) {
@@ -867,8 +916,6 @@ impl TypeChecker {
                             .to_string(),
                     ));
                 }
-                let expected_ty =
-                    self.resolve_associated_projection(&self.infer.apply_subst(arg_ty))?;
                 if matches!(expected_ty.kind, TyKind::Int(IntKind::I64))
                     && matches!(actual_ty.kind, TyKind::Fn { .. })
                 {
@@ -880,16 +927,30 @@ impl TypeChecker {
                 self.infer.unify(&expected_ty, &actual_ty)?;
             }
 
+            let is_async_call = direct_fn_name
+                .as_ref()
+                .is_some_and(|name| self.async_functions.contains(name));
+            if let Some(expected) = expected_return.filter(|_| generic_ctx.is_some()) {
+                let return_ty = self.resolve_associated_projection(&self.infer.apply_subst(ret))?;
+                let call_result = if is_async_call {
+                    Ty::new(0, TyKind::Future(Box::new(return_ty)))
+                } else {
+                    return_ty
+                };
+                self.infer.unify(&call_result, expected)?;
+            }
+
             if let Some((name, meta, var_map)) = generic_ctx.as_ref() {
                 let span = func.span();
                 self.enforce_generic_function_constraints(name, meta, var_map, span.lo, span.hi)?;
             }
 
             let resolved_ret = self.resolve_associated_projection(&self.infer.apply_subst(ret))?;
+            if generic_ctx.is_some() {
+                self.env
+                    .record_call_return_type(call_span.lo, resolved_ret.clone());
+            }
 
-            let is_async_call = direct_fn_name
-                .as_ref()
-                .is_some_and(|name| self.async_functions.contains(name));
             if is_async_call {
                 Ok(Ty::new(0, TyKind::Future(Box::new(resolved_ret))))
             } else {
@@ -916,41 +977,109 @@ impl TypeChecker {
         }
     }
 
-    fn check_inherent_associated_function(
+    fn check_associated_function(
         &mut self,
         path: &crate::ast::Path,
         args: &[Expr],
+        call_site: u32,
     ) -> TyResult<Option<Ty>> {
         if path.segments.len() != 2 {
             return Ok(None);
         }
         let type_name = &path.segments[0].name;
         let method_name = &path.segments[1].name;
-        let target_ty = self.env.new_ty(TyKind::Adt {
-            name: type_name.clone(),
-            args: Vec::new(),
-        });
+        let target_ty = self
+            .env
+            .lookup(type_name)
+            .and_then(|symbol| symbol.get_ty())
+            .cloned()
+            .unwrap_or_else(|| {
+                self.env.new_ty(TyKind::Adt {
+                    name: type_name.clone(),
+                    args: Vec::new(),
+                })
+            });
         let target_key = type_key(&target_ty);
-        let Some(method_ty) = self
+
+        if let Some(method_ty) = self
             .impl_registry
             .lookup_inherent_method(&target_key, method_name)
             .cloned()
-        else {
-            return Ok(None);
+        {
+            if method_ty.has_self {
+                return Ok(None);
+            }
+            if method_ty.param_types.len() != args.len() {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: method_ty.param_types.len(),
+                    found: args.len(),
+                });
+            }
+            for (expected, arg) in method_ty.param_types.iter().zip(args) {
+                let actual = self.check_expr_with_expected(arg, expected)?;
+                self.infer.unify(expected, &actual)?;
+            }
+            return Ok(Some(self.infer.apply_subst(&method_ty.return_type)));
+        }
+
+        let actual_types = args
+            .iter()
+            .map(|arg| self.check_expr(arg))
+            .collect::<TyResult<Vec<_>>>()?;
+        let mut candidates = Vec::new();
+        for trait_name in self.trait_registry.all_traits() {
+            for (impl_info, method_ty) in
+                self.impl_registry
+                    .lookup_trait_methods(&trait_name, &target_key, method_name)
+            {
+                if method_ty.has_self || method_ty.param_types.len() != actual_types.len() {
+                    continue;
+                }
+                if method_ty.param_types.iter().zip(actual_types.iter()).all(
+                    |(expected, actual)| {
+                        type_key(&self.infer.apply_subst(expected))
+                            == type_key(&self.infer.apply_subst(actual))
+                    },
+                ) {
+                    candidates.push((trait_name.clone(), impl_info.clone(), method_ty.clone()));
+                }
+            }
+        }
+
+        let (trait_name, impl_info, method_ty) = match candidates.as_slice() {
+            [] => return Ok(None),
+            [candidate] => candidate.clone(),
+            many => {
+                let labels = many
+                    .iter()
+                    .map(|(trait_name, impl_info, _)| {
+                        crate::typeck::r#trait::trait_impl_label(trait_name, &impl_info.trait_args)
+                    })
+                    .collect::<Vec<_>>();
+                return Err(TypeckError::Other(ambiguous_method_error(
+                    method_name,
+                    &target_key,
+                    &labels,
+                )));
+            }
         };
-        if method_ty.has_self {
-            return Ok(None);
+        for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+            self.infer.unify(expected, actual)?;
         }
-        if method_ty.param_types.len() != args.len() {
-            return Err(TypeckError::ArgumentCountMismatch {
-                expected: method_ty.param_types.len(),
-                found: args.len(),
-            });
-        }
-        for (expected, arg) in method_ty.param_types.iter().zip(args) {
-            let actual = self.check_expr(arg)?;
-            self.infer.unify(expected, &actual)?;
-        }
+        let trait_args = impl_info
+            .trait_args
+            .iter()
+            .map(type_key)
+            .collect::<Vec<_>>();
+        let suffix = if trait_args.is_empty() {
+            String::new()
+        } else {
+            format!("_{}", trait_args.join("_"))
+        };
+        self.env.record_associated_function(
+            call_site,
+            format!("{target_key}_{trait_name}{suffix}_{method_name}"),
+        );
         Ok(Some(self.infer.apply_subst(&method_ty.return_type)))
     }
 
@@ -1001,6 +1130,7 @@ impl TypeChecker {
                 if !self
                     .impl_registry
                     .implements_trait(trait_name, &concrete_key)
+                    && !self.type_satisfies_auto_marker_bound(trait_name, &concrete_ty)
                 {
                     return Err(Self::unsatisfied_trait_bound_error(
                         function_name,
@@ -1010,6 +1140,54 @@ impl TypeChecker {
                         span_lo,
                         span_hi,
                     ));
+                }
+            }
+
+            if !param.trait_bounds.is_empty() {
+                let concrete_by_original_var = var_map
+                    .iter()
+                    .map(|(original, instantiated)| {
+                        let placeholder = Ty::new(0, TyKind::Var(*instantiated));
+                        (*original, self.infer.apply_subst(&placeholder))
+                    })
+                    .collect::<HashMap<_, _>>();
+                for bound in &param.trait_bounds {
+                    if bound.args.is_empty() {
+                        continue;
+                    }
+                    let resolved_args = bound
+                        .args
+                        .iter()
+                        .map(|arg| {
+                            self.infer.apply_subst(
+                                &self.substitute_ty_vars(arg, &concrete_by_original_var),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    let concrete_key = type_key(&concrete_ty);
+                    let has_exact_impl = self
+                        .impl_registry
+                        .get_trait_impls(&bound.trait_name, &concrete_key)
+                        .iter()
+                        .any(|impl_info| {
+                            impl_info.trait_args.len() == resolved_args.len()
+                                && impl_info.trait_args.iter().zip(resolved_args.iter()).all(
+                                    |(actual, expected)| type_key(actual) == type_key(expected),
+                                )
+                        });
+                    if !has_exact_impl {
+                        return Err(Self::unsatisfied_trait_bound_error(
+                            function_name,
+                            &concrete_key,
+                            crate::typeck::r#trait::trait_impl_label(
+                                &bound.trait_name,
+                                &resolved_args,
+                            ),
+                            &param.name,
+                            span_lo,
+                            span_hi,
+                        ));
+                    }
                 }
             }
         }
@@ -1073,6 +1251,8 @@ impl TypeChecker {
         receiver: &Expr,
         method: &Ident,
         args: &[Expr],
+        expected_return: Option<&Ty>,
+        call_span: crate::lexer::Span,
     ) -> TyResult<Ty> {
         use crate::typeck::r#trait::type_key;
 
@@ -1236,13 +1416,22 @@ impl TypeChecker {
         }
 
         // Then trait impl lookup.
-        if let Some(fn_ty) =
-            self.select_trait_method_call_candidate(&receiver_key, method_name, args.len())?
-        {
+        if let Some(fn_ty) = self.select_trait_method_call_candidate(
+            &receiver_key,
+            method_name,
+            args.len(),
+            expected_return,
+            call_span,
+        )? {
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
                 self.infer.unify(expected, actual)?;
             }
-            return Ok(self.infer.apply_subst(&fn_ty.return_type));
+            let resolved = self.infer.apply_subst(&fn_ty.return_type);
+            if method_name == "into" {
+                self.env
+                    .record_method_return_type(call_span, resolved.clone());
+            }
+            return Ok(resolved);
         }
 
         Err(TypeckError::MethodNotFound {
@@ -1320,14 +1509,26 @@ impl TypeChecker {
         receiver_key: &str,
         method_name: &str,
         arg_count: usize,
+        expected_return: Option<&Ty>,
+        call_span: crate::lexer::Span,
     ) -> TyResult<Option<FunctionTy>> {
         let mut candidates = Vec::new();
         for trait_name in self.trait_registry.all_traits() {
-            if let Some(fn_ty) = self
+            let trait_methods = self
                 .impl_registry
-                .lookup_trait_method(&trait_name, receiver_key, method_name)
-                .cloned()
-            {
+                .lookup_trait_methods(&trait_name, receiver_key, method_name)
+                .into_iter()
+                .map(|(impl_info, fn_ty)| {
+                    (
+                        crate::typeck::r#trait::trait_impl_label(
+                            &trait_name,
+                            &impl_info.trait_args,
+                        ),
+                        fn_ty.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            for (trait_label, fn_ty) in trait_methods {
                 if trait_name == "Drop" && method_name == "drop" {
                     return Err(TypeckError::Other(
                         "Drop::drop is reserved for compiler-inserted cleanup; use an explicit compatibility release method instead".to_string(),
@@ -1335,10 +1536,33 @@ impl TypeChecker {
                 }
                 let instantiated = self.instantiate_method_function_ty(&fn_ty, &HashMap::new());
                 candidates.push(MethodCandidate {
-                    label: trait_name,
+                    label: trait_label,
                     param_count: instantiated.param_types.len(),
                     value: instantiated,
                 });
+            }
+        }
+
+        if method_name == "into" {
+            if let Some(expected) = expected_return
+                .map(|ty| self.infer.apply_subst(ty))
+                .filter(|ty| !matches!(ty.kind, TyKind::Var(_) | TyKind::Error))
+            {
+                let expected_key = type_key(&expected);
+                let had_into_candidate = !candidates.is_empty();
+                candidates.retain(|candidate| {
+                    type_key(&self.infer.apply_subst(&candidate.value.return_type)) == expected_key
+                });
+                if had_into_candidate && candidates.is_empty() {
+                    return Err(TypeckError::diagnostic(
+                        "into-target-missing",
+                        format!(
+                            "type `{receiver_key}` has no lossless `Into<{expected_key}>` implementation"
+                        ),
+                        call_span.lo,
+                        call_span.hi,
+                    ));
+                }
             }
         }
 

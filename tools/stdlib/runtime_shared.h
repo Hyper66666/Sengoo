@@ -2,6 +2,9 @@
 #define SENGOO_RUNTIME_SHARED_H
 
 #include <stddef.h>
+#include <stdint.h>
+
+#define SENGOO_COLLECTIONS_ABI_VERSION 1
 
 enum {
     SENGOO_RUNTIME_MAX_BUFFER_BYTES = 64 * 1024 * 1024,
@@ -39,6 +42,68 @@ typedef struct {
     size_t used_len;
 } SengooFfiBuffer;
 
+typedef void (*SengooMoveFn)(void* destination, void* source);
+typedef void (*SengooDropFn)(void* value);
+typedef int (*SengooCloneFn)(void* destination, const void* source);
+typedef uint64_t (*SengooHashFn)(const void* value);
+typedef long long (*SengooEqFn)(const void* left, const void* right);
+typedef long long (*SengooCompareFn)(const void* left, const void* right);
+
+typedef struct {
+    uint32_t abi_version;
+    uint32_t flags;
+    size_t size;
+    size_t align;
+    SengooMoveFn move_value;
+    SengooDropFn drop_value;
+    SengooCloneFn clone_value;
+    SengooHashFn hash_value;
+    SengooEqFn eq_value;
+    SengooCompareFn compare_value;
+} SengooTypeDescriptor;
+
+long long sengoo_collections_abi_version(void);
+long long sengoo_type_descriptor_validate(const SengooTypeDescriptor* descriptor);
+long long sengoo_raw_vec_new(const SengooTypeDescriptor* descriptor);
+long long sengoo_raw_vec_new_parts(
+    long long size,
+    long long align,
+    void* move_value,
+    void* drop_value
+);
+long long sengoo_raw_vec_len(long long handle);
+long long sengoo_raw_vec_push(long long handle, void* value);
+void* sengoo_raw_vec_get(long long handle, long long index);
+long long sengoo_raw_vec_set(long long handle, long long index, void* value);
+long long sengoo_raw_vec_insert(long long handle, long long index, void* value);
+long long sengoo_raw_vec_pop(long long handle, void* out_value);
+long long sengoo_raw_vec_remove(long long handle, long long index, void* out_value);
+long long sengoo_raw_vec_clear(long long handle);
+long long sengoo_raw_vec_free(long long handle);
+long long sengoo_raw_vec_iter_new(long long handle);
+void* sengoo_raw_vec_iter_next(long long handle);
+long long sengoo_raw_vec_iter_free(long long handle);
+long long sengoo_raw_hashmap_new_parts(
+    long long key_size, long long key_align, void* key_move, void* key_drop,
+    void* key_hash, void* key_eq, long long value_size, long long value_align,
+    void* value_move, void* value_drop
+);
+long long sengoo_raw_hashmap_len(long long handle);
+long long sengoo_raw_hashmap_insert(long long handle, void* key, void* value);
+void* sengoo_raw_hashmap_get(long long handle, const void* key);
+long long sengoo_raw_hashmap_contains(long long handle, const void* key);
+long long sengoo_raw_hashmap_remove(long long handle, const void* key, void* out_value);
+long long sengoo_raw_hashmap_clear(long long handle);
+long long sengoo_raw_hashmap_free(long long handle);
+long long sengoo_raw_btreemap_new_parts(
+    long long key_size, long long key_align, void* key_move, void* key_drop,
+    void* key_compare, long long value_size, long long value_align,
+    void* value_move, void* value_drop
+);
+long long sengoo_raw_map_key_iter_new(long long handle);
+void* sengoo_raw_map_key_iter_next(long long handle);
+long long sengoo_raw_map_key_iter_free(long long handle);
+
 long long sengoo_ptr_to_handle(void* ptr);
 void* sengoo_handle_to_ptr(long long handle);
 long long sengoo_opaque_handle_new(void* ptr);
@@ -52,6 +117,8 @@ long long sengoo_string_live_handle_count(void);
 char* sengoo_copy_cstr_from_handle(long long value_ptr);
 char* sengoo_strdup_bytes(const char* value);
 long long sengoo_time_unix_ms(void);
+void sengoo_coverage_register(long long line);
+void sengoo_coverage_hit(long long line);
 
 #ifdef _WIN32
 int sengoo_size_add(size_t* total, size_t value);

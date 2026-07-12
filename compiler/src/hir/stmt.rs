@@ -6,6 +6,10 @@ use crate::symbol::SymbolId;
 /// HIR 语句。
 #[derive(Debug, Clone)]
 pub enum HIRStmt {
+    /// Coverage-only statement boundary. MIR lowering ignores this marker
+    /// unless a coverage context is explicitly enabled by the toolchain.
+    Coverage { site_lo: u32 },
+
     /// Let 绑定语句。
     Let {
         name: String,

@@ -19,8 +19,19 @@ impl TypeChecker {
         self.env.push_scope();
 
         let mut result_ty = self.env.unit_ty();
-        for stmt in &block.stmts {
-            if let Some(ty) = self.check_stmt(stmt)? {
+        for (index, stmt) in block.stmts.iter().enumerate() {
+            let is_function_tail = reject_tail_borrow_escape && index + 1 == block.stmts.len();
+            let checked = if is_function_tail {
+                match (&stmt.kind, self.expected_return_types.last().cloned()) {
+                    (StmtKind::Expr(expr), Some(expected)) => {
+                        Some(self.check_expr_with_expected(expr, &expected)?)
+                    }
+                    _ => self.check_stmt(stmt)?,
+                }
+            } else {
+                self.check_stmt(stmt)?
+            };
+            if let Some(ty) = checked {
                 result_ty = ty;
             }
         }
@@ -55,6 +66,7 @@ impl TypeChecker {
                 };
 
                 let value_ty = match value {
+                    Some(v) if ty.is_some() => self.check_expr_with_expected(v, &var_ty)?,
                     Some(v) => self.check_expr(v)?,
                     None => self.env.unit_ty(),
                 };
@@ -74,7 +86,7 @@ impl TypeChecker {
             }
             StmtKind::Const { name, ty, value } => {
                 let var_ty = self.check_type(ty)?;
-                let value_ty = self.check_expr(value)?;
+                let value_ty = self.check_expr_with_expected(value, &var_ty)?;
                 if Self::is_async_context_ty(&value_ty) {
                     return Err(TypeckError::Other(
                         "AsyncContext is poll-scoped and cannot be stored".to_string(),
@@ -194,7 +206,11 @@ impl TypeChecker {
     /// 检查return语句，验证返回值类型与函数返回类型匹配。
     pub(super) fn check_return(&mut self, value: &Option<Box<Expr>>) -> TyResult<Ty> {
         if let Some(v) = value {
-            let ty = self.check_expr(v)?;
+            let expected = self.expected_return_types.last().cloned();
+            let ty = match expected.as_ref() {
+                Some(expected) => self.check_expr_with_expected(v, expected)?,
+                None => self.check_expr(v)?,
+            };
             if Self::is_async_context_ty(&ty) {
                 return Err(TypeckError::Other(
                     "AsyncContext is poll-scoped and cannot be returned".to_string(),
@@ -202,6 +218,9 @@ impl TypeChecker {
             }
             if self.contains_future_escape_ty(&ty) {
                 return Err(Self::future_escape_error());
+            }
+            if let Some(expected) = expected {
+                self.infer.unify(&expected, &ty)?;
             }
         }
         Ok(self.env.never_ty())

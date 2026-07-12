@@ -305,7 +305,7 @@ impl IntKind {
             IntKind::I32 | IntKind::U32 => 32,
             IntKind::I64 | IntKind::U64 => 64,
             IntKind::I128 | IntKind::U128 => 128,
-            IntKind::ISize | IntKind::USize => 32,
+            IntKind::ISize | IntKind::USize => 64,
         }
     }
 }

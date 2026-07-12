@@ -1,6 +1,94 @@
 use super::*;
 
 impl Codegen {
+    fn should_emit_integer_overflow_check(&self, op: mir::MirBinOp, ty: &MIRType) -> bool {
+        self.integer_overflow_mode == IntegerOverflowMode::DebugChecked
+            && matches!(
+                op,
+                mir::MirBinOp::Add | mir::MirBinOp::Sub | mir::MirBinOp::Mul
+            )
+            && Self::integer_bit_width(ty).is_some_and(|width| width <= 64)
+    }
+
+    fn should_emit_division_by_zero_check(&self, op: mir::MirBinOp, ty: &MIRType) -> bool {
+        self.integer_overflow_mode == IntegerOverflowMode::DebugChecked
+            && matches!(op, mir::MirBinOp::Div | mir::MirBinOp::Rem)
+            && Self::integer_bit_width(ty).is_some_and(|width| width <= 64)
+    }
+
+    fn integer_bit_width(ty: &MIRType) -> Option<u8> {
+        match ty {
+            MIRType::Int(width) | MIRType::UInt(width) => Some(*width),
+            _ => None,
+        }
+    }
+
+    fn emit_checked_integer_binary(
+        &mut self,
+        dest: String,
+        op: mir::MirBinOp,
+        ty: &MIRType,
+        llvm_ty: &str,
+        left_val: &str,
+        right_val: &str,
+    ) {
+        let signedness = if matches!(ty, MIRType::UInt(_)) {
+            "u"
+        } else {
+            "s"
+        };
+        let op_name = match op {
+            mir::MirBinOp::Add => "add",
+            mir::MirBinOp::Sub => "sub",
+            mir::MirBinOp::Mul => "mul",
+            _ => unreachable!("checked integer overflow is only defined for + - *"),
+        };
+        let intrinsic = format!("llvm.{signedness}{op_name}.with.overflow.{llvm_ty}");
+        let tuple_ty = format!("{{ {llvm_ty}, i1 }}");
+        let check = format!("%ov.check.{}", self.overflow_check_counter);
+        let flag = format!("%ov.flag.{}", self.overflow_check_counter);
+        self.overflow_check_counter += 1;
+
+        self.ir.push_str(&format!(
+            "{check} = call {tuple_ty} @{intrinsic}({llvm_ty} {left_val}, {llvm_ty} {right_val})\n"
+        ));
+        self.emit_indent();
+        self.ir
+            .push_str(&format!("{dest} = extractvalue {tuple_ty} {check}, 0\n"));
+        self.emit_indent();
+        self.ir
+            .push_str(&format!("{flag} = extractvalue {tuple_ty} {check}, 1\n"));
+        self.emit_indent();
+        let flag_i64 = format!("%ov.flag.i64.{}", self.overflow_check_counter - 1);
+        self.ir
+            .push_str(&format!("{flag_i64} = zext i1 {flag} to i64\n"));
+        self.emit_indent();
+        self.ir.push_str(&format!(
+            "call void @sengoo_panic_integer_overflow(i64 {flag_i64})\n"
+        ));
+    }
+
+    fn emit_division_by_zero_check(&mut self, ty: &MIRType, llvm_ty: &str, divisor: &str) {
+        let divisor_i64 = if llvm_ty == "i64" {
+            divisor.to_string()
+        } else {
+            let casted = format!("%divisor.i64.{}", self.overflow_check_counter);
+            self.overflow_check_counter += 1;
+            let cast = if matches!(ty, MIRType::UInt(_)) {
+                "zext"
+            } else {
+                "sext"
+            };
+            self.ir
+                .push_str(&format!("{casted} = {cast} {llvm_ty} {divisor} to i64\n"));
+            self.emit_indent();
+            casted
+        };
+        self.ir.push_str(&format!(
+            "call void @sengoo_panic_division_by_zero(i64 {divisor_i64})\n"
+        ));
+    }
+
     pub(super) fn codegen_instruction(
         &mut self,
 
@@ -8,7 +96,7 @@ impl Codegen {
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
-        let dbg = self.debug_location_suffix(&mir_fn.name);
+        let dbg = self.debug_instruction_location_suffix(mir_fn, inst);
         match inst {
             mir::Instruction::Nop => {}
 
@@ -118,13 +206,20 @@ impl Codegen {
                 let dest = self.local_name(*destination);
 
                 let src_val = self.operand_value(*operand, mir_fn);
+                let src_ty = self.get_local_type(mir_fn, *operand);
+                let src_llvm = self.mir_type_to_llvm_cached(src_ty);
 
                 self.emit_indent();
 
                 match op {
                     mir::MirUnOp::Neg => {
-                        self.ir
-                            .push_str(&format!("{} = sub i64 0, {}\n", dest, src_val));
+                        if matches!(src_ty, MIRType::Float(_)) {
+                            self.ir
+                                .push_str(&format!("{} = fneg {} {}\n", dest, src_llvm, src_val));
+                        } else {
+                            self.ir
+                                .push_str(&format!("{} = sub {} 0, {}\n", dest, src_llvm, src_val));
+                        }
                     }
 
                     mir::MirUnOp::Not => {
@@ -134,7 +229,7 @@ impl Codegen {
 
                     mir::MirUnOp::BitNot => {
                         self.ir
-                            .push_str(&format!("{} = xor i64 {}, -1\n", dest, src_val));
+                            .push_str(&format!("{} = xor {} {}, -1\n", dest, src_llvm, src_val));
                     }
                 }
             }
@@ -163,6 +258,25 @@ impl Codegen {
                 self.emit_indent();
 
                 match op {
+                    mir::MirBinOp::Add | mir::MirBinOp::Sub | mir::MirBinOp::Mul
+                        if self.should_emit_integer_overflow_check(*op, &left_ty) =>
+                    {
+                        self.emit_checked_integer_binary(
+                            dest, *op, &left_ty, &llvm_ty, &left_val, &right_val,
+                        );
+                    }
+
+                    mir::MirBinOp::Div | mir::MirBinOp::Rem
+                        if self.should_emit_division_by_zero_check(*op, &left_ty) =>
+                    {
+                        self.emit_division_by_zero_check(&left_ty, &llvm_ty, &right_val);
+                        let opcode = common::binary_op_to_llvm(*op, &left_ty);
+                        self.ir.push_str(&format!(
+                            "{} = {} {} {}, {}\n",
+                            dest, opcode, llvm_ty, left_val, right_val
+                        ));
+                    }
+
                     mir::MirBinOp::Add
                     | mir::MirBinOp::Sub
                     | mir::MirBinOp::Mul
@@ -210,9 +324,10 @@ impl Codegen {
                     }
 
                     mir::MirBinOp::Shr => {
+                        let opcode = common::binary_op_to_llvm(*op, &left_ty);
                         self.ir.push_str(&format!(
-                            "{} = ashr {} {}, {}\n",
-                            dest, llvm_ty, left_val, right_val
+                            "{} = {} {} {}, {}\n",
+                            dest, opcode, llvm_ty, left_val, right_val
                         ));
                     }
 
@@ -510,7 +625,7 @@ impl Codegen {
                     MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } => {
                         self.emit_value_copy(&dest, &dest_ty, &src)?;
                     }
-                    MIRType::Int(_) => {
+                    MIRType::Int(_) | MIRType::UInt(_) => {
                         self.ir.push_str(&format!(
                             "{} = ptrtoint {} {} to {}\n",
                             dest, source_ptr_ty, src, dest_llvm
@@ -792,19 +907,34 @@ impl Codegen {
                 self.emit_indent();
 
                 match (&src_ty, to) {
-                    // Int-to-int casts use sext or trunc depending on destination width.
-                    (MIRType::Int(a), MIRType::Int(b)) if a < b => {
+                    // Integer widening preserves the source signedness.
+                    (MIRType::Int(a), MIRType::Int(b) | MIRType::UInt(b)) if a < b => {
                         self.ir.push_str(&format!(
                             "{} = sext {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
                         ));
                     }
 
-                    (MIRType::Int(a), MIRType::Int(b)) if a > b => {
+                    (MIRType::UInt(a), MIRType::Int(b) | MIRType::UInt(b)) if a < b => {
+                        self.ir.push_str(&format!(
+                            "{} = zext {} {} to {}\n",
+                            dest, src_llvm, src_val, dst_llvm
+                        ));
+                    }
+
+                    (MIRType::Int(a) | MIRType::UInt(a), MIRType::Int(b) | MIRType::UInt(b))
+                        if a > b =>
+                    {
                         self.ir.push_str(&format!(
                             "{} = trunc {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
                         ));
+                    }
+
+                    (MIRType::Int(a) | MIRType::UInt(a), MIRType::Int(b) | MIRType::UInt(b))
+                        if a == b =>
+                    {
+                        self.emit_value_copy(&dest, src_ty, &src_val)?;
                     }
 
                     // Float-to-float casts use fpext or fptrunc depending on destination width.
@@ -830,16 +960,30 @@ impl Codegen {
                         ));
                     }
 
-                    // Float-to-int casts use fptosi.
-                    (MIRType::Float(_), MIRType::Int(_)) => {
+                    (MIRType::UInt(_), MIRType::Float(_)) => {
                         self.ir.push_str(&format!(
-                            "{} = fptosi {} {} to {}\n",
+                            "{} = uitofp {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
                         ));
                     }
 
+                    // Saturating intrinsics define NaN and out-of-range behavior.
+                    (MIRType::Float(float_width), MIRType::Int(int_width)) => {
+                        self.ir.push_str(&format!(
+                            "{} = call {} @llvm.fptosi.sat.i{}.f{}({} {})\n",
+                            dest, dst_llvm, int_width, float_width, src_llvm, src_val
+                        ));
+                    }
+
+                    (MIRType::Float(float_width), MIRType::UInt(int_width)) => {
+                        self.ir.push_str(&format!(
+                            "{} = call {} @llvm.fptoui.sat.i{}.f{}({} {})\n",
+                            dest, dst_llvm, int_width, float_width, src_llvm, src_val
+                        ));
+                    }
+
                     // Bool -> Int闂佹寧绋掗惌顔界箾閸ヮ剚鍋?zext闂佹寧绋戝? 闂佸湱顣介弲娑㈠春?iN闂佹寧绋戦ˇ顓㈠焵?
-                    (MIRType::Bool, MIRType::Int(_)) => {
+                    (MIRType::Bool, MIRType::Int(_) | MIRType::UInt(_)) => {
                         self.ir.push_str(&format!(
                             "{} = zext {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
@@ -847,7 +991,7 @@ impl Codegen {
                     }
 
                     // Int -> Bool闂佹寧绋掗惌顔界箾閸ヮ剚鍋?trunc闂佹寧绋戝鐑?闂佽鎯屾禍婊堝春?i1闂佹寧绋戦ˇ顓㈠焵?
-                    (MIRType::Int(_), MIRType::Bool) => {
+                    (MIRType::Int(_) | MIRType::UInt(_), MIRType::Bool) => {
                         self.ir.push_str(&format!(
                             "{} = trunc {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
@@ -855,8 +999,11 @@ impl Codegen {
                     }
 
                     (MIRType::Ptr(_), MIRType::Int(_))
+                    | (MIRType::Ptr(_), MIRType::UInt(_))
                     | (MIRType::Ref(_), MIRType::Int(_))
-                    | (MIRType::Fn { .. }, MIRType::Int(_)) => {
+                    | (MIRType::Ref(_), MIRType::UInt(_))
+                    | (MIRType::Fn { .. }, MIRType::Int(_))
+                    | (MIRType::Fn { .. }, MIRType::UInt(_)) => {
                         self.ir.push_str(&format!(
                             "{} = ptrtoint {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm
@@ -864,8 +1011,11 @@ impl Codegen {
                     }
 
                     (MIRType::Int(_), MIRType::Ptr(_))
+                    | (MIRType::UInt(_), MIRType::Ptr(_))
                     | (MIRType::Int(_), MIRType::Ref(_))
-                    | (MIRType::Int(_), MIRType::Fn { .. }) => {
+                    | (MIRType::UInt(_), MIRType::Ref(_))
+                    | (MIRType::Int(_), MIRType::Fn { .. })
+                    | (MIRType::UInt(_), MIRType::Fn { .. }) => {
                         self.ir.push_str(&format!(
                             "{} = inttoptr {} {} to {}\n",
                             dest, src_llvm, src_val, dst_llvm

@@ -91,11 +91,23 @@ where
 /// Resolve a method call target. The `bool` in the result reports whether the
 /// receiver was resolved through the deref plan (pointer receiver, by-value
 /// callee), meaning the caller must load the receiver before the call.
+#[cfg(test)]
 pub(super) fn resolve_method_call_target_with_ctx(
     ctx: &mut LoweringContext<'_>,
     receiver_local: Local,
     method: &str,
     arg_locals: &[Local],
+) -> Result<(String, bool), String> {
+    resolve_method_call_target_with_expected(ctx, receiver_local, method, arg_locals, None, None)
+}
+
+fn resolve_method_call_target_with_expected(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    method: &str,
+    arg_locals: &[Local],
+    expected_return_type: Option<&MIRType>,
+    expected_return_name: Option<&str>,
 ) -> Result<(String, bool), String> {
     let receiver_ty = ctx.get_local_type(receiver_local).clone();
     let explicit_type_name = ctx.type_names.get(&receiver_local).cloned();
@@ -104,6 +116,17 @@ pub(super) fn resolve_method_call_target_with_ctx(
 
     let known_function_entries: Vec<(String, usize)> = ctx
         .known_function_names()
+        .filter(|name| {
+            if method == "into" {
+                if let Some(expected_name) = expected_return_name {
+                    return name.ends_with(&format!("_Into_{expected_name}_into"));
+                }
+            }
+            expected_return_type.is_none_or(|expected| {
+                ctx.function_sig(name)
+                    .is_some_and(|sig| &sig.ret_type == expected)
+            })
+        })
         .map(|name| {
             (
                 name.clone(),
@@ -214,6 +237,17 @@ pub(super) fn lower_method_call_from_locals(
     method: &str,
     arg_locals: &[Local],
 ) -> Local {
+    lower_method_call_from_locals_with_expected(ctx, receiver_local, method, arg_locals, None, None)
+}
+
+pub(super) fn lower_method_call_from_locals_with_expected(
+    ctx: &mut LoweringContext<'_>,
+    receiver_local: Local,
+    method: &str,
+    arg_locals: &[Local],
+    expected_return_type: Option<&MIRType>,
+    expected_return_name: Option<&str>,
+) -> Local {
     if is_explicit_release_method(method) {
         ctx.mark_drop_local_moved(receiver_local);
     }
@@ -242,14 +276,20 @@ pub(super) fn lower_method_call_from_locals(
         return result_local;
     }
 
-    let (resolved_func_name, receiver_needs_load) =
-        match resolve_method_call_target_with_ctx(ctx, receiver_local, method, arg_locals) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                ctx.errors.push(error);
-                return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
-            }
-        };
+    let (resolved_func_name, receiver_needs_load) = match resolve_method_call_target_with_expected(
+        ctx,
+        receiver_local,
+        method,
+        arg_locals,
+        expected_return_type,
+        expected_return_name,
+    ) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            ctx.errors.push(error);
+            return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+    };
     let receiver_local = if receiver_needs_load {
         load_deref_receiver(ctx, receiver_local)
     } else {

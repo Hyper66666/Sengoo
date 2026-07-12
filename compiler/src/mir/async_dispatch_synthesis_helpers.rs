@@ -57,6 +57,10 @@ pub fn select_result_runtime_suffix(ty: &MIRType) -> Option<&'static str> {
         MIRType::Int(16) => Some("i16"),
         MIRType::Int(32) => Some("i32"),
         MIRType::Int(64) => Some("i64"),
+        MIRType::UInt(8) => Some("u8"),
+        MIRType::UInt(16) => Some("u16"),
+        MIRType::UInt(32) => Some("u32"),
+        MIRType::UInt(64) => Some("u64"),
         MIRType::Float(32) => Some("f32"),
         MIRType::Float(64) => Some("f64"),
         _ => None,
@@ -78,6 +82,10 @@ pub fn select_runtime_return_type(ty: &MIRType) -> Option<MIRType> {
         MIRType::Int(16) => Some(MIRType::Int(16)),
         MIRType::Int(32) => Some(MIRType::Int(32)),
         MIRType::Int(64) => Some(MIR_I64),
+        MIRType::UInt(8) => Some(MIRType::UInt(8)),
+        MIRType::UInt(16) => Some(MIRType::UInt(16)),
+        MIRType::UInt(32) => Some(MIRType::UInt(32)),
+        MIRType::UInt(64) => Some(MIRType::UInt(64)),
         MIRType::Float(32) => Some(MIRType::Float(32)),
         MIRType::Float(64) => Some(MIRType::Float(64)),
         _ => None,
@@ -89,6 +97,7 @@ pub fn select_runtime_declaration(ty: &MIRType) -> Option<String> {
     let ret = match select_runtime_return_type(ty)? {
         MIRType::Bool => "i1".to_string(),
         MIRType::Int(bits) => format!("i{bits}"),
+        MIRType::UInt(bits) => format!("u{bits}"),
         MIRType::Float(32) => "float".to_string(),
         MIRType::Float(64) => "double".to_string(),
         _ => return None,
@@ -100,6 +109,7 @@ fn select_result_default_constant(ty: &MIRType) -> Option<MirConstant> {
     match ty {
         MIRType::Bool => Some(MirConstant::Bool(false)),
         MIRType::Int(_) => Some(MirConstant::Int(0)),
+        MIRType::UInt(_) => Some(MirConstant::Uint(0)),
         MIRType::Float(_) => Some(MirConstant::Float(0.0)),
         _ => None,
     }

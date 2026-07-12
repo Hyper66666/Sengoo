@@ -1,6 +1,7 @@
 use crate::hir::{self, HIRType, HIRTypeKind};
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
+    substitute_hir_type,
 };
 use crate::mir::method_specialization_helpers::prepare_method_specialization;
 use crate::mir::{ConcreteTypeRegistry, InherentMethodTemplate, MIRType};
@@ -144,8 +145,47 @@ pub(crate) fn collect_matching_inherent_method_templates<'a>(
             matches.push((template, legacy_prefix));
         }
     }
+    matches.sort_by_key(|(template, _)| inherent_template_placeholder_count(template));
 
     matches
+}
+
+fn inherent_template_placeholder_count(template: &InherentMethodTemplate) -> usize {
+    let generic_params = template
+        .method
+        .type_params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<HashSet<_>>();
+    count_placeholders_in_hir_type(&template.target_type, &generic_params)
+}
+
+fn count_placeholders_in_hir_type(ty: &HIRType, generic_params: &HashSet<&str>) -> usize {
+    match &ty.kind {
+        HIRTypeKind::Named { name, args } => {
+            usize::from(generic_params.contains(name.as_str()))
+                + args
+                    .iter()
+                    .map(|arg| count_placeholders_in_hir_type(arg, generic_params))
+                    .sum::<usize>()
+        }
+        HIRTypeKind::Ref(_, inner) | HIRTypeKind::Ptr(inner) | HIRTypeKind::Slice(inner) => {
+            count_placeholders_in_hir_type(inner, generic_params)
+        }
+        HIRTypeKind::Array(inner, _) => count_placeholders_in_hir_type(inner, generic_params),
+        HIRTypeKind::Tuple(items) => items
+            .iter()
+            .map(|item| count_placeholders_in_hir_type(item, generic_params))
+            .sum(),
+        HIRTypeKind::Fn { params, ret } => {
+            params
+                .iter()
+                .map(|param| count_placeholders_in_hir_type(param, generic_params))
+                .sum::<usize>()
+                + count_placeholders_in_hir_type(ret, generic_params)
+        }
+        _ => 0,
+    }
 }
 
 pub(crate) fn specialize_matching_inherent_method(
@@ -241,7 +281,11 @@ pub(crate) fn expand_impl_variants(
                 variants.push(hir::HIRImpl {
                     target_type: concrete.clone(),
                     trait_name: impl_item.trait_name.clone(),
-                    trait_args: impl_item.trait_args.clone(),
+                    trait_args: impl_item
+                        .trait_args
+                        .iter()
+                        .map(|arg| substitute_hir_type(arg, &subst))
+                        .collect(),
                     items: impl_item
                         .items
                         .iter()

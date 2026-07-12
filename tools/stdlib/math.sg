@@ -1,3 +1,51 @@
+#[link(name = "m")]
+extern "C" {
+    fn sengoo_f64_is_nan(value: f64) -> i64;
+    fn sengoo_f64_is_finite(value: f64) -> i64;
+    fn sengoo_f64_is_infinite(value: f64) -> i64;
+    fn sengoo_f32_is_nan(value: f32) -> i64;
+    fn sengoo_f32_is_finite(value: f32) -> i64;
+    fn sengoo_f32_is_infinite(value: f32) -> i64;
+    fn sengoo_f32_sqrt(value: f32) -> f32;
+    fn sengoo_f32_pow(base: f32, exp: f32) -> f32;
+    fn sengoo_f32_exp(value: f32) -> f32;
+    fn sengoo_f32_ln(value: f32) -> f32;
+    fn sengoo_f32_floor(value: f32) -> f32;
+    fn sengoo_f32_ceil(value: f32) -> f32;
+    fn sengoo_f32_round(value: f32) -> f32;
+    fn sengoo_f32_sin(value: f32) -> f32;
+    fn sengoo_f32_cos(value: f32) -> f32;
+    fn sengoo_f32_tan(value: f32) -> f32;
+    fn sengoo_f64_sqrt(value: f64) -> f64;
+    fn sengoo_f64_pow(base: f64, exp: f64) -> f64;
+    fn sengoo_f64_exp(value: f64) -> f64;
+    fn sengoo_f64_ln(value: f64) -> f64;
+    fn sengoo_f64_floor(value: f64) -> f64;
+    fn sengoo_f64_ceil(value: f64) -> f64;
+    fn sengoo_f64_round(value: f64) -> f64;
+    fn sengoo_f64_sin(value: f64) -> f64;
+    fn sengoo_f64_cos(value: f64) -> f64;
+    fn sengoo_f64_tan(value: f64) -> f64;
+    fn sengoo_i64_checked_add_ok(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_checked_sub_ok(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_checked_mul_ok(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_wrapping_add(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_wrapping_sub(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_wrapping_mul(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_saturating_add(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_saturating_sub(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_i64_saturating_mul(lhs: i64, rhs: i64) -> i64;
+    fn sengoo_u64_checked_add_ok(lhs: u64, rhs: u64) -> i64;
+    fn sengoo_u64_checked_sub_ok(lhs: u64, rhs: u64) -> i64;
+    fn sengoo_u64_checked_mul_ok(lhs: u64, rhs: u64) -> i64;
+    fn sengoo_u64_wrapping_add(lhs: u64, rhs: u64) -> u64;
+    fn sengoo_u64_wrapping_sub(lhs: u64, rhs: u64) -> u64;
+    fn sengoo_u64_wrapping_mul(lhs: u64, rhs: u64) -> u64;
+    fn sengoo_u64_saturating_add(lhs: u64, rhs: u64) -> u64;
+    fn sengoo_u64_saturating_sub(lhs: u64, rhs: u64) -> u64;
+    fn sengoo_u64_saturating_mul(lhs: u64, rhs: u64) -> u64;
+}
+
 def abs_i64(value: i64) -> i64 {
     if value < 0 {
         0 - value
@@ -68,4 +116,1953 @@ def pow_i64(base: i64, exp: i64) -> i64 {
     } else {
         base * pow_i64(base, exp - 1)
     }
+}
+
+trait Add<Rhs, Output> {
+    def add(self, rhs: Rhs) -> Output {}
+}
+
+trait Sub<Rhs, Output> {
+    def sub(self, rhs: Rhs) -> Output {}
+}
+
+trait Mul<Rhs, Output> {
+    def mul(self, rhs: Rhs) -> Output {}
+}
+
+trait Div<Rhs, Output> {
+    def div(self, rhs: Rhs) -> Output {}
+}
+
+trait Rem<Rhs, Output> {
+    def rem(self, rhs: Rhs) -> Output {}
+}
+
+trait Neg<Output> {
+    def neg(self) -> Output {}
+}
+
+trait Into<T> {
+    def into(self) -> T {}
+}
+
+trait From<T> {
+    def from_value(value: T) -> Self {}
+}
+
+trait NumericOrder<T> {
+    def numeric_abs_value(self) -> T {}
+    def numeric_min_value(self, rhs: T) -> T {}
+    def numeric_max_value(self, rhs: T) -> T {}
+    def numeric_clamp_value(self, lower: T, upper: T) -> T {}
+}
+
+def numeric_abs<T>(value: T) -> T where T: NumericOrder<T> {
+    value.numeric_abs_value()
+}
+
+def numeric_min<T>(lhs: T, rhs: T) -> T where T: NumericOrder<T> {
+    lhs.numeric_min_value(rhs)
+}
+
+def numeric_max<T>(lhs: T, rhs: T) -> T where T: NumericOrder<T> {
+    lhs.numeric_max_value(rhs)
+}
+
+def numeric_clamp<T>(value: T, lower: T, upper: T) -> T where T: NumericOrder<T> {
+    value.numeric_clamp_value(lower, upper)
+}
+
+impl NumericOrder<i64> for i64 {
+    def numeric_abs_value(self) -> i64 { abs_i64(self) }
+    def numeric_min_value(self, rhs: i64) -> i64 { min_i64(self, rhs) }
+    def numeric_max_value(self, rhs: i64) -> i64 { max_i64(self, rhs) }
+    def numeric_clamp_value(self, lower: i64, upper: i64) -> i64 {
+        clamp_i64(self, lower, upper)
+    }
+}
+
+impl NumericOrder<i32> for i32 {
+    def numeric_abs_value(self) -> i32 {
+        if self < 0i32 { 0i32 - self } else { self }
+    }
+    def numeric_min_value(self, rhs: i32) -> i32 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: i32) -> i32 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: i32, upper: i32) -> i32 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<i16> for i16 {
+    def numeric_abs_value(self) -> i16 {
+        if self < 0i16 { 0i16 - self } else { self }
+    }
+    def numeric_min_value(self, rhs: i16) -> i16 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: i16) -> i16 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: i16, upper: i16) -> i16 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<i8> for i8 {
+    def numeric_abs_value(self) -> i8 {
+        if self < 0i8 { 0i8 - self } else { self }
+    }
+    def numeric_min_value(self, rhs: i8) -> i8 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: i8) -> i8 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: i8, upper: i8) -> i8 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<isize> for isize {
+    def numeric_abs_value(self) -> isize {
+        if self < 0isize { 0isize - self } else { self }
+    }
+    def numeric_min_value(self, rhs: isize) -> isize {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: isize) -> isize {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: isize, upper: isize) -> isize {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<u64> for u64 {
+    def numeric_abs_value(self) -> u64 { self }
+    def numeric_min_value(self, rhs: u64) -> u64 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: u64) -> u64 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: u64, upper: u64) -> u64 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<u32> for u32 {
+    def numeric_abs_value(self) -> u32 { self }
+    def numeric_min_value(self, rhs: u32) -> u32 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: u32) -> u32 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: u32, upper: u32) -> u32 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<u16> for u16 {
+    def numeric_abs_value(self) -> u16 { self }
+    def numeric_min_value(self, rhs: u16) -> u16 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: u16) -> u16 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: u16, upper: u16) -> u16 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<u8> for u8 {
+    def numeric_abs_value(self) -> u8 { self }
+    def numeric_min_value(self, rhs: u8) -> u8 {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: u8) -> u8 {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: u8, upper: u8) -> u8 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<usize> for usize {
+    def numeric_abs_value(self) -> usize { self }
+    def numeric_min_value(self, rhs: usize) -> usize {
+        if self < rhs { self } else { rhs }
+    }
+    def numeric_max_value(self, rhs: usize) -> usize {
+        if self > rhs { self } else { rhs }
+    }
+    def numeric_clamp_value(self, lower: usize, upper: usize) -> usize {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<f32> for f32 {
+    def numeric_abs_value(self) -> f32 { abs_f32(self) }
+    def numeric_min_value(self, rhs: f32) -> f32 { min_f32(self, rhs) }
+    def numeric_max_value(self, rhs: f32) -> f32 { max_f32(self, rhs) }
+    def numeric_clamp_value(self, lower: f32, upper: f32) -> f32 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl NumericOrder<f64> for f64 {
+    def numeric_abs_value(self) -> f64 { abs_f64(self) }
+    def numeric_min_value(self, rhs: f64) -> f64 { min_f64(self, rhs) }
+    def numeric_max_value(self, rhs: f64) -> f64 { max_f64(self, rhs) }
+    def numeric_clamp_value(self, lower: f64, upper: f64) -> f64 {
+        let minimum = self.numeric_min_value(upper);
+        minimum.numeric_max_value(lower)
+    }
+}
+
+impl Into<i64> for i8 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl From<i8> for i64 {
+    def from_value(value: i8) -> i64 { value as i64 }
+}
+
+impl Into<i16> for i8 {
+    def into(self) -> i16 { self as i16 }
+}
+
+impl Into<i32> for i8 {
+    def into(self) -> i32 { self as i32 }
+}
+
+impl Into<i64> for i16 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<i32> for i16 {
+    def into(self) -> i32 { self as i32 }
+}
+
+impl Into<i64> for i32 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<i64> for i64 {
+    def into(self) -> i64 { self }
+}
+
+impl Into<i64> for isize {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<i64> for u8 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<i16> for u8 {
+    def into(self) -> i16 { self as i16 }
+}
+
+impl Into<i32> for u8 {
+    def into(self) -> i32 { self as i32 }
+}
+
+impl Into<u16> for u8 {
+    def into(self) -> u16 { self as u16 }
+}
+
+impl Into<u32> for u8 {
+    def into(self) -> u32 { self as u32 }
+}
+
+impl Into<u64> for u8 {
+    def into(self) -> u64 { self as u64 }
+}
+
+impl Into<i64> for u16 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<i32> for u16 {
+    def into(self) -> i32 { self as i32 }
+}
+
+impl Into<u32> for u16 {
+    def into(self) -> u32 { self as u32 }
+}
+
+impl Into<u64> for u16 {
+    def into(self) -> u64 { self as u64 }
+}
+
+impl Into<i64> for u32 {
+    def into(self) -> i64 { self as i64 }
+}
+
+impl Into<u64> for u32 {
+    def into(self) -> u64 { self as u64 }
+}
+
+impl Into<u64> for u64 {
+    def into(self) -> u64 { self }
+}
+
+impl Into<u64> for usize {
+    def into(self) -> u64 { self as u64 }
+}
+
+impl Into<isize> for i8 {
+    def into(self) -> isize { self as isize }
+}
+
+impl Into<isize> for i16 {
+    def into(self) -> isize { self as isize }
+}
+
+impl Into<isize> for i32 {
+    def into(self) -> isize { self as isize }
+}
+
+impl Into<usize> for u8 {
+    def into(self) -> usize { self as usize }
+}
+
+impl Into<isize> for u8 {
+    def into(self) -> isize { self as isize }
+}
+
+impl Into<usize> for u16 {
+    def into(self) -> usize { self as usize }
+}
+
+impl Into<isize> for u16 {
+    def into(self) -> isize { self as isize }
+}
+
+impl Into<usize> for u32 {
+    def into(self) -> usize { self as usize }
+}
+
+impl Into<f64> for f32 {
+    def into(self) -> f64 { self as f64 }
+}
+
+impl From<i8> for i16 {
+    def from_value(value: i8) -> i16 { value as i16 }
+}
+
+impl From<i8> for i32 {
+    def from_value(value: i8) -> i32 { value as i32 }
+}
+
+impl From<i8> for isize {
+    def from_value(value: i8) -> isize { value as isize }
+}
+
+impl From<i16> for i32 {
+    def from_value(value: i16) -> i32 { value as i32 }
+}
+
+impl From<i16> for i64 {
+    def from_value(value: i16) -> i64 { value as i64 }
+}
+
+impl From<i16> for isize {
+    def from_value(value: i16) -> isize { value as isize }
+}
+
+impl From<i32> for i64 {
+    def from_value(value: i32) -> i64 { value as i64 }
+}
+
+impl From<i32> for isize {
+    def from_value(value: i32) -> isize { value as isize }
+}
+
+impl From<isize> for i64 {
+    def from_value(value: isize) -> i64 { value as i64 }
+}
+
+impl From<u8> for u16 {
+    def from_value(value: u8) -> u16 { value as u16 }
+}
+
+impl From<u8> for u32 {
+    def from_value(value: u8) -> u32 { value as u32 }
+}
+
+impl From<u8> for u64 {
+    def from_value(value: u8) -> u64 { value as u64 }
+}
+
+impl From<u8> for usize {
+    def from_value(value: u8) -> usize { value as usize }
+}
+
+impl From<u8> for i16 {
+    def from_value(value: u8) -> i16 { value as i16 }
+}
+
+impl From<u8> for i32 {
+    def from_value(value: u8) -> i32 { value as i32 }
+}
+
+impl From<u8> for i64 {
+    def from_value(value: u8) -> i64 { value as i64 }
+}
+
+impl From<u8> for isize {
+    def from_value(value: u8) -> isize { value as isize }
+}
+
+impl From<u16> for u32 {
+    def from_value(value: u16) -> u32 { value as u32 }
+}
+
+impl From<u16> for u64 {
+    def from_value(value: u16) -> u64 { value as u64 }
+}
+
+impl From<u16> for usize {
+    def from_value(value: u16) -> usize { value as usize }
+}
+
+impl From<u16> for i32 {
+    def from_value(value: u16) -> i32 { value as i32 }
+}
+
+impl From<u16> for i64 {
+    def from_value(value: u16) -> i64 { value as i64 }
+}
+
+impl From<u16> for isize {
+    def from_value(value: u16) -> isize { value as isize }
+}
+
+impl From<u32> for u64 {
+    def from_value(value: u32) -> u64 { value as u64 }
+}
+
+impl From<u32> for usize {
+    def from_value(value: u32) -> usize { value as usize }
+}
+
+impl From<u32> for i64 {
+    def from_value(value: u32) -> i64 { value as i64 }
+}
+
+impl From<usize> for u64 {
+    def from_value(value: usize) -> u64 { value as u64 }
+}
+
+impl From<f32> for f64 {
+    def from_value(value: f32) -> f64 { value as f64 }
+}
+
+
+impl i64 {
+    def wrapping_add(self, rhs: i64) -> i64 {
+        sengoo_i64_wrapping_add(self, rhs)
+    }
+
+    def wrapping_sub(self, rhs: i64) -> i64 {
+        sengoo_i64_wrapping_sub(self, rhs)
+    }
+
+    def wrapping_mul(self, rhs: i64) -> i64 {
+        sengoo_i64_wrapping_mul(self, rhs)
+    }
+
+    def checked_add(self, rhs: i64) -> Option<i64> {
+        if sengoo_i64_checked_add_ok(self, rhs) != 0 {
+            option_some_i64(self + rhs)
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def checked_sub(self, rhs: i64) -> Option<i64> {
+        if sengoo_i64_checked_sub_ok(self, rhs) != 0 {
+            option_some_i64(self - rhs)
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def checked_mul(self, rhs: i64) -> Option<i64> {
+        if sengoo_i64_checked_mul_ok(self, rhs) != 0 {
+            option_some_i64(self * rhs)
+        } else {
+            option_none_i64()
+        }
+    }
+
+    def saturating_add(self, rhs: i64) -> i64 {
+        sengoo_i64_saturating_add(self, rhs)
+    }
+
+    def saturating_sub(self, rhs: i64) -> i64 {
+        sengoo_i64_saturating_sub(self, rhs)
+    }
+
+    def saturating_mul(self, rhs: i64) -> i64 {
+        sengoo_i64_saturating_mul(self, rhs)
+    }
+}
+
+impl i32 {
+    def wrapping_add(self, rhs: i32) -> i32 {
+        ((self as i64) + (rhs as i64)) as i32
+    }
+
+    def wrapping_sub(self, rhs: i32) -> i32 {
+        ((self as i64) - (rhs as i64)) as i32
+    }
+
+    def wrapping_mul(self, rhs: i32) -> i32 {
+        ((self as i64) * (rhs as i64)) as i32
+    }
+
+    def checked_add(self, rhs: i32) -> Option<i32> {
+        let result = (self as i64) + (rhs as i64);
+        if result < -2147483648 {
+            option_none_with(0i32)
+        } else if result > 2147483647 {
+            option_none_with(0i32)
+        } else {
+            option_some(result as i32)
+        }
+    }
+
+    def checked_sub(self, rhs: i32) -> Option<i32> {
+        let result = (self as i64) - (rhs as i64);
+        if result < -2147483648 {
+            option_none_with(0i32)
+        } else if result > 2147483647 {
+            option_none_with(0i32)
+        } else {
+            option_some(result as i32)
+        }
+    }
+
+    def checked_mul(self, rhs: i32) -> Option<i32> {
+        let result = (self as i64) * (rhs as i64);
+        if result < -2147483648 {
+            option_none_with(0i32)
+        } else if result > 2147483647 {
+            option_none_with(0i32)
+        } else {
+            option_some(result as i32)
+        }
+    }
+
+    def saturating_add(self, rhs: i32) -> i32 {
+        let result = (self as i64) + (rhs as i64);
+        if result < -2147483648 {
+            -2147483648i32
+        } else if result > 2147483647 {
+            2147483647i32
+        } else {
+            result as i32
+        }
+    }
+
+    def saturating_sub(self, rhs: i32) -> i32 {
+        let result = (self as i64) - (rhs as i64);
+        if result < -2147483648 {
+            -2147483648i32
+        } else if result > 2147483647 {
+            2147483647i32
+        } else {
+            result as i32
+        }
+    }
+
+    def saturating_mul(self, rhs: i32) -> i32 {
+        let result = (self as i64) * (rhs as i64);
+        if result < -2147483648 {
+            -2147483648i32
+        } else if result > 2147483647 {
+            2147483647i32
+        } else {
+            result as i32
+        }
+    }
+}
+
+impl i16 {
+    def wrapping_add(self, rhs: i16) -> i16 {
+        ((self as i64) + (rhs as i64)) as i16
+    }
+
+    def wrapping_sub(self, rhs: i16) -> i16 {
+        ((self as i64) - (rhs as i64)) as i16
+    }
+
+    def wrapping_mul(self, rhs: i16) -> i16 {
+        ((self as i64) * (rhs as i64)) as i16
+    }
+
+    def checked_add(self, rhs: i16) -> Option<i16> {
+        let result = (self as i64) + (rhs as i64);
+        if result < -32768 {
+            option_none_with(0i16)
+        } else if result > 32767 {
+            option_none_with(0i16)
+        } else {
+            option_some(result as i16)
+        }
+    }
+
+    def checked_sub(self, rhs: i16) -> Option<i16> {
+        let result = (self as i64) - (rhs as i64);
+        if result < -32768 {
+            option_none_with(0i16)
+        } else if result > 32767 {
+            option_none_with(0i16)
+        } else {
+            option_some(result as i16)
+        }
+    }
+
+    def checked_mul(self, rhs: i16) -> Option<i16> {
+        let result = (self as i64) * (rhs as i64);
+        if result < -32768 {
+            option_none_with(0i16)
+        } else if result > 32767 {
+            option_none_with(0i16)
+        } else {
+            option_some(result as i16)
+        }
+    }
+
+    def saturating_add(self, rhs: i16) -> i16 {
+        let result = (self as i64) + (rhs as i64);
+        if result < -32768 {
+            -32768i16
+        } else if result > 32767 {
+            32767i16
+        } else {
+            result as i16
+        }
+    }
+
+    def saturating_sub(self, rhs: i16) -> i16 {
+        let result = (self as i64) - (rhs as i64);
+        if result < -32768 {
+            -32768i16
+        } else if result > 32767 {
+            32767i16
+        } else {
+            result as i16
+        }
+    }
+
+    def saturating_mul(self, rhs: i16) -> i16 {
+        let result = (self as i64) * (rhs as i64);
+        if result < -32768 {
+            -32768i16
+        } else if result > 32767 {
+            32767i16
+        } else {
+            result as i16
+        }
+    }
+}
+
+impl i8 {
+    def wrapping_add(self, rhs: i8) -> i8 {
+        ((self as i64) + (rhs as i64)) as i8
+    }
+
+    def wrapping_sub(self, rhs: i8) -> i8 {
+        ((self as i64) - (rhs as i64)) as i8
+    }
+
+    def wrapping_mul(self, rhs: i8) -> i8 {
+        ((self as i64) * (rhs as i64)) as i8
+    }
+
+    def checked_add(self, rhs: i8) -> Option<i8> {
+        let result = (self as i64) + (rhs as i64);
+        if result < -128 {
+            option_none_with(0i8)
+        } else if result > 127 {
+            option_none_with(0i8)
+        } else {
+            option_some(result as i8)
+        }
+    }
+
+    def checked_sub(self, rhs: i8) -> Option<i8> {
+        let result = (self as i64) - (rhs as i64);
+        if result < -128 {
+            option_none_with(0i8)
+        } else if result > 127 {
+            option_none_with(0i8)
+        } else {
+            option_some(result as i8)
+        }
+    }
+
+    def checked_mul(self, rhs: i8) -> Option<i8> {
+        let result = (self as i64) * (rhs as i64);
+        if result < -128 {
+            option_none_with(0i8)
+        } else if result > 127 {
+            option_none_with(0i8)
+        } else {
+            option_some(result as i8)
+        }
+    }
+
+    def saturating_add(self, rhs: i8) -> i8 {
+        let result = (self as i64) + (rhs as i64);
+        if result < -128 {
+            -128i8
+        } else if result > 127 {
+            127i8
+        } else {
+            result as i8
+        }
+    }
+
+    def saturating_sub(self, rhs: i8) -> i8 {
+        let result = (self as i64) - (rhs as i64);
+        if result < -128 {
+            -128i8
+        } else if result > 127 {
+            127i8
+        } else {
+            result as i8
+        }
+    }
+
+    def saturating_mul(self, rhs: i8) -> i8 {
+        let result = (self as i64) * (rhs as i64);
+        if result < -128 {
+            -128i8
+        } else if result > 127 {
+            127i8
+        } else {
+            result as i8
+        }
+    }
+}
+
+impl u32 {
+    def wrapping_add(self, rhs: u32) -> u32 {
+        ((self as u64) + (rhs as u64)) as u32
+    }
+
+    def wrapping_sub(self, rhs: u32) -> u32 {
+        ((self as i64) - (rhs as i64)) as u32
+    }
+
+    def wrapping_mul(self, rhs: u32) -> u32 {
+        ((self as u64) * (rhs as u64)) as u32
+    }
+
+    def checked_add(self, rhs: u32) -> Option<u32> {
+        let result = (self as u64) + (rhs as u64);
+        if result > 4294967295u64 {
+            option_none_with(0u32)
+        } else {
+            option_some(result as u32)
+        }
+    }
+
+    def checked_sub(self, rhs: u32) -> Option<u32> {
+        if self < rhs {
+            option_none_with(0u32)
+        } else {
+            option_some(self - rhs)
+        }
+    }
+
+    def checked_mul(self, rhs: u32) -> Option<u32> {
+        let result = (self as u64) * (rhs as u64);
+        if result > 4294967295u64 {
+            option_none_with(0u32)
+        } else {
+            option_some(result as u32)
+        }
+    }
+
+    def saturating_add(self, rhs: u32) -> u32 {
+        let result = (self as u64) + (rhs as u64);
+        if result > 4294967295u64 {
+            4294967295u32
+        } else {
+            result as u32
+        }
+    }
+
+    def saturating_sub(self, rhs: u32) -> u32 {
+        if self < rhs {
+            0u32
+        } else {
+            self - rhs
+        }
+    }
+
+    def saturating_mul(self, rhs: u32) -> u32 {
+        let result = (self as u64) * (rhs as u64);
+        if result > 4294967295u64 {
+            4294967295u32
+        } else {
+            result as u32
+        }
+    }
+}
+
+impl u64 {
+    def wrapping_add(self, rhs: u64) -> u64 {
+        sengoo_u64_wrapping_add(self, rhs)
+    }
+
+    def wrapping_sub(self, rhs: u64) -> u64 {
+        sengoo_u64_wrapping_sub(self, rhs)
+    }
+
+    def wrapping_mul(self, rhs: u64) -> u64 {
+        sengoo_u64_wrapping_mul(self, rhs)
+    }
+
+    def checked_add(self, rhs: u64) -> Option<u64> {
+        if sengoo_u64_checked_add_ok(self, rhs) != 0 {
+            option_some(self + rhs)
+        } else {
+            option_none_with(0u64)
+        }
+    }
+
+    def checked_sub(self, rhs: u64) -> Option<u64> {
+        if sengoo_u64_checked_sub_ok(self, rhs) != 0 {
+            option_some(self - rhs)
+        } else {
+            option_none_with(0u64)
+        }
+    }
+
+    def checked_mul(self, rhs: u64) -> Option<u64> {
+        if sengoo_u64_checked_mul_ok(self, rhs) != 0 {
+            option_some(self * rhs)
+        } else {
+            option_none_with(0u64)
+        }
+    }
+
+    def saturating_add(self, rhs: u64) -> u64 {
+        sengoo_u64_saturating_add(self, rhs)
+    }
+
+    def saturating_sub(self, rhs: u64) -> u64 {
+        sengoo_u64_saturating_sub(self, rhs)
+    }
+
+    def saturating_mul(self, rhs: u64) -> u64 {
+        sengoo_u64_saturating_mul(self, rhs)
+    }
+}
+
+def usize_max_value() -> usize {
+    sengoo_u64_wrapping_sub(0u64, 1u64) as usize
+}
+
+def isize_max_value() -> isize {
+    (usize_max_value() >> 1usize) as isize
+}
+
+def isize_min_value() -> isize {
+    0isize - isize_max_value() - 1isize
+}
+
+impl usize {
+    def wrapping_add(self, rhs: usize) -> usize {
+        sengoo_u64_wrapping_add(self as u64, rhs as u64) as usize
+    }
+
+    def wrapping_sub(self, rhs: usize) -> usize {
+        sengoo_u64_wrapping_sub(self as u64, rhs as u64) as usize
+    }
+
+    def wrapping_mul(self, rhs: usize) -> usize {
+        sengoo_u64_wrapping_mul(self as u64, rhs as u64) as usize
+    }
+
+    def checked_add(self, rhs: usize) -> Option<usize> {
+        let max = usize_max_value();
+        if rhs > max - self {
+            option_none_with(0usize)
+        } else {
+            option_some(self + rhs)
+        }
+    }
+
+    def checked_sub(self, rhs: usize) -> Option<usize> {
+        if self < rhs {
+            option_none_with(0usize)
+        } else {
+            option_some(self - rhs)
+        }
+    }
+
+    def checked_mul(self, rhs: usize) -> Option<usize> {
+        let max = usize_max_value();
+        if self != 0usize && rhs > max / self {
+            option_none_with(0usize)
+        } else {
+            option_some(self * rhs)
+        }
+    }
+
+    def saturating_add(self, rhs: usize) -> usize {
+        let max = usize_max_value();
+        if rhs > max - self { max } else { self + rhs }
+    }
+
+    def saturating_sub(self, rhs: usize) -> usize {
+        if self < rhs { 0usize } else { self - rhs }
+    }
+
+    def saturating_mul(self, rhs: usize) -> usize {
+        let max = usize_max_value();
+        if self != 0usize && rhs > max / self { max } else { self * rhs }
+    }
+}
+
+impl isize {
+    def wrapping_add(self, rhs: isize) -> isize {
+        sengoo_i64_wrapping_add(self as i64, rhs as i64) as isize
+    }
+
+    def wrapping_sub(self, rhs: isize) -> isize {
+        sengoo_i64_wrapping_sub(self as i64, rhs as i64) as isize
+    }
+
+    def wrapping_mul(self, rhs: isize) -> isize {
+        sengoo_i64_wrapping_mul(self as i64, rhs as i64) as isize
+    }
+
+    def checked_add(self, rhs: isize) -> Option<isize> {
+        if sengoo_i64_checked_add_ok(self as i64, rhs as i64) != 0 {
+            let value = (self as i64) + (rhs as i64);
+            if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
+                option_none_with(0isize)
+            } else {
+                option_some(value as isize)
+            }
+        } else {
+            option_none_with(0isize)
+        }
+    }
+
+    def checked_sub(self, rhs: isize) -> Option<isize> {
+        if sengoo_i64_checked_sub_ok(self as i64, rhs as i64) != 0 {
+            let value = (self as i64) - (rhs as i64);
+            if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
+                option_none_with(0isize)
+            } else {
+                option_some(value as isize)
+            }
+        } else {
+            option_none_with(0isize)
+        }
+    }
+
+    def checked_mul(self, rhs: isize) -> Option<isize> {
+        if sengoo_i64_checked_mul_ok(self as i64, rhs as i64) != 0 {
+            let value = (self as i64) * (rhs as i64);
+            if value < (isize_min_value() as i64) || value > (isize_max_value() as i64) {
+                option_none_with(0isize)
+            } else {
+                option_some(value as isize)
+            }
+        } else {
+            option_none_with(0isize)
+        }
+    }
+
+    def saturating_add(self, rhs: isize) -> isize {
+        let value = sengoo_i64_saturating_add(self as i64, rhs as i64);
+        if value < (isize_min_value() as i64) {
+            isize_min_value()
+        } else if value > (isize_max_value() as i64) {
+            isize_max_value()
+        } else {
+            value as isize
+        }
+    }
+
+    def saturating_sub(self, rhs: isize) -> isize {
+        let value = sengoo_i64_saturating_sub(self as i64, rhs as i64);
+        if value < (isize_min_value() as i64) {
+            isize_min_value()
+        } else if value > (isize_max_value() as i64) {
+            isize_max_value()
+        } else {
+            value as isize
+        }
+    }
+
+    def saturating_mul(self, rhs: isize) -> isize {
+        let value = sengoo_i64_saturating_mul(self as i64, rhs as i64);
+        if value < (isize_min_value() as i64) {
+            isize_min_value()
+        } else if value > (isize_max_value() as i64) {
+            isize_max_value()
+        } else {
+            value as isize
+        }
+    }
+}
+
+impl u16 {
+    def wrapping_add(self, rhs: u16) -> u16 {
+        ((self as i64) + (rhs as i64)) as u16
+    }
+
+    def wrapping_sub(self, rhs: u16) -> u16 {
+        ((self as i64) - (rhs as i64)) as u16
+    }
+
+    def wrapping_mul(self, rhs: u16) -> u16 {
+        ((self as i64) * (rhs as i64)) as u16
+    }
+
+    def checked_add(self, rhs: u16) -> Option<u16> {
+        let result = (self as i64) + (rhs as i64);
+        if result > 65535 {
+            option_none_with(0u16)
+        } else {
+            option_some(result as u16)
+        }
+    }
+
+    def checked_sub(self, rhs: u16) -> Option<u16> {
+        if self < rhs {
+            option_none_with(0u16)
+        } else {
+            option_some(self - rhs)
+        }
+    }
+
+    def checked_mul(self, rhs: u16) -> Option<u16> {
+        let result = (self as i64) * (rhs as i64);
+        if result > 65535 {
+            option_none_with(0u16)
+        } else {
+            option_some(result as u16)
+        }
+    }
+
+    def saturating_add(self, rhs: u16) -> u16 {
+        let result = (self as i64) + (rhs as i64);
+        if result > 65535 {
+            65535u16
+        } else {
+            result as u16
+        }
+    }
+
+    def saturating_sub(self, rhs: u16) -> u16 {
+        if self < rhs {
+            0u16
+        } else {
+            self - rhs
+        }
+    }
+
+    def saturating_mul(self, rhs: u16) -> u16 {
+        let result = (self as i64) * (rhs as i64);
+        if result > 65535 {
+            65535u16
+        } else {
+            result as u16
+        }
+    }
+}
+
+impl u8 {
+    def wrapping_add(self, rhs: u8) -> u8 {
+        ((self as i64) + (rhs as i64)) as u8
+    }
+
+    def wrapping_sub(self, rhs: u8) -> u8 {
+        ((self as i64) - (rhs as i64)) as u8
+    }
+
+    def wrapping_mul(self, rhs: u8) -> u8 {
+        ((self as i64) * (rhs as i64)) as u8
+    }
+
+    def checked_add(self, rhs: u8) -> Option<u8> {
+        let result = (self as i64) + (rhs as i64);
+        if result > 255 {
+            option_none_with(0u8)
+        } else {
+            option_some(result as u8)
+        }
+    }
+
+    def checked_sub(self, rhs: u8) -> Option<u8> {
+        if self < rhs {
+            option_none_with(0u8)
+        } else {
+            option_some(self - rhs)
+        }
+    }
+
+    def checked_mul(self, rhs: u8) -> Option<u8> {
+        let result = (self as i64) * (rhs as i64);
+        if result > 255 {
+            option_none_with(0u8)
+        } else {
+            option_some(result as u8)
+        }
+    }
+
+    def saturating_add(self, rhs: u8) -> u8 {
+        let result = (self as i64) + (rhs as i64);
+        if result > 255 {
+            255u8
+        } else {
+            result as u8
+        }
+    }
+
+    def saturating_sub(self, rhs: u8) -> u8 {
+        if self < rhs {
+            0u8
+        } else {
+            self - rhs
+        }
+    }
+
+    def saturating_mul(self, rhs: u8) -> u8 {
+        let result = (self as i64) * (rhs as i64);
+        if result > 255 {
+            255u8
+        } else {
+            result as u8
+        }
+    }
+}
+
+def checked_i8_to_i16(value: i8) -> Result<i16, i64> {
+    Result { is_ok: true, value: value as i16, error: 0 }
+}
+
+def checked_i8_to_i32(value: i8) -> Result<i32, i64> {
+    Result { is_ok: true, value: value as i32, error: 0 }
+}
+
+def checked_i8_to_i64(value: i8) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_i8_to_isize(value: i8) -> Result<isize, i64> {
+    Result { is_ok: true, value: value as isize, error: 0 }
+}
+
+def checked_i8_to_usize(value: i8) -> Result<usize, i64> {
+    if value < 0i8 {
+        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_i16_to_i32(value: i16) -> Result<i32, i64> {
+    Result { is_ok: true, value: value as i32, error: 0 }
+}
+
+def checked_i16_to_i64(value: i16) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_i16_to_isize(value: i16) -> Result<isize, i64> {
+    Result { is_ok: true, value: value as isize, error: 0 }
+}
+
+def checked_i16_to_usize(value: i16) -> Result<usize, i64> {
+    if value < 0i16 {
+        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_i32_to_i64(value: i32) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_i32_to_isize(value: i32) -> Result<isize, i64> {
+    Result { is_ok: true, value: value as isize, error: 0 }
+}
+
+def checked_i32_to_usize(value: i32) -> Result<usize, i64> {
+    if value < 0i32 {
+        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_i64_to_isize(value: i64) -> Result<isize, i64> {
+    if value < (isize_min_value() as i64) {
+        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+    } else if value > (isize_max_value() as i64) {
+        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as isize, error: 0 }
+    }
+}
+
+def checked_i64_to_usize(value: i64) -> Result<usize, i64> {
+    if value < 0i64 {
+        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+    } else if (value as u64) > (usize_max_value() as u64) {
+        Result { is_ok: false, value: 0usize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_isize_to_usize(value: isize) -> Result<usize, i64> {
+    if value < 0isize {
+        Result { is_ok: false, value: 0usize, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_u8_to_isize(value: u8) -> Result<isize, i64> {
+    Result { is_ok: true, value: value as isize, error: 0 }
+}
+
+def checked_u8_to_usize(value: u8) -> Result<usize, i64> {
+    Result { is_ok: true, value: value as usize, error: 0 }
+}
+
+def checked_u16_to_isize(value: u16) -> Result<isize, i64> {
+    Result { is_ok: true, value: value as isize, error: 0 }
+}
+
+def checked_u16_to_usize(value: u16) -> Result<usize, i64> {
+    Result { is_ok: true, value: value as usize, error: 0 }
+}
+
+def checked_u32_to_isize(value: u32) -> Result<isize, i64> {
+    if (value as u64) > (isize_max_value() as u64) {
+        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as isize, error: 0 }
+    }
+}
+
+def checked_u32_to_u64(value: u32) -> Result<u64, i64> {
+    Result { is_ok: true, value: value as u64, error: 0 }
+}
+
+def checked_u32_to_usize(value: u32) -> Result<usize, i64> {
+    Result { is_ok: true, value: value as usize, error: 0 }
+}
+
+def checked_u64_to_i8(value: u64) -> Result<i8, i64> {
+    if value > 127u64 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_u64_to_i16(value: u64) -> Result<i16, i64> {
+    if value > 32767u64 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_u64_to_i32(value: u64) -> Result<i32, i64> {
+    if value > 2147483647u64 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i32, error: 0 }
+    }
+}
+
+def checked_u64_to_i64(value: u64) -> Result<i64, i64> {
+    if value > 9223372036854775807u64 {
+        Result { is_ok: false, value: 0i64, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i64, error: 0 }
+    }
+}
+
+def checked_u64_to_isize(value: u64) -> Result<isize, i64> {
+    if value > (isize_max_value() as u64) {
+        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as isize, error: 0 }
+    }
+}
+
+def checked_u64_to_u8(value: u64) -> Result<u8, i64> {
+    if value > 255u64 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_u64_to_u16(value: u64) -> Result<u16, i64> {
+    if value > 65535u64 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_u64_to_u32(value: u64) -> Result<u32, i64> {
+    if value > 4294967295u64 {
+        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_u64_to_usize(value: u64) -> Result<usize, i64> {
+    if value > (usize_max_value() as u64) {
+        Result { is_ok: false, value: 0usize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as usize, error: 0 }
+    }
+}
+
+def checked_usize_to_isize(value: usize) -> Result<isize, i64> {
+    if (value as u64) > (isize_max_value() as u64) {
+        Result { is_ok: false, value: 0isize, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as isize, error: 0 }
+    }
+}
+
+def checked_i64_to_i32(value: i64) -> Result<i32, i64> {
+    if value < -2147483648 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else if value > 2147483647 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i32, error: 0 }
+    }
+}
+
+def checked_i64_to_i16(value: i64) -> Result<i16, i64> {
+    if value < -32768 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else if value > 32767 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_i64_to_i8(value: i64) -> Result<i8, i64> {
+    if value < -128 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else if value > 127 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_i64_to_u32(value: i64) -> Result<u32, i64> {
+    if value < 0 {
+        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 4294967295 {
+        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_i64_to_u64(value: i64) -> Result<u64, i64> {
+    if value < 0 {
+        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u64, error: 0 }
+    }
+}
+
+def checked_i64_to_u16(value: i64) -> Result<u16, i64> {
+    if value < 0 {
+        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 65535 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_i64_to_u8(value: i64) -> Result<u8, i64> {
+    if value < 0 {
+        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 255 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_i32_to_i16(value: i32) -> Result<i16, i64> {
+    if value < -32768i32 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else if value > 32767i32 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_i32_to_i8(value: i32) -> Result<i8, i64> {
+    if value < -128i32 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else if value > 127i32 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_i32_to_u64(value: i32) -> Result<u64, i64> {
+    if value < 0i32 {
+        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u64, error: 0 }
+    }
+}
+
+def checked_i32_to_u32(value: i32) -> Result<u32, i64> {
+    if value < 0i32 {
+        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_i32_to_u16(value: i32) -> Result<u16, i64> {
+    if value < 0i32 {
+        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 65535i32 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_i32_to_u8(value: i32) -> Result<u8, i64> {
+    if value < 0i32 {
+        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 255i32 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_i16_to_i8(value: i16) -> Result<i8, i64> {
+    if value < -128i16 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else if value > 127i16 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_i16_to_u64(value: i16) -> Result<u64, i64> {
+    if value < 0i16 {
+        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u64, error: 0 }
+    }
+}
+
+def checked_i16_to_u32(value: i16) -> Result<u32, i64> {
+    if value < 0i16 {
+        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_i16_to_u16(value: i16) -> Result<u16, i64> {
+    if value < 0i16 {
+        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_i16_to_u8(value: i16) -> Result<u8, i64> {
+    if value < 0i16 {
+        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+    } else if value > 255i16 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_i8_to_u64(value: i8) -> Result<u64, i64> {
+    if value < 0i8 {
+        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u64, error: 0 }
+    }
+}
+
+def checked_i8_to_u32(value: i8) -> Result<u32, i64> {
+    if value < 0i8 {
+        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_i8_to_u16(value: i8) -> Result<u16, i64> {
+    if value < 0i8 {
+        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_i8_to_u8(value: i8) -> Result<u8, i64> {
+    if value < 0i8 {
+        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_u32_to_i64(value: u32) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_u32_to_i32(value: u32) -> Result<i32, i64> {
+    if value > 2147483647u32 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i32, error: 0 }
+    }
+}
+
+def checked_u32_to_i16(value: u32) -> Result<i16, i64> {
+    if value > 32767u32 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_u32_to_i8(value: u32) -> Result<i8, i64> {
+    if value > 127u32 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_u32_to_u16(value: u32) -> Result<u16, i64> {
+    if value > 65535u32 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_u32_to_u8(value: u32) -> Result<u8, i64> {
+    if value > 255u32 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_u16_to_i64(value: u16) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_u16_to_i32(value: u16) -> Result<i32, i64> {
+    Result { is_ok: true, value: value as i32, error: 0 }
+}
+
+def checked_u16_to_i16(value: u16) -> Result<i16, i64> {
+    if value > 32767u16 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_u16_to_i8(value: u16) -> Result<i8, i64> {
+    if value > 127u16 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_u16_to_u32(value: u16) -> Result<u32, i64> {
+    Result { is_ok: true, value: value as u32, error: 0 }
+}
+
+def checked_u16_to_u64(value: u16) -> Result<u64, i64> {
+    Result { is_ok: true, value: value as u64, error: 0 }
+}
+
+def checked_u16_to_u8(value: u16) -> Result<u8, i64> {
+    if value > 255u16 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_u8_to_i64(value: u8) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_u8_to_i32(value: u8) -> Result<i32, i64> {
+    Result { is_ok: true, value: value as i32, error: 0 }
+}
+
+def checked_u8_to_i16(value: u8) -> Result<i16, i64> {
+    Result { is_ok: true, value: value as i16, error: 0 }
+}
+
+def checked_u8_to_i8(value: u8) -> Result<i8, i64> {
+    if value > 127u8 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_u8_to_u16(value: u8) -> Result<u16, i64> {
+    Result { is_ok: true, value: value as u16, error: 0 }
+}
+
+def checked_u8_to_u32(value: u8) -> Result<u32, i64> {
+    Result { is_ok: true, value: value as u32, error: 0 }
+}
+
+def checked_u8_to_u64(value: u8) -> Result<u64, i64> {
+    Result { is_ok: true, value: value as u64, error: 0 }
+}
+
+def checked_isize_to_i64(value: isize) -> Result<i64, i64> {
+    Result { is_ok: true, value: value as i64, error: 0 }
+}
+
+def checked_isize_to_i32(value: isize) -> Result<i32, i64> {
+    if (value as i64) < -2147483648i64 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else if (value as i64) > 2147483647i64 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i32, error: 0 }
+    }
+}
+
+def checked_isize_to_i16(value: isize) -> Result<i16, i64> {
+    if (value as i64) < -32768i64 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else if (value as i64) > 32767i64 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_isize_to_i8(value: isize) -> Result<i8, i64> {
+    if (value as i64) < -128i64 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else if (value as i64) > 127i64 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_isize_to_u64(value: isize) -> Result<u64, i64> {
+    if value < 0isize {
+        Result { is_ok: false, value: 0u64, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        Result { is_ok: true, value: value as u64, error: 0 }
+    }
+}
+
+def checked_isize_to_u32(value: isize) -> Result<u32, i64> {
+    if value < 0isize {
+        Result { is_ok: false, value: 0u32, error: STATUS_INVALID_ARGUMENT() }
+    } else if (value as u64) > 4294967295u64 {
+        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_isize_to_u16(value: isize) -> Result<u16, i64> {
+    if value < 0isize {
+        Result { is_ok: false, value: 0u16, error: STATUS_INVALID_ARGUMENT() }
+    } else if (value as u64) > 65535u64 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_isize_to_u8(value: isize) -> Result<u8, i64> {
+    if value < 0isize {
+        Result { is_ok: false, value: 0u8, error: STATUS_INVALID_ARGUMENT() }
+    } else if (value as u64) > 255u64 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def checked_usize_to_i64(value: usize) -> Result<i64, i64> {
+    if (value as u64) > 9223372036854775807u64 {
+        Result { is_ok: false, value: 0, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i64, error: 0 }
+    }
+}
+
+def checked_usize_to_i32(value: usize) -> Result<i32, i64> {
+    if (value as u64) > 2147483647u64 {
+        Result { is_ok: false, value: 0i32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i32, error: 0 }
+    }
+}
+
+def checked_usize_to_i16(value: usize) -> Result<i16, i64> {
+    if (value as u64) > 32767u64 {
+        Result { is_ok: false, value: 0i16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i16, error: 0 }
+    }
+}
+
+def checked_usize_to_i8(value: usize) -> Result<i8, i64> {
+    if (value as u64) > 127u64 {
+        Result { is_ok: false, value: 0i8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as i8, error: 0 }
+    }
+}
+
+def checked_usize_to_u64(value: usize) -> Result<u64, i64> {
+    Result { is_ok: true, value: value as u64, error: 0 }
+}
+
+def checked_usize_to_u32(value: usize) -> Result<u32, i64> {
+    if (value as u64) > 4294967295u64 {
+        Result { is_ok: false, value: 0u32, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u32, error: 0 }
+    }
+}
+
+def checked_usize_to_u16(value: usize) -> Result<u16, i64> {
+    if (value as u64) > 65535u64 {
+        Result { is_ok: false, value: 0u16, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u16, error: 0 }
+    }
+}
+
+def checked_usize_to_u8(value: usize) -> Result<u8, i64> {
+    if (value as u64) > 255u64 {
+        Result { is_ok: false, value: 0u8, error: STATUS_OVERFLOW() }
+    } else {
+        Result { is_ok: true, value: value as u8, error: 0 }
+    }
+}
+
+def abs_f64(value: f64) -> f64 {
+    if value < 0.0 {
+        0.0 - value
+    } else {
+        value
+    }
+}
+
+def min_f64(lhs: f64, rhs: f64) -> f64 {
+    if lhs < rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def max_f64(lhs: f64, rhs: f64) -> f64 {
+    if lhs > rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def abs_f32(value: f32) -> f32 {
+    if value < 0.0f32 {
+        0.0f32 - value
+    } else {
+        value
+    }
+}
+
+def min_f32(lhs: f32, rhs: f32) -> f32 {
+    if lhs < rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def max_f32(lhs: f32, rhs: f32) -> f32 {
+    if lhs > rhs {
+        lhs
+    } else {
+        rhs
+    }
+}
+
+def sqrt_f32(value: f32) -> f32 {
+    sengoo_f32_sqrt(value)
+}
+
+def pow_f32(base: f32, exp: f32) -> f32 {
+    sengoo_f32_pow(base, exp)
+}
+
+def exp_f32(value: f32) -> f32 {
+    sengoo_f32_exp(value)
+}
+
+def ln_f32(value: f32) -> f32 {
+    sengoo_f32_ln(value)
+}
+
+def floor_f32(value: f32) -> f32 {
+    sengoo_f32_floor(value)
+}
+
+def ceil_f32(value: f32) -> f32 {
+    sengoo_f32_ceil(value)
+}
+
+def round_f32(value: f32) -> f32 {
+    sengoo_f32_round(value)
+}
+
+def sin_f32(value: f32) -> f32 {
+    sengoo_f32_sin(value)
+}
+
+def cos_f32(value: f32) -> f32 {
+    sengoo_f32_cos(value)
+}
+
+def tan_f32(value: f32) -> f32 {
+    sengoo_f32_tan(value)
+}
+
+def sqrt_f64(value: f64) -> f64 {
+    sengoo_f64_sqrt(value)
+}
+
+def pow_f64(base: f64, exp: f64) -> f64 {
+    sengoo_f64_pow(base, exp)
+}
+
+def exp_f64(value: f64) -> f64 {
+    sengoo_f64_exp(value)
+}
+
+def ln_f64(value: f64) -> f64 {
+    sengoo_f64_ln(value)
+}
+
+def floor_f64(value: f64) -> f64 {
+    sengoo_f64_floor(value)
+}
+
+def ceil_f64(value: f64) -> f64 {
+    sengoo_f64_ceil(value)
+}
+
+def round_f64(value: f64) -> f64 {
+    sengoo_f64_round(value)
+}
+
+def sin_f64(value: f64) -> f64 {
+    sengoo_f64_sin(value)
+}
+
+def cos_f64(value: f64) -> f64 {
+    sengoo_f64_cos(value)
+}
+
+def tan_f64(value: f64) -> f64 {
+    sengoo_f64_tan(value)
+}
+
+def is_nan_f64(value: f64) -> bool {
+    sengoo_f64_is_nan(value) != 0
+}
+
+def is_finite_f64(value: f64) -> bool {
+    sengoo_f64_is_finite(value) != 0
+}
+
+def is_infinite_f64(value: f64) -> bool {
+    sengoo_f64_is_infinite(value) != 0
+}
+
+def is_nan_f32(value: f32) -> bool {
+    sengoo_f32_is_nan(value) != 0
+}
+
+def is_finite_f32(value: f32) -> bool {
+    sengoo_f32_is_finite(value) != 0
+}
+
+def is_infinite_f32(value: f32) -> bool {
+    sengoo_f32_is_infinite(value) != 0
 }

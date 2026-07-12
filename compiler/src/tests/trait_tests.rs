@@ -372,6 +372,49 @@ def main() -> i64 {
     );
 }
 
+#[test]
+fn test_generic_trait_args_are_part_of_impl_function_names() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 {
+        self as i64
+    }
+}
+
+impl Convert<u64> for i32 {
+    def convert(self) -> u64 {
+        self as u64
+    }
+}
+
+def main() -> i64 {
+    0
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic trait impls with distinct args should lower to distinct functions");
+    assert!(
+        ir.contains("i32_Convert_i64_convert"),
+        "IR should contain target-specific Convert<i64> impl, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("i32_Convert_u64_convert"),
+        "IR should contain target-specific Convert<u64> impl, got:\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("i32_Convert_convert"),
+        "IR should not emit the old trait-arg-erasing impl name, got:\n{}",
+        ir
+    );
+}
+
 /// Test that a default trait method is NOT generated when the impl overrides it.
 ///
 /// When the impl provides its own implementation, the default should not be used.

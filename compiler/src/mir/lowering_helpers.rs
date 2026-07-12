@@ -112,6 +112,7 @@ pub(crate) fn collect_named_symbols_in_body(
 ) {
     for stmt in &body.stmts {
         match stmt {
+            HIRStmt::Coverage { .. } => {}
             HIRStmt::Expr(expr) => {
                 collect_named_symbols(expr, target_name, out);
             }
@@ -302,6 +303,7 @@ fn collect_vars_from_stmt(
     free_vars: &mut Vec<(String, Local)>,
 ) {
     match stmt {
+        HIRStmt::Coverage { .. } => {}
         HIRStmt::Let { value, .. } => {
             if let Some(v) = value {
                 collect_vars_from_expr(v, param_names, local_names, free_vars);

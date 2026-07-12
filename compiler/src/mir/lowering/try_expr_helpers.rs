@@ -39,8 +39,132 @@ fn default_error_value(ctx: &mut LoweringContext<'_>, err_ty: &MIRType) -> Local
     match err_ty {
         MIRType::Bool => ctx.lower_literal(&HIRLiteral::Bool(false)),
         MIRType::Int(_) => ctx.lower_literal(&HIRLiteral::Int(0)),
+        MIRType::UInt(_) => ctx.lower_literal(&HIRLiteral::Uint(0)),
         _ => ctx.lower_literal(&HIRLiteral::Int(0)),
     }
+}
+
+pub(super) fn default_value_for_type(ctx: &mut LoweringContext<'_>, ty: &MIRType) -> Local {
+    let destination = ctx.add_local(None, LocalKind::Temp, ty.clone());
+    match ty {
+        MIRType::Bool => ctx.push_inst(Instruction::Assign {
+            destination,
+            value: MirConstant::Bool(false),
+        }),
+        MIRType::Int(_) => ctx.push_inst(Instruction::Assign {
+            destination,
+            value: MirConstant::Int(0),
+        }),
+        MIRType::UInt(_) => ctx.push_inst(Instruction::Assign {
+            destination,
+            value: MirConstant::Uint(0),
+        }),
+        MIRType::Float(_) => ctx.push_inst(Instruction::Assign {
+            destination,
+            value: MirConstant::Float(0.0),
+        }),
+        MIRType::Unit | MIRType::Never => ctx.push_inst(Instruction::Assign {
+            destination,
+            value: MirConstant::Unit,
+        }),
+        MIRType::Struct { fields, .. } => {
+            let fields = fields
+                .iter()
+                .map(|(_, field_ty)| default_value_for_type(ctx, field_ty))
+                .collect();
+            ctx.push_inst(Instruction::Aggregate {
+                destination,
+                fields,
+                ty: ty.clone(),
+            });
+        }
+        MIRType::Tuple(field_tys) => {
+            let fields = field_tys
+                .iter()
+                .map(|field_ty| default_value_for_type(ctx, field_ty))
+                .collect();
+            ctx.push_inst(Instruction::Aggregate {
+                destination,
+                fields,
+                ty: ty.clone(),
+            });
+        }
+        MIRType::Array(elem_ty, len) => {
+            let fields = (0..*len)
+                .map(|_| default_value_for_type(ctx, elem_ty))
+                .collect();
+            ctx.push_inst(Instruction::Aggregate {
+                destination,
+                fields,
+                ty: ty.clone(),
+            });
+        }
+        MIRType::Enum { .. } => ctx.push_inst(Instruction::EnumConstruct {
+            destination,
+            discriminant: 0,
+            payload: None,
+            enum_type: ty.clone(),
+        }),
+        MIRType::Ptr(_) | MIRType::Ref(_) | MIRType::Fn { .. } | MIRType::Future(_) => {
+            let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+            ctx.push_inst(Instruction::Assign {
+                destination: zero,
+                value: MirConstant::Int(0),
+            });
+            ctx.push_inst(Instruction::Cast {
+                destination,
+                value: zero,
+                to: ty.clone(),
+            });
+        }
+    }
+    destination
+}
+
+fn rebuild_failure_for_target(
+    ctx: &mut LoweringContext<'_>,
+    operand_local: Local,
+    operand_ty: &MIRType,
+    target_ty: &MIRType,
+) -> Local {
+    if operand_ty == target_ty {
+        return operand_local;
+    }
+
+    let MIRType::Struct {
+        name: target_name,
+        fields: target_fields,
+    } = target_ty
+    else {
+        return operand_local;
+    };
+    let value_ty = target_fields
+        .iter()
+        .find(|(name, _)| name == "value")
+        .map(|(_, ty)| ty.clone())
+        .unwrap_or(MIR_UNIT);
+    let flag = ctx.lower_literal(&HIRLiteral::Bool(false));
+    let value = default_value_for_type(ctx, &value_ty);
+    let destination = ctx.add_local(None, LocalKind::Temp, target_ty.clone());
+
+    if target_name == "Result" || target_name.starts_with("Result_") {
+        let error = lower_field_expr(ctx, operand_local, "error");
+        ctx.push_inst(Instruction::Aggregate {
+            destination,
+            fields: vec![flag, value, error],
+            ty: target_ty.clone(),
+        });
+        return destination;
+    }
+    if target_name == "Option" || target_name.starts_with("Option_") {
+        ctx.push_inst(Instruction::Aggregate {
+            destination,
+            fields: vec![flag, value],
+            ty: target_ty.clone(),
+        });
+        return destination;
+    }
+    operand_local
 }
 
 fn ensure_try_block_result_local(ctx: &mut LoweringContext<'_>, ty: MIRType) -> Local {
@@ -145,8 +269,10 @@ pub(super) fn lower_try_expr(ctx: &mut LoweringContext<'_>, operand: &HIRExpr) -
     ctx.set_current_block(fail_block);
     match ctx.try_scope_stack.last().cloned() {
         Some(TryScope::Function) | None => {
+            let return_ty = ctx.mir_fn.return_type.clone();
+            let failure = rebuild_failure_for_target(ctx, operand_local, &operand_ty, &return_ty);
             ctx.emit_active_drop_scopes_before_exit();
-            ctx.set_terminator(Terminator::Return(Some(operand_local)));
+            ctx.set_terminator(Terminator::Return(Some(failure)));
         }
         Some(TryScope::TryBlock {
             merge_block,

@@ -2,8 +2,9 @@ use miette::{IntoDiagnostic, Result};
 use sengoo_compiler::hir::HIRItem;
 use sengoo_compiler::mir::MirFunction;
 use sengoo_compiler::{
-    collect_ffi_codegen_config, lower_ast, lower_hir_with_options, AssertCallsiteContext, Codegen,
-    DebugInfoConfig, FfiCodegenConfig, MirLowerOptions, MirOptLevel, Parser, TypeChecker,
+    collect_ffi_codegen_config, lower_ast, lower_ast_with_coverage, lower_hir_with_options,
+    AssertCallsiteContext, Codegen, CoverageContext, DebugInfoConfig, FfiCodegenConfig,
+    IntegerOverflowMode, MirLowerOptions, MirOptLevel, Parser, TargetPointerWidth, TypeChecker,
 };
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -117,6 +118,14 @@ fn contract_runtime_checks_enabled(opt_level: u8) -> bool {
     false
 }
 
+fn integer_overflow_mode(opt_level: u8) -> IntegerOverflowMode {
+    if opt_level <= 1 {
+        IntegerOverflowMode::DebugChecked
+    } else {
+        IntegerOverflowMode::ReleaseWrapping
+    }
+}
+
 fn large_project_optimization_enabled() -> bool {
     if let Some(override_mode) =
         decode_large_project_mode_override(LARGE_PROJECT_MODE_OVERRIDE.load(Ordering::Relaxed))
@@ -184,10 +193,17 @@ pub(crate) fn compile_source_with_phase_timings(
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
         None,
+        None,
+        TargetPointerWidth::host().bits(),
     )?;
 
     let codegen_start = Instant::now();
-    let mut codegen = Codegen::with_ffi(ffi_codegen);
+    let mut codegen = Codegen::with_ffi_target_debug_and_overflow(
+        ffi_codegen,
+        None,
+        DebugInfoConfig::disabled(),
+        integer_overflow_mode(opt_level),
+    );
     let llvm_ir = match resolved_memory_mode {
         FrontendMemoryMode::Stream | FrontendMemoryMode::LowMemory => {
             let mut out = Vec::new();
@@ -218,8 +234,11 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
     opt_level: u8,
     low_memory_mode: bool,
     assert_callsite: Option<AssertCallsiteContext>,
+    coverage: Option<CoverageContext>,
+    target_pointer_width: u8,
 ) -> Result<(Vec<MirFunction>, FfiCodegenConfig, BTreeMap<String, f64>)> {
     let mut phases = BTreeMap::new();
+    let coverage_enabled = coverage.is_some();
 
     let (
         mut mir_fns,
@@ -242,7 +261,7 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         let mut source_pruned_count = 0usize;
         let mut source_prune_applied = false;
         let mut pruned_source = None;
-        if large_project_optimization_enabled() {
+        if !coverage_enabled && large_project_optimization_enabled() {
             let source_prune_start = Instant::now();
             if let Some(result) =
                 prune_unreachable_plain_source_functions(source_ref, typeck_filter_min_functions())
@@ -261,7 +280,7 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
             .unwrap_or_else(|| Cow::Borrowed(source_ref));
         let parse_start = Instant::now();
         let mut program = Some(
-            Parser::parse(parse_input.as_ref())
+            Parser::parse_with_pointer_width(parse_input.as_ref(), target_pointer_width)
                 .map_err(|e| miette::miette!("parse failed: {}", e))?,
         );
         let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
@@ -271,7 +290,7 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         let mut ast_prune_ms = 0.0;
         let mut ast_pruned_count = 0usize;
         let mut ast_prune_applied = false;
-        if low_memory_mode {
+        if low_memory_mode && !coverage_enabled {
             let ast_prune_start = Instant::now();
             ast_pruned_count =
                 prune_unreachable_ast_functions(program.as_mut().expect("program present"));
@@ -279,7 +298,8 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
             ast_prune_applied = true;
         }
 
-        if !low_memory_mode
+        if !coverage_enabled
+            && !low_memory_mode
             && should_filter_typecheck_function_bodies_in_default_mode(
                 program.as_ref().expect("program present before typecheck"),
             )
@@ -299,7 +319,8 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         let async_functions = checker.async_function_names().clone();
         let mut type_env = Some(checker.into_env());
         let typeck_ms = typeck_start.elapsed().as_secs_f64() * 1000.0;
-        if !ast_prune_applied
+        if !coverage_enabled
+            && !ast_prune_applied
             && !low_memory_mode
             && should_prune_unreachable_ast_in_default_mode(
                 program.as_ref().expect("program present after typeck"),
@@ -315,20 +336,25 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         let mir_start = Instant::now();
         let runtime_contract_checks = contract_runtime_checks_enabled(opt_level);
         let hir_lower_start = Instant::now();
-        let mut hir_module = lower_ast(
-            program.as_ref().expect("program present during lowering"),
-            type_env.as_ref().expect("type env present during lowering"),
-        );
+        let program_ref = program.as_ref().expect("program present during lowering");
+        let type_env_ref = type_env.as_ref().expect("type env present during lowering");
+        let mut hir_module = if coverage_enabled {
+            lower_ast_with_coverage(program_ref, type_env_ref)
+        } else {
+            lower_ast(program_ref, type_env_ref)
+        };
         let hir_lower_ms = hir_lower_start.elapsed().as_secs_f64() * 1000.0;
         let mut hir_prune_ms = 0.0;
         let mut hir_pruned_count = 0usize;
         let mut hir_prune_applied = false;
-        if low_memory_mode {
+        if low_memory_mode && !coverage_enabled {
             let hir_prune_start = Instant::now();
             hir_pruned_count = prune_unreachable_hir_functions(&mut hir_module.items);
             hir_prune_ms = hir_prune_start.elapsed().as_secs_f64() * 1000.0;
             hir_prune_applied = true;
-        } else if should_prune_unreachable_hir_in_default_mode(&hir_module.items) {
+        } else if !coverage_enabled
+            && should_prune_unreachable_hir_in_default_mode(&hir_module.items)
+        {
             // Keep full typechecking, but skip lowering/codegen of cold unreachable functions.
             let hir_prune_start = Instant::now();
             hir_pruned_count = prune_unreachable_hir_functions(&mut hir_module.items);
@@ -342,9 +368,13 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
         let ffi_codegen = collect_ffi_codegen_config(&hir_module);
         let mir_lower_start = Instant::now();
         let mut mir_options =
-            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone());
+            MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone())
+                .with_target_pointer_width(target_pointer_width);
         if let Some(context) = assert_callsite {
             mir_options = mir_options.with_assert_callsite_context(context);
+        }
+        if let Some(context) = coverage {
+            mir_options = mir_options.with_coverage_context(context);
         }
         let mut mir_fns = lower_hir_with_options(&hir_module.items, mir_options)
             .map_err(|e| miette::miette!("{}", e))?;
@@ -452,6 +482,31 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
     target_triple: Option<&str>,
     debug_info: Option<DebugInfoConfig>,
 ) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
+    compile_source_to_llvm_file_with_phase_timings_with_mode_and_coverage(
+        source,
+        opt_level,
+        llvm_path,
+        forced_memory_mode,
+        assert_callsite,
+        target_triple,
+        debug_info,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode_and_coverage<
+    S: AsRef<str>,
+>(
+    source: S,
+    opt_level: u8,
+    llvm_path: &Path,
+    forced_memory_mode: Option<FrontendMemoryMode>,
+    assert_callsite: Option<AssertCallsiteContext>,
+    target_triple: Option<&str>,
+    debug_info: Option<DebugInfoConfig>,
+    coverage: Option<CoverageContext>,
+) -> Result<(BTreeMap<String, f64>, FrontendMemoryMode)> {
     let resolved_memory_mode =
         forced_memory_mode.unwrap_or_else(|| resolve_frontend_memory_mode(source.as_ref().len()));
     let (mir_fns, ffi_codegen, mut phases) = compile_frontend_to_mir_with_phase_timings(
@@ -459,6 +514,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
         opt_level,
         matches!(resolved_memory_mode, FrontendMemoryMode::LowMemory),
         assert_callsite,
+        coverage,
+        target_triple
+            .and_then(TargetPointerWidth::from_target_triple)
+            .unwrap_or_else(TargetPointerWidth::host)
+            .bits(),
     )?;
 
     let codegen_target = target_triple.map(str::to_string);
@@ -476,10 +536,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
             )
         })?;
         let mut writer = BufWriter::new(file);
-        let mut codegen = Codegen::with_ffi_target_and_debug(
+        let mut codegen = Codegen::with_ffi_target_debug_and_overflow(
             ffi_codegen.clone(),
             codegen_target.clone(),
             debug_info.clone().unwrap_or_else(DebugInfoConfig::disabled),
+            integer_overflow_mode(opt_level),
         );
         codegen
             .codegen_to_writer(&mir_fns, &mut writer)
@@ -490,10 +551,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
 
     if let Err(_err) = stream_result {
         effective_mode = FrontendMemoryMode::Legacy;
-        let mut codegen = Codegen::with_ffi_target_and_debug(
+        let mut codegen = Codegen::with_ffi_target_debug_and_overflow(
             ffi_codegen.clone(),
             codegen_target.clone(),
             debug_info.clone().unwrap_or_else(DebugInfoConfig::disabled),
+            integer_overflow_mode(opt_level),
         );
         let llvm_ir = codegen
             .codegen(&mir_fns)
@@ -502,10 +564,11 @@ pub(crate) fn compile_source_to_llvm_file_with_phase_timings_with_mode<S: AsRef<
             .into_diagnostic()
             .map_err(|e| miette::miette!("failed to write LLVM IR: {}", e))?;
     } else if matches!(resolved_memory_mode, FrontendMemoryMode::Legacy) {
-        let mut codegen = Codegen::with_ffi_target_and_debug(
+        let mut codegen = Codegen::with_ffi_target_debug_and_overflow(
             ffi_codegen,
             codegen_target,
             debug_info.unwrap_or_else(DebugInfoConfig::disabled),
+            integer_overflow_mode(opt_level),
         );
         let llvm_ir = codegen
             .codegen(&mir_fns)

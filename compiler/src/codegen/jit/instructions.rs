@@ -201,7 +201,7 @@ impl JITCodegen {
                 let op_inst = match op {
                     MirUnOp::Neg => {
                         if matches!(ty, MIRType::Float(_)) {
-                            format!("{}.neg = fneg float {}", dest, temp)
+                            format!("{}.neg = fneg {} {}", dest, llvm_ty, temp)
                         } else {
                             format!("{}.neg = sub {} 0, {}", dest, llvm_ty, temp)
                         }
@@ -216,13 +216,7 @@ impl JITCodegen {
                         )
                     }
                     MirUnOp::BitNot => {
-                        format!(
-                            "{}.bitnot = xor {} {}, {}",
-                            dest,
-                            llvm_ty,
-                            temp,
-                            self.mir_constant_to_llvm_str(&MirConstant::Int(-1))
-                        )
+                        format!("{}.bitnot = xor {} {}, -1", dest, llvm_ty, temp)
                     }
                 };
                 self.ir.push_str(&format!("{}\n", op_inst));
@@ -396,7 +390,7 @@ impl JITCodegen {
                         let arg_val = self.local_reg(*arg_local);
 
                         match &arg_ty {
-                            MIRType::Int(_) => {
+                            MIRType::Int(_) | MIRType::UInt(_) => {
                                 self.ir.push_str(&format!(
                                     "call void @puts(i8* bitcast i64* inttoptr i64 {} to i8*)\n",
                                     arg_val

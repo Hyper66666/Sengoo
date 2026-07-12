@@ -55,6 +55,12 @@ pub struct FfiCodegenConfig {
     pub export_symbols: Vec<ExportSymbol>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegerOverflowMode {
+    ReleaseWrapping,
+    DebugChecked,
+}
+
 pub struct Codegen {
     ir: String,
 
@@ -92,6 +98,16 @@ pub struct Codegen {
 
     debug_locations: HashMap<String, debug_info::DebugLocationIds>,
 
+    debug_type_ids: HashMap<MIRType, u32>,
+
+    debug_expression_id: Option<u32>,
+
+    debug_next_metadata_id: u32,
+
+    integer_overflow_mode: IntegerOverflowMode,
+
+    overflow_check_counter: usize,
+
     /// LLVM type string of module-level globals (e.g. `dyn Trait` vtables),
     /// keyed by global symbol name. Used to materialize correctly-typed
     /// `bitcast`s when a `GlobalRef` is taken as a pointer.
@@ -115,6 +131,20 @@ impl Codegen {
         ffi: FfiCodegenConfig,
         target_triple: Option<String>,
         debug_info: DebugInfoConfig,
+    ) -> Self {
+        Self::with_ffi_target_debug_and_overflow(
+            ffi,
+            target_triple,
+            debug_info,
+            IntegerOverflowMode::ReleaseWrapping,
+        )
+    }
+
+    pub fn with_ffi_target_debug_and_overflow(
+        ffi: FfiCodegenConfig,
+        target_triple: Option<String>,
+        debug_info: DebugInfoConfig,
+        integer_overflow_mode: IntegerOverflowMode,
     ) -> Self {
         let mut cg = Self {
             ir: String::new(),
@@ -146,6 +176,16 @@ impl Codegen {
             debug_info,
 
             debug_locations: HashMap::new(),
+
+            debug_type_ids: HashMap::new(),
+
+            debug_expression_id: None,
+
+            debug_next_metadata_id: 0,
+
+            integer_overflow_mode,
+
+            overflow_check_counter: 0,
 
             global_types: HashMap::new(),
         };
@@ -203,6 +243,8 @@ impl Codegen {
         // Reset load counter per function for clean SSA naming
 
         self.load_counter = 0;
+
+        self.overflow_check_counter = 0;
 
         self.ir.push('\n');
 
@@ -272,6 +314,13 @@ impl Codegen {
 
         self.indent += 1;
 
+        if bb.id == 0 {
+            for (index, ty) in mir_fn.params.iter().enumerate() {
+                let local = Local::new(index + 1, LocalKind::Param);
+                self.emit_debug_param_value(mir_fn, local, ty, index + 1);
+            }
+        }
+
         // Emit allocas at the start of the entry block (before any instructions)
 
         for (local, ty) in allocas {
@@ -283,6 +332,7 @@ impl Codegen {
 
             self.ir
                 .push_str(&format!("{} = alloca {}\n", local_name, llvm_ty));
+            self.emit_debug_local_declare(mir_fn, *local, ty);
         }
 
         for inst_id in &bb.instructions {
@@ -478,7 +528,7 @@ impl Codegen {
     fn zero_literal_for_type(ty: &MIRType) -> Option<&'static str> {
         match ty {
             MIRType::Bool => Some("false"),
-            MIRType::Int(_) | MIRType::Future(_) => Some("0"),
+            MIRType::Int(_) | MIRType::UInt(_) | MIRType::Future(_) => Some("0"),
             MIRType::Float(_) => Some("0.0"),
             MIRType::Ref(_) | MIRType::Ptr(_) | MIRType::Fn { .. } => Some("null"),
             _ => None,
@@ -491,7 +541,7 @@ impl Codegen {
             MIRType::Bool => self
                 .ir
                 .push_str(&format!("{dest} = xor i1 {value}, false\n")),
-            MIRType::Int(_) | MIRType::Future(_) => self
+            MIRType::Int(_) | MIRType::UInt(_) | MIRType::Future(_) => self
                 .ir
                 .push_str(&format!("{dest} = add {llvm_ty} 0, {value}\n")),
             MIRType::Float(_) => self

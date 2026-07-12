@@ -15,6 +15,16 @@ pub fn lower_hir_with_options(
     items: &[HIRItem],
     options: MirLowerOptions,
 ) -> Result<Vec<MirFunction>, String> {
+    let target_pointer_width = options.target_pointer_width;
+    crate::mir::type_mapping_helpers::with_target_pointer_width(target_pointer_width, || {
+        lower_hir_with_options_scoped(items, options)
+    })
+}
+
+fn lower_hir_with_options_scoped(
+    items: &[HIRItem],
+    options: MirLowerOptions,
+) -> Result<Vec<MirFunction>, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut lambda_counter = 0;
@@ -56,6 +66,8 @@ pub fn lower_hir_with_options(
         build_dyn_dispatch_metadata(items, &trait_defs, &struct_defs, &options.enum_defs);
     let options = options.with_dyn_dispatch_metadata(trait_method_order, dyn_param_traits);
     let inherent_method_templates = collect_inherent_method_templates(items);
+    let concrete_inherent_method_names =
+        collect_concrete_inherent_method_names(items, &known_named_types);
     let mut trait_method_templates: Vec<TraitMethodTemplate> = Vec::new();
     let mut eager_trait_functions: Vec<hir::HIRFunction> = Vec::new();
 
@@ -92,6 +104,8 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
+                let impl_is_concrete =
+                    hir_type_is_concrete(&impl_item.target_type, &known_named_types);
                 for impl_item in
                     expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
                 {
@@ -124,6 +138,11 @@ pub fn lower_hir_with_options(
                     } else {
                         for method in &impl_item.items {
                             if !method.type_params.is_empty() {
+                                continue;
+                            }
+                            if !impl_is_concrete
+                                && concrete_inherent_method_names.contains(&method.name)
+                            {
                                 continue;
                             }
                             known_functions.insert(method.name.clone());
@@ -171,6 +190,8 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
+                let impl_is_concrete =
+                    hir_type_is_concrete(&impl_item.target_type, &known_named_types);
                 for impl_item in
                     expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
                 {
@@ -179,6 +200,11 @@ pub fn lower_hir_with_options(
                     }
                     for method in &impl_item.items {
                         if !method.type_params.is_empty() {
+                            continue;
+                        }
+                        if !impl_is_concrete
+                            && concrete_inherent_method_names.contains(&method.name)
+                        {
                             continue;
                         }
                         match lower_function(
@@ -233,6 +259,8 @@ pub fn lower_hir_with_options(
         return Err(format!("MIR lowering failed:\n{}", errors.join("\n")));
     }
 
+    dedup_mir_functions_by_name(&mut results);
+
     let shims = synthesize_dyn_vtable_shims(&options, &results);
     results.extend(shims);
 
@@ -247,7 +275,38 @@ pub fn lower_hir_with_options(
         results.push(synthesize_owned_dyn_drop_helper(&trait_name));
     }
 
+    coverage_helpers::inject_coverage_registration(&mut results, &options);
+
     Ok(results)
+}
+
+fn dedup_mir_functions_by_name(functions: &mut Vec<MirFunction>) {
+    let mut seen = HashSet::new();
+    functions.retain(|function| seen.insert(function.name.clone()));
+}
+
+fn collect_concrete_inherent_method_names(
+    items: &[HIRItem],
+    known_named_types: &HashSet<String>,
+) -> HashSet<String> {
+    let concrete_named_types = HashMap::new();
+    let mut names = HashSet::new();
+    for item in items {
+        let HIRItem::Impl(impl_item) = item else {
+            continue;
+        };
+        if impl_item.trait_name.is_some()
+            || !hir_type_is_concrete(&impl_item.target_type, known_named_types)
+        {
+            continue;
+        }
+        for impl_item in expand_impl_variants(impl_item, &concrete_named_types, known_named_types) {
+            for method in impl_item.items {
+                names.insert(method.name);
+            }
+        }
+    }
+    names
 }
 
 /// Collect dyn-dispatch metadata: per-trait vtable slot layout (sorted method

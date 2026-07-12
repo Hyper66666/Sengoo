@@ -172,6 +172,7 @@ pub(crate) fn collect_concrete_named_types_from_body(
 ) {
     for stmt in &body.stmts {
         match stmt {
+            HIRStmt::Coverage { .. } => {}
             HIRStmt::Let { ty, value, .. } => {
                 collect_concrete_named_types_from_type(ty, known_named_types, out);
                 if let Some(value) = value {

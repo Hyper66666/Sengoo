@@ -32,11 +32,11 @@ def option_none_bool() -> Option<bool> {
 }
 
 impl<T> Option<T> {
-    def is_some(self) -> bool {
+    def is_some(&self) -> bool {
         self.is_some
     }
 
-    def is_none(self) -> bool {
+    def is_none(&self) -> bool {
         if self.is_some {
             false
         } else {

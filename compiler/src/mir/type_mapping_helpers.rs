@@ -3,7 +3,44 @@ use crate::mir::enum_defs::EnumDefMap;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::MIRType;
 use crate::type_naming::mir_type_instance_name;
+use std::cell::Cell;
 use std::collections::HashMap;
+
+thread_local! {
+    static TARGET_POINTER_WIDTH: Cell<u8> = const { Cell::new(usize::BITS as u8) };
+}
+
+pub(crate) fn with_target_pointer_width<T>(bits: u8, action: impl FnOnce() -> T) -> T {
+    TARGET_POINTER_WIDTH.with(|cell| {
+        struct Reset<'a> {
+            cell: &'a Cell<u8>,
+            previous: u8,
+        }
+
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.cell.set(self.previous);
+            }
+        }
+
+        let reset = Reset {
+            cell,
+            previous: cell.replace(bits),
+        };
+        let result = action();
+        drop(reset);
+        result
+    })
+}
+
+pub(crate) fn integer_bits_for_mir(kind: crate::hir::IntKind) -> u8 {
+    match kind {
+        crate::hir::IntKind::ISize | crate::hir::IntKind::USize => {
+            TARGET_POINTER_WIDTH.with(Cell::get)
+        }
+        _ => kind.bits() as u8,
+    }
+}
 
 pub(crate) fn hir_type_to_mir_with_structs_and_enums(
     ty: &HIRType,
@@ -72,6 +109,7 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
             }
         }
         HIRTypeKind::Str => MIRType::Ptr(Box::new(MIRType::Int(8))),
+        HIRTypeKind::Byte => MIRType::UInt(8),
         HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
             MIRType::Ptr(Box::new(MIRType::Int(8)))
         }
@@ -126,6 +164,8 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
                 subst,
             )),
         },
+        HIRTypeKind::Int(ik) if ik.is_signed() => MIRType::Int(integer_bits_for_mir(*ik)),
+        HIRTypeKind::Int(ik) => MIRType::UInt(integer_bits_for_mir(*ik)),
         _ => ty.clone().into(),
     }
 }

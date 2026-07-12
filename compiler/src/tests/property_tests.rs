@@ -5,7 +5,7 @@
 use proptest::prelude::*;
 use std::collections::HashSet;
 
-use crate::compile_to_ir;
+use crate::{compile_to_ir, Keyword};
 
 // ============================================================================
 // Property 10: Compilation pipeline produces valid output or descriptive error
@@ -729,57 +729,8 @@ proptest! {
 /// Sengoo keywords.
 fn impl_method_name_strategy() -> impl Strategy<Value = String> {
     "[a-z]{3,10}".prop_filter("must not be a Sengoo keyword", |name| {
-        // Filter out all Sengoo keywords that could collide with generated names
-        !matches!(
-            name.as_str(),
-            "def"
-                | "let"
-                | "for"
-                | "while"
-                | "loop"
-                | "break"
-                | "continue"
-                | "return"
-                | "yield"
-                | "await"
-                | "async"
-                | "import"
-                | "from"
-                | "export"
-                | "try"
-                | "except"
-                | "finally"
-                | "raise"
-                | "throw"
-                | "pub"
-                | "priv"
-                | "where"
-                | "self"
-                | "true"
-                | "false"
-                | "none"
-                | "class"
-                | "struct"
-                | "enum"
-                | "impl"
-                | "trait"
-                | "type"
-                | "const"
-                | "static"
-                | "match"
-                | "case"
-                | "default"
-                | "elif"
-                | "else"
-                | "parallel"
-                | "print"
-                | "if"
-                | "fn"
-                | "as"
-                | "in"
-                | "is"
-                | "mut"
-        )
+        // Keep the property generator in sync with the lexer keyword table.
+        Keyword::lookup(name).is_none() && !matches!(name.as_str(), "print" | "mut")
     })
 }
 
@@ -940,56 +891,7 @@ fn trait_name_strategy() -> impl Strategy<Value = String> {
 /// Reuses the same filtering logic as `impl_method_name_strategy`.
 fn trait_method_name_strategy() -> impl Strategy<Value = String> {
     "[a-z]{3,10}".prop_filter("must not be a Sengoo keyword", |name| {
-        !matches!(
-            name.as_str(),
-            "def"
-                | "let"
-                | "for"
-                | "while"
-                | "loop"
-                | "break"
-                | "continue"
-                | "return"
-                | "yield"
-                | "await"
-                | "async"
-                | "import"
-                | "from"
-                | "export"
-                | "try"
-                | "except"
-                | "finally"
-                | "raise"
-                | "throw"
-                | "pub"
-                | "priv"
-                | "where"
-                | "self"
-                | "true"
-                | "false"
-                | "none"
-                | "class"
-                | "struct"
-                | "enum"
-                | "impl"
-                | "trait"
-                | "type"
-                | "const"
-                | "static"
-                | "match"
-                | "case"
-                | "default"
-                | "elif"
-                | "else"
-                | "parallel"
-                | "print"
-                | "if"
-                | "fn"
-                | "as"
-                | "in"
-                | "is"
-                | "mut"
-        )
+        Keyword::lookup(name).is_none() && !matches!(name.as_str(), "print" | "mut")
     })
 }
 
