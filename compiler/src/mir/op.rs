@@ -139,7 +139,7 @@ impl MirConstant {
             MirConstant::Unit => super::MIRType::Unit,
             MirConstant::Bool(_) => super::MIRType::Bool,
             MirConstant::Int(_) => super::MIRType::Int(64),
-            MirConstant::Uint(_) => super::MIRType::Int(64),
+            MirConstant::Uint(_) => super::MIRType::UInt(64),
             MirConstant::Float(_) => super::MIRType::Float(64),
             MirConstant::Char(_) => super::MIRType::Int(32),
             MirConstant::String(_) => super::MIRType::pointer(super::MIRType::Int(8)),

@@ -564,6 +564,8 @@ pub struct Impl {
     pub target_type: Type,
     pub trait_path: Option<Path>,
     pub trait_args: Vec<Type>,
+    /// `impl !Trait for Type {}` opt-out for compiler auto-marker traits.
+    pub is_negative: bool,
     pub associated_types: Vec<TypeAlias>,
     pub items: Vec<Function>,
     pub span: Span,
@@ -577,6 +579,7 @@ impl Impl {
             target_type,
             trait_path: None,
             trait_args: Vec::new(),
+            is_negative: false,
             associated_types: Vec::new(),
             items: Vec::new(),
             span,

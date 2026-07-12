@@ -3,7 +3,44 @@ use crate::mir::enum_defs::EnumDefMap;
 use crate::mir::hir_specialization_helpers::substitute_hir_type;
 use crate::mir::MIRType;
 use crate::type_naming::mir_type_instance_name;
+use std::cell::Cell;
 use std::collections::HashMap;
+
+thread_local! {
+    static TARGET_POINTER_WIDTH: Cell<u8> = const { Cell::new(usize::BITS as u8) };
+}
+
+pub(crate) fn with_target_pointer_width<T>(bits: u8, action: impl FnOnce() -> T) -> T {
+    TARGET_POINTER_WIDTH.with(|cell| {
+        struct Reset<'a> {
+            cell: &'a Cell<u8>,
+            previous: u8,
+        }
+
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.cell.set(self.previous);
+            }
+        }
+
+        let reset = Reset {
+            cell,
+            previous: cell.replace(bits),
+        };
+        let result = action();
+        drop(reset);
+        result
+    })
+}
+
+pub(crate) fn integer_bits_for_mir(kind: crate::hir::IntKind) -> u8 {
+    match kind {
+        crate::hir::IntKind::ISize | crate::hir::IntKind::USize => {
+            TARGET_POINTER_WIDTH.with(Cell::get)
+        }
+        _ => kind.bits() as u8,
+    }
+}
 
 pub(crate) fn hir_type_to_mir_with_structs_and_enums(
     ty: &HIRType,
@@ -72,6 +109,7 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
             }
         }
         HIRTypeKind::Str => MIRType::Ptr(Box::new(MIRType::Int(8))),
+        HIRTypeKind::Byte => MIRType::UInt(8),
         HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
             MIRType::Ptr(Box::new(MIRType::Int(8)))
         }
@@ -126,6 +164,8 @@ pub(crate) fn hir_type_to_mir_with_structs_and_enums(
                 subst,
             )),
         },
+        HIRTypeKind::Int(ik) if ik.is_signed() => MIRType::Int(integer_bits_for_mir(*ik)),
+        HIRTypeKind::Int(ik) => MIRType::UInt(integer_bits_for_mir(*ik)),
         _ => ty.clone().into(),
     }
 }
@@ -145,6 +185,23 @@ pub(crate) fn bind_mir_subst_from_hir_type(
     subst: &mut HashMap<String, MIRType>,
 ) {
     match &template.kind {
+        HIRTypeKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } => {
+            if let HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    subst
+                        .entry(format!("<{base_name} as {trait_name}>::{name}"))
+                        .or_insert_with(|| actual.clone());
+                }
+            }
+        }
         HIRTypeKind::Named { name, args } if args.is_empty() && !struct_defs.contains_key(name) => {
             match subst.get(name) {
                 Some(existing) if existing != actual => {}
@@ -198,6 +255,83 @@ pub(crate) fn bind_mir_subst_from_hir_type(
                 }
             }
         }
+        HIRTypeKind::Fn { params, ret } => {
+            if let MIRType::Fn {
+                params: actual_params,
+                ret: actual_ret,
+            } = actual
+            {
+                for (template_param, actual_param) in params.iter().zip(actual_params.iter()) {
+                    bind_mir_subst_from_hir_type(template_param, actual_param, struct_defs, subst);
+                }
+                bind_mir_subst_from_hir_type(ret, actual_ret, struct_defs, subst);
+            }
+        }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn associated_projection_binds_concrete_actual_type() {
+        let projection = HIRType::new(HIRTypeKind::AssocProjection {
+            base: Box::new(HIRType::named("I".to_string(), Vec::new())),
+            trait_name: "Iterator".to_string(),
+            name: "Item".to_string(),
+        });
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(&projection, &MIRType::Bool, &HashMap::new(), &mut subst);
+
+        assert_eq!(subst.get("<I as Iterator>::Item"), Some(&MIRType::Bool));
+    }
+
+    #[test]
+    fn same_named_associated_types_from_distinct_traits_do_not_collide() {
+        let projection = |trait_name: &str| {
+            HIRType::new(HIRTypeKind::AssocProjection {
+                base: Box::new(HIRType::named("I".to_string(), Vec::new())),
+                trait_name: trait_name.to_string(),
+                name: "Item".to_string(),
+            })
+        };
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(
+            &projection("Iterator"),
+            &MIRType::Bool,
+            &HashMap::new(),
+            &mut subst,
+        );
+        bind_mir_subst_from_hir_type(
+            &projection("Stream"),
+            &MIRType::Int(32),
+            &HashMap::new(),
+            &mut subst,
+        );
+
+        assert_eq!(subst.get("<I as Iterator>::Item"), Some(&MIRType::Bool));
+        assert_eq!(subst.get("<I as Stream>::Item"), Some(&MIRType::Int(32)));
+    }
+
+    #[test]
+    fn function_signature_binds_generic_parameter_and_return_types() {
+        let template = HIRType::new(HIRTypeKind::Fn {
+            params: vec![HIRType::named("T".to_string(), Vec::new())],
+            ret: Box::new(HIRType::named("O".to_string(), Vec::new())),
+        });
+        let actual = MIRType::Fn {
+            params: vec![MIRType::Bool],
+            ret: Box::new(MIRType::Int(64)),
+        };
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(&template, &actual, &HashMap::new(), &mut subst);
+
+        assert_eq!(subst.get("T"), Some(&MIRType::Bool));
+        assert_eq!(subst.get("O"), Some(&MIRType::Int(64)));
     }
 }

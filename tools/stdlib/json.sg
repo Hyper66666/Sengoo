@@ -5,6 +5,7 @@ extern "C" {
     fn sengoo_json_doc_close(handle: i64) -> i64;
     fn sengoo_json_doc_root(handle: i64) -> i64;
     fn sengoo_json_doc_serialize(handle: i64, buffer: i64) -> i64;
+    fn sengoo_json_doc_serialize_string(handle: i64) -> i64;
     fn sengoo_json_doc_new_object(handle: i64) -> i64;
     fn sengoo_json_doc_new_array(handle: i64) -> i64;
     fn sengoo_json_doc_new_string(handle: i64, value: i64) -> i64;
@@ -36,6 +37,11 @@ struct JsonValue {
     doc_handle: i64,
     node_id: i64,
 }
+
+impl !Send for JsonDoc {}
+impl !Sync for JsonDoc {}
+impl !Send for JsonValue {}
+impl !Sync for JsonValue {}
 
 def JSON_KIND_NULL() -> i64 { 0 }
 def JSON_KIND_BOOL() -> i64 { 1 }
@@ -149,6 +155,10 @@ impl JsonDoc {
 
     def serialize(self, buffer: Buffer) -> Result<i64, i64> {
         json_count_result(sengoo_json_doc_serialize(self.handle, buffer.handle))
+    }
+
+    def serialize_string(self) -> Result<String, i64> {
+        json_string_result(sengoo_json_doc_serialize_string(self.handle))
     }
 
     def new_object(self) -> Result<JsonValue, i64> {

@@ -51,6 +51,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
         module,
         "option"
             | "result"
+            | "math"
             | "collections"
             | "json"
             | "status"
@@ -83,7 +84,7 @@ fn source_module_needs_result_family(module: &str) -> bool {
 fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
     match module {
         "collections" | "json" | "status" => &["ffi", "string"],
-        "math" => &["option"],
+        "math" => &["option", "status"],
         "string" => &["ffi"],
         "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
         "path" | "dir" => &["status", "string"],
@@ -226,15 +227,15 @@ mod tests {
     }
 
     #[test]
-    fn math_import_expands_option_result_dependencies() {
+    fn math_import_expands_option_and_status_dependencies() {
         let expanded =
             expand_stdlib_imports_for_source("import std::math;\ndef main() -> i64 { 0 }\n")
                 .expect("math stdlib import should expand");
 
         assert!(expanded.contains("struct Option"));
-        assert!(expanded.contains("struct Result"));
-        assert!(expanded.contains("def checked_add_i64"));
-        assert!(expanded.contains("def saturating_mul_i64"));
+        assert!(expanded.contains("def STATUS_OVERFLOW()"));
+        assert!(expanded.contains("def checked_add(self, rhs: i64) -> Option<i64>"));
+        assert!(expanded.contains("def saturating_mul(self, rhs: i64) -> i64"));
     }
 
     #[test]
@@ -346,7 +347,7 @@ mod tests {
         assert!(expanded.contains("def dir_entry_name"));
         assert!(expanded.contains("struct DirWalk"));
         assert!(expanded.contains("def dir_walk"));
-        assert!(expanded.contains("def next(self, buffer: Buffer) -> Result<i64, i64>"));
+        assert!(expanded.contains("def next(&self, buffer: Buffer) -> Result<i64, i64>"));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }

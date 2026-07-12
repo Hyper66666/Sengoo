@@ -1,3 +1,4 @@
+use super::named_call_helpers::emit_owned_dyn_coercion;
 use super::*;
 
 pub(super) fn lower_let_stmt(
@@ -87,6 +88,20 @@ pub(super) fn lower_let_stmt(
                     ));
                 }
             }
+        } else if let Some(trait_name) = owned_dyn_let_coercion_trait(ctx, ty, value_local) {
+            ctx.mark_drop_expr_moved(value_expr);
+            let fat_local = emit_owned_dyn_coercion(ctx, value_local, &trait_name);
+            let fat_ty = ctx.get_local_type(fat_local).clone();
+            let local = ctx.add_local(Some(name.to_string()), kind, fat_ty);
+            ctx.bind_local_symbol(symbol, local);
+            if let Some(type_name) = ctx.type_names.get(&fat_local).cloned() {
+                ctx.type_names.insert(local, type_name);
+            }
+            ctx.push_inst(Instruction::Store {
+                destination: local,
+                value: fat_local,
+            });
+            ctx.record_drop_binding_if_needed(local);
         } else {
             let value_ty = ctx.get_local_type(value_local).clone();
             ctx.mark_drop_expr_moved(value_expr);
@@ -145,6 +160,25 @@ pub(super) fn lower_let_stmt(
         let local = ctx.add_local(Some(name.to_string()), kind, mir_ty);
         ctx.bind_local_symbol(symbol, local);
     }
+}
+
+/// Returns the trait name when the let binding declares an owned `dyn Trait`
+/// type and the initializer is a concrete (non-fat-pointer) value, i.e. an
+/// owned unsize coercion site.
+fn owned_dyn_let_coercion_trait(
+    ctx: &LoweringContext<'_>,
+    ty: &HIRType,
+    value_local: Local,
+) -> Option<String> {
+    let hir::HIRTypeKind::TraitObject(traits) = &ty.kind else {
+        return None;
+    };
+    let trait_name = traits.first()?.clone();
+    let value_ty = ctx.get_local_type(value_local);
+    if crate::mir::dyn_dispatch::dyn_trait_of_type(value_ty).is_some() {
+        return None;
+    }
+    matches!(value_ty, MIRType::Struct { .. }).then_some(trait_name)
 }
 
 #[cfg(test)]

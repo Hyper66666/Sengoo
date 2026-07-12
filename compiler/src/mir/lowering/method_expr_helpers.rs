@@ -1,4 +1,4 @@
-use super::method_call_helpers::lower_method_call_from_locals;
+use super::method_call_helpers::lower_method_call_from_locals_with_expected;
 use super::*;
 
 pub(super) fn lower_method_call_expr(
@@ -6,10 +6,20 @@ pub(super) fn lower_method_call_expr(
     receiver: &HIRExpr,
     method: &str,
     args: &[HIRExpr],
+    expected_return_type: Option<&HIRType>,
 ) -> Local {
     let receiver_local = ctx.lower_expr(receiver);
     let arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
-    let result = lower_method_call_from_locals(ctx, receiver_local, method, &arg_locals);
+    let expected_return_name = expected_return_type.map(crate::type_naming::hir_type_instance_name);
+    let expected_return_type = expected_return_type.map(|ty| ctx.hir_type_to_mir(ty));
+    let result = lower_method_call_from_locals_with_expected(
+        ctx,
+        receiver_local,
+        method,
+        &arg_locals,
+        expected_return_type.as_ref(),
+        expected_return_name.as_deref(),
+    );
     for arg in args {
         ctx.mark_drop_expr_moved(arg);
     }
@@ -59,7 +69,7 @@ mod tests {
             name: "s".to_string(),
             symbol: SymbolId::new(1),
         };
-        let result = lower_method_call_expr(&mut ctx, &expr, "len", &[]);
+        let result = lower_method_call_expr(&mut ctx, &expr, "len", &[], None);
 
         assert_eq!(ctx.get_local_type(result), &MIR_I64);
         assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(

@@ -1,0 +1,35 @@
+import std::assert;
+
+import std::dir;
+
+import std::file;
+
+import std::status;
+
+import workspace_audit;
+
+def setup() {
+    let _made_src = dir_create_all("fixture/src");
+    let _made_tests = dir_create_all("fixture/tests");
+    let _manifest = file_write_str("fixture/Sengoo.toml", "fixture manifest");
+    let _source = file_write_str("fixture/src/main.sg", "source file");
+    let _test = file_write_str("fixture/tests/audit.sg", "test file");
+}
+
+def teardown() {
+    let _removed = dir_remove_tree("fixture", 8, 100);
+}
+
+def test_audit_fixture() -> i64 {
+    let result = audit_workspace("fixture", "fixture/no-config.json", "fixture/audit.txt");
+    if result.is_err() { result.error; } else if result.value <= 1 { 11; } else if not file_exists("fixture/audit.txt") { 12; } else if not file_exists("fixture/audit-report.json") { 13; } else { 0; };
+}
+
+def test_missing_tests_returns_not_found() -> i64 {
+    let _made = dir_create_all("empty/src");
+    let _manifest = file_write_str("empty/Sengoo.toml", "empty manifest");
+    let _source = file_write_str("empty/src/main.sg", "source file");
+    let result = audit_workspace("empty", "empty/no-config.json", "empty/audit.txt");
+    let _removed = dir_remove_tree("empty", 8, 100);
+    if result.is_err() and result.error == STATUS_NOT_FOUND() { 0; } else if result.is_err() { result.error; } else { 20; };
+}

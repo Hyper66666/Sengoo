@@ -55,12 +55,18 @@ pub(super) fn expand_derive_macros(source: &str) -> Result<Cow<'_, str>> {
         return Ok(Cow::Borrowed(source));
     }
 
+    let hasher_in_scope = source_provides_hasher(source);
     let mut expanded = without_attributes;
     let mut insertions: Vec<(usize, String)> = Vec::new();
 
     for invocation in &invocations {
         for derive in &invocation.derives {
-            let generated = execute_derive_macro(derive, &invocation.target, &invocation.derives)?;
+            let generated = execute_derive_macro(
+                derive,
+                &invocation.target,
+                &invocation.derives,
+                hasher_in_scope,
+            )?;
             if generated.trim().is_empty() {
                 return Err(parse_error(format!(
                     "derive macro `{derive}` generated empty output for {} `{}`",
@@ -232,7 +238,22 @@ fn find_derive_target(source: &str, bytes: &[u8], from: usize) -> Result<DeriveT
     })
 }
 
-fn execute_derive_macro(derive: &str, target: &DeriveTarget, derives: &[String]) -> Result<String> {
+/// `#[derive(Hash)]` routes through `hash_into(&self, h: &mut Hasher)` only
+/// when a `Hasher` surface is reachable from the program (a local definition
+/// or the stdlib string module); otherwise it falls back to the standalone
+/// FNV-1a `hash()` body so programs without a hasher stay source-compatible.
+fn source_provides_hasher(source: &str) -> bool {
+    source.contains("struct Hasher")
+        || source.contains("def hasher_new")
+        || source.contains("import std::string")
+}
+
+fn execute_derive_macro(
+    derive: &str,
+    target: &DeriveTarget,
+    derives: &[String],
+    hasher_in_scope: bool,
+) -> Result<String> {
     let env_key = format!("SENGOO_DERIVE_{}", to_env_macro_key(derive));
     if let Ok(command) = env::var(&env_key) {
         if !command.trim().is_empty() {
@@ -240,7 +261,12 @@ fn execute_derive_macro(derive: &str, target: &DeriveTarget, derives: &[String])
         }
     }
 
-    Ok(generate_builtin_derive(derive, target, derives))
+    Ok(generate_builtin_derive(
+        derive,
+        target,
+        derives,
+        hasher_in_scope,
+    ))
 }
 
 fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Result<String> {
@@ -272,7 +298,12 @@ fn run_external_derive(command: &str, derive: &str, target: &DeriveTarget) -> Re
     Ok(generated)
 }
 
-fn generate_builtin_derive(derive: &str, target: &DeriveTarget, derives: &[String]) -> String {
+fn generate_builtin_derive(
+    derive: &str,
+    target: &DeriveTarget,
+    derives: &[String],
+    hasher_in_scope: bool,
+) -> String {
     if derive.rsplit("::").next().unwrap_or(derive) == "Clone"
         && matches!(target.kind, DeriveTargetKind::Struct)
     {
@@ -341,10 +372,17 @@ fn generate_builtin_derive(derive: &str, target: &DeriveTarget, derives: &[Strin
     if derive.rsplit("::").next().unwrap_or(derive) == "Hash"
         && matches!(target.kind, DeriveTargetKind::Struct)
     {
+        if hasher_in_scope {
+            let into_body = hash_into_body(&target.fields);
+            return format!(
+                "impl Hash for {} {{\n    def hash_into(&self, h: &mut Hasher) {{\n{}\n    }}\n}}\nimpl {} {{\n    def hash(&self) -> i64 {{\n        let mut __hasher = hasher_new();\n        self.hash_into(&mut __hasher);\n        __hasher.finish()\n    }}\n}}",
+                target.name, into_body, target.name
+            );
+        }
         let hash_body = hash_body(&target.fields);
         return format!(
-            "impl Hash for {} {{\n}}\nimpl {} {{\n    def hash(&self) -> i64 {{\n{}\n    }}\n}}",
-            target.name, target.name, hash_body
+            "impl Hash for {} {{\n    def hash(&self) -> i64 {{\n{}\n    }}\n}}\nimpl {} {{\n    def hash(&self) -> i64 {{\n{}\n    }}\n}}",
+            target.name, hash_body, target.name, hash_body
         );
     }
 
@@ -478,6 +516,22 @@ fn lexicographic_compare_body(fields: &[DeriveField]) -> String {
     }
     lines.push("        0".to_string());
     lines.join("\n")
+}
+
+fn hash_into_body(fields: &[DeriveField]) -> String {
+    if fields.is_empty() {
+        return "        h.write_i64(0);".to_string();
+    }
+    fields
+        .iter()
+        .map(|field| match field.ty.trim() {
+            "bool" => format!("        h.write_bool(self.{});", field.name),
+            "char" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32"
+            | "u64" | "u128" | "usize" => format!("        h.write_i64(self.{});", field.name),
+            _ => format!("        self.{}.hash_into(h);", field.name),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn hash_body(fields: &[DeriveField]) -> String {
@@ -735,6 +789,9 @@ fn parse_balanced(
 }
 
 fn skip_quoted_literal(bytes: &[u8], start: usize) -> Option<usize> {
+    if let Some(next) = super::fstring_scan::skip_fstring_literal(bytes, start) {
+        return Some(next);
+    }
     let quote = *bytes.get(start)?;
     if quote != b'"' && quote != b'\'' {
         return None;

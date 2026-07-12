@@ -190,8 +190,8 @@ impl<'source> Parser<'source> {
                     if self.consume(TokenKind::Semicolon).is_some() {
                         let len = if let Some(token) = self.current() {
                             match &token.kind {
-                                TokenKind::Int(Some(n)) if *n >= 0 => {
-                                    let n = *n as u64;
+                                TokenKind::Int(Some(n)) => {
+                                    let n = *n;
                                     self.advance();
                                     n
                                 }
@@ -269,8 +269,12 @@ impl<'source> Parser<'source> {
                     TypeKind::Infer
                 }
                 TokenKind::SelfKw => {
-                    self.advance();
-                    TypeKind::SelfType
+                    if self.check_peek(TokenKind::ColonColon) {
+                        TypeKind::Path(self.parse_path()?)
+                    } else {
+                        self.advance();
+                        TypeKind::SelfType
+                    }
                 }
                 TokenKind::Ident => {
                     let path = self.parse_path()?;

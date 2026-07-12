@@ -7,6 +7,18 @@
 
 use crate::mir::{Local, LocalKind, MIRType, MirBinOp, MirConstant};
 
+pub(crate) fn escape_llvm_c_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if (0x20..=0x7e).contains(&byte) && byte != b'"' && byte != b'\\' {
+            escaped.push(char::from(byte));
+        } else {
+            escaped.push_str(&format!("\\{byte:02X}"));
+        }
+    }
+    escaped
+}
+
 /// Convert a MIR type to its LLVM IR type string representation.
 ///
 /// This is the comprehensive version that handles all MIR type variants,
@@ -16,7 +28,7 @@ pub fn mir_type_to_llvm_str(ty: &MIRType) -> String {
         MIRType::Unit => "void".to_string(),
         MIRType::Never => "void".to_string(),
         MIRType::Bool => "i1".to_string(),
-        MIRType::Int(n) => format!("i{}", n),
+        MIRType::Int(n) | MIRType::UInt(n) => format!("i{}", n),
         MIRType::Float(n) => match n {
             32 => "float".to_string(),
             64 => "double".to_string(),
@@ -72,7 +84,7 @@ pub fn mir_type_size_align(ty: &MIRType) -> (u64, u64) {
     match ty {
         MIRType::Unit | MIRType::Never => (0, 1),
         MIRType::Bool => (1, 1),
-        MIRType::Int(bits) | MIRType::Float(bits) => {
+        MIRType::Int(bits) | MIRType::UInt(bits) | MIRType::Float(bits) => {
             let size = (u64::from(*bits).div_ceil(8)).max(1);
             (size, size.next_power_of_two().min(8))
         }
@@ -111,17 +123,17 @@ pub fn enum_payload_storage_size(ty: &MIRType) -> u64 {
 pub fn mir_type_bit_width(ty: &MIRType) -> Option<u32> {
     match ty {
         MIRType::Bool => Some(1),
-        MIRType::Int(bits) | MIRType::Float(bits) => Some(*bits as u32),
+        MIRType::Int(bits) | MIRType::UInt(bits) | MIRType::Float(bits) => Some(*bits as u32),
         _ => None,
     }
 }
 
 pub fn supports_mir_bitcast(from: &MIRType, to: &MIRType) -> bool {
     match (from, to) {
-        (MIRType::Float(32), MIRType::Int(32))
-        | (MIRType::Int(32), MIRType::Float(32))
-        | (MIRType::Float(64), MIRType::Int(64))
-        | (MIRType::Int(64), MIRType::Float(64)) => true,
+        (MIRType::Float(32), MIRType::Int(32) | MIRType::UInt(32))
+        | (MIRType::Int(32) | MIRType::UInt(32), MIRType::Float(32))
+        | (MIRType::Float(64), MIRType::Int(64) | MIRType::UInt(64))
+        | (MIRType::Int(64) | MIRType::UInt(64), MIRType::Float(64)) => true,
         _ => mir_type_bit_width(from)
             .zip(mir_type_bit_width(to))
             .is_some_and(|(a, b)| a == b && from == to),
@@ -157,6 +169,7 @@ pub fn emit_indent(ir: &mut String, indent: usize) {
 /// Returns the LLVM instruction mnemonic (e.g., `"add"`, `"fadd"`, `"icmp eq"`, `"fcmp oeq"`).
 pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
     let is_float = matches!(ty, MIRType::Float(_));
+    let is_unsigned = matches!(ty, MIRType::UInt(_));
     match op {
         MirBinOp::Add => {
             if is_float {
@@ -182,6 +195,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Div => {
             if is_float {
                 "fdiv"
+            } else if is_unsigned {
+                "udiv"
             } else {
                 "sdiv"
             }
@@ -189,6 +204,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Rem => {
             if is_float {
                 "frem"
+            } else if is_unsigned {
+                "urem"
             } else {
                 "srem"
             }
@@ -210,6 +227,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Lt => {
             if is_float {
                 "fcmp olt"
+            } else if is_unsigned {
+                "icmp ult"
             } else {
                 "icmp slt"
             }
@@ -217,6 +236,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Gt => {
             if is_float {
                 "fcmp ogt"
+            } else if is_unsigned {
+                "icmp ugt"
             } else {
                 "icmp sgt"
             }
@@ -224,6 +245,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Le => {
             if is_float {
                 "fcmp ole"
+            } else if is_unsigned {
+                "icmp ule"
             } else {
                 "icmp sle"
             }
@@ -231,6 +254,8 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::Ge => {
             if is_float {
                 "fcmp oge"
+            } else if is_unsigned {
+                "icmp uge"
             } else {
                 "icmp sge"
             }
@@ -239,6 +264,7 @@ pub fn binary_op_to_llvm(op: MirBinOp, ty: &MIRType) -> &'static str {
         MirBinOp::BitOr => "or",
         MirBinOp::BitXor => "xor",
         MirBinOp::Shl => "shl",
+        MirBinOp::Shr if is_unsigned => "lshr",
         MirBinOp::Shr => "ashr",
         MirBinOp::LogAnd => "and",
         MirBinOp::LogOr => "or",
@@ -478,6 +504,17 @@ mod tests {
     }
 
     #[test]
+    fn test_binary_op_uint_comparison_uses_unsigned_predicates() {
+        let uint_ty = MIRType::UInt(64);
+        assert_eq!(binary_op_to_llvm(MirBinOp::Eq, &uint_ty), "icmp eq");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Ne, &uint_ty), "icmp ne");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Lt, &uint_ty), "icmp ult");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Gt, &uint_ty), "icmp ugt");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Le, &uint_ty), "icmp ule");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Ge, &uint_ty), "icmp uge");
+    }
+
+    #[test]
     fn test_binary_op_float_comparison() {
         let float_ty = MIRType::Float(64);
         assert_eq!(binary_op_to_llvm(MirBinOp::Eq, &float_ty), "fcmp oeq");
@@ -496,6 +533,14 @@ mod tests {
         assert_eq!(binary_op_to_llvm(MirBinOp::BitXor, &int_ty), "xor");
         assert_eq!(binary_op_to_llvm(MirBinOp::Shl, &int_ty), "shl");
         assert_eq!(binary_op_to_llvm(MirBinOp::Shr, &int_ty), "ashr");
+    }
+
+    #[test]
+    fn test_binary_op_uint_div_rem_and_shift_use_unsigned_opcodes() {
+        let uint_ty = MIRType::UInt(64);
+        assert_eq!(binary_op_to_llvm(MirBinOp::Div, &uint_ty), "udiv");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Rem, &uint_ty), "urem");
+        assert_eq!(binary_op_to_llvm(MirBinOp::Shr, &uint_ty), "lshr");
     }
 
     #[test]

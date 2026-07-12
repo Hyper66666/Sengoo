@@ -1,17 +1,23 @@
 ## Why
 
-Two developer-experience gaps remain after `six-pillar-gap-closure`:
+The test-framework portion of this change is implemented. The remaining
+developer-experience gap is release-host debugger proof:
 
 - **Debugging**: the compiler emits DWARF (`--debug-info`/`-g`,
   `native-debug-info`), and `docs/debugging-native.md` documents manual
   lldb/Windows steps, but there is no validated source-level stepping and
   variable-inspection experience — and no integrated/editor debugging.
-- **Testing**: `sgc test` exists and `std::assert` has typed helpers with a JSON
-  envelope, but the framework lacks fixtures/setup-teardown, parametrized cases,
-  test discovery conventions beyond smoke tests, and coverage reporting.
+- **Testing**: discovery, fixtures, parametrized cases, structured assertions,
+  and runtime statement-line coverage now exist and remain compatibility gates
+  while debugger work closes.
 
 Mainstream languages ship a real debugger experience and a batteries-included
-test framework. This change is largely independent of P0 and can start early.
+test framework. Remaining implementation begins only after
+`mainline-release-baseline` establishes the integrated Phase 0 baseline.
+
+Object-level DWARF inspection is not sufficient for archive: `design.md`
+requires actual LLDB/CDB statement stepping and live value reads on release
+hosts.
 
 ## Proposal
 

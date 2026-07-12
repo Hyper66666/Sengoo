@@ -1207,6 +1207,29 @@ def main() -> i64 {
     }
 
     #[test]
+    fn dyn_errors_keep_stable_codes_for_lsp() {
+        let cases = [
+            (
+                "trait Read {}\ntrait Write {}\ndef stream(x: dyn Read + Write) -> i64 { 0 }\n",
+                "dyn-multi-trait-unsupported",
+            ),
+            (
+                "trait Show {}\nstruct Box<T> { value: T }\ndef takes(x: Box<dyn Show>) -> i64 { 0 }\n",
+                "dyn-box-unsupported",
+            ),
+        ];
+
+        for (src, code) in cases {
+            let diagnostics = embedded_compiler_diagnostics(src);
+            assert_eq!(diagnostics.len(), 1, "{code}");
+            assert_eq!(
+                diagnostics[0].code,
+                Some(NumberOrString::String(code.to_string()))
+            );
+        }
+    }
+
+    #[test]
     fn compiler_diagnostics_fall_back_to_embedded_compiler_when_sgc_is_missing() {
         let src = "def main() -> i64 {\n    let = 1;\n}\n";
         let diagnostics = compiler_diagnostics_from_sgc_tool(

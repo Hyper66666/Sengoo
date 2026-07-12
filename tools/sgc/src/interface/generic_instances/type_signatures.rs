@@ -60,6 +60,7 @@ pub(super) fn infer_expr_type_signature(
     match &expr.kind {
         ExprKind::Literal(lit) => match lit {
             sengoo_compiler::Literal::Int(_) => "i64".to_string(),
+            sengoo_compiler::Literal::Uint(_) => "u64".to_string(),
             sengoo_compiler::Literal::Float(_) => "f64".to_string(),
             sengoo_compiler::Literal::Bool(_) => "bool".to_string(),
             sengoo_compiler::Literal::String(_) => "str".to_string(),

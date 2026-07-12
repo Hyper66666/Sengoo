@@ -54,7 +54,7 @@ fn stdlib_dependencies(module: &str) -> &'static [&'static str] {
         "ffi" => &["option", "result"],
         "json" | "status" => &["ffi"],
         "fmt" => &["strconv", "status"],
-        "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" | "time" => {
+        "math" | "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" | "time" => {
             &["status"]
         }
         "http" => &["ffi", "status"],
@@ -453,6 +453,10 @@ import std::status;
         assert!(names.contains(&"string_map_i64_new"));
         assert!(names.contains(&"StringMapBool"));
         assert!(names.contains(&"string_map_bool_new"));
+        assert!(names.contains(&"HashSet"));
+        assert!(names.contains(&"hashset_new_i64"));
+        assert!(names.contains(&"hashset_new_bool"));
+        assert!(names.contains(&"hashset_new_string"));
 
         let signatures = stdlib_signatures_for_content("import std::collections;\n");
         let labels = signatures
@@ -462,6 +466,9 @@ import std::status;
         assert!(labels.contains(&"def text_list_new() -> TextList"));
         assert!(labels.contains(&"def string_map_i64_new() -> StringMapI64"));
         assert!(labels.contains(&"def string_map_bool_new() -> StringMapBool"));
+        assert!(labels.contains(&"def hashset_new_i64() -> HashSet<i64>"));
+        assert!(labels.contains(&"def hashset_new_bool() -> HashSet<bool>"));
+        assert!(labels.contains(&"def hashset_new_string() -> HashSet<String>"));
         assert!(
             labels.contains(
                 &"def get_copy(self, index: i64, buffer: Buffer) -> Result<i64, i64> [impl TextList]"
@@ -820,7 +827,10 @@ import std::status;
 
         assert!(names.contains(&"strconv_parse_i64"));
         assert!(names.contains(&"strconv_parse_i64_buffer"));
+        assert!(names.contains(&"strconv_parse_f64"));
+        assert!(names.contains(&"strconv_parse_f64_buffer"));
         assert!(names.contains(&"strconv_format_i64"));
+        assert!(names.contains(&"strconv_format_f64"));
         assert!(names.contains(&"Buffer"));
         assert!(names.contains(&"Result"));
 
@@ -830,8 +840,12 @@ import std::status;
             .map(|signature| signature.label.as_str())
             .collect::<Vec<_>>();
         assert!(labels.contains(&"def strconv_parse_i64(value: &str) -> Result<i64, i64>"));
+        assert!(labels.contains(&"def strconv_parse_f64(value: &str) -> Result<f64, i64>"));
         assert!(labels
             .contains(&"def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64>"));
+        assert!(labels.contains(
+            &"def strconv_format_f64(value: f64, precision: i64, buffer: Buffer) -> Result<i64, i64>"
+        ));
     }
 
     #[test]
@@ -860,6 +874,48 @@ import std::status;
             labels.contains(&"def status_name_copy(code: i64, buffer: Buffer) -> Result<i64, i64>")
         );
         assert!(labels.contains(&"def status_from_raw_ffi(code: i64) -> i64"));
+    }
+
+    #[test]
+    fn stdlib_symbols_follow_math_dependencies() {
+        let symbols = stdlib_symbols_for_content("import std::math;\n");
+        let names = symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"abs_i64"));
+        assert!(names.contains(&"checked_i64_to_i32"));
+        assert!(names.contains(&"checked_i64_to_u8"));
+        assert!(names.contains(&"wrapping_add"));
+        assert!(names.contains(&"checked_add"));
+        assert!(names.contains(&"saturating_add"));
+        assert!(names.contains(&"Add"));
+        assert!(names.contains(&"Into"));
+        assert!(names.contains(&"is_finite_f64"));
+        assert!(names.contains(&"sqrt_f64"));
+        assert!(names.contains(&"pow_f64"));
+        assert!(names.contains(&"ln_f64"));
+        assert!(names.contains(&"sin_f64"));
+        assert!(names.contains(&"sqrt_f32"));
+        assert!(names.contains(&"pow_f32"));
+        assert!(names.contains(&"is_finite_f32"));
+        assert!(names.contains(&"STATUS_OVERFLOW"));
+        assert!(names.contains(&"STATUS_INVALID_ARGUMENT"));
+        assert!(names.contains(&"Result"));
+
+        let signatures = stdlib_signatures_for_content("import std::math;\n");
+        let labels = signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.contains(&"def checked_i64_to_i32(value: i64) -> Result<i32, i64>"));
+        assert!(labels.contains(&"def is_finite_f64(value: f64) -> bool"));
+        assert!(labels.contains(&"def sqrt_f64(value: f64) -> f64"));
+        assert!(labels.contains(&"def pow_f64(base: f64, exp: f64) -> f64"));
+        assert!(labels.contains(&"def is_finite_f32(value: f32) -> bool"));
+        assert!(labels.contains(&"def sqrt_f32(value: f32) -> f32"));
+        assert!(labels.contains(&"def pow_f32(base: f32, exp: f32) -> f32"));
     }
 
     #[test]

@@ -1085,6 +1085,27 @@ long long sengoo_json_doc_serialize(long long handle, long long buffer_handle) {
     return copied;
 }
 
+long long sengoo_string_from_str_copy(long long value_ptr);
+
+long long sengoo_json_doc_serialize_string(long long handle) {
+    sengoo_json_clear_error();
+    SengooJsonDoc* doc = sengoo_json_doc_from_handle(handle);
+    if (!doc || doc->root == 0) {
+        return sengoo_json_set_error(SENGOO_STATUS_INVALID_HANDLE, -1, "json document handle not found");
+    }
+    SengooJsonBuilder builder = {0};
+    if (!sengoo_json_serialize_node(doc, doc->root, &builder)) {
+        free(builder.data);
+        return sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY, -1, "json serialization failed");
+    }
+    long long value = sengoo_string_from_str_copy(sengoo_ptr_to_handle(builder.data));
+    free(builder.data);
+    if (value < 0) {
+        sengoo_json_set_error(-value, -1, "json serialization failed");
+    }
+    return value;
+}
+
 long long sengoo_json_last_error_code(void) {
     return sengoo_json_last_error;
 }

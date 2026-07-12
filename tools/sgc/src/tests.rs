@@ -402,12 +402,15 @@ fn stdlib_runtime_exports_vec_and_hashmap_core_operations() {
         "sengoo_vec_push_i64",
         "sengoo_vec_get_i64",
         "sengoo_vec_set_i64",
+        "sengoo_vec_insert_i64",
         "sengoo_vec_pop_i64",
         "sengoo_vec_get_or_default_i64",
         "sengoo_vec_contains_i64",
         "sengoo_vec_remove_i64",
         "sengoo_vec_remove_or_default_i64",
         "sengoo_vec_pop_or_default_i64",
+        "sengoo_vec_string_set",
+        "sengoo_vec_string_insert",
         "sengoo_hashmap_new_i64",
         "sengoo_hashmap_free_i64",
         "sengoo_hashmap_len_i64",
@@ -993,6 +996,7 @@ fn run_supported_engine_flags_parse() {
     assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--engine", "auto",]).is_ok());
     assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--engine", "native",]).is_ok());
     assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--engine", "lli",]).is_ok());
+    assert!(Cli::try_parse_from(["sgc", "run", "tests/demo.sg", "--cranelift-fast-jit",]).is_ok());
 }
 
 #[test]
@@ -1072,6 +1076,18 @@ fn render_compile_error_json_extracts_stable_diagnostic_code() {
         .as_str()
         .unwrap_or("")
         .contains("non-exhaustive-match"));
+}
+
+#[test]
+fn render_compile_error_json_extracts_dyn_stable_diagnostic_codes() {
+    for code in ["dyn-multi-trait-unsupported", "dyn-box-unsupported"] {
+        let raw = format!("typecheck failed: [{code}] unsupported dyn form");
+        let json = super::render_compile_error_json(Some("tests/dyn.sg"), &raw);
+        let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+        assert_eq!(value["code"], code);
+        assert!(value["message"].as_str().unwrap_or("").contains(code));
+    }
 }
 
 #[test]
@@ -4486,6 +4502,231 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_stdlib_arc_i64_bool_runtime_counts_and_reads() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+def consume_i64_arc(value: Arc<i64>) {
+    let observed = value.get();
+}
+
+def consume_bool_arc(value: Arc<bool>) {
+    let observed = value.get();
+}
+
+def main() -> i64 {
+    let shared = arc_new_i64(40);
+    let cloned = shared.clone_arc();
+    let before_drop = shared.strong_count();
+    let value = cloned.get();
+    consume_i64_arc(cloned);
+    let after_drop = shared.strong_count();
+    let flag = arc_new_bool(true);
+    let flag_clone = flag.clone_arc();
+    let flag_count = flag.strong_count();
+    consume_bool_arc(flag_clone);
+    let flag_after_drop = flag.strong_count();
+    let ok = value == 40
+        && before_drop == 2
+        && after_drop == 1
+        && flag.get()
+        && flag_count == 2
+        && flag_after_drop == 1;
+    if ok {
+        42
+    } else {
+        1
+    }
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("Arc stdlib source should compile");
+    let ll_path = temp_artifact("async-arc", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact("async-arc", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("Arc executable should run");
+    assert_eq!(output.status.code(), Some(42));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_stdlib_shared_counter_joins_cross_thread_workers() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-shared-counter",
+        r#"
+import std::async;
+
+def main() -> i64 {
+    let enabled = runtime_enable_thread_pool(4);
+    if !enabled.is_ok { return enabled.error; }
+
+    let counter = arc_mutex_new_i64(2);
+    let first = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let second = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let third = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let fourth = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let fifth = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let sixth = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let seventh = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    let eighth = spawn_shared_counter_i64(counter.clone_arc_mutex(), 1, 5);
+    if !first.is_ok || !second.is_ok || !third.is_ok || !fourth.is_ok
+        || !fifth.is_ok || !sixth.is_ok || !seventh.is_ok || !eighth.is_ok {
+        return 1;
+    }
+
+    first.value.join();
+    second.value.join();
+    third.value.join();
+    fourth.value.join();
+    fifth.value.join();
+    sixth.value.join();
+    seventh.value.join();
+    eighth.value.join();
+    counter.get()
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_mutex_guard_i64_releases_and_writes_back_on_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-mutex-guard",
+        r#"
+import std::async;
+
+async def update(mutex: MutexI64) -> i64 {
+    let locked = await mutex_lock_guard_i64(mutex);
+    if !locked.is_ok { return locked.error; }
+    let guard = locked.value;
+    guard.set(17);
+    0
+}
+
+async def read_after_update(mutex: MutexI64) -> i64 {
+    let locked = await mutex_lock_guard_i64(mutex);
+    if !locked.is_ok { return locked.error; }
+    let guard = locked.value;
+    guard.get()
+}
+
+async def main() -> i64 {
+    let mutex = mutex_new_i64(5);
+    let wrote = await update(mutex);
+    let observed = await read_after_update(mutex);
+
+    mutex_close(mutex);
+    let rejected = await mutex_lock_guard_i64(mutex);
+    mutex_drop(mutex);
+
+    if wrote == 0 && observed == 17 && !rejected.is_ok {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_rwlock_i64_guards_release_and_write_back_on_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-rwlock-guards",
+        r#"
+import std::async;
+
+def read_pair(lock: RwLockI64) -> i64 {
+    let first_result = rwlock_try_read_guard_i64(lock);
+    if !first_result.is_ok { return first_result.error; }
+    let first = first_result.value;
+    let second_result = rwlock_try_read_guard_i64(lock);
+    if !second_result.is_ok { return second_result.error; }
+    let second = second_result.value;
+    first.get() + second.get()
+}
+
+def write_value(lock: RwLockI64, value: i64) -> i64 {
+    let result = rwlock_try_write_guard_i64(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    guard.set(value);
+    guard.get()
+}
+
+def read_value(lock: RwLockI64) -> i64 {
+    let result = rwlock_try_read_guard_i64(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    guard.get()
+}
+
+def main() -> i64 {
+    let lock = rwlock_new_i64(5);
+    let before = read_pair(lock);
+    let wrote = write_value(lock, 17);
+    let after = read_value(lock);
+    rwlock_close(lock);
+    let rejected = rwlock_try_read_guard_i64(lock);
+    rwlock_drop(lock);
+
+    if before == 10 && wrote == 17 && after == 17 && !rejected.is_ok {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;
@@ -4608,9 +4849,14 @@ fn read_example_source(relative_path: &str) -> String {
 
 fn assert_example_file(relative_path: &str) {
     let source = read_example_source(relative_path);
+    let line_limit = match relative_path {
+        "examples/stdlib/02_math.sg" => 180,
+        "examples/stdlib/25_formatting.sg" => 100,
+        _ => 60,
+    };
     assert!(
-        source.lines().count() <= 60,
-        "{relative_path} should stay at or below 60 lines"
+        source.lines().count() <= line_limit,
+        "{relative_path} should stay at or below {line_limit} lines"
     );
     assert!(
         source.starts_with("//"),
@@ -4789,9 +5035,18 @@ fn assert_example_output_with_c_inputs_and_args(
     args: &[&str],
     expected_stdout: &str,
 ) {
-    let Some(output) =
-        compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args, false)
-    else {
+    let output = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name(format!("compile-example-{tag}"))
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                compile_and_run_example_with_args(tag, relative_path, extra_c_inputs, args, false)
+            })
+            .expect("example compiler worker should spawn")
+            .join()
+            .expect("example compiler worker should complete")
+    });
+    let Some(output) = output else {
         return;
     };
     assert!(
@@ -5234,7 +5489,7 @@ fn examples_smoke_stdlib_strings_import() {
 
 #[test]
 fn examples_smoke_stdlib_math_import() {
-    assert_example_output("stdlib-math", "examples/stdlib/02_math.sg", "104");
+    assert_example_output("stdlib-math", "examples/stdlib/02_math.sg", "50");
 }
 
 #[test]
@@ -5278,11 +5533,30 @@ fn examples_smoke_stdlib_process_import() {
 
 #[test]
 fn examples_smoke_stdlib_collections_import() {
-    assert_example_output(
-        "stdlib-collections",
-        "examples/stdlib/10_collections.sg",
-        "60",
+    let Some(output) = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("compile-example-stdlib-collections".to_string())
+            .stack_size(16 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                compile_and_run_example_with_args(
+                    "stdlib-collections",
+                    "examples/stdlib/10_collections.sg",
+                    &[],
+                    &[],
+                    true,
+                )
+            })
+            .expect("collections compiler worker should spawn")
+            .join()
+            .expect("collections compiler worker should complete")
+    }) else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "collections example should succeed"
     );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "60");
 }
 
 #[test]
@@ -5604,6 +5878,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_string_hash_uses_runtime_byte_state() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "string-hash-runtime-state",
+        r#"
+import std::string;
+
+def main() -> i64 {
+    let mut left = hasher_new();
+    left.write_str("ab");
+    let left_hash = left.finish();
+    let mut right = hasher_new();
+    right.write_str("ac");
+    let right_hash = right.finish();
+    if left_hash == right_hash {
+        2
+    } else {
+        0
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_string_comparison_operators_order_owned_strings() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "string-compare-operators",
@@ -5800,10 +6109,13 @@ def main() -> i64 {
         next_byte = bytes.next();
     }
     let mut char_count = 0;
-    let mut char_sum = 0;
+    let mut saw_non_ascii_char = false;
     let mut next_char = chars.next();
     while next_char.is_some() {
-        char_sum = char_sum + next_char.unwrap_or(0);
+        let value = next_char.unwrap_or('\0');
+        if value != 'h' {
+            saw_non_ascii_char = true;
+        }
         char_count = char_count + 1;
         next_char = chars.next();
     }
@@ -5816,7 +6128,7 @@ def main() -> i64 {
     if byte_count <= char_count { return 10; }
     if saw_non_ascii_byte == false { return 11; }
     if char_count != 2 { return 12; }
-    if char_sum <= 104 { return 13; }
+    if saw_non_ascii_char == false { return 13; }
     if bytes_freed == false { return 18; }
     if chars_freed == false { return 19; }
     if copied != 2 { return 20; }
@@ -7371,6 +7683,156 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_strconv_runtime_parses_and_formats_f64_values() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "strconv-f64",
+        r#"
+import std::io;
+import std::strconv;
+
+def main() -> i64 {
+    let out = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let parsed = strconv_parse_f64(" 3.25\n").unwrap_or(0.0);
+    let invalid = strconv_parse_f64("3.2x").err().unwrap_or(0);
+    let formatted = strconv_format_f64(parsed, 2, out).unwrap_or(0);
+    let wrote = io_stdout_write_raw(out.ptr(), formatted).unwrap_or(0);
+    out.free();
+
+    if invalid == STATUS_PARSE() && formatted == 4 && wrote == 4 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "3.25");
+}
+
+#[test]
+fn stdlib_math_runtime_float_predicates_cover_nan_and_infinity() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
+        "math-float-predicates",
+        r#"
+import std::math;
+
+def main() -> i64 {
+    let nan64 = 0.0 / 0.0;
+    let inf64 = 1.0 / 0.0;
+    let finite64 = sqrt_f64(9.0);
+
+    let nan32 = 0.0f32 / 0.0f32;
+    let inf32 = 1.0f32 / 0.0f32;
+    let finite32 = sqrt_f32(9.0f32);
+
+    if is_nan_f64(nan64)
+        && is_infinite_f64(inf64)
+        && !is_finite_f64(inf64)
+        && is_finite_f64(finite64)
+        && is_nan_f32(nan32)
+        && is_infinite_f32(inf32)
+        && !is_finite_f32(inf32)
+        && is_finite_f32(finite32) {
+        0
+    } else {
+        1
+    }
+}
+"#,
+        "",
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn native_integer_overflow_traps_in_debug_and_wraps_in_release() {
+    let source = r#"
+def main() -> i64 {
+    let max = 9223372036854775807;
+    let value = max + 1;
+    if value < 0 {
+        0
+    } else {
+        1
+    }
+}
+"#;
+
+    let Some(debug_output) = compile_and_run_program_with_opt_level("integer-overflow", source, 0)
+    else {
+        return;
+    };
+    assert!(
+        !debug_output.status.success(),
+        "O0 overflow should trap before returning successfully; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&debug_output.stdout),
+        String::from_utf8_lossy(&debug_output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&debug_output.stderr).contains("Integer overflow"),
+        "O0 overflow should report the runtime overflow trap, got stderr:\n{}",
+        String::from_utf8_lossy(&debug_output.stderr)
+    );
+
+    let Some(release_output) =
+        compile_and_run_program_with_opt_level("integer-overflow", source, 2)
+    else {
+        return;
+    };
+    assert!(
+        release_output.status.success(),
+        "O2 overflow should wrap and take the negative branch; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&release_output.stdout),
+        String::from_utf8_lossy(&release_output.stderr)
+    );
+}
+
+#[test]
+fn native_integer_division_by_zero_traps_in_debug() {
+    let source = r#"
+def main() -> i64 {
+    let zero = 0;
+    let value = 84 / zero;
+    value
+}
+"#;
+
+    let Some(debug_output) = compile_and_run_program_with_opt_level("integer-div-zero", source, 0)
+    else {
+        return;
+    };
+    assert!(
+        !debug_output.status.success(),
+        "O0 division by zero should trap before returning successfully; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&debug_output.stdout),
+        String::from_utf8_lossy(&debug_output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&debug_output.stderr).contains("Division by zero"),
+        "O0 division by zero should report the runtime divisor trap, got stderr:\n{}",
+        String::from_utf8_lossy(&debug_output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_legacy_fallible_wrappers_return_status_categories() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
         "legacy-status-categories",
@@ -8141,6 +8603,45 @@ fn compile_and_run_stdlib_import_program_with_stdin(
     Some(output)
 }
 
+fn compile_and_run_program_with_opt_level(
+    tag: &str,
+    source: &str,
+    opt_level: u8,
+) -> Option<std::process::Output> {
+    let llvm_ir = compile_source(source, opt_level)
+        .unwrap_or_else(|err| panic!("source should compile at O{opt_level}: {err}"));
+
+    let clang = find_clang()?;
+    let runtime_c = find_runtime_c()?;
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return None;
+    }
+
+    let ll_path = temp_artifact(&format!("native-opt-{tag}-O{opt_level}"), "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact(&format!("native-opt-{tag}-O{opt_level}-main"), obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, opt_level, None, false).unwrap();
+
+    let exe_path = temp_artifact(
+        &format!("native-opt-{tag}-O{opt_level}"),
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![main_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, opt_level, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("native binary should run");
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+    Some(output)
+}
+
 fn compile_and_run_stdlib_import_program_with_native_runtime(
     tag: &str,
     source: &str,
@@ -8846,6 +9347,146 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_runtime_owned_dyn_scope_exit_drop_releases_handle() {
+    let output = require_stdlib_runtime_output!(
+        "owned-dyn-scope-exit-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+}
+
+trait Speak {
+    def speak(&self) -> i64 {
+        0
+    }
+}
+
+struct Guard {
+    handle: i64,
+}
+
+impl Drop for Guard {
+    def drop(&mut self) {
+        sengoo_string_free_status(self.handle);
+    }
+}
+
+impl Speak for Guard {
+    def speak(&self) -> i64 {
+        1
+    }
+}
+
+def scoped(handle: i64) -> i64 {
+    let g = Guard { handle: handle };
+    let s: dyn Speak = g;
+    s.speak()
+}
+
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let handle = text.handle;
+    let before = sengoo_string_live_handle_count();
+    let spoke = scoped(handle);
+    let after = sengoo_string_live_handle_count();
+    if spoke == 1 and after == before - 1 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_owned_dyn_explicit_drop_releases_handle() {
+    let output = require_stdlib_runtime_output!(
+        "owned-dyn-explicit-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+    fn sengoo_string_free_status(handle: i64) -> i64;
+}
+
+trait Speak {
+    def speak(&self) -> i64 {
+        0
+    }
+}
+
+struct Guard {
+    handle: i64,
+}
+
+impl Drop for Guard {
+    def drop(&mut self) {
+        sengoo_string_free_status(self.handle);
+    }
+}
+
+impl Speak for Guard {
+    def speak(&self) -> i64 {
+        1
+    }
+}
+
+def main() -> i64 {
+    let text = string_from_str("hello").unwrap_or(String { handle: 0 });
+    let handle = text.handle;
+    let before = sengoo_string_live_handle_count();
+    let g = Guard { handle: handle };
+    let s: dyn Speak = g;
+    s.drop();
+    let after = sengoo_string_live_handle_count();
+    if after == before - 1 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_derived_hash_matches_manual_hash_into() {
+    let output = require_stdlib_runtime_output!(
+        "derived-hash-runtime-state-consistency",
+        r#"
+#[derive(Hash)]
+struct Point {
+    x: i64,
+    y: i64,
+    flag: bool,
+}
+
+def main() -> i64 {
+    let p = Point { x: 7, y: 11, flag: true };
+    let derived = p.hash();
+    let mut h = hasher_new();
+    h.write_i64(7);
+    h.write_i64(11);
+    h.write_bool(true);
+    let manual = h.finish();
+    if derived == manual and derived != 0 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
 fn stdlib_surface_runtime_rc_generic_borrow_reads_shared_payload() {
     let output = require_stdlib_runtime_output!(
         "rc-generic-payload-borrow",
@@ -9104,7 +9745,9 @@ fn compile_phase_timings_include_expected_keys() {
 
 #[test]
 fn debug_info_metadata_is_emitted_to_llvm_ir() {
-    let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
+    let source =
+        "def helper(value: i64) -> i64 {\n    let doubled = value * 2;\n    doubled\n}\n\n\
+def main() -> i64 { helper(1) }\n";
     let llvm_path = temp_artifact("debug-info", "ll");
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
@@ -9127,11 +9770,765 @@ fn debug_info_metadata_is_emitted_to_llvm_ir() {
         llvm_ir.contains("!DISubprogram(name: \"main\""),
         "{llvm_ir}"
     );
+    assert!(
+        llvm_ir.contains("!DILocalVariable(name: \"value\", arg: 1"),
+        "{llvm_ir}"
+    );
+    assert!(
+        llvm_ir.contains("!DILocalVariable(name: \"doubled\""),
+        "{llvm_ir}"
+    );
+    assert!(llvm_ir.contains("@llvm.dbg.value"), "{llvm_ir}");
+    assert!(llvm_ir.contains("@llvm.dbg.declare"), "{llvm_ir}");
     assert!(llvm_ir.contains("define i64 @main() !dbg !"), "{llvm_ir}");
     assert!(llvm_ir.contains("ret i64"), "{llvm_ir}");
     assert!(llvm_ir.contains(", !dbg !"), "{llvm_ir}");
 
     let _ = fs::remove_file(llvm_path);
+}
+
+fn find_llvm_dwarfdump() -> Option<&'static str> {
+    ["llvm-dwarfdump", "llvm-dwarfdump.exe"]
+        .into_iter()
+        .find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        })
+}
+
+fn parse_dwarf_line_rows(dump: &str) -> Vec<(u64, u64)> {
+    dump.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("0x") {
+                return None;
+            }
+            let columns = trimmed.split_whitespace().collect::<Vec<_>>();
+            if columns.len() < 4 {
+                return None;
+            }
+            let line_number = columns[1].parse().ok()?;
+            let file_number = columns[3].parse().ok()?;
+            Some((line_number, file_number))
+        })
+        .collect()
+}
+
+fn source_line_number(source: &str, needle: &str) -> u64 {
+    source
+        .lines()
+        .position(|line| line.contains(needle))
+        .map(|index| index as u64 + 1)
+        .unwrap_or_else(|| panic!("source should contain {needle}"))
+}
+
+fn dwarfdump_has_subprogram_decl_line(dump: &str, name: &str, decl_line: u64) -> bool {
+    let name_needle = format!("(\"{name}\")");
+    let line_needle = format!("DW_AT_decl_line\t({decl_line})");
+    dump.split("DW_TAG_subprogram")
+        .any(|block| block.contains(&name_needle) && block.contains(&line_needle))
+}
+
+fn dwarfdump_has_named_debug_entry(dump: &str, tag: &str, name: &str) -> bool {
+    dwarfdump_named_debug_entry_contains(dump, tag, name, &[])
+}
+
+fn dwarfdump_named_debug_entry_contains(
+    dump: &str,
+    tag: &str,
+    name: &str,
+    required: &[&str],
+) -> bool {
+    let name_needle = format!("(\"{name}\")");
+    let mut current = String::new();
+    let mut matches_tag = false;
+
+    for line in dump.lines() {
+        if line.contains("DW_TAG_") {
+            if matches_tag
+                && current.contains("DW_AT_name")
+                && current.contains(&name_needle)
+                && required.iter().all(|needle| current.contains(needle))
+            {
+                return true;
+            }
+            current.clear();
+            matches_tag = line.contains(tag);
+        }
+        if matches_tag {
+            current.push_str(line);
+            current.push('\n');
+        }
+    }
+
+    matches_tag
+        && current.contains("DW_AT_name")
+        && current.contains(&name_needle)
+        && required.iter().all(|needle| current.contains(needle))
+}
+
+#[test]
+fn debug_info_line_table_survives_object_compilation() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info line table test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info line table test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
+    let llvm_path = temp_artifact("debug-info-line-table", "ll");
+    let object_path = temp_artifact(
+        "debug-info-line-table",
+        if cfg!(windows) { "obj" } else { "o" },
+    );
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/main.sg",
+            source.to_string(),
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("debug-info LLVM IR should compile to an object");
+
+    let output = Command::new(dwarfdump)
+        .arg("--debug-line")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump should run");
+    assert!(
+        output.status.success(),
+        "llvm-dwarfdump failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let dump = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        dump.contains("main.sg"),
+        "DWARF line table should reference the Sengoo source file, got:\n{dump}"
+    );
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
+}
+
+#[test]
+fn debug_info_preserves_statement_and_local_declaration_lines() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info statement-line test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info statement-line test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let source = r#"struct Pair {
+    left: i64,
+    enabled: bool,
+}
+
+def debug_probe(value: i64) -> i64 {
+    let doubled = value * 2;
+    let pair = Pair { left: value, enabled: true };
+    let tuple_value = (doubled, pair.enabled);
+    let stepped = tuple_value.0 + 1;
+    stepped
+}
+
+def main() -> i64 {
+    debug_probe(21)
+}
+"#;
+    let llvm_path = temp_artifact("debug-info-statements", "ll");
+    let object_path = temp_artifact(
+        "debug-info-statements",
+        if cfg!(windows) { "obj" } else { "o" },
+    );
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/debugger_probe.sg",
+            source,
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("statement-level debug-info LLVM IR should compile to an object");
+
+    let line_output = Command::new(dwarfdump)
+        .arg("--debug-line")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-line should run");
+    assert!(
+        line_output.status.success(),
+        "llvm-dwarfdump --debug-line failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&line_output.stdout),
+        String::from_utf8_lossy(&line_output.stderr)
+    );
+    let line_dump = String::from_utf8_lossy(&line_output.stdout);
+    let line_rows = parse_dwarf_line_rows(&line_dump)
+        .into_iter()
+        .filter(|(_, file_number)| *file_number == 1)
+        .map(|(line, _)| line)
+        .collect::<HashSet<_>>();
+    let expected_lines = [
+        source_line_number(source, "let doubled ="),
+        source_line_number(source, "let pair ="),
+        source_line_number(source, "let tuple_value ="),
+        source_line_number(source, "let stepped ="),
+        source_line_number(source, "    stepped"),
+    ];
+    let missing = expected_lines
+        .iter()
+        .filter(|line| !line_rows.contains(line))
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "DWARF line table should retain every debug_probe statement line, missing {missing:?}:\n{line_dump}"
+    );
+
+    let info_output = Command::new(dwarfdump)
+        .arg("--debug-info")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-info should run");
+    assert!(
+        info_output.status.success(),
+        "llvm-dwarfdump --debug-info failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&info_output.stdout),
+        String::from_utf8_lossy(&info_output.stderr)
+    );
+    let info_dump = String::from_utf8_lossy(&info_output.stdout);
+    for (name, needle) in [
+        ("doubled", "let doubled ="),
+        ("pair", "let pair ="),
+        ("tuple_value", "let tuple_value ="),
+        ("stepped", "let stepped ="),
+    ] {
+        let line = source_line_number(source, needle);
+        assert!(
+            dwarfdump_named_debug_entry_contains(
+                &info_dump,
+                "DW_TAG_variable",
+                name,
+                &[&format!("DW_AT_decl_line\t({line})"), "DW_AT_location"],
+            ),
+            "DWARF local `{name}` should retain declaration line {line} and a location:\n{info_dump}"
+        );
+    }
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
+}
+
+#[test]
+fn debug_info_emits_parameter_and_local_variable_dies() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info variable test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info variable test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let source = r#"
+def helper(value: i64) -> i64 {
+    let doubled = value * 2;
+    doubled
+}
+
+def main() -> i64 {
+    helper(21)
+}
+"#;
+    let llvm_path = temp_artifact("debug-info-vars", "ll");
+    let object_path = temp_artifact("debug-info-vars", if cfg!(windows) { "obj" } else { "o" });
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/vars.sg",
+            source.to_string(),
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("debug-info LLVM IR with local variables should compile to an object");
+
+    let output = Command::new(dwarfdump)
+        .arg("--debug-info")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-info should run");
+    assert!(
+        output.status.success(),
+        "llvm-dwarfdump --debug-info failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let dump = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        dwarfdump_has_named_debug_entry(&dump, "DW_TAG_formal_parameter", "value"),
+        "DWARF should expose helper(value: i64) as a named formal parameter:\n{dump}"
+    );
+    assert!(
+        dwarfdump_has_named_debug_entry(&dump, "DW_TAG_variable", "doubled"),
+        "DWARF should expose `let doubled` as a named local variable:\n{dump}"
+    );
+    assert!(
+        dump.contains("DW_TAG_base_type") && dump.contains("(\"i64\")"),
+        "DWARF should include the i64 base type used by the parameter/local:\n{dump}"
+    );
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
+}
+
+#[test]
+fn debug_info_emits_struct_member_names_types_and_offsets() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info struct test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info struct test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let source = r#"
+struct Pair {
+    left: i64,
+    enabled: bool,
+}
+
+def inspect_pair() -> i64 {
+    let pair = Pair { left: 21, enabled: true };
+    if pair.enabled { pair.left } else { 0 }
+}
+
+def main() -> i64 {
+    inspect_pair()
+}
+"#;
+    let llvm_path = temp_artifact("debug-info-struct", "ll");
+    let object_path = temp_artifact("debug-info-struct", if cfg!(windows) { "obj" } else { "o" });
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/struct.sg",
+            source.to_string(),
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("debug-info LLVM IR with a struct local should compile to an object");
+    let output = Command::new(dwarfdump)
+        .arg("--debug-info")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-info should run");
+    assert!(
+        output.status.success(),
+        "llvm-dwarfdump --debug-info failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let dump = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        dump.contains("DW_TAG_structure_type") && dump.contains("(\"Pair\")"),
+        "DWARF should expose the Pair composite type:\n{dump}"
+    );
+    assert!(
+        dwarfdump_has_named_debug_entry(&dump, "DW_TAG_member", "left"),
+        "DWARF should expose Pair.left as a member:\n{dump}"
+    );
+    assert!(
+        dwarfdump_has_named_debug_entry(&dump, "DW_TAG_member", "enabled"),
+        "DWARF should expose Pair.enabled as a member:\n{dump}"
+    );
+    assert!(
+        dump.contains("(\"i64\")") && dump.contains("(\"bool\")"),
+        "DWARF should retain Pair member base types:\n{dump}"
+    );
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
+}
+
+#[test]
+fn debug_info_emits_enum_tuple_string_and_vec_composite_layouts() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info composite test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info composite test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let stdlib = load_stdlib_surface_source();
+    let program = r#"
+enum Choice { Empty, Value(i64) }
+
+def inspect_composites() -> i64 {
+    let tuple_value = (21, true);
+    let text = string_new();
+    let values = vec_new_i64();
+    let picked = Choice::Value(7);
+    if tuple_value.1 { tuple_value.0 + text.len() + values.len() } else { 0 }
+}
+
+def main() -> i64 {
+    inspect_composites()
+}
+"#;
+    let source = format!("{stdlib}\n\n{program}");
+    let llvm_path = temp_artifact("debug-info-composites", "ll");
+    let object_path = temp_artifact(
+        "debug-info-composites",
+        if cfg!(windows) { "obj" } else { "o" },
+    );
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        &source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/composites.sg",
+            source.clone(),
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("debug-info LLVM IR with composite locals should compile to an object");
+    let output = Command::new(dwarfdump)
+        .arg("--debug-info")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-info should run");
+    assert!(
+        output.status.success(),
+        "llvm-dwarfdump --debug-info failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let dump = String::from_utf8_lossy(&output.stdout);
+
+    for (local, debug_type) in [
+        ("tuple_value", "tuple"),
+        ("text", "String"),
+        ("values", "Vec_i64"),
+        ("picked", "enum"),
+    ] {
+        assert!(
+            dwarfdump_named_debug_entry_contains(
+                &dump,
+                "DW_TAG_variable",
+                local,
+                &[debug_type, "DW_AT_location"]
+            ),
+            "DWARF should retain the location and type of local `{local}` as `{debug_type}`:\n{dump}"
+        );
+    }
+
+    for composite in ["tuple", "String", "Vec_i64", "enum"] {
+        assert!(
+            dwarfdump_has_named_debug_entry(&dump, "DW_TAG_structure_type", composite),
+            "DWARF should expose the `{composite}` composite type:\n{dump}"
+        );
+    }
+    for member in ["0", "1", "handle", "marker", "discriminant", "payload"] {
+        assert!(
+            dwarfdump_has_named_debug_entry(&dump, "DW_TAG_member", member),
+            "DWARF should expose composite member `{member}`:\n{dump}"
+        );
+    }
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_member",
+            "1",
+            &["bool", "DW_AT_data_member_location\t(0x08)"]
+        ),
+        "tuple field 1 should retain its bool type at byte offset 8:\n{dump}"
+    );
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_base_type",
+            "bool",
+            &["DW_AT_byte_size\t(0x01)"]
+        ),
+        "bool debug metadata should describe its one-byte storage size:\n{dump}"
+    );
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_member",
+            "handle",
+            &["i64", "DW_AT_data_member_location\t(0x00)"]
+        ),
+        "String/Vec handles should retain their i64 type at byte offset 0:\n{dump}"
+    );
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_member",
+            "discriminant",
+            &["i64", "DW_AT_data_member_location\t(0x00)"]
+        ),
+        "enum discriminant should be an i64 member at byte offset 0:\n{dump}"
+    );
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_member",
+            "payload",
+            &["DW_AT_data_member_location\t(0x08)"]
+        ),
+        "enum payload storage should begin at byte offset 8:\n{dump}"
+    );
+    assert!(
+        dump.contains("DW_TAG_array_type")
+            && dump.contains("DW_TAG_subrange_type")
+            && dump.contains("(\"u8\")"),
+        "enum payload bytes should retain u8 array/subrange metadata:\n{dump}"
+    );
+    assert!(
+        dwarfdump_named_debug_entry_contains(
+            &dump,
+            "DW_TAG_member",
+            "marker",
+            &["i64", "DW_AT_data_member_location\t(0x08)"]
+        ),
+        "Vec<i64>.marker should retain its i64 type at byte offset 8:\n{dump}"
+    );
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
+}
+
+#[test]
+fn debug_info_tracks_multi_surface_function_entry_lines() {
+    let Some(clang) = find_clang() else {
+        eprintln!("skipping debug-info surface test: clang not found");
+        return;
+    };
+    let Some(dwarfdump) = find_llvm_dwarfdump() else {
+        eprintln!("skipping debug-info surface test: llvm-dwarfdump not found");
+        return;
+    };
+
+    let stdlib = load_stdlib_surface_source();
+    let program = r#"struct Pair {
+    left: i64,
+    right: i64,
+}
+
+enum Choice { Empty, Value(i64) }
+
+def scalar_surface() -> i64 {
+    let base = 2;
+    let scaled = base * 3;
+    scaled + 1
+}
+
+def struct_surface() -> i64 {
+    let pair = Pair { left: 4, right: 5 };
+    pair.left + pair.right
+}
+
+def enum_surface() -> i64 {
+    let picked = Choice::Value(7);
+    match picked {
+        Choice::Empty => 0,
+        Choice::Value(value) => value,
+    }
+}
+
+def string_surface() -> i64 {
+    let greeting = string_from_str("hi");
+    if greeting.is_ok == false {
+        return 0;
+    }
+    let owned = greeting.value;
+    let appended = owned.push_str("!");
+    if appended.is_ok == false {
+        return 0;
+    }
+    owned.len()
+}
+
+def vec_surface() -> i64 {
+    let values = vec_new_i64();
+    values.push(1);
+    values.push(2);
+    let total = values.get(0).unwrap_or(0) + values.get(1).unwrap_or(0);
+    values.free();
+    total
+}
+
+def call_surface(value: i64) -> i64 {
+    scalar_surface() + value
+}
+
+def closure_surface() -> i64 {
+    let add = |x| call_surface(x);
+    add(3)
+}
+
+def main() -> i64 {
+    struct_surface()
+        + enum_surface()
+        + string_surface()
+        + vec_surface()
+        + closure_surface()
+}
+"#;
+    let source = format!("{stdlib}\n\n{program}");
+    let llvm_path = temp_artifact("debug-info-surfaces", "ll");
+    let object_path = temp_artifact(
+        "debug-info-surfaces",
+        if cfg!(windows) { "obj" } else { "o" },
+    );
+    compile_source_to_llvm_file_with_phase_timings_with_mode(
+        &source,
+        0,
+        &llvm_path,
+        None,
+        None,
+        None,
+        Some(DebugInfoConfig::for_source(
+            "examples/debug/main.sg",
+            source.clone(),
+        )),
+    )
+    .unwrap();
+
+    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
+        .expect("debug-info LLVM IR should compile to an object");
+
+    let line_output = Command::new(dwarfdump)
+        .arg("--debug-line")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-line should run");
+    assert!(
+        line_output.status.success(),
+        "llvm-dwarfdump --debug-line failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&line_output.stdout),
+        String::from_utf8_lossy(&line_output.stderr)
+    );
+    let line_dump = String::from_utf8_lossy(&line_output.stdout);
+    let surfaced_lines = parse_dwarf_line_rows(&line_dump)
+        .into_iter()
+        .filter(|(_, file_number)| *file_number == 1)
+        .map(|(line_number, _)| line_number)
+        .collect::<HashSet<_>>();
+    let expected_functions = [
+        (
+            "scalar_surface",
+            source_line_number(&source, "def scalar_surface() -> i64 {"),
+        ),
+        (
+            "struct_surface",
+            source_line_number(&source, "def struct_surface() -> i64 {"),
+        ),
+        (
+            "enum_surface",
+            source_line_number(&source, "def enum_surface() -> i64 {"),
+        ),
+        (
+            "string_surface",
+            source_line_number(&source, "def string_surface() -> i64 {"),
+        ),
+        (
+            "vec_surface",
+            source_line_number(&source, "def vec_surface() -> i64 {"),
+        ),
+        (
+            "call_surface",
+            source_line_number(&source, "def call_surface(value: i64) -> i64 {"),
+        ),
+        (
+            "closure_surface",
+            source_line_number(&source, "def closure_surface() -> i64 {"),
+        ),
+        ("main", source_line_number(&source, "def main() -> i64 {")),
+    ];
+    let missing_line_rows = expected_functions
+        .iter()
+        .filter_map(|(name, line_number)| {
+            (!surfaced_lines.contains(line_number)).then_some(format!("{name}@{line_number}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        missing_line_rows.is_empty(),
+        "DWARF line table should preserve entry lines for scalar/struct/enum/string/Vec/call/closure surfaces, missing {missing_line_rows:?}\n{line_dump}"
+    );
+
+    let debug_info_output = Command::new(dwarfdump)
+        .arg("--debug-info")
+        .arg(&object_path)
+        .output()
+        .expect("llvm-dwarfdump --debug-info should run");
+    assert!(
+        debug_info_output.status.success(),
+        "llvm-dwarfdump --debug-info failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&debug_info_output.stdout),
+        String::from_utf8_lossy(&debug_info_output.stderr)
+    );
+    let debug_info_dump = String::from_utf8_lossy(&debug_info_output.stdout);
+    let missing_decl_lines = expected_functions
+        .iter()
+        .filter_map(|(name, line_number)| {
+            (!dwarfdump_has_subprogram_decl_line(&debug_info_dump, name, *line_number))
+                .then_some(format!("{name}@{line_number}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        missing_decl_lines.is_empty(),
+        "DWARF subprogram DIEs should preserve decl lines for surface probes, missing {missing_decl_lines:?}\n{debug_info_dump}"
+    );
+
+    let _ = fs::remove_file(llvm_path);
+    let _ = fs::remove_file(object_path);
 }
 
 #[test]
@@ -11473,6 +12870,7 @@ def main() -> i64 {
     let vec = vec_new_bool();
     vec.push(true);
     vec.push(false);
+    vec.insert(1, true);
 
     let iter = vec.iter();
     let iter_first = iter.next().unwrap_or(false);
@@ -11489,6 +12887,7 @@ def main() -> i64 {
     let had_true = vec.contains(true);
     vec.set(0, false);
     let removed = vec.remove(0).unwrap_or(true);
+    let removed_tail = vec.remove(0).unwrap_or(false);
     let vec_ok = iter_first
         && !iter_mapped
         && iter_filtered
@@ -11496,6 +12895,7 @@ def main() -> i64 {
         && !second
         && had_true
         && !removed
+        && removed_tail
         && vec.is_empty();
 
     let map = hashmap_new_bool_bool();
@@ -11529,6 +12929,43 @@ def main() -> i64 {
     );
 
     assert_eq!(output.status.code(), Some(9));
+}
+
+#[test]
+fn stdlib_surface_runtime_string_vec_set_and_insert_transfer_values() {
+    let output = require_stdlib_runtime_output!(
+        "string-vec-set-insert",
+        r#"
+def main() -> i64 {
+    let vec = vec_new_string();
+    let pushed = vec.push(string_from_str("alpha").unwrap_or(string_new()));
+    let inserted = vec.insert(0, string_from_str("go").unwrap_or(string_new()));
+    let set = vec.set(1, string_from_str("rust").unwrap_or(string_new()));
+    let first = vec.get(0).unwrap_or(string_new());
+    let second = vec.get(1).unwrap_or(string_new());
+    let removed = vec.remove(0).unwrap_or(string_new());
+    let remaining = vec.get(0).unwrap_or(string_new());
+
+    let ok = pushed
+        && inserted
+        && set
+        && vec.len() == 1
+        && first.len() == 2
+        && second.len() == 4
+        && removed.len() == 2
+        && remaining.len() == 4;
+    vec.free();
+
+    if ok {
+        42
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
 }
 
 #[test]
@@ -11637,6 +13074,33 @@ def main() -> i64 {
     let on_value = flags.get("on").unwrap_or(true);
     let off_value = flags.get("off").unwrap_or(true);
 
+    let generic_numbers: HashMap<String, i64> = hashmap_new_string_i64();
+    let generic_inserted = generic_numbers.insert(str_append("ga", "mma"), 11);
+    let generic_replaced = generic_numbers.insert("gamma", 12);
+    let generic_number_keys = generic_numbers.iter_keys().collect();
+    let generic_value = generic_numbers.get("gamma").unwrap_or(0);
+    let generic_missing_value = generic_numbers.get("missing").unwrap_or(5);
+    let generic_removed = generic_numbers.remove("gamma");
+    let generic_missing_after = !generic_numbers.contains("gamma");
+
+    let generic_flags: HashMap<String, bool> = hashmap_new_string_bool();
+    let generic_flag_inserted = generic_flags.insert("enabled", true);
+    let generic_flag_replaced = generic_flags.insert("enabled", false);
+    let generic_flag_value = generic_flags.get("enabled").unwrap_or(true);
+    let generic_flag_removed = generic_flags.remove("enabled");
+    let generic_flag_missing = !generic_flags.contains("enabled");
+
+    let generic_texts: HashMap<String, String> = hashmap_new_string_string();
+    let generic_text_inserted = generic_texts.insert("title", string_from_str("alpha").unwrap_or(string_new()));
+    let generic_text_replaced = generic_texts.insert("title", string_from_str("gamma").unwrap_or(string_new()));
+    let generic_text_key_count = generic_texts.iter_keys().count();
+    let generic_text_taken = generic_texts.iter_keys().take(1);
+    let generic_text_keys = generic_texts.iter_keys().collect();
+    let generic_text_skipped_count = generic_texts.iter_keys().skip(1).count();
+    let generic_text_value = generic_texts.get("title").unwrap_or(string_new());
+    let generic_text_removed = generic_texts.remove("title").unwrap_or(string_new());
+    let generic_text_missing = !generic_texts.contains("title");
+
     let iter = numbers.iter_keys();
     let first = iter.next_copy(buffer).unwrap_or(0);
     let wrote_first = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
@@ -11672,6 +13136,27 @@ def main() -> i64 {
         && replaced_on
         && !on_value
         && !off_value
+        && generic_inserted
+        && generic_replaced
+        && generic_number_keys.len() == 1
+        && generic_value == 12
+        && generic_missing_value == 5
+        && generic_removed
+        && generic_missing_after
+        && generic_flag_inserted
+        && generic_flag_replaced
+        && !generic_flag_value
+        && generic_flag_removed
+        && generic_flag_missing
+        && generic_text_inserted
+        && generic_text_replaced
+        && generic_text_key_count == 1
+        && generic_text_taken.len() == 1
+        && generic_text_keys.len() == 1
+        && generic_text_skipped_count == 0
+        && generic_text_value.len() == 5
+        && generic_text_removed.len() == 5
+        && generic_text_missing
         && first == 4
         && wrote_first == 4
         && wrote_sep == 1

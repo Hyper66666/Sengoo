@@ -126,12 +126,18 @@ pub(crate) fn native_library_link_args(
         }
     }
     for library in libraries {
-        args.push(native_library_link_arg(library, target));
+        let arg = native_library_link_arg(library, target);
+        if !arg.is_empty() {
+            args.push(arg);
+        }
     }
     args
 }
 
 fn native_library_link_arg(library: &str, target: &NativeBuildTarget) -> String {
+    if target.is_windows_msvc() && library.eq_ignore_ascii_case("m") {
+        return String::new();
+    }
     if uses_msvc_link_path_syntax(target) {
         if library.ends_with(".lib") {
             library.to_string()
@@ -205,6 +211,15 @@ mod tests {
                 vec!["-L/opt/libs".to_string(), "-lsample".to_string()]
             );
         }
+    }
+
+    #[test]
+    fn native_library_link_args_skip_libm_on_windows_msvc() {
+        let target =
+            NativeBuildTarget::resolve(Some(crate::cross_compile::REFERENCE_TARGET_WINDOWS_MSVC))
+                .unwrap();
+        let args = native_library_link_args(&["m".to_string()], &target, &[]);
+        assert!(!args.iter().any(|arg| arg == "m.lib"));
     }
 
     #[test]

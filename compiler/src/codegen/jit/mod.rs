@@ -2,8 +2,11 @@
 //!
 //! 使用 inkwell 生成真实的 LLVM IR 并可以 JIT 执行
 
-use super::common;
-use crate::mir::dyn_dispatch::{parse_shim_name, vtable_global_name};
+use super::{common, IntegerOverflowMode};
+use crate::mir::dyn_dispatch::{
+    parse_drop_method_metadata, parse_shim_name, vtable_global_name, VTABLE_ALIGN_SLOT,
+    VTABLE_METHOD_BASE, VTABLE_SIZE_SLOT,
+};
 use crate::mir::{MIRType, MirFunction};
 use std::collections::HashMap;
 
@@ -44,11 +47,17 @@ pub struct JITCodegen {
     global_types: HashMap<String, String>,
     phi_incoming_loads_by_block: HashMap<usize, Vec<PhiIncomingLoad>>,
     phi_incoming_values: HashMap<(usize, usize, usize), String>,
+    integer_overflow_mode: IntegerOverflowMode,
+    overflow_check_counter: usize,
 }
 
 impl JITCodegen {
     /// 鍒涘缓鏂扮殑浠ｇ爜鐢熸垚鍣?
     pub fn new() -> Self {
+        Self::with_integer_overflow_mode(IntegerOverflowMode::ReleaseWrapping)
+    }
+
+    pub fn with_integer_overflow_mode(integer_overflow_mode: IntegerOverflowMode) -> Self {
         let mut cg = Self {
             ir: String::new(),
             indent: 0,
@@ -60,6 +69,8 @@ impl JITCodegen {
             global_types: HashMap::new(),
             phi_incoming_loads_by_block: HashMap::new(),
             phi_incoming_values: HashMap::new(),
+            integer_overflow_mode,
+            overflow_check_counter: 0,
         };
         cg.emit_header();
         cg
@@ -112,7 +123,7 @@ impl JITCodegen {
             self.ir.push_str("; String Constants\n");
             for (i, s) in self.strings.iter().enumerate() {
                 // 转义字符串
-                let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped = common::escape_llvm_c_string(s);
                 self.ir.push_str(&format!(
                     "@.str.{} = private unnamed_addr constant [{} x i8] c\"{}\\00\"\n",
                     i,
@@ -140,6 +151,7 @@ impl JITCodegen {
     fn emit_dyn_vtables(&mut self, mir_fns: &[MirFunction]) {
         let mut tables: HashMap<(String, String), HashMap<usize, (String, String)>> =
             HashMap::new();
+        let mut layouts: HashMap<(String, String), (u64, u64)> = HashMap::new();
 
         for mir_fn in mir_fns {
             let Some(parsed) = parse_shim_name(&mir_fn.name) else {
@@ -152,6 +164,12 @@ impl JITCodegen {
                 .map(|ty| self.mir_type_to_llvm_str(ty))
                 .collect();
             let fn_ptr_ty = format!("{} ({})*", ret, params.join(", "));
+            if let Some((size, align)) = parse_drop_method_metadata(&parsed.method) {
+                layouts.insert(
+                    (parsed.trait_name.clone(), parsed.type_prefix.clone()),
+                    (size, align),
+                );
+            }
             tables
                 .entry((parsed.trait_name, parsed.type_prefix))
                 .or_default()
@@ -173,16 +191,27 @@ impl JITCodegen {
                 .copied()
                 .max()
                 .map(|slot| slot + 1)
-                .unwrap_or(0);
+                .unwrap_or(0)
+                .max(VTABLE_METHOD_BASE);
+            let (size, align) = layouts
+                .get(&(trait_name.clone(), type_prefix.clone()))
+                .copied()
+                .unwrap_or((0, 1));
             let mut elements = Vec::with_capacity(slot_count);
 
             for slot in 0..slot_count {
-                match slots.get(&slot) {
-                    Some((shim_name, fn_ptr_ty)) => elements.push(format!(
-                        "i64 ptrtoint ({} @{} to i64)",
-                        fn_ptr_ty, shim_name
-                    )),
-                    None => elements.push("i64 0".to_string()),
+                if slot == VTABLE_SIZE_SLOT {
+                    elements.push(format!("i64 {size}"));
+                } else if slot == VTABLE_ALIGN_SLOT {
+                    elements.push(format!("i64 {align}"));
+                } else {
+                    match slots.get(&slot) {
+                        Some((shim_name, fn_ptr_ty)) => elements.push(format!(
+                            "i64 ptrtoint ({} @{} to i64)",
+                            fn_ptr_ty, shim_name
+                        )),
+                        None => elements.push("i64 0".to_string()),
+                    }
                 }
             }
 

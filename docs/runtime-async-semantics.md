@@ -131,13 +131,56 @@ future without exposing lifecycle ids.
 - **Send:** `spawn_blocking_i64` cross-thread captures must be primitive/unit or
   sendable aggregates. Runtime handles, references, pointers, `AsyncContext`, and
   `Future` values are rejected at compile time.
+- **Send/Sync marker surface:** `Send` and `Sync` are compiler-known auto marker
+  traits surfaced by `std::async`. Bool, fixed-width integers, pointer-sized
+  integers, and f32/f64 satisfy them structurally, so user APIs can spell
+  `T: Send` / `T: Sync` bounds
+  today. Generic `T: Send` / `T: Sync` bounds structurally inspect tuples,
+  arrays, user structs, generic enum payloads, and nested generic arguments.
+  Runtime handle fields such as `Buffer` and single-thread shared ownership
+  such as `Rc<T>` remain non-send. Source-level `impl !Send` / `impl !Sync`
+  declarations are enforced for the single-thread stdlib handle inventory.
+  Current cross-thread entry points enforce their boundary: blocking closures
+  require `Send`, channel values require `Send`, and shared state requires both
+  `Send` and `Sync`.
+- **Arc:** `Arc<i64>` and `Arc<bool>` are available as an atomic-refcounted
+  transition surface with `clone_arc`, `strong_count`, `get`, and automatic
+  scope-exit `Drop`. Generic payload storage and `Arc<Mutex<T>>`
+  remain roadmap work.
+- **Shared counter proof:** `arc_mutex_new_i64` exposes a pinned
+  `ArcMutex<i64>` transition type backed by a real runtime
+  `Arc<Mutex<i64>>`. `spawn_shared_counter_i64(shared, delta, repetitions)`
+  clones the backing Arc into an enabled worker pool; each returned
+  `SharedCounterJobI64` has a deterministic `join()` and scope-exit cleanup.
+  The shared argument is checked for both `Send` and `Sync`, and a `!Send`
+  argument is rejected before lowering. This API is evidence for cross-thread
+  ownership and locking, not a substitute for the still-open generic public
+  `Arc<Mutex<T>>` surface.
 - **Channels:** `channel_bounded(cap)` provides async `channel_send_i64` /
   `channel_recv_i64`. A full channel leaves send pending; runtime-level close
   and drop paths wake receivers with `STATUS_INVALID_HANDLE`.
-- **Mutex:** `mutex_new_i64` + `mutex_lock_async` polls pending under contention;
-  runtime-level close/drop paths wake waiters with `STATUS_INVALID_HANDLE`.
+- **Mutex:** `mutex_new_i64` + `mutex_lock_async` polls pending under contention.
+  `await mutex_lock_guard_i64(mutex)` wraps a successful lock in
+  `MutexGuardI64`; `get`/`set` access the locked value and scope-exit `Drop`
+  writes back and unlocks exactly once. A failed lock returns an inactive guard
+  payload whose drop is a no-op, and the runtime rejects duplicate unlocks with
+  `STATUS_INVALID_HANDLE`. Runtime-level close/drop paths wake waiters with the
+  same status. This is an i64 transition surface; generic `Mutex<T>`,
+  and `Arc<Mutex<T>>` remain roadmap work. Until those owning types land,
+  callers must keep `MutexI64` live until every guard has dropped.
+- **RwLock:** `rwlock_new_i64` provides the scalar transition surface.
+  `rwlock_try_read_guard_i64` permits multiple simultaneous readers and
+  `rwlock_try_write_guard_i64` permits one writer only when no guard is active.
+  Both are deliberately non-blocking: contention returns `STATUS_TIMEOUT`.
+  `RwLockReadGuardI64` exposes `get`; `RwLockWriteGuardI64` exposes `get`/`set`;
+  both release through scope-exit `Drop`. Runtime-issued guard tokens make a
+  repeated or mismatched unlock return `STATUS_INVALID_HANDLE` without
+  releasing another reader. Callers must keep `RwLockI64` live until all guards
+  drop. Generic `RwLock<T>`, async waiting/wakeup, and lock lifetime tracking
+  remain roadmap work.
 - **Cleanup wrappers:** public `channel_pair_drop`, `channel_sender_drop`, and
-  `mutex_drop` lower as void cleanup calls in package-shaped async programs.
+  `mutex_drop` / `rwlock_drop` lower as void cleanup calls in package-shaped
+  async programs.
 - **Realworld smoke:** `examples/realworld/async-channel-smoke` exercises the
   public `std::async` channel/mutex create, send/receive, lock/unlock helpers
   and cleanup wrappers in a package loop. It does not claim all-host owned-fd

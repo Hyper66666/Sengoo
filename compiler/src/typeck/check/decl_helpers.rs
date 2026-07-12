@@ -229,11 +229,13 @@ impl TypeChecker {
                 name: type_param.name.name.clone(),
                 var_id,
                 bounds: Vec::new(),
+                trait_bounds: Vec::new(),
                 default: None,
             });
         }
 
         for (type_param, meta) in type_params.iter().zip(metas.iter_mut()) {
+            let mut detailed_bounds = Vec::new();
             for bound in &type_param.bounds {
                 let trait_name = bound
                     .path
@@ -254,6 +256,15 @@ impl TypeChecker {
                         name: trait_name,
                     }));
                 }
+                let args = bound
+                    .params
+                    .iter()
+                    .map(|arg| self.check_type(arg).map_err(CompileError::from))
+                    .collect::<Result<Vec<_>>>()?;
+                detailed_bounds.push(GenericTraitBoundMeta {
+                    trait_name: trait_name.clone(),
+                    args,
+                });
                 meta.bounds.push(trait_name);
             }
 
@@ -275,6 +286,9 @@ impl TypeChecker {
 
             self.generic_var_bounds
                 .insert(meta.var_id, meta.bounds.clone());
+            meta.trait_bounds = detailed_bounds.clone();
+            self.generic_var_trait_bounds
+                .insert(meta.var_id, detailed_bounds);
         }
 
         Ok(metas)

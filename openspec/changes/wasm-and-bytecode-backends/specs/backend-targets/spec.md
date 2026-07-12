@@ -1,38 +1,52 @@
 ## ADDED Requirements
 
-### Requirement: The compiler SHALL emit WebAssembly modules
+### Requirement: Alternative backend work SHALL pass a stable-ABI entry gate
 
-`sgc` SHALL compile programs to `.wasm` and define a WASI-based host-interface
-subset for the standard library.
+WASM and bytecode implementation SHALL begin only after the native MIR/runtime
+ABI is versioned and the roadmap's default-library, distribution, concurrency,
+and production-hardening gates pass.
 
-#### Scenario: Run a program under a WASM runtime
+#### Scenario: A child backend is proposed before the entry gate
 
-- **WHEN** a representative program is built with `--target wasm` and executed
-  under a WASM runtime
-- **THEN** a valid `.wasm` module is produced and runs to the expected result
-- **AND** stdlib calls outside the supported WASI subset are rejected with a
-  documented diagnostic rather than miscompiling
+- **WHEN** one or more prerequisite gates or ABI versions are missing
+- **THEN** implementation remains deferred
+- **AND** design/capability-matrix corrections may continue without claiming
+  backend support
 
-### Requirement: The compiler SHALL provide a portable bytecode VM
+### Requirement: WASM and bytecode SHALL have independent owners
 
-`sgc` SHALL define a portable bytecode format and an interpreter so programs can
-run without a native toolchain (clang/LLVM).
+WASM implementation SHALL be owned by `wasm-backend-v1` and bytecode
+implementation SHALL be owned by `bytecode-vm-v1`. This coordinator SHALL NOT
+own their compiler or runtime implementation tasks.
 
-#### Scenario: Clang-free execution on the VM
+#### Scenario: Backend implementation begins
 
-- **WHEN** a program is run with the bytecode target on a machine without
-  clang/LLVM installed
-- **THEN** it executes on the interpreter and produces the same result as the
-  native build for the core conformance suite
+- **WHEN** code implementation starts for WASM or bytecode
+- **THEN** the corresponding child change has passed strict validation
+- **AND** its design, tests, migration, and archive gate are independently
+  reviewable
 
-### Requirement: Build targets SHALL be selectable with a documented capability matrix
+### Requirement: Alternative targets SHALL share differential conformance policy
 
-`sgc build --target {native,wasm,bytecode}` SHALL select the backend, and a
-per-target capability matrix SHALL document supported stdlib areas.
+The child backends SHALL use native production semantics as the differential
+oracle and SHALL publish one capability matrix with stable unsupported-target
+diagnostics.
 
-#### Scenario: Selecting a target
+#### Scenario: A target cannot support a stdlib capability
 
-- **WHEN** a user passes `--target wasm` or `--target bytecode`
-- **THEN** `sgc` produces the corresponding artifact
-- **AND** the capability matrix documents which stdlib areas are supported on
-  that target
+- **WHEN** a program uses a capability absent from the selected target
+- **THEN** build fails with a stable target/capability diagnostic
+- **AND** it does not silently execute through the native backend
+
+### Requirement: The bytecode VM SHALL pass a go/no-go value review
+
+The bytecode VM SHALL proceed only after a positive value review. It may be
+cancelled by an explicit replacement decision when measured startup,
+portability, or tooling value does not justify a second runtime.
+
+#### Scenario: The VM is not justified
+
+- **WHEN** the entry review finds a packaged native toolchain, WASM, or
+  experimental JIT satisfies the user need with lower maintenance cost
+- **THEN** a replacement OpenSpec may cancel `bytecode-vm-v1`
+- **AND** native and WASM support claims remain unchanged

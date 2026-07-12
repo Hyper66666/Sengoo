@@ -65,6 +65,9 @@ impl Codegen {
         self.load_counter = 0;
         self.emit_args_main_wrapper = false;
         self.debug_locations.clear();
+        self.debug_type_ids.clear();
+        self.debug_expression_id = None;
+        self.debug_next_metadata_id = 0;
         self.global_types.clear();
         self.emit_header();
         self.declare_runtime_functions();
@@ -90,7 +93,9 @@ impl Codegen {
         self.maybe_declare_concurrent_async_runtime_functions(mir_fns);
         self.maybe_declare_async_task_runtime_functions(mir_fns);
         self.maybe_declare_eprint_runtime_functions(mir_fns);
+        self.maybe_declare_coverage_runtime_functions(mir_fns);
         self.maybe_declare_rc_runtime_functions(mir_fns);
+        self.maybe_declare_saturating_float_to_int_intrinsics(mir_fns);
         self.emit_string_constants();
         self.emit_struct_types(mir_fns);
         self.emit_dyn_vtables(mir_fns);

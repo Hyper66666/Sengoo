@@ -41,10 +41,13 @@ pub(crate) use generic_methods::ConcreteTypeRegistry;
 pub(crate) use generic_methods::InherentMethodTemplate;
 pub(crate) use generic_methods::TraitMethodTemplate;
 pub use inst::{InstId, Instruction, IntrinsicOp, Local, LocalKind};
-pub use lowering::{lower_hir, lower_hir_with_options, AssertCallsiteContext, MirLowerOptions};
+pub use lowering::{
+    lower_hir, lower_hir_with_options, AssertCallsiteContext, CoverageContext, MirLowerOptions,
+};
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;
+use std::collections::HashMap;
 
 /// MIR 函数
 #[derive(Debug, Clone)]
@@ -60,6 +63,8 @@ pub struct MirFunction {
     /// 基本块
     pub basic_blocks: Vec<BasicBlock>,
     pub instructions: Vec<Instruction>,
+    /// Source-level names for params/user locals, keyed by MIR local index.
+    pub local_debug_names: HashMap<usize, String>,
     /// 起始基本块索引
     pub start_block: usize,
     /// Whether this function was declared `async def`
@@ -84,6 +89,7 @@ impl MirFunction {
             locals,
             basic_blocks,
             instructions: Vec::new(),
+            local_debug_names: HashMap::new(),
             start_block,
             is_async: false,
         }
@@ -95,6 +101,10 @@ impl MirFunction {
         let local = Local::new(id, kind);
         self.locals.push((local, ty));
         local
+    }
+
+    pub fn set_local_debug_name(&mut self, local: Local, name: impl Into<String>) {
+        self.local_debug_names.insert(local.index(), name.into());
     }
 
     /// 添加新的基本块
@@ -157,6 +167,8 @@ pub enum MIRType {
     Bool,
     /// 整数类型（位宽）
     Int(u8),
+    /// 无符号整数类型（位宽）
+    UInt(u8),
     /// 浮点类型（位宽）
     Float(u8),
     /// 引用类型
@@ -210,6 +222,10 @@ impl MIRType {
         MIRType::Int(bits)
     }
 
+    pub fn uint(bits: u8) -> Self {
+        MIRType::UInt(bits)
+    }
+
     pub fn float(bits: u8) -> Self {
         MIRType::Float(bits)
     }
@@ -252,8 +268,12 @@ impl From<HIRType> for MIRType {
             HIRTypeKind::Never => MIRType::Never,
             HIRTypeKind::Bool => MIRType::Bool,
             HIRTypeKind::Char => MIRType::Int(32),
+            HIRTypeKind::Byte => MIRType::UInt(8),
             HIRTypeKind::Str => MIRType::Ptr(Box::new(MIRType::Int(8))),
-            HIRTypeKind::Int(ik) => MIRType::Int(ik.bits() as u8),
+            HIRTypeKind::Int(ik) if ik.is_signed() => {
+                MIRType::Int(type_mapping_helpers::integer_bits_for_mir(ik))
+            }
+            HIRTypeKind::Int(ik) => MIRType::UInt(type_mapping_helpers::integer_bits_for_mir(ik)),
             HIRTypeKind::Float(fk) => MIRType::Float(fk.bits() as u8),
             HIRTypeKind::Ref(_, inner) if matches!(inner.kind, HIRTypeKind::Str) => {
                 MIRType::Ptr(Box::new(MIRType::Int(8)))

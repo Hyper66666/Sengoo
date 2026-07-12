@@ -1,6 +1,7 @@
 use crate::ast;
 use crate::hir::ty::{FloatKind, IntKind};
 use crate::typeck::TypeEnv;
+use crate::typeck::{Ty, TyKind};
 
 use super::super::{HIRType, HIRTypeKind};
 
@@ -13,10 +14,10 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
         ast::TypeKind::Path(path) => {
             let name = path
                 .as_simple()
-                .map(|ident| ident.name.as_str())
-                .unwrap_or("");
+                .map(|ident| ident.name.clone())
+                .unwrap_or_else(|| path_to_string(path));
 
-            match name {
+            match name.as_str() {
                 "bool" => HIRType::bool(),
                 "char" => HIRType::char(),
                 "str" => HIRType::str(),
@@ -35,7 +36,7 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
                 "f32" => HIRType::float(FloatKind::F32),
                 "f64" => HIRType::float(FloatKind::F64),
                 "()" | "unit" => HIRType::unit(),
-                _ => HIRType::named(name.to_string(), vec![]),
+                _ => HIRType::named(name, vec![]),
             }
         }
         ast::TypeKind::PathWithArgs { path, args } => {
@@ -82,6 +83,68 @@ pub(super) fn lower_type(ast_type: &ast::Type, _type_env: &TypeEnv) -> HIRType {
     }
 }
 
+pub(super) fn lower_checked_type(ty: &Ty) -> HIRType {
+    use crate::hir::ty::{FloatKind as HirFloatKind, IntKind as HirIntKind};
+    use crate::typeck::ty::{FloatKind as CheckedFloatKind, IntKind as CheckedIntKind};
+
+    match &ty.kind {
+        TyKind::Unit => HIRType::unit(),
+        TyKind::Never => HIRType::never(),
+        TyKind::Bool => HIRType::bool(),
+        TyKind::Char => HIRType::char(),
+        TyKind::Str => HIRType::str(),
+        TyKind::Byte => HIRType::new(HIRTypeKind::Byte),
+        TyKind::Bytes => HIRType::new(HIRTypeKind::Bytes),
+        TyKind::Int(kind) => HIRType::int(match kind {
+            CheckedIntKind::I8 => HirIntKind::I8,
+            CheckedIntKind::I16 => HirIntKind::I16,
+            CheckedIntKind::I32 => HirIntKind::I32,
+            CheckedIntKind::I64 => HirIntKind::I64,
+            CheckedIntKind::I128 => HirIntKind::I128,
+            CheckedIntKind::ISize => HirIntKind::ISize,
+            CheckedIntKind::U8 => HirIntKind::U8,
+            CheckedIntKind::U16 => HirIntKind::U16,
+            CheckedIntKind::U32 => HirIntKind::U32,
+            CheckedIntKind::U64 => HirIntKind::U64,
+            CheckedIntKind::U128 => HirIntKind::U128,
+            CheckedIntKind::USize => HirIntKind::USize,
+        }),
+        TyKind::Float(kind) => HIRType::float(match kind {
+            CheckedFloatKind::F32 => HirFloatKind::F32,
+            CheckedFloatKind::F64 => HirFloatKind::F64,
+        }),
+        TyKind::Tuple(types) => HIRType::tuple(types.iter().map(lower_checked_type).collect()),
+        TyKind::Array(elem, len) => HIRType::array(lower_checked_type(elem), *len),
+        TyKind::Slice(elem) => HIRType::slice(lower_checked_type(elem)),
+        TyKind::Ref(is_mut, inner) => HIRType::reference(*is_mut, lower_checked_type(inner)),
+        TyKind::Ptr(inner) => HIRType::pointer(lower_checked_type(inner)),
+        TyKind::Fn { params, ret, .. } => HIRType::function(
+            params.iter().map(lower_checked_type).collect(),
+            Box::new(lower_checked_type(ret)),
+        ),
+        TyKind::Adt { name, args } => {
+            HIRType::named(name.clone(), args.iter().map(lower_checked_type).collect())
+        }
+        TyKind::Dyn(traits) | TyKind::ImplTrait(traits) => {
+            HIRType::new(HIRTypeKind::TraitObject(traits.clone()))
+        }
+        TyKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } => HIRType::new(HIRTypeKind::AssocProjection {
+            base: Box::new(lower_checked_type(base)),
+            trait_name: trait_name.clone(),
+            name: name.clone(),
+        }),
+        TyKind::Future(inner) => {
+            HIRType::named("Future".to_string(), vec![lower_checked_type(inner)])
+        }
+        TyKind::SelfType => HIRType::named("Self".to_string(), Vec::new()),
+        TyKind::Error | TyKind::Var(_) | TyKind::Inferred => HIRType::new(HIRTypeKind::Error),
+    }
+}
+
 /// 从 AST 表达式推断类型（简化版，用于 let 语句类型推断）
 fn path_to_string(path: &ast::Path) -> String {
     path.segments
@@ -95,6 +158,7 @@ pub(super) fn infer_expr_type(expr: &ast::Expr) -> HIRType {
     match &expr.kind {
         ast::ExprKind::Literal(lit) => match lit {
             ast::Literal::Int(_) => HIRType::int(IntKind::I64),
+            ast::Literal::Uint(_) => HIRType::int(IntKind::U64),
             ast::Literal::Float(_) => HIRType::float(FloatKind::F64),
             ast::Literal::Bool(_) => HIRType::bool(),
             ast::Literal::String(_) => HIRType::reference(false, HIRType::str()),

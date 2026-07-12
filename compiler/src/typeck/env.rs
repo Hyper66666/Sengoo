@@ -126,6 +126,17 @@ pub struct TypeEnv {
     drop_owned_type_keys: HashSet<String>,
     /// Resolved field layouts used by ownership analysis after type checking.
     struct_field_types: HashMap<String, StructFieldTypes>,
+    /// Expected return type selected for an overloaded method call, keyed by
+    /// the call expression's full byte span. HIR lowering consumes this to keep
+    /// type-check and MIR dispatch decisions identical.
+    /// A full span is required because every node in a chained call starts at
+    /// the receiver's offset while each node has a distinct end offset.
+    resolved_method_return_types: HashMap<(u32, u32), Ty>,
+    /// Concrete return type selected for a generic function call.
+    resolved_call_return_types: HashMap<u32, Ty>,
+    resolved_struct_literal_types: HashMap<(u32, u32), Ty>,
+    /// Fully-qualified symbol selected for an associated trait function call.
+    resolved_associated_functions: HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +156,10 @@ impl TypeEnv {
             owned_string_ty: None,
             drop_owned_type_keys: HashSet::new(),
             struct_field_types: HashMap::new(),
+            resolved_method_return_types: HashMap::new(),
+            resolved_call_return_types: HashMap::new(),
+            resolved_struct_literal_types: HashMap::new(),
+            resolved_associated_functions: HashMap::new(),
         };
         // 创建全局作用域
         env.push_scope();
@@ -340,6 +355,31 @@ impl TypeEnv {
         Some(Self::substitute_ty_vars(&field_ty, &subst))
     }
 
+    pub fn struct_field_types_for(&self, owner: &Ty) -> Option<Vec<(String, Ty)>> {
+        let TyKind::Adt { name, args } = &owner.kind else {
+            return None;
+        };
+        let layout = self.struct_field_types.get(name)?;
+        let subst = layout
+            .type_params
+            .iter()
+            .copied()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        Some(
+            layout
+                .fields
+                .iter()
+                .map(|(field_name, field_ty)| {
+                    (
+                        field_name.clone(),
+                        Self::substitute_ty_vars(field_ty, &subst),
+                    )
+                })
+                .collect(),
+        )
+    }
+
     pub fn type_contains_drop_owned_value(&self, ty: &Ty) -> bool {
         self.type_contains_drop_owned_value_inner(ty, &mut HashSet::new())
     }
@@ -488,6 +528,43 @@ impl TypeEnv {
         } else {
             None
         }
+    }
+
+    pub fn record_method_return_type(&mut self, call_site: crate::lexer::Span, ty: Ty) {
+        self.resolved_method_return_types
+            .insert((call_site.lo, call_site.hi), ty);
+    }
+
+    pub fn resolved_method_return_type(&self, call_site: crate::lexer::Span) -> Option<&Ty> {
+        self.resolved_method_return_types
+            .get(&(call_site.lo, call_site.hi))
+    }
+
+    pub fn record_call_return_type(&mut self, call_site: u32, ty: Ty) {
+        self.resolved_call_return_types.insert(call_site, ty);
+    }
+
+    pub fn resolved_call_return_type(&self, call_site: u32) -> Option<&Ty> {
+        self.resolved_call_return_types.get(&call_site)
+    }
+
+    pub fn record_struct_literal_type(&mut self, site: crate::lexer::Span, ty: Ty) {
+        self.resolved_struct_literal_types
+            .insert((site.lo, site.hi), ty);
+    }
+
+    pub fn resolved_struct_literal_type(&self, site: crate::lexer::Span) -> Option<&Ty> {
+        self.resolved_struct_literal_types.get(&(site.lo, site.hi))
+    }
+
+    pub fn record_associated_function(&mut self, call_site: u32, name: String) {
+        self.resolved_associated_functions.insert(call_site, name);
+    }
+
+    pub fn resolved_associated_function(&self, call_site: u32) -> Option<&str> {
+        self.resolved_associated_functions
+            .get(&call_site)
+            .map(String::as_str)
     }
 
     /// 检查符号是否存在于任何作用域
@@ -795,5 +872,20 @@ mod tests {
         let id_a_again = env1.interner().borrow_mut().intern(novel_kind_a);
         assert_eq!(id_a, id_a_again);
         assert_eq!(env2.interner().borrow().len(), initial_len + 2);
+    }
+
+    #[test]
+    fn chained_method_return_types_use_the_complete_call_span() {
+        let mut env = TypeEnv::new();
+        let inner_call = crate::lexer::Span::new(12, 24);
+        let outer_call = crate::lexer::Span::new(12, 34);
+        let inner_ty = env.int_ty(IntKind::I64);
+        let outer_ty = env.bool_ty();
+
+        env.record_method_return_type(inner_call, inner_ty.clone());
+        env.record_method_return_type(outer_call, outer_ty.clone());
+
+        assert_eq!(env.resolved_method_return_type(inner_call), Some(&inner_ty));
+        assert_eq!(env.resolved_method_return_type(outer_call), Some(&outer_ty));
     }
 }

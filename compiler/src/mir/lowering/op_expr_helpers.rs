@@ -1,4 +1,6 @@
+use super::method_call_helpers::emit_resolved_method_call;
 use super::*;
+use crate::mir::method_dispatch_helpers::build_method_dispatch_plan;
 
 fn is_string_ptr(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Ptr(inner) if matches!(inner.as_ref(), MIRType::Int(8)))
@@ -10,6 +12,117 @@ fn is_owned_string(ty: &MIRType) -> bool {
 
 fn is_async_context_type(ty: &MIRType) -> bool {
     matches!(ty, MIRType::Struct { name, .. } if name == "AsyncContext")
+}
+
+fn is_numeric_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Int(_) | MIRType::UInt(_) | MIRType::Float(_))
+}
+
+fn operator_type_prefix(ctx: &LoweringContext<'_>, local: Local, method: &str) -> String {
+    build_method_dispatch_plan(
+        ctx.type_names.get(&local).map(String::as_str),
+        ctx.get_local_type(local),
+        method,
+    )
+    .type_prefix
+}
+
+fn resolve_operator_trait_function(
+    ctx: &LoweringContext<'_>,
+    receiver: Local,
+    rhs: Option<Local>,
+    trait_name: &str,
+    method: &str,
+) -> Result<String, String> {
+    let receiver_prefix = operator_type_prefix(ctx, receiver, method);
+    let prefix = if let Some(rhs) = rhs {
+        format!(
+            "{}_{}_{}_",
+            receiver_prefix,
+            trait_name,
+            operator_type_prefix(ctx, rhs, method)
+        )
+    } else {
+        format!("{}_{}_", receiver_prefix, trait_name)
+    };
+    let suffix = format!("_{method}");
+    // FunctionSig stores the explicit argument count; the receiver is carried
+    // separately by the method-call ABI.
+    let expected_arity = usize::from(rhs.is_some());
+    let candidates = ctx
+        .known_function_names()
+        .filter(|name| name.starts_with(&prefix) && name.ends_with(&suffix))
+        .filter(|name| {
+            ctx.function_sig(name)
+                .is_some_and(|signature| signature.param_count == expected_arity)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [] => Err(format!(
+            "operator trait lowering could not find `{trait_name}::{method}` for `{receiver_prefix}`"
+        )),
+        [candidate] => Ok(candidate.clone()),
+        many => Err(format!(
+            "operator trait lowering found ambiguous `{trait_name}::{method}` implementations for `{receiver_prefix}`: {}",
+            many.join(", ")
+        )),
+    }
+}
+
+fn try_lower_binary_operator_trait(
+    ctx: &mut LoweringContext<'_>,
+    op: MirBinOp,
+    left_expr: &HIRExpr,
+    right_expr: &HIRExpr,
+    left: Local,
+    right: Local,
+) -> Option<Local> {
+    if !op.is_arithmetic()
+        || (is_numeric_type(ctx.get_local_type(left)) && is_numeric_type(ctx.get_local_type(right)))
+    {
+        return None;
+    }
+    let (trait_name, method) = match op {
+        MirBinOp::Add => ("Add", "add"),
+        MirBinOp::Sub => ("Sub", "sub"),
+        MirBinOp::Mul => ("Mul", "mul"),
+        MirBinOp::Div => ("Div", "div"),
+        MirBinOp::Rem => ("Rem", "rem"),
+        _ => return None,
+    };
+    let function = match resolve_operator_trait_function(ctx, left, Some(right), trait_name, method)
+    {
+        Ok(function) => function,
+        Err(error) => {
+            ctx.errors.push(error);
+            return Some(ctx.add_local(None, LocalKind::Temp, MIR_UNIT));
+        }
+    };
+    let result = emit_resolved_method_call(ctx, left, &[right], &function);
+    ctx.mark_drop_expr_moved(left_expr);
+    ctx.mark_drop_expr_moved(right_expr);
+    Some(result)
+}
+
+fn try_lower_neg_operator_trait(
+    ctx: &mut LoweringContext<'_>,
+    operand_expr: &HIRExpr,
+    operand: Local,
+) -> Option<Local> {
+    if is_numeric_type(ctx.get_local_type(operand)) {
+        return None;
+    }
+    let function = match resolve_operator_trait_function(ctx, operand, None, "Neg", "neg") {
+        Ok(function) => function,
+        Err(error) => {
+            ctx.errors.push(error);
+            return Some(ctx.add_local(None, LocalKind::Temp, MIR_UNIT));
+        }
+    };
+    let result = emit_resolved_method_call(ctx, operand, &[], &function);
+    ctx.mark_drop_expr_moved(operand_expr);
+    Some(result)
 }
 
 fn owned_string_mir_type() -> MIRType {
@@ -141,10 +254,15 @@ pub(super) fn lower_unary_expr(
         }
         _ => {
             let operand_local = ctx.lower_expr(operand);
+            if matches!(op, hir::HIRUnaryOp::Neg) {
+                if let Some(result) = try_lower_neg_operator_trait(ctx, operand, operand_local) {
+                    return result;
+                }
+            }
             let mir_op = ctx.lower_un_op(op);
             let result_ty = match op {
                 hir::HIRUnaryOp::Not => MIR_BOOL,
-                _ => MIR_I64,
+                _ => ctx.get_local_type(operand_local).clone(),
             };
             let local = ctx.add_local(None, LocalKind::Temp, result_ty);
             ctx.push_inst(Instruction::Unary {
@@ -330,6 +448,12 @@ pub(super) fn lower_binary_expr(
             ctx.record_drop_binding_if_needed(result);
             return result;
         }
+    }
+
+    if let Some(result) =
+        try_lower_binary_operator_trait(ctx, mir_op, left, right, left_local, right_local)
+    {
+        return result;
     }
 
     if mir_op.is_comparison() {

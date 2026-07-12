@@ -19,9 +19,10 @@ or moving non-thread-safe values across thread boundaries.
 
 ### Requirement: The runtime SHALL provide a multi-threaded executor
 
-The runtime SHALL offer a work-stealing multi-threaded executor in addition to
-the cooperative scheduler, with `spawn` requiring `Send` futures on the
-multi-threaded executor.
+The runtime SHALL offer a multi-threaded executor in addition to the cooperative
+scheduler, with `spawn` requiring `Send` futures. The public contract SHALL
+define bounded submission/backpressure, progress, cancellation, shutdown,
+error isolation, and join behavior independently of the scheduling algorithm.
 
 #### Scenario: Parallel tasks run and join
 
@@ -29,18 +30,27 @@ multi-threaded executor.
 - **THEN** the tasks make progress in parallel and their results join
   deterministically
 
+#### Scenario: Executor is saturated or shut down
+
+- **WHEN** submission exceeds configured bounds or shutdown begins
+- **THEN** submission returns the documented status without unbounded growth
+- **AND** accepted tasks are joined or cancelled per the shutdown contract
+- **AND** a task failure does not terminate unrelated worker tasks
+
 ### Requirement: The async runtime SHALL provide a cross-platform IO reactor
 
-The runtime SHALL drive timer, socket, and owned-file-descriptor readiness on
-Linux and Windows, closing the prior "owned-fd all-host readiness" deferral for
-those hosts.
+The runtime SHALL drive timer, socket, and owned-handle readiness on supported
+Windows, Linux, and macOS release hosts, closing the prior all-host readiness
+deferral for those hosts.
 
 #### Scenario: Owned-fd readiness on a reference host
 
-- **WHEN** an async helper awaits readiness on an owned file descriptor or socket
-  on Linux or Windows
+- **WHEN** an async helper awaits readiness on an owned descriptor, handle, or
+  socket on a supported release host
 - **THEN** the reactor wakes the task when the fd becomes ready
 - **AND** a reference-host test demonstrates the wakeup without busy polling
+- **AND** timeout, cancellation, and close unregister the wait without stale
+  wakeups or leaked registrations
 
 ### Requirement: The runtime SHALL provide a Future trait, channels, and structured concurrency
 

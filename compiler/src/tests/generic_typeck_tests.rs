@@ -70,6 +70,18 @@ trait Iterator {
 }
 
 #[test]
+fn trait_method_self_associated_projection_parses() {
+    let source = r#"
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+"#;
+
+    Parser::parse(source).expect("Self::Item should parse in a trait method signature");
+}
+
+#[test]
 fn impl_associated_type_definition_typechecks() {
     let source = r#"
 trait Iterator {
@@ -478,6 +490,59 @@ impl Wave for i64 {
     checker
         .check_program(&program)
         .expect("distinct traits for the same type should not conflict");
+}
+
+#[test]
+fn same_generic_trait_for_same_type_with_distinct_args_is_accepted() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+
+impl Convert<u64> for i32 {
+    def convert(self) -> u64 { self as u64 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("generic trait impls with distinct trait args should not conflict");
+}
+
+#[test]
+fn duplicate_generic_trait_impl_for_same_type_and_args_is_rejected() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 { self as i64 }
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&program)
+        .expect_err("duplicate generic trait impl should be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("[conflicting-impl]")
+            && message.contains("Convert<i64>")
+            && message.contains("i32"),
+        "expected generic conflicting-impl diagnostic, got: {message}"
+    );
 }
 
 #[test]
@@ -1342,5 +1407,325 @@ def main() -> i64 {
     assert!(
         ir.contains("; Function: Outer_hash") && ir.contains("call i64 @Inner_hash"),
         "expected generated Outer_hash to call Inner_hash\n{ir}"
+    );
+}
+
+#[test]
+fn custom_hash_into_impl_synthesizes_hash_bridge() {
+    let source = r#"
+struct Hasher {
+    state: i64,
+}
+
+def hasher_new() -> Hasher {
+    Hasher { state: 0 }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        self.state = self.state + value;
+        true
+    }
+
+    def finish(self) -> i64 {
+        self.state
+    }
+}
+
+struct Key {
+    id: i64,
+}
+
+impl Hash for Key {
+    def hash_into(&self, h: &mut Hasher) {
+        h.write_i64(self.id);
+    }
+}
+
+def use_hash<T: Hash>(value: T) -> i64 {
+    value.hash()
+}
+
+def main() -> i64 {
+    use_hash(Key { id: 7 })
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("hash_into protocol should synthesize hash bridge");
+    assert!(
+        ir.contains("; Function: Key_Hash_hash") && ir.contains("call void @Key_Hash_hash_into"),
+        "expected Hash.hash bridge to drive hash_into, got:\n{ir}"
+    );
+}
+
+#[test]
+fn derive_hash_routes_through_hash_into_when_hasher_in_scope() {
+    let source = r#"
+struct Hasher {
+    state: i64,
+}
+
+def hasher_new() -> Hasher {
+    Hasher { state: 0 }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        self.state = self.state + value;
+        true
+    }
+
+    def write_bool(&mut self, value: bool) -> bool {
+        self.state = self.state + (if value { 1 } else { 0 });
+        true
+    }
+
+    def finish(self) -> i64 {
+        self.state
+    }
+}
+
+#[derive(Hash)]
+struct Inner {
+    value: i64,
+}
+
+#[derive(Hash)]
+struct Key {
+    inner: Inner,
+    flag: bool,
+}
+
+def use_hash<T: Hash>(value: T) -> i64 {
+    value.hash()
+}
+
+def main() -> i64 {
+    use_hash(Key { inner: Inner { value: 7 }, flag: true }) + Key { inner: Inner { value: 7 }, flag: true }.hash()
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("derived Hash should route through hash_into");
+    assert!(
+        ir.contains("; Function: Key_Hash_hash_into")
+            && ir.contains("call void @Inner_Hash_hash_into")
+            && ir.contains("call void @Key_Hash_hash_into"),
+        "expected derived hash_into bodies driving nested hash_into, got:\n{ir}"
+    );
+    assert!(
+        ir.contains("; Function: Key_Hash_hash"),
+        "expected synthesized hash bridge for derived hash_into, got:\n{ir}"
+    );
+}
+
+#[test]
+fn zero_argument_generic_constructor_infers_type_from_expected_return() {
+    let source = r#"
+struct Holder<T> {
+    handle: i64,
+}
+
+def holder_new<T>() -> Holder<T> {
+    Holder { handle: 0 }
+}
+
+def main() -> i64 {
+    let holder: Holder<i64> = holder_new();
+    holder.handle
+}
+"#;
+
+    compile_to_ir(source)
+        .expect("expected return type should infer a zero-argument constructor type parameter");
+}
+
+#[test]
+fn option_none_infers_and_materializes_concrete_payload_defaults() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+struct Payload {
+    count: i64,
+    ready: bool,
+}
+
+def option_none<T>() -> Option<T> { __sengoo_option_none() }
+def __sengoo_option_none<T>() -> Option<T> { __sengoo_option_none() }
+
+def main() -> i64 {
+    let number: Option<i64> = option_none();
+    let flag: Option<bool> = option_none();
+    let payload: Option<Payload> = option_none();
+    if number.is_some || flag.is_some || payload.is_some {
+        1
+    } else {
+        payload.value.count
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("option_none should infer T and synthesize a concrete unused payload");
+    assert!(ir.contains("%Option_i64"), "missing Option<i64> in:\n{ir}");
+    assert!(
+        ir.contains("%Option_bool"),
+        "missing Option<bool> in:\n{ir}"
+    );
+    assert!(
+        ir.contains("%Option_Payload"),
+        "missing Option<Payload> in:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call %Option_"),
+        "option_none should lower directly instead of calling an empty body:\n{ir}"
+    );
+}
+
+#[test]
+fn user_option_none_function_is_not_hijacked_by_stdlib_intrinsic() {
+    let source = r#"
+def option_none() -> i64 {
+    41
+}
+
+def main() -> i64 {
+    option_none() + 1
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("ordinary same-named functions must resolve normally");
+    assert!(
+        ir.contains("call i64 @option_none"),
+        "expected a normal user function call in:\n{ir}"
+    );
+}
+
+#[test]
+fn generic_iterator_next_resolves_associated_item_end_to_end() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+struct BoolIter {
+    value: bool,
+}
+
+impl Iterator for BoolIter {
+    type Item = bool;
+    def next(&self) -> Option<bool> {
+        Option { is_some: true, value: self.value }
+    }
+}
+
+def pull<I: Iterator>(iter: &I) -> Option<I::Item> {
+    iter.next()
+}
+
+def main() -> i64 {
+    let iter = BoolIter { value: true };
+    let item: Option<bool> = pull(&iter);
+    if item.value { 0 } else { 1 }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic Iterator::next should specialize I::Item through MIR lowering");
+    assert!(
+        ir.contains("pull_BoolIter") && ir.contains("BoolIter_Iterator_next"),
+        "expected generic trait dispatch specialization in:\n{ir}"
+    );
+}
+
+#[test]
+fn generic_adapter_can_store_a_concrete_next_function() {
+    let source = r#"
+struct Option<T> { is_some: bool, value: T }
+struct Counter { value: i64 }
+struct Adapter<I, T> {
+    inner: I,
+    next_fn: fn(&I) -> Option<T>,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+impl Counter {
+    def read(&self) -> i64 { self.value }
+}
+
+def counter_next(counter: &Counter) -> Option<i64> {
+    Option { is_some: true, value: counter.read() }
+}
+
+impl<I, T> Iterator for Adapter<I, T> {
+    type Item = T;
+    def next(&self) -> Option<T> {
+        let next = self.next_fn;
+        next(&self.inner)
+    }
+}
+
+impl<I, T> Adapter<I, T> {
+    def next(&self) -> Option<T> {
+        let next = self.next_fn;
+        next(&self.inner)
+    }
+}
+
+def main() -> i64 {
+    let adapter = Adapter {
+        inner: Counter { value: 42 },
+        next_fn: counter_next,
+    };
+    adapter.next().value
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("adapter next function fields should specialize");
+    assert!(
+        ir.contains("call %Option_i64 %") || ir.contains("call %Option_i64 @counter_next"),
+        "expected a concrete adapter next call in:\n{ir}"
+    );
+}
+
+#[test]
+fn phantom_generic_struct_literals_keep_distinct_mir_instance_names() {
+    let source = r#"
+struct Phantom<T> {
+    handle: i64,
+}
+
+def make_i64() -> Phantom<i64> {
+    Phantom { handle: 1 }
+}
+
+def make_bool() -> Phantom<bool> {
+    Phantom { handle: 2 }
+}
+
+def main() -> i64 {
+    make_i64().handle + make_bool().handle
+}
+"#;
+    let ir = compile_to_ir(source).expect("phantom generic instances should compile");
+    assert!(
+        ir.contains("%Phantom_i64 = type"),
+        "missing i64 instance:\n{ir}"
+    );
+    assert!(
+        ir.contains("%Phantom_bool = type"),
+        "missing bool instance:\n{ir}"
     );
 }

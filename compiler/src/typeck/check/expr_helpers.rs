@@ -1,9 +1,196 @@
 use super::*;
 
 impl TypeChecker {
+    fn builtin_arithmetic_pair(&self, left: &Ty, right: &Ty) -> bool {
+        match (&left.kind, &right.kind) {
+            (TyKind::Int(_), TyKind::Int(_))
+            | (TyKind::Float(_), TyKind::Float(_))
+            | (TyKind::Int(_) | TyKind::Float(_), TyKind::Var(_))
+            | (TyKind::Var(_), TyKind::Int(_) | TyKind::Float(_)) => true,
+            (TyKind::Var(left_var), TyKind::Var(right_var)) => {
+                let has_detailed_bound = |var_id| {
+                    self.generic_var_trait_bounds
+                        .get(var_id)
+                        .is_some_and(|bounds| !bounds.is_empty())
+                };
+                !has_detailed_bound(left_var) && !has_detailed_bound(right_var)
+            }
+            _ => false,
+        }
+    }
+
+    fn string_add_pair(op: &BinOp, left: &Ty, right: &Ty) -> bool {
+        if !matches!(op, BinOp::Add) {
+            return false;
+        }
+        let is_str = |ty: &Ty| {
+            matches!(ty.kind, TyKind::Str)
+                || matches!(&ty.kind, TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str))
+        };
+        let is_string = |ty: &Ty| matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String");
+        (is_str(left) && is_str(right))
+            || (is_string(left) && is_str(right))
+            || (is_str(left) && is_string(right))
+    }
+
+    fn resolve_binary_operator_trait(
+        &self,
+        op: &BinOp,
+        left_ty: &Ty,
+        right_ty: &Ty,
+        left: &Expr,
+        right: &Expr,
+    ) -> TyResult<Ty> {
+        let (trait_name, symbol) = match op {
+            BinOp::Add => ("Add", "+"),
+            BinOp::Sub => ("Sub", "-"),
+            BinOp::Mul => ("Mul", "*"),
+            BinOp::Div => ("Div", "/"),
+            BinOp::Mod => ("Rem", "%"),
+            _ => unreachable!("only arithmetic operators use operator traits"),
+        };
+        let left_key = type_key(left_ty);
+        if let TyKind::Var(var_id) = left_ty.kind {
+            let candidates = self
+                .generic_var_trait_bounds
+                .get(&var_id)
+                .into_iter()
+                .flatten()
+                .filter(|bound| {
+                    bound.trait_name == trait_name
+                        && bound.args.len() == 2
+                        && type_key(&self.infer.apply_subst(&bound.args[0]))
+                            == type_key(&self.infer.apply_subst(right_ty))
+                })
+                .collect::<Vec<_>>();
+            return match candidates.as_slice() {
+                [] => Err(TypeckError::diagnostic(
+                    "operator-trait-missing",
+                    format!(
+                        "operator `{symbol}` requires `{left_key}: {trait_name}<{}, Output>`",
+                        type_key(right_ty)
+                    ),
+                    left.span.lo,
+                    right.span.hi,
+                )),
+                [bound] => Ok(self.infer.apply_subst(&bound.args[1])),
+                many => Err(TypeckError::diagnostic(
+                    "operator-trait-ambiguous",
+                    format!(
+                        "operator `{symbol}` has multiple `{trait_name}` bounds for `{left_key}` with outputs: {}",
+                        many.iter()
+                            .map(|bound| type_key(&self.infer.apply_subst(&bound.args[1])))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    left.span.lo,
+                    right.span.hi,
+                )),
+            };
+        }
+        let candidates = self
+            .impl_registry
+            .get_trait_impls(trait_name, &left_key)
+            .iter()
+            .filter(|impl_info| {
+                impl_info.trait_args.len() == 2
+                    && type_key(&impl_info.trait_args[0]) == type_key(right_ty)
+            })
+            .collect::<Vec<_>>();
+        let span_lo = left.span.lo;
+        let span_hi = right.span.hi;
+        match candidates.as_slice() {
+            [] => Err(TypeckError::diagnostic(
+                "operator-trait-missing",
+                format!(
+                    "operator `{symbol}` requires `{left_key}: {trait_name}<{}, Output>`",
+                    type_key(right_ty)
+                ),
+                span_lo,
+                span_hi,
+            )),
+            [impl_info] => Ok(impl_info.trait_args[1].clone()),
+            many => Err(TypeckError::diagnostic(
+                "operator-trait-ambiguous",
+                format!(
+                    "operator `{symbol}` has multiple `{trait_name}` implementations for `{left_key}` and Rhs `{}` with outputs: {}",
+                    type_key(right_ty),
+                    many.iter()
+                        .map(|impl_info| type_key(&impl_info.trait_args[1]))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                span_lo,
+                span_hi,
+            )),
+        }
+    }
+
+    fn resolve_neg_operator_trait(&self, ty: &Ty, operand: &Expr) -> TyResult<Ty> {
+        let type_name = type_key(ty);
+        if let TyKind::Var(var_id) = ty.kind {
+            let candidates = self
+                .generic_var_trait_bounds
+                .get(&var_id)
+                .into_iter()
+                .flatten()
+                .filter(|bound| bound.trait_name == "Neg" && bound.args.len() == 1)
+                .collect::<Vec<_>>();
+            return match candidates.as_slice() {
+                [] => Err(TypeckError::diagnostic(
+                    "operator-trait-missing",
+                    format!("operator `-` requires `{type_name}: Neg<Output>`"),
+                    operand.span.lo,
+                    operand.span.hi,
+                )),
+                [bound] => Ok(self.infer.apply_subst(&bound.args[0])),
+                many => Err(TypeckError::diagnostic(
+                    "operator-trait-ambiguous",
+                    format!(
+                        "operator `-` has multiple `Neg` bounds for `{type_name}` with outputs: {}",
+                        many.iter()
+                            .map(|bound| type_key(&self.infer.apply_subst(&bound.args[0])))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    operand.span.lo,
+                    operand.span.hi,
+                )),
+            };
+        }
+        let candidates = self
+            .impl_registry
+            .get_trait_impls("Neg", &type_name)
+            .iter()
+            .filter(|impl_info| impl_info.trait_args.len() == 1)
+            .collect::<Vec<_>>();
+        match candidates.as_slice() {
+            [] => Err(TypeckError::diagnostic(
+                "operator-trait-missing",
+                format!("operator `-` requires `{type_name}: Neg<Output>`"),
+                operand.span.lo,
+                operand.span.hi,
+            )),
+            [impl_info] => Ok(impl_info.trait_args[0].clone()),
+            many => Err(TypeckError::diagnostic(
+                "operator-trait-ambiguous",
+                format!(
+                    "operator `-` has multiple `Neg` implementations for `{type_name}` with outputs: {}",
+                    many.iter()
+                        .map(|impl_info| type_key(&impl_info.trait_args[0]))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                operand.span.lo,
+                operand.span.hi,
+            )),
+        }
+    }
+
     pub(super) fn check_literal(&mut self, lit: &Literal) -> TyResult<Ty> {
         Ok(match lit {
             Literal::Int(_) => self.env.int_ty(IntKind::I64),
+            Literal::Uint(_) => self.env.int_ty(IntKind::U64),
             Literal::Float(_) => self.env.float_ty(FloatKind::F64),
             Literal::String(_) => {
                 let str_ty = self.env.str_ty();
@@ -159,7 +346,9 @@ impl TypeChecker {
                 }
                 for bound in &param.bounds {
                     let concrete_key = type_key(&concrete_ty);
-                    if !self.impl_registry.implements_trait(bound, &concrete_key) {
+                    if !self.impl_registry.implements_trait(bound, &concrete_key)
+                        && !self.type_satisfies_auto_marker_bound(bound, &concrete_ty)
+                    {
                         return Some(Err(Self::unsatisfied_trait_bound_error(
                             format!("enum `{enum_name}` variant `{variant_name}`"),
                             &concrete_key,
@@ -237,6 +426,15 @@ impl TypeChecker {
             });
         }
 
+        if matches!(
+            op,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+        ) && !self.builtin_arithmetic_pair(&left_ty, &right_ty)
+            && !Self::string_add_pair(op, &left_ty, &right_ty)
+        {
+            return self.resolve_binary_operator_trait(op, &left_ty, &right_ty, left, right);
+        }
+
         let types_compatible = match (&left_ty.kind, &right_ty.kind) {
             (
                 TyKind::Adt {
@@ -272,7 +470,7 @@ impl TypeChecker {
             {
                 true
             }
-            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
+            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() == b.is_signed() => {
                 matches!(
                     op,
                     BinOp::Add
@@ -320,7 +518,7 @@ impl TypeChecker {
         }
 
         let result_ty = match (&left_ty.kind, &right_ty.kind) {
-            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() && b.is_signed() => {
+            (TyKind::Int(a), TyKind::Int(b)) if a != b && a.is_signed() == b.is_signed() => {
                 let wider = if a.bits() >= b.bits() { *a } else { *b };
                 self.env.int_ty(wider)
             }
@@ -367,6 +565,9 @@ impl TypeChecker {
 
     pub(super) fn check_unary(&mut self, op: &UnOp, operand: &Expr) -> TyResult<Ty> {
         let ty = self.check_expr(operand)?;
+        if matches!(op, UnOp::Neg) && !matches!(ty.kind, TyKind::Int(_) | TyKind::Float(_)) {
+            return self.resolve_neg_operator_trait(&ty, operand);
+        }
         Ok(match op {
             UnOp::Neg | UnOp::Not | UnOp::Plus | UnOp::BitNot => ty.clone(),
             UnOp::Deref => {
@@ -382,6 +583,26 @@ impl TypeChecker {
             UnOp::Ref => self.env.ref_ty(false, ty),
             UnOp::RefMut | UnOp::DerefMut => self.env.ref_ty(true, ty),
         })
+    }
+
+    pub(super) fn check_cast(&mut self, expr: &Expr, target: &Type) -> TyResult<Ty> {
+        let source_ty = self.check_expr(expr)?;
+        let target_ty = self.check_type(target)?;
+
+        if is_supported_cast_ty(&source_ty.kind, &target_ty.kind) {
+            Ok(target_ty)
+        } else {
+            let (span_lo, span_hi) = expression_subject_span(expr);
+            Err(TypeckError::diagnostic(
+                "invalid-cast",
+                format!(
+                    "invalid cast from {} to {}; `as` currently supports integer/float casts and bool<->integer casts",
+                    source_ty.kind, target_ty.kind
+                ),
+                span_lo,
+                span_hi,
+            ))
+        }
     }
 
     pub(super) fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
@@ -601,6 +822,46 @@ impl TypeChecker {
     }
 
     pub(super) fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
+        let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
+        self.check_lambda_with_signature(params, body, param_tys, None)
+    }
+
+    pub(super) fn check_lambda_with_expected(
+        &mut self,
+        params: &[Ident],
+        body: &Expr,
+        expected: &Ty,
+    ) -> TyResult<Ty> {
+        let expected = self.infer.apply_subst(expected);
+        let TyKind::Fn {
+            params: expected_params,
+            ret,
+            ..
+        } = &expected.kind
+        else {
+            return self.check_lambda(params, body);
+        };
+        if expected_params.len() != params.len() {
+            return Err(TypeckError::ArgumentCountMismatch {
+                expected: expected_params.len(),
+                found: params.len(),
+            });
+        }
+        self.check_lambda_with_signature(
+            params,
+            body,
+            expected_params.clone(),
+            Some(ret.as_ref().clone()),
+        )
+    }
+
+    fn check_lambda_with_signature(
+        &mut self,
+        params: &[Ident],
+        body: &Expr,
+        param_tys: Vec<Ty>,
+        expected_return: Option<Ty>,
+    ) -> TyResult<Ty> {
         let mut seen = std::collections::HashSet::new();
         if let Some(duplicate) = params
             .iter()
@@ -617,14 +878,19 @@ impl TypeChecker {
             ));
         }
 
-        let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
-
         self.env.push_scope();
         for (param, ty) in params.iter().zip(param_tys.iter()) {
             self.env.insert_var(param.name.clone(), ty.clone());
         }
         let body_ty = self.check_expr(body)?;
         self.env.pop_scope();
+
+        let body_ty = if let Some(expected_return) = expected_return {
+            self.infer.unify(&expected_return, &body_ty)?;
+            self.infer.apply_subst(&expected_return)
+        } else {
+            body_ty
+        };
 
         Ok(self.env.fn_ty(param_tys, body_ty))
     }
@@ -657,8 +923,32 @@ fn expression_subject_span(expr: &Expr) -> (u32, u32) {
             let len = value.to_string().len() as u32;
             (expr.span.lo, expr.span.lo + len)
         }
+        ExprKind::Literal(Literal::Uint(value)) => {
+            let len = value.to_string().len() as u32;
+            (expr.span.lo, expr.span.lo + len)
+        }
         _ => (expr.span.lo, expr.span.hi),
     }
+}
+
+fn is_supported_cast_ty(source: &TyKind, target: &TyKind) -> bool {
+    if source == target {
+        return matches!(
+            source,
+            TyKind::Int(_) | TyKind::Float(_) | TyKind::Bool | TyKind::Byte
+        );
+    }
+
+    fn is_int_like(kind: &TyKind) -> bool {
+        matches!(kind, TyKind::Int(_) | TyKind::Byte)
+    }
+
+    (is_int_like(source) && is_int_like(target))
+        || matches!((source, target), (TyKind::Float(_), TyKind::Float(_)))
+        || (is_int_like(source) && matches!(target, TyKind::Float(_)))
+        || (matches!(source, TyKind::Float(_)) && is_int_like(target))
+        || (matches!(source, TyKind::Bool) && is_int_like(target))
+        || (is_int_like(source) && matches!(target, TyKind::Bool))
 }
 
 #[cfg(test)]

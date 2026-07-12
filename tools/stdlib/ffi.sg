@@ -48,6 +48,15 @@ struct Buffer {
     handle: i64,
 }
 
+impl !Send for CLib {}
+impl !Sync for CLib {}
+impl !Send for CppObject {}
+impl !Sync for CppObject {}
+impl !Send for CallbackToken {}
+impl !Sync for CallbackToken {}
+impl !Send for Buffer {}
+impl !Sync for Buffer {}
+
 def ffi_last_error_code() -> i64 {
     sengoo_ffi_last_error_code()
 }

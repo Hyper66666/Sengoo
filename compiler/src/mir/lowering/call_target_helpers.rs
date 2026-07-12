@@ -37,6 +37,7 @@ impl<'a> LoweringContext<'a> {
         &mut self,
         name: &str,
         arg_locals: &[Local],
+        expected_return_type: Option<&MIRType>,
     ) -> CallTargetResolution {
         if let Some(&var_local) = self.local_names.get(name) {
             if let Some(lambda_name) = self.lambda_names.get(&var_local) {
@@ -70,7 +71,9 @@ impl<'a> LoweringContext<'a> {
             return CallTargetResolution::Builtin(builtin_local);
         }
 
-        if let Some(plan) = self.try_materialize_generic_function(name, arg_locals) {
+        if let Some(plan) =
+            self.try_materialize_generic_function(name, arg_locals, expected_return_type)
+        {
             return CallTargetResolution::Planned(plan);
         }
 
@@ -121,7 +124,7 @@ mod tests {
         );
         ctx.local_names.insert("worker".to_string(), local);
 
-        let resolution = ctx.resolve_named_call_target("worker", &[]);
+        let resolution = ctx.resolve_named_call_target("worker", &[], None);
         match resolution {
             CallTargetResolution::Planned(plan) => {
                 assert_eq!(plan.func_name, mir_local_name(local));
@@ -157,7 +160,7 @@ mod tests {
         ctx.set_current_block(start_block);
 
         let task = ctx.add_local(None, LocalKind::Temp, MIR_I64);
-        let resolution = ctx.resolve_named_call_target("task_status", &[task]);
+        let resolution = ctx.resolve_named_call_target("task_status", &[task], None);
         match resolution {
             CallTargetResolution::Builtin(result_local) => {
                 assert_eq!(ctx.get_local_type(result_local), &MIR_I64);

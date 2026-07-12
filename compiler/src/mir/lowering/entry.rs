@@ -15,6 +15,16 @@ pub fn lower_hir_with_options(
     items: &[HIRItem],
     options: MirLowerOptions,
 ) -> Result<Vec<MirFunction>, String> {
+    let target_pointer_width = options.target_pointer_width;
+    crate::mir::type_mapping_helpers::with_target_pointer_width(target_pointer_width, || {
+        lower_hir_with_options_scoped(items, options)
+    })
+}
+
+fn lower_hir_with_options_scoped(
+    items: &[HIRItem],
+    options: MirLowerOptions,
+) -> Result<Vec<MirFunction>, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut lambda_counter = 0;
@@ -56,6 +66,8 @@ pub fn lower_hir_with_options(
         build_dyn_dispatch_metadata(items, &trait_defs, &struct_defs, &options.enum_defs);
     let options = options.with_dyn_dispatch_metadata(trait_method_order, dyn_param_traits);
     let inherent_method_templates = collect_inherent_method_templates(items);
+    let concrete_inherent_method_names =
+        collect_concrete_inherent_method_names(items, &known_named_types);
     let mut trait_method_templates: Vec<TraitMethodTemplate> = Vec::new();
     let mut eager_trait_functions: Vec<hir::HIRFunction> = Vec::new();
 
@@ -92,6 +104,8 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
+                let impl_is_concrete =
+                    hir_type_is_concrete(&impl_item.target_type, &known_named_types);
                 for impl_item in
                     expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
                 {
@@ -124,6 +138,11 @@ pub fn lower_hir_with_options(
                     } else {
                         for method in &impl_item.items {
                             if !method.type_params.is_empty() {
+                                continue;
+                            }
+                            if !impl_is_concrete
+                                && concrete_inherent_method_names.contains(&method.name)
+                            {
                                 continue;
                             }
                             known_functions.insert(method.name.clone());
@@ -171,6 +190,8 @@ pub fn lower_hir_with_options(
                 }
             }
             HIRItem::Impl(impl_item) => {
+                let impl_is_concrete =
+                    hir_type_is_concrete(&impl_item.target_type, &known_named_types);
                 for impl_item in
                     expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
                 {
@@ -179,6 +200,11 @@ pub fn lower_hir_with_options(
                     }
                     for method in &impl_item.items {
                         if !method.type_params.is_empty() {
+                            continue;
+                        }
+                        if !impl_is_concrete
+                            && concrete_inherent_method_names.contains(&method.name)
+                        {
                             continue;
                         }
                         match lower_function(
@@ -233,10 +259,54 @@ pub fn lower_hir_with_options(
         return Err(format!("MIR lowering failed:\n{}", errors.join("\n")));
     }
 
+    dedup_mir_functions_by_name(&mut results);
+
     let shims = synthesize_dyn_vtable_shims(&options, &results);
     results.extend(shims);
 
+    let mut owned_drop_traits: Vec<String> = options
+        .dyn_owned_drop_requests
+        .borrow()
+        .iter()
+        .cloned()
+        .collect();
+    owned_drop_traits.sort();
+    for trait_name in owned_drop_traits {
+        results.push(synthesize_owned_dyn_drop_helper(&trait_name));
+    }
+
+    coverage_helpers::inject_coverage_registration(&mut results, &options);
+
     Ok(results)
+}
+
+fn dedup_mir_functions_by_name(functions: &mut Vec<MirFunction>) {
+    let mut seen = HashSet::new();
+    functions.retain(|function| seen.insert(function.name.clone()));
+}
+
+fn collect_concrete_inherent_method_names(
+    items: &[HIRItem],
+    known_named_types: &HashSet<String>,
+) -> HashSet<String> {
+    let concrete_named_types = HashMap::new();
+    let mut names = HashSet::new();
+    for item in items {
+        let HIRItem::Impl(impl_item) = item else {
+            continue;
+        };
+        if impl_item.trait_name.is_some()
+            || !hir_type_is_concrete(&impl_item.target_type, known_named_types)
+        {
+            continue;
+        }
+        for impl_item in expand_impl_variants(impl_item, &concrete_named_types, known_named_types) {
+            for method in impl_item.items {
+                names.insert(method.name);
+            }
+        }
+    }
+    names
 }
 
 /// Collect dyn-dispatch metadata: per-trait vtable slot layout (sorted method
@@ -300,7 +370,7 @@ fn synthesize_dyn_vtable_shims(
     options: &MirLowerOptions,
     results: &[MirFunction],
 ) -> Vec<MirFunction> {
-    use crate::mir::dyn_dispatch::vtable_shim_name;
+    use crate::mir::dyn_dispatch::{vtable_shim_name, VTABLE_METHOD_BASE};
 
     let by_name: HashMap<&str, &MirFunction> =
         results.iter().map(|f| (f.name.as_str(), f)).collect();
@@ -318,6 +388,24 @@ fn synthesize_dyn_vtable_shims(
         let Some(slots) = options.trait_method_order.get(&trait_name) else {
             continue;
         };
+        let concrete_ty = slots.iter().find_map(|method| {
+            let eager_name = format!("{}_{}_{}", type_prefix, trait_name, method.name);
+            by_name
+                .get(eager_name.as_str())
+                .and_then(|eager_fn| eager_fn.params.first())
+                .map(dyn_concrete_object_ty)
+        });
+        if let Some(concrete_ty) = concrete_ty.clone() {
+            let drop_func = format!("{}_Drop_drop", type_prefix);
+            shims.push(synthesize_dyn_drop_thunk(
+                &trait_name,
+                &type_prefix,
+                &concrete_ty,
+                by_name
+                    .contains_key(drop_func.as_str())
+                    .then_some(drop_func),
+            ));
+        }
         for (slot, method) in slots.iter().enumerate() {
             let eager_name = format!("{}_{}_{}", type_prefix, trait_name, method.name);
             let Some(eager_fn) = by_name.get(eager_name.as_str()) else {
@@ -333,29 +421,50 @@ fn synthesize_dyn_vtable_shims(
             shim_params.push(MIRType::Ptr(Box::new(MIRType::Int(8))));
             shim_params.extend(method_params.iter().cloned());
 
-            let shim_name = vtable_shim_name(&trait_name, &type_prefix, slot, &method.name);
+            let shim_name = vtable_shim_name(
+                &trait_name,
+                &type_prefix,
+                VTABLE_METHOD_BASE + slot,
+                &method.name,
+            );
             let mut shim = MirFunction::new(shim_name, shim_params, ret_ty.clone());
 
-            // param 1 = data pointer (i8*); reinterpret as `&Concrete` and load it.
+            // param 1 = data pointer (i8*); reinterpret it to the concrete
+            // receiver ABI. Value receivers need a load; reference receivers
+            // are already pointer-shaped and must not be loaded again.
             let data_param = Local::new(1, LocalKind::Param);
-            let typed_ptr =
-                shim.add_local(LocalKind::Temp, MIRType::Ptr(Box::new(concrete_ty.clone())));
-            shim.push_inst_to_block(
-                0,
-                Instruction::Cast {
-                    destination: typed_ptr,
-                    value: data_param,
-                    to: MIRType::Ptr(Box::new(concrete_ty.clone())),
-                },
-            );
-            let self_val = shim.add_local(LocalKind::Temp, concrete_ty);
-            shim.push_inst_to_block(
-                0,
-                Instruction::Load {
-                    destination: self_val,
-                    source: typed_ptr,
-                },
-            );
+            let self_val = if matches!(concrete_ty, MIRType::Ref(_) | MIRType::Ptr(_)) {
+                let typed_ref = shim.add_local(LocalKind::Temp, concrete_ty.clone());
+                shim.push_inst_to_block(
+                    0,
+                    Instruction::Cast {
+                        destination: typed_ref,
+                        value: data_param,
+                        to: concrete_ty.clone(),
+                    },
+                );
+                typed_ref
+            } else {
+                let typed_ptr =
+                    shim.add_local(LocalKind::Temp, MIRType::Ptr(Box::new(concrete_ty.clone())));
+                shim.push_inst_to_block(
+                    0,
+                    Instruction::Cast {
+                        destination: typed_ptr,
+                        value: data_param,
+                        to: MIRType::Ptr(Box::new(concrete_ty.clone())),
+                    },
+                );
+                let self_val = shim.add_local(LocalKind::Temp, concrete_ty);
+                shim.push_inst_to_block(
+                    0,
+                    Instruction::Load {
+                        destination: self_val,
+                        source: typed_ptr,
+                    },
+                );
+                self_val
+            };
 
             let mut call_args = vec![self_val];
             for i in 0..method_params.len() {
@@ -375,4 +484,168 @@ fn synthesize_dyn_vtable_shims(
         }
     }
     shims
+}
+
+fn dyn_concrete_object_ty(receiver_ty: &MIRType) -> MIRType {
+    match receiver_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner.as_ref().clone(),
+        other => other.clone(),
+    }
+}
+
+/// Synthesize the per-trait owned `dyn Trait` drop helper
+/// `__dyn_Trait_Drop_drop(fat: __dyn_Trait)`. It loads the vtable drop slot
+/// from the fat pointer and, when non-null, calls the erased drop thunk with
+/// the data pointer, dispatching to the concrete `Drop` impl.
+fn synthesize_owned_dyn_drop_helper(trait_name: &str) -> MirFunction {
+    use crate::mir::dyn_dispatch::{dyn_fat_ptr_type, dyn_struct_name, VTABLE_DROP_SLOT};
+
+    let fat_ty = dyn_fat_ptr_type(trait_name);
+    let name = format!("{}_Drop_drop", dyn_struct_name(trait_name));
+    let mut helper = MirFunction::new(name, vec![fat_ty], MIR_UNIT);
+
+    let fat_param = Local::new(1, LocalKind::Param);
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let i64_ptr = MIRType::Ptr(Box::new(MIR_I64));
+
+    let data = helper.add_local(LocalKind::Temp, i8_ptr.clone());
+    helper.push_inst_to_block(
+        0,
+        Instruction::Extract {
+            destination: data,
+            value: fat_param,
+            index: 0,
+        },
+    );
+    let vtable_i8 = helper.add_local(LocalKind::Temp, i8_ptr);
+    helper.push_inst_to_block(
+        0,
+        Instruction::Extract {
+            destination: vtable_i8,
+            value: fat_param,
+            index: 1,
+        },
+    );
+    let vtable_words = helper.add_local(LocalKind::Temp, i64_ptr.clone());
+    helper.push_inst_to_block(
+        0,
+        Instruction::Cast {
+            destination: vtable_words,
+            value: vtable_i8,
+            to: i64_ptr,
+        },
+    );
+    let slot = helper.add_local(LocalKind::Temp, MIR_I64);
+    helper.push_inst_to_block(
+        0,
+        Instruction::Assign {
+            destination: slot,
+            value: MirConstant::Int(VTABLE_DROP_SLOT as i64),
+        },
+    );
+    let slot_addr = helper.add_local(LocalKind::Temp, MIRType::Ptr(Box::new(MIR_I64)));
+    helper.push_inst_to_block(
+        0,
+        Instruction::IndexAddr {
+            destination: slot_addr,
+            base: vtable_words,
+            index: slot,
+        },
+    );
+    let fnptr = helper.add_local(LocalKind::Temp, MIR_I64);
+    helper.push_inst_to_block(
+        0,
+        Instruction::Load {
+            destination: fnptr,
+            source: slot_addr,
+        },
+    );
+    let zero = helper.add_local(LocalKind::Temp, MIR_I64);
+    helper.push_inst_to_block(
+        0,
+        Instruction::Assign {
+            destination: zero,
+            value: MirConstant::Int(0),
+        },
+    );
+    let has_drop = helper.add_local(LocalKind::Temp, MIR_BOOL);
+    helper.push_inst_to_block(
+        0,
+        Instruction::Binary {
+            destination: has_drop,
+            op: MirBinOp::Ne,
+            left: fnptr,
+            right: zero,
+        },
+    );
+
+    let call_block = helper.add_block();
+    let exit_block = helper.add_block();
+    helper.basic_blocks[0].set_terminator(Terminator::If {
+        cond: has_drop,
+        then_block: call_block,
+        else_block: exit_block,
+    });
+
+    let unit = helper.add_local(LocalKind::Temp, MIR_UNIT);
+    helper.push_inst_to_block(
+        call_block,
+        Instruction::CallIndirect {
+            destination: unit,
+            func_ptr: fnptr,
+            args: vec![data],
+        },
+    );
+    helper.basic_blocks[call_block].set_terminator(Terminator::Goto(exit_block));
+    helper.basic_blocks[exit_block].set_terminator(Terminator::Return(None));
+    helper
+}
+
+fn synthesize_dyn_drop_thunk(
+    trait_name: &str,
+    type_prefix: &str,
+    concrete_ty: &MIRType,
+    drop_func: Option<String>,
+) -> MirFunction {
+    let (size, align) = crate::codegen::common::mir_type_size_align(concrete_ty);
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let thunk_name =
+        crate::mir::dyn_dispatch::vtable_drop_shim_name(trait_name, type_prefix, size, align);
+    let mut thunk = MirFunction::new(thunk_name, vec![i8_ptr.clone()], MIR_UNIT);
+
+    let data_param = Local::new(1, LocalKind::Param);
+    let typed_ptr = thunk.add_local(LocalKind::Temp, MIRType::Ptr(Box::new(concrete_ty.clone())));
+    thunk.push_inst_to_block(
+        0,
+        Instruction::Cast {
+            destination: typed_ptr,
+            value: data_param,
+            to: MIRType::Ptr(Box::new(concrete_ty.clone())),
+        },
+    );
+
+    // Concrete `{Type}_Drop_drop` glue takes the receiver by value (matching
+    // the drop-glue ABI used for scope-exit drops), so load the payload before
+    // calling it.
+    if let Some(drop_func) = drop_func {
+        let payload = thunk.add_local(LocalKind::Temp, concrete_ty.clone());
+        thunk.push_inst_to_block(
+            0,
+            Instruction::Load {
+                destination: payload,
+                source: typed_ptr,
+            },
+        );
+        let destination = thunk.add_local(LocalKind::Temp, MIR_UNIT);
+        thunk.push_inst_to_block(
+            0,
+            Instruction::Call {
+                destination,
+                func: drop_func,
+                args: vec![payload],
+            },
+        );
+    }
+    thunk.basic_blocks[0].set_terminator(Terminator::Return(None));
+    thunk
 }

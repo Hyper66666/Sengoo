@@ -2,7 +2,7 @@
 //!
 //! 使用 `logos` 将 Sengoo 源代码转换为 Token 流。
 
-pub use token::{Keyword, LiteralKind, Span, Symbol, Token, TokenKind};
+pub use token::{FStringLiteral, Keyword, LiteralKind, Span, Symbol, Token, TokenKind};
 
 mod token;
 
@@ -107,6 +107,39 @@ mod tests {
     }
 
     #[test]
+    fn test_tokenize_unsigned_integer_above_i64_max() {
+        let tokens = Lexer::tokenize("18446744073709551615u64 0xffff_ffff_ffff_ffffu64");
+        assert!(matches!(
+            tokens[0].kind,
+            TokenKind::Int(Some(18_446_744_073_709_551_615))
+        ));
+        assert!(matches!(
+            tokens[1].kind,
+            TokenKind::Int(Some(18_446_744_073_709_551_615))
+        ));
+    }
+
+    #[test]
+    fn integer_tokens_stop_before_range_and_method_dots() {
+        let source = "0..3 1.wrap(true)";
+        let tokens = Lexer::new(source).collect::<Vec<_>>();
+        let spellings = tokens
+            .iter()
+            .map(|token| &source[token.span.lo as usize..token.span.hi as usize])
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            spellings,
+            vec!["0", "..", "3", "1", ".", "wrap", "(", "true", ")"],
+            "{tokens:#?}"
+        );
+        assert!(matches!(tokens[0].kind, TokenKind::Int(Some(0))));
+        assert_eq!(tokens[1].kind, TokenKind::DotDot);
+        assert!(matches!(tokens[3].kind, TokenKind::Int(Some(1))));
+        assert_eq!(tokens[4].kind, TokenKind::Dot);
+    }
+
+    #[test]
     fn test_tokenize_keywords() {
         let tokens = Lexer::tokenize("fn let if else");
         assert!(tokens[0].is_keyword(Keyword::Fn));
@@ -149,6 +182,34 @@ mod tests {
         let tokens = Lexer::tokenize("\"hello\" b\"bytes\"");
         assert!(matches!(tokens[0].kind, TokenKind::String(Some(_))));
         assert!(matches!(&tokens[1].kind, TokenKind::Bytes(Some(bytes)) if bytes == b"bytes"));
+    }
+
+    #[test]
+    fn test_tokenize_fstring_token_with_interpolation_spans() {
+        let source = "f\"x={a + b}!\"";
+        let tokens = Lexer::tokenize(source);
+        assert_eq!(tokens.len(), 1);
+        let TokenKind::FString(Some(literal)) = &tokens[0].kind else {
+            panic!("expected an f-string token, got {:?}", tokens[0].kind);
+        };
+        assert_eq!(literal.template, "x={}!");
+        assert_eq!(literal.interpolations.len(), 1);
+        let span = literal.interpolations[0];
+        assert_eq!(&source[span.lo as usize..span.hi as usize], "a + b");
+        assert_eq!(tokens[0].span, Span::new(0, source.len() as u32));
+    }
+
+    #[test]
+    fn test_tokenize_fstring_ident_prefix_is_not_fstring() {
+        let tokens = Lexer::tokenize("xf\"nope\"");
+        assert!(tokens[0].is_ident());
+        assert!(matches!(tokens[1].kind, TokenKind::String(Some(_))));
+    }
+
+    #[test]
+    fn test_tokenize_unterminated_fstring_yields_malformed_payload() {
+        let tokens = Lexer::tokenize("f\"never ends");
+        assert!(matches!(tokens[0].kind, TokenKind::FString(None)));
     }
 
     #[test]

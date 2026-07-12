@@ -179,6 +179,108 @@ def leak() -> &str {
 }
 
 #[test]
+fn stdlib_owned_string_rebound_as_str_view_cannot_escape_return() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    let rebound = view;
+    return rebound;
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("returning a rebound borrowed view should fail type checking");
+    let crate::error::CompileError::TypeckError(typeck) = &err else {
+        panic!("expected typeck error, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+}
+
+#[test]
+fn stdlib_owned_string_rebound_as_str_view_prevents_owner_move() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    let rebound = view;
+    let moved = owner;
+    rebound.len()
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("moving an owner with a rebound view should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
+}
+
+#[test]
+fn stdlib_owned_string_reassigned_as_str_view_cannot_escape_return() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def leak() -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let mut alias = "fallback";
+    alias = owner.as_str();
+    return alias;
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("returning a reassigned borrowed view should fail type checking");
+    let crate::error::CompileError::TypeckError(typeck) = &err else {
+        panic!("expected typeck error, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+}
+
+#[test]
+fn stdlib_owned_string_reassigned_as_str_view_prevents_owner_move() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]),
+        r#"
+def main() -> i64 {
+    let owner: String = string_from_str("borrowed").value;
+    let mut alias = "fallback";
+    alias = owner.as_str();
+    let moved = owner;
+    alias.len()
+}
+"#,
+    );
+    let parsed = Parser::parse(&source).expect("source should parse");
+    let mut checker = TypeChecker::new();
+    let err = checker
+        .check_program(&parsed)
+        .expect_err("moving an owner with a reassigned view should fail");
+    let crate::error::CompileError::TypeckError(typeck) = err else {
+        panic!("expected TypeckError, got {err:?}");
+    };
+    assert_eq!(typeck.stable_code(), Some("cannot-move-borrowed"));
+}
+
+#[test]
 fn stdlib_owned_string_as_str_view_cannot_escape_tail_expression() {
     let err = typecheck_fails_with_stdlib(
         r#"
@@ -186,6 +288,64 @@ def leak() -> &str {
     let owner: String = string_from_str("borrowed").value;
     let view = owner.as_str();
     view
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_in_tuple() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak() -> (&str, i64) {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    (view, 1)
+}
+"#,
+    );
+    assert!(
+        err.contains("borrowed view `view` escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_in_struct_literal() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+struct Holder {
+    view: &str,
+}
+
+def leak() -> Holder {
+    let owner: String = string_from_str("borrowed").value;
+    return Holder { view: owner.as_str() };
+}
+"#,
+    );
+    assert!(
+        err.contains("escapes its owner scope"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn stdlib_owned_string_as_str_view_cannot_escape_if_else_tail() {
+    let err = typecheck_fails_with_stdlib(
+        r#"
+def leak(flag: bool) -> &str {
+    let owner: String = string_from_str("borrowed").value;
+    let view = owner.as_str();
+    if flag {
+        view
+    } else {
+        "fallback"
+    }
 }
 "#,
     );

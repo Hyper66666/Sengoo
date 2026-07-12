@@ -38,6 +38,7 @@ impl<'a> LoweringContext<'a> {
     ) -> Local {
         let local = self.mir_fn.add_local(kind, ty);
         if let Some(name) = name {
+            self.mir_fn.set_local_debug_name(local, name.clone());
             self.local_names.insert(name, local);
         }
         local
@@ -181,6 +182,21 @@ impl<'a> LoweringContext<'a> {
                 };
                 (new_left, new_right)
             }
+            (MIRType::UInt(a), MIRType::UInt(b)) => {
+                let target_bits = std::cmp::max(*a, *b);
+                let target_ty = MIRType::UInt(target_bits);
+                let new_left = if left_ty != target_ty {
+                    self.insert_cast(left, target_ty.clone())
+                } else {
+                    left
+                };
+                let new_right = if right_ty != target_ty {
+                    self.insert_cast(right, target_ty)
+                } else {
+                    right
+                };
+                (new_left, new_right)
+            }
 
             // 两个浮点数操作数：选择较大位宽的类型。
             (MIRType::Float(a), MIRType::Float(b)) => {
@@ -200,12 +216,12 @@ impl<'a> LoweringContext<'a> {
             }
 
             // 整数与浮点数混合：将整数转为浮点数。
-            (MIRType::Int(_), MIRType::Float(b)) => {
+            (MIRType::Int(_) | MIRType::UInt(_), MIRType::Float(b)) => {
                 let target_ty = MIRType::Float(*b);
                 let new_left = self.insert_cast(left, target_ty);
                 (new_left, right)
             }
-            (MIRType::Float(a), MIRType::Int(_)) => {
+            (MIRType::Float(a), MIRType::Int(_) | MIRType::UInt(_)) => {
                 let target_ty = MIRType::Float(*a);
                 let new_right = self.insert_cast(right, target_ty);
                 (left, new_right)
@@ -217,8 +233,18 @@ impl<'a> LoweringContext<'a> {
                 let new_left = self.insert_cast(left, target_ty);
                 (new_left, right)
             }
+            (MIRType::Bool, MIRType::UInt(b)) => {
+                let target_ty = MIRType::UInt(*b);
+                let new_left = self.insert_cast(left, target_ty);
+                (new_left, right)
+            }
             (MIRType::Int(a), MIRType::Bool) => {
                 let target_ty = MIRType::Int(*a);
+                let new_right = self.insert_cast(right, target_ty);
+                (left, new_right)
+            }
+            (MIRType::UInt(a), MIRType::Bool) => {
+                let target_ty = MIRType::UInt(*a);
                 let new_right = self.insert_cast(right, target_ty);
                 (left, new_right)
             }

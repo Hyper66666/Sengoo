@@ -504,6 +504,9 @@ fn matching_delim(open: u8) -> Option<u8> {
 }
 
 fn skip_quoted_literal(bytes: &[u8], start: usize) -> Option<usize> {
+    if let Some(next) = super::fstring_scan::skip_fstring_literal(bytes, start) {
+        return Some(next);
+    }
     let quote = *bytes.get(start)?;
     if quote != b'"' && quote != b'\'' {
         return None;

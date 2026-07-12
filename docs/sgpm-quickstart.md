@@ -362,15 +362,32 @@ packages. The debug profile maps to `sgc test` without `--release` (`sgc run
 -O 0` per test), and `--release` adds `sgc test --release` (`sgc run -O 2`).
 
 Direct `sgc test` discovers `tests/**/*.sg` plus any `[[test]]` entries in
-`Sengoo.toml`. A file with `main` remains one test case. A file without `main`
-can define zero-argument synchronous `test_*() -> i64` functions, which are
-reported and filtered independently as `path::function`. See
-[`docs/testing.md`](testing.md) for the current conventions and limits.
-Use `--filter TEXT`, `--exact NAME`, `--format json`, `--nocapture`,
+`Sengoo.toml`. Files under `tests/**/*.sg` that do not define `main` may expose
+top-level `def test_*` functions or functions annotated with `#[test]`; `sgc
+test` runs each such function through a generated harness named
+`path/to/file.sg::test_name`. The generated harness strips `#[test]` before
+calling the normal compiler path. If the source file defines top-level
+`setup()` or `teardown()` functions, each generated function-test harness runs
+`setup(); test; teardown(); return`, so teardown executes after bool/i64/unit
+test functions before the harness returns its status. Files that define `main`
+keep the legacy file-level behavior and do not use generated fixtures. Use
+`#[case("label", ARG)]` lines immediately before a function to run one generated
+test per case; case labels appear in names such as `tests/math.sg::non_negative[zero]`,
+and JSON output includes `parameters` entries for `case` and `arg0`. Use
+`--filter TEXT`, `--exact NAME`, `--format json`, `--nocapture`,
 `--manifest-path PATH`, and `--locked` (requires `sgpm` on `PATH` to run
-`sgpm update --check`). JSON output includes `schema_version`, `exit_status`,
-`capture`, per-test `duration_ms`, and an optional `function` field for
-function-discovered cases.
+`sgpm update --check`). JSON output includes
+`schema_version`, `exit_status`, `capture`, per-test `duration_ms`, and
+per-test `parameters` for parameterized cases. `--coverage` enables
+statement-line probes only for the generated test binaries. Each binary
+registers every executable source probe and records only probes reached at
+runtime, so uncalled functions and untaken multi-line branches remain
+uncovered. Reports aggregate unique `(source, line)` hits across cases and emit
+the v1 `covered_lines`, `executable_lines`, and `percent` fields in text and
+JSON output. Generated harness-only lines are excluded; normal builds and test
+runs emit no coverage calls and omit the optional `coverage` field. Coverage
+artifacts use a separate `.coverage` cache namespace and cannot be reused by a
+later ordinary run.
 
 Optional `sengoo-schema = 1` in `Sengoo.toml` is validated; unsupported values
 fail with an explicit incompatible-version error. `Sengoo.lock` uses
@@ -383,17 +400,6 @@ of silently skipping unreadable `.sg` files.
 
 Git dependencies are cloned into `target/sgpm/git/` under the selected package.
 Remote registry dependencies are unpacked into `target/sgpm/registry/`.
-The complete v1 HTTP contract, owner reservation model, yank behavior, and
-reference-server instructions are documented in
-[`docs/registry-protocol.md`](registry-protocol.md). For local development:
-
-```text
-sgpm registry serve --root target/sgpm-registry --listen 127.0.0.1:7878
-```
-
-Remote cache entries retain the archive checksum plus a deterministic extracted
-content hash. Locked commands repair modified or incomplete cache contents
-before invoking `sgc`.
 Incomplete cached packages are validated and downloaded again automatically.
 Failed downloads remove their staging directory instead of exposing a partial
 cache version. Git clones and refreshes also complete in sibling staging paths;

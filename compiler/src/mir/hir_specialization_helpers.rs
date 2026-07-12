@@ -1,4 +1,4 @@
-use crate::hir::{self, HIRBody, HIRExpr, HIRMatchArm, HIRParam, HIRStmt, HIRType, HIRTypeKind};
+use crate::hir::{self, HIRBody, HIRExpr, HIRMatchArm, HIRStmt, HIRType, HIRTypeKind};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn hir_type_is_placeholder_name(
@@ -84,6 +84,30 @@ pub(crate) fn substitute_hir_type(ty: &HIRType, subst: &HashMap<String, HIRType>
                 .map(|arg| substitute_hir_type(arg, subst))
                 .collect(),
         ),
+        HIRTypeKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } => {
+            if let HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    if let Some(replacement) =
+                        subst.get(&format!("<{base_name} as {trait_name}>::{name}"))
+                    {
+                        return replacement.clone();
+                    }
+                }
+            }
+            HIRType::new(HIRTypeKind::AssocProjection {
+                base: Box::new(substitute_hir_type(base, subst)),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            })
+        }
         _ => ty.clone(),
     }
 }
@@ -152,6 +176,7 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             func,
             args,
             site_lo,
+            expected_return_type,
         } => HIRExpr::Call {
             func: Box::new(substitute_hir_expr(func, subst)),
             args: args
@@ -159,6 +184,9 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
                 .map(|arg| substitute_hir_expr(arg, subst))
                 .collect(),
             site_lo: *site_lo,
+            expected_return_type: expected_return_type
+                .as_ref()
+                .map(|ty| substitute_hir_type(ty, subst)),
         },
         HIRExpr::EnumConstruct {
             enum_name,
@@ -178,6 +206,7 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
             receiver,
             method,
             args,
+            expected_return_type,
         } => HIRExpr::MethodCall {
             receiver: Box::new(substitute_hir_expr(receiver, subst)),
             method: method.clone(),
@@ -185,13 +214,23 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
                 .iter()
                 .map(|arg| substitute_hir_expr(arg, subst))
                 .collect(),
+            expected_return_type: expected_return_type
+                .as_ref()
+                .map(|ty| substitute_hir_type(ty, subst)),
         },
-        HIRExpr::Struct { name, fields } => HIRExpr::Struct {
+        HIRExpr::Struct {
+            name,
+            fields,
+            concrete_type,
+        } => HIRExpr::Struct {
             name: name.clone(),
             fields: fields
                 .iter()
                 .map(|(field, value)| (field.clone(), substitute_hir_expr(value, subst)))
                 .collect(),
+            concrete_type: concrete_type
+                .as_ref()
+                .map(|ty| substitute_hir_type(ty, subst)),
         },
         HIRExpr::Array(items) => HIRExpr::Array(
             items
@@ -273,6 +312,7 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
 
 pub(crate) fn substitute_hir_stmt(stmt: &HIRStmt, subst: &HashMap<String, HIRType>) -> HIRStmt {
     match stmt {
+        HIRStmt::Coverage { site_lo } => HIRStmt::Coverage { site_lo: *site_lo },
         HIRStmt::Let {
             name,
             symbol,
@@ -317,13 +357,7 @@ pub(crate) fn substitute_hir_function(
         params: function
             .params
             .iter()
-            .map(|param| {
-                HIRParam::new(
-                    param.name.clone(),
-                    param.symbol,
-                    substitute_hir_type(&param.ty, subst),
-                )
-            })
+            .map(|param| param.with_type(substitute_hir_type(&param.ty, subst)))
             .collect(),
         return_type: substitute_hir_type(&function.return_type, subst),
         precondition: function

@@ -132,8 +132,10 @@ pub(crate) use native_toolchain::{runtime_bundle_fingerprint, runtime_source_bun
 pub(crate) use pipeline::{compile_source, compile_source_with_phase_timings};
 pub(crate) use pipeline::{
     compile_source_to_llvm_file_with_phase_timings,
-    compile_source_to_llvm_file_with_phase_timings_with_mode, maybe_print_phase_timings,
-    set_contract_runtime_checks_override, set_large_project_mode_override, user_source_base_offset,
+    compile_source_to_llvm_file_with_phase_timings_with_mode,
+    compile_source_to_llvm_file_with_phase_timings_with_mode_and_coverage,
+    maybe_print_phase_timings, set_contract_runtime_checks_override,
+    set_large_project_mode_override, user_source_base_offset,
 };
 #[cfg(test)]
 pub(crate) use reflection::source_requests_reflection;

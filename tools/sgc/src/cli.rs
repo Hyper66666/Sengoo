@@ -130,6 +130,10 @@ pub(crate) enum Commands {
         #[arg(long, value_enum, default_value_t = RunEngine::Auto)]
         engine: RunEngine,
 
+        /// Execute the supported primitive numeric subset with Cranelift JIT.
+        #[arg(long = "cranelift-fast-jit", conflicts_with = "daemon")]
+        cranelift_fast_jit: bool,
+
         /// Ignore cached run artifacts and rebuild.
         #[arg(long)]
         force_rebuild: bool,
@@ -216,6 +220,10 @@ pub(crate) enum Commands {
         /// Use release optimization for test runs.
         #[arg(long)]
         release: bool,
+
+        /// Emit a line-coverage summary for discovered test source files.
+        #[arg(long)]
+        coverage: bool,
 
         /// Manifest path used to locate the package root.
         #[arg(long = "manifest-path")]
@@ -424,6 +432,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             opt_level,
             contract_checks,
             engine,
+            cranelift_fast_jit,
             force_rebuild,
             low_memory,
             frontend_jobs,
@@ -469,6 +478,20 @@ async fn dispatch(command: Commands) -> Result<()> {
                         );
                     }
                 }
+            }
+            if cranelift_fast_jit {
+                if !args.is_empty() {
+                    return Err(miette::miette!(
+                        "cranelift fast-jit does not support program arguments"
+                    ));
+                }
+                let source = std::fs::read_to_string(&input).map_err(|error| {
+                    miette::miette!("failed to read Cranelift input `{input}`: {error}")
+                })?;
+                let value =
+                    crate::cranelift_fast_jit::run_with_cranelift_fast_jit(&source, opt_level)?;
+                println!("{value}");
+                return Ok(());
             }
             if daemon {
                 let addr = resolve_daemon_addr(daemon_addr.as_deref());
@@ -516,6 +539,7 @@ async fn dispatch(command: Commands) -> Result<()> {
             format,
             nocapture,
             release,
+            coverage,
             manifest_path,
             locked,
         } => {
@@ -528,6 +552,7 @@ async fn dispatch(command: Commands) -> Result<()> {
                 format,
                 nocapture,
                 release,
+                coverage,
                 locked,
                 manifest_path: manifest,
             })

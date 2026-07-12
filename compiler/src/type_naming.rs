@@ -3,7 +3,7 @@ use crate::mir::MIRType;
 
 pub(crate) fn hir_type_prefix(ty: &HIRType) -> String {
     match &ty.kind {
-        HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
+        HIRTypeKind::Int(ik) => ik.to_string(),
         HIRTypeKind::Float(fk) => format!("f{}", fk.bits()),
         HIRTypeKind::Bool => "bool".to_string(),
         HIRTypeKind::Unit => "unit".to_string(),
@@ -14,7 +14,7 @@ pub(crate) fn hir_type_prefix(ty: &HIRType) -> String {
 
 pub(crate) fn hir_type_instance_name(ty: &HIRType) -> String {
     match &ty.kind {
-        HIRTypeKind::Int(ik) => format!("i{}", ik.bits()),
+        HIRTypeKind::Int(ik) => ik.to_string(),
         HIRTypeKind::Float(fk) => format!("f{}", fk.bits()),
         HIRTypeKind::Bool => "bool".to_string(),
         HIRTypeKind::Unit => "unit".to_string(),
@@ -41,6 +41,7 @@ pub(crate) fn hir_type_instance_name(ty: &HIRType) -> String {
 pub(crate) fn mir_type_instance_name(ty: &MIRType) -> String {
     match ty {
         MIRType::Int(bits) => format!("i{}", bits),
+        MIRType::UInt(bits) => format!("u{}", bits),
         MIRType::Float(bits) => format!("f{}", bits),
         MIRType::Bool => "bool".to_string(),
         MIRType::Unit => "unit".to_string(),

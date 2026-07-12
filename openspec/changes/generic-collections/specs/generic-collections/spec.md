@@ -27,6 +27,20 @@ types, own their elements, and drop them automatically.
 - **THEN** insertion moves the value in, reads borrow or clone it, and removal
   moves it back out to the caller
 
+#### Scenario: Generic storage preserves layout and exact Drop
+
+- **WHEN** a collection stores an over-aligned user struct containing owned
+  fields and grows, replaces, removes, clears, or drops entries
+- **THEN** each element remains correctly aligned and readable
+- **AND** every still-owned value is dropped exactly once
+- **AND** allocation or callback failure leaves the collection valid
+
+#### Scenario: Mutation cannot invalidate a live element borrow
+
+- **WHEN** code holds an element borrow and attempts a collection mutation that
+  may move or reallocate storage
+- **THEN** borrow checking rejects the mutation until the borrow ends
+
 ### Requirement: Iterator adapters SHALL be available over collections
 
 The standard library SHALL provide `map`, `filter`, `fold`, `enumerate`, `take`,

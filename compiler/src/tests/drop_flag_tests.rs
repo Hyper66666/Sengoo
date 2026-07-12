@@ -313,6 +313,77 @@ def main() -> i64 {
 }
 
 #[test]
+fn option_drop_is_conditioned_on_the_active_payload_tag() {
+    let none_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let absent: Option<Resource> = option_none();
+    0
+}
+"#,
+    );
+    let none_main = function(&none_mir, "main");
+    assert!(
+        named_drop_calls(none_main, "Resource_Drop_drop").is_empty(),
+        "None<Resource> must not directly drop its inactive payload"
+    );
+    let helper = function(&none_mir, "Option_Resource_Drop_drop");
+    assert!(has_guard_terminator(helper));
+    assert_eq!(
+        named_drop_calls(helper, "Resource_Drop_drop").len(),
+        1,
+        "the conditional helper must own the only payload drop"
+    );
+
+    let some_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let present: Option<Resource> = option_some(Resource { id: 1 });
+    0
+}
+"#,
+    );
+    assert_eq!(
+        some_mir
+            .iter()
+            .filter(|function| function.name == "Option_Resource_Drop_drop")
+            .count(),
+        1,
+        "one concrete Option helper should be synthesized"
+    );
+
+    let nested_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let inner: Option<Resource> = option_none();
+    let nested: Option<Option<Resource>> = option_some(inner);
+    0
+}
+"#,
+    );
+    let outer = function(&nested_mir, "Option_Option_Resource_Drop_drop");
+    assert_eq!(
+        named_drop_calls(outer, "Option_Resource_Drop_drop").len(),
+        1,
+        "the outer active payload must delegate to the inner conditional helper"
+    );
+    assert_eq!(
+        nested_mir
+            .iter()
+            .filter(|function| function.name == "Option_Resource_Drop_drop")
+            .count(),
+        1,
+        "nested Option helpers must be deduplicated"
+    );
+}
+
+#[test]
 fn partial_move_drops_only_the_remaining_composite_field() {
     let mir = compile_with_owned_string(
         r#"
@@ -1160,5 +1231,138 @@ def main() -> i64 {
         named_drop_calls(main_fn, "Resource_Drop_drop").len(),
         2,
         "try-block Resource must be dropped on both success and propagated failure paths"
+    );
+}
+
+#[test]
+fn implicit_return_moves_owned_aggregate_without_dropping_in_callee() {
+    let mir = compile_to_mir(
+        r#"
+struct Resource {
+    handle: i64,
+}
+
+impl Drop for Resource {
+    def drop(&mut self) {
+    }
+}
+
+def make_resource() -> Resource {
+    Resource { handle: 7 }
+}
+
+def main() -> i64 {
+    let resource = make_resource();
+    resource.handle
+}
+"#,
+    )
+    .expect("owned aggregate return should compile to MIR");
+    let make_resource = function(&mir, "make_resource");
+    let main_fn = function(&mir, "main");
+
+    assert!(
+        named_drop_calls(make_resource, "Resource_Drop_drop").is_empty(),
+        "the returned aggregate is moved out of the callee and must not be dropped there"
+    );
+    assert_eq!(
+        named_drop_calls(main_fn, "Resource_Drop_drop").len(),
+        1,
+        "the caller-owned binding should be dropped exactly once"
+    );
+}
+
+#[test]
+fn concrete_generic_method_return_moves_owned_aggregate_without_early_drop() {
+    let mir = compile_to_mir(
+        r#"
+struct Shared<T> {
+    handle: i64,
+    marker: T,
+}
+
+impl<T> Drop for Shared<T> {
+    def drop(&mut self) {
+    }
+}
+
+impl Shared<i64> {
+    def clone_owned(&self) -> Shared<i64> {
+        Shared { handle: self.handle, marker: 0 }
+    }
+
+    def clone_owned_mut(&mut self) -> Shared<i64> {
+        Shared { handle: self.handle, marker: 0 }
+    }
+}
+
+def main() -> i64 {
+    let mut original = Shared { handle: 7, marker: 0 };
+    let cloned = original.clone_owned();
+    let cloned_mut = original.clone_owned_mut();
+    cloned.handle + cloned_mut.handle
+}
+"#,
+    )
+    .expect("generic owning method return should compile to MIR");
+    let clone_owned = function(&mir, "Shared_i64_clone_owned");
+    let clone_owned_mut = function(&mir, "Shared_i64_clone_owned_mut");
+    let main_fn = function(&mir, "main");
+
+    assert!(
+        named_drop_calls(clone_owned, "Shared_i64_Drop_drop").is_empty(),
+        "the method return value must not be dropped before control returns to the caller:\n{clone_owned:#?}"
+    );
+    assert!(
+        named_drop_calls(clone_owned_mut, "Shared_i64_Drop_drop").is_empty(),
+        "an &mut self receiver is borrowed and must not be dropped by the callee:\n{clone_owned_mut:#?}"
+    );
+    assert_eq!(
+        named_drop_calls(main_fn, "Shared_i64_Drop_drop").len(),
+        3,
+        "all caller-owned Shared values should be dropped exactly once"
+    );
+}
+
+#[test]
+fn borrowed_result_predicate_does_not_drop_owned_success_payload() {
+    let ir = compile_to_ir(
+        r#"
+struct Result<T, E> { is_ok: bool, value: T, error: E }
+struct Owned { handle: i64 }
+
+impl Drop for Owned {
+    def drop(&mut self) { }
+}
+
+impl<T, E> Result<T, E> {
+    def is_err(&self) -> bool { !self.is_ok }
+}
+
+def inspect_then_move(result: Result<Owned, i64>) -> i64 {
+    let failed = result.is_err();
+    let payload = result.value;
+    if failed { 0 } else { payload.handle }
+}
+
+def main() -> i64 { 0 }
+"#,
+    )
+    .expect("a borrowed Result predicate should leave its owned payload movable");
+
+    let predicate = ir
+        .split("; Function: Result_Owned_i64_is_err")
+        .nth(1)
+        .expect("specialized Result::is_err should be emitted")
+        .split("; Function:")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        !predicate.contains("Owned_Drop_drop"),
+        "the borrowed predicate must not drop the success payload:\n{predicate}"
+    );
+    assert!(
+        ir.contains("Owned_Drop_drop"),
+        "the payload remains owned by the caller and should still receive Drop glue:\n{ir}"
     );
 }

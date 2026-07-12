@@ -89,11 +89,35 @@ pub struct HIRParam {
     pub name: String,
     pub symbol: SymbolId,
     pub ty: HIRType,
+    pub is_borrowed: bool,
 }
 
 impl HIRParam {
     pub fn new(name: String, symbol: SymbolId, ty: HIRType) -> Self {
-        Self { name, symbol, ty }
+        Self {
+            name,
+            symbol,
+            ty,
+            is_borrowed: false,
+        }
+    }
+
+    pub fn borrowed(name: String, symbol: SymbolId, ty: HIRType) -> Self {
+        Self {
+            name,
+            symbol,
+            ty,
+            is_borrowed: true,
+        }
+    }
+
+    pub fn with_type(&self, ty: HIRType) -> Self {
+        Self {
+            name: self.name.clone(),
+            symbol: self.symbol,
+            ty,
+            is_borrowed: self.is_borrowed,
+        }
     }
 }
 
@@ -173,6 +197,7 @@ pub struct HIRImpl {
     pub target_type: HIRType,
     pub trait_name: Option<String>,
     pub trait_args: Vec<HIRType>,
+    pub associated_types: Vec<(String, HIRType)>,
     pub items: Vec<HIRFunction>,
 }
 

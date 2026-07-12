@@ -15,6 +15,9 @@ struct Lua54 {
     handle: i64,
 }
 
+impl !Send for Lua54 {}
+impl !Sync for Lua54 {}
+
 def lua54_last_error_code() -> i64 {
     sengoo_lua54_last_error_code()
 }

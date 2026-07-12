@@ -1,4 +1,5 @@
 use super::JITCodegen;
+use crate::codegen::IntegerOverflowMode;
 use crate::mir::async_dispatch_synthesis_helpers::{
     select_cancel_n_winner_runtime_declaration, select_cancel_n_winner_runtime_function_name,
     select_cancel_winner_runtime_declaration, select_cancel_winner_runtime_function_name,
@@ -19,6 +20,31 @@ impl JITCodegen {
             .push_str("declare i32 @printf(i8*, ...)\n");
         self.extern_decls
             .push_str("declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64)\n");
+        for float_width in [32_u8, 64] {
+            let float_ty = if float_width == 32 { "float" } else { "double" };
+            for int_width in [8_u8, 16, 32, 64] {
+                for operation in ["fptosi", "fptoui"] {
+                    self.extern_decls.push_str(&format!(
+                        "declare i{int_width} @llvm.{operation}.sat.i{int_width}.f{float_width}({float_ty})\n"
+                    ));
+                }
+            }
+        }
+        if self.integer_overflow_mode == IntegerOverflowMode::DebugChecked {
+            for width in [8_u8, 16, 32, 64] {
+                for signedness in ["s", "u"] {
+                    for op in ["add", "sub", "mul"] {
+                        self.extern_decls.push_str(&format!(
+                            "declare {{ i{width}, i1 }} @llvm.{signedness}{op}.with.overflow.i{width}(i{width}, i{width})\n"
+                        ));
+                    }
+                }
+            }
+            self.extern_decls
+                .push_str("declare void @sengoo_panic_integer_overflow(i64)\n");
+            self.extern_decls
+                .push_str("declare void @sengoo_panic_division_by_zero(i64)\n");
+        }
         self.extern_decls.push_str("declare i8* @malloc(i64)\n");
         self.extern_decls.push_str("declare void @free(i8*)\n");
         self.extern_decls

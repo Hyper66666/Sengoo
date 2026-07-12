@@ -16,7 +16,7 @@ impl JITCodegen {
     pub(super) fn get_type_size(&self, ty: &MIRType) -> u64 {
         match ty {
             MIRType::Bool => 1,
-            MIRType::Int(n) => (*n as u64) / 8,
+            MIRType::Int(n) | MIRType::UInt(n) => (*n as u64) / 8,
             MIRType::Float(n) => (*n as u64) / 8,
             MIRType::Ptr(_) | MIRType::Ref(_) => 8, // 鎸囬拡澶у皬
             MIRType::Array(elem, len) => self.get_type_size(elem) * len,

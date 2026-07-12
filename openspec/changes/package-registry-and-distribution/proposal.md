@@ -1,12 +1,13 @@
 ## Why
 
-`sgpm` supports local-path/git deps, lockfiles, workspaces, and publish
-*dry-run*, but there is no public package registry and no prebuilt binary
-distribution. Toolchain archives exist for Windows/Linux as dry-run only, macOS
-is deferred, and no real release tag has shipped. Mainstream languages have a
-central registry (crates.io / PyPI / npm) and one-command installable toolchains.
-Without this, third parties cannot share or consume packages and cannot install
-Sengoo easily.
+`sgpm` has advanced beyond the original baseline: it now contains semver
+registry requirements, local/remote registry configuration, aliases,
+multiversion lockfile data, remote publish/download/cache paths, and checksum
+verification tests. The remaining gap is product closure: a protocol-conformant
+reference server, authenticated ownership/yank behavior, full publish-to-run
+e2e, malicious archive defenses, real tagged releases, and macOS install
+evidence. The task list must be reconciled with code before more resolver logic
+is added.
 
 ## Proposal
 
@@ -36,3 +37,5 @@ Sengoo easily.
 - Operating a production hosted registry service (this delivers the protocol +
   reference server; hosting/ops is a separate concern).
 - A package web UI / search frontend.
+- Treating mock HTTP upload/download tests as proof that the reference server or
+  a production-hosted registry exists.

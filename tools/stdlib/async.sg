@@ -2,6 +2,13 @@ extern "C" {
     fn sengoo_async_runtime_enable_thread_pool(worker_count: i64) -> i64;
     fn sengoo_async_runtime_thread_pool_enabled() -> bool;
     fn sengoo_async_spawn_blocking_i64__start(work_ptr: i64) -> i64;
+    fn sengoo_async_shared_counter_new_i64(value: i64) -> i64;
+    fn sengoo_async_shared_counter_clone_i64(handle: i64) -> i64;
+    fn sengoo_async_shared_counter_get_i64(handle: i64) -> i64;
+    fn sengoo_async_shared_counter_drop(handle: i64);
+    fn sengoo_async_shared_counter_spawn_add_i64(handle: i64, delta: i64, repetitions: i64) -> i64;
+    fn sengoo_async_shared_counter_join_i64(handle: i64) -> i64;
+    fn sengoo_async_shared_counter_job_drop(handle: i64);
 
     fn sengoo_async_channel_bounded_i64(capacity: i64) -> i64;
     fn sengoo_async_channel_pair_sender(pair_handle: i64) -> i64;
@@ -18,6 +25,28 @@ extern "C" {
     fn sengoo_async_mutex_drop(mutex_handle: i64);
     fn sengoo_async_mutex_lock_i64__start(mutex_handle: i64) -> i64;
     fn sengoo_async_mutex_unlock_i64(mutex_handle: i64, value: i64) -> i64;
+    fn sengoo_async_mutex_guard_get_i64(mutex_handle: i64) -> i64;
+    fn sengoo_async_mutex_guard_set_i64(mutex_handle: i64, value: i64) -> i64;
+    fn sengoo_async_mutex_guard_unlock_i64(mutex_handle: i64) -> i64;
+
+    fn sengoo_async_rwlock_new_i64(value: i64) -> i64;
+    fn sengoo_async_rwlock_close(lock_handle: i64);
+    fn sengoo_async_rwlock_drop(lock_handle: i64);
+    fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_read_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
+    fn sengoo_async_rwlock_write_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
+    fn sengoo_async_rwlock_write_guard_set_i64(lock_handle: i64, guard_id: i64, value: i64) -> i64;
+    fn sengoo_async_rwlock_read_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
+    fn sengoo_async_rwlock_write_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
+
+    fn sengoo_arc_new_i64(value: i64) -> i64;
+    fn sengoo_arc_new_bool(value: i64) -> i64;
+    fn sengoo_arc_clone(handle: i64) -> i64;
+    fn sengoo_arc_strong_count(handle: i64) -> i64;
+    fn sengoo_arc_get_i64(handle: i64) -> i64;
+    fn sengoo_arc_get_bool(handle: i64) -> i64;
+    fn sengoo_arc_drop(handle: i64);
 }
 
 struct ChannelSendOutcome {
@@ -53,6 +82,172 @@ struct MutexI64 {
     handle: i64,
 }
 
+struct MutexGuardI64 {
+    mutex_handle: i64,
+    value: i64,
+    active: bool,
+}
+
+struct RwLockI64 {
+    handle: i64,
+}
+
+struct RwLockReadGuardI64 {
+    lock_handle: i64,
+    guard_id: i64,
+    active: bool,
+}
+
+struct RwLockWriteGuardI64 {
+    lock_handle: i64,
+    guard_id: i64,
+    active: bool,
+}
+
+impl !Send for MutexGuardI64 {}
+impl !Sync for MutexGuardI64 {}
+impl !Send for RwLockReadGuardI64 {}
+impl !Sync for RwLockReadGuardI64 {}
+impl !Send for RwLockWriteGuardI64 {}
+impl !Sync for RwLockWriteGuardI64 {}
+
+struct Arc<T> {
+    handle: i64,
+    marker: T,
+}
+
+// Pinned Arc<Mutex<i64>> transition surface until generic runtime payloads land.
+struct ArcMutex<T> {
+    handle: i64,
+    marker: T,
+}
+
+struct SharedCounterJobI64 {
+    handle: i64,
+}
+
+def arc_new_i64(value: i64) -> Arc<i64> {
+    Arc { handle: sengoo_arc_new_i64(value), marker: 0 }
+}
+
+def arc_new_bool(value: bool) -> Arc<bool> {
+    Arc { handle: sengoo_arc_new_bool(if value { 1 } else { 0 }), marker: false }
+}
+
+impl<T> Arc<T> {
+    def strong_count(&self) -> i64 {
+        sengoo_arc_strong_count(self.handle)
+    }
+}
+
+impl Arc<i64> {
+    def clone_arc(&self) -> Arc<i64> {
+        Arc { handle: sengoo_arc_clone(self.handle), marker: 0 }
+    }
+
+    def get(&self) -> i64 {
+        sengoo_arc_get_i64(self.handle)
+    }
+}
+
+impl Arc<bool> {
+    def clone_arc(&self) -> Arc<bool> {
+        Arc { handle: sengoo_arc_clone(self.handle), marker: false }
+    }
+
+    def get(&self) -> bool {
+        sengoo_arc_get_bool(self.handle) != 0
+    }
+}
+
+impl<T> Drop for Arc<T> {
+    def drop(&mut self) {
+        sengoo_arc_drop(self.handle);
+    }
+}
+
+def arc_mutex_new_i64(value: i64) -> ArcMutex<i64> {
+    ArcMutex { handle: sengoo_async_shared_counter_new_i64(value), marker: 0 }
+}
+
+impl ArcMutex<i64> {
+    def clone_arc_mutex(&self) -> ArcMutex<i64> {
+        ArcMutex { handle: sengoo_async_shared_counter_clone_i64(self.handle), marker: 0 }
+    }
+
+    def get(&self) -> i64 {
+        sengoo_async_shared_counter_get_i64(self.handle)
+    }
+}
+
+impl<T> Drop for ArcMutex<T> {
+    def drop(&mut self) {
+        sengoo_async_shared_counter_drop(self.handle);
+    }
+}
+
+impl SharedCounterJobI64 {
+    def join(&self) -> i64 {
+        sengoo_async_shared_counter_join_i64(self.handle)
+    }
+}
+
+impl Drop for SharedCounterJobI64 {
+    def drop(&mut self) {
+        sengoo_async_shared_counter_job_drop(self.handle);
+    }
+}
+
+impl MutexGuardI64 {
+    def get(&self) -> i64 {
+        sengoo_async_mutex_guard_get_i64(self.mutex_handle)
+    }
+
+    def set(&self, value: i64) {
+        sengoo_async_mutex_guard_set_i64(self.mutex_handle, value);
+    }
+}
+
+impl Drop for MutexGuardI64 {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_mutex_guard_unlock_i64(self.mutex_handle);
+        }
+    }
+}
+
+impl RwLockReadGuardI64 {
+    def get(&self) -> i64 {
+        sengoo_async_rwlock_read_guard_get_i64(self.lock_handle, self.guard_id)
+    }
+}
+
+impl Drop for RwLockReadGuardI64 {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_rwlock_read_guard_unlock_i64(self.lock_handle, self.guard_id);
+        }
+    }
+}
+
+impl RwLockWriteGuardI64 {
+    def get(&self) -> i64 {
+        sengoo_async_rwlock_write_guard_get_i64(self.lock_handle, self.guard_id)
+    }
+
+    def set(&self, value: i64) {
+        sengoo_async_rwlock_write_guard_set_i64(self.lock_handle, self.guard_id, value);
+    }
+}
+
+impl Drop for RwLockWriteGuardI64 {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_rwlock_write_guard_unlock_i64(self.lock_handle, self.guard_id);
+        }
+    }
+}
+
 def runtime_enable_thread_pool(worker_count: i64) -> Result<i64, i64> {
     let raw = sengoo_async_runtime_enable_thread_pool(worker_count);
     if raw >= 0 {
@@ -75,6 +270,39 @@ def spawn_blocking_i64(work: fn() -> i64) -> Result<i64, i64> {
             Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
         } else {
             Result { is_ok: true, value: handle, error: 0 }
+        }
+    }
+}
+
+def spawn_shared_counter_i64(
+    shared: ArcMutex<i64>,
+    delta: i64,
+    repetitions: i64,
+) -> Result<SharedCounterJobI64, i64> {
+    if repetitions < 0 {
+        Result {
+            is_ok: false,
+            value: SharedCounterJobI64 { handle: 0 },
+            error: STATUS_INVALID_ARGUMENT(),
+        }
+    } else {
+        let handle = sengoo_async_shared_counter_spawn_add_i64(
+            shared.handle,
+            delta,
+            repetitions,
+        );
+        if handle == 0 {
+            Result {
+                is_ok: false,
+                value: SharedCounterJobI64 { handle: 0 },
+                error: STATUS_UNSUPPORTED(),
+            }
+        } else {
+            Result {
+                is_ok: true,
+                value: SharedCounterJobI64 { handle: handle },
+                error: 0,
+            }
         }
     }
 }
@@ -140,11 +368,86 @@ def mutex_lock_async(mutex: MutexI64) -> i64 {
     sengoo_async_mutex_lock_i64__start(mutex.handle)
 }
 
+async def mutex_lock_guard_i64(mutex: MutexI64) -> Result<MutexGuardI64, i64> {
+    let locked = await mutex_lock_async(mutex);
+    if locked.is_ok {
+        Result {
+            is_ok: true,
+            value: MutexGuardI64 {
+                mutex_handle: mutex.handle,
+                value: locked.value,
+                active: true,
+            },
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: MutexGuardI64 { mutex_handle: 0, value: 0, active: false },
+            error: locked.error,
+        }
+    }
+}
+
 def mutex_unlock_i64(mutex: MutexI64, value: i64) -> Result<i64, i64> {
     let raw = sengoo_async_mutex_unlock_i64(mutex.handle, value);
     if raw >= 0 {
         Result { is_ok: true, value: raw, error: 0 }
     } else {
         Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+    }
+}
+
+def rwlock_new_i64(value: i64) -> RwLockI64 {
+    RwLockI64 { handle: sengoo_async_rwlock_new_i64(value) }
+}
+
+def rwlock_close(lock: RwLockI64) {
+    sengoo_async_rwlock_close(lock.handle);
+}
+
+def rwlock_drop(lock: RwLockI64) {
+    sengoo_async_rwlock_drop(lock.handle);
+}
+
+def rwlock_try_read_guard_i64(lock: RwLockI64) -> Result<RwLockReadGuardI64, i64> {
+    let raw = sengoo_async_rwlock_try_read_i64(lock.handle);
+    if raw > 0 {
+        Result {
+            is_ok: true,
+            value: RwLockReadGuardI64 {
+                lock_handle: lock.handle,
+                guard_id: raw,
+                active: true,
+            },
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: RwLockReadGuardI64 { lock_handle: 0, guard_id: 0, active: false },
+            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
+        }
+    }
+}
+
+def rwlock_try_write_guard_i64(lock: RwLockI64) -> Result<RwLockWriteGuardI64, i64> {
+    let raw = sengoo_async_rwlock_try_write_i64(lock.handle);
+    if raw > 0 {
+        Result {
+            is_ok: true,
+            value: RwLockWriteGuardI64 {
+                lock_handle: lock.handle,
+                guard_id: raw,
+                active: true,
+            },
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: RwLockWriteGuardI64 { lock_handle: 0, guard_id: 0, active: false },
+            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
+        }
     }
 }

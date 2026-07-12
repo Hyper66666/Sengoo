@@ -92,8 +92,16 @@ fn collect_mir_call_targets(
     for block in &mir_fn.basic_blocks {
         for inst_id in &block.instructions {
             let inst = mir_fn.instruction(*inst_id);
-            if let MirInstruction::Call { func, .. } = inst {
-                if let Some(&idx) = index_by_name.get(func) {
+            let target = match inst {
+                MirInstruction::Call { func, .. } => Some(func.as_str()),
+                MirInstruction::Assign {
+                    value: sengoo_compiler::mir::MirConstant::GlobalRef(name),
+                    ..
+                } => Some(name.as_str()),
+                _ => None,
+            };
+            if let Some(target) = target {
+                if let Some(&idx) = index_by_name.get(target) {
                     if seen.insert(idx) {
                         targets.push(idx);
                     }
@@ -131,4 +139,41 @@ fn collect_mir_call_targets(
         }
     }
     targets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sengoo_compiler::mir::{LocalKind, MIRType, MirConstant, MIR_UNIT};
+
+    #[test]
+    fn global_function_references_keep_callbacks_reachable() {
+        let mut main = MirFunction::new("main".to_string(), vec![], MIR_UNIT);
+        let callback_ptr = main.add_local(
+            LocalKind::Temp,
+            MIRType::Fn {
+                params: vec![],
+                ret: Box::new(MIR_UNIT),
+            },
+        );
+        main.push_inst_to_block(
+            main.start_block,
+            MirInstruction::Assign {
+                destination: callback_ptr,
+                value: MirConstant::GlobalRef("callback".to_string()),
+            },
+        );
+        let callback = MirFunction::new("callback".to_string(), vec![], MIR_UNIT);
+        let dead = MirFunction::new("dead".to_string(), vec![], MIR_UNIT);
+        let mut functions = vec![main, callback, dead];
+
+        assert_eq!(prune_unreachable_mir_functions(&mut functions), 1);
+        assert_eq!(
+            functions
+                .iter()
+                .map(|function| function.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["main", "callback"]
+        );
+    }
 }

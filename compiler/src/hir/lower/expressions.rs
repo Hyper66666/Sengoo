@@ -2,12 +2,40 @@ use super::enum_index;
 use crate::ast;
 use crate::symbol::SymbolId;
 use crate::typeck::{SymbolKind, TyKind, TypeEnv};
+use std::cell::Cell;
 
 use super::super::{
     HIRBinaryOp, HIRBody, HIRExpr, HIRLiteral, HIRMatchArm, HIRPattern, HIRStmt, HIRType,
     HIRUnaryOp,
 };
-use super::types::{infer_expr_type, lower_type};
+use super::types::{infer_expr_type, lower_checked_type, lower_type};
+
+thread_local! {
+    static COVERAGE_MARKERS_ENABLED: Cell<bool> = const { Cell::new(false) };
+}
+
+struct CoverageMarkerReset<'a> {
+    cell: &'a Cell<bool>,
+    previous: bool,
+}
+
+impl Drop for CoverageMarkerReset<'_> {
+    fn drop(&mut self) {
+        self.cell.set(self.previous);
+    }
+}
+
+pub(super) fn with_coverage_markers<T>(enabled: bool, f: impl FnOnce() -> T) -> T {
+    COVERAGE_MARKERS_ENABLED.with(|cell| {
+        let previous = cell.replace(enabled);
+        let _reset = CoverageMarkerReset { cell, previous };
+        f()
+    })
+}
+
+fn coverage_markers_enabled() -> bool {
+    COVERAGE_MARKERS_ENABLED.with(Cell::get)
+}
 
 /// 解析整数字面量
 /// 降低 AST 块到 HIR 块
@@ -40,6 +68,11 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                 value,
                 is_mut,
             } => {
+                if coverage_markers_enabled() {
+                    hir_body.add_stmt(HIRStmt::Coverage {
+                        site_lo: stmt.span.lo,
+                    });
+                }
                 // 如果有显式类型注解，使用它；否则从值表达式推断
                 let hir_ty = if let Some(type_annotation) = ty {
                     lower_type(type_annotation, type_env)
@@ -60,6 +93,11 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
                 });
             }
             ast::StmtKind::Const { name, ty, value } => {
+                if coverage_markers_enabled() {
+                    hir_body.add_stmt(HIRStmt::Coverage {
+                        site_lo: stmt.span.lo,
+                    });
+                }
                 let hir_ty = lower_type(ty, type_env);
                 let hir_value =
                     lower_expr(value.as_ref(), type_env).unwrap_or(HIRExpr::Lit(HIRLiteral::Null));
@@ -73,6 +111,11 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
             }
             ast::StmtKind::Expr(expr) => {
                 if let Ok(hir_expr) = lower_expr(expr, type_env) {
+                    if coverage_markers_enabled() {
+                        hir_body.add_stmt(HIRStmt::Coverage {
+                            site_lo: stmt.span.lo,
+                        });
+                    }
                     hir_body.add_stmt(HIRStmt::Expr(hir_expr));
                 }
             }
@@ -84,6 +127,11 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
         if let Some(stmt) = stmts.get(last_idx) {
             if let ast::StmtKind::Expr(expr) = &stmt.kind {
                 if let Ok(hir_expr) = lower_expr(expr, type_env) {
+                    if coverage_markers_enabled() {
+                        hir_body.add_stmt(HIRStmt::Coverage {
+                            site_lo: stmt.span.lo,
+                        });
+                    }
                     hir_body.set_expr(hir_expr);
                 }
             }
@@ -152,6 +200,9 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                             // 将表达式包装在块中
                             let mut body = HIRBody::new();
                             if let Ok(expr) = lower_expr(e, type_env) {
+                                if coverage_markers_enabled() {
+                                    body.add_stmt(HIRStmt::Coverage { site_lo: e.span.lo });
+                                }
                                 body.set_expr(expr);
                             }
                             Some(Box::new(body))
@@ -205,16 +256,45 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
             }
         }
         ast::ExprKind::Call { func, args } => {
-            if let ast::ExprKind::Path(path) = &func.kind {
-                if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
-                    HIRExpr::EnumConstruct {
-                        enum_name,
-                        variant_name,
-                        discriminant,
-                        args: args
-                            .iter()
-                            .filter_map(|arg| lower_expr(arg, type_env).ok())
-                            .collect(),
+            if let Some(resolved) = type_env.resolved_associated_function(expr.span.lo) {
+                HIRExpr::Call {
+                    func: Box::new(HIRExpr::Var {
+                        name: resolved.to_string(),
+                        symbol: SymbolId::INVALID,
+                    }),
+                    args: args
+                        .iter()
+                        .filter_map(|arg| lower_expr(arg, type_env).ok())
+                        .collect(),
+                    site_lo: Some(expr.span.lo),
+                    expected_return_type: type_env
+                        .resolved_call_return_type(expr.span.lo)
+                        .map(lower_checked_type),
+                }
+            } else {
+                if let ast::ExprKind::Path(path) = &func.kind {
+                    if let Some((enum_name, variant_name, discriminant)) = enum_constructor(path) {
+                        HIRExpr::EnumConstruct {
+                            enum_name,
+                            variant_name,
+                            discriminant,
+                            args: args
+                                .iter()
+                                .filter_map(|arg| lower_expr(arg, type_env).ok())
+                                .collect(),
+                        }
+                    } else {
+                        HIRExpr::Call {
+                            func: Box::new(lower_expr(func, type_env)?),
+                            args: args
+                                .iter()
+                                .filter_map(|arg| lower_expr(arg, type_env).ok())
+                                .collect(),
+                            site_lo: Some(expr.span.lo),
+                            expected_return_type: type_env
+                                .resolved_call_return_type(expr.span.lo)
+                                .map(lower_checked_type),
+                        }
                     }
                 } else {
                     HIRExpr::Call {
@@ -224,16 +304,10 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                             .filter_map(|arg| lower_expr(arg, type_env).ok())
                             .collect(),
                         site_lo: Some(expr.span.lo),
+                        expected_return_type: type_env
+                            .resolved_call_return_type(expr.span.lo)
+                            .map(lower_checked_type),
                     }
-                }
-            } else {
-                HIRExpr::Call {
-                    func: Box::new(lower_expr(func, type_env)?),
-                    args: args
-                        .iter()
-                        .filter_map(|arg| lower_expr(arg, type_env).ok())
-                        .collect(),
-                    site_lo: Some(expr.span.lo),
                 }
             }
         }
@@ -248,6 +322,9 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                 .iter()
                 .filter_map(|a| lower_expr(a, type_env).ok())
                 .collect(),
+            expected_return_type: type_env
+                .resolved_method_return_type(expr.span)
+                .map(lower_checked_type),
         },
         ast::ExprKind::Struct { path, fields, base } => {
             let _ = base; // 暂时忽略 base
@@ -263,6 +340,9 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                         Some((name, lower_expr(&fv.value, type_env).ok()?))
                     })
                     .collect(),
+                concrete_type: type_env
+                    .resolved_struct_literal_type(expr.span)
+                    .map(lower_checked_type),
             }
         }
         ast::ExprKind::Array(elems) => HIRExpr::Array(
@@ -359,6 +439,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
 fn lower_literal(lit: &ast::Literal) -> HIRLiteral {
     match lit {
         ast::Literal::Int(n) => HIRLiteral::Int(*n),
+        ast::Literal::Uint(n) => HIRLiteral::Uint(*n),
         ast::Literal::Float(f) => HIRLiteral::Float(*f),
         ast::Literal::String(s) => HIRLiteral::String(s.clone()),
         ast::Literal::Bytes(b) => HIRLiteral::Bytes(b.clone()),

@@ -1,38 +1,35 @@
 ## Why
 
-The language spec (`Sengoo_Language_Specification.md` §1.4) promises three code
-generation backends — LLVM, a bytecode VM, and WASM — but only the textual-LLVM
-(+clang) and Cranelift paths are implemented. Two consequences:
+WASM and a portable bytecode VM are both valuable long-range deployment
+options, but they are not one implementation surface. WASM targets a sandboxed
+external platform and WASI host contract; bytecode introduces a second Sengoo
+runtime, artifact verifier, and interpreter. Keeping both under one
+implementation owner would create ambiguous tasks and archive criteria.
 
-- **No WASM target**, so Sengoo cannot run in browsers or WASM sandboxes, a
-  major deployment surface for mainstream languages.
-- **No bytecode VM**, so the spec's "fast startup via bytecode" goal and a
-  portable, clang-free execution mode are unmet (today AOT requires clang/LLVM
-  15+ installed).
-
-This depends on a stable MIR/runtime ABI, so it starts after P0 stabilizes.
+They also depend on a versioned native MIR/runtime semantic checkpoint. Starting
+before generic collections, concurrency, distribution, and production
+hardening stabilize would duplicate moving ownership and host-ABI rules.
 
 ## Proposal
 
-- **WASM backend**: lower MIR to WebAssembly (via the existing LLVM path's
-  `wasm32` target or a direct emitter), producing `.wasm` modules. Define a
-  WASI-based host interface subset for the stdlib (file/io/env/time/process
-  where the sandbox allows) and document unsupported host APIs.
-- **Bytecode VM**: a portable bytecode format plus an interpreter for fast
-  startup and clang-free execution, suitable for scripting and `sgc run` without
-  a native toolchain. Define the instruction set, the value/heap model
-  (consistent with the ownership/`Drop` model), and the stdlib bridge.
-- **Target selection**: `sgc build --target {native,wasm,bytecode}` with a
-  documented capability matrix per target.
+Convert this change into the post-v1 backend coordinator:
 
-## What changes
+- enforce the stable-ABI and roadmap entry review;
+- track independent `wasm-backend-v1` and `bytecode-vm-v1` child changes;
+- keep one cross-target capability matrix and differential conformance policy;
+- allow the bytecode go/no-go review to cancel the VM if evidence does not
+  justify a second runtime.
 
-- ADDED: WASM backend emitting `.wasm` + a WASI host-interface subset.
-- ADDED: bytecode format + interpreter VM + `sgc run` clang-free mode.
-- ADDED: `--target` selection and a per-target capability matrix.
+Implementation requirements are owned only by the child changes.
+
+## Impact
+
+- Parent: `language-maturity-roadmap`, post-v1 phase.
+- Children: `wasm-backend-v1`, `bytecode-vm-v1`.
+- This coordinator changes no compiler/runtime code.
 
 ## Non-goals
 
-- WASM component model / interface types (a later proposal); the MVP targets
-  core WASM + WASI preview.
-- A JIT for the bytecode VM (interpreter first; JIT proposable later).
+- Implementing either backend in this coordinator.
+- Blocking the earlier mainstream-default release.
+- Treating Cranelift parity as WASM or bytecode work.

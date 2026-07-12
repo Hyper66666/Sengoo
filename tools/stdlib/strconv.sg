@@ -2,7 +2,9 @@ extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_strconv_last_error_code() -> i64;
     fn sengoo_strconv_parse_i64(data_ptr: i64, len: i64) -> i64;
+    fn sengoo_strconv_parse_f64(data_ptr: i64, len: i64) -> f64;
     fn sengoo_strconv_format_i64(value: i64, buffer_ptr: i64, capacity: i64) -> i64;
+    fn sengoo_strconv_format_f64(value: f64, precision: i64, buffer_ptr: i64, capacity: i64) -> i64;
 }
 
 def strconv_last_error_code() -> i64 {
@@ -32,12 +34,46 @@ def strconv_i64_value_result(value: i64) -> Result<i64, i64> {
     }
 }
 
+def strconv_f64_value_result(value: f64) -> Result<f64, i64> {
+    let error = sengoo_strconv_last_error_code();
+    if error == 0 {
+        Result { is_ok: true, value: value, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0.0, error: strconv_status_from_raw_code(error) }
+    }
+}
+
+def strconv_f32_value_result(value: f64) -> Result<f32, i64> {
+    let error = sengoo_strconv_last_error_code();
+    if error == 0 {
+        Result { is_ok: true, value: value as f32, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0.0f32, error: strconv_status_from_raw_code(error) }
+    }
+}
+
 def strconv_parse_i64_raw(data_ptr: i64, len: i64) -> Result<i64, i64> {
     strconv_i64_value_result(sengoo_strconv_parse_i64(data_ptr, len))
 }
 
+def strconv_parse_f64_raw(data_ptr: i64, len: i64) -> Result<f64, i64> {
+    strconv_f64_value_result(sengoo_strconv_parse_f64(data_ptr, len))
+}
+
+def strconv_parse_f32_raw(data_ptr: i64, len: i64) -> Result<f32, i64> {
+    strconv_f32_value_result(sengoo_strconv_parse_f64(data_ptr, len))
+}
+
 def strconv_parse_i64(value: &str) -> Result<i64, i64> {
     strconv_parse_i64_raw(sengoo_stdlib_str_ptr(value), value.len())
+}
+
+def strconv_parse_f64(value: &str) -> Result<f64, i64> {
+    strconv_parse_f64_raw(sengoo_stdlib_str_ptr(value), value.len())
+}
+
+def strconv_parse_f32(value: &str) -> Result<f32, i64> {
+    strconv_parse_f32_raw(sengoo_stdlib_str_ptr(value), value.len())
 }
 
 def strconv_parse_i64_buffer(buffer: Buffer, len: i64) -> Result<i64, i64> {
@@ -48,6 +84,28 @@ def strconv_parse_i64_buffer(buffer: Buffer, len: i64) -> Result<i64, i64> {
         Result { is_ok: false, value: 0, error: STATUS_BUFFER_TOO_SMALL() }
     } else {
         Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    }
+}
+
+def strconv_parse_f64_buffer(buffer: Buffer, len: i64) -> Result<f64, i64> {
+    let capacity = buffer.len();
+    if len >= 0 && len <= capacity {
+        strconv_parse_f64_raw(buffer.ptr(), len)
+    } else if len > capacity {
+        Result { is_ok: false, value: 0.0, error: STATUS_BUFFER_TOO_SMALL() }
+    } else {
+        Result { is_ok: false, value: 0.0, error: STATUS_INVALID_ARGUMENT() }
+    }
+}
+
+def strconv_parse_f32_buffer(buffer: Buffer, len: i64) -> Result<f32, i64> {
+    let capacity = buffer.len();
+    if len >= 0 && len <= capacity {
+        strconv_parse_f32_raw(buffer.ptr(), len)
+    } else if len > capacity {
+        Result { is_ok: false, value: 0.0f32, error: STATUS_BUFFER_TOO_SMALL() }
+    } else {
+        Result { is_ok: false, value: 0.0f32, error: STATUS_INVALID_ARGUMENT() }
     }
 }
 
@@ -62,4 +120,25 @@ def strconv_format_i64_raw(value: i64, buffer_ptr: i64, capacity: i64) -> Result
 
 def strconv_format_i64(value: i64, buffer: Buffer) -> Result<i64, i64> {
     strconv_format_i64_raw(value, buffer.ptr(), buffer.len())
+}
+
+def strconv_format_f64_raw(value: f64, precision: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    let written = sengoo_strconv_format_f64(value, precision, buffer_ptr, capacity);
+    if written >= 0 {
+        Result { is_ok: true, value: written, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: strconv_status_from_raw_code(sengoo_strconv_last_error_code()) }
+    }
+}
+
+def strconv_format_f64(value: f64, precision: i64, buffer: Buffer) -> Result<i64, i64> {
+    strconv_format_f64_raw(value, precision, buffer.ptr(), buffer.len())
+}
+
+def strconv_format_f32_raw(value: f32, precision: i64, buffer_ptr: i64, capacity: i64) -> Result<i64, i64> {
+    strconv_format_f64_raw(value as f64, precision, buffer_ptr, capacity)
+}
+
+def strconv_format_f32(value: f32, precision: i64, buffer: Buffer) -> Result<i64, i64> {
+    strconv_format_f32_raw(value, precision, buffer.ptr(), buffer.len())
 }

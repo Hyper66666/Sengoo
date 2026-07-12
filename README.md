@@ -6,7 +6,7 @@ Sengoo is a self-developed compiled language focused on practical engineering ou
 
 - Python interoperability for gradual migration from existing ecosystems
 - Fast full and incremental compile loops for day-to-day development
-- Native execution from textual LLVM IR compiled and linked by `clang`, plus a Cranelift fast path
+- Native execution from textual LLVM IR compiled and linked by `clang`, plus an opt-in primitive Cranelift fast-JIT
 - Optional non-invasive reflection with sidecar metadata
 
 Sengoo is still in active development, but the CLI workflow is already usable for real local projects.
@@ -349,7 +349,7 @@ Curated runnable examples live in [`examples/`](examples/README.md). They cover 
 
 Useful entry points:
 
-- [`examples/realworld/`](examples/realworld/README.md) for three package-shaped
+- [`examples/realworld/`](examples/realworld/README.md) for package-shaped
   fixtures that run the locked `sgpm update`, `check`, `test`, `fmt --check`,
   `doc`, and `build` loop. Use
   [`examples/realworld/SUPPORT_MATRIX.md`](examples/realworld/SUPPORT_MATRIX.md)
@@ -397,7 +397,8 @@ sgpm build --locked
 
 The same locked sequence is supported from
 `examples/realworld/http-client-status` and
-`examples/realworld/workspace-doc-loop`; see
+`examples/realworld/workspace-doc-loop`; `examples/realworld/workspace-audit`
+is the flagship maturity fixture for the same loop; see
 [`examples/realworld/README.md`](examples/realworld/README.md).
 
 Use `sgpm init` inside an existing directory to preserve unrelated files while

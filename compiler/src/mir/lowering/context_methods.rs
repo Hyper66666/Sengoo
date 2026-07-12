@@ -147,6 +147,7 @@ impl<'a> LoweringContext<'a> {
         &mut self,
         name: &str,
         arg_locals: &[Local],
+        expected_return_type: Option<&MIRType>,
     ) -> Option<CallTargetPlan> {
         let template = self.options.generic_function_templates.get(name)?.clone();
         if template.params.len() != arg_locals.len() {
@@ -166,6 +167,21 @@ impl<'a> LoweringContext<'a> {
                 &mut mir_subst,
             );
         }
+        if let Some(expected) = expected_return_type {
+            bind_mir_subst_from_hir_type(
+                &template.return_type,
+                expected,
+                self.struct_defs,
+                &mut mir_subst,
+            );
+            bind_registered_generic_args(
+                &template.return_type,
+                expected,
+                self.struct_defs,
+                &self.concrete_type_registry,
+                &mut mir_subst,
+            );
+        }
 
         let mut hir_subst = HashMap::new();
         for type_param in &template.type_params {
@@ -178,12 +194,25 @@ impl<'a> LoweringContext<'a> {
             };
             let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(mir_ty) else {
                 self.errors.push(format!(
-                    "generic function {}: concrete type argument for {} could not be resolved during MIR lowering",
-                    name, type_param.name
+                    "generic function {}: concrete type argument for {} could not be resolved during MIR lowering: {:?}",
+                    name, type_param.name, mir_ty
                 ));
                 return None;
             };
             hir_subst.insert(type_param.name.clone(), hir_ty);
+        }
+
+        // Associated-type projections (`I::Item`) are lowered to HIR named types
+        // keyed by their full path; bind them from the actual argument types so
+        // the specialized body sees the concrete item type.
+        for (name, mir_ty) in &mir_subst {
+            if !name.contains("::") || hir_subst.contains_key(name) {
+                continue;
+            }
+            let Some(hir_ty) = self.concrete_type_registry.hir_type_for_mir(mir_ty) else {
+                continue;
+            };
+            hir_subst.insert(name.clone(), hir_ty);
         }
 
         for ty in hir_subst.values() {
@@ -400,6 +429,32 @@ fn bind_registered_hir_pair(
     subst: &mut HashMap<String, MIRType>,
 ) {
     match (&template.kind, &actual.kind) {
+        (
+            hir::HIRTypeKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            },
+            _,
+        ) => {
+            if let hir::HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    subst
+                        .entry(format!("<{base_name} as {trait_name}>::{name}"))
+                        .or_insert_with(|| {
+                            hir_type_to_mir_with_structs_and_subst(
+                                actual,
+                                struct_defs,
+                                &HashMap::new(),
+                            )
+                        });
+                }
+            }
+        }
         (
             hir::HIRTypeKind::Named {
                 name,

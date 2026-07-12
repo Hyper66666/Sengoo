@@ -1,12 +1,14 @@
 // examples/stdlib/10_collections.sg
 //
 // Demonstrates: importing std::collections helpers for runtime-backed Vec<i64>,
-// HashMap<i64, i64>, copied text lists, string-key maps, and iterator flows.
+// HashMap<i64, i64>, Vec<String>, copied text lists, string-key maps, ordered
+// string/i64 BTree collections, and iterator flows.
 //
 // Run: sgc run examples/stdlib/10_collections.sg
 // Expected output: 60
 
 import std::collections;
+import std::string;
 
 def main() -> i64 {
     let values = vec_new_i64();
@@ -22,7 +24,36 @@ def main() -> i64 {
     let iter_score = iter.next().unwrap_or(0)
         + iter.map_add(1).unwrap_or(0)
         + iter.filter_even().unwrap_or(0);
-    iter.free();
+    let count_iter = values.iter();
+    let value_count = count_iter.count();
+    let sum_iter = values.iter();
+    let value_sum = sum_iter.sum();
+    let collected_values = values.iter().collect();
+    let collected_count = collected_values.len();
+    let mut enumerated_values = values.iter().enumerate();
+    let first_enumerated = enumerated_values.next().unwrap_or(EnumeratedI64 { index: 0, value: 0 });
+    let second_enumerated = enumerated_values.next().unwrap_or(EnumeratedI64 { index: 0, value: 0 });
+    let inserted_value = values.insert(1, 15);
+    let inserted_total = values.get(0).unwrap_or(0)
+        + values.get(1).unwrap_or(0)
+        + values.get(2).unwrap_or(0)
+        + values.get(3).unwrap_or(0);
+
+    let deque = vecdeque_new_i64();
+    let deque_back = deque.push_back(2);
+    let deque_front = deque.push_front(1);
+    let deque_front_value = deque.front().unwrap_or(0);
+    let deque_back_value = deque.back().unwrap_or(0);
+    let deque_pop_front = deque.pop_front().unwrap_or(0);
+    let deque_pop_back = deque.pop_back().unwrap_or(0);
+
+    let flag_deque = vecdeque_new_bool();
+    let flag_deque_back = flag_deque.push_back(false);
+    let flag_deque_front = flag_deque.push_front(true);
+    let flag_deque_front_value = flag_deque.front().unwrap_or(false);
+    let flag_deque_back_value = flag_deque.back().unwrap_or(true);
+    let flag_deque_pop_front = flag_deque.pop_front().unwrap_or(false);
+    let flag_deque_pop_back = flag_deque.pop_back().unwrap_or(true);
 
     let counts = hashmap_new_i64_i64();
     counts.insert(1, 10);
@@ -34,6 +65,12 @@ def main() -> i64 {
         + counts.get(3).unwrap_or(0);
     let removed = counts.remove(2);
     let missing = !counts.contains(2);
+    let counts_iter = counts.iter();
+    let counts_sum = counts_iter.sum();
+    let collected_counts = counts.iter().collect();
+    let collected_counts_count = collected_counts.len();
+    let mut enumerated_counts = counts.iter().enumerate();
+    let first_count_entry = enumerated_counts.next().unwrap_or(EnumeratedI64 { index: 9, value: 0 });
 
     let names = text_list_new();
     let text_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
@@ -50,17 +87,152 @@ def main() -> i64 {
     let first_key = key_iter.next_copy(text_buffer).unwrap_or(0);
     let second_key = key_iter.next_copy(text_buffer).unwrap_or(0);
     let key_iter_done = key_iter.done();
-    key_iter.free();
+    let score_key_count = scores.iter_keys().count();
 
-    let ok = values.len() == 3
+    let words = vec_new_string();
+    let pushed_alpha = words.push(string_from_str("alpha").unwrap_or(string_new()));
+    let pushed_beta = words.push(string_from_str("beta").unwrap_or(string_new()));
+    let inserted_middle = words.insert(1, string_from_str("mid").unwrap_or(string_new()));
+    let replaced_tail = words.set(2, string_from_str("gamma").unwrap_or(string_new()));
+    let cloned_middle = words.get(1).unwrap_or(string_new());
+    let cloned_tail = words.get(2).unwrap_or(string_new());
+    let removed_alpha = words.remove(0).unwrap_or(string_new());
+    let word_iter = words.iter();
+    let iter_middle = word_iter.next().unwrap_or(string_new());
+    let word_iter_done = word_iter.done();
+    let counted_words = words.iter().count();
+    let collected_words = words.iter().collect();
+    let collected_words_count = collected_words.len();
+    let taken_words = words.iter().take(1);
+    let taken_words_count = taken_words.len();
+    let skipped_words_count = words.iter().skip(1).count();
+
+    let generic_scores: HashMap<String, i64> = hashmap_new_string_i64();
+    let generic_inserted_a = generic_scores.insert("alice", 2);
+    let generic_inserted_b = generic_scores.insert("bob", 3);
+    let generic_replaced_a = generic_scores.insert("alice", 5);
+    let generic_score_keys = generic_scores.iter_keys().collect();
+    let generic_alice = generic_scores.get("alice").unwrap_or(0);
+    let generic_removed_b = generic_scores.remove("bob");
+    let generic_missing_b = !generic_scores.contains("bob");
+
+    let generic_flags: HashMap<String, bool> = hashmap_new_string_bool();
+    let generic_flag_inserted = generic_flags.insert("enabled", true);
+    let generic_flag_replaced = generic_flags.insert("enabled", false);
+    let generic_flag_value = generic_flags.get("enabled").unwrap_or(true);
+    let generic_flag_removed = generic_flags.remove("enabled");
+    let generic_flag_missing = !generic_flags.contains("enabled");
+
+    let generic_labels: HashMap<String, String> = hashmap_new_string_string();
+    let generic_label_inserted = generic_labels.insert("name", string_from_str("alpha").unwrap_or(string_new()));
+    let generic_label_replaced = generic_labels.insert("name", string_from_str("gamma").unwrap_or(string_new()));
+    let generic_label_key_count = generic_labels.iter_keys().count();
+    let generic_label_taken = generic_labels.iter_keys().take(1);
+    let generic_label_keys = generic_labels.iter_keys().collect();
+    let generic_label_skipped_count = generic_labels.iter_keys().skip(1).count();
+    let generic_label_value = generic_labels.get("name").unwrap_or(string_new());
+    let generic_label_removed = generic_labels.remove("name").unwrap_or(string_new());
+    let generic_label_missing = !generic_labels.contains("name");
+
+    let ordered_scores = btreemap_new_string_i64();
+    let ordered_inserted_z = ordered_scores.insert("zeta", 6);
+    let ordered_inserted_a = ordered_scores.insert("alpha", 1);
+    let ordered_score_keys = ordered_scores.iter_keys().collect();
+    let ordered_first_key = ordered_score_keys.get(0).unwrap_or(string_new());
+    let ordered_second_key = ordered_score_keys.get(1).unwrap_or(string_new());
+    let ordered_names = btreeset_new_string();
+    let ordered_name_z = ordered_names.insert("zeta");
+    let ordered_name_a = ordered_names.insert("a");
+    let ordered_name_keys = ordered_names.iter().collect();
+    let ordered_first_name = ordered_name_keys.get(0).unwrap_or(string_new());
+
+    let ordered_numbers = btreemap_new_i64_i64();
+    let ordered_number_high = ordered_numbers.insert(30, 3);
+    let ordered_number_low = ordered_numbers.insert(-4, 4);
+    let ordered_number_mid = ordered_numbers.insert(10, 1);
+    let ordered_number_replaced = ordered_numbers.insert(10, 99);
+    let ordered_number_keys = ordered_numbers.iter_keys().collect();
+    let ordered_number_removed = ordered_numbers.remove(-4);
+    let ordered_flags = btreemap_new_i64_bool();
+    let ordered_flag_inserted = ordered_flags.insert(5, true);
+    let ordered_flag_replaced = ordered_flags.insert(5, false);
+    let ordered_flag_value = ordered_flags.get(5).unwrap_or(true);
+    let ordered_ids = btreeset_new_i64();
+    let ordered_id_high = ordered_ids.insert(8);
+    let ordered_id_low = ordered_ids.insert(-8);
+    let ordered_id_mid = ordered_ids.insert(0);
+    let ordered_id_keys = ordered_ids.iter().collect();
+
+    let id_set = hashset_new_i64();
+    let id_inserted = id_set.insert(42);
+    let id_present = id_set.contains(42);
+    let mut id_entries = id_set.iter().enumerate();
+    let first_id = id_entries.next().unwrap_or(EnumeratedI64 { index: 9, value: 0 });
+    let id_taken = id_set.iter().take(1);
+    let id_removed = id_set.remove(42);
+    let id_missing = !id_set.contains(42);
+
+    let flag_set = hashset_new_bool();
+    let flag_inserted = flag_set.insert(true);
+    let flag_present = flag_set.contains(true);
+    let mut flag_entries = flag_set.iter().enumerate();
+    let first_flag_entry = flag_entries.next().unwrap_or(EnumeratedBool { index: 9, value: false });
+    let flag_taken = flag_set.iter().take(1);
+    let bool_map = hashmap_new_bool_bool();
+    bool_map.insert(true, true);
+    let mut enumerated_bool_map = bool_map.iter().enumerate();
+    let first_bool_entry = enumerated_bool_map.next().unwrap_or(EnumeratedBool { index: 9, value: false });
+    let bool_values = vec_new_bool();
+    bool_values.push(false);
+    bool_values.push(true);
+    let bool_inserted = bool_values.insert(1, true);
+    let mut enumerated_flags = bool_values.iter().enumerate();
+    let _first_flag = enumerated_flags.next().unwrap_or(EnumeratedBool { index: 0, value: false });
+    let second_flag = enumerated_flags.next().unwrap_or(EnumeratedBool { index: 0, value: false });
+
+    let word_set = hashset_new_string();
+    let word_inserted = word_set.insert("ready");
+    let word_present = word_set.contains("ready");
+    let word_entry_count = word_set.iter().count();
+    let word_keys = word_set.iter().collect();
+    let word_removed = word_set.remove("ready");
+    let word_missing = !word_set.contains("ready");
+
+    let vectors_ok = values.len() == 4
         && values.contains(20)
         && vector_total == 60
         && iter_score == 61
-        && counts.len() == 2
+        && value_count == 3
+        && value_sum == 60
+        && collected_count == 3
+        && first_enumerated.index == 0
+        && first_enumerated.value == 10
+        && second_enumerated.index == 1
+        && second_enumerated.value == 20
+        && inserted_value
+        && inserted_total == 75
+        && deque_back
+        && deque_front
+        && deque_front_value == 1
+        && deque_back_value == 2
+        && deque_pop_front == 1
+        && deque_pop_back == 2
+        && deque.is_empty()
+        && flag_deque_back
+        && flag_deque_front
+        && flag_deque_front_value
+        && !flag_deque_back_value
+        && flag_deque_pop_front
+        && !flag_deque_pop_back
+        && flag_deque.is_empty();
+    let maps_ok = counts.len() == 2
         && map_total == 60
+        && counts_sum == 40
+        && collected_counts_count == 2
+        && first_count_entry.index == 0
         && removed
-        && missing
-        && pushed_name
+        && missing;
+    let text_ok = pushed_name
         && replaced_name
         && copied_name == 4
         && inserted_b
@@ -70,13 +242,96 @@ def main() -> i64 {
         && b_score == 7
         && first_key == 1
         && second_key == 1
-        && key_iter_done;
-
-    text_buffer.free();
-    names.free();
-    scores.free();
-    values.free();
-    counts.free();
+        && key_iter_done
+        && score_key_count == 2
+        && pushed_alpha
+        && pushed_beta
+        && inserted_middle
+        && replaced_tail
+        && cloned_middle.len() == 3
+        && cloned_tail.len() == 5
+        && removed_alpha.len() == 5
+        && iter_middle.len() == 3
+        && !word_iter_done
+        && counted_words == 2
+        && collected_words_count == 2
+        && taken_words_count == 1
+        && skipped_words_count == 1;
+    let string_maps_ok = generic_inserted_a
+        && generic_inserted_b
+        && generic_replaced_a
+        && generic_score_keys.len() == 2
+        && generic_alice == 5
+        && generic_removed_b
+        && generic_missing_b
+        && generic_flag_inserted
+        && generic_flag_replaced
+        && !generic_flag_value
+        && generic_flag_removed
+        && generic_flag_missing
+        && generic_label_inserted
+        && generic_label_replaced
+        && generic_label_key_count == 1
+        && generic_label_taken.len() == 1
+        && generic_label_keys.len() == 1
+        && generic_label_skipped_count == 0
+        && generic_label_value.len() == 5
+        && generic_label_removed.len() == 5
+        && generic_label_missing;
+    let ordered_ok = ordered_inserted_z
+        && ordered_inserted_a
+        && ordered_score_keys.len() == 2
+        && ordered_first_key.len() == 5
+        && ordered_second_key.len() == 4
+        && ordered_name_z
+        && ordered_name_a
+        && ordered_name_keys.len() == 2
+        && ordered_first_name.len() == 1
+        && ordered_number_high
+        && ordered_number_low
+        && ordered_number_mid
+        && ordered_number_replaced
+        && ordered_number_keys.len() == 3
+        && ordered_number_keys.get(0).unwrap_or(0) == -4
+        && ordered_number_keys.get(1).unwrap_or(0) == 10
+        && ordered_number_keys.get(2).unwrap_or(0) == 30
+        && ordered_numbers.get(10).unwrap_or(0) == 99
+        && ordered_number_removed
+        && ordered_numbers.len() == 2
+        && ordered_flag_inserted
+        && ordered_flag_replaced
+        && !ordered_flag_value
+        && ordered_id_high
+        && ordered_id_low
+        && ordered_id_mid
+        && ordered_id_keys.len() == 3
+        && ordered_id_keys.get(0).unwrap_or(0) == -8
+        && ordered_id_keys.get(1).unwrap_or(1) == 0
+        && ordered_id_keys.get(2).unwrap_or(0) == 8;
+    let sets_ok = id_inserted
+        && id_present
+        && first_id.index == 0
+        && first_id.value == 42
+        && id_taken.len() == 1
+        && id_removed
+        && id_missing
+        && flag_inserted
+        && flag_present
+        && first_flag_entry.index == 0
+        && first_flag_entry.value
+        && flag_taken.len() == 1
+        && first_bool_entry.index == 0
+        && first_bool_entry.value
+        && bool_inserted
+        && second_flag.index == 1
+        && second_flag.value
+        && word_inserted
+        && word_present
+        && word_entry_count == 1
+        && word_keys.len() == 1
+        && word_removed
+        && word_missing;
+    let ok = vectors_ok && maps_ok && text_ok && string_maps_ok && ordered_ok && sets_ok;
 
     print(if ok { 60 } else { 0 });
     0

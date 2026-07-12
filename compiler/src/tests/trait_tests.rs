@@ -14,6 +14,37 @@ fn typecheck_source(source: &str) -> crate::Result<()> {
     checker.check_program(&program)
 }
 
+#[test]
+fn trait_impl_rejects_wrong_associated_projection_return_type() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+struct BadIter {}
+
+impl Iterator for BadIter {
+    type Item = bool;
+    def next(&self) -> Option<i64> {
+        Option { is_some: false, value: 0 }
+    }
+}
+"#;
+
+    let error = typecheck_source(source).expect_err("wrong Iterator::Item must be rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("trait method") && message.contains("next"),
+        "expected stable trait method mismatch context, got: {message}"
+    );
+}
+
 fn typecheck_stable_code(source: &str) -> Option<&'static str> {
     let err = typecheck_source(source).expect_err("source should fail type checking");
     let CompileError::TypeckError(typeck_err) = err else {
@@ -577,6 +608,49 @@ def main() -> i64 {
         !ir.contains("define %Wrap_i64 @i64_WrapValue_wrap("),
         "unspecialized trait generic method should not leak into IR, got:
 {}",
+        ir
+    );
+}
+
+#[test]
+fn test_generic_trait_args_are_part_of_impl_function_names() {
+    let source = r#"
+trait Convert<T> {
+    def convert(self) -> T {}
+}
+
+impl Convert<i64> for i32 {
+    def convert(self) -> i64 {
+        self as i64
+    }
+}
+
+impl Convert<u64> for i32 {
+    def convert(self) -> u64 {
+        self as u64
+    }
+}
+
+def main() -> i64 {
+    0
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic trait impls with distinct args should lower to distinct functions");
+    assert!(
+        ir.contains("i32_Convert_i64_convert"),
+        "IR should contain target-specific Convert<i64> impl, got:\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("i32_Convert_u64_convert"),
+        "IR should contain target-specific Convert<u64> impl, got:\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("i32_Convert_convert"),
+        "IR should not emit the old trait-arg-erasing impl name, got:\n{}",
         ir
     );
 }

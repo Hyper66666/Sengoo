@@ -125,7 +125,9 @@ impl<'a> LoweringContext<'a> {
 
                 self.emit_print_str_literal(" }", sink);
             }
-            MIRType::Int(_) => self.emit_runtime_print_call(sink.i64_func(), value_local),
+            MIRType::Int(_) | MIRType::UInt(_) => {
+                self.emit_runtime_print_call(sink.i64_func(), value_local)
+            }
             MIRType::Bool => self.emit_runtime_print_call(sink.bool_func(), value_local),
             MIRType::Float(_) => self.emit_runtime_print_call(sink.f64_func(), value_local),
             MIRType::Ptr(_) | MIRType::Ref(_) => {

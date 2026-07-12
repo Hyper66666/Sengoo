@@ -63,6 +63,8 @@ pub enum HIRExpr {
         args: Vec<HIRExpr>,
         /// Byte offset of the call expression in the lowered source text.
         site_lo: Option<u32>,
+        /// Concrete generic return selected by type checking, when available.
+        expected_return_type: Option<HIRType>,
     },
 
     EnumConstruct {
@@ -77,12 +79,14 @@ pub enum HIRExpr {
         receiver: Box<HIRExpr>,
         method: String,
         args: Vec<HIRExpr>,
+        expected_return_type: Option<HIRType>,
     },
 
     /// 结构体实例化
     Struct {
         name: String,
         fields: Vec<(String, HIRExpr)>,
+        concrete_type: Option<HIRType>,
     },
 
     /// 数组字面量

@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/target-*/
 **/target/
 # Applications in this workspace use a committed lockfile for reproducible builds.
 

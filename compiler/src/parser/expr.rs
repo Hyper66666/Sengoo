@@ -3,7 +3,7 @@ mod aggregates;
 mod control_flow;
 
 use crate::ast::*;
-use crate::error::{CompileError, ParseError};
+use crate::error::{CompileError, LexError, ParseError};
 use crate::lexer::TokenKind;
 use crate::Result;
 
@@ -20,6 +20,7 @@ const PREC_BIT_AND: u8 = 7;
 const PREC_SHIFT: u8 = 8;
 const PREC_ADD: u8 = 9;
 const PREC_MUL: u8 = 10;
+const PREC_CAST: u8 = 11;
 const PREC_UNARY: u8 = 11;
 const PREC_CALL: u8 = 12;
 const PREC_POSTFIX: u8 = 13;
@@ -61,11 +62,14 @@ impl<'source> Parser<'source> {
             Some(token) => match &token.kind {
                 TokenKind::Int(Some(n)) => {
                     self.advance();
-                    ExprKind::Literal(Literal::Int(*n))
+                    return self.integer_literal_expr(*n, token.span);
+                }
+                TokenKind::Int(None) | TokenKind::InvalidNumber(_) => {
+                    return Err(self.invalid_numeric_literal_error(&token));
                 }
                 TokenKind::Float(Some(f)) => {
                     self.advance();
-                    ExprKind::Literal(Literal::Float(*f))
+                    return self.numeric_literal_expr(Literal::Float(*f), token.span);
                 }
                 TokenKind::String(Some(s)) => {
                     self.advance();
@@ -74,6 +78,12 @@ impl<'source> Parser<'source> {
                 TokenKind::Char(Some(c)) => {
                     self.advance();
                     ExprKind::Literal(Literal::Char(*c))
+                }
+                TokenKind::FString(payload) => {
+                    let payload = payload.clone();
+                    let span = token.span;
+                    self.advance();
+                    return self.parse_fstring_expr(span, payload);
                 }
                 TokenKind::TrueKw => {
                     self.advance();
@@ -97,6 +107,9 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::Minus => {
                     self.advance();
+                    if let Some(negative) = self.parse_negative_integer_literal()? {
+                        return Ok(negative);
+                    }
                     let operand = self.parse_simple_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
                         op: UnOp::Neg,
@@ -105,9 +118,14 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::BitAnd => {
                     self.advance();
+                    let op = if self.consume(TokenKind::MutKw).is_some() {
+                        UnOp::RefMut
+                    } else {
+                        UnOp::Ref
+                    };
                     let operand = self.parse_simple_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
-                        op: UnOp::Ref,
+                        op,
                         operand: Box::new(operand),
                     }
                 }
@@ -207,11 +225,14 @@ impl<'source> Parser<'source> {
             Some(token) => match &token.kind {
                 TokenKind::Int(Some(n)) => {
                     self.advance();
-                    ExprKind::Literal(Literal::Int(*n))
+                    return self.integer_literal_expr(*n, token.span);
+                }
+                TokenKind::Int(None) | TokenKind::InvalidNumber(_) => {
+                    return Err(self.invalid_numeric_literal_error(&token));
                 }
                 TokenKind::Float(Some(f)) => {
                     self.advance();
-                    ExprKind::Literal(Literal::Float(*f))
+                    return self.numeric_literal_expr(Literal::Float(*f), token.span);
                 }
                 TokenKind::String(Some(s)) => {
                     self.advance();
@@ -220,6 +241,12 @@ impl<'source> Parser<'source> {
                 TokenKind::Char(Some(c)) => {
                     self.advance();
                     ExprKind::Literal(Literal::Char(*c))
+                }
+                TokenKind::FString(payload) => {
+                    let payload = payload.clone();
+                    let span = token.span;
+                    self.advance();
+                    return self.parse_fstring_expr(span, payload);
                 }
                 TokenKind::TrueKw => {
                     self.advance();
@@ -237,6 +264,9 @@ impl<'source> Parser<'source> {
                 // 解析一元负号表达式。
                 TokenKind::Minus => {
                     self.advance();
+                    if let Some(negative) = self.parse_negative_integer_literal()? {
+                        return Ok(negative);
+                    }
                     let operand = self.parse_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
                         op: UnOp::Neg,
@@ -261,9 +291,14 @@ impl<'source> Parser<'source> {
                 }
                 TokenKind::BitAnd => {
                     self.advance();
+                    let op = if self.consume(TokenKind::MutKw).is_some() {
+                        UnOp::RefMut
+                    } else {
+                        UnOp::Ref
+                    };
                     let operand = self.parse_expr_prec(PREC_UNARY)?;
                     ExprKind::Unary {
-                        op: UnOp::Ref,
+                        op,
                         operand: Box::new(operand),
                     }
                 }
@@ -603,7 +638,7 @@ impl<'source> Parser<'source> {
             TokenKind::Dot => {
                 let field = match self.current().cloned() {
                     Some(token) => match token.kind {
-                        TokenKind::Int(Some(n)) if n >= 0 => {
+                        TokenKind::Int(Some(n)) => {
                             self.advance();
                             self.intern_named_ident(n.to_string(), token.span)
                         }
@@ -651,6 +686,14 @@ impl<'source> Parser<'source> {
 
             TokenKind::Question => ExprKind::Try(Box::new(left)),
 
+            TokenKind::AsKw => {
+                let ty = self.parse_type()?;
+                ExprKind::Cast {
+                    expr: Box::new(left),
+                    ty,
+                }
+            }
+
             // 未知中缀运算符，返回原表达式。
             _ => {
                 return Err(CompileError::ParseError(
@@ -693,6 +736,8 @@ impl<'source> Parser<'source> {
             TokenKind::Dot | TokenKind::LBracket | TokenKind::LParen => PREC_CALL,
 
             TokenKind::Question => PREC_POSTFIX,
+
+            TokenKind::AsKw => PREC_CAST,
 
             TokenKind::DotDot => PREC_OR,
 
@@ -743,5 +788,138 @@ impl<'source> Parser<'source> {
     /// 检查当前token是否可以作为范围结束表达式的开始。
     fn check_range_end(&mut self) -> bool {
         self.check_expr()
+    }
+
+    fn integer_literal_expr(&self, value: u64, span: crate::lexer::Span) -> Result<Expr> {
+        let suffix = self.numeric_literal_suffix(span)?;
+        self.validate_integer_literal_range(value, suffix, false, span)?;
+        let literal = if matches!(suffix, Some("usize" | "u64" | "u32" | "u16" | "u8")) {
+            Literal::Uint(value)
+        } else {
+            let signed = i64::try_from(value).map_err(|_| {
+                CompileError::ParseError(ParseError::InvalidPatternAt {
+                    message:
+                        "integer literal exceeds i64; add an unsigned suffix such as `u64` or `usize`"
+                            .to_string(),
+                    span: (span.lo as usize, span.len() as usize).into(),
+                })
+            })?;
+            Literal::Int(signed)
+        };
+        self.numeric_literal_expr_with_suffix(literal, span, suffix)
+    }
+
+    fn parse_negative_integer_literal(&mut self) -> Result<Option<Expr>> {
+        let Some(token) = self.current().cloned() else {
+            return Ok(None);
+        };
+        let TokenKind::Int(Some(value)) = token.kind else {
+            return Ok(None);
+        };
+        let suffix = self.numeric_literal_suffix(token.span)?;
+        if matches!(
+            suffix,
+            Some("u8" | "u16" | "u32" | "u64" | "usize" | "f32" | "f64")
+        ) {
+            return Ok(None);
+        }
+
+        self.validate_integer_literal_range(value, suffix, true, token.span)?;
+        let signed = if value == (1_u64 << 63) {
+            i64::MIN
+        } else {
+            -(value as i64)
+        };
+        self.advance();
+        self.numeric_literal_expr_with_suffix(Literal::Int(signed), token.span, suffix)
+            .map(Some)
+    }
+
+    fn validate_integer_literal_range(
+        &self,
+        value: u64,
+        suffix: Option<&str>,
+        negative: bool,
+        span: crate::lexer::Span,
+    ) -> Result<()> {
+        let (display, signed, bits) = match suffix {
+            None => ("i64", true, 64),
+            Some("i8") => ("i8", true, 8),
+            Some("i16") => ("i16", true, 16),
+            Some("i32") => ("i32", true, 32),
+            Some("i64") => ("i64", true, 64),
+            Some("isize") => ("isize", true, self.target_pointer_width),
+            Some("u8") => ("u8", false, 8),
+            Some("u16") => ("u16", false, 16),
+            Some("u32") => ("u32", false, 32),
+            Some("u64") => ("u64", false, 64),
+            Some("usize") => ("usize", false, self.target_pointer_width),
+            Some(_) => return Ok(()),
+        };
+        let max = if signed {
+            if negative {
+                1_u64 << (bits - 1)
+            } else {
+                (1_u64 << (bits - 1)) - 1
+            }
+        } else if bits == 64 {
+            u64::MAX
+        } else {
+            (1_u64 << bits) - 1
+        };
+        if value <= max {
+            return Ok(());
+        }
+
+        let raw = self
+            .source
+            .get(span.lo as usize..span.hi as usize)
+            .unwrap_or("<numeric literal>");
+        Err(CompileError::LexError(LexError::InvalidNumber(format!(
+            "`{raw}` exceeds range of `{display}`"
+        ))))
+    }
+
+    fn invalid_numeric_literal_error(&self, token: &crate::lexer::Token) -> CompileError {
+        let raw = self
+            .source
+            .get(token.span.lo as usize..token.span.hi as usize)
+            .unwrap_or("<numeric literal>");
+        CompileError::LexError(LexError::InvalidNumber(raw.to_string()))
+    }
+
+    fn numeric_literal_expr(&self, literal: Literal, span: crate::lexer::Span) -> Result<Expr> {
+        let suffix = self.numeric_literal_suffix(span)?;
+        self.numeric_literal_expr_with_suffix(literal, span, suffix)
+    }
+
+    fn numeric_literal_expr_with_suffix(
+        &self,
+        literal: Literal,
+        span: crate::lexer::Span,
+        suffix: Option<&'static str>,
+    ) -> Result<Expr> {
+        let expr = Expr::new(ExprKind::Literal(literal), span);
+        let Some(suffix) = suffix else {
+            return Ok(expr);
+        };
+        let suffix_span = crate::lexer::Span::new(span.hi - suffix.len() as u32, span.hi);
+        Ok(Expr::cast(expr, Type::simple(suffix, suffix_span), span))
+    }
+
+    fn numeric_literal_suffix(&self, span: crate::lexer::Span) -> Result<Option<&'static str>> {
+        let Some(raw) = self.source.get(span.lo as usize..span.hi as usize) else {
+            return Ok(None);
+        };
+        if let Some(suffix) = [
+            "isize", "usize", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "f64", "f32",
+        ]
+        .into_iter()
+        .find(|suffix| raw.ends_with(suffix))
+        {
+            return Ok(Some(suffix));
+        }
+
+        Ok(None)
     }
 }

@@ -5,7 +5,7 @@ Run each file with `sgc run <path>`.
 | File | Demonstrates | Expected output |
 |---|---|---:|
 | [`01_strings.sg`](01_strings.sg) | Importing `std::string` helpers for append, repeat, equality, search, and empty checks | `8` |
-| [`02_math.sg`](02_math.sg) | Importing `std::math` helpers for integer bounds, signs, powers, and common divisors | `50` |
+| [`02_math.sg`](02_math.sg) | Importing `std::math` concrete and trait-bound numeric helpers for bounds, signs, powers, overflow modes, and common divisors | `50` |
 | [`03_error.sg`](03_error.sg) | Importing `std::error` assertion helpers for booleans, integers, strings, and floats | `7` |
 | [`04_option_result.sg`](04_option_result.sg) | Importing `std::option` and `std::result` bool constructors, unwrap helpers, and projections | `7` |
 | [`05_file.sg`](05_file.sg) | Importing `std::file` helpers for write, append, read, length, existence, and removal | `15` |
@@ -13,7 +13,7 @@ Run each file with `sgc run <path>`.
 | [`07_random.sg`](07_random.sg) | Importing `std::random` helpers for deterministic seeding, non-negative i64 values, bounded ranges, and booleans | `8` |
 | [`08_path.sg`](08_path.sg) | Importing `std::path` helpers for separator discovery, absolute checks, joining, extraction, and lexical normalization | `9` |
 | [`09_process.sg`](09_process.sg) | Importing `std::process` helpers for process metadata, current working directory copy, and exit-code selection | `10` |
-| [`10_collections.sg`](10_collections.sg) | Importing `std::collections` helpers for runtime-backed vectors, maps, copied text lists, string-key maps, and iterator flows | `60` |
+| [`10_collections.sg`](10_collections.sg) | Importing `std::collections` helpers for runtime-backed vectors, maps, `VecDeque<i64>` / `VecDeque<bool>`, `Vec<String>` mutators, copied text lists, string-key maps, ordered `BTreeMap<String, ...>` / `BTreeSet<String>` and `BTreeMap<i64, i64/bool>` / `BTreeSet<i64>` transition types, and iterator flows | `60` |
 | [`11_args.sg`](11_args.sg) | Importing `std::args` helpers for user argument count, length checks, and Buffer-backed copy | `11` |
 | [`12_dir.sg`](12_dir.sg) | Importing `std::dir` helpers for directory existence, creation, recursive creation, and empty-directory removal | `12` |
 | [`13_io.sg`](13_io.sg) | Importing `std::io` helpers for exact stdout/stderr writes and flushing | `13` |

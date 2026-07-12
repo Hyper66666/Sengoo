@@ -322,6 +322,7 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     fn tls_success_with_test_ca_root() {
+        let _net_guard = crate::net::net_test_lock();
         let _guard = tls_test_guard();
         let bundle = build_test_cert_bundle();
         set_test_extra_roots(vec![bundle.ca_der.clone()]);
@@ -361,6 +362,7 @@ mod tests {
 
     #[test]
     fn tls_untrusted_certificate_maps_to_cert_invalid() {
+        let _net_guard = crate::net::net_test_lock();
         let _guard = tls_test_guard();
         let bundle = build_test_cert_bundle();
         let port = spawn_tls_server(
@@ -390,6 +392,7 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     fn https_get_runtime_roundtrip_smoke() {
+        let _net_guard = crate::net::net_test_lock();
         let _guard = tls_test_guard();
         use crate::net::{
             sengoo_http_body_copy, sengoo_http_body_len, sengoo_http_close, sengoo_http_get,
@@ -419,6 +422,7 @@ mod tests {
     #[test]
     #[cfg(not(windows))]
     fn tls_hostname_mismatch_maps_to_hostname_error() {
+        let _net_guard = crate::net::net_test_lock();
         let _guard = tls_test_guard();
         let bundle = build_test_cert_bundle();
         set_test_extra_roots(vec![bundle.ca_der.clone()]);
@@ -442,6 +446,7 @@ mod tests {
 
     #[test]
     fn tls_unavailable_when_no_trust_roots() {
+        let _net_guard = crate::net::net_test_lock();
         let _guard = tls_test_guard();
         #[cfg(not(windows))]
         {

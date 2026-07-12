@@ -324,15 +324,22 @@ pub enum TokenKind {
     Ident,
 
     // 整数
-    #[regex(r"0b[01][01_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"0o[0-7][0-7_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"0x[0-9a-fA-F][0-9a-fA-F_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    #[regex(r"[0-9][0-9_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()))]
-    Int(Option<i64>),
+    #[regex(r"0b[01]+(_[01]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"0o[0-7]+(_[0-7]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"0x[0-9a-fA-F]+(_[0-9a-fA-F]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    #[regex(r"[0-9]+(_[0-9]+)*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?", |lex| parse_int_literal(lex.slice()), priority = 3)]
+    Int(Option<u64>),
 
     // 浮点数
-    #[regex(r"[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?(f32|f64)?", |lex| parse_float_literal(lex.slice()))]
+    #[regex(r"[0-9]+(_[0-9]+)*\.[0-9]+(_[0-9]+)*([eE][+-]?[0-9]+(_[0-9]+)*)?(f32|f64)?", |lex| parse_float_literal(lex.slice()), priority = 3)]
     Float(Option<f64>),
+
+    // A numeric-looking token that did not match the valid grammar above.
+    // Keeping the whole spelling in one token lets the parser report a stable
+    // numeric diagnostic instead of silently splitting `42u128` into `42` and
+    // an identifier or dropping malformed digits.
+    #[regex(r"[0-9][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 1)]
+    InvalidNumber(String),
 
     // 字符串
     #[token("\"\"\"", lex_multiline_string)]
@@ -350,12 +357,27 @@ pub enum TokenKind {
     // 字符
     #[regex(r"'[^'\\]*(?:\\.[^'\\]*)*'", |lex| Some(parse_char(&lex.slice()[1..lex.slice().len()-1])))]
     Char(Option<char>),
+
+    // f-string（插值字符串）：载荷携带模板与每个插值表达式
+    // 在 token 内的字节区间，供 parser 精确回溯原始位置。
+    // 载荷为 `None` 表示字面量未闭合（畸形）。
+    #[token("f\"", lex_fstring)]
+    FString(Option<FStringLiteral>),
+}
+
+/// f-string 字面量的词法载荷。
+#[derive(Debug, Clone, PartialEq)]
+pub struct FStringLiteral {
+    /// 已解码的模板文本；插值位置以 `{}` 占位，`{{`/`}}` 原样保留。
+    pub template: String,
+    /// 每个插值表达式相对 token 起点（`f` 处）的字节区间。
+    pub interpolations: Vec<Span>,
 }
 
 /// 字面量类型
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralKind {
-    Int(i64),
+    Int(u64),
     Float(f64),
     String(String),
     RawString(String),
@@ -691,7 +713,7 @@ fn parse_float_literal(slice: &str) -> Option<f64> {
     digits.replace('_', "").parse::<f64>().ok()
 }
 
-fn parse_int_literal(slice: &str) -> Option<i64> {
+fn parse_int_literal(slice: &str) -> Option<u64> {
     const SUFFIXES: &[&str] = &[
         "isize", "usize", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8",
     ];
@@ -701,13 +723,13 @@ fn parse_int_literal(slice: &str) -> Option<i64> {
         .unwrap_or(slice);
     let normalized = digits.replace('_', "");
     if let Some(rest) = normalized.strip_prefix("0b") {
-        i64::from_str_radix(rest, 2).ok()
+        u64::from_str_radix(rest, 2).ok()
     } else if let Some(rest) = normalized.strip_prefix("0o") {
-        i64::from_str_radix(rest, 8).ok()
+        u64::from_str_radix(rest, 8).ok()
     } else if let Some(rest) = normalized.strip_prefix("0x") {
-        i64::from_str_radix(rest, 16).ok()
+        u64::from_str_radix(rest, 16).ok()
     } else {
-        normalized.parse::<i64>().ok()
+        normalized.parse::<u64>().ok()
     }
 }
 
@@ -761,6 +783,126 @@ fn unescape_string(s: &str) -> String {
     }
 
     result
+}
+
+/// f-string 前缀 `f"` 的字节长度，用于换算 token 内相对偏移。
+const FSTRING_PREFIX_LEN: usize = 2;
+
+/// 词法回调：扫描 `f"..."` 剩余部分。
+///
+/// 成功时消费至闭合引号并返回模板与插值区间；未闭合（行尾或 EOF）
+/// 时消费到行尾并返回 `None`，由 parser 汇报诊断。
+fn lex_fstring(lex: &mut logos::Lexer<TokenKind>) -> Option<FStringLiteral> {
+    let remainder = lex.remainder();
+    match scan_fstring_body(remainder) {
+        Some((literal, consumed)) => {
+            lex.bump(consumed);
+            Some(literal)
+        }
+        None => {
+            let line_end = remainder.find('\n').unwrap_or(remainder.len());
+            lex.bump(line_end);
+            None
+        }
+    }
+}
+
+/// 扫描 f-string 正文（`f"` 之后的文本），返回载荷与消费的字节数。
+fn scan_fstring_body(remainder: &str) -> Option<(FStringLiteral, usize)> {
+    let bytes = remainder.as_bytes();
+    let mut raw_template = String::new();
+    let mut interpolations = Vec::new();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let literal = FStringLiteral {
+                    template: unescape_string(&raw_template),
+                    interpolations,
+                };
+                return Some((literal, i + 1));
+            }
+            b'\n' => return None,
+            b'\\' => {
+                raw_template.push('\\');
+                i += 1;
+                if let Some(c) = remainder[i..].chars().next() {
+                    raw_template.push(c);
+                    i += c.len_utf8();
+                }
+            }
+            b'{' if bytes.get(i + 1) == Some(&b'{') => {
+                raw_template.push_str("{{");
+                i += 2;
+            }
+            b'}' if bytes.get(i + 1) == Some(&b'}') => {
+                raw_template.push_str("}}");
+                i += 2;
+            }
+            b'{' => {
+                i += 1;
+                let expr_lo = i;
+                let expr_hi = scan_interpolation_end(bytes, &mut i)?;
+                interpolations.push(Span::new(
+                    (expr_lo + FSTRING_PREFIX_LEN) as u32,
+                    (expr_hi + FSTRING_PREFIX_LEN) as u32,
+                ));
+                raw_template.push_str("{}");
+            }
+            _ => {
+                let c = remainder[i..].chars().next()?;
+                raw_template.push(c);
+                i += c.len_utf8();
+            }
+        }
+    }
+
+    None
+}
+
+/// 扫描插值表达式直到深度为 0 的闭合 `}`，返回其字节下标。
+/// 表达式内部的嵌套花括号与字符串/字符字面量会被正确跳过。
+fn scan_interpolation_end(bytes: &[u8], i: &mut usize) -> Option<usize> {
+    let mut depth = 0usize;
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b'}' if depth == 0 => {
+                let end = *i;
+                *i += 1;
+                return Some(end);
+            }
+            b'{' => {
+                depth += 1;
+                *i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                *i += 1;
+            }
+            quote @ (b'"' | b'\'') => skip_fstring_quoted(bytes, i, quote)?,
+            b'\n' => return None,
+            _ => *i += 1,
+        }
+    }
+    None
+}
+
+/// 跳过插值内部的字符串/字符字面量。
+fn skip_fstring_quoted(bytes: &[u8], i: &mut usize, quote: u8) -> Option<()> {
+    *i += 1;
+    while *i < bytes.len() {
+        match bytes[*i] {
+            b'\\' => *i += 2,
+            b'\n' => return None,
+            b if b == quote => {
+                *i += 1;
+                return Some(());
+            }
+            _ => *i += 1,
+        }
+    }
+    None
 }
 
 /// 解析字符字面量

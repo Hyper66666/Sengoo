@@ -1,9 +1,11 @@
 use crate::*;
 use miette::{IntoDiagnostic, Result};
-use sengoo_compiler::{AssertCallsiteContext, DebugInfoConfig};
+use sengoo_compiler::{AssertCallsiteContext, CoverageContext, DebugInfoConfig};
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
+
+use super::test::{strip_test_attributes, COVERAGE_REPORT_ENV, COVERAGE_SOURCE_ENV};
 
 use super::shared::{
     contract_checks_mode_label, resolve_contract_checks_enabled, ContractChecksOverrideGuard,
@@ -12,6 +14,15 @@ use super::shared::{
 use super::workset_optimizations::{
     can_reuse_artifacts_for_unreachable_impl_only_changes, can_skip_codegen_via_generic_cache,
 };
+
+fn run_artifact_stem(source_stem: &str, coverage_requested: bool) -> String {
+    if coverage_requested {
+        format!("{source_stem}.coverage")
+    } else {
+        source_stem.to_string()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn cmd_run(
     input: &str,
@@ -29,7 +40,11 @@ pub(crate) async fn cmd_run(
     println!("Running: {}", input);
 
     let input_path = Path::new(input);
-    let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
+    let source_stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
+    let stem = run_artifact_stem(
+        &source_stem,
+        std::env::var_os(COVERAGE_REPORT_ENV).is_some(),
+    );
     let source_dir = input_path.parent().unwrap_or(Path::new("."));
     let build_dir = source_dir.join("build");
     fs::create_dir_all(&build_dir).into_diagnostic()?;
@@ -38,7 +53,7 @@ pub(crate) async fn cmd_run(
     let executable_path = if cfg!(windows) {
         build_dir.join(format!("{}.exe", stem))
     } else {
-        build_dir.join(stem.to_string())
+        build_dir.join(&stem)
     };
     let cache_path = build_dir.join(format!("{}.run-cache.json", stem));
     let frontend_session_path = frontend_session_store_path(&build_dir, &stem);
@@ -68,6 +83,7 @@ pub(crate) async fn cmd_run(
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to read source {}: {}", input, e))?;
     let source = expand_imports_for_source(input_path, &root_source)?;
+    let coverage_context = coverage_context_from_env(&source)?;
     let native_link_libraries = collect_native_link_libraries_for_graph(input_path, &root_source)?;
     if !native_link_libraries.is_empty() {
         println!(
@@ -237,6 +253,7 @@ pub(crate) async fn cmd_run(
         format!("reflection={}", reflection.enabled),
         format!("contract_checks={}", contract_checks_enabled),
         format!("debug_info={}", debug_info),
+        format!("coverage={}", coverage_context.is_some()),
     ];
     let (generic_plan_stats, next_generic_cache) = derive_generic_instance_plan(
         previous_generic_cache_seed.as_ref(),
@@ -489,28 +506,30 @@ pub(crate) async fn cmd_run(
         source_text: Some(Rc::from(source.as_str())),
         user_base_offset: user_source_base_offset(&source, &root_source),
     };
-    let (phases, effective_memory_mode) = compile_source_to_llvm_file_with_phase_timings_with_mode(
-        &source,
-        opt_level,
-        &llvm_ir_path,
-        if low_memory {
-            Some(FrontendMemoryMode::LowMemory)
-        } else {
-            None
-        },
-        Some(assert_callsite),
-        None,
-        debug_info.then(|| {
-            DebugInfoConfig::for_source(
-                input_path.to_string_lossy().replace('\\', "/"),
-                root_source.clone(),
-            )
-        }),
-    )
-    .map_err(|e| {
-        emit_compile_error(Some(input), &e.to_string());
-        miette::miette!("compile failed")
-    })?;
+    let (phases, effective_memory_mode) =
+        compile_source_to_llvm_file_with_phase_timings_with_mode_and_coverage(
+            &source,
+            opt_level,
+            &llvm_ir_path,
+            if low_memory {
+                Some(FrontendMemoryMode::LowMemory)
+            } else {
+                None
+            },
+            Some(assert_callsite),
+            None,
+            debug_info.then(|| {
+                DebugInfoConfig::for_source(
+                    input_path.to_string_lossy().replace('\\', "/"),
+                    root_source.clone(),
+                )
+            }),
+            coverage_context,
+        )
+        .map_err(|e| {
+            emit_compile_error(Some(input), &e.to_string());
+            miette::miette!("compile failed")
+        })?;
     crate::maybe_print_phase_timings(&phases);
     println!(
         "frontend memory mode: {}",
@@ -682,4 +701,55 @@ pub(crate) async fn cmd_run(
 
     propagate_run_exit_code(native_exit_code)?;
     Ok(())
+}
+
+fn coverage_context_from_env(expanded_source: &str) -> Result<Option<CoverageContext>> {
+    if std::env::var_os(COVERAGE_REPORT_ENV).is_none() {
+        return Ok(None);
+    }
+    let source_path = std::env::var_os(COVERAGE_SOURCE_ENV).ok_or_else(|| {
+        miette::miette!(
+            "{} requires {} to identify the instrumented source",
+            COVERAGE_REPORT_ENV,
+            COVERAGE_SOURCE_ENV
+        )
+    })?;
+    let source_path = Path::new(&source_path);
+    let user_source = fs::read_to_string(source_path)
+        .into_diagnostic()
+        .map_err(|err| {
+            miette::miette!(
+                "failed to read coverage source {}: {}",
+                source_path.display(),
+                err
+            )
+        })?;
+    let user_source = strip_test_attributes(&user_source);
+    let base = expanded_source.rfind(&user_source).ok_or_else(|| {
+        miette::miette!(
+            "coverage source {} is not present in the expanded test harness",
+            source_path.display()
+        )
+    })?;
+    let user_base_offset = u32::try_from(base)
+        .map_err(|_| miette::miette!("expanded coverage source exceeds the 4 GiB span limit"))?;
+    let user_source_len = u32::try_from(user_source.len())
+        .map_err(|_| miette::miette!("coverage source exceeds the 4 GiB span limit"))?;
+
+    Ok(Some(CoverageContext::for_source(
+        Rc::from(expanded_source),
+        user_base_offset,
+        user_source_len,
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_artifact_stem;
+
+    #[test]
+    fn coverage_artifacts_use_an_isolated_cache_namespace() {
+        assert_eq!(run_artifact_stem("case", false), "case");
+        assert_eq!(run_artifact_stem("case", true), "case.coverage");
+    }
 }

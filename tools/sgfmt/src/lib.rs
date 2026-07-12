@@ -757,6 +757,16 @@ mod tests {
     }
 
     #[test]
+    fn formats_unsigned_literals_without_losing_their_type() {
+        let src = "def main() -> u64 { 7u64 }";
+        let first = format_test_source(src, FormatOptions::default());
+        SgParser::parse(&first).expect("formatted unsigned literal must parse");
+        let second = format_test_source(&first, FormatOptions::default());
+        assert_eq!(first, second);
+        assert!(first.contains("7 as u64") || first.contains("7u64"));
+    }
+
+    #[test]
     fn preserves_mutable_local_bindings() {
         let src = "def main()->i64{let mut value=1;value=value+1;value}";
         let formatted = format_test_source(src, FormatOptions::default());

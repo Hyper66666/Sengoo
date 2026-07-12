@@ -2190,7 +2190,7 @@ async def main() -> i64 {
         })
         .collect::<Vec<_>>();
     assert!(
-        call_names.contains(&"ImmediateFuture_Future_poll"),
+        call_names.contains(&"ImmediateFuture_Future_i64_poll"),
         "user Future await should call the trait poll implementation: {call_names:?}"
     );
     assert!(
@@ -2262,7 +2262,7 @@ async def main() -> i64 {
         .collect::<Vec<_>>();
     let poll_calls = call_names
         .iter()
-        .filter(|name| **name == "ImmediateFuture_Future_poll")
+        .filter(|name| **name == "ImmediateFuture_Future_i64_poll")
         .count();
     assert!(
         poll_calls >= 2,

@@ -8,7 +8,7 @@ impl Codegen {
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
-        let dbg = self.debug_location_suffix(&mir_fn.name);
+        let dbg = self.debug_terminator_location_suffix(mir_fn, terminator);
         match terminator {
             mir::Terminator::Return(value) => {
                 if let Some(v) = value {

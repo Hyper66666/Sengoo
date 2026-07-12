@@ -9,10 +9,15 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, iterators, i64/bool collection mutators, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared ownership with `RcValue` generic construction, copied-text lists, and string-key maps for scalar i64/bool values.
+- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, transitional
+  `HashSet<T>` for i64/bool/string keys, deterministic
+  `BTreeMap<String, ...>` / `BTreeMap<i64, ...>` and matching sets, iterators,
+  i64/bool collection mutators, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared
+  ownership with `RcValue` generic construction, copied-text lists, and
+  string-key maps for scalar i64/bool values.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `push_i64`, `push_char`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
-- `strconv.sg`: runtime-backed decimal `i64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
-- `math.sg`: pure-Sengoo integer helpers: `abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, and `pow_i64`.
+- `strconv.sg`: runtime-backed decimal `i64`, `f32`, and `f64` conversion helpers for parsing `&str` or Buffer bytes and formatting values into managed `Buffer` handles.
+- `math.sg`: integer helpers (`abs_i64`, `min_i64`, `max_i64`, `sign_i64`, `clamp_i64`, `gcd_i64`, `lcm_i64`, `pow_i64`), trait-bound `numeric_abs/min/max/clamp` for every supported integer and f32/f64 family, `i64` overflow helpers (`wrapping_*`, `checked_*`, `saturating_*`), checked `i64` conversions to fixed-width integer types, plus f32/f64 helpers (`abs_*`, `min_*`, `max_*`, `sqrt_*`, `pow_*`, `exp_*`, `ln_*`, `floor_*`, `ceil_*`, `round_*`, `sin_*`, `cos_*`, `tan_*`, `is_nan_*`, `is_finite_*`, `is_infinite_*`).
 - `error.sg`: compatibility assertion helpers (prefer `assert.sg` for new code).
 - `assert.sg`: primary assertion helpers for boolean, i64, string, and f64 checks.
 - `fmt.sg`: primitive formatting into managed `Buffer` handles via `strconv` and `status`.
@@ -101,17 +106,80 @@ that explicit: `capacity()`, `used_len()`, `clear()`,
 itself; stdlib functions that write through `buffer.ptr()` still report their
 meaningful byte count through their `Result` return value.
 
+## Assertion And Test Helpers
+
+`std::assert` is the primary assertion module for new tests. Assertion failures
+emit schema-v1 JSON envelopes with helper name, message, callsite file/line, and
+expected/actual payloads when the helper has those values. `sgc test --format
+json` keeps its existing top-level fields stable and omits optional `coverage`
+and per-test `parameters` fields unless those features are active. `sgc test`
+discovers legacy file-level tests, top-level `def test_*` functions, and
+`#[test]` functions in test files that do not define their own `main`; the
+runner strips the tooling-only `#[test]` marker from generated harnesses before
+invoking the normal compiler path. Generated function-test harnesses call
+top-level `setup()` before each test case and `teardown()` after each test case
+when those fixture functions are present. `#[case("label", ARG)]` lines
+immediately before a test function generate one case per argument, with JSON
+`parameters` entries for the case label and `arg0`. `sgc test --coverage`
+compiles statement-line probes into test binaries, registers all executable
+source probes, and aggregates only runtime hits into the v1 text and JSON
+coverage summary. Uncalled functions and untaken multi-line branches are not
+reported as covered. The `sengoo_coverage_register` / `sengoo_coverage_hit`
+runtime hooks are toolchain-internal; ordinary builds emit no calls to them.
+
 ## Collection Helpers
 
-`std::collections` keeps the existing scalar `Vec<T>` and `HashMap<K, V>`
-helpers for i64/bool combinations and adds runtime-owned text shapes for common
-tooling workloads. `TextList` copies inserted `&str` values and can copy
-elements back into a managed `Buffer` with `get_copy`, `remove_copy`, and
-iterator `next_copy`. `StringMapI64` and `StringMapBool` copy string keys on
-insert, replace existing values when a duplicate key is inserted, and expose
-deterministic key iteration by unsigned byte ordering. Key ordering is byte
-based only; Unicode normalization, locale collation, and case folding are not
-applied.
+`std::collections` provides an ABI-versioned, descriptor-backed `Vec<T>` for
+arbitrary concrete element types. Its owning surface covers push/pop,
+borrowed get, set/insert/remove, length/empty checks, clear, and automatic
+element Drop. Borrowing `iter()` yields `&T`, owning `into_iter()` yields moved
+`T`, and a live borrowed element or iterator blocks mutations that could move
+storage.
+The existing scalar `Vec<T>` and `HashMap<K, V>` helpers remain compatible for
+i64/bool combinations, alongside runtime-owned text shapes for common tooling
+workloads. Generic `VecDeque<T>` shares the descriptor-backed RawVec core and
+supports borrowed front/back, push/pop at both ends, clear, and automatic Drop.
+Transitional `VecDeque<i64>` and `VecDeque<bool>` support `push_front`,
+`push_back`, `pop_front`, `pop_back`, `front`, `back`, `len`, `clear`, and
+automatic scope-exit `Drop` over the same i64 vector runtime; manual `free()`
+remains source-compatible. `Vec<String>` supports
+owned-string `push`, `set`, `insert`, cloned reads, transfer removal, cloned
+iteration, and consuming iterator `collect()` through the existing
+string-vector runtime. `HashMap<String, i64>`, `HashMap<String, bool>`, and
+`HashMap<String, String>` are transition spellings over the copied-key string
+map runtimes: they copy `&str` keys on insert, replace existing values for
+duplicate keys, and expose deterministic key iteration by unsigned byte
+ordering, including consuming `count`, `skip`, and bounded `take` on owned-key
+iterators, plus `collect()` into `Vec<String>`. The same sorted runtime now
+backs explicit `BTreeMap<String, i64/bool/String>` and `BTreeSet<String>`
+transition types, whose iteration order is independent of insertion order.
+`BTreeMap<i64, i64>`, `BTreeMap<i64, bool>`, and `BTreeSet<i64>` use a
+separate sorted integer runtime rather than the hash-map slot order. They
+support insertion and replacement, lookup, removal, length/clear, automatic
+`Drop`, and deterministic ascending key iteration (including negative keys).
+`TextList`
+copies inserted `&str` values and can copy elements back into a managed
+`Buffer` with `get_copy`, `remove_copy`, and iterator `next_copy`.
+`StringMapI64` and `StringMapBool` remain source-compatible aliases for the
+same copied-key scalar map family. Runtime-backed Vec i64 iterators support
+single-step `map_with`/`filter_with` plus consuming `count`, `sum`, `skip`,
+`take`, `collect`, and transitional `enumerate()`; bool vector iterators
+support `map_with`/`filter_with` plus consuming `count`, `skip`, `take`,
+`collect`, and transitional `enumerate()`. Runtime-backed i64/bool map
+iterators also expose transitional `enumerate()` over yielded values.
+Transitional `HashSet<i64>`/`HashSet<bool>` iterators enumerate set keys and
+can consume `skip`, `take`, `count`, or `collect`, while string-key maps and
+sets expose copied/owned key iteration plus counting, bounded `take`, and
+`collect()` into `Vec<String>`. The verified scalar/string set handles now
+release automatically on scope exit; manual `free()` remains compatible.
+`Vec<String>` iterators can consume `count`, `skip`, `take`, or
+collect cloned strings into a new `Vec<String>`.
+Key ordering is byte based only; Unicode
+normalization, locale collation, and case folding are not applied. Generic
+`HashMap<K,V>` and `HashSet<T>` use compiler-generated Hash/Eq and move/Drop
+callbacks for arbitrary concrete keys and values. Generic `BTreeMap<K,V>` and
+`BTreeSet<T>` use Ord callbacks, sorted insertion, deterministic borrowed key
+iteration, and the same exact key/value Drop contract.
 
 `Rc<T>` is a single-threaded shared-ownership handle for the verified payloads
 `i64`, `bool`, and `String`. Use `rc_new_i64`, `rc_new_bool`, and
@@ -129,9 +197,11 @@ can consume data returned by `std::args`, `std::file`, or `std::io`.
 `strconv_format_i64(value, buffer)` writes base-10 ASCII into a managed Buffer
 and returns the byte count; it does not append a NUL terminator. Parsing accepts
 optional ASCII whitespace and a leading sign, rejects non-whitespace trailing
-characters, and reports overflow as an error-shaped `Result`. Floats, radix
-selection, locale-specific formatting, arbitrary precision values, and
-owned-string returns remain deferred.
+characters, and reports overflow as an error-shaped `Result`. `strconv_parse_f32`,
+`strconv_parse_f64`, their Buffer variants, and `strconv_format_f32`/
+`strconv_format_f64` provide fixed-precision decimal float conversion over the
+same status taxonomy. Radix selection, locale-specific formatting, arbitrary
+precision values, and owned-string returns remain deferred.
 
 ## JSON Helpers
 

@@ -156,6 +156,13 @@ pub enum HIRTypeKind {
     /// Trait 对象 `dyn Trait`
     TraitObject(Vec<String>),
 
+    /// Associated type projection such as `<I as Iterator>::Item`.
+    AssocProjection {
+        base: Box<HIRType>,
+        trait_name: String,
+        name: String,
+    },
+
     /// 类型推断失败时的错误类型
     Error,
 }
@@ -194,7 +201,7 @@ impl IntKind {
             Self::I32 | Self::U32 => 32,
             Self::I64 | Self::U64 => 64,
             Self::I128 | Self::U128 => 128,
-            Self::ISize | Self::USize => 32, // 假设 32 位指针
+            Self::ISize | Self::USize => 64,
         }
     }
 }

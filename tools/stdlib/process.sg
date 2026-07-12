@@ -42,6 +42,13 @@ struct ProcessHandle {
     handle: i64,
 }
 
+impl !Send for ProcessCommand {}
+impl !Sync for ProcessCommand {}
+impl !Send for ProcessOutput {}
+impl !Sync for ProcessOutput {}
+impl !Send for ProcessHandle {}
+impl !Sync for ProcessHandle {}
+
 def process_i64_result(value: i64) -> Result<i64, i64> {
     if value >= 0 {
         Result { is_ok: true, value: value, error: 0 }

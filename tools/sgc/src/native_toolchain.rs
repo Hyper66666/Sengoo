@@ -4,8 +4,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(not(windows))]
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cross_compile::{linux_sysroot_from_env, windows_cross_sdk_include_paths};
 use crate::module_graph::collect_module_sources_with_edges;
@@ -20,6 +19,7 @@ use crate::{
 };
 
 pub(crate) const MINIMUM_CLANG_MAJOR: u32 = 15;
+static RUNTIME_OBJECT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn effective_target(target: Option<&NativeBuildTarget>) -> NativeBuildTarget {
     target.cloned().unwrap_or_else(NativeBuildTarget::host)
@@ -247,6 +247,32 @@ fn compile_runtime_source_to_object(
     Ok(())
 }
 
+fn runtime_object_temp_path(object_path: &Path) -> PathBuf {
+    let sequence = RUNTIME_OBJECT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let file_name = object_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("runtime-object");
+    object_path.with_file_name(format!(
+        ".{file_name}.tmp-{}-{sequence}",
+        std::process::id()
+    ))
+}
+
+fn publish_runtime_object(temp_path: &Path, object_path: &Path) -> Result<()> {
+    match fs::rename(temp_path, object_path) {
+        Ok(()) => Ok(()),
+        Err(_) if object_path.exists() => {
+            let _ = fs::remove_file(temp_path);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = fs::remove_file(temp_path);
+            Err(error).into_diagnostic()
+        }
+    }
+}
+
 pub(crate) fn ensure_runtime_objects(
     clang_exe: &str,
     runtime_c: &str,
@@ -283,14 +309,20 @@ pub(crate) fn ensure_runtime_objects_with_defines(
             defines,
         )?;
         if !object_path.exists() {
-            compile_runtime_source_to_object(
+            let temp_path = runtime_object_temp_path(&object_path);
+            let compile_result = compile_runtime_source_to_object(
                 clang_exe,
                 &source_path,
-                &object_path,
+                &temp_path,
                 opt_level,
                 &target,
                 defines,
-            )?;
+            );
+            if let Err(error) = compile_result {
+                let _ = fs::remove_file(&temp_path);
+                return Err(error);
+            }
+            publish_runtime_object(&temp_path, &object_path)?;
         }
         object_paths.push(object_path);
     }
@@ -1266,6 +1298,35 @@ mod tests {
             plain, native_net,
             "C-only and native-net runtime objects must not share a cache slot"
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn runtime_object_cache_publish_is_atomic_under_competing_writers() {
+        let root = temp_test_dir("runtime-object-publish");
+        fs::create_dir_all(&root).unwrap();
+        let object_path = root.join("runtime.obj");
+        let first_temp = root.join("first.tmp");
+        let second_temp = root.join("second.tmp");
+        fs::write(&first_temp, b"complete-first").unwrap();
+        fs::write(&second_temp, b"complete-second").unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        std::thread::scope(|scope| {
+            for temp_path in [&first_temp, &second_temp] {
+                let barrier = barrier.clone();
+                let object_path = &object_path;
+                scope.spawn(move || {
+                    barrier.wait();
+                    publish_runtime_object(temp_path, object_path).unwrap();
+                });
+            }
+        });
+
+        let published = fs::read(&object_path).unwrap();
+        assert!(published == b"complete-first" || published == b"complete-second");
+        assert!(!first_temp.exists());
+        assert!(!second_temp.exists());
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Condvar, Mutex};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use super::concurrent::PoolJobHandle;
@@ -59,9 +59,107 @@ pub(crate) fn wait_for_cross_thread_wakeup(timeout: std::time::Duration) {
     SCHEDULER_WAKEUP.wait_for_signal_or_timeout(timeout);
 }
 
+#[derive(Default)]
+struct WorkerQueue {
+    jobs: Mutex<VecDeque<PoolJobHandle>>,
+}
+
+struct PoolState {
+    queues: Vec<Arc<WorkerQueue>>,
+    next_queue: AtomicUsize,
+    steal_count: AtomicUsize,
+    shutdown: AtomicBool,
+    wake_mutex: Mutex<()>,
+    wake: Condvar,
+}
+
+impl PoolState {
+    fn new(worker_count: usize) -> Self {
+        Self {
+            queues: (0..worker_count)
+                .map(|_| Arc::new(WorkerQueue::default()))
+                .collect(),
+            next_queue: AtomicUsize::new(0),
+            steal_count: AtomicUsize::new(0),
+            shutdown: AtomicBool::new(false),
+            wake_mutex: Mutex::new(()),
+            wake: Condvar::new(),
+        }
+    }
+
+    fn enqueue(&self, job: PoolJobHandle) -> bool {
+        let index = self.next_queue.fetch_add(1, Ordering::Relaxed) % self.queues.len();
+        self.enqueue_to(job, index)
+    }
+
+    fn enqueue_to(&self, job: PoolJobHandle, index: usize) -> bool {
+        let Some(queue) = self.queues.get(index) else {
+            return false;
+        };
+        if self.shutdown.load(Ordering::Acquire) {
+            return false;
+        }
+        queue
+            .jobs
+            .lock()
+            .expect("worker queue mutex poisoned")
+            .push_back(job);
+        self.wake.notify_one();
+        true
+    }
+
+    fn pop_or_steal(&self, worker_index: usize) -> Option<PoolJobHandle> {
+        if let Some(job) = self.queues[worker_index]
+            .jobs
+            .lock()
+            .expect("worker queue mutex poisoned")
+            .pop_front()
+        {
+            return Some(job);
+        }
+
+        for offset in 1..self.queues.len() {
+            let victim = (worker_index + offset) % self.queues.len();
+            if let Some(job) = self.queues[victim]
+                .jobs
+                .lock()
+                .expect("worker queue mutex poisoned")
+                .pop_back()
+            {
+                self.steal_count.fetch_add(1, Ordering::Relaxed);
+                return Some(job);
+            }
+        }
+        None
+    }
+
+    fn wait_for_work(&self) {
+        if self.shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        let Ok(guard) = self.wake_mutex.lock() else {
+            return;
+        };
+        let _ = self
+            .wake
+            .wait_timeout(guard, std::time::Duration::from_millis(10))
+            .ok();
+    }
+}
+
 struct ThreadPool {
-    _workers: Vec<JoinHandle<()>>,
-    job_tx: Sender<PoolJobHandle>,
+    workers: Vec<JoinHandle<()>>,
+    state: Arc<PoolState>,
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        self.state.shutdown.store(true, Ordering::Release);
+        self.state.wake.notify_all();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
 }
 
 static POOL_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -70,10 +168,7 @@ static POOL: Mutex<Option<ThreadPool>> = Mutex::new(None);
 const MAX_WORKER_COUNT: i64 = 256;
 
 pub(crate) fn runtime_enable_thread_pool(worker_count: i64) -> Result<i64, i64> {
-    if worker_count < 1 {
-        return Err(STATUS_INVALID_ARGUMENT);
-    }
-    if worker_count > MAX_WORKER_COUNT {
+    if !(1..=MAX_WORKER_COUNT).contains(&worker_count) {
         return Err(STATUS_INVALID_ARGUMENT);
     }
 
@@ -82,17 +177,12 @@ pub(crate) fn runtime_enable_thread_pool(worker_count: i64) -> Result<i64, i64> 
         return Ok(1);
     }
 
-    let (job_tx, job_rx) = mpsc::channel::<PoolJobHandle>();
-    let shared_rx = ArcReceiver::new(job_rx);
     let worker_count = worker_count as usize;
-    let mut workers = Vec::with_capacity(worker_count);
-    for _ in 0..worker_count {
-        workers.push(spawn_pool_worker(shared_rx.clone()));
-    }
-    *pool_guard = Some(ThreadPool {
-        _workers: workers,
-        job_tx,
-    });
+    let state = Arc::new(PoolState::new(worker_count));
+    let workers = (0..worker_count)
+        .map(|worker_index| spawn_pool_worker(state.clone(), worker_index))
+        .collect();
+    *pool_guard = Some(ThreadPool { workers, state });
     POOL_ENABLED.store(true, Ordering::Release);
     Ok(1)
 }
@@ -104,57 +194,85 @@ pub(crate) fn is_thread_pool_enabled() -> bool {
 #[cfg(test)]
 pub(crate) fn test_only_disable_thread_pool() {
     POOL_ENABLED.store(false, Ordering::Release);
-    let mut pool_guard = POOL.lock().expect("thread pool mutex poisoned");
-    *pool_guard = None;
+    let pool = POOL.lock().expect("thread pool mutex poisoned").take();
+    drop(pool);
 }
 
-#[derive(Clone)]
-struct ArcReceiver {
-    inner: std::sync::Arc<Mutex<Receiver<PoolJobHandle>>>,
-}
-
-impl ArcReceiver {
-    fn new(receiver: Receiver<PoolJobHandle>) -> Self {
-        Self {
-            inner: std::sync::Arc::new(Mutex::new(receiver)),
+fn spawn_pool_worker(state: Arc<PoolState>, worker_index: usize) -> JoinHandle<()> {
+    thread::spawn(move || loop {
+        if let Some(job) = state.pop_or_steal(worker_index) {
+            execute_job(job);
+            continue;
         }
-    }
-
-    fn recv(&self) -> Option<PoolJobHandle> {
-        self.inner
-            .lock()
-            .expect("pool receiver mutex poisoned")
-            .recv()
-            .ok()
-    }
-}
-
-fn spawn_pool_worker(job_rx: ArcReceiver) -> JoinHandle<()> {
-    thread::spawn(move || {
-        while let Some(job) = job_rx.recv() {
-            if job.canceled.load(Ordering::Acquire) {
-                continue;
-            }
-            let value = (job.work_fn)();
-            if job.canceled.load(Ordering::Acquire) {
-                continue;
-            }
-            if let Ok(mut slot) = job.result.lock() {
-                *slot = Some(value);
-            }
-            job.completed.store(true, Ordering::Release);
-            signal_scheduler_wakeup();
+        if state.shutdown.load(Ordering::Acquire) {
+            break;
         }
+        state.wait_for_work();
     })
 }
 
-pub(crate) fn submit_pool_job(work_fn: extern "C" fn() -> i64) -> Option<PoolJobHandle> {
-    if !is_thread_pool_enabled() {
-        return None;
+fn execute_job(job: PoolJobHandle) {
+    if job.canceled.load(Ordering::Acquire) {
+        return;
     }
-    let job = PoolJobHandle::new(work_fn);
+    let Some(value) = job.execute() else {
+        return;
+    };
+    if job.canceled.load(Ordering::Acquire) {
+        return;
+    }
+    if let Ok(mut slot) = job.result.lock() {
+        *slot = Some(value);
+    }
+    job.completed.store(true, Ordering::Release);
+    signal_scheduler_wakeup();
+}
+
+fn submit_job(job: &PoolJobHandle) -> bool {
+    if !is_thread_pool_enabled() {
+        return false;
+    }
     let pool_guard = POOL.lock().expect("thread pool mutex poisoned");
-    let pool = pool_guard.as_ref()?;
-    pool.job_tx.send(job.clone_for_queue()).ok()?;
-    Some(job)
+    pool_guard
+        .as_ref()
+        .is_some_and(|pool| pool.state.enqueue(job.clone_for_queue()))
+}
+
+pub(crate) fn submit_pool_job(work_fn: extern "C" fn() -> i64) -> Option<PoolJobHandle> {
+    let job = PoolJobHandle::new(work_fn);
+    submit_job(&job).then_some(job)
+}
+
+pub(crate) fn submit_pool_task<F>(work: F) -> Option<PoolJobHandle>
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
+    let job = PoolJobHandle::new_task(Box::new(work));
+    submit_job(&job).then_some(job)
+}
+
+#[cfg(test)]
+pub(crate) fn test_only_submit_to_worker<F>(work: F, worker_index: usize) -> Option<PoolJobHandle>
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
+    let job = PoolJobHandle::new_task(Box::new(work));
+    let pool_guard = POOL.lock().expect("thread pool mutex poisoned");
+    pool_guard
+        .as_ref()
+        .and_then(|pool| {
+            pool.state
+                .enqueue_to(job.clone_for_queue(), worker_index)
+                .then_some(())
+        })
+        .map(|()| job)
+}
+
+#[cfg(test)]
+pub(crate) fn test_only_steal_count() -> usize {
+    POOL.lock()
+        .expect("thread pool mutex poisoned")
+        .as_ref()
+        .map(|pool| pool.state.steal_count.load(Ordering::Acquire))
+        .unwrap_or(0)
 }

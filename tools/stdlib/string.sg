@@ -28,11 +28,20 @@ extern "C" {
     fn sengoo_string_slice_status(handle: i64, start: i64, end: i64) -> i64;
     fn sengoo_string_eq(lhs_handle: i64, rhs_handle: i64) -> i64;
     fn sengoo_string_compare(lhs_handle: i64, rhs_handle: i64) -> i64;
+    fn sengoo_str_hash(value: &str) -> i64;
+    fn sengoo_hasher_new() -> i64;
+    fn sengoo_hasher_free_status(handle: i64) -> i64;
+    fn sengoo_hasher_write_i64(handle: i64, value: i64) -> i64;
+    fn sengoo_hasher_write_bool(handle: i64, value: i64) -> i64;
+    fn sengoo_hasher_write_str(handle: i64, value: &str) -> i64;
+    fn sengoo_hasher_write_string(handle: i64, string_handle: i64) -> i64;
+    fn sengoo_hasher_finish(handle: i64) -> i64;
     fn sengoo_string_bytes_iter_new(handle: i64) -> i64;
     fn sengoo_string_chars_iter_new(handle: i64) -> i64;
     fn sengoo_string_iter_done(iter_handle: i64) -> i64;
     fn sengoo_string_bytes_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
     fn sengoo_string_chars_iter_next_or_default(iter_handle: i64, fallback: i64) -> i64;
+    fn sengoo_string_chars_iter_next_char(iter_handle: i64, fallback: char) -> char;
     fn sengoo_string_iter_free_status(iter_handle: i64) -> i64;
     fn sengoo_string_split_iter_new(handle: i64, delimiter_ptr: i64) -> i64;
     fn sengoo_string_split_iter_done(iter_handle: i64) -> i64;
@@ -55,6 +64,84 @@ struct StringCharsIter {
 
 struct StringSplitIter {
     handle: i64,
+}
+
+struct Formatter {
+    handle: i64,
+}
+
+struct Hasher {
+    handle: i64,
+}
+
+def formatter_new() -> Formatter {
+    Formatter { handle: sengoo_string_new() }
+}
+
+def hasher_new() -> Hasher {
+    Hasher { handle: sengoo_hasher_new() }
+}
+
+impl Formatter {
+    def write_str(&mut self, text: &str) -> bool {
+        sengoo_string_push_str_status(self.handle, sengoo_stdlib_str_ptr(text)) >= 0
+    }
+
+    def write_char(&mut self, value: char) -> bool {
+        sengoo_string_push_char_status(self.handle, value) >= 0
+    }
+
+    def write_i64(&mut self, value: i64) -> bool {
+        sengoo_string_push_i64_status(self.handle, value) >= 0
+    }
+
+    def write_bool(&mut self, value: bool) -> bool {
+        let raw = if value { 1 } else { 0 };
+        sengoo_string_push_bool_status(self.handle, raw) >= 0
+    }
+
+    def write_f64(&mut self, value: f64, precision: i64) -> bool {
+        sengoo_string_push_f64_precision_status(self.handle, value, precision) >= 0
+    }
+
+    def write_string(&mut self, value: String) -> bool {
+        sengoo_string_push_padded_string_status(self.handle, value.handle, 1, 0) >= 0
+    }
+
+    def finish(self) -> String {
+        String { handle: self.handle }
+    }
+}
+
+impl Hasher {
+    def write_i64(&mut self, value: i64) -> bool {
+        sengoo_hasher_write_i64(self.handle, value) >= 0
+    }
+
+    def write_bool(&mut self, value: bool) -> bool {
+        let raw = if value { 1 } else { 0 };
+        sengoo_hasher_write_bool(self.handle, raw) >= 0
+    }
+
+    def write_str(&mut self, text: &str) -> bool {
+        sengoo_hasher_write_str(self.handle, text) >= 0
+    }
+
+    def write_string(&mut self, value: String) -> bool {
+        sengoo_hasher_write_string(self.handle, value.handle) >= 0
+    }
+
+    def finish(self) -> i64 {
+        let state = sengoo_hasher_finish(self.handle);
+        sengoo_hasher_free_status(self.handle);
+        state
+    }
+}
+
+impl Hash for String {
+    def hash_into(&self, h: &mut Hasher) {
+        sengoo_hasher_write_string(h.handle, self.handle);
+    }
 }
 
 def str_len(value: &str) -> i64 {
@@ -323,14 +410,8 @@ impl Ord for String {
 
 impl Iterator for StringBytesIter {
     type Item = i64;
-}
 
-impl Iterator for StringCharsIter {
-    type Item = i64;
-}
-
-impl StringBytesIter {
-    def next(&mut self) -> Option<i64> {
+    def next(&self) -> Option<i64> {
         if sengoo_string_iter_done(self.handle) != 0 {
             option_none_i64()
         } else {
@@ -343,8 +424,21 @@ impl StringBytesIter {
     }
 }
 
+impl Iterator for StringCharsIter {
+    type Item = char;
+
+    def next(&self) -> Option<char> {
+        if sengoo_string_iter_done(self.handle) != 0 {
+            option_none_with('\0')
+        } else {
+            option_some(sengoo_string_chars_iter_next_char(self.handle, '\0'))
+        }
+    }
+
+}
+
 impl StringCharsIter {
-    def next(&mut self) -> Option<i64> {
+    def next_codepoint(&self) -> Option<i64> {
         if sengoo_string_iter_done(self.handle) != 0 {
             option_none_i64()
         } else {
@@ -357,8 +451,10 @@ impl StringCharsIter {
     }
 }
 
-impl StringSplitIter {
-    def next(&mut self) -> Option<String> {
+impl Iterator for StringSplitIter {
+    type Item = String;
+
+    def next(&self) -> Option<String> {
         if sengoo_string_split_iter_done(self.handle) != 0 {
             option_none_with(String { handle: 0 })
         } else {

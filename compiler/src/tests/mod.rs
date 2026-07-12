@@ -47,6 +47,7 @@ pub mod method_specialization_helpers_tests;
 pub mod mir_generic_methods_tests;
 pub mod mir_type_helpers_tests;
 pub mod mir_type_mapping_helpers_tests;
+pub mod negative_impl_tests;
 pub mod owned_string_tests;
 pub mod parser_ambiguity_tests;
 pub mod pattern_helpers_tests;
