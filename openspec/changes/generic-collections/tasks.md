@@ -164,8 +164,13 @@
     specialization keys are formed, so `RawVecIntoIter<Payload>.skip(1).take(1)`
     terminates and emits concrete nested `SkipIter`/`TakeIter` state machines.
     Concrete named function values can also initialize function-typed struct
-    fields, preparing lazy map/filter state. Map/filter/enumerate/fold/collect
-    and native owning Drop evidence remain open.
+    fields. Function-signature substitution now binds generic parameter and
+    return types, and explicitly typed lambdas are checked/lowered against
+    their declared callable signature. Generic lazy `MapIter<I,T,O>` and
+    `EnumerateIter<I,T>` state machines specialize for arbitrary user structs;
+    compiler coverage exercises `skip -> take -> map` and indexed enumeration.
+    Filter/fold/collect, mixed deep adapter chains, and native owning Drop
+    evidence remain open.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: transitional consuming `collect()` now materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and
@@ -188,6 +193,10 @@
     `HashMap<String, String>` key iterator transition surface. It also runs
     the transitional `VecDeque<i64>` / `VecDeque<bool>` push/front/back/pop
     path and `Vec<String>` set/insert/remove plus cloned iterator collection.
+  - Generic compiler-surface coverage now exercises lazy `skip -> take -> map`
+    over an owned user struct and verifies a generic `enumerate` state machine
+    yields stable zero-based indices. Native Drop/leak evidence and full
+    map/filter/collect chaining remain open.
 
 ## 4. Migration and docs
 

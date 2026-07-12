@@ -822,6 +822,46 @@ impl TypeChecker {
     }
 
     pub(super) fn check_lambda(&mut self, params: &[Ident], body: &Expr) -> TyResult<Ty> {
+        let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
+        self.check_lambda_with_signature(params, body, param_tys, None)
+    }
+
+    pub(super) fn check_lambda_with_expected(
+        &mut self,
+        params: &[Ident],
+        body: &Expr,
+        expected: &Ty,
+    ) -> TyResult<Ty> {
+        let expected = self.infer.apply_subst(expected);
+        let TyKind::Fn {
+            params: expected_params,
+            ret,
+            ..
+        } = &expected.kind
+        else {
+            return self.check_lambda(params, body);
+        };
+        if expected_params.len() != params.len() {
+            return Err(TypeckError::ArgumentCountMismatch {
+                expected: expected_params.len(),
+                found: params.len(),
+            });
+        }
+        self.check_lambda_with_signature(
+            params,
+            body,
+            expected_params.clone(),
+            Some(ret.as_ref().clone()),
+        )
+    }
+
+    fn check_lambda_with_signature(
+        &mut self,
+        params: &[Ident],
+        body: &Expr,
+        param_tys: Vec<Ty>,
+        expected_return: Option<Ty>,
+    ) -> TyResult<Ty> {
         let mut seen = std::collections::HashSet::new();
         if let Some(duplicate) = params
             .iter()
@@ -838,14 +878,19 @@ impl TypeChecker {
             ));
         }
 
-        let param_tys: Vec<Ty> = params.iter().map(|_| self.infer.fresh_ty_var()).collect();
-
         self.env.push_scope();
         for (param, ty) in params.iter().zip(param_tys.iter()) {
             self.env.insert_var(param.name.clone(), ty.clone());
         }
         let body_ty = self.check_expr(body)?;
         self.env.pop_scope();
+
+        let body_ty = if let Some(expected_return) = expected_return {
+            self.infer.unify(&expected_return, &body_ty)?;
+            self.infer.apply_subst(&expected_return)
+        } else {
+            body_ty
+        };
 
         Ok(self.env.fn_ty(param_tys, body_ty))
     }

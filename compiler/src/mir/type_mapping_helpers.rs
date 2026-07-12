@@ -255,6 +255,18 @@ pub(crate) fn bind_mir_subst_from_hir_type(
                 }
             }
         }
+        HIRTypeKind::Fn { params, ret } => {
+            if let MIRType::Fn {
+                params: actual_params,
+                ret: actual_ret,
+            } = actual
+            {
+                for (template_param, actual_param) in params.iter().zip(actual_params.iter()) {
+                    bind_mir_subst_from_hir_type(template_param, actual_param, struct_defs, subst);
+                }
+                bind_mir_subst_from_hir_type(ret, actual_ret, struct_defs, subst);
+            }
+        }
         _ => {}
     }
 }
@@ -303,5 +315,23 @@ mod tests {
 
         assert_eq!(subst.get("<I as Iterator>::Item"), Some(&MIRType::Bool));
         assert_eq!(subst.get("<I as Stream>::Item"), Some(&MIRType::Int(32)));
+    }
+
+    #[test]
+    fn function_signature_binds_generic_parameter_and_return_types() {
+        let template = HIRType::new(HIRTypeKind::Fn {
+            params: vec![HIRType::named("T".to_string(), Vec::new())],
+            ret: Box::new(HIRType::named("O".to_string(), Vec::new())),
+        });
+        let actual = MIRType::Fn {
+            params: vec![MIRType::Bool],
+            ret: Box::new(MIRType::Int(64)),
+        };
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(&template, &actual, &HashMap::new(), &mut subst);
+
+        assert_eq!(subst.get("T"), Some(&MIRType::Bool));
+        assert_eq!(subst.get("O"), Some(&MIRType::Int(64)));
     }
 }

@@ -2573,17 +2573,49 @@ def main() -> i64 {
     values.push(Payload { value: 10 });
     values.push(Payload { value: 20 });
     values.push(Payload { value: 30 });
-    let iter = values.into_iter().skip(1).take(1);
-    let first: Option<Payload> = iter.next();
-    let exhausted: Option<Payload> = iter.next();
-    if first.is_some && first.value.value == 20 && exhausted.is_none() { 0 } else { 1 }
+    let mapper: fn(Payload) -> i64 = |payload| payload.value;
+    let iter = values.into_iter().skip(1).take(1).map(mapper);
+    let first: Option<i64> = iter.next();
+    let exhausted: Option<i64> = iter.next();
+    if first.is_some && first.value == 20 && exhausted.is_none() { 0 } else { 1 }
 }
 "#,
     );
 
     assert!(
-        ir.contains("TakeIter_") && ir.contains("_next"),
-        "expected a concrete lazy TakeIter specialization:\n{ir}"
+        ir.contains("TakeIter_") && ir.contains("MapIter_") && ir.contains("_next"),
+        "expected concrete lazy TakeIter and MapIter specializations:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_surface_generic_into_iterator_enumerate_tracks_indices() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Payload {
+    value: i64,
+}
+
+def main() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload { value: 10 });
+    values.push(Payload { value: 20 });
+    let iter = values.into_iter().enumerate();
+    let first: Option<EnumeratedItem<Payload>> = iter.next();
+    let second: Option<EnumeratedItem<Payload>> = iter.next();
+    if first.is_some && first.value.index == 0 && first.value.value.value == 10
+        && second.is_some && second.value.index == 1 && second.value.value.value == 20 {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("EnumerateIter_") && ir.contains("_next"),
+        "expected a concrete lazy EnumerateIter specialization:\n{ir}"
     );
 }
 

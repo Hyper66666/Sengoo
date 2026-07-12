@@ -178,6 +178,21 @@ struct SkipIter<I, T> {
     remaining: Vec<i64>,
 }
 
+struct EnumeratedItem<T> {
+    index: i64,
+    value: T,
+}
+
+struct EnumerateIter<I, T> {
+    inner: I,
+    index: Vec<i64>,
+}
+
+struct MapIter<I, T, O> {
+    inner: I,
+    mapper: fn(T) -> O,
+}
+
 struct EnumeratedI64 {
     index: i64,
     value: i64,
@@ -799,19 +814,31 @@ impl<T> RawVecIntoIter<T> {
     }
 
     def take(self, count: i64) -> TakeIter<RawVecIntoIter<T>, T> {
-        iterator_take(self, count)
+        let remaining: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(remaining.handle, count);
+        TakeIter { inner: self, remaining: remaining }
     }
 
     def skip(self, count: i64) -> SkipIter<RawVecIntoIter<T>, T> {
-        iterator_skip(self, count)
+        let remaining: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(remaining.handle, count);
+        SkipIter { inner: self, remaining: remaining }
+    }
+    def enumerate(self) -> EnumerateIter<RawVecIntoIter<T>, T> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
+    }
+    def map<O>(self, mapper: fn(T) -> O) -> MapIter<RawVecIntoIter<T>, T, O> {
+        MapIter { inner: self, mapper: mapper }
     }
 
 }
 
 impl<I: Iterator, T> Iterator for TakeIter<I, T> {
-    type Item = I::Item;
+    type Item = T;
 
-    def next(&self) -> Option<I::Item> {
+    def next(&self) -> Option<T> {
         let count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
         if count <= 0 {
             __sengoo_option_none()
@@ -823,7 +850,7 @@ impl<I: Iterator, T> Iterator for TakeIter<I, T> {
 }
 
 impl<I: Iterator, T> TakeIter<I, T> {
-    def next(&self) -> Option<I::Item> {
+    def next(&self) -> Option<T> {
         let count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
         if count <= 0 {
             __sengoo_option_none()
@@ -832,12 +859,20 @@ impl<I: Iterator, T> TakeIter<I, T> {
             self.inner.next()
         }
     }
+    def enumerate(self) -> EnumerateIter<TakeIter<I, T>, T> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
+    }
+    def map<O>(self, mapper: fn(T) -> O) -> MapIter<TakeIter<I, T>, T, O> {
+        MapIter { inner: self, mapper: mapper }
+    }
 }
 
 impl<I: Iterator, T> Iterator for SkipIter<I, T> {
-    type Item = I::Item;
+    type Item = T;
 
-    def next(&self) -> Option<I::Item> {
+    def next(&self) -> Option<T> {
         let mut count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
         let mut exhausted = false;
         while count > 0 {
@@ -859,7 +894,7 @@ impl<I: Iterator, T> Iterator for SkipIter<I, T> {
 }
 
 impl<I: Iterator, T> SkipIter<I, T> {
-    def next(&self) -> Option<I::Item> {
+    def next(&self) -> Option<T> {
         let mut count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
         let mut exhausted = false;
         while count > 0 {
@@ -879,7 +914,76 @@ impl<I: Iterator, T> SkipIter<I, T> {
         }
     }
     def take(self, count: i64) -> TakeIter<SkipIter<I, T>, T> {
-        iterator_take(self, count)
+        let remaining: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(remaining.handle, count);
+        TakeIter { inner: self, remaining: remaining }
+    }
+    def enumerate(self) -> EnumerateIter<SkipIter<I, T>, T> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
+    }
+    def map<O>(self, mapper: fn(T) -> O) -> MapIter<SkipIter<I, T>, T, O> {
+        MapIter { inner: self, mapper: mapper }
+    }
+}
+
+impl<I: Iterator, T> Iterator for EnumerateIter<I, T> {
+    type Item = EnumeratedItem<T>;
+
+    def next(&self) -> Option<EnumeratedItem<T>> {
+        let item = self.inner.next();
+        if item.is_none() {
+            __sengoo_option_none()
+        } else {
+            let index = sengoo_vec_get_or_default_i64(self.index.handle, 0, 0);
+            sengoo_vec_set_i64(self.index.handle, 0, index + 1);
+            option_some(EnumeratedItem { index: index, value: item.value })
+        }
+    }
+}
+
+impl<I: Iterator, T> EnumerateIter<I, T> {
+    def next(&self) -> Option<EnumeratedItem<T>> {
+        let item = self.inner.next();
+        if item.is_none() {
+            __sengoo_option_none()
+        } else {
+            let index = sengoo_vec_get_or_default_i64(self.index.handle, 0, 0);
+            sengoo_vec_set_i64(self.index.handle, 0, index + 1);
+            option_some(EnumeratedItem { index: index, value: item.value })
+        }
+    }
+}
+
+impl<I: Iterator, T, O> Iterator for MapIter<I, T, O> {
+    type Item = O;
+
+    def next(&self) -> Option<O> {
+        let item = self.inner.next();
+        if item.is_none() {
+            __sengoo_option_none()
+        } else {
+            let mapper = self.mapper;
+            option_some(mapper(item.value))
+        }
+    }
+}
+
+impl<I: Iterator, T, O> MapIter<I, T, O> {
+    def next(&self) -> Option<O> {
+        let item = self.inner.next();
+        if item.is_none() {
+            __sengoo_option_none()
+        } else {
+            let mapper = self.mapper;
+            option_some(mapper(item.value))
+        }
+    }
+    def enumerate(self) -> EnumerateIter<MapIter<I, T, O>, O> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
     }
 }
 

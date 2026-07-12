@@ -1309,6 +1309,9 @@ impl TypeChecker {
             ExprKind::Call { func, args } => {
                 self.check_call_with_expected(func, args, expr.span, Some(expected))
             }
+            ExprKind::Lambda { params, body } => {
+                self.check_lambda_with_expected(params, body, expected)
+            }
             ExprKind::Struct { .. } => {
                 self.expected_return_types.push(expected.clone());
                 let result = self.check_expr(expr);
