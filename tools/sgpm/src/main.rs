@@ -4,6 +4,7 @@ mod cache;
 mod lockfile;
 mod manifest;
 mod package;
+mod registry_server;
 mod resolver;
 mod runner;
 mod scaffold;
@@ -100,6 +101,30 @@ enum Commands {
     Cache {
         #[command(subcommand)]
         command: CacheCommand,
+    },
+
+    /// Run or administer the reference package registry.
+    Registry {
+        #[command(subcommand)]
+        command: RegistryCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum RegistryCommand {
+    /// Run the filesystem-backed reference registry server.
+    Serve {
+        /// Directory used for package archives, metadata, and owner reservations.
+        #[arg(long, default_value = "target/sgpm-registry")]
+        root: PathBuf,
+
+        /// TCP address for the HTTP listener.
+        #[arg(long, default_value = "127.0.0.1:7878")]
+        listen: String,
+
+        /// Exit after serving this many requests (intended for deterministic smoke tests).
+        #[arg(long, hide = true)]
+        max_requests: Option<usize>,
     },
 }
 
@@ -667,6 +692,13 @@ fn main() -> Result<()> {
                 }
                 Ok(())
             }
+        },
+        Commands::Registry { command } => match command {
+            RegistryCommand::Serve {
+                root,
+                listen,
+                max_requests,
+            } => registry_server::serve(&root, &listen, max_requests),
         },
     }
 }

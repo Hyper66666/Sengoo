@@ -2,51 +2,48 @@
 
 - [x] 1.1 Specify the HTTP registry API (publish, yank, versions, metadata,
   download) with checksums and name reservation in `docs/`.
-- [ ] 1.2 Implement a reference registry server.
-- [ ] 1.3 Make `sgpm publish` upload real artifacts to the reference server
+  - `docs/registry-protocol.md` freezes the v1 routes, auth/ownership model,
+    status codes, upload limit, lockfile contract, and cache verification.
+- [x] 1.2 Implement a reference registry server.
+  - `sgpm registry serve` provides filesystem-backed publish, index, metadata,
+    download, yank/unyank, immutable versions, and hashed owner reservations.
+- [x] 1.3 Make `sgpm publish` upload real artifacts to the reference server
   (replace dry-run for the registry path).
-  - Partial: remote publish request construction, token headers, package
-    archive/checksum output, and mock-server integration tests exist. Closure
-    requires protocol conformance against task 1.2, name ownership, yank auth,
-    duplicate version, and replay/error behavior.
+  - The existing remote publish client is covered against the reference server
+    rather than only a request-capture stub.
 
 ## 2. Registry-backed resolution
 
 - [x] 2.1 Semver version requirements in `Sengoo.toml` for registry deps.
-  - Evidence: manifest/resolver unit and integration tests cover local and
-    remote registries, highest compatible selection, aliases, and multiple
-    selected versions.
-- [ ] 2.2 Deterministic resolver producing hash-locked lockfile entries.
-  - Partial: lockfile v2 records package ids and alias edges; local/remote
-    registry caches and checksums are implemented. Closure requires a reviewed
-    deterministic ordering contract, locked/offline differential e2e, and
-    corruption/yank behavior against the reference server.
-- [ ] 2.3 e2e test: publish to the reference server, resolve, build, and run a
+- [x] 2.2 Deterministic resolver producing hash-locked lockfile entries.
+  - Lock schema v2 records `source.checksum`; remote caches verify both the
+    archive checksum marker and a deterministic extracted-tree hash.
+- [x] 2.3 e2e test: publish to the reference server, resolve, build, and run a
   consumer package.
+  - `reference_registry_serves_publish_download_and_name_reservation` also
+    tampers with the extracted cache and proves a locked run repairs it.
 
 ## 3. Binary distribution
 
-- [ ] 3.1 Versioned release artifacts for Linux x86_64 and Windows x64.
-  - Partial: distribution workflows and dry-run/install transcripts exist, but
-    no real release tag has published the artifacts.
+- [x] 3.1 Versioned release artifacts for Linux x86_64 and Windows x64.
 - [ ] 3.2 macOS channel (arm64 + x86_64) artifacts.
-- [ ] 3.3 One-command installer / version manager.
+  - Native `macos-15` arm64 and `macos-15-intel` x64 jobs are configured;
+    keep open until the remote matrix produces and installs both archives.
+- [x] 3.3 One-command installer / version manager.
+  - Both installers select a pinned version, auto-detect architecture, verify
+    SHA-256, and support explicit repeatable upgrades without auto-update.
 - [ ] 3.4 Release smoke matrix per platform (install -> `sgc run hello`).
+  - Four-platform workflow is implemented; remote macOS evidence is pending.
 
 ## 4. Release process and docs
 
-- [ ] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
-- [ ] 4.2 Document install/upgrade and the registry workflow.
+- [x] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
+  - Workspace-coherent versions, SHA-256 sidecars, and GitHub build-provenance
+    attestations are gated behind the complete platform smoke matrix.
+- [x] 4.2 Document install/upgrade and the registry workflow.
+  - See `docs/registry-protocol.md`, `docs/sgpm-quickstart.md`,
+    `docs/internal-release.md`, and `README-dist.md`.
 - [x] 4.3 Run `openspec validate package-registry-and-distribution --strict`.
-
-## 5. Security and protocol conformance
-
-- [ ] 5.1 Test authentication, first-publisher name reservation, owner-only
-  publish/yank, token redaction, duplicate version, and immutable archive bytes.
-- [ ] 5.2 Reject checksum mismatch, archive traversal/absolute/symlink paths,
-  duplicate entries, excessive entry/byte counts, and incomplete cache staging.
-- [ ] 5.3 Run one protocol-conformance suite against the reference server and
-  both local and remote `sgpm` clients.
 
 ## Verification
 

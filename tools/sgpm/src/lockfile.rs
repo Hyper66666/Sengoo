@@ -259,11 +259,16 @@ fn render_package_entry_v2(out: &mut String, base_dir: &Path, node: &PackageNode
             out.push_str(&format!("source.rev = \"{}\"\n", escape(rev)));
         }
         PackageSource::Registry {
-            registry, version, ..
+            registry,
+            version,
+            metadata,
         } => {
             out.push_str("source.kind = \"registry\"\n");
             out.push_str(&format!("source.registry = \"{}\"\n", escape(registry)));
             out.push_str(&format!("source.version = \"{}\"\n", escape(version)));
+            if let Some(checksum) = metadata.checksum.as_deref() {
+                out.push_str(&format!("source.checksum = \"{}\"\n", escape(checksum)));
+            }
         }
     }
     out.push_str(&format!(

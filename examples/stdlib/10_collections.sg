@@ -24,13 +24,10 @@ def main() -> i64 {
     let iter_score = iter.next().unwrap_or(0)
         + iter.map_add(1).unwrap_or(0)
         + iter.filter_even().unwrap_or(0);
-    iter.free();
     let count_iter = values.iter();
     let value_count = count_iter.count();
-    count_iter.free();
     let sum_iter = values.iter();
     let value_sum = sum_iter.sum();
-    sum_iter.free();
     let collected_values = values.iter().collect();
     let collected_count = collected_values.len();
     let mut enumerated_values = values.iter().enumerate();
@@ -70,7 +67,6 @@ def main() -> i64 {
     let missing = !counts.contains(2);
     let counts_iter = counts.iter();
     let counts_sum = counts_iter.sum();
-    counts_iter.free();
     let collected_counts = counts.iter().collect();
     let collected_counts_count = collected_counts.len();
     let mut enumerated_counts = counts.iter().enumerate();
@@ -91,7 +87,6 @@ def main() -> i64 {
     let first_key = key_iter.next_copy(text_buffer).unwrap_or(0);
     let second_key = key_iter.next_copy(text_buffer).unwrap_or(0);
     let key_iter_done = key_iter.done();
-    key_iter.free();
     let score_key_count = scores.iter_keys().count();
 
     let words = vec_new_string();
@@ -105,7 +100,6 @@ def main() -> i64 {
     let word_iter = words.iter();
     let iter_middle = word_iter.next().unwrap_or(string_new());
     let word_iter_done = word_iter.done();
-    word_iter.free();
     let counted_words = words.iter().count();
     let collected_words = words.iter().collect();
     let collected_words_count = collected_words.len();
@@ -204,7 +198,7 @@ def main() -> i64 {
     let word_removed = word_set.remove("ready");
     let word_missing = !word_set.contains("ready");
 
-    let ok = values.len() == 4
+    let vectors_ok = values.len() == 4
         && values.contains(20)
         && vector_total == 60
         && iter_score == 61
@@ -230,15 +224,15 @@ def main() -> i64 {
         && !flag_deque_back_value
         && flag_deque_pop_front
         && !flag_deque_pop_back
-        && flag_deque.is_empty()
-        && counts.len() == 2
+        && flag_deque.is_empty();
+    let maps_ok = counts.len() == 2
         && map_total == 60
         && counts_sum == 40
         && collected_counts_count == 2
         && first_count_entry.index == 0
         && removed
-        && missing
-        && pushed_name
+        && missing;
+    let text_ok = pushed_name
         && replaced_name
         && copied_name == 4
         && inserted_b
@@ -262,8 +256,8 @@ def main() -> i64 {
         && counted_words == 2
         && collected_words_count == 2
         && taken_words_count == 1
-        && skipped_words_count == 1
-        && generic_inserted_a
+        && skipped_words_count == 1;
+    let string_maps_ok = generic_inserted_a
         && generic_inserted_b
         && generic_replaced_a
         && generic_score_keys.len() == 2
@@ -283,8 +277,8 @@ def main() -> i64 {
         && generic_label_skipped_count == 0
         && generic_label_value.len() == 5
         && generic_label_removed.len() == 5
-        && generic_label_missing
-        && ordered_inserted_z
+        && generic_label_missing;
+    let ordered_ok = ordered_inserted_z
         && ordered_inserted_a
         && ordered_score_keys.len() == 2
         && ordered_first_key.len() == 5
@@ -313,8 +307,8 @@ def main() -> i64 {
         && ordered_id_keys.len() == 3
         && ordered_id_keys.get(0).unwrap_or(0) == -8
         && ordered_id_keys.get(1).unwrap_or(1) == 0
-        && ordered_id_keys.get(2).unwrap_or(0) == 8
-        && id_inserted
+        && ordered_id_keys.get(2).unwrap_or(0) == 8;
+    let sets_ok = id_inserted
         && id_present
         && first_id.index == 0
         && first_id.value == 42
@@ -337,28 +331,7 @@ def main() -> i64 {
         && word_keys.len() == 1
         && word_removed
         && word_missing;
-
-    text_buffer.free();
-    names.free();
-    scores.free();
-    id_set.free();
-    flag_set.free();
-    id_taken.free();
-    flag_taken.free();
-    bool_map.free();
-    bool_values.free();
-    word_set.free();
-    generic_score_keys.free();
-    generic_label_keys.free();
-    word_keys.free();
-    ordered_number_keys.free();
-    ordered_id_keys.free();
-    values.free();
-    counts.free();
-    collected_values.free();
-    collected_counts.free();
-    collected_words.free();
-    taken_words.free();
+    let ok = vectors_ok && maps_ok && text_ok && string_maps_ok && ordered_ok && sets_ok;
 
     print(if ok { 60 } else { 0 });
     0

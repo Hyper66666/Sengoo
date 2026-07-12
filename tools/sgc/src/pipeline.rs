@@ -463,6 +463,21 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
     Ok((mir_fns, ffi_codegen, phases))
 }
 
+pub(crate) fn compile_source_to_mir_bundle_for_fast_jit(
+    source: &str,
+    opt_level: u8,
+) -> Result<(Vec<MirFunction>, FfiCodegenConfig)> {
+    let (mir_fns, ffi_codegen, _phases) = compile_frontend_to_mir_with_phase_timings(
+        source,
+        opt_level,
+        false,
+        None,
+        None,
+        TargetPointerWidth::host().bits(),
+    )?;
+    Ok((mir_fns, ffi_codegen))
+}
+
 pub(crate) fn compile_source_to_llvm_file_with_phase_timings(
     source: &str,
     opt_level: u8,

@@ -1530,8 +1530,11 @@ impl TypeChecker {
                 .collect::<Vec<_>>();
             for (trait_label, fn_ty) in trait_methods {
                 if trait_name == "Drop" && method_name == "drop" {
-                    return Err(TypeckError::Other(
-                        "Drop::drop is reserved for compiler-inserted cleanup; use an explicit compatibility release method instead".to_string(),
+                    return Err(TypeckError::diagnostic(
+                        "drop-direct-call",
+                        "`Drop::drop` is compiler-inserted and cannot be called directly",
+                        call_span.lo,
+                        call_span.hi,
                     ));
                 }
                 let instantiated = self.instantiate_method_function_ty(&fn_ty, &HashMap::new());

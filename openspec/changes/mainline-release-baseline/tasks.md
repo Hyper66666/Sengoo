@@ -29,8 +29,13 @@
   - `git fetch --all --prune` confirms the development branch is 29 behind / 3
     ahead of local `main`, 28 behind / 4 ahead of `origin/main`, and its former
     upstream remains gone.
-- [ ] 2.2 Integrate capability slices in dependency order, preserving user
+- [x] 2.2 Integrate capability slices in dependency order, preserving user
   changes and resolving conflicts with tests.
+  - Merged local `main` into `codex/toolchain-transcript-evidence`, preserving
+    the advanced compiler/stdlib work while accepting the newer registry and
+    portable-backend surfaces. Conflict follow-ups restored strict native
+    collections execution, DWARF statement lines, test discovery source maps,
+    and race-free runtime object publication.
 - [ ] 2.3 Split changes into reviewable Lore-protocol commits tied to owning
   OpenSpec changes; do not create one opaque mega-commit.
 - [ ] 2.4 Confirm no required commit remains only on a gone upstream branch or
@@ -50,12 +55,21 @@
 
 ## 4. Integrated verification
 
-- [ ] 4.1 Run fmt and supported-feature clippy with warnings denied.
-- [ ] 4.2 Run workspace/compiler/runtime/sgc/sgpm/sglsp tests from the integrated
+- [x] 4.1 Run fmt and supported-feature clippy with warnings denied.
+  - `cargo fmt --all -- --check` and
+    `cargo clippy --workspace --all-targets -- -D warnings` pass on the
+    integrated Windows worktree.
+- [x] 4.2 Run workspace/compiler/runtime/sgc/sgpm/sglsp tests from the integrated
   revision.
+  - `cargo test --workspace --all-targets` passed the compiler (1017), runtime
+    (68), sgc unit (459), and all integration targets except two test-report
+    schema/source-map assertions. Their fix was then verified by 20 command
+    tests and the complete 2/2 `test_discovery` e2e target.
 - [ ] 4.3 Run realworld locked package loops and toolchain distribution dry-run
   smoke on Windows and Linux CI.
-- [ ] 4.4 Run `openspec validate mainline-release-baseline --strict` and
+- [x] 4.4 Run `openspec validate mainline-release-baseline --strict` and
   `openspec validate --all --strict`.
+  - `npx.cmd @fission-ai/openspec validate --all --strict` reports 47 passed,
+    0 failed, including `mainline-release-baseline`.
 - [ ] 4.5 Push the integration branch and verify the exact tested SHA is visible
   on the configured GitHub remote.

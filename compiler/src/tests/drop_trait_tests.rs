@@ -28,11 +28,6 @@ fn drop_trait_is_compiler_known_by_default() {
 fn drop_impl_with_mut_self_typechecks() {
     typecheck(
         r#"
-trait Drop {
-    def drop(&mut self) {
-    }
-}
-
 struct Widget {
     id: i64,
 }
@@ -50,11 +45,6 @@ impl Drop for Widget {
 fn drop_impl_with_shared_self_is_rejected() {
     let err = typecheck(
         r#"
-trait Drop {
-    def drop(&mut self) {
-    }
-}
-
 struct Widget {
     id: i64,
 }
@@ -67,7 +57,7 @@ impl Drop for Widget {
     )
     .expect_err("a `Drop` impl with `&self` must be rejected");
     assert!(
-        err.contains("Drop::drop must use `&mut self`"),
+        err.contains("drop-trait-contract"),
         "expected the Drop receiver diagnostic, got: {err}"
     );
 }
@@ -76,11 +66,6 @@ impl Drop for Widget {
 fn drop_impl_with_extra_param_is_rejected() {
     let err = typecheck(
         r#"
-trait Drop {
-    def drop(&mut self) {
-    }
-}
-
 struct Widget {
     id: i64,
 }
@@ -93,7 +78,7 @@ impl Drop for Widget {
     )
     .expect_err("a `Drop` impl with an extra parameter must be rejected");
     assert!(
-        err.contains("Drop::drop must take no parameters"),
+        err.contains("drop-trait-contract"),
         "expected the Drop parameter diagnostic, got: {err}"
     );
 }
@@ -102,11 +87,6 @@ impl Drop for Widget {
 fn direct_drop_trait_call_is_rejected() {
     let err = typecheck(
         r#"
-trait Drop {
-    def drop(&mut self) {
-    }
-}
-
 struct Widget {
     id: i64,
 }
@@ -125,7 +105,7 @@ def main() -> i64 {
     )
     .expect_err("user code must not call a `Drop` trait method directly");
     assert!(
-        err.contains("Drop::drop is reserved for compiler-inserted cleanup"),
+        err.contains("drop-direct-call"),
         "expected the direct Drop call diagnostic, got: {err}"
     );
 }

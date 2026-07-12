@@ -77,6 +77,8 @@ pub(crate) enum AssertionEnvelopeRead {
 #[derive(Debug, Serialize)]
 struct TestCaseJson<'a> {
     name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function: Option<&'a str>,
     path: String,
     ok: bool,
     duration_ms: u128,
@@ -98,6 +100,7 @@ struct TestCase {
     path: PathBuf,
     source_path: PathBuf,
     name: String,
+    function: Option<String>,
     parameters: Option<Vec<TestParameterJson>>,
 }
 
@@ -195,12 +198,17 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
             (ok, exit_code, stdout, stderr)
         };
         let duration_ms = started.elapsed().as_millis();
-        let (assertion, assertion_transport) = if ok {
+        let (mut assertion, assertion_transport) = if ok {
             let _ = fs::remove_file(&assert_report_path);
             (None, None)
         } else {
             read_assertion_envelope(&assert_report_path)
         };
+        if test.function.is_some() && test.path != test.source_path {
+            if let Some(AssertionEnvelopeRead::Valid(envelope)) = assertion.as_mut() {
+                envelope.file = Some(test.source_path.to_string_lossy().replace('\\', "/"));
+            }
+        }
         if let Some(report_path) = coverage_report_path.as_deref() {
             collect_runtime_line_coverage(&test.source_path, report_path, &mut coverage_totals)?;
             let _ = fs::remove_file(report_path);
@@ -239,6 +247,7 @@ pub(crate) fn cmd_test(options: TestOptions<'_>) -> Result<()> {
         if matches!(options.format, TestOutputFormat::Json) {
             json_cases.push(TestCaseJson {
                 name: &test.name,
+                function: test.function.as_deref(),
                 path: test.path.to_string_lossy().to_string(),
                 ok,
                 duration_ms,
@@ -486,6 +495,7 @@ fn push_test_case(
             source_path: path.clone(),
             path,
             name,
+            function: None,
             parameters: None,
         });
     }
@@ -580,6 +590,7 @@ fn push_function_test_cases(
                 path: harness_path,
                 source_path: source_path.to_path_buf(),
                 name,
+                function: Some(function.name.clone()),
                 parameters: invocation.parameters(),
             });
         }
@@ -1342,6 +1353,7 @@ mod tests {
             coverage: None,
             tests: vec![TestCaseJson {
                 name: "tests/basic.sg",
+                function: None,
                 path: "tests/basic.sg".to_string(),
                 ok: true,
                 duration_ms: 3,
@@ -1384,6 +1396,7 @@ mod tests {
             }),
             tests: vec![TestCaseJson {
                 name: "tests/table.sg",
+                function: None,
                 path: "tests/table.sg".to_string(),
                 ok: true,
                 duration_ms: 5,

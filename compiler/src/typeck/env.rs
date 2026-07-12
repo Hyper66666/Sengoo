@@ -134,7 +134,7 @@ pub struct TypeEnv {
     resolved_method_return_types: HashMap<(u32, u32), Ty>,
     /// Concrete return type selected for a generic function call.
     resolved_call_return_types: HashMap<u32, Ty>,
-    resolved_struct_literal_types: HashMap<u32, Ty>,
+    resolved_struct_literal_types: HashMap<(u32, u32), Ty>,
     /// Fully-qualified symbol selected for an associated trait function call.
     resolved_associated_functions: HashMap<u32, String>,
 }
@@ -548,12 +548,13 @@ impl TypeEnv {
         self.resolved_call_return_types.get(&call_site)
     }
 
-    pub fn record_struct_literal_type(&mut self, site: u32, ty: Ty) {
-        self.resolved_struct_literal_types.insert(site, ty);
+    pub fn record_struct_literal_type(&mut self, site: crate::lexer::Span, ty: Ty) {
+        self.resolved_struct_literal_types
+            .insert((site.lo, site.hi), ty);
     }
 
-    pub fn resolved_struct_literal_type(&self, site: u32) -> Option<&Ty> {
-        self.resolved_struct_literal_types.get(&site)
+    pub fn resolved_struct_literal_type(&self, site: crate::lexer::Span) -> Option<&Ty> {
+        self.resolved_struct_literal_types.get(&(site.lo, site.hi))
     }
 
     pub fn record_associated_function(&mut self, call_site: u32, name: String) {

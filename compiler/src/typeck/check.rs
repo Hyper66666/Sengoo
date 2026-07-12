@@ -1508,7 +1508,7 @@ impl TypeChecker {
                 if let Ok(resolved) = &result {
                     if Self::type_is_fully_concrete(resolved) {
                         self.env
-                            .record_struct_literal_type(expr.span.lo, resolved.clone());
+                            .record_struct_literal_type(expr.span, resolved.clone());
                     }
                 }
                 result

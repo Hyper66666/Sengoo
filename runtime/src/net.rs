@@ -5,6 +5,17 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+#[cfg(test)]
+static NET_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn net_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    NET_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 mod http_client;
 mod http_server;
 mod tcp;
@@ -452,17 +463,7 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, UdpSocket};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::thread;
-
-    static ASYNC_HTTP_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn async_http_test_lock() -> MutexGuard<'static, ()> {
-        ASYNC_HTTP_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("async HTTP test lock poisoned")
-    }
 
     fn c_string_bytes(value: &str) -> Vec<u8> {
         let mut bytes = value.as_bytes().to_vec();
@@ -488,6 +489,7 @@ mod tests {
 
     #[test]
     fn tcp_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind tcp listener");
         let addr = listener.local_addr().expect("listener addr");
         let server = std::thread::spawn(move || {
@@ -521,6 +523,7 @@ mod tests {
 
     #[test]
     fn tcp_instance_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind tcp listener");
         let addr = listener.local_addr().expect("listener addr");
         let server = std::thread::spawn(move || {
@@ -557,6 +560,7 @@ mod tests {
 
     #[test]
     fn tcp_instance_runtimes_do_not_share_handles() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind tcp listener");
         let addr = listener.local_addr().expect("listener addr");
         let server = std::thread::spawn(move || {
@@ -580,6 +584,7 @@ mod tests {
 
     #[test]
     fn udp_instance_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let server = UdpSocket::bind("127.0.0.1:0").expect("bind udp server");
         server
             .set_read_timeout(Some(Duration::from_millis(2_000)))
@@ -626,6 +631,7 @@ mod tests {
 
     #[test]
     fn http_response_instance_lifecycle() {
+        let _guard = net_test_lock();
         let rt = NetRuntime::new();
         let handle = rt
             .http_store(HttpResponseEntry {
@@ -658,6 +664,7 @@ mod tests {
 
     #[test]
     fn websocket_instance_runtime_echo_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ws listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -700,6 +707,7 @@ mod tests {
 
     #[test]
     fn http_server_instance_state_lifecycle() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind http server");
         listener.set_nonblocking(true).expect("set nonblocking");
         let rt = NetRuntime::new();
@@ -798,6 +806,7 @@ mod tests {
 
     #[test]
     fn udp_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let server = UdpSocket::bind("127.0.0.1:0").expect("bind udp server");
         let server_addr = server.local_addr().expect("server addr");
         let worker = std::thread::spawn(move || {
@@ -835,6 +844,7 @@ mod tests {
 
     #[test]
     fn http_get_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind http listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -867,6 +877,7 @@ mod tests {
 
     #[test]
     fn http_chunked_runtime_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind http listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -893,6 +904,7 @@ mod tests {
 
     #[test]
     fn http_chunked_decode_error_exposes_protocol_error_code() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind http listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -916,6 +928,7 @@ mod tests {
 
     #[test]
     fn http_ftp_scheme_returns_unsupported() {
+        let _guard = net_test_lock();
         let url = c_string_bytes("ftp://127.0.0.1/");
         let handle = sengoo_http_get(url.as_ptr(), 1_000);
         assert_eq!(handle, 0, "ftp scheme should remain unsupported");
@@ -927,6 +940,7 @@ mod tests {
 
     #[test]
     fn websocket_runtime_echo_roundtrip_smoke() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ws listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -969,6 +983,7 @@ mod tests {
 
     #[test]
     fn websocket_handshake_requires_accept_header() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ws listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -992,6 +1007,7 @@ mod tests {
 
     #[test]
     fn websocket_ping_pong_and_close_path() {
+        let _guard = net_test_lock();
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ws listener");
         let addr = listener.local_addr().expect("listener addr");
         let worker = thread::spawn(move || {
@@ -1026,6 +1042,7 @@ mod tests {
 
     #[test]
     fn http_server_route_and_middleware_pipeline() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1084,6 +1101,7 @@ mod tests {
 
     #[test]
     fn http_server_rejects_malformed_request_with_bad_request() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1103,6 +1121,7 @@ mod tests {
 
     #[test]
     fn http_server_websocket_upgrade_echo_path() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1148,6 +1167,7 @@ mod tests {
 
     #[test]
     fn invalid_argument_sets_error_mapping() {
+        let _guard = net_test_lock();
         let ret = unsafe { sengoo_tcp_send(999, std::ptr::null(), 5) };
         assert_eq!(ret, -1);
         assert_eq!(
@@ -1167,6 +1187,7 @@ mod tests {
 
     #[test]
     fn net_last_error_remains_process_visible_across_threads() {
+        let _guard = net_test_lock();
         use std::sync::atomic::AtomicBool;
 
         sengoo_net_clear_error();
@@ -1215,6 +1236,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_pull_and_respond_roundtrip() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1317,6 +1339,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_timeout_maps_to_timeout() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1360,7 +1383,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_async_timeout_preserves_server() {
-        let _guard = async_http_test_lock();
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1397,7 +1420,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_async_ready_on_localhost_client() {
-        let _guard = async_http_test_lock();
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1441,7 +1464,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_async_drop_pending_leaves_server_usable() {
-        let _guard = async_http_test_lock();
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1490,7 +1513,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_async_slow_client_never_publishes_partial_request() {
-        let _guard = async_http_test_lock();
+        let _guard = net_test_lock();
         use std::io::Write;
 
         let host = b"127.0.0.1\0";
@@ -1541,6 +1564,7 @@ mod tests {
 
     #[test]
     fn http_server_next_request_answers_static_and_middleware_inline() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1628,6 +1652,7 @@ mod tests {
 
     #[test]
     fn http_request_double_respond_is_rejected() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1663,6 +1688,7 @@ mod tests {
 
     #[test]
     fn http_request_close_unanswered_sends_gateway_timeout() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1692,6 +1718,7 @@ mod tests {
 
     #[test]
     fn http_request_oversized_response_body_is_rejected() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1730,6 +1757,7 @@ mod tests {
 
     #[test]
     fn http_server_pending_cap_answers_overflow_inline() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);
@@ -1788,6 +1816,7 @@ mod tests {
 
     #[test]
     fn http_server_close_drains_unanswered_requests_with_gateway_timeout() {
+        let _guard = net_test_lock();
         let host = b"127.0.0.1\0";
         let server = sengoo_http_server_bind(host.as_ptr(), 0);
         assert!(server != 0);

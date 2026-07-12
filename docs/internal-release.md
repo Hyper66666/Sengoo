@@ -9,11 +9,14 @@ realworld workflow:
 
 | Host | CI evidence | Notes |
 | --- | --- | --- |
-| Windows latest | `.github/workflows/realworld-e2e.yml` `windows-latest` matrix | Installs LLVM through Chocolatey before building package tools. |
-| Ubuntu latest | `.github/workflows/realworld-e2e.yml` `ubuntu-latest` matrix | Installs `clang` before building package tools. |
+| Windows x64 | `windows-latest` distribution matrix | Produces `x86_64-pc-windows-msvc`. |
+| Ubuntu x64 | `ubuntu-latest` distribution matrix | Produces `x86_64-unknown-linux-gnu`. |
+| macOS arm64 | `macos-15` distribution matrix | Produces `aarch64-apple-darwin`. |
+| macOS x64 | `macos-15-intel` distribution matrix | Produces `x86_64-apple-darwin`. |
 
-Other hosts are not release-channel targets until a workflow or manual smoke
-record is added.
+The matrix uses native runners for every channel. Packaging receives the
+explicit target label and first checks that the installer detects the same
+host architecture.
 
 ## Binaries in the release set
 
@@ -88,9 +91,35 @@ and the locked package loop.
 2. Tag the repository with the workspace version (`v<version>`). The
    `toolchain-distribution` workflow rejects tags that do not match the
    workspace version.
-3. Let `.github/workflows/toolchain-distribution.yml` build, smoke, checksum,
-   and upload the Windows/Linux archives. Record the Git SHA and host triple in
-   the internal change log.
+3. Let `.github/workflows/toolchain-distribution.yml` build, install, and smoke
+   all four native archives. The release job waits for every matrix entry,
+   creates GitHub build-provenance attestations, then publishes the complete
+   archive/checksum set. Record the Git SHA and host triple in the internal
+   change log.
+
+## Install and explicit upgrade
+
+The install scripts choose the current host channel, download the pinned tag,
+verify its SHA-256, and replace the selected install directory:
+
+```powershell
+.\scripts\install.ps1 -Version 0.1.0 -AddToPath
+```
+
+```sh
+sh scripts/install.sh --version 0.1.0 --add-to-path
+```
+
+Run the same command with a newer explicit version to upgrade. There is no
+background or implicit update path. Use `-PrintTarget` or `--print-target` to
+inspect auto-detection, and `-Target` or `--target` only when intentionally
+selecting a different published channel.
+
+Verify signed provenance for a downloaded release archive:
+
+```text
+gh attestation verify <archive> --repo Hyper66666/Sengoo
+```
 
 ## Rollback
 

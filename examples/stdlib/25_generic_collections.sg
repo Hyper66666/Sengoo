@@ -1,0 +1,44 @@
+// examples/stdlib/25_generic_collections.sg
+//
+// Demonstrates: std::collections owning String values in Vec<String> and
+// exposing string-keyed maps through the HashMap<String, i64> surface.
+//
+// Run: sgc run examples/stdlib/25_generic_collections.sg
+// Expected output: 25
+
+import std::collections;
+
+def main() -> i64 {
+    let words = vec_new_string();
+    let alpha = string_from_str("alpha").unwrap_or(String { handle: 0 });
+    let beta = string_from_str("beta").unwrap_or(String { handle: 0 });
+    words.push(alpha);
+    words.push(beta);
+
+    let first = words.get(0).unwrap_or(String { handle: 0 });
+    let second = words.remove(1).unwrap_or(String { handle: 0 });
+    let vec_ok = first.len() == 5
+        && first.contains("ph")
+        && second.starts_with("be");
+
+    let scores: HashMap<String, i64> = hashmap_new_string_i64();
+    let inserted_alpha = scores.insert("alpha", 3);
+    let inserted_beta = scores.insert(str_append("be", "ta"), 4);
+    let replaced_alpha = scores.insert("alpha", 8);
+    let has_beta = scores.contains("beta");
+    let alpha_score = scores.get("alpha").unwrap_or(0);
+    let beta_score = scores.get("beta").unwrap_or(0);
+    let removed_beta = scores.remove("beta");
+    let missing_beta = !scores.contains("beta");
+    let map_ok = inserted_alpha
+        && inserted_beta
+        && replaced_alpha
+        && has_beta
+        && alpha_score == 8
+        && beta_score == 4
+        && removed_beta
+        && missing_beta;
+
+    print(if vec_ok && map_ok { 25 } else { 0 });
+    0
+}

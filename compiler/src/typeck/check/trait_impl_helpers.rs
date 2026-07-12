@@ -22,23 +22,25 @@ impl TypeChecker {
     /// than producing surprising drop glue later.
     fn validate_drop_contract(method: &Function) -> Result<()> {
         if method.name.name != "drop" {
-            return Ok(());
-        }
-
-        if !matches!(method.self_param, Some(SelfParam::BorrowedMut)) {
-            return Err(CompileError::from(TypeckError::Other(
-                "Drop::drop must use `&mut self` receiver".to_string(),
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "drop-trait-contract",
+                "`Drop` impls may only define `def drop(&mut self)`",
+                method.name.span.lo,
+                method.name.span.hi,
             )));
         }
 
-        let extra_params = method
-            .params
-            .iter()
-            .filter(|param| param.name.name != "self")
-            .count();
-        if extra_params != 0 {
-            return Err(CompileError::from(TypeckError::Other(
-                "Drop::drop must take no parameters other than `&mut self`".to_string(),
+        if !matches!(method.self_param, Some(SelfParam::BorrowedMut))
+            || !method.params.is_empty()
+            || method.return_type.is_some()
+            || method.is_async
+            || method.abi.is_some()
+        {
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "drop-trait-contract",
+                "`Drop::drop` must be a synchronous `def drop(&mut self)` method with no parameters and no return type",
+                method.name.span.lo,
+                method.name.span.hi,
             )));
         }
 
@@ -46,7 +48,7 @@ impl TypeChecker {
     }
 
     /// Whether `ty` is the compiler-known owned `String` type.
-    fn is_owned_string_ty(ty: &Ty) -> bool {
+    fn is_owned_string_return_ty(ty: &Ty) -> bool {
         matches!(&ty.kind, TyKind::Adt { name, .. } if name == "String")
     }
 
@@ -214,6 +216,23 @@ impl TypeChecker {
     }
 
     pub(super) fn check_trait_decl(&mut self, trait_decl: &Trait) -> Result<()> {
+        if trait_decl.name.name == "Drop" {
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "drop-trait-reserved",
+                "`Drop` is a compiler-known trait; user code must not redeclare it",
+                trait_decl.name.span.lo,
+                trait_decl.name.span.hi,
+            )));
+        }
+        if trait_decl.name.name == "Copy" {
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "copy-trait-reserved",
+                "`Copy` is a compiler-known trait; user code must not redeclare it",
+                trait_decl.name.span.lo,
+                trait_decl.name.span.hi,
+            )));
+        }
+
         self.env.push_scope();
         let trait_type_params = self.bind_type_params_with_meta(&trait_decl.type_params)?;
 
@@ -492,7 +511,7 @@ impl TypeChecker {
                     Some(method) => {
                         let has_self = method.self_param.is_some();
                         let returns_string = match &method.return_type {
-                            Some(ret) => Self::is_owned_string_ty(&self.check_type(ret)?),
+                            Some(ret) => Self::is_owned_string_return_ty(&self.check_type(ret)?),
                             None => false,
                         };
                         has_self && returns_string

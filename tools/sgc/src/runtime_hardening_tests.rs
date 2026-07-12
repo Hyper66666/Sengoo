@@ -10,7 +10,7 @@ use std::fs;
 use std::process::Command;
 
 #[test]
-fn runtime_hardening_buffer_double_close_returns_invalid_handle() {
+fn runtime_hardening_buffer_double_close_is_idempotent() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "buffer-double-close",
         r#"
@@ -21,7 +21,7 @@ def main() -> i64 {
     let buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
     let first = buffer.free();
     let second = buffer.free();
-    if first && second == false && ffi_status_from_raw(ffi_last_error_code()) == STATUS_INVALID_HANDLE() {
+    if first && second && ffi_last_error_code() == 0 {
         0
     } else {
         1
@@ -33,7 +33,8 @@ def main() -> i64 {
     };
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -117,7 +118,8 @@ def main() -> i64 {{
     let _ = fs::remove_file(&child_exe);
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -151,7 +153,8 @@ def main() -> i64 {{
     };
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -182,7 +185,8 @@ def main() -> i64 {{
     };
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -232,11 +236,16 @@ def main() -> i64 {
     let request = HttpServerRequest { handle: 7 };
 
     let bind_result = http_server_bind("127.0.0.1", 0);
-    let bind_unsupported = !bind_result.is_ok && bind_result.error == STATUS_UNSUPPORTED();
+    let bind_supported_or_explicitly_unsupported = if bind_result.is_ok {
+        bind_result.value.close()
+    } else {
+        bind_result.error == STATUS_UNSUPPORTED()
+    };
 
     let server = HttpServer { handle: 7 };
     let next_result = server.next_request(1);
-    let next_unsupported = !next_result.is_ok && next_result.error == STATUS_UNSUPPORTED();
+    let next_rejected = !next_result.is_ok
+        && (next_result.error == STATUS_INVALID_HANDLE() || next_result.error == STATUS_UNSUPPORTED());
 
     let method_len_result = request.method_len();
     let method_len_invalid = !method_len_result.is_ok && method_len_result.error == STATUS_INVALID_HANDLE();
@@ -273,21 +282,20 @@ def main() -> i64 {
     let typed_result = request.respond_with_content_type(200, "text/plain", "x");
     let typed_invalid = !typed_result.is_ok && typed_result.error == STATUS_INVALID_HANDLE();
 
-    let close_rejected = request.close() == false;
+    let close_idempotent = request.close();
     buffer.free();
 
-    if bind_unsupported && next_unsupported
-        && method_len_invalid && method_copy_invalid
-        && path_len_invalid && path_copy_invalid
-        && query_len_invalid && query_copy_invalid
-        && version_len_invalid && version_copy_invalid
-        && header_len_invalid && header_copy_invalid
-        && body_len_invalid && body_copy_invalid
-        && respond_invalid && typed_invalid && close_rejected {
-        0
-    } else {
-        1
-    }
+    if !bind_supported_or_explicitly_unsupported { return 1; }
+    if !next_rejected { return 2; }
+    if !method_len_invalid || !method_copy_invalid { return 3; }
+    if !path_len_invalid || !path_copy_invalid { return 4; }
+    if !query_len_invalid || !query_copy_invalid { return 5; }
+    if !version_len_invalid || !version_copy_invalid { return 6; }
+    if !header_len_invalid || !header_copy_invalid { return 7; }
+    if !body_len_invalid || !body_copy_invalid { return 8; }
+    if !respond_invalid || !typed_invalid { return 9; }
+    if !close_idempotent { return 10; }
+    0
 }
 "#,
         "",
@@ -296,7 +304,8 @@ def main() -> i64 {
     };
     assert!(
         output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

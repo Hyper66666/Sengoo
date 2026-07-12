@@ -4,7 +4,8 @@ param(
     [string]$Target = "",
     [string]$BaseUrl = "https://github.com/Hyper66666/Sengoo/releases/download",
     [string]$InstallDir = (Join-Path $HOME ".sengoo"),
-    [switch]$AddToPath
+    [switch]$AddToPath,
+    [switch]$PrintTarget
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,8 +21,15 @@ function Default-Target {
     if (Is-WindowsHost) {
         return "x86_64-pc-windows-msvc"
     }
+    $architecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     if ($IsMacOS) {
+        if ($architecture -eq "Arm64") {
+            return "aarch64-apple-darwin"
+        }
         return "x86_64-apple-darwin"
+    }
+    if ($architecture -eq "Arm64") {
+        return "aarch64-unknown-linux-gnu"
     }
     return "x86_64-unknown-linux-gnu"
 }
@@ -29,6 +37,11 @@ function Default-Target {
 function Download-File($Url, $Destination) {
     Write-Host "Downloading $Url"
     Invoke-WebRequest -Uri $Url -OutFile $Destination
+}
+
+if ($PrintTarget) {
+    Write-Output (Default-Target)
+    return
 }
 
 if (-not $Archive -and -not $Version) {

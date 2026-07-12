@@ -33,8 +33,15 @@ function Target-Label {
     if (Is-WindowsHost) {
         return "x86_64-pc-windows-msvc"
     }
+    $architecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
     if ($IsMacOS) {
+        if ($architecture -eq "Arm64") {
+            return "aarch64-apple-darwin"
+        }
         return "x86_64-apple-darwin"
+    }
+    if ($architecture -eq "Arm64") {
+        return "aarch64-unknown-linux-gnu"
     }
     return "x86_64-unknown-linux-gnu"
 }

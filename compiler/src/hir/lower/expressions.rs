@@ -341,7 +341,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                     })
                     .collect(),
                 concrete_type: type_env
-                    .resolved_struct_literal_type(expr.span.lo)
+                    .resolved_struct_literal_type(expr.span)
                     .map(lower_checked_type),
             }
         }

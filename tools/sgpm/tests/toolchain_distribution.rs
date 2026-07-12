@@ -105,3 +105,50 @@ fn tool_versions_share_workspace_version_and_hash() {
         "tool version/hash mismatch: {signatures:?}"
     );
 }
+
+#[test]
+fn distribution_workflow_covers_native_macos_architectures() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+        .expect("read toolchain distribution workflow");
+    assert!(
+        workflow.contains("macos-15") && workflow.contains("aarch64-apple-darwin"),
+        "workflow should package the native Apple Silicon channel"
+    );
+    assert!(
+        workflow.contains("macos-15-intel") && workflow.contains("x86_64-apple-darwin"),
+        "workflow should package the native Intel macOS channel"
+    );
+    assert!(
+        workflow.contains("SENGOO_DIST_TARGET"),
+        "packaging must receive an explicit matrix target"
+    );
+    assert!(
+        workflow.contains("needs: package-smoke") && workflow.contains("attest-build-provenance"),
+        "release publication should wait for every platform and emit signed provenance"
+    );
+}
+
+#[test]
+fn installers_detect_darwin_architecture_instead_of_assuming_x86_64() {
+    let root = workspace_root();
+    let shell = fs::read_to_string(root.join("scripts/install.sh")).expect("read install.sh");
+    assert!(
+        shell.contains("uname -m"),
+        "install.sh should inspect host arch"
+    );
+    assert!(
+        shell.contains("aarch64-apple-darwin"),
+        "install.sh should select the Apple Silicon archive"
+    );
+    let powershell =
+        fs::read_to_string(root.join("scripts/install.ps1")).expect("read install.ps1");
+    assert!(
+        powershell.contains("ProcessArchitecture"),
+        "install.ps1 should inspect host architecture"
+    );
+    assert!(
+        powershell.contains("aarch64-apple-darwin"),
+        "install.ps1 should select the Apple Silicon archive"
+    );
+}

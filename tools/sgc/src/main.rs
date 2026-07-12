@@ -34,6 +34,7 @@ mod module_graph;
 mod native_link;
 mod native_toolchain;
 mod pipeline;
+mod portable_backends;
 mod reflection;
 mod reflection_native;
 mod reflection_sidecar;

@@ -97,25 +97,107 @@ impl Codegen {
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
         let dbg = self.debug_instruction_location_suffix(mir_fn, inst);
+        let instruction_ir_start = self.ir.len();
         match inst {
             mir::Instruction::Nop => {}
 
             mir::Instruction::Assign { destination, value } => {
                 let dest = self.local_name(*destination);
+                let dest_ty = self.get_local_type(mir_fn, *destination).clone();
+                let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
+
+                if self.local_uses_stack_slot(*destination, mir_fn) {
+                    self.emit_indent();
+                    match value {
+                        mir::MirConstant::Int(n) => {
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, n, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::Uint(n) => {
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, n, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::Bool(b) => {
+                            self.ir.push_str(&format!(
+                                "store i1 {}, i1* {}\n",
+                                if *b { 1 } else { 0 },
+                                dest
+                            ));
+                        }
+                        mir::MirConstant::Float(f) => {
+                            let literal = Self::llvm_float_literal(*f);
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, literal, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::Char(c) => {
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, *c as u32, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::String(s) => {
+                            let str_idx = self.strings.iter().position(|x| x == s).unwrap_or(0);
+                            let tmp = format!("%assign.{}", self.load_counter);
+                            self.load_counter += 1;
+                            self.ir.push_str(&format!(
+                                "{} = bitcast [{} x i8]* @.str.{} to i8*\n",
+                                tmp,
+                                s.len() + 1,
+                                str_idx
+                            ));
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, tmp, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::Bytes(_) => {
+                            self.ir
+                                .push_str(&format!("store {} 0, {}* {}\n", llvm_ty, llvm_ty, dest));
+                        }
+                        mir::MirConstant::GlobalRef(name) => {
+                            let tmp = format!("%assign.{}", self.load_counter);
+                            self.load_counter += 1;
+                            if matches!(dest_ty, MIRType::Fn { .. }) {
+                                self.ir.push_str(&format!(
+                                    "{} = bitcast {} @{} to {}\n",
+                                    tmp, llvm_ty, name, llvm_ty
+                                ));
+                            } else {
+                                self.ir.push_str(&format!(
+                                    "{} = bitcast i64* @{} to i64\n",
+                                    tmp, name
+                                ));
+                            }
+                            self.emit_indent();
+                            self.ir.push_str(&format!(
+                                "store {} {}, {}* {}\n",
+                                llvm_ty, tmp, llvm_ty, dest
+                            ));
+                        }
+                        mir::MirConstant::Unit => {
+                            self.ir.push_str(&format!("store i8 0, i8* {}\n", dest));
+                        }
+                    }
+                    self.attach_debug_location_to_segment(instruction_ir_start, &dbg);
+                    return Ok(());
+                }
 
                 self.emit_indent();
 
                 match value {
                     mir::MirConstant::Int(n) => {
-                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
-                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
                         self.ir
                             .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, n));
                     }
 
                     mir::MirConstant::Uint(n) => {
-                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
-                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
                         self.ir
                             .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, n));
                     }
@@ -129,16 +211,12 @@ impl Codegen {
                     }
 
                     mir::MirConstant::Float(f) => {
-                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
-                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
                         let literal = Self::llvm_float_literal(*f);
                         self.ir
                             .push_str(&format!("{} = fadd {} 0.0, {}\n", dest, llvm_ty, literal));
                     }
 
                     mir::MirConstant::Char(c) => {
-                        let dest_ty = self.get_local_type(mir_fn, *destination).clone();
-                        let llvm_ty = self.mir_type_to_llvm_cached(&dest_ty);
                         self.ir
                             .push_str(&format!("{} = add {} 0, {}\n", dest, llvm_ty, *c as u32));
                     }
@@ -397,6 +475,7 @@ impl Codegen {
                 if destination == value {
                     // Redundant self-writeback (`store x -> x`) does not change program state.
 
+                    self.attach_debug_location_to_segment(instruction_ir_start, &dbg);
                     return Ok(());
                 }
 
@@ -1282,6 +1361,7 @@ impl Codegen {
                 if is_void_like {
                     // LLVM does not allow `phi void`.
 
+                    self.attach_debug_location_to_segment(instruction_ir_start, &dbg);
                     return Ok(());
                 }
 
@@ -1311,6 +1391,7 @@ impl Codegen {
             }
         }
 
+        self.attach_debug_location_to_segment(instruction_ir_start, &dbg);
         Ok(())
     }
 

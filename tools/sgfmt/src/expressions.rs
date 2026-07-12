@@ -405,6 +405,7 @@ impl Formatter {
     fn format_literal(&self, literal: &Literal) -> String {
         match literal {
             Literal::Int(v) => v.to_string(),
+            Literal::Uint(v) => v.to_string(),
             Literal::Float(v) => {
                 let mut s = v.to_string();
                 if !s.contains('.') && !s.contains('e') && !s.contains('E') {

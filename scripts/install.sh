@@ -11,12 +11,27 @@ add_to_path=0
 usage() {
   echo "usage: scripts/install.sh --version VERSION [--target TARGET] [--base-url URL] [--install-dir DIR] [--add-to-path]" >&2
   echo "   or: scripts/install.sh ARCHIVE [INSTALL_DIR]" >&2
+  echo "   or: scripts/install.sh --print-target" >&2
 }
 
 default_target() {
-  case "$(uname -s)" in
-    Linux*) echo "x86_64-unknown-linux-gnu" ;;
-    Darwin*) echo "x86_64-apple-darwin" ;;
+  os=$(uname -s)
+  arch=$(uname -m)
+  case "$os" in
+    Linux*)
+      case "$arch" in
+        x86_64|amd64) echo "x86_64-unknown-linux-gnu" ;;
+        aarch64|arm64) echo "aarch64-unknown-linux-gnu" ;;
+        *) echo "${arch}-unknown-linux-gnu" ;;
+      esac
+      ;;
+    Darwin*)
+      case "$arch" in
+        arm64|aarch64) echo "aarch64-apple-darwin" ;;
+        x86_64|amd64) echo "x86_64-apple-darwin" ;;
+        *) echo "${arch}-apple-darwin" ;;
+      esac
+      ;;
     MINGW*|MSYS*|CYGWIN*) echo "x86_64-pc-windows-msvc" ;;
     *) echo "x86_64-unknown-linux-gnu" ;;
   esac
@@ -57,6 +72,10 @@ while [ "$#" -gt 0 ]; do
     --add-to-path)
       add_to_path=1
       shift
+      ;;
+    --print-target)
+      default_target
+      exit 0
       ;;
     --help|-h)
       usage

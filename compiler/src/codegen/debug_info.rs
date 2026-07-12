@@ -94,6 +94,21 @@ impl Codegen {
         format!(", !dbg !{}", ids.location_for_line(ids.current_line.get()))
     }
 
+    pub(super) fn attach_debug_location_to_segment(&mut self, start: usize, suffix: &str) {
+        if suffix.is_empty() || start >= self.ir.len() || self.ir[start..].contains("!dbg !") {
+            return;
+        }
+        let segment = &self.ir[start..];
+        let line_end = segment
+            .strip_suffix('\n')
+            .and_then(|without_trailing_newline| without_trailing_newline.rfind('\n'))
+            .map_or(start, |offset| start + offset + 1);
+        let insert_at = self.ir[line_end..]
+            .find('\n')
+            .map_or(self.ir.len(), |offset| line_end + offset);
+        self.ir.insert_str(insert_at, suffix);
+    }
+
     pub(super) fn emit_debug_metadata(&mut self, mir_fns: &[MirFunction]) {
         self.debug_locations.clear();
         self.debug_type_ids.clear();

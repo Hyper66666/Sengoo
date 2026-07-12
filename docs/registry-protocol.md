@@ -1,172 +1,134 @@
-# Sengoo Registry Protocol
+# Sengoo package registry protocol v1
 
-This document defines the reference HTTP protocol that `sgpm` registry support
-will implement. It is intentionally small: path/git dependencies continue to use
-the existing resolver, while registry dependencies use these endpoints and
-content hashes.
+This document defines the HTTP contract implemented by the filesystem-backed
+reference registry and consumed by `sgpm`. The reference server is suitable for
+local development, CI, and protocol compatibility tests. It is not a hosted
+multi-tenant service and does not replace production authentication, quotas,
+replication, or abuse controls.
 
-## Objects
-
-Package names are lowercase ASCII identifiers with optional `-` separators.
-The reference registry reserves a package name for the first authenticated owner
-that publishes or explicitly reserves it. Versions use semver.
-
-A package version contains:
-
-- `name`: package name.
-- `version`: semver version.
-- `manifest`: normalized `Sengoo.toml` metadata.
-- `archive_sha256`: lowercase hex SHA-256 of the uploaded `.sgpkg` archive.
-- `archive_size`: byte length of the uploaded archive.
-- `yanked`: whether new resolution may select this version.
-- `published_at`: RFC 3339 timestamp.
-- `owners`: owner ids allowed to publish or yank the package.
-
-## Authentication
-
-The protocol uses bearer tokens:
+Start a local registry:
 
 ```text
-Authorization: Bearer <token>
+sgpm registry serve --root target/sgpm-registry --listen 127.0.0.1:7878
 ```
 
-Reference-server tokens are opaque. Production hosting may replace the token
-issuer, but endpoint authorization semantics must stay compatible.
+Configure a package:
 
-## Endpoints
-
-### Reserve Name
-
-```text
-PUT /api/v1/packages/{name}/reservation
+```toml
+[registries.default]
+url = "http://127.0.0.1:7878"
+token_env = "SENGOO_REGISTRY_TOKEN"
 ```
 
-Authenticated. Reserves an unpublished package name for the caller. Returns
-`201 Created` when reserved, `200 OK` when the caller already owns it, and
-`409 Conflict` when another owner controls the name.
+All write operations require `Authorization: Bearer <token>`. On the first
+successful publish, the package name is reserved to the SHA-256 hash of that
+token. The raw token is never persisted. Later publishes, yanks, and unyanks
+for that package must use the same token. A production registry may replace
+this token-as-owner model with authenticated account identities while
+preserving the status codes and route semantics below.
 
-### Publish Version
+## Routes
 
-```text
-PUT /api/v1/packages/{name}/versions/{version}
-Content-Type: application/vnd.sengoo.package+gzip
-Digest: sha-256=<base64-sha256>
-```
+### Publish a version
 
-Authenticated. Uploads an immutable package archive. The server computes the
-archive SHA-256 and rejects mismatched `Digest` headers. Publishing the same
-`name@version` twice returns `409 Conflict`; use a new version instead.
+`POST /api/v1/packages/<package>/<version>`
 
-Successful response:
+Required headers:
+
+- `Authorization: Bearer <token>`
+- `Content-Type: application/gzip`
+- `x-sengoo-package: <package>`
+- `x-sengoo-version: <semver>`
+- `x-sengoo-checksum: <lowercase SHA-256 hex of body>`
+
+The body is the deterministic `.tar.gz` produced by `sgpm publish --dry-run`.
+The reference server limits request bodies to 64 MiB, verifies the route and
+headers, verifies the checksum, reserves the name, and writes a version
+atomically. Existing versions are immutable and return `409 Conflict`.
+
+### List versions
+
+`GET /api/v1/packages/<package>`
+
+Response:
 
 ```json
 {
-  "name": "example",
-  "version": "1.2.3",
-  "archive_sha256": "0123...",
-  "archive_size": 12345,
-  "yanked": false
-}
-```
-
-### Yank Or Unyank Version
-
-```text
-PATCH /api/v1/packages/{name}/versions/{version}/yank
-Content-Type: application/json
-
-{ "yanked": true, "reason": "bad release" }
-```
-
-Authenticated owner-only endpoint. Yanked versions remain downloadable when a
-lockfile already pins their hash, but new resolution must not select them unless
-the user explicitly asks to allow yanked versions.
-
-### List Versions
-
-```text
-GET /api/v1/packages/{name}/versions
-```
-
-Returns version metadata sorted by semver ascending. Resolver clients must
-ignore yanked versions by default.
-
-```json
-{
-  "name": "example",
   "versions": [
     {
-      "version": "1.2.3",
-      "archive_sha256": "0123...",
-      "archive_size": 12345,
+      "version": "1.2.0",
+      "checksum": "<sha256>",
       "yanked": false,
-      "published_at": "2026-07-07T00:00:00Z"
+      "features": []
     }
   ]
 }
 ```
 
-### Version Metadata
+Versions are returned in ascending semantic-version order. `sgpm` selects the
+highest non-yanked version satisfying the dependency requirement.
 
-```text
-GET /api/v1/packages/{name}/versions/{version}
-```
+### Read version metadata
 
-Returns the same metadata plus normalized manifest dependency information.
+`GET /api/v1/packages/<package>/<version>`
 
-### Download Archive
+Returns the same version object used by the index.
 
-```text
-GET /api/v1/packages/{name}/versions/{version}/download
-```
+### Download a version
 
-Returns the `.sgpkg` bytes. Clients must compute SHA-256 and compare it with the
-metadata or lockfile hash before unpacking.
+`GET /api/v1/packages/<package>/<version>/download`
 
-## Lockfile Entries
+Returns the published archive as `application/gzip`. `sgpm` verifies its
+SHA-256 before unpacking. The cache stores both the archive checksum and a
+deterministic hash of the extracted file tree; a later locked resolution
+repairs missing or modified cache contents before invoking the toolchain.
 
-Registry lock entries record source identity and content hash:
+### Yank or unyank
 
-```toml
-[[package]]
-name = "example"
-version = "1.2.3"
-source = "registry+https://registry.example/api/v1"
-archive_sha256 = "0123..."
-```
+`POST /api/v1/packages/<package>/<version>/yank`
 
-Resolution is deterministic: for a given manifest, registry index state, and
-lockfile, `sgpm update` must choose the same highest compatible non-yanked
-version. `sgpm build` must verify the locked archive hash and fail before
-unpacking on mismatch.
-
-## Error Responses
-
-Errors use JSON:
+Optional JSON body:
 
 ```json
-{
-  "error": "name_reserved",
-  "message": "package name is owned by another account"
-}
+{"reason":"critical regression"}
 ```
 
-Stable error names:
+`POST /api/v1/packages/<package>/<version>/unyank`
 
-- `unauthorized`
-- `forbidden`
-- `not_found`
-- `name_reserved`
-- `version_exists`
-- `checksum_mismatch`
-- `invalid_manifest`
-- `invalid_archive`
-- `yanked`
-- `server_error`
+Both require the owner bearer token. Yanking prevents new unlocked resolution
+from selecting the version. Existing lockfiles can still report the yanked
+version so users receive a diagnostic and can update deliberately.
 
-## Reference Server Scope
+## Names, versions, and errors
 
-The reference server must implement all endpoints above with local durable
-storage suitable for e2e tests. It does not need to be a production hosted
-service, provide a search UI, or implement account management beyond opaque
-owner tokens.
+Package names use lowercase ASCII letters, digits, `_`, or `-`. Versions are
+valid semantic versions. Error responses are JSON:
+
+```json
+{"error":"human-readable diagnostic"}
+```
+
+The protocol uses:
+
+- `400` for malformed names, versions, headers, JSON, archives, or checksums;
+- `401` when a write request has no bearer token;
+- `403` when another owner reserved the package name;
+- `404` for unknown routes, packages, or versions;
+- `409` when a published version already exists;
+- `500` for storage or server failures.
+
+## Lockfile contract
+
+Registry entries in `Sengoo.lock` schema version 2 record the selected registry,
+version, and archive checksum:
+
+```toml
+source.kind = "registry"
+source.registry = "default"
+source.version = "1.2.0"
+source.checksum = "<sha256>"
+```
+
+`sgpm update --check` and commands using `--locked` regenerate the graph and
+compare this checksum with the current registry index. Path and git source
+formats are unchanged.

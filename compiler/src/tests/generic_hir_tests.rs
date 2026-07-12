@@ -5,9 +5,9 @@ use crate::{lower_ast, Parser, TypeChecker};
 fn lower_ast_preserves_generic_bounds_in_hir_function() {
     let source = r#"
 trait Summable {}
-trait Copy {}
+trait Cloneable {}
 
-def foo<T: Summable + Copy>(x: i64) -> i64 {
+def foo<T: Summable + Cloneable>(x: i64) -> i64 {
     x
 }
 "#;
@@ -37,16 +37,16 @@ def foo<T: Summable + Copy>(x: i64) -> i64 {
         .iter()
         .map(|bound| bound.trait_path.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(bounds, vec!["Summable", "Copy"]);
+    assert_eq!(bounds, vec!["Summable", "Cloneable"]);
 }
 
 #[test]
 fn lower_ast_preserves_where_clause_bounds_in_hir_function() {
     let source = r#"
 trait Summable {}
-trait Copy {}
+trait Cloneable {}
 
-def foo<T>(x: i64) -> i64 where T: Summable + Copy {
+def foo<T>(x: i64) -> i64 where T: Summable + Cloneable {
     x
 }
 "#;
@@ -76,7 +76,7 @@ def foo<T>(x: i64) -> i64 where T: Summable + Copy {
         .iter()
         .map(|bound| bound.trait_path.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(bounds, vec!["Summable", "Copy"]);
+    assert_eq!(bounds, vec!["Summable", "Cloneable"]);
 }
 
 #[test]

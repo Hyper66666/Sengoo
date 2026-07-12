@@ -1648,6 +1648,7 @@ mod tests {
 
     #[test]
     fn dynamic_request_stream_reports_timeout_configuration_errors() {
+        let _guard = super::super::net_test_lock();
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
         let address = listener.local_addr().expect("read test listener address");
         let client = TcpStream::connect(address).expect("connect test client");
@@ -1672,6 +1673,7 @@ mod tests {
 
     #[test]
     fn async_next_request_cancel_unregisters_listener_interest() {
+        let _guard = super::super::net_test_lock();
         let baseline = crate::async_runtime::http_listener_interest_count();
         let server = sengoo_http_server_bind(std::ptr::null(), 0);
         assert_ne!(server, 0, "test server should bind");
