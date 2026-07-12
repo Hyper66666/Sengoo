@@ -15,6 +15,10 @@ pub(super) fn lower_named_call(
     {
         return lower_option_none_call(ctx, expected_return_type);
     }
+    if name == "__sengoo_option_none" && arg_locals.is_empty() {
+        let return_type = ctx.mir_fn.return_type.clone();
+        return lower_option_none_call(ctx, Some(&return_type));
+    }
     if name == "vec_new" && arg_locals.is_empty() {
         return lower_vec_new_call(ctx, expected_return_type);
     }

@@ -774,12 +774,30 @@ impl TypeChecker {
                 for (method_name, method_sig) in &trait_info.methods {
                     if !impl_info.has_method(method_name) {
                         if method_sig.has_default {
+                            let param_types = method_sig
+                                .param_types
+                                .iter()
+                                .map(|ty| {
+                                    Self::specialize_trait_contract_ty(
+                                        ty,
+                                        &impl_info.target_type,
+                                        &trait_name,
+                                        &impl_info.assoc_types,
+                                    )
+                                })
+                                .collect();
+                            let return_type = Self::specialize_trait_contract_ty(
+                                &method_sig.return_type,
+                                &impl_info.target_type,
+                                &trait_name,
+                                &impl_info.assoc_types,
+                            );
                             impl_info.add_method(
                                 method_name.clone(),
                                 FunctionTy::with_generic_params(
                                     method_sig.has_self,
-                                    method_sig.param_types.clone(),
-                                    method_sig.return_type.clone(),
+                                    param_types,
+                                    return_type,
                                     method_sig.generic_params.clone(),
                                 ),
                             );

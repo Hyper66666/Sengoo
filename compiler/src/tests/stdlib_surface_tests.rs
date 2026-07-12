@@ -2546,6 +2546,7 @@ def main() -> i64 {
     taken_sum + bool_value + map_taken.len() + bool_map_taken.len() + bool_map_value
         + set_taken.len() + bool_set_taken.len() + string_taken.len()
 }
+
 "#,
     );
 
@@ -2557,6 +2558,34 @@ def main() -> i64 {
     assert!(ir.contains("HashSetIter_bool_Iterator_take"));
     assert!(ir.contains("VecStringIter_skip"));
     assert!(ir.contains("VecStringIter_take"));
+}
+
+#[test]
+fn stdlib_surface_generic_into_iterator_take_is_lazy_state_machine() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Payload {
+    value: i64,
+}
+
+def main() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload { value: 10 });
+    values.push(Payload { value: 20 });
+    values.push(Payload { value: 30 });
+    let iter = values.into_iter().take(2);
+    let first: Option<Payload> = iter.next();
+    let second: Option<Payload> = iter.next();
+    let exhausted: Option<Payload> = iter.next();
+    if first.is_some && second.is_some && exhausted.is_none() { 0 } else { 1 }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("TakeIter_") && ir.contains("_next"),
+        "expected a concrete lazy TakeIter specialization:\n{ir}"
+    );
 }
 
 #[test]

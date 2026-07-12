@@ -168,6 +168,11 @@ struct RawVecIntoIter<T> {
     marker: i64,
 }
 
+struct TakeIter<I, T> {
+    inner: I,
+    remaining: Vec<i64>,
+}
+
 struct EnumeratedI64 {
     index: i64,
     value: i64,
@@ -463,6 +468,12 @@ def raw_vec_remove<T>(handle: i64, index: i64) -> Option<T> {
 
 def raw_vec_iter_next<T>(handle: i64) -> Option<&T> {
     raw_vec_iter_next(handle)
+}
+
+def iterator_take<I: Iterator>(inner: I, count: i64) -> TakeIter<I, I::Item> {
+    let remaining: Vec<i64> = vec_new_i64();
+    sengoo_vec_push_i64(remaining.handle, count);
+    TakeIter { inner: inner, remaining: remaining }
 }
 
 def string_map_string_new() -> StringMapString {
@@ -774,6 +785,37 @@ impl<T> Iterator for RawVecIntoIter<T> {
 impl<T> RawVecIntoIter<T> {
     def next(&self) -> Option<T> {
         self.vec.pop()
+    }
+
+    def take(self, count: i64) -> TakeIter<RawVecIntoIter<T>, T> {
+        iterator_take(self, count)
+    }
+
+}
+
+impl<I: Iterator, T> Iterator for TakeIter<I, T> {
+    type Item = I::Item;
+
+    def next(&self) -> Option<I::Item> {
+        let count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
+        if count <= 0 {
+            __sengoo_option_none()
+        } else {
+            sengoo_vec_set_i64(self.remaining.handle, 0, count - 1);
+            self.inner.next()
+        }
+    }
+}
+
+impl<I: Iterator, T> TakeIter<I, T> {
+    def next(&self) -> Option<I::Item> {
+        let count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
+        if count <= 0 {
+            __sengoo_option_none()
+        } else {
+            sengoo_vec_set_i64(self.remaining.handle, 0, count - 1);
+            self.inner.next()
+        }
     }
 }
 

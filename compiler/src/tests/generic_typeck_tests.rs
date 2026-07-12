@@ -1552,9 +1552,8 @@ struct Payload {
     ready: bool,
 }
 
-def option_none<T>() -> Option<T> {
-    option_none()
-}
+def option_none<T>() -> Option<T> { __sengoo_option_none() }
+def __sengoo_option_none<T>() -> Option<T> { __sengoo_option_none() }
 
 def main() -> i64 {
     let number: Option<i64> = option_none();

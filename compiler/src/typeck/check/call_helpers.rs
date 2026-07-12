@@ -30,7 +30,7 @@ fn assert_helper_allows_callsite_injection(
 }
 
 impl TypeChecker {
-    fn resolve_associated_projection(&self, ty: &Ty) -> TyResult<Ty> {
+    fn resolve_associated_projection(&mut self, ty: &Ty) -> TyResult<Ty> {
         let kind = match &ty.kind {
             TyKind::AssocProjection {
                 base,
@@ -38,24 +38,44 @@ impl TypeChecker {
                 name,
             } => {
                 let base = self.infer.apply_subst(base);
-                if matches!(base.kind, TyKind::Var(_)) {
+                let base_key = type_key(&base);
+                if matches!(base.kind, TyKind::Var(_) | TyKind::Inferred)
+                    || matches!(&base.kind, TyKind::Adt { name, .. } if name == "<unknown>")
+                    || base_key.contains("<unknown>")
+                {
                     TyKind::AssocProjection {
                         base: Box::new(base),
                         trait_name: trait_name.clone(),
                         name: name.clone(),
                     }
                 } else {
-                    let key = type_key(&base);
-                    return self
+                    let key = base_key;
+                    if let Some(resolved) = self
                         .impl_registry
                         .get_trait_impl(trait_name, &key)
                         .and_then(|impl_info| impl_info.assoc_types.get(name))
                         .cloned()
-                        .ok_or_else(|| {
-                            TypeckError::Other(format!(
-                                "cannot resolve associated type `<{key} as {trait_name}>::{name}` from visible trait impls"
-                            ))
-                        });
+                    {
+                        return Ok(resolved);
+                    }
+
+                    let generic_key = self.generic_lookup_key(&base);
+                    let candidates = self
+                        .impl_registry
+                        .get_trait_impls(trait_name, &generic_key)
+                        .to_vec();
+                    for impl_info in candidates {
+                        let mut subst = HashMap::new();
+                        if self.match_generic_impl_target(&impl_info.target_type, &base, &mut subst)
+                        {
+                            if let Some(resolved) = impl_info.assoc_types.get(name) {
+                                return Ok(self.substitute_ty_vars(resolved, &subst));
+                            }
+                        }
+                    }
+                    return Err(TypeckError::Other(format!(
+                        "cannot resolve associated type `<{key} as {trait_name}>::{name}` from visible trait impls"
+                    )));
                 }
             }
             TyKind::Tuple(items) => TyKind::Tuple(
@@ -1158,6 +1178,9 @@ impl TypeChecker {
             }
 
             if matches!(concrete_ty.kind, TyKind::Var(_)) {
+                if function_name == "__sengoo_option_none" {
+                    continue;
+                }
                 return Err(TypeckError::Other(format!(
                     "cannot infer generic type parameter `{}` in call to `{}`",
                     param.name, function_name
@@ -1440,7 +1463,7 @@ impl TypeChecker {
                 self.infer.unify(expected, actual)?;
             }
 
-            return Ok(self.infer.apply_subst(&fn_ty.return_type));
+            return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
         }
 
         // A generic parameter may call methods promised by its declared bounds
@@ -1451,7 +1474,7 @@ impl TypeChecker {
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
                 self.infer.unify(expected, actual)?;
             }
-            return Ok(self.infer.apply_subst(&fn_ty.return_type));
+            return self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type));
         }
 
         // Then trait impl lookup.
@@ -1465,7 +1488,8 @@ impl TypeChecker {
             for (expected, actual) in fn_ty.param_types.iter().zip(arg_types.iter()) {
                 self.infer.unify(expected, actual)?;
             }
-            let resolved = self.infer.apply_subst(&fn_ty.return_type);
+            let resolved =
+                self.resolve_associated_projection(&self.infer.apply_subst(&fn_ty.return_type))?;
             if method_name == "into" {
                 self.env
                     .record_method_return_type(call_span, resolved.clone());

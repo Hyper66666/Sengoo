@@ -153,8 +153,13 @@
     collisions, and trait impls reject concrete associated-result signature
     mismatches. `option_none<T>()` infers its concrete payload from the
     expected `Option<T>` and lowers directly to a tagged aggregate, removing
-    the placeholder argument needed by lazy adapters. The lazy adapter state
-    machines and their owning Drop evidence remain open.
+    the placeholder argument needed by lazy adapters. A first concrete lazy
+    `TakeIter<I,T>` now owns its source iterator and an RAII-managed runtime
+    counter; `RawVecIntoIter<T>.take()` specializes and stops polling after the
+    requested count for arbitrary user structs. Chaining a second adapter
+    currently re-enters non-terminating method specialization, so
+    map/filter/enumerate/skip/fold/collect and owning Drop evidence remain open
+    until nested adapter identity is fixed.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: transitional consuming `collect()` now materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and

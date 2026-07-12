@@ -16,7 +16,11 @@ def option_none_with<T>(placeholder: T) -> Option<T> {
 }
 
 def option_none<T>() -> Option<T> {
-    option_none()
+    __sengoo_option_none()
+}
+
+def __sengoo_option_none<T>() -> Option<T> {
+    __sengoo_option_none()
 }
 
 def option_some_i64(value: i64) -> Option<i64> {
