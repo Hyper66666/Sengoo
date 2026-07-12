@@ -56,7 +56,11 @@ impl TypeChecker {
                         .and_then(|impl_info| impl_info.assoc_types.get(name))
                         .cloned()
                     {
-                        return Ok(resolved);
+                        return if type_key(&resolved) == type_key(ty) {
+                            Ok(resolved)
+                        } else {
+                            self.resolve_associated_projection(&resolved)
+                        };
                     }
 
                     let generic_key = self.generic_lookup_key(&base);
@@ -69,7 +73,12 @@ impl TypeChecker {
                         if self.match_generic_impl_target(&impl_info.target_type, &base, &mut subst)
                         {
                             if let Some(resolved) = impl_info.assoc_types.get(name) {
-                                return Ok(self.substitute_ty_vars(resolved, &subst));
+                                let resolved = self.substitute_ty_vars(resolved, &subst);
+                                return if type_key(&resolved) == type_key(ty) {
+                                    Ok(resolved)
+                                } else {
+                                    self.resolve_associated_projection(&resolved)
+                                };
                             }
                         }
                     }

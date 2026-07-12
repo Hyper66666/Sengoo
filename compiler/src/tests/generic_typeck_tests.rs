@@ -1647,6 +1647,60 @@ def main() -> i64 {
 }
 
 #[test]
+fn generic_adapter_can_store_a_concrete_next_function() {
+    let source = r#"
+struct Option<T> { is_some: bool, value: T }
+struct Counter { value: i64 }
+struct Adapter<I, T> {
+    inner: I,
+    next_fn: fn(&I) -> Option<T>,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+impl Counter {
+    def read(&self) -> i64 { self.value }
+}
+
+def counter_next(counter: &Counter) -> Option<i64> {
+    Option { is_some: true, value: counter.read() }
+}
+
+impl<I, T> Iterator for Adapter<I, T> {
+    type Item = T;
+    def next(&self) -> Option<T> {
+        let next = self.next_fn;
+        next(&self.inner)
+    }
+}
+
+impl<I, T> Adapter<I, T> {
+    def next(&self) -> Option<T> {
+        let next = self.next_fn;
+        next(&self.inner)
+    }
+}
+
+def main() -> i64 {
+    let adapter = Adapter {
+        inner: Counter { value: 42 },
+        next_fn: counter_next,
+    };
+    adapter.next().value
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("adapter next function fields should specialize");
+    assert!(
+        ir.contains("call %Option_i64 %") || ir.contains("call %Option_i64 @counter_next"),
+        "expected a concrete adapter next call in:\n{ir}"
+    );
+}
+
+#[test]
 fn phantom_generic_struct_literals_keep_distinct_mir_instance_names() {
     let source = r#"
 struct Phantom<T> {

@@ -430,6 +430,32 @@ fn bind_registered_hir_pair(
 ) {
     match (&template.kind, &actual.kind) {
         (
+            hir::HIRTypeKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            },
+            _,
+        ) => {
+            if let hir::HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    subst
+                        .entry(format!("<{base_name} as {trait_name}>::{name}"))
+                        .or_insert_with(|| {
+                            hir_type_to_mir_with_structs_and_subst(
+                                actual,
+                                struct_defs,
+                                &HashMap::new(),
+                            )
+                        });
+                }
+            }
+        }
+        (
             hir::HIRTypeKind::Named {
                 name,
                 args: template_args,

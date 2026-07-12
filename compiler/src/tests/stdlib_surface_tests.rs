@@ -2573,11 +2573,10 @@ def main() -> i64 {
     values.push(Payload { value: 10 });
     values.push(Payload { value: 20 });
     values.push(Payload { value: 30 });
-    let iter = values.into_iter().take(2);
+    let iter = values.into_iter().skip(1).take(1);
     let first: Option<Payload> = iter.next();
-    let second: Option<Payload> = iter.next();
     let exhausted: Option<Payload> = iter.next();
-    if first.is_some && second.is_some && exhausted.is_none() { 0 } else { 1 }
+    if first.is_some && first.value.value == 20 && exhausted.is_none() { 0 } else { 1 }
 }
 "#,
     );

@@ -159,10 +159,13 @@
     requested count for arbitrary user structs. Concrete `Option<T>` values now
     use synthesized tag-guarded Drop helpers, so an exhausted iterator's
     compiler-generated `None<T>` never drops its inactive placeholder while
-    `Some<T>` and nested `Option<Option<T>>` delegate exactly once. Chaining a second adapter
-    currently re-enters non-terminating method specialization, so
-    map/filter/enumerate/skip/fold/collect and owning Drop evidence remain open
-    until nested adapter identity is fixed.
+    `Some<T>` and nested `Option<Option<T>>` delegate exactly once. Registered-HIR
+    back-binding now recovers trait-qualified associated projections before
+    specialization keys are formed, so `RawVecIntoIter<Payload>.skip(1).take(1)`
+    terminates and emits concrete nested `SkipIter`/`TakeIter` state machines.
+    Concrete named function values can also initialize function-typed struct
+    fields, preparing lazy map/filter state. Map/filter/enumerate/fold/collect
+    and native owning Drop evidence remain open.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: transitional consuming `collect()` now materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and

@@ -250,30 +250,50 @@ pub(super) fn lower_struct_expr(
     fields: &[(String, HIRExpr)],
     concrete_type: Option<&HIRType>,
 ) -> Local {
-    if let Some(concrete) = concrete_type {
+    let concrete_struct_ty = concrete_type.map(|concrete| {
         ctx.concrete_type_registry.register_instance(
             crate::type_naming::hir_type_instance_name(concrete),
             concrete.clone(),
         );
-    }
+        crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+            concrete,
+            ctx.struct_defs,
+            &ctx.options.enum_defs,
+            &HashMap::new(),
+        )
+    });
     let lowered_fields: Vec<(String, Local)> = fields
         .iter()
-        .map(|(field_name, expr)| (field_name.clone(), ctx.lower_expr(expr)))
+        .map(|(field_name, expr)| {
+            let expected = match &concrete_struct_ty {
+                Some(MIRType::Struct { fields, .. }) => fields
+                    .iter()
+                    .find(|(name, _)| name == field_name)
+                    .map(|(_, ty)| ty.clone()),
+                _ => None,
+            };
+            let local = match (expr, expected) {
+                (HIRExpr::Var { name, .. }, Some(fn_ty @ MIRType::Fn { .. }))
+                    if ctx.is_known_function(name) =>
+                {
+                    let local = ctx.add_local(None, LocalKind::Temp, fn_ty);
+                    ctx.push_inst(Instruction::Assign {
+                        destination: local,
+                        value: MirConstant::GlobalRef(name.clone()),
+                    });
+                    local
+                }
+                _ => ctx.lower_expr(expr),
+            };
+            (field_name.clone(), local)
+        })
         .collect();
     let field_locals_by_name: HashMap<String, Local> = lowered_fields
         .iter()
         .map(|(field_name, local)| (field_name.clone(), *local))
         .collect();
 
-    let struct_ty = concrete_type
-        .map(|ty| {
-            crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
-                ty,
-                ctx.struct_defs,
-                &ctx.options.enum_defs,
-                &HashMap::new(),
-            )
-        })
+    let struct_ty = concrete_struct_ty
         .or_else(|| ctx.infer_struct_literal_type(name, &field_locals_by_name))
         .unwrap_or_else(|| MIRType::Struct {
             name: name.to_string(),

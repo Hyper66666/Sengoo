@@ -173,6 +173,11 @@ struct TakeIter<I, T> {
     remaining: Vec<i64>,
 }
 
+struct SkipIter<I, T> {
+    inner: I,
+    remaining: Vec<i64>,
+}
+
 struct EnumeratedI64 {
     index: i64,
     value: i64,
@@ -474,6 +479,12 @@ def iterator_take<I: Iterator>(inner: I, count: i64) -> TakeIter<I, I::Item> {
     let remaining: Vec<i64> = vec_new_i64();
     sengoo_vec_push_i64(remaining.handle, count);
     TakeIter { inner: inner, remaining: remaining }
+}
+
+def iterator_skip<I: Iterator>(inner: I, count: i64) -> SkipIter<I, I::Item> {
+    let remaining: Vec<i64> = vec_new_i64();
+    sengoo_vec_push_i64(remaining.handle, count);
+    SkipIter { inner: inner, remaining: remaining }
 }
 
 def string_map_string_new() -> StringMapString {
@@ -791,6 +802,10 @@ impl<T> RawVecIntoIter<T> {
         iterator_take(self, count)
     }
 
+    def skip(self, count: i64) -> SkipIter<RawVecIntoIter<T>, T> {
+        iterator_skip(self, count)
+    }
+
 }
 
 impl<I: Iterator, T> Iterator for TakeIter<I, T> {
@@ -816,6 +831,55 @@ impl<I: Iterator, T> TakeIter<I, T> {
             sengoo_vec_set_i64(self.remaining.handle, 0, count - 1);
             self.inner.next()
         }
+    }
+}
+
+impl<I: Iterator, T> Iterator for SkipIter<I, T> {
+    type Item = I::Item;
+
+    def next(&self) -> Option<I::Item> {
+        let mut count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
+        let mut exhausted = false;
+        while count > 0 {
+            let skipped = self.inner.next();
+            if skipped.is_none() {
+                exhausted = true;
+                count = 0;
+            } else {
+                count = count - 1;
+            }
+        }
+        sengoo_vec_set_i64(self.remaining.handle, 0, count);
+        if exhausted {
+            __sengoo_option_none()
+        } else {
+            self.inner.next()
+        }
+    }
+}
+
+impl<I: Iterator, T> SkipIter<I, T> {
+    def next(&self) -> Option<I::Item> {
+        let mut count = sengoo_vec_get_or_default_i64(self.remaining.handle, 0, 0);
+        let mut exhausted = false;
+        while count > 0 {
+            let skipped = self.inner.next();
+            if skipped.is_none() {
+                exhausted = true;
+                count = 0;
+            } else {
+                count = count - 1;
+            }
+        }
+        sengoo_vec_set_i64(self.remaining.handle, 0, count);
+        if exhausted {
+            __sengoo_option_none()
+        } else {
+            self.inner.next()
+        }
+    }
+    def take(self, count: i64) -> TakeIter<SkipIter<I, T>, T> {
+        iterator_take(self, count)
     }
 }
 

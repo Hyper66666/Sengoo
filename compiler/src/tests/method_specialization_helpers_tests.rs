@@ -151,6 +151,108 @@ fn bind_method_specialization_subst_infers_from_args() {
 }
 
 #[test]
+fn bind_method_specialization_subst_recovers_registered_associated_projection() {
+    let take_def = HIRStruct {
+        name: "TakeIter".to_string(),
+        type_params: vec![
+            HIRTypeParam {
+                name: "I".to_string(),
+                bounds: Vec::new(),
+                default: None,
+            },
+            HIRTypeParam {
+                name: "T".to_string(),
+                bounds: Vec::new(),
+                default: None,
+            },
+        ],
+        fields: Vec::new(),
+        is_pub: false,
+    };
+    let raw_iter_def = HIRStruct {
+        name: "RawVecIntoIter".to_string(),
+        type_params: vec![HIRTypeParam {
+            name: "T".to_string(),
+            bounds: Vec::new(),
+            default: None,
+        }],
+        fields: Vec::new(),
+        is_pub: false,
+    };
+    let payload_def = HIRStruct {
+        name: "Payload".to_string(),
+        type_params: Vec::new(),
+        fields: Vec::new(),
+        is_pub: false,
+    };
+    let struct_defs = HashMap::from([
+        (take_def.name.clone(), &take_def),
+        (raw_iter_def.name.clone(), &raw_iter_def),
+        (payload_def.name.clone(), &payload_def),
+    ]);
+    let iterator = HIRType::named("I".to_string(), Vec::new());
+    let item = HIRType::new(crate::hir::HIRTypeKind::AssocProjection {
+        base: Box::new(iterator.clone()),
+        trait_name: "Iterator".to_string(),
+        name: "Item".to_string(),
+    });
+    let target = HIRType::named("TakeIter".to_string(), vec![iterator, item]);
+    let concrete_iterator = HIRType::named(
+        "RawVecIntoIter".to_string(),
+        vec![HIRType::named("Payload".to_string(), Vec::new())],
+    );
+    let concrete = HIRType::named(
+        "TakeIter".to_string(),
+        vec![
+            concrete_iterator.clone(),
+            HIRType::named("Payload".to_string(), Vec::new()),
+        ],
+    );
+    let receiver_name = "TakeIter_RawVecIntoIter_Payload_Payload".to_string();
+    let receiver = MIRType::Struct {
+        name: receiver_name.clone(),
+        fields: Vec::new(),
+    };
+    let registry = ConcreteTypeRegistry::default();
+    registry.register_instance(receiver_name, concrete);
+    registry.register_instance("RawVecIntoIter_Payload".to_string(), concrete_iterator);
+    registry.register_instance(
+        "Payload".to_string(),
+        HIRType::named("Payload".to_string(), Vec::new()),
+    );
+    let method = HIRFunction {
+        name: "next".to_string(),
+        type_params: Vec::new(),
+        params: vec![HIRParam::new(
+            "self".to_string(),
+            SymbolId::new(1),
+            target.clone(),
+        )],
+        return_type: HIRType::unit(),
+        precondition: None,
+        postcondition: None,
+        body: crate::hir::HIRBody::new(),
+        is_async: false,
+        abi: None,
+        is_unsafe: false,
+        no_mangle: false,
+        export_name: None,
+        is_pub: false,
+    };
+
+    let subst =
+        bind_method_specialization_subst(&target, &method, &receiver, &[], &struct_defs, &registry)
+            .expect("registered concrete adapter should bind projections");
+
+    assert!(
+        matches!(subst.get("I"), Some(MIRType::Struct { name, .. }) if name == "RawVecIntoIter_Payload")
+    );
+    assert!(
+        matches!(subst.get("<I as Iterator>::Item"), Some(MIRType::Struct { name, .. }) if name == "Payload")
+    );
+}
+
+#[test]
 fn bind_method_specialization_subst_rejects_wrong_arity() {
     let vec_def = generic_vec_struct();
     let struct_defs = HashMap::from([(vec_def.name.clone(), &vec_def)]);
