@@ -6,8 +6,13 @@
     fetch/prune: branch/upstream state, local and remote-main divergence,
     tracked/untracked counts, diff size, and generated target sizes are
     explicit.
-- [ ] 1.2 Create and verify a recoverable checkpoint containing every source,
+- [x] 1.2 Create and verify a recoverable checkpoint containing every source,
   test, documentation, example, and OpenSpec change.
+  - Commit `db37d8bb8` preserves 218 non-generated paths (25,330 insertions,
+    1,756 deletions) with an explicit directive to split by OpenSpec owner
+    before final integration. `git status` was clean immediately after the
+    commit, proving no source/test/doc/example/OpenSpec path remained only in
+    the worktree.
 - [ ] 1.3 Classify paths by OpenSpec owner and generated/source status; flag
   unknown ownership rather than guessing.
 - [x] 1.4 Verify cleanup targets resolve inside the workspace before removing
