@@ -313,6 +313,77 @@ def main() -> i64 {
 }
 
 #[test]
+fn option_drop_is_conditioned_on_the_active_payload_tag() {
+    let none_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let absent: Option<Resource> = option_none();
+    0
+}
+"#,
+    );
+    let none_main = function(&none_mir, "main");
+    assert!(
+        named_drop_calls(none_main, "Resource_Drop_drop").is_empty(),
+        "None<Resource> must not directly drop its inactive payload"
+    );
+    let helper = function(&none_mir, "Option_Resource_Drop_drop");
+    assert!(has_guard_terminator(helper));
+    assert_eq!(
+        named_drop_calls(helper, "Resource_Drop_drop").len(),
+        1,
+        "the conditional helper must own the only payload drop"
+    );
+
+    let some_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let present: Option<Resource> = option_some(Resource { id: 1 });
+    0
+}
+"#,
+    );
+    assert_eq!(
+        some_mir
+            .iter()
+            .filter(|function| function.name == "Option_Resource_Drop_drop")
+            .count(),
+        1,
+        "one concrete Option helper should be synthesized"
+    );
+
+    let nested_mir = compile_with_owned_string(
+        r#"
+struct Resource { id: i64 }
+impl Drop for Resource { def drop(&mut self) {} }
+def main() -> i64 {
+    let inner: Option<Resource> = option_none();
+    let nested: Option<Option<Resource>> = option_some(inner);
+    0
+}
+"#,
+    );
+    let outer = function(&nested_mir, "Option_Option_Resource_Drop_drop");
+    assert_eq!(
+        named_drop_calls(outer, "Option_Resource_Drop_drop").len(),
+        1,
+        "the outer active payload must delegate to the inner conditional helper"
+    );
+    assert_eq!(
+        nested_mir
+            .iter()
+            .filter(|function| function.name == "Option_Resource_Drop_drop")
+            .count(),
+        1,
+        "nested Option helpers must be deduplicated"
+    );
+}
+
+#[test]
 fn partial_move_drops_only_the_remaining_composite_field() {
     let mir = compile_with_owned_string(
         r#"

@@ -156,7 +156,10 @@
     the placeholder argument needed by lazy adapters. A first concrete lazy
     `TakeIter<I,T>` now owns its source iterator and an RAII-managed runtime
     counter; `RawVecIntoIter<T>.take()` specializes and stops polling after the
-    requested count for arbitrary user structs. Chaining a second adapter
+    requested count for arbitrary user structs. Concrete `Option<T>` values now
+    use synthesized tag-guarded Drop helpers, so an exhausted iterator's
+    compiler-generated `None<T>` never drops its inactive placeholder while
+    `Some<T>` and nested `Option<Option<T>>` delegate exactly once. Chaining a second adapter
     currently re-enters non-terminating method specialization, so
     map/filter/enumerate/skip/fold/collect and owning Drop evidence remain open
     until nested adapter identity is fixed.

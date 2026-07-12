@@ -288,8 +288,12 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn drop_func_for_local(&self, local: Local) -> Option<String> {
-        let type_name = match self.get_local_type(local) {
+    fn drop_func_for_local(&mut self, local: Local) -> Option<String> {
+        let local_ty = self.get_local_type(local).clone();
+        if Self::option_payload_type(&local_ty).is_some() {
+            return self.ensure_option_drop_helper(&local_ty);
+        }
+        let type_name = match &local_ty {
             MIRType::Struct { name, .. } => Some(name.as_str()),
             _ => self.type_names.get(&local).map(String::as_str),
         }?;
@@ -297,7 +301,10 @@ impl<'a> LoweringContext<'a> {
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
-    fn drop_func_for_type(&self, ty: &MIRType) -> Option<String> {
+    fn drop_func_for_type(&mut self, ty: &MIRType) -> Option<String> {
+        if Self::option_payload_type(ty).is_some() {
+            return self.ensure_option_drop_helper(ty);
+        }
         let MIRType::Struct { name, .. } = ty else {
             return None;
         };
@@ -305,8 +312,118 @@ impl<'a> LoweringContext<'a> {
         self.is_known_function(&drop_func).then_some(drop_func)
     }
 
+    fn option_payload_type(ty: &MIRType) -> Option<MIRType> {
+        let MIRType::Struct { name, fields } = ty else {
+            return None;
+        };
+        if !(name == "Option" || name.starts_with("Option_"))
+            || !matches!(fields.first(), Some((field, MIRType::Bool)) if field == "is_some")
+            || fields.len() != 2
+        {
+            return None;
+        }
+        fields
+            .get(1)
+            .and_then(|(field, ty)| (field == "value").then_some(ty.clone()))
+    }
+
+    fn ensure_option_drop_helper(&mut self, option_ty: &MIRType) -> Option<String> {
+        let payload_ty = Self::option_payload_type(option_ty)?;
+        let MIRType::Struct { name, .. } = option_ty else {
+            return None;
+        };
+        let helper_name = format!("{name}_Drop_drop");
+        if self.is_known_function(&helper_name) {
+            return Some(helper_name);
+        }
+
+        self.insert_known_function(helper_name.clone());
+        self.insert_function_sig(
+            helper_name.clone(),
+            FunctionSig {
+                ret_type: MIR_UNIT,
+                param_count: 1,
+                env: Vec::new(),
+            },
+        );
+
+        let mut helper = MirFunction::new(helper_name.clone(), vec![option_ty.clone()], MIR_UNIT);
+        let start = helper.start_block;
+        let payload_block = helper.add_block();
+        let empty_return = helper.add_block();
+        let mut helper_ctx = LoweringContext::new(
+            &mut helper,
+            self.lambda_counter,
+            self.known_functions_base,
+            self.function_sigs_base,
+            self.struct_defs,
+            self.concrete_type_registry.clone(),
+            self.options.clone(),
+            self.inherent_method_templates,
+            self.trait_method_templates,
+        );
+        helper_ctx.known_functions_overlay = self.known_functions_overlay.clone();
+        helper_ctx.function_sigs_overlay = self.function_sigs_overlay.clone();
+        helper_ctx.insert_known_function(helper_name.clone());
+        helper_ctx.insert_function_sig(
+            helper_name.clone(),
+            FunctionSig {
+                ret_type: MIR_UNIT,
+                param_count: 1,
+                env: Vec::new(),
+            },
+        );
+
+        let option = Local::new(1, LocalKind::Param);
+        let condition = helper_ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+        helper_ctx.mir_fn.push_inst_to_block(
+            start,
+            Instruction::Extract {
+                destination: condition,
+                value: option,
+                index: 0,
+            },
+        );
+        helper_ctx.mir_fn.basic_blocks[start].set_terminator(Terminator::If {
+            cond: condition,
+            then_block: payload_block,
+            else_block: empty_return,
+        });
+        helper_ctx.mir_fn.basic_blocks[empty_return].set_terminator(Terminator::Return(None));
+
+        let extracted = helper_ctx.add_local(None, LocalKind::Temp, payload_ty.clone());
+        helper_ctx.mir_fn.push_inst_to_block(
+            payload_block,
+            Instruction::Extract {
+                destination: extracted,
+                value: option,
+                index: 1,
+            },
+        );
+        let payload = helper_ctx.add_local(None, LocalKind::User, payload_ty);
+        helper_ctx.mir_fn.push_inst_to_block(
+            payload_block,
+            Instruction::Store {
+                destination: payload,
+                value: extracted,
+            },
+        );
+        helper_ctx.set_current_block(payload_block);
+        helper_ctx.push_drop_scope();
+        helper_ctx.record_drop_binding_if_needed(payload);
+        helper_ctx.pop_drop_scope(None);
+        helper_ctx.mir_fn.basic_blocks[payload_block].set_terminator(Terminator::Return(None));
+
+        let nested_helpers = std::mem::take(&mut helper_ctx.lambda_functions);
+        let generated = helper_ctx.mir_fn.clone();
+        drop(helper_ctx);
+        self.lambda_functions.extend(nested_helpers);
+        self.lambda_functions.push(generated);
+        Some(helper_name)
+    }
+
     fn collect_field_drop_bindings(
-        &self,
+        &mut self,
         local: Local,
         ty: &MIRType,
         path: &mut Vec<u32>,
