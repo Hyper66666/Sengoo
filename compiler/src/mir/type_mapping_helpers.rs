@@ -185,6 +185,23 @@ pub(crate) fn bind_mir_subst_from_hir_type(
     subst: &mut HashMap<String, MIRType>,
 ) {
     match &template.kind {
+        HIRTypeKind::AssocProjection {
+            base,
+            trait_name,
+            name,
+        } => {
+            if let HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    subst
+                        .entry(format!("<{base_name} as {trait_name}>::{name}"))
+                        .or_insert_with(|| actual.clone());
+                }
+            }
+        }
         HIRTypeKind::Named { name, args } if args.is_empty() && !struct_defs.contains_key(name) => {
             match subst.get(name) {
                 Some(existing) if existing != actual => {}
@@ -239,5 +256,52 @@ pub(crate) fn bind_mir_subst_from_hir_type(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn associated_projection_binds_concrete_actual_type() {
+        let projection = HIRType::new(HIRTypeKind::AssocProjection {
+            base: Box::new(HIRType::named("I".to_string(), Vec::new())),
+            trait_name: "Iterator".to_string(),
+            name: "Item".to_string(),
+        });
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(&projection, &MIRType::Bool, &HashMap::new(), &mut subst);
+
+        assert_eq!(subst.get("<I as Iterator>::Item"), Some(&MIRType::Bool));
+    }
+
+    #[test]
+    fn same_named_associated_types_from_distinct_traits_do_not_collide() {
+        let projection = |trait_name: &str| {
+            HIRType::new(HIRTypeKind::AssocProjection {
+                base: Box::new(HIRType::named("I".to_string(), Vec::new())),
+                trait_name: trait_name.to_string(),
+                name: "Item".to_string(),
+            })
+        };
+        let mut subst = HashMap::new();
+
+        bind_mir_subst_from_hir_type(
+            &projection("Iterator"),
+            &MIRType::Bool,
+            &HashMap::new(),
+            &mut subst,
+        );
+        bind_mir_subst_from_hir_type(
+            &projection("Stream"),
+            &MIRType::Int(32),
+            &HashMap::new(),
+            &mut subst,
+        );
+
+        assert_eq!(subst.get("<I as Iterator>::Item"), Some(&MIRType::Bool));
+        assert_eq!(subst.get("<I as Stream>::Item"), Some(&MIRType::Int(32)));
     }
 }

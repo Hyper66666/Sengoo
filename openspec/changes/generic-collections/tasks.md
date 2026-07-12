@@ -147,8 +147,14 @@
     then lower concrete lazy adapter state machines.
   - The first normalization prerequisite is now in place: HIR preserves
     structured associated-type projections and impl `type Item = ...`
-    bindings through lowering and generic substitution. MIR resolution of
-    those projections and the lazy adapter state machines remain open.
+    bindings through lowering and generic substitution. Type checking now
+    recursively resolves nested projections such as `Option<I::Item>`, MIR
+    substitution keys include the declaring trait to avoid same-name
+    collisions, and trait impls reject concrete associated-result signature
+    mismatches. `option_none<T>()` infers its concrete payload from the
+    expected `Option<T>` and lowers directly to a tagged aggregate, removing
+    the placeholder argument needed by lazy adapters. The lazy adapter state
+    machines and their owning Drop evidence remain open.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: transitional consuming `collect()` now materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and

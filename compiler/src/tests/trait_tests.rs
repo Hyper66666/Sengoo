@@ -14,6 +14,37 @@ fn typecheck_source(source: &str) -> crate::Result<()> {
     checker.check_program(&program)
 }
 
+#[test]
+fn trait_impl_rejects_wrong_associated_projection_return_type() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+struct BadIter {}
+
+impl Iterator for BadIter {
+    type Item = bool;
+    def next(&self) -> Option<i64> {
+        Option { is_some: false, value: 0 }
+    }
+}
+"#;
+
+    let error = typecheck_source(source).expect_err("wrong Iterator::Item must be rejected");
+    let message = error.to_string();
+    assert!(
+        message.contains("trait method") && message.contains("next"),
+        "expected stable trait method mismatch context, got: {message}"
+    );
+}
+
 fn typecheck_stable_code(source: &str) -> Option<&'static str> {
     let err = typecheck_source(source).expect_err("source should fail type checking");
     let CompileError::TypeckError(typeck_err) = err else {

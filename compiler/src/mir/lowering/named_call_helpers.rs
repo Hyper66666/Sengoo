@@ -9,6 +9,12 @@ pub(super) fn lower_named_call(
     if name == "rc_new" && arg_locals.len() == 1 {
         return lower_rc_new_call(ctx, arg_locals[0]);
     }
+    if name == "option_none"
+        && arg_locals.is_empty()
+        && expected_return_type.is_some_and(is_option_mir_type)
+    {
+        return lower_option_none_call(ctx, expected_return_type);
+    }
     if name == "vec_new" && arg_locals.is_empty() {
         return lower_vec_new_call(ctx, expected_return_type);
     }
@@ -136,6 +142,52 @@ pub(super) fn lower_named_call(
             emit_call_from_plan(ctx, invocation)
         }
     }
+}
+
+fn is_option_mir_type(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::Struct { name, fields }
+        if (name == "Option" || name.starts_with("Option_"))
+            && matches!(fields.first(), Some((_, MIRType::Bool)))
+            && fields.len() == 2)
+}
+
+fn lower_option_none_call(
+    ctx: &mut LoweringContext<'_>,
+    expected_return_type: Option<&MIRType>,
+) -> Local {
+    let Some(option_ty) = expected_return_type.cloned() else {
+        ctx.errors
+            .push("option_none<T>: expected concrete Option<T> return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let MIRType::Struct { name, fields } = &option_ty else {
+        ctx.errors
+            .push("option_none<T>: expected concrete Option<T> return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    if !(name == "Option" || name.starts_with("Option_"))
+        || !matches!(fields.first(), Some((_, MIRType::Bool)))
+    {
+        ctx.errors
+            .push("option_none<T>: malformed Option<T> return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    }
+    let Some((_, value_ty)) = fields.get(1) else {
+        ctx.errors
+            .push("option_none<T>: malformed Option<T> return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+
+    let is_some = ctx.lower_literal(&HIRLiteral::Bool(false));
+    let value = super::try_expr_helpers::default_value_for_type(ctx, value_ty);
+    let result = ctx.add_local(None, LocalKind::Temp, option_ty.clone());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![is_some, value],
+        ty: option_ty,
+    });
+    ctx.mark_drop_local_moved(value);
+    result
 }
 
 fn lower_raw_hashset_remove_call(

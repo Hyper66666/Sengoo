@@ -31,35 +31,74 @@ fn assert_helper_allows_callsite_injection(
 
 impl TypeChecker {
     fn resolve_associated_projection(&self, ty: &Ty) -> TyResult<Ty> {
-        let TyKind::AssocProjection {
-            base,
-            trait_name,
-            name,
-        } = &ty.kind
-        else {
-            return Ok(ty.clone());
+        let kind = match &ty.kind {
+            TyKind::AssocProjection {
+                base,
+                trait_name,
+                name,
+            } => {
+                let base = self.infer.apply_subst(base);
+                if matches!(base.kind, TyKind::Var(_)) {
+                    TyKind::AssocProjection {
+                        base: Box::new(base),
+                        trait_name: trait_name.clone(),
+                        name: name.clone(),
+                    }
+                } else {
+                    let key = type_key(&base);
+                    return self
+                        .impl_registry
+                        .get_trait_impl(trait_name, &key)
+                        .and_then(|impl_info| impl_info.assoc_types.get(name))
+                        .cloned()
+                        .ok_or_else(|| {
+                            TypeckError::Other(format!(
+                                "cannot resolve associated type `<{key} as {trait_name}>::{name}` from visible trait impls"
+                            ))
+                        });
+                }
+            }
+            TyKind::Tuple(items) => TyKind::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.resolve_associated_projection(item))
+                    .collect::<TyResult<Vec<_>>>()?,
+            ),
+            TyKind::Array(item, len) => {
+                TyKind::Array(Box::new(self.resolve_associated_projection(item)?), *len)
+            }
+            TyKind::Slice(item) => {
+                TyKind::Slice(Box::new(self.resolve_associated_projection(item)?))
+            }
+            TyKind::Ref(is_mut, item) => {
+                TyKind::Ref(*is_mut, Box::new(self.resolve_associated_projection(item)?))
+            }
+            TyKind::Ptr(item) => TyKind::Ptr(Box::new(self.resolve_associated_projection(item)?)),
+            TyKind::Fn {
+                params,
+                ret,
+                is_variadic,
+            } => TyKind::Fn {
+                params: params
+                    .iter()
+                    .map(|param| self.resolve_associated_projection(param))
+                    .collect::<TyResult<Vec<_>>>()?,
+                ret: Box::new(self.resolve_associated_projection(ret)?),
+                is_variadic: *is_variadic,
+            },
+            TyKind::Adt { name, args } => TyKind::Adt {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| self.resolve_associated_projection(arg))
+                    .collect::<TyResult<Vec<_>>>()?,
+            },
+            TyKind::Future(item) => {
+                TyKind::Future(Box::new(self.resolve_associated_projection(item)?))
+            }
+            _ => return Ok(ty.clone()),
         };
-        let base = self.infer.apply_subst(base);
-        if matches!(base.kind, TyKind::Var(_)) {
-            return Ok(Ty::new(
-                ty.id,
-                TyKind::AssocProjection {
-                    base: Box::new(base),
-                    trait_name: trait_name.clone(),
-                    name: name.clone(),
-                },
-            ));
-        }
-        let key = type_key(&base);
-        self.impl_registry
-            .get_trait_impl(trait_name, &key)
-            .and_then(|impl_info| impl_info.assoc_types.get(name))
-            .cloned()
-            .ok_or_else(|| {
-                TypeckError::Other(format!(
-                    "cannot resolve associated type `<{key} as {trait_name}>::{name}` from visible trait impls"
-                ))
-            })
+        Ok(Ty::new(ty.id, kind))
     }
 
     fn instantiate_method_function_ty(

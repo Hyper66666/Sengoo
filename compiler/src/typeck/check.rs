@@ -119,6 +119,7 @@ pub struct TypeChecker {
     /// Trait-impl supertrait obligations `(trait, type_key, span)` collected while
     /// checking impls; validated once every impl has been registered.
     pending_supertrait_obligations: Vec<(String, String, crate::lexer::Span)>,
+    current_trait_associated_types: Option<(String, HashSet<String>)>,
 }
 
 impl TypeChecker {
@@ -156,6 +157,7 @@ impl TypeChecker {
             trait_default_methods: HashMap::new(),
             pending_supertrait_links: Vec::new(),
             pending_supertrait_obligations: Vec::new(),
+            current_trait_associated_types: None,
         }
     }
 
@@ -919,6 +921,18 @@ impl TypeChecker {
         if path.segments.len() == 2 && explicit_args.is_empty() {
             let base_name = &path.segments[0].name;
             let assoc_name = &path.segments[1].name;
+            if base_name == "Self" {
+                if let Some((trait_name, associated_types)) = &self.current_trait_associated_types {
+                    if associated_types.contains(assoc_name) {
+                        let self_ty = self.env.new_ty(TyKind::SelfType);
+                        return Ok(self.env.new_ty(TyKind::AssocProjection {
+                            base: Box::new(self_ty),
+                            trait_name: trait_name.clone(),
+                            name: assoc_name.clone(),
+                        }));
+                    }
+                }
+            }
             if let Some(base) = self.env.lookup(base_name).and_then(Symbol::get_ty).cloned() {
                 let TyKind::Var(var_id) = &base.kind else {
                     return Err(TypeckError::Other(format!(

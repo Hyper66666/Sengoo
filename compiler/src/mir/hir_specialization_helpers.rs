@@ -88,11 +88,26 @@ pub(crate) fn substitute_hir_type(ty: &HIRType, subst: &HashMap<String, HIRType>
             base,
             trait_name,
             name,
-        } => HIRType::new(HIRTypeKind::AssocProjection {
-            base: Box::new(substitute_hir_type(base, subst)),
-            trait_name: trait_name.clone(),
-            name: name.clone(),
-        }),
+        } => {
+            if let HIRTypeKind::Named {
+                name: base_name,
+                args,
+            } = &base.kind
+            {
+                if args.is_empty() {
+                    if let Some(replacement) =
+                        subst.get(&format!("<{base_name} as {trait_name}>::{name}"))
+                    {
+                        return replacement.clone();
+                    }
+                }
+            }
+            HIRType::new(HIRTypeKind::AssocProjection {
+                base: Box::new(substitute_hir_type(base, subst)),
+                trait_name: trait_name.clone(),
+                name: name.clone(),
+            })
+        }
         _ => ty.clone(),
     }
 }

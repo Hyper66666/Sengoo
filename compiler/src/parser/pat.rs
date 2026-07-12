@@ -172,6 +172,11 @@ impl<'source> Parser<'source> {
                     self.advance();
                     self.intern_named_ident("default", span)
                 }
+                TokenKind::SelfKw => {
+                    let span = token.span;
+                    self.advance();
+                    self.intern_named_ident("Self", span)
+                }
                 _ => break,
             };
             segments.push(segment);

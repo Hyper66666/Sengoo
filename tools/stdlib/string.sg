@@ -410,18 +410,8 @@ impl Ord for String {
 
 impl Iterator for StringBytesIter {
     type Item = i64;
-}
 
-impl Iterator for StringCharsIter {
-    type Item = char;
-}
-
-impl Iterator for StringSplitIter {
-    type Item = String;
-}
-
-impl StringBytesIter {
-    def next(&mut self) -> Option<i64> {
+    def next(&self) -> Option<i64> {
         if sengoo_string_iter_done(self.handle) != 0 {
             option_none_i64()
         } else {
@@ -434,8 +424,10 @@ impl StringBytesIter {
     }
 }
 
-impl StringCharsIter {
-    def next(&mut self) -> Option<char> {
+impl Iterator for StringCharsIter {
+    type Item = char;
+
+    def next(&self) -> Option<char> {
         if sengoo_string_iter_done(self.handle) != 0 {
             option_none_with('\0')
         } else {
@@ -443,7 +435,10 @@ impl StringCharsIter {
         }
     }
 
-    def next_codepoint(&mut self) -> Option<i64> {
+}
+
+impl StringCharsIter {
+    def next_codepoint(&self) -> Option<i64> {
         if sengoo_string_iter_done(self.handle) != 0 {
             option_none_i64()
         } else {
@@ -456,8 +451,10 @@ impl StringCharsIter {
     }
 }
 
-impl StringSplitIter {
-    def next(&mut self) -> Option<String> {
+impl Iterator for StringSplitIter {
+    type Item = String;
+
+    def next(&self) -> Option<String> {
         if sengoo_string_split_iter_done(self.handle) != 0 {
             option_none_with(String { handle: 0 })
         } else {

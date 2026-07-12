@@ -70,6 +70,18 @@ trait Iterator {
 }
 
 #[test]
+fn trait_method_self_associated_projection_parses() {
+    let source = r#"
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+"#;
+
+    Parser::parse(source).expect("Self::Item should parse in a trait method signature");
+}
+
+#[test]
 fn impl_associated_type_definition_typechecks() {
     let source = r#"
 trait Iterator {
@@ -1525,6 +1537,114 @@ def main() -> i64 {
 
     compile_to_ir(source)
         .expect("expected return type should infer a zero-argument constructor type parameter");
+}
+
+#[test]
+fn option_none_infers_and_materializes_concrete_payload_defaults() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+struct Payload {
+    count: i64,
+    ready: bool,
+}
+
+def option_none<T>() -> Option<T> {
+    option_none()
+}
+
+def main() -> i64 {
+    let number: Option<i64> = option_none();
+    let flag: Option<bool> = option_none();
+    let payload: Option<Payload> = option_none();
+    if number.is_some || flag.is_some || payload.is_some {
+        1
+    } else {
+        payload.value.count
+    }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("option_none should infer T and synthesize a concrete unused payload");
+    assert!(ir.contains("%Option_i64"), "missing Option<i64> in:\n{ir}");
+    assert!(
+        ir.contains("%Option_bool"),
+        "missing Option<bool> in:\n{ir}"
+    );
+    assert!(
+        ir.contains("%Option_Payload"),
+        "missing Option<Payload> in:\n{ir}"
+    );
+    assert!(
+        !ir.contains("call %Option_"),
+        "option_none should lower directly instead of calling an empty body:\n{ir}"
+    );
+}
+
+#[test]
+fn user_option_none_function_is_not_hijacked_by_stdlib_intrinsic() {
+    let source = r#"
+def option_none() -> i64 {
+    41
+}
+
+def main() -> i64 {
+    option_none() + 1
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("ordinary same-named functions must resolve normally");
+    assert!(
+        ir.contains("call i64 @option_none"),
+        "expected a normal user function call in:\n{ir}"
+    );
+}
+
+#[test]
+fn generic_iterator_next_resolves_associated_item_end_to_end() {
+    let source = r#"
+struct Option<T> {
+    is_some: bool,
+    value: T,
+}
+
+trait Iterator {
+    type Item;
+    def next(&self) -> Option<Self::Item> {}
+}
+
+struct BoolIter {
+    value: bool,
+}
+
+impl Iterator for BoolIter {
+    type Item = bool;
+    def next(&self) -> Option<bool> {
+        Option { is_some: true, value: self.value }
+    }
+}
+
+def pull<I: Iterator>(iter: &I) -> Option<I::Item> {
+    iter.next()
+}
+
+def main() -> i64 {
+    let iter = BoolIter { value: true };
+    let item: Option<bool> = pull(&iter);
+    if item.value { 0 } else { 1 }
+}
+"#;
+
+    let ir = compile_to_ir(source)
+        .expect("generic Iterator::next should specialize I::Item through MIR lowering");
+    assert!(
+        ir.contains("pull_BoolIter") && ir.contains("BoolIter_Iterator_next"),
+        "expected generic trait dispatch specialization in:\n{ir}"
+    );
 }
 
 #[test]

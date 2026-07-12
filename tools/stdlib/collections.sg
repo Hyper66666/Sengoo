@@ -385,9 +385,7 @@ def collections_copy_result(value: i64) -> Result<i64, i64> {
 trait Iterator {
     type Item;
 
-    def next(self) -> Option<i64> {
-        option_none_i64()
-    }
+    def next(&self) -> Option<Self::Item> {}
 
 
     def map_add(self, delta: i64) -> Option<i64> {
@@ -731,7 +729,11 @@ impl<T: Ord> BTreeSet<T> {
     }
 }
 
-impl<T> Iterator for RawMapKeyIter<T> { type Item = &T; }
+impl<T> Iterator for RawMapKeyIter<T> {
+    type Item = &T;
+
+    def next(&self) -> Option<&T> { raw_map_key_iter_next(self.handle) }
+}
 
 impl<T> RawMapKeyIter<T> {
     def next(&self) -> Option<&T> { raw_map_key_iter_next(self.handle) }
@@ -743,6 +745,10 @@ impl<T> Drop for RawMapKeyIter<T> {
 
 impl<T> Iterator for RawVecIter<T> {
     type Item = &T;
+
+    def next(&self) -> Option<&T> {
+        raw_vec_iter_next(self.handle)
+    }
 }
 
 impl<T> RawVecIter<T> {
@@ -759,6 +765,10 @@ impl<T> Drop for RawVecIter<T> {
 
 impl<T> Iterator for RawVecIntoIter<T> {
     type Item = T;
+
+    def next(&self) -> Option<T> {
+        self.vec.pop()
+    }
 }
 
 impl<T> RawVecIntoIter<T> {

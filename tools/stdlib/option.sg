@@ -15,6 +15,10 @@ def option_none_with<T>(placeholder: T) -> Option<T> {
     Option { is_some: false, value: placeholder }
 }
 
+def option_none<T>() -> Option<T> {
+    option_none()
+}
+
 def option_some_i64(value: i64) -> Option<i64> {
     Option { is_some: true, value: value }
 }

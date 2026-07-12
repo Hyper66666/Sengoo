@@ -62,6 +62,12 @@ fn substitute_hir_type_preserves_associated_projection_identity() {
             name: "Item".to_string(),
         })
     );
+
+    let resolved = substitute_hir_type(
+        &projection,
+        &HashMap::from([("<T as Iterator>::Item".to_string(), HIRType::bool())]),
+    );
+    assert_eq!(resolved, HIRType::bool());
 }
 
 #[test]
