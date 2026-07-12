@@ -1,9 +1,10 @@
 use crate::hir::{
     HIRBody, HIRExpr, HIRFunction, HIRLiteral, HIRMatchArm, HIRParam, HIRPattern, HIRStmt, HIRType,
-    IntKind,
+    HIRTypeKind, IntKind,
 };
 use crate::mir::hir_specialization_helpers::{
     hir_type_is_concrete, hir_type_is_placeholder_name, substitute_hir_function,
+    substitute_hir_type,
 };
 use crate::symbol::SymbolId;
 use std::collections::{HashMap, HashSet};
@@ -39,6 +40,28 @@ fn hir_type_placeholder_and_concrete_checks_respect_known_named_types() {
         ),
         &known_named_types
     ));
+}
+
+#[test]
+fn substitute_hir_type_preserves_associated_projection_identity() {
+    let projection = HIRType::new(HIRTypeKind::AssocProjection {
+        base: Box::new(HIRType::named("T".to_string(), Vec::new())),
+        trait_name: "Iterator".to_string(),
+        name: "Item".to_string(),
+    });
+    let substituted = substitute_hir_type(
+        &projection,
+        &HashMap::from([("T".to_string(), HIRType::int(IntKind::I64))]),
+    );
+
+    assert_eq!(
+        substituted,
+        HIRType::new(HIRTypeKind::AssocProjection {
+            base: Box::new(HIRType::int(IntKind::I64)),
+            trait_name: "Iterator".to_string(),
+            name: "Item".to_string(),
+        })
+    );
 }
 
 #[test]

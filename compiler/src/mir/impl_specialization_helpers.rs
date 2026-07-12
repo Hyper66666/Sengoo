@@ -251,6 +251,7 @@ pub(crate) fn expand_impl_variants(
             target_type: impl_item.target_type.clone(),
             trait_name: impl_item.trait_name.clone(),
             trait_args: impl_item.trait_args.clone(),
+            associated_types: impl_item.associated_types.clone(),
             items: impl_item
                 .items
                 .iter()
@@ -285,6 +286,11 @@ pub(crate) fn expand_impl_variants(
                         .trait_args
                         .iter()
                         .map(|arg| substitute_hir_type(arg, &subst))
+                        .collect(),
+                    associated_types: impl_item
+                        .associated_types
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), substitute_hir_type(ty, &subst)))
                         .collect(),
                     items: impl_item
                         .items

@@ -2,6 +2,49 @@ use crate::hir::HIRItem;
 use crate::{lower_ast, Parser, TypeChecker};
 
 #[test]
+fn lower_ast_preserves_impl_associated_type_bindings() {
+    let source = r#"
+trait Items {
+    type Item;
+}
+
+struct Counter {}
+
+impl Items for Counter {
+    type Item = i64;
+}
+
+def main() -> i64 { 0 }
+"#;
+
+    let program = Parser::parse(source).expect("parse should succeed");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("typecheck should succeed");
+    let env = checker.into_env();
+    let module = lower_ast(&program, &env);
+    let impl_item = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            HIRItem::Impl(impl_item) if impl_item.trait_name.as_deref() == Some("Items") => {
+                Some(impl_item)
+            }
+            _ => None,
+        })
+        .expect("expected Items impl in HIR");
+
+    assert_eq!(
+        impl_item.associated_types,
+        vec![(
+            "Item".to_string(),
+            crate::hir::HIRType::int(crate::hir::IntKind::I64)
+        )]
+    );
+}
+
+#[test]
 fn lower_ast_preserves_generic_bounds_in_hir_function() {
     let source = r#"
 trait Summable {}

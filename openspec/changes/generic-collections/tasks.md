@@ -145,6 +145,10 @@
     monomorphization; the remaining implementation must first make associated
     `Iterator::Item` projections usable during generic MIR specialization and
     then lower concrete lazy adapter state machines.
+  - The first normalization prerequisite is now in place: HIR preserves
+    structured associated-type projections and impl `type Item = ...`
+    bindings through lowering and generic substitution. MIR resolution of
+    those projections and the lazy adapter state machines remain open.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: transitional consuming `collect()` now materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and

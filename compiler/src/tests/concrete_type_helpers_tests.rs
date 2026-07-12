@@ -76,6 +76,7 @@ fn collect_concrete_named_types_from_items_includes_function_impl_and_struct_fie
         target_type: vec_i64.clone(),
         trait_name: None,
         trait_args: Vec::new(),
+        associated_types: Vec::new(),
         items: vec![HIRFunction {
             name: "size".to_string(),
             type_params: vec![],
@@ -138,6 +139,7 @@ fn collect_concrete_named_types_with_impl_variants_reaches_fixed_point() {
         target_type: vec_t.clone(),
         trait_name: None,
         trait_args: Vec::new(),
+        associated_types: Vec::new(),
         items: vec![HIRFunction {
             name: "Vec_into_map".to_string(),
             type_params: vec![HIRTypeParam {

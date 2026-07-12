@@ -98,6 +98,7 @@ fn expand_impl_variants_instantiates_methods_for_concrete_named_targets() {
         ),
         trait_name: None,
         trait_args: Vec::new(),
+        associated_types: Vec::new(),
         items: vec![method("vec_len")],
     };
 

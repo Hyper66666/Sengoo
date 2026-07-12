@@ -132,10 +132,11 @@ pub(super) fn lower_checked_type(ty: &Ty) -> HIRType {
             base,
             trait_name,
             name,
-        } => HIRType::named(
-            format!("<{} as {}>::{}", base, trait_name, name),
-            Vec::new(),
-        ),
+        } => HIRType::new(HIRTypeKind::AssocProjection {
+            base: Box::new(lower_checked_type(base)),
+            trait_name: trait_name.clone(),
+            name: name.clone(),
+        }),
         TyKind::Future(inner) => {
             HIRType::named("Future".to_string(), vec![lower_checked_type(inner)])
         }

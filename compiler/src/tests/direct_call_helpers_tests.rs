@@ -108,6 +108,7 @@ fn collect_direct_call_names_accumulates_function_and_impl_bodies() {
         target_type: HIRType::named("Point".to_string(), vec![]),
         trait_name: None,
         trait_args: Vec::new(),
+        associated_types: Vec::new(),
         items: vec![empty_function(
             "sum",
             HIRBody::with_expr(HIRExpr::Call {

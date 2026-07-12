@@ -197,6 +197,7 @@ pub struct HIRImpl {
     pub target_type: HIRType,
     pub trait_name: Option<String>,
     pub trait_args: Vec<HIRType>,
+    pub associated_types: Vec<(String, HIRType)>,
     pub items: Vec<HIRFunction>,
 }
 

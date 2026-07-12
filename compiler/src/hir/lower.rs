@@ -607,6 +607,7 @@ fn lower_class_bundle<'a>(
             target_type: self_ty,
             trait_name: None,
             trait_args: Vec::new(),
+            associated_types: Vec::new(),
             items: impl_items,
         })
     };
@@ -669,6 +670,11 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
         .iter()
         .map(|arg| lower_type(arg, type_env))
         .collect();
+    let associated_types = impl_decl
+        .associated_types
+        .iter()
+        .map(|binding| (binding.name.name.clone(), lower_type(&binding.ty, type_env)))
+        .collect();
 
     // 生成类型前缀（用于函数名修饰）
     let type_prefix = Some(hir_type_to_prefix(&target_type));
@@ -691,6 +697,7 @@ fn lower_impl(impl_decl: &ast::Impl, type_env: &TypeEnv) -> Result<HIRImpl, Stri
         target_type,
         trait_name,
         trait_args,
+        associated_types,
         items,
     })
 }
