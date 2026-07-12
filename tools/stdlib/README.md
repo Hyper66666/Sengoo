@@ -180,6 +180,14 @@ normalization, locale collation, and case folding are not applied. Generic
 callbacks for arbitrary concrete keys and values. Generic `BTreeMap<K,V>` and
 `BTreeSet<T>` use Ord callbacks, sorted insertion, deterministic borrowed key
 iteration, and the same exact key/value Drop contract.
+Owning generic iterators expose lazy `skip`, `take`, `map`, `filter`, and
+`enumerate` state machines plus consuming `count`, `fold`, and `collect`.
+Numeric item types implement `SumValue`, so `sum()` preserves the item type and
+returns that type's zero identity for an empty iterator. Use
+`collect_hashset()` for an explicit set sink or
+`collect_hashmap(projector)` with a projector returning `MapEntry<K,V>`; these
+explicit targets avoid return-type-only generic method inference and move
+accepted keys and values into the generic collection core.
 
 `Rc<T>` is a single-threaded shared-ownership handle for the verified payloads
 `i64`, `bool`, and `String`. Use `rc_new_i64`, `rc_new_bool`, and

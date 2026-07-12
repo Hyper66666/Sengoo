@@ -2702,6 +2702,118 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_generic_iterator_sum_uses_explicit_identity_contract() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let total = values.into_iter().sum();
+
+    let empty: Vec<i64> = vec_new();
+    total + empty.into_iter().sum()
+}
+"#,
+    );
+
+    assert!(ir.contains("RawVecIntoIter_i64_sum"));
+    assert!(ir.contains("i64_SumValue_sum_combine"));
+}
+
+#[test]
+fn stdlib_surface_generic_iterator_sum_rejects_non_sum_items() {
+    let source = format!(
+        "{}\n\n{}",
+        load_stdlib_surface(&[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "string.sg",
+            "collections.sg",
+        ]),
+        r#"
+def main() -> i64 {
+    let values: Vec<bool> = vec_new();
+    values.push(true);
+    if values.into_iter().sum() { 0 } else { 1 }
+}
+"#
+    );
+
+    let err = compile_to_ir(&source).expect_err("bool must not satisfy SumValue");
+    let message = err.to_string();
+    assert!(
+        message.contains("sum") || message.contains("SumValue"),
+        "expected a sum-bound diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn stdlib_surface_generic_iterator_collects_into_explicit_map_and_set_sinks() {
+    let ir = compile_with_stdlib(
+        r#"
+def to_entry(value: i64) -> MapEntry<i64, i64> {
+    MapEntry { key: value, value: value + 10 }
+}
+
+def main() -> i64 {
+    let set_values: Vec<i64> = vec_new();
+    set_values.push(1);
+    set_values.push(1);
+    set_values.push(2);
+    let set: HashSet<i64> = set_values.into_iter().collect_hashset();
+
+    let map_values: Vec<i64> = vec_new();
+    map_values.push(3);
+    map_values.push(4);
+    let projector: fn(i64) -> MapEntry<i64, i64> = to_entry;
+    let map: HashMap<i64, i64> = map_values.into_iter().collect_hashmap(projector);
+    set.len() + map.len()
+}
+"#,
+    );
+
+    assert!(ir.contains("RawVecIntoIter_i64_collect_hashset"));
+    assert!(ir.contains("RawVecIntoIter_i64_collect_hashmap_i64_i64"));
+    assert!(
+        ir.contains("sengoo_raw_hashmap_insert"),
+        "explicit collection sinks should lower through the generic map runtime:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_surface_lazy_adapters_remain_composable_after_each_builder() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let mapped_values: Vec<i64> = vec_new();
+    mapped_values.push(1);
+    mapped_values.push(2);
+    mapped_values.push(3);
+    let identity: fn(i64) -> i64 = |value| value;
+    let mapped_count = mapped_values.into_iter().map(identity).take(2).skip(1).count();
+
+    let filtered_values: Vec<i64> = vec_new();
+    filtered_values.push(1);
+    filtered_values.push(2);
+    filtered_values.push(3);
+    let keep: fn(&i64) -> bool = |value| *value >= 1;
+    let indexed = filtered_values.into_iter().filter(keep).skip(1).take(2).enumerate();
+    let first: Option<EnumeratedItem<i64>> = indexed.next();
+    if first.is_some { mapped_count + first.value.index } else { 0 }
+}
+"#,
+    );
+
+    assert!(ir.contains("MapIter_") && ir.contains("_take"));
+    assert!(ir.contains("TakeIter_") && ir.contains("_skip"));
+    assert!(ir.contains("FilterIter_") && ir.contains("_skip"));
+    assert!(ir.contains("TakeIter_") && ir.contains("_enumerate"));
+}
+
+#[test]
 fn struct_literal_field_move_does_not_drop_the_source_before_return() {
     let ir = compile_with_stdlib(
         r#"

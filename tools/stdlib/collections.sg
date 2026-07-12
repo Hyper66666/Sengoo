@@ -183,6 +183,11 @@ struct EnumeratedItem<T> {
     value: T,
 }
 
+struct MapEntry<K, V> {
+    key: K,
+    value: V,
+}
+
 struct EnumerateIter<I, T> {
     inner: I,
     index: Vec<i64>,
@@ -445,6 +450,62 @@ trait Iterator {
     def sum(self) -> i64 {
         0
     }
+}
+
+trait SumValue {
+    def sum_combine(self, rhs: Self) -> Self {}
+}
+
+impl SumValue for i8 {
+    def sum_combine(self, rhs: i8) -> i8 { self + rhs }
+}
+
+impl SumValue for i16 {
+    def sum_combine(self, rhs: i16) -> i16 { self + rhs }
+}
+
+impl SumValue for i32 {
+    def sum_combine(self, rhs: i32) -> i32 { self + rhs }
+}
+
+impl SumValue for i64 {
+    def sum_combine(self, rhs: i64) -> i64 { self + rhs }
+}
+
+impl SumValue for isize {
+    def sum_combine(self, rhs: isize) -> isize { self + rhs }
+}
+
+impl SumValue for u8 {
+    def sum_combine(self, rhs: u8) -> u8 { self + rhs }
+}
+
+impl SumValue for u16 {
+    def sum_combine(self, rhs: u16) -> u16 { self + rhs }
+}
+
+impl SumValue for u32 {
+    def sum_combine(self, rhs: u32) -> u32 { self + rhs }
+}
+
+impl SumValue for u64 {
+    def sum_combine(self, rhs: u64) -> u64 { self + rhs }
+}
+
+impl SumValue for usize {
+    def sum_combine(self, rhs: usize) -> usize { self + rhs }
+}
+
+impl SumValue for f32 {
+    def sum_combine(self, rhs: f32) -> f32 { self + rhs }
+}
+
+impl SumValue for f64 {
+    def sum_combine(self, rhs: f64) -> f64 { self + rhs }
+}
+
+def sum_identity<T: SumValue>() -> T {
+    sum_identity()
 }
 
 def vec_new_i64() -> Vec<i64> {
@@ -809,13 +870,13 @@ impl<T> Iterator for RawVecIntoIter<T> {
     type Item = T;
 
     def next(&self) -> Option<T> {
-        self.vec.pop()
+        raw_vec_remove(self.vec.handle, 0)
     }
 }
 
 impl<T> RawVecIntoIter<T> {
     def next(&self) -> Option<T> {
-        self.vec.pop()
+        raw_vec_remove(self.vec.handle, 0)
     }
 
     def take(self, count: i64) -> TakeIter<RawVecIntoIter<T>, T> {
@@ -879,6 +940,59 @@ impl<T> RawVecIntoIter<T> {
         result
     }
 
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(T) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            }
+        }
+        result
+    }
+
+}
+
+impl<T: SumValue> RawVecIntoIter<T> {
+    def sum(self) -> T {
+        let mut total: T = sum_identity();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                total = total.sum_combine(item.value);
+                item.is_some = false;
+            }
+        }
+        total
+    }
+}
+
+impl<T: Hash + Eq> RawVecIntoIter<T> {
+    def collect_hashset(self) -> HashSet<T> {
+        let result: HashSet<T> = hashset_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_hashset_insert(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
 }
 
 impl<I: Iterator, T> Iterator for TakeIter<I, T> {
@@ -904,6 +1018,12 @@ impl<I: Iterator, T> TakeIter<I, T> {
             sengoo_vec_set_i64(self.remaining.handle, 0, count - 1);
             self.inner.next()
         }
+    }
+    def take(self, count: i64) -> TakeIter<TakeIter<I, T>, T> {
+        iterator_take(self, count)
+    }
+    def skip(self, count: i64) -> SkipIter<TakeIter<I, T>, T> {
+        iterator_skip(self, count)
     }
     def enumerate(self) -> EnumerateIter<TakeIter<I, T>, T> {
         let index: Vec<i64> = vec_new_i64();
@@ -946,6 +1066,52 @@ impl<I: Iterator, T> TakeIter<I, T> {
             let mut item = self.next();
             if item.is_none() { done = true; } else {
                 result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(T) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T: SumValue> TakeIter<I, T> {
+    def sum(self) -> T {
+        let mut total: T = sum_identity();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                total = total.sum_combine(item.value);
+                item.is_some = false;
+            }
+        }
+        total
+    }
+}
+
+impl<I: Iterator, T: Hash + Eq> TakeIter<I, T> {
+    def collect_hashset(self) -> HashSet<T> {
+        let result: HashSet<T> = hashset_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                raw_hashset_insert(result.handle, item.value);
                 item.is_some = false;
             }
         }
@@ -1002,6 +1168,9 @@ impl<I: Iterator, T> SkipIter<I, T> {
         sengoo_vec_push_i64(remaining.handle, count);
         TakeIter { inner: self, remaining: remaining }
     }
+    def skip(self, count: i64) -> SkipIter<SkipIter<I, T>, T> {
+        iterator_skip(self, count)
+    }
     def enumerate(self) -> EnumerateIter<SkipIter<I, T>, T> {
         let index: Vec<i64> = vec_new_i64();
         sengoo_vec_push_i64(index.handle, 0);
@@ -1048,6 +1217,52 @@ impl<I: Iterator, T> SkipIter<I, T> {
         }
         result
     }
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(T) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T: SumValue> SkipIter<I, T> {
+    def sum(self) -> T {
+        let mut total: T = sum_identity();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                total = total.sum_combine(item.value);
+                item.is_some = false;
+            }
+        }
+        total
+    }
+}
+
+impl<I: Iterator, T: Hash + Eq> SkipIter<I, T> {
+    def collect_hashset(self) -> HashSet<T> {
+        let result: HashSet<T> = hashset_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                raw_hashset_insert(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
 }
 
 impl<I: Iterator, T> Iterator for EnumerateIter<I, T> {
@@ -1082,6 +1297,31 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
     ) -> FilterIter<EnumerateIter<I, T>, EnumeratedItem<T>> {
         FilterIter { inner: self, predicate: predicate }
     }
+    def map<O>(
+        self,
+        mapper: fn(EnumeratedItem<T>) -> O,
+    ) -> MapIter<EnumerateIter<I, T>, EnumeratedItem<T>, O> {
+        MapIter { inner: self, mapper: mapper }
+    }
+    def take(
+        self,
+        count: i64,
+    ) -> TakeIter<EnumerateIter<I, T>, EnumeratedItem<T>> {
+        iterator_take(self, count)
+    }
+    def skip(
+        self,
+        count: i64,
+    ) -> SkipIter<EnumerateIter<I, T>, EnumeratedItem<T>> {
+        iterator_skip(self, count)
+    }
+    def enumerate(
+        self,
+    ) -> EnumerateIter<EnumerateIter<I, T>, EnumeratedItem<T>> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
+    }
     def collect(self) -> Vec<EnumeratedItem<T>> {
         let result: Vec<EnumeratedItem<T>> = vec_new();
         let mut done = false;
@@ -1113,6 +1353,22 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
             if item.is_none() { done = true; } else {
                 result = reducer(result, item.value);
                 item.is_some = false;
+            }
+        }
+        result
+    }
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(EnumeratedItem<T>) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
             }
         }
         result
@@ -1151,6 +1407,15 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
     def filter(self, predicate: fn(&O) -> bool) -> FilterIter<MapIter<I, T, O>, O> {
         FilterIter { inner: self, predicate: predicate }
     }
+    def map<P>(self, mapper: fn(O) -> P) -> MapIter<MapIter<I, T, O>, O, P> {
+        MapIter { inner: self, mapper: mapper }
+    }
+    def take(self, count: i64) -> TakeIter<MapIter<I, T, O>, O> {
+        iterator_take(self, count)
+    }
+    def skip(self, count: i64) -> SkipIter<MapIter<I, T, O>, O> {
+        iterator_skip(self, count)
+    }
     def collect(self) -> Vec<O> {
         let result: Vec<O> = vec_new();
         let mut done = false;
@@ -1181,6 +1446,52 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
             let mut item = self.next();
             if item.is_none() { done = true; } else {
                 result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(O) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T, O: SumValue> MapIter<I, T, O> {
+    def sum(self) -> O {
+        let mut total: O = sum_identity();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                total = total.sum_combine(item.value);
+                item.is_some = false;
+            }
+        }
+        total
+    }
+}
+
+impl<I: Iterator, T, O: Hash + Eq> MapIter<I, T, O> {
+    def collect_hashset(self) -> HashSet<O> {
+        let result: HashSet<O> = hashset_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                raw_hashset_insert(result.handle, item.value);
                 item.is_some = false;
             }
         }
@@ -1234,6 +1545,26 @@ impl<I: Iterator, T> FilterIter<I, T> {
         }
         result
     }
+    def map<O>(self, mapper: fn(T) -> O) -> MapIter<FilterIter<I, T>, T, O> {
+        MapIter { inner: self, mapper: mapper }
+    }
+    def filter(
+        self,
+        predicate: fn(&T) -> bool,
+    ) -> FilterIter<FilterIter<I, T>, T> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+    def enumerate(self) -> EnumerateIter<FilterIter<I, T>, T> {
+        let index: Vec<i64> = vec_new_i64();
+        sengoo_vec_push_i64(index.handle, 0);
+        EnumerateIter { inner: self, index: index }
+    }
+    def take(self, count: i64) -> TakeIter<FilterIter<I, T>, T> {
+        iterator_take(self, count)
+    }
+    def skip(self, count: i64) -> SkipIter<FilterIter<I, T>, T> {
+        iterator_skip(self, count)
+    }
 
     def collect(self) -> Vec<T> {
         let result: Vec<T> = vec_new();
@@ -1265,6 +1596,52 @@ impl<I: Iterator, T> FilterIter<I, T> {
             let mut item = self.next();
             if item.is_none() { done = true; } else {
                 result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def collect_hashmap<K: Hash + Eq, V>(
+        self,
+        projector: fn(T) -> MapEntry<K, V>,
+    ) -> HashMap<K, V> {
+        let result: HashMap<K, V> = hashmap_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                let entry = projector(item.value);
+                item.is_some = false;
+                raw_hashmap_insert(result.handle, entry.key, entry.value);
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T: SumValue> FilterIter<I, T> {
+    def sum(self) -> T {
+        let mut total: T = sum_identity();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                total = total.sum_combine(item.value);
+                item.is_some = false;
+            }
+        }
+        total
+    }
+}
+
+impl<I: Iterator, T: Hash + Eq> FilterIter<I, T> {
+    def collect_hashset(self) -> HashSet<T> {
+        let result: HashSet<T> = hashset_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                raw_hashset_insert(result.handle, item.value);
                 item.is_some = false;
             }
         }

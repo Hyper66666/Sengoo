@@ -109,6 +109,17 @@ fn lower_hir_with_options_scoped(
                 for impl_item in
                     expand_impl_variants(impl_item, &concrete_named_types, &known_named_types)
                 {
+                    for method in &impl_item.items {
+                        if method.type_params.is_empty()
+                            && matches!(method.return_type.kind, hir::HIRTypeKind::Named { .. })
+                            && hir_type_is_concrete(&method.return_type, &known_named_types)
+                        {
+                            concrete_type_registry.register_instance(
+                                crate::type_naming::hir_type_instance_name(&method.return_type),
+                                method.return_type.clone(),
+                            );
+                        }
+                    }
                     let type_prefix = impl_type_prefix(&impl_item.target_type);
                     if let Some(trait_name) = &impl_item.trait_name {
                         let collected = collect_trait_method_templates_for_impl(
@@ -137,9 +148,7 @@ fn lower_hir_with_options_scoped(
                         trait_method_templates.extend(collected.templates);
                     } else {
                         for method in &impl_item.items {
-                            if !impl_is_concrete
-                                && method.name.rsplit('_').next() == Some("collect")
-                            {
+                            if !impl_is_concrete && is_terminal_iterator_method(&method.name) {
                                 continue;
                             }
                             if !method.type_params.is_empty() {
@@ -204,7 +213,7 @@ fn lower_hir_with_options_scoped(
                         continue;
                     }
                     for method in &impl_item.items {
-                        if !impl_is_concrete && method.name.rsplit('_').next() == Some("collect") {
+                        if !impl_is_concrete && is_terminal_iterator_method(&method.name) {
                             continue;
                         }
                         if !method.type_params.is_empty() {

@@ -19,6 +19,12 @@ pub(super) fn lower_named_call(
         let return_type = ctx.mir_fn.return_type.clone();
         return lower_option_none_call(ctx, Some(&return_type));
     }
+    if name == "sum_identity" && arg_locals.is_empty() {
+        let identity_ty = expected_return_type
+            .cloned()
+            .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
+        return super::try_expr_helpers::default_value_for_type(ctx, &identity_ty);
+    }
     if name == "vec_new" && arg_locals.is_empty() {
         return lower_vec_new_call(ctx, expected_return_type);
     }

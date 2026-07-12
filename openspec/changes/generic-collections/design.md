@@ -51,6 +51,22 @@ has been measured to enter non-terminating monomorphization on a basic
 `map/filter/fold/collect` chain. Each adapter therefore gets a concrete lazy
 state-machine type after associated-item projection is available.
 
+Generic `sum` is item-preserving: an iterator yielding `T` returns `T`, and
+only types implementing `SumValue` expose the terminal. `SumValue` defines
+same-type combination; the compiler-provided `sum_identity<T>()` supplies the
+zero identity for the built-in numeric implementations. Empty iterators return
+that identity. This change does not add Rust-style return-type-polymorphic
+`sum<S>()`, and it does not pretend that arbitrary user structs have a
+zero/default identity.
+
+Collection terminals use explicit names while return-type-only method generic
+inference remains incomplete: `collect()` materializes `Vec<T>`,
+`collect_hashset()` materializes `HashSet<T>`, and
+`collect_hashmap(projector)` infers `K,V` from a callback returning
+`MapEntry<K,V>`. Adapter builders and terminal materializers are specialized
+on demand so recursive `MapIter<MapIter<...>>` and container return types do
+not re-seed eager type discovery.
+
 ### Decision 5: Scalar APIs become thin compatibility wrappers
 
 Existing scalar constructors and named map/list types keep source compatibility

@@ -240,3 +240,25 @@ fn collect_concrete_named_types_with_impl_variants_treats_collect_as_terminal() 
         "collect return types must not re-seed impl discovery"
     );
 }
+
+#[test]
+fn iterator_terminal_method_names_include_sum_and_explicit_collection_sinks() {
+    use crate::mir::concrete_type_helpers::is_terminal_iterator_method;
+
+    for name in [
+        "collect",
+        "RawVecIntoIter_collect",
+        "sum",
+        "RawVecIntoIter_sum",
+        "collect_hashset",
+        "RawVecIntoIter_collect_hashset",
+        "collect_hashmap",
+        "RawVecIntoIter_collect_hashmap",
+    ] {
+        assert!(
+            is_terminal_iterator_method(name),
+            "{name} should be terminal"
+        );
+    }
+    assert!(!is_terminal_iterator_method("count"));
+}

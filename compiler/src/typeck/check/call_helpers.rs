@@ -1171,6 +1171,10 @@ impl TypeChecker {
                 // Unused unconstrained generic parameter does not affect call typing.
                 // Keep backward compatibility for benchmark and existing code.
                 continue;
+            } else if matches!(function_name, "__sengoo_option_none" | "sum_identity") {
+                // These compiler intrinsics recover their concrete payload from the
+                // expected return type when the generic body is specialized.
+                continue;
             } else {
                 return Err(TypeckError::Other(format!(
                     "cannot infer generic type parameter `{}` in call to `{}`",
@@ -1187,7 +1191,7 @@ impl TypeChecker {
             }
 
             if matches!(concrete_ty.kind, TyKind::Var(_)) {
-                if function_name == "__sengoo_option_none" {
+                if matches!(function_name, "__sengoo_option_none" | "sum_identity") {
                     continue;
                 }
                 return Err(TypeckError::Other(format!(

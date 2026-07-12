@@ -18,7 +18,9 @@ use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
 use crate::mir::build_enum_defs;
-use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
+use crate::mir::concrete_type_helpers::{
+    collect_concrete_named_types_with_impl_variants, is_terminal_iterator_method,
+};
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
 use crate::mir::hir_specialization_helpers::hir_type_is_concrete;
 use crate::mir::impl_specialization_helpers::{

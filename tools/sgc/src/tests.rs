@@ -9384,16 +9384,16 @@ impl Payload {
 def exercise_filter() -> i64 {
     let values: Vec<Payload> = vec_new();
     values.push(Payload {
-        text: string_from_str("remaining").unwrap_or(String { handle: 0 }),
-        keep: true,
+        text: string_from_str("rejected").unwrap_or(String { handle: 0 }),
+        keep: false,
     });
     values.push(Payload {
         text: string_from_str("accepted").unwrap_or(String { handle: 0 }),
         keep: true,
     });
     values.push(Payload {
-        text: string_from_str("rejected").unwrap_or(String { handle: 0 }),
-        keep: false,
+        text: string_from_str("remaining").unwrap_or(String { handle: 0 }),
+        keep: true,
     });
     let predicate: fn(&Payload) -> bool = |payload| payload.should_keep();
     let iter = values.into_iter().filter(predicate);
@@ -9479,6 +9479,75 @@ def main() -> i64 {
     let keep: fn(&i64) -> bool = |value| *value >= 2;
     let count = flags.into_iter().filter(keep).count();
     if total == 60 && count == 2 { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_sum_and_explicit_collection_sinks_execute() {
+    let output = require_stdlib_runtime_output!(
+        "generic-sum-collection-sinks",
+        r#"
+#[derive(Hash, PartialEq, Eq)]
+struct Key {
+    value: i64,
+}
+
+def keep(value: &i64) -> bool { *value >= 2 }
+def to_key(value: i64) -> Key { Key { value: value } }
+def identity(value: i64) -> i64 { value }
+def to_entry(value: i64) -> MapEntry<Key, i64> {
+    MapEntry { key: Key { value: value }, value: value + 10 }
+}
+
+def main() -> i64 {
+    let sum_values: Vec<i64> = vec_new();
+    sum_values.push(1);
+    sum_values.push(2);
+    sum_values.push(3);
+    sum_values.push(4);
+    let total = sum_values.into_iter().skip(1).take(2).sum();
+
+    let set_values: Vec<i64> = vec_new();
+    set_values.push(1);
+    set_values.push(2);
+    set_values.push(2);
+    set_values.push(3);
+    let predicate: fn(&i64) -> bool = keep;
+    let mapper: fn(i64) -> Key = to_key;
+    let set: HashSet<Key> = set_values.into_iter().filter(predicate).map(mapper).collect_hashset();
+
+    let map_values: Vec<i64> = vec_new();
+    map_values.push(4);
+    map_values.push(5);
+    let projector: fn(i64) -> MapEntry<Key, i64> = to_entry;
+    let map: HashMap<Key, i64> = map_values.into_iter().collect_hashmap(projector);
+
+    let chain_values: Vec<i64> = vec_new();
+    chain_values.push(1);
+    chain_values.push(2);
+    chain_values.push(3);
+    let identity_fn: fn(i64) -> i64 = identity;
+    let chain_count = chain_values.into_iter().map(identity_fn).take(2).skip(1).count();
+
+    let indexed_values: Vec<i64> = vec_new();
+    indexed_values.push(1);
+    indexed_values.push(2);
+    indexed_values.push(3);
+    let indexed = indexed_values.into_iter().filter(predicate).skip(1).take(1).enumerate();
+    let first: Option<EnumeratedItem<i64>> = indexed.next();
+
+    if total != 5 { 11 }
+    else if set.len() != 2 { 12 }
+    else if map.len() != 2 { 13 }
+    else if chain_count != 1 { 14 }
+    else if first.is_none() { 15 }
+    else if first.value.index != 0 { 16 }
+    else if first.value.value != 3 { 17 }
+    else { 42 }
 }
 "#,
     );

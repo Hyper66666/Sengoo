@@ -139,6 +139,12 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_materialized_method(&mut self, specialized: hir::HIRFunction) -> Option<String> {
+        if matches!(specialized.return_type.kind, hir::HIRTypeKind::Named { .. }) {
+            self.concrete_type_registry.register_instance(
+                crate::type_naming::hir_type_instance_name(&specialized.return_type),
+                specialized.return_type.clone(),
+            );
+        }
         let param_count = explicit_hir_method_param_count(&specialized);
         self.lower_materialized_function(specialized, param_count)
     }

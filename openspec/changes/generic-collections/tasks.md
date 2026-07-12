@@ -124,7 +124,7 @@
 
 ## 3. Iterator adapters
 
-- [ ] 3.1 Implement `map`, `filter`, `fold`, `enumerate`, `take`, `skip`,
+- [x] 3.1 Implement `map`, `filter`, `fold`, `enumerate`, `take`, `skip`,
   `count`, `sum` over `Iterator`.
   - Partial: transitional iterator helpers now cover single-step `map_with`
     and `filter_with`, plus consuming `count`, `sum`, and `fold_with` for the
@@ -176,9 +176,16 @@
     unconsumed values are each released exactly once. All six owning adapter
     families now expose consuming `count()` and accumulator-generic
     `fold<A>(A, fn(A, Item) -> A)`; compiler and native tests cover both through
-    lazy chains. A principled generic `sum` constraint and broader mixed-chain
-    coverage remain open.
-- [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
+    lazy chains. Generic `sum()` is now item-preserving and available through
+    the numeric `SumValue` contract; empty iterators use the compiler-provided
+    numeric identity and chained adapters combine each yielded item once.
+    Adapter-building `map` methods and terminal methods specialize on demand,
+    preventing recursive eager type discovery while allowing `filter -> map`
+    and repeated-map chains. Every lazy adapter family keeps the applicable
+    `map`, `filter`, `take`, `skip`, and `enumerate` builders, and concrete
+    return HIR is registered at materialization time so the next chained call
+    can specialize without eager recursive type expansion.
+- [x] 3.2 `collect` into `Vec<T>` and into maps/sets.
   - Partial: terminal generic `collect() -> Vec<T>` now materializes
     `RawVecIntoIter`, `TakeIter`, `SkipIter`, `MapIter`, `FilterIter`, and
     `EnumerateIter` through the ABI-v1 RawVec path. Terminal collect methods are
@@ -191,14 +198,16 @@
     now clones the remaining iterator items into a new `Vec<String>` through a
     runtime bridge, and string-key map/set key iterators can collect owned key
     copies into `Vec<String>`, so the transition surface covers owned strings
-    without borrowing handles from `Result<String>`. Explicit generic map/set
-    collection sinks remain open; they will not use return-type-only
+    without borrowing handles from `Result<String>`. Explicit generic
+    `collect_hashset()` and `collect_hashmap(projector)` sinks now materialize
+    the ABI-v1 map core. The projector returns `MapEntry<K,V>`, so K/V are
+    inferred from a callback argument rather than unsupported return-type-only
     `collect<C>()` inference.
   - Chained method result identity is now keyed by the complete source span,
     fixing a regression where `.iter().collect()` reused the inner iterator
     type as the outer call's expected return type and hid the correct trait
     method during MIR dispatch.
-- [ ] 3.3 Tests for adapter chains and `collect`.
+- [x] 3.3 Tests for adapter chains and `collect`.
   - Partial: compiler surface tests cover i64/bool Vec and HashMap
     `enumerate()` lowering, HashSet key enumeration, and string-key iterator
     enumeration lowering. `examples/stdlib/10_collections.sg` now runs i64/bool
@@ -212,8 +221,12 @@
     yields stable zero-based indices, and materializes a `map -> filter ->
     collect` chain. Native owned-String coverage proves filter and collect keep
     exact Drop balance. Generic count/fold execute natively over RawVec and
-    filtered adapters. Generic sum and map/set collection scenarios remain
-    open.
+    filtered adapters. Native mixed-chain coverage now executes
+    `skip -> take -> sum` and `filter -> map -> collect_hashset`, and explicit
+    map collection uses a user-defined Hash/Eq key. Additional compiler/native
+    coverage executes `map -> take -> skip -> count` and
+    `filter -> skip -> take -> enumerate`; a negative compiler test rejects
+    `sum` for non-`SumValue` items.
 
 ## 4. Migration and docs
 
