@@ -92,7 +92,7 @@ use self::aggregate_expr_helpers::{
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};
 use self::call_emission_helpers::emit_call_from_plan;
-use self::call_expr_helpers::lower_call_expr;
+use self::call_expr_helpers::{lower_call_expr, lower_call_expr_with_expected_mir};
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::{CallTargetPlan, CallTargetResolution};
 use self::enum_expr_helpers::lower_enum_construct_expr;

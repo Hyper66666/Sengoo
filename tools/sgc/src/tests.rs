@@ -9334,11 +9334,151 @@ def main() -> i64 {
     let before = sengoo_string_live_handle_count();
     let count = make_shared_pair();
     let after = sengoo_string_live_handle_count();
-    if count == 4 and after == before {
-        42
-    } else {
-        1
-    }
+    if count == 4 and after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_filter_skips_rejected_items() {
+    let output = require_stdlib_runtime_output!(
+        "generic-filter-i64",
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let keep: fn(&i64) -> bool = |value| *value == 20;
+    let iter = values.into_iter().filter(keep);
+    let first: Option<i64> = iter.next();
+    if first.is_some && first.value == 20 { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_filter_drops_owned_items_once() {
+    let output = require_stdlib_runtime_output!(
+        "generic-filter-owned-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Payload {
+    text: String,
+    keep: bool,
+}
+
+impl Payload {
+    def should_keep(&self) -> bool { self.keep }
+}
+
+def exercise_filter() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload {
+        text: string_from_str("remaining").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    values.push(Payload {
+        text: string_from_str("accepted").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    values.push(Payload {
+        text: string_from_str("rejected").unwrap_or(String { handle: 0 }),
+        keep: false,
+    });
+    let predicate: fn(&Payload) -> bool = |payload| payload.should_keep();
+    let iter = values.into_iter().filter(predicate);
+    let accepted: Option<Payload> = iter.next();
+    if accepted.is_some { accepted.value.text.len() } else { 0 }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let accepted_len = exercise_filter();
+    let after = sengoo_string_live_handle_count();
+    if accepted_len == 8 && after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_collect_preserves_owned_items() {
+    let output = require_stdlib_runtime_output!(
+        "generic-collect-owned",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Payload {
+    text: String,
+    keep: bool,
+}
+
+impl Payload {
+    def should_keep(&self) -> bool { self.keep }
+}
+
+def exercise_collect() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload {
+        text: string_from_str("skip").unwrap_or(String { handle: 0 }),
+        keep: false,
+    });
+    values.push(Payload {
+        text: string_from_str("accepted").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    let predicate: fn(&Payload) -> bool = |payload| payload.should_keep();
+    let collected: Vec<Payload> = values.into_iter().filter(predicate).collect();
+    let accepted: Option<Payload> = collected.pop();
+    if accepted.is_some { accepted.value.text.len() } else { 0 }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let accepted_len = exercise_collect();
+    let after = sengoo_string_live_handle_count();
+    if accepted_len == 8 && after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_count_and_fold_execute() {
+    let output = require_stdlib_runtime_output!(
+        "generic-count-fold",
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let add: fn(i64, i64) -> i64 = |total, value| total + value;
+    let total = values.into_iter().fold(0, add);
+
+    let flags: Vec<i64> = vec_new();
+    flags.push(1);
+    flags.push(2);
+    flags.push(3);
+    let keep: fn(&i64) -> bool = |value| *value >= 2;
+    let count = flags.into_iter().filter(keep).count();
+    if total == 60 && count == 2 { 42 } else { 1 }
 }
 "#,
     );

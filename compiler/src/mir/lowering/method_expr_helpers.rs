@@ -10,6 +10,9 @@ pub(super) fn lower_method_call_expr(
 ) -> Local {
     let receiver_local = ctx.lower_expr(receiver);
     let arg_locals: Vec<Local> = args.iter().map(|a| ctx.lower_expr(a)).collect();
+    let receiver_ty = ctx.get_local_type(receiver_local).clone();
+    let consumes_receiver =
+        ctx.inherent_method_consumes_receiver(&receiver_ty, method, &arg_locals);
     let expected_return_name = expected_return_type.map(crate::type_naming::hir_type_instance_name);
     let expected_return_type = expected_return_type.map(|ty| ctx.hir_type_to_mir(ty));
     let result = lower_method_call_from_locals_with_expected(
@@ -23,7 +26,7 @@ pub(super) fn lower_method_call_expr(
     for arg in args {
         ctx.mark_drop_expr_moved(arg);
     }
-    if method == "drop" {
+    if consumes_receiver || method == "drop" {
         ctx.mark_drop_expr_moved(receiver);
     }
     result

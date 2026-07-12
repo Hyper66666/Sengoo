@@ -193,6 +193,11 @@ struct MapIter<I, T, O> {
     mapper: fn(T) -> O,
 }
 
+struct FilterIter<I, T> {
+    inner: I,
+    predicate: fn(&T) -> bool,
+}
+
 struct EnumeratedI64 {
     index: i64,
     value: i64,
@@ -832,6 +837,47 @@ impl<T> RawVecIntoIter<T> {
     def map<O>(self, mapper: fn(T) -> O) -> MapIter<RawVecIntoIter<T>, T, O> {
         MapIter { inner: self, mapper: mapper }
     }
+    def filter(self, predicate: fn(&T) -> bool) -> FilterIter<RawVecIntoIter<T>, T> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+
+    def collect(self) -> Vec<T> {
+        let result: Vec<T> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, T) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
 
 }
 
@@ -866,6 +912,44 @@ impl<I: Iterator, T> TakeIter<I, T> {
     }
     def map<O>(self, mapper: fn(T) -> O) -> MapIter<TakeIter<I, T>, T, O> {
         MapIter { inner: self, mapper: mapper }
+    }
+    def filter(self, predicate: fn(&T) -> bool) -> FilterIter<TakeIter<I, T>, T> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+    def collect(self) -> Vec<T> {
+        let result: Vec<T> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, T) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
     }
 }
 
@@ -926,6 +1010,44 @@ impl<I: Iterator, T> SkipIter<I, T> {
     def map<O>(self, mapper: fn(T) -> O) -> MapIter<SkipIter<I, T>, T, O> {
         MapIter { inner: self, mapper: mapper }
     }
+    def filter(self, predicate: fn(&T) -> bool) -> FilterIter<SkipIter<I, T>, T> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+    def collect(self) -> Vec<T> {
+        let result: Vec<T> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, T) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
 }
 
 impl<I: Iterator, T> Iterator for EnumerateIter<I, T> {
@@ -953,6 +1075,47 @@ impl<I: Iterator, T> EnumerateIter<I, T> {
             sengoo_vec_set_i64(self.index.handle, 0, index + 1);
             option_some(EnumeratedItem { index: index, value: item.value })
         }
+    }
+    def filter(
+        self,
+        predicate: fn(&EnumeratedItem<T>) -> bool,
+    ) -> FilterIter<EnumerateIter<I, T>, EnumeratedItem<T>> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+    def collect(self) -> Vec<EnumeratedItem<T>> {
+        let result: Vec<EnumeratedItem<T>> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, EnumeratedItem<T>) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
     }
 }
 
@@ -984,6 +1147,128 @@ impl<I: Iterator, T, O> MapIter<I, T, O> {
         let index: Vec<i64> = vec_new_i64();
         sengoo_vec_push_i64(index.handle, 0);
         EnumerateIter { inner: self, index: index }
+    }
+    def filter(self, predicate: fn(&O) -> bool) -> FilterIter<MapIter<I, T, O>, O> {
+        FilterIter { inner: self, predicate: predicate }
+    }
+    def collect(self) -> Vec<O> {
+        let result: Vec<O> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, O) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T> Iterator for FilterIter<I, T> {
+    type Item = T;
+
+    def next(&self) -> Option<T> {
+        let mut result: Option<T> = __sengoo_option_none();
+        let mut done = false;
+        while done == false {
+            let mut item = self.inner.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                let predicate = self.predicate;
+                if predicate(&item.value) {
+                    result = item;
+                    item = __sengoo_option_none();
+                    done = true;
+                } else {
+                    item = __sengoo_option_none();
+                }
+            }
+        }
+        result
+    }
+}
+
+impl<I: Iterator, T> FilterIter<I, T> {
+    def next(&self) -> Option<T> {
+        let mut result: Option<T> = __sengoo_option_none();
+        let mut done = false;
+        while done == false {
+            let mut item = self.inner.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                let predicate = self.predicate;
+                if predicate(&item.value) {
+                    result = item;
+                    item = __sengoo_option_none();
+                    done = true;
+                } else {
+                    item = __sengoo_option_none();
+                }
+            }
+        }
+        result
+    }
+
+    def collect(self) -> Vec<T> {
+        let result: Vec<T> = vec_new();
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() {
+                done = true;
+            } else {
+                raw_vec_push(result.handle, item.value);
+                item.is_some = false;
+            }
+        }
+        result
+    }
+    def count(self) -> i64 {
+        let mut total = 0;
+        let mut done = false;
+        while done == false {
+            let item = self.next();
+            if item.is_none() { done = true; } else { total = total + 1; }
+        }
+        total
+    }
+    def fold<A>(self, initial: A, reducer: fn(A, T) -> A) -> A {
+        let mut result = initial;
+        let mut done = false;
+        while done == false {
+            let mut item = self.next();
+            if item.is_none() { done = true; } else {
+                result = reducer(result, item.value);
+                item.is_some = false;
+            }
+        }
+        result
     }
 }
 

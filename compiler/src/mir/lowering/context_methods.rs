@@ -276,8 +276,38 @@ impl<'a> LoweringContext<'a> {
             self.struct_defs,
             &mut self.concrete_type_registry,
         )?;
-
         self.lower_materialized_method(specialized)
+    }
+
+    pub(super) fn inherent_method_consumes_receiver(
+        &mut self,
+        receiver_ty: &MIRType,
+        method: &str,
+        arg_locals: &[Local],
+    ) -> bool {
+        // Established handle wrappers spell borrowed legacy methods as `self`
+        // rather than `&self`. Preserve that ABI until those modules migrate;
+        // generic Vec's owning `into_iter` remains the deliberate exception.
+        if Self::is_legacy_idempotent_handle_mir_type(receiver_ty) && method != "into_iter" {
+            return false;
+        }
+        let actual_arg_types =
+            collect_local_types(arg_locals, |local| self.get_local_type(local).clone());
+        let Some(specialized) = resolve_inherent_method_specialization(
+            self.inherent_method_templates,
+            method,
+            receiver_ty,
+            &actual_arg_types,
+            self.struct_defs,
+            &mut self.concrete_type_registry,
+        ) else {
+            return false;
+        };
+        specialized.params.first().is_some_and(|param| {
+            param.name == "self"
+                && !param.is_borrowed
+                && !matches!(param.ty.kind, hir::HIRTypeKind::Ref(_, _))
+        })
     }
 
     pub(super) fn try_materialize_trait_method(

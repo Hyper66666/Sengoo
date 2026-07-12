@@ -2620,6 +2620,115 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_surface_generic_iterator_filter_borrows_items_lazily() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Payload {
+    value: i64,
+}
+
+def main() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload { value: 10 });
+    values.push(Payload { value: 20 });
+    values.push(Payload { value: 30 });
+    let mapper: fn(Payload) -> i64 = |payload| payload.value;
+    let keep: fn(&i64) -> bool = |value| *value == 20;
+    let iter = values.into_iter().skip(1).take(2).map(mapper).filter(keep);
+    let first: Option<i64> = iter.next();
+    let exhausted: Option<i64> = iter.next();
+    if first.is_some && first.value == 20 && exhausted.is_none() { 0 } else { 1 }
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("FilterIter_") && ir.contains("_next"),
+        "expected a concrete lazy FilterIter specialization:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_surface_generic_iterator_collect_materializes_lazy_adapters() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Payload {
+    value: i64,
+}
+
+def main() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload { value: 10 });
+    values.push(Payload { value: 20 });
+    values.push(Payload { value: 30 });
+    let mapper: fn(Payload) -> i64 = |payload| payload.value;
+    let keep: fn(&i64) -> bool = |value| *value >= 20;
+    let collected: Vec<i64> = values.into_iter().map(mapper).filter(keep).collect();
+    collected.len()
+}
+"#,
+    );
+
+    assert!(
+        ir.contains("FilterIter_") && ir.contains("_collect"),
+        "expected terminal collect specialization for a lazy filter chain:\n{ir}"
+    );
+}
+
+#[test]
+fn stdlib_surface_generic_iterator_count_and_fold_materialize() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let add: fn(i64, i64) -> i64 = |total, value| total + value;
+    let total = values.into_iter().fold(0, add);
+
+    let flags: Vec<i64> = vec_new();
+    flags.push(1);
+    flags.push(2);
+    flags.push(3);
+    let keep: fn(&i64) -> bool = |value| *value >= 2;
+    total + flags.into_iter().filter(keep).count()
+}
+"#,
+    );
+
+    assert!(ir.contains("RawVecIntoIter_i64_fold_i64"));
+    assert!(ir.contains("FilterIter_") && ir.contains("_count"));
+}
+
+#[test]
+fn struct_literal_field_move_does_not_drop_the_source_before_return() {
+    let ir = compile_with_stdlib(
+        r#"
+struct Holder {
+    value: String,
+}
+
+def make_holder() -> Holder {
+    let value = string_from_str("alive").unwrap_or(String { handle: 0 });
+    Holder { value: value }
+}
+
+def main() -> i64 {
+    let holder = make_holder();
+    holder.value.len()
+}
+"#,
+    );
+
+    let wrap = llvm_function_section(&ir, "; Function: make_holder");
+    assert!(
+        !wrap.contains("@String_Drop_drop"),
+        "moving a field into a returned struct must suppress source Drop:\n{wrap}"
+    );
+}
+
+#[test]
 fn stdlib_surface_iterator_collect_helpers_compile() {
     let ir = compile_with_stdlib(
         r#"

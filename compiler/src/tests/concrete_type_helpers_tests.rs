@@ -175,3 +175,68 @@ fn collect_concrete_named_types_with_impl_variants_reaches_fixed_point() {
         Some(&map_vec_i64_i64)
     );
 }
+
+#[test]
+fn collect_concrete_named_types_with_impl_variants_treats_collect_as_terminal() {
+    let known_named_types = HashSet::from(["Vec".to_string()]);
+    let placeholder_t = HIRType::named("T".to_string(), vec![]);
+    let vec_t = HIRType::named("Vec".to_string(), vec![placeholder_t.clone()]);
+    let vec_i64 = HIRType::named("Vec".to_string(), vec![HIRType::int(IntKind::I64)]);
+
+    let seed_function = HIRItem::Function(HIRFunction {
+        name: "seed".to_string(),
+        type_params: vec![],
+        params: vec![HIRParam::new(
+            "value".to_string(),
+            SymbolId::new(4),
+            vec_i64,
+        )],
+        return_type: HIRType::unit(),
+        precondition: None,
+        postcondition: None,
+        body: HIRBody::new(),
+        is_async: false,
+        abi: None,
+        is_unsafe: false,
+        no_mangle: false,
+        export_name: None,
+        is_pub: false,
+    });
+
+    let recursive_impl = HIRItem::Impl(HIRImpl {
+        target_type: vec_t.clone(),
+        trait_name: None,
+        trait_args: Vec::new(),
+        associated_types: Vec::new(),
+        items: vec![HIRFunction {
+            name: "Vec_collect".to_string(),
+            type_params: vec![HIRTypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+                default: None,
+            }],
+            params: vec![],
+            return_type: HIRType::named("Vec".to_string(), vec![vec_t]),
+            precondition: None,
+            postcondition: None,
+            body: HIRBody::new(),
+            is_async: false,
+            abi: None,
+            is_unsafe: false,
+            no_mangle: false,
+            export_name: None,
+            is_pub: false,
+        }],
+    });
+
+    let out = collect_concrete_named_types_with_impl_variants(
+        &[seed_function, recursive_impl],
+        &known_named_types,
+    );
+
+    assert_eq!(
+        out.len(),
+        1,
+        "collect return types must not re-seed impl discovery"
+    );
+}

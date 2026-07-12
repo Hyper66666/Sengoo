@@ -74,9 +74,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn mark_drop_local_moved(&mut self, local: Local) {
-        if self.drop_func_for_local(local).is_some() {
-            self.moved_drop_locals.insert(local);
-        }
+        self.moved_drop_locals.insert(local);
     }
 
     pub(super) fn mark_drop_locals_moved(&mut self, locals: &[Local]) {
@@ -108,6 +106,14 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             _ => {
+                if let HIRExpr::Var { name, symbol } = expr {
+                    let resolves_to_local = (symbol.is_valid()
+                        && self.local_symbols.contains_key(symbol))
+                        || self.local_names.contains_key(name);
+                    if !resolves_to_local && self.is_known_function(name) {
+                        return;
+                    }
+                }
                 let Some((local, field_path)) = self.resolve_drop_place(expr) else {
                     return;
                 };
@@ -143,7 +149,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn drop_place_type(&self, local: Local, path: &[u32]) -> Option<MIRType> {
+    pub(super) fn drop_place_type(&self, local: Local, path: &[u32]) -> Option<MIRType> {
         let mut ty = self.get_local_type(local).clone();
         for index in path {
             ty = match ty {
@@ -254,7 +260,7 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    fn is_legacy_idempotent_handle_mir_type(ty: &MIRType) -> bool {
+    pub(super) fn is_legacy_idempotent_handle_mir_type(ty: &MIRType) -> bool {
         match ty {
             MIRType::Struct { name, .. } => {
                 matches!(

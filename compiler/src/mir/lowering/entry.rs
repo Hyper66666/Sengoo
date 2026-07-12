@@ -137,6 +137,11 @@ fn lower_hir_with_options_scoped(
                         trait_method_templates.extend(collected.templates);
                     } else {
                         for method in &impl_item.items {
+                            if !impl_is_concrete
+                                && method.name.rsplit('_').next() == Some("collect")
+                            {
+                                continue;
+                            }
                             if !method.type_params.is_empty() {
                                 continue;
                             }
@@ -199,6 +204,9 @@ fn lower_hir_with_options_scoped(
                         continue;
                     }
                     for method in &impl_item.items {
+                        if !impl_is_concrete && method.name.rsplit('_').next() == Some("collect") {
+                            continue;
+                        }
                         if !method.type_params.is_empty() {
                             continue;
                         }

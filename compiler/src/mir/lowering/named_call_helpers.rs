@@ -1404,6 +1404,7 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
         name: rc_name.clone(),
         fields: vec![("handle".to_string(), MIR_I64)],
     };
+    synthesize_rc_owner_drop(ctx, &rc_ty, &rc_name);
 
     let drop_thunk = synthesize_rc_drop_thunk(ctx, &value_ty, &rc_name);
     let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
@@ -1468,6 +1469,44 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
     });
     ctx.mark_drop_local_moved(payload_source);
     result
+}
+
+fn synthesize_rc_owner_drop(ctx: &mut LoweringContext<'_>, rc_ty: &MIRType, rc_name: &str) {
+    let drop_name = format!("{rc_name}_Drop_drop");
+    if ctx.is_known_function(&drop_name) {
+        return;
+    }
+    let mut function = MirFunction::new(drop_name.clone(), vec![rc_ty.clone()], MIR_UNIT);
+    let owner = Local::new(1, LocalKind::Param);
+    let handle = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Extract {
+            destination: handle,
+            value: owner,
+            index: 0,
+        },
+    );
+    let status = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Call {
+            destination: status,
+            func: "sengoo_rc_drop".to_string(),
+            args: vec![handle],
+        },
+    );
+    function.basic_blocks[function.start_block].set_terminator(Terminator::Return(None));
+    ctx.lambda_functions.push(function);
+    ctx.insert_known_function(drop_name.clone());
+    ctx.insert_function_sig(
+        drop_name,
+        FunctionSig {
+            ret_type: MIR_UNIT,
+            param_count: 1,
+            env: Vec::new(),
+        },
+    );
 }
 
 /// Coerce an owned concrete value into an owned `dyn Trait` fat pointer. The

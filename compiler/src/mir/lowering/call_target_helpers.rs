@@ -56,10 +56,22 @@ impl<'a> LoweringContext<'a> {
                 });
             }
 
-            if let MIRType::Fn { ret, .. } = self.get_local_type(var_local) {
+            let fn_ty = self.get_local_type(var_local).clone();
+            if let MIRType::Fn { ret, .. } = &fn_ty {
+                let ret_type = (**ret).clone();
+                let callable_local = if var_local.kind == LocalKind::User {
+                    let loaded = self.add_local(None, LocalKind::Temp, fn_ty);
+                    self.push_inst(Instruction::Load {
+                        destination: loaded,
+                        source: var_local,
+                    });
+                    loaded
+                } else {
+                    var_local
+                };
                 return CallTargetResolution::Planned(CallTargetPlan {
-                    func_name: mir_local_name(var_local),
-                    ret_type: (**ret).clone(),
+                    func_name: mir_local_name(callable_local),
+                    ret_type,
                     env_ptr_local: None,
                 });
             }
@@ -127,9 +139,13 @@ mod tests {
         let resolution = ctx.resolve_named_call_target("worker", &[], None);
         match resolution {
             CallTargetResolution::Planned(plan) => {
-                assert_eq!(plan.func_name, mir_local_name(local));
+                assert!(plan.func_name.starts_with("%t_"));
                 assert_eq!(plan.ret_type, MIR_I64);
                 assert_eq!(plan.env_ptr_local, None);
+                assert!(ctx.mir_fn.instructions.iter().any(|inst| matches!(
+                    inst,
+                    Instruction::Load { source, .. } if *source == local
+                )));
             }
             CallTargetResolution::Builtin(_) => panic!("expected function-value resolution"),
         }

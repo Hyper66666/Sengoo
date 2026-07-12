@@ -311,6 +311,13 @@ pub(crate) fn collect_concrete_named_types_from_impl(
 ) {
     collect_concrete_named_types_from_type(&impl_item.target_type, known_named_types, out);
     for method in &impl_item.items {
+        // `collect` is a terminal materializer. Feeding its container return
+        // type back into eager impl discovery creates recursive type graphs
+        // such as Vec<T> -> IntoIter<T> -> collect -> Vec<T>. The concrete
+        // return is still registered when the method is actually selected.
+        if method.name.rsplit('_').next() == Some("collect") {
+            continue;
+        }
         for param in &method.params {
             collect_concrete_named_types_from_type(&param.ty, known_named_types, out);
         }

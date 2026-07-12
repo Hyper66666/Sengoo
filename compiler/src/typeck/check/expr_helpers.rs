@@ -608,7 +608,7 @@ impl TypeChecker {
     pub(super) fn check_assign(&mut self, target: &Expr, value: &Expr) -> TyResult<Ty> {
         self.ensure_assignable_target(target)?;
         let target_ty = self.check_expr(target)?;
-        let value_ty = self.check_expr(value)?;
+        let value_ty = self.check_expr_with_expected(value, &target_ty)?;
         self.infer.unify(&target_ty, &value_ty)?;
         Ok(self.env.unit_ty())
     }
@@ -621,7 +621,13 @@ impl TypeChecker {
     ) -> TyResult<Ty> {
         self.ensure_assignable_target(target)?;
         let target_ty = self.check_expr(target)?;
-        let value_ty = self.check_expr(value)?;
+        let value_ty = if matches!(op, AssignOp::AddAssign)
+            && matches!(&target_ty.kind, TyKind::Adt { name, .. } if name == "String")
+        {
+            self.check_expr(value)?
+        } else {
+            self.check_expr_with_expected(value, &target_ty)?
+        };
         if matches!(op, AssignOp::AddAssign)
             && matches!(&target_ty.kind, TyKind::Adt { name, .. } if name == "String")
             && matches!(&value_ty.kind, TyKind::Ref(false, inner) if matches!(inner.kind, TyKind::Str))

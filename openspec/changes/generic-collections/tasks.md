@@ -169,17 +169,31 @@
     their declared callable signature. Generic lazy `MapIter<I,T,O>` and
     `EnumerateIter<I,T>` state machines specialize for arbitrary user structs;
     compiler coverage exercises `skip -> take -> map` and indexed enumeration.
-    Filter/fold/collect, mixed deep adapter chains, and native owning Drop
-    evidence remain open.
+    Generic `FilterIter<I,T>` now borrows each candidate for its predicate,
+    skips rejected items lazily, and preserves owning payloads without copying.
+    Compiler and native coverage exercise `skip -> take -> map -> filter`, and
+    an owned `Payload<String>` leak-counter test proves accepted, rejected, and
+    unconsumed values are each released exactly once. All six owning adapter
+    families now expose consuming `count()` and accumulator-generic
+    `fold<A>(A, fn(A, Item) -> A)`; compiler and native tests cover both through
+    lazy chains. A principled generic `sum` constraint and broader mixed-chain
+    coverage remain open.
 - [ ] 3.2 `collect` into `Vec<T>` and into maps/sets.
-  - Partial: transitional consuming `collect()` now materializes the existing
+  - Partial: terminal generic `collect() -> Vec<T>` now materializes
+    `RawVecIntoIter`, `TakeIter`, `SkipIter`, `MapIter`, `FilterIter`, and
+    `EnumerateIter` through the ABI-v1 RawVec path. Terminal collect methods are
+    excluded from eager impl-type rediscovery and are specialized when called,
+    preventing recursive `Vec -> into_iter -> collect` type growth. Native
+    `Payload<String>` coverage proves collected ownership transfers without a
+    leak or double drop. Transitional consuming `collect()` also materializes the existing
     runtime-backed `VecIter<i64>`, `VecIter<bool>`, `HashMapIter<i64>`, and
     `HashMapIter<bool>` into `Vec<i64>` / `Vec<bool>`. `VecStringIter.collect()`
     now clones the remaining iterator items into a new `Vec<String>` through a
     runtime bridge, and string-key map/set key iterators can collect owned key
     copies into `Vec<String>`, so the transition surface covers owned strings
-    without borrowing handles from `Result<String>`. Fully generic `collect`,
-    lazy adapter chains, and collect into maps/sets remain open.
+    without borrowing handles from `Result<String>`. Explicit generic map/set
+    collection sinks remain open; they will not use return-type-only
+    `collect<C>()` inference.
   - Chained method result identity is now keyed by the complete source span,
     fixing a regression where `.iter().collect()` reused the inner iterator
     type as the outer call's expected return type and hid the correct trait
@@ -194,9 +208,12 @@
     the transitional `VecDeque<i64>` / `VecDeque<bool>` push/front/back/pop
     path and `Vec<String>` set/insert/remove plus cloned iterator collection.
   - Generic compiler-surface coverage now exercises lazy `skip -> take -> map`
-    over an owned user struct and verifies a generic `enumerate` state machine
-    yields stable zero-based indices. Native Drop/leak evidence and full
-    map/filter/collect chaining remain open.
+    over an owned user struct, verifies a generic `enumerate` state machine
+    yields stable zero-based indices, and materializes a `map -> filter ->
+    collect` chain. Native owned-String coverage proves filter and collect keep
+    exact Drop balance. Generic count/fold execute natively over RawVec and
+    filtered adapters. Generic sum and map/set collection scenarios remain
+    open.
 
 ## 4. Migration and docs
 

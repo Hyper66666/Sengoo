@@ -321,6 +321,9 @@ pub(super) fn lower_struct_expr(
         fields: ordered_field_locals,
         ty: struct_ty,
     });
+    for (_, field_expr) in fields {
+        ctx.mark_drop_expr_moved(field_expr);
+    }
 
     if let Some(name) = struct_type_name {
         ctx.type_names.insert(struct_local, name);
