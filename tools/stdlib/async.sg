@@ -17,6 +17,7 @@ extern "C" {
     fn sengoo_async_channel_sender_clone(sender_handle: i64) -> i64;
     fn sengoo_async_channel_sender_close(sender_handle: i64);
     fn sengoo_async_channel_sender_drop(sender_handle: i64);
+    fn sengoo_async_channel_receiver_drop(receiver_handle: i64);
     fn sengoo_async_channel_send_i64__start(sender_handle: i64, value: i64) -> i64;
     fn sengoo_async_channel_recv_i64__start(receiver_handle: i64) -> i64;
 
@@ -85,6 +86,23 @@ struct ChannelSenderI64 {
 struct ChannelReceiverI64 {
     handle: i64,
 }
+
+struct ChannelPair<T> {
+    handle: i64,
+    marker: i64,
+}
+
+struct ChannelSender<T> {
+    handle: i64,
+    marker: i64,
+}
+
+struct ChannelReceiver<T> {
+    handle: i64,
+    marker: i64,
+}
+
+impl<T> !Sync for ChannelReceiver<T> {}
 
 struct MutexI64 {
     handle: i64,
@@ -197,6 +215,22 @@ def raw_mutex_guard_set<T>(handle: i64, value: T) -> bool {
 }
 
 def raw_rwlock_write_guard_set<T>(handle: i64, guard_id: i64, value: T) -> bool {
+    false
+}
+
+def raw_channel_send<T>(sender: &ChannelSender<T>, value: T) -> i64 {
+    0
+}
+
+def raw_channel_recv<T>(receiver: &ChannelReceiver<T>) -> i64 {
+    0
+}
+
+def raw_channel_value_move_into<T>(
+    receiver: &ChannelReceiver<T>,
+    value_handle: i64,
+    output: &mut T,
+) -> bool {
     false
 }
 
@@ -509,6 +543,91 @@ async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
             error: status,
         };
         result
+    }
+}
+
+def channel<T: Send>(capacity: i64) -> ChannelPair<T> {
+    ChannelPair { handle: 0, marker: 0 }
+}
+
+def channel_sender<T>(pair: &ChannelPair<T>) -> ChannelSender<T> {
+    ChannelSender {
+        handle: sengoo_async_channel_pair_sender((*pair).handle),
+        marker: 0,
+    }
+}
+
+def channel_receiver<T>(pair: &ChannelPair<T>) -> ChannelReceiver<T> {
+    ChannelReceiver {
+        handle: sengoo_async_channel_pair_receiver((*pair).handle),
+        marker: 0,
+    }
+}
+
+def channel_clone_sender<T>(sender: &ChannelSender<T>) -> ChannelSender<T> {
+    ChannelSender {
+        handle: sengoo_async_channel_sender_clone((*sender).handle),
+        marker: 0,
+    }
+}
+
+async def channel_send<T: Send>(
+    sender: &ChannelSender<T>,
+    value: T,
+) -> Result<i64, i64> {
+    let status = await raw_channel_send(sender, value);
+    if status == 0 {
+        Result { is_ok: true, value: 0, error: 0 }
+    } else {
+        Result {
+            is_ok: false,
+            value: 0,
+            error: status_from_raw_ffi(status),
+        }
+    }
+}
+
+async def channel_recv_into<T>(
+    receiver: &ChannelReceiver<T>,
+    output: &mut T,
+) -> Result<i64, i64> {
+    let value_handle = await raw_channel_recv(receiver);
+    if value_handle > 0 {
+        if raw_channel_value_move_into(receiver, value_handle, output) {
+            Result { is_ok: true, value: 0, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: 0,
+            error: if value_handle < 0 { status_from_raw_ffi(value_handle) } else { STATUS_INVALID_HANDLE() },
+        }
+    }
+}
+
+impl<T> Drop for ChannelPair<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_pair_free(self.handle);
+        }
+    }
+}
+
+impl<T> Drop for ChannelSender<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_sender_drop(self.handle);
+        }
+    }
+}
+
+impl<T> Drop for ChannelReceiver<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_receiver_drop(self.handle);
+        }
     }
 }
 

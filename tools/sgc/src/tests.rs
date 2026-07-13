@@ -4502,6 +4502,60 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_generic_channel_round_trip() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+struct Payload {
+    value: i64,
+}
+
+impl Drop for Payload {
+    def drop(&mut self) {}
+}
+
+async def main() -> i64 {
+    let pair: ChannelPair<Payload> = channel(2);
+    let sender = channel_sender(&pair);
+    let receiver = channel_receiver(&pair);
+    let sent = await channel_send(&sender, Payload { value: 41 });
+    if !sent.is_ok { return 10; }
+    let mut output = Payload { value: 0 };
+    let received = await channel_recv_into(&receiver, &mut output);
+    if !received.is_ok { return 11; }
+    output.value
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("generic channel source should compile");
+    let ll_path = temp_artifact("async-generic-channel", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-generic-channel",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("generic channel executable should run");
+    assert_eq!(output.status.code(), Some(41));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_stdlib_arc_i64_bool_runtime_counts_and_reads() {
     let Some(clang) = find_clang() else {
         return;

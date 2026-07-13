@@ -463,6 +463,113 @@ def main() -> i64 {
 }
 
 #[test]
+fn concurrent_generic_channel_moves_typed_payload_through_async_send_and_recv() {
+    let source = r#"
+struct Payload {
+    value: i64,
+}
+
+impl Drop for Payload {
+    def drop(&mut self) {}
+}
+
+async def round_trip() -> i64 {
+    let pair: ChannelPair<Payload> = channel(2);
+    let sender = channel_sender(&pair);
+    let receiver = channel_receiver(&pair);
+
+    let sent = await channel_send(&sender, Payload { value: 41 });
+    if !sent.is_ok { return sent.error; }
+
+    let mut output = Payload { value: 0 };
+    let received = await channel_recv_into(&receiver, &mut output);
+    if !received.is_ok { return received.error; }
+    output.value
+}
+
+async def main() -> i64 {
+    await round_trip()
+}
+"#;
+
+    let ir = compile_with_async_stdlib(source);
+    assert!(ir.contains("sengoo_async_channel_bounded_parts"));
+    assert!(ir.contains("sengoo_async_channel_send__start"));
+    assert!(ir.contains("sengoo_async_channel_send__poll"));
+    assert!(ir.contains("sengoo_async_channel_send__result"));
+    assert!(ir.contains("sengoo_async_channel_recv__start"));
+    assert!(ir.contains("sengoo_async_channel_recv__poll"));
+    assert!(ir.contains("sengoo_async_channel_recv__result"));
+    assert!(ir.contains("sengoo_async_channel_value_move_into"));
+    assert!(ir.contains("ChannelPair_Payload_Drop_drop"));
+    assert!(
+        ir.contains("ChannelSender_Payload_Drop_drop"),
+        "generic channel sender must receive scope-exit Drop glue; functions: {:?}",
+        ir.lines()
+            .filter(|line| line.contains("Function:") && line.contains("Channel"))
+            .collect::<Vec<_>>()
+    );
+    assert!(ir.contains("ChannelReceiver_Payload_Drop_drop"));
+}
+
+#[test]
+fn concurrent_generic_channel_send_rejects_non_send_payload() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct LocalOnly {
+    value: i64,
+}
+
+impl !Send for LocalOnly {}
+
+async def main() -> i64 {
+    let pair: ChannelPair<LocalOnly> = channel(1);
+    let sender = channel_sender(&pair);
+    let sent = await channel_send(&sender, LocalOnly { value: 1 });
+    if sent.is_ok { 0 } else { sent.error }
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("channel send must require a Send payload");
+    let message = error.to_string();
+    assert!(
+        message.contains("not Send") || message.contains("does not implement `Send`"),
+        "expected Send marker diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn concurrent_generic_channel_raw_send_cannot_bypass_send_bound() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct LocalOnly {
+    value: i64,
+}
+
+impl !Send for LocalOnly {}
+
+async def main() -> i64 {
+    let pair: ChannelPair<LocalOnly> = channel(1);
+    let sender = channel_sender(&pair);
+    await raw_channel_send(&sender, LocalOnly { value: 1 })
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("raw channel send must enforce Send");
+    let message = error.to_string();
+    assert!(
+        message.contains("not Send") || message.contains("does not implement `Send`"),
+        "expected Send marker diagnostic, got: {message}"
+    );
+}
+
+#[test]
 fn concurrent_send_sync_auto_marker_bounds_reject_runtime_handles() {
     let source = format!(
         "{}\n\n{}",

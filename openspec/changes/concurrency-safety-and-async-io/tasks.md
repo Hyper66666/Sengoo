@@ -91,9 +91,15 @@
   - Partial: `tools/stdlib/async_futures.sg` defines `Poll<T>`,
     `AsyncContext`, and `Future<T>::poll`, with compiler and native tests for
     ready/pending user futures plus rejected Poll/receiver shapes.
-- [ ] 5.2 `channel<T>()` mpsc with async-aware send/recv.
-  - Partial: `std::async` exposes bounded i64 channels with async send/recv
-    outcomes and realworld smoke coverage. Generic `channel<T>` remains open.
+- [x] 5.2 `channel<T>()` mpsc with async-aware send/recv.
+  - `std::async` exposes descriptor-backed `ChannelPair<T>`, sender and
+    receiver endpoints, async `channel_send`, and the v1 no-`Default`
+    `channel_recv_into` move-out contract while retaining the bounded i64
+    wrappers. Runtime tests cover backpressure, close, queued teardown,
+    pending/closed/cancelled send ownership, receive replacement, abandoned
+    value handles, and exact Drop. Compiler tests cover typed lowering plus
+    public and raw `!Send` rejection, and a native `sgc` round trip moves a
+    user-defined payload through the complete runtime ABI.
 - [ ] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
   scope exit).
 - [ ] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.

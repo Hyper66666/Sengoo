@@ -146,6 +146,26 @@ impl OwnedDescriptorValue {
     fn as_ptr(&self) -> *mut c_void {
         self.ptr.as_ptr().cast::<c_void>()
     }
+
+    unsafe fn move_into_output(self, output: *mut c_void) {
+        let descriptor = self.descriptor;
+        let layout = self.layout;
+        let ptr = self.ptr;
+        std::mem::forget(self);
+        descriptor
+            .move_value
+            .expect("validated descriptor keeps move")(
+            output, ptr.as_ptr().cast::<c_void>()
+        );
+        dealloc(ptr.as_ptr(), layout);
+    }
+
+    unsafe fn replace_initialized_output(self, output: *mut c_void) {
+        self.descriptor
+            .drop_value
+            .expect("validated descriptor keeps drop")(output);
+        self.move_into_output(output);
+    }
 }
 
 impl Drop for OwnedDescriptorValue {
@@ -515,9 +535,16 @@ pub unsafe extern "C" fn sengoo_async_shared_counter_job_drop(handle: i64) {
 
 struct ChannelInner {
     capacity: usize,
-    queue: VecDeque<i64>,
+    descriptor: Option<SengooTypeDescriptor>,
+    queue: VecDeque<ChannelQueueEntry>,
     sender_count: usize,
+    receiver_alive: bool,
     closed: bool,
+}
+
+enum ChannelQueueEntry {
+    I64(i64),
+    Descriptor(OwnedDescriptorValue),
 }
 
 struct ChannelShared {
@@ -532,6 +559,8 @@ struct ChannelReceiver {
     channel: Arc<ChannelShared>,
 }
 
+type ChannelPair = (Option<ChannelSender>, Option<ChannelReceiver>);
+
 struct ChannelSendI64State {
     channel: Arc<ChannelShared>,
     value: i64,
@@ -545,6 +574,54 @@ struct ChannelRecvI64State {
     outcome: Option<Result<i64, i64>>,
 }
 
+struct ChannelSendState {
+    channel: Arc<ChannelShared>,
+    value: Option<OwnedDescriptorValue>,
+    lifecycle: PollLifecycle,
+    outcome: Option<i64>,
+}
+
+struct ChannelRecvState {
+    channel: Arc<ChannelShared>,
+    lifecycle: PollLifecycle,
+    outcome: Option<Result<OwnedDescriptorValue, i64>>,
+}
+
+struct ChannelValueHandle {
+    payload: Option<OwnedDescriptorValue>,
+}
+
+fn channel_drop_sender(channel: &Arc<ChannelShared>) {
+    if let Ok(mut inner) = channel.inner.lock() {
+        inner.sender_count = inner.sender_count.saturating_sub(1);
+        if inner.sender_count == 0 {
+            inner.closed = true;
+        }
+    }
+}
+
+fn channel_drop_receiver(channel: &Arc<ChannelShared>) {
+    if let Ok(mut inner) = channel.inner.lock() {
+        if !inner.receiver_alive {
+            return;
+        }
+        inner.receiver_alive = false;
+        inner.queue.clear();
+    }
+}
+
+impl Drop for ChannelSender {
+    fn drop(&mut self) {
+        channel_drop_sender(&self.channel);
+    }
+}
+
+impl Drop for ChannelReceiver {
+    fn drop(&mut self) {
+        channel_drop_receiver(&self.channel);
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn sengoo_async_channel_bounded_i64(capacity: i64) -> i64 {
     if capacity < 1 {
@@ -553,16 +630,51 @@ pub extern "C" fn sengoo_async_channel_bounded_i64(capacity: i64) -> i64 {
     let channel = Arc::new(ChannelShared {
         inner: Mutex::new(ChannelInner {
             capacity: capacity as usize,
+            descriptor: None,
             queue: VecDeque::new(),
             sender_count: 1,
+            receiver_alive: true,
             closed: false,
         }),
     });
     let pair = (
-        ChannelSender {
+        Some(ChannelSender {
             channel: channel.clone(),
-        },
-        ChannelReceiver { channel },
+        }),
+        Some(ChannelReceiver { channel }),
+    );
+    Box::into_raw(Box::new(pair)) as i64
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_channel_bounded_parts(
+    capacity: i64,
+    size: i64,
+    align: i64,
+    move_value: Option<SengooMoveFn>,
+    drop_value: Option<SengooDropFn>,
+) -> i64 {
+    if capacity < 1 {
+        return 0;
+    }
+    let Some(descriptor) = descriptor_from_parts(size, align, move_value, drop_value) else {
+        return 0;
+    };
+    let channel = Arc::new(ChannelShared {
+        inner: Mutex::new(ChannelInner {
+            capacity: capacity as usize,
+            descriptor: Some(descriptor),
+            queue: VecDeque::new(),
+            sender_count: 1,
+            receiver_alive: true,
+            closed: false,
+        }),
+    });
+    let pair = (
+        Some(ChannelSender {
+            channel: channel.clone(),
+        }),
+        Some(ChannelReceiver { channel }),
     );
     Box::into_raw(Box::new(pair)) as i64
 }
@@ -573,11 +685,11 @@ pub extern "C" fn sengoo_async_channel_bounded_i64(capacity: i64) -> i64 {
 /// `pair_handle` must be a live handle returned by
 /// [`sengoo_async_channel_bounded_i64`].
 pub unsafe extern "C" fn sengoo_async_channel_pair_sender(pair_handle: i64) -> i64 {
-    let Some(pair) = handle_ref::<(ChannelSender, ChannelReceiver)>(pair_handle) else {
+    let Some(pair) = handle_mut::<ChannelPair>(pair_handle) else {
         return 0;
     };
-    let sender = ChannelSender {
-        channel: pair.0.channel.clone(),
+    let Some(sender) = pair.0.take() else {
+        return 0;
     };
     Box::into_raw(Box::new(sender)) as i64
 }
@@ -588,11 +700,11 @@ pub unsafe extern "C" fn sengoo_async_channel_pair_sender(pair_handle: i64) -> i
 /// `pair_handle` must be a live handle returned by
 /// [`sengoo_async_channel_bounded_i64`].
 pub unsafe extern "C" fn sengoo_async_channel_pair_receiver(pair_handle: i64) -> i64 {
-    let Some(pair) = handle_ref::<(ChannelSender, ChannelReceiver)>(pair_handle) else {
+    let Some(pair) = handle_mut::<ChannelPair>(pair_handle) else {
         return 0;
     };
-    let receiver = ChannelReceiver {
-        channel: pair.1.channel.clone(),
+    let Some(receiver) = pair.1.take() else {
+        return 0;
     };
     Box::into_raw(Box::new(receiver)) as i64
 }
@@ -603,10 +715,22 @@ pub unsafe extern "C" fn sengoo_async_channel_pair_receiver(pair_handle: i64) ->
 /// `pair_handle` must be a live handle returned by
 /// [`sengoo_async_channel_bounded_i64`].
 pub unsafe extern "C" fn sengoo_async_channel_pair_free(pair_handle: i64) {
-    let Some(pair) = handle_take_box::<(ChannelSender, ChannelReceiver)>(pair_handle) else {
+    let Some(pair) = handle_take_box::<ChannelPair>(pair_handle) else {
         return;
     };
     drop(pair);
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `receiver_handle` must be a live handle returned by
+/// [`sengoo_async_channel_pair_receiver`].
+pub unsafe extern "C" fn sengoo_async_channel_receiver_drop(receiver_handle: i64) {
+    let Some(receiver) = handle_take_box::<ChannelReceiver>(receiver_handle) else {
+        return;
+    };
+    drop(receiver);
 }
 
 #[no_mangle]
@@ -637,12 +761,7 @@ pub unsafe extern "C" fn sengoo_async_channel_sender_close(sender_handle: i64) {
     let Some(sender) = handle_take_box::<ChannelSender>(sender_handle) else {
         return;
     };
-    if let Ok(mut inner) = sender.channel.inner.lock() {
-        inner.sender_count = inner.sender_count.saturating_sub(1);
-        if inner.sender_count == 0 {
-            inner.closed = true;
-        }
-    };
+    drop(sender);
 }
 
 #[no_mangle]
@@ -660,6 +779,12 @@ pub extern "C" fn sengoo_async_channel_send_i64__start(sender_handle: i64, value
     let Some(sender) = (unsafe { handle_ref::<ChannelSender>(sender_handle) }) else {
         return 0;
     };
+    let Ok(inner) = sender.channel.inner.lock() else {
+        return 0;
+    };
+    if inner.descriptor.is_some() {
+        return 0;
+    }
     let state = ChannelSendI64State {
         channel: sender.channel.clone(),
         value,
@@ -692,13 +817,13 @@ pub unsafe extern "C" fn sengoo_async_channel_send_i64__poll(handle: i64) -> i64
         .inner
         .lock()
         .expect("channel inner mutex poisoned");
-    if inner.closed {
+    if inner.closed || !inner.receiver_alive {
         state.outcome = Some(Err(STATUS_INVALID_HANDLE));
         guard.mark_ready();
         return 1;
     }
     if inner.queue.len() < inner.capacity {
-        inner.queue.push_back(state.value);
+        inner.queue.push_back(ChannelQueueEntry::I64(state.value));
         state.outcome = Some(Ok(()));
         guard.mark_ready();
         return 1;
@@ -768,11 +893,146 @@ pub unsafe extern "C" fn sengoo_async_channel_send_i64__drop(handle: i64) {
     drop(state);
 }
 
+fn drop_failed_channel_send_input(value: *mut c_void, drop_value: Option<SengooDropFn>) {
+    if value.is_null() {
+        return;
+    }
+    let Some(drop_value) = drop_value else {
+        return;
+    };
+    unsafe { drop_value(value) };
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `sender_handle` must be a live handle returned by
+/// [`sengoo_async_channel_pair_sender`] for a descriptor-backed channel, and
+/// `value` must point to an owned payload of the channel element type.
+pub unsafe extern "C" fn sengoo_async_channel_send__start(
+    sender_handle: i64,
+    value: *mut c_void,
+    drop_value: Option<SengooDropFn>,
+) -> i64 {
+    let Some(sender) = handle_ref::<ChannelSender>(sender_handle) else {
+        drop_failed_channel_send_input(value, drop_value);
+        return 0;
+    };
+    let descriptor = {
+        let Ok(inner) = sender.channel.inner.lock() else {
+            drop_failed_channel_send_input(value, drop_value);
+            return 0;
+        };
+        let Some(descriptor) = inner.descriptor else {
+            drop_failed_channel_send_input(value, drop_value);
+            return 0;
+        };
+        descriptor
+    };
+    let Some(value) = OwnedDescriptorValue::new(&descriptor, value) else {
+        drop_failed_channel_send_input(value, drop_value);
+        return 0;
+    };
+    let state = ChannelSendState {
+        channel: sender.channel.clone(),
+        value: Some(value),
+        lifecycle: PollLifecycle::default(),
+        outcome: None,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be a live handle returned by
+/// [`sengoo_async_channel_send__start`].
+pub unsafe extern "C" fn sengoo_async_channel_send__poll(handle: i64) -> i64 {
+    let Some(state) = handle_mut::<ChannelSendState>(handle) else {
+        return 1;
+    };
+    let guard = match state.lifecycle.enter() {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    if state.outcome.is_some() {
+        guard.mark_ready();
+        return 1;
+    }
+
+    let mut inner = state
+        .channel
+        .inner
+        .lock()
+        .expect("channel inner mutex poisoned");
+    if inner.closed || !inner.receiver_alive || inner.descriptor.is_none() {
+        state.outcome = Some(-STATUS_INVALID_HANDLE);
+        guard.mark_ready();
+        return 1;
+    }
+    if inner.queue.len() < inner.capacity {
+        let Some(value) = state.value.take() else {
+            state.outcome = Some(-STATUS_INVALID_HANDLE);
+            guard.mark_ready();
+            return 1;
+        };
+        inner.queue.push_back(ChannelQueueEntry::Descriptor(value));
+        state.outcome = Some(0);
+        guard.mark_ready();
+        return 1;
+    }
+    record_poll_wakeup_hint(std::time::Instant::now());
+    0
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_send__start`].
+pub unsafe extern "C" fn sengoo_async_channel_send__result(handle: i64) -> i64 {
+    let Some(state) = handle_take_box::<ChannelSendState>(handle) else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    state.outcome.unwrap_or(-STATUS_INVALID_HANDLE)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_send__start`].
+pub unsafe extern "C" fn sengoo_async_channel_send__cancel(handle: i64) -> bool {
+    let Some(state) = handle_take_box::<ChannelSendState>(handle) else {
+        return false;
+    };
+    drop(state);
+    true
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_send__start`].
+pub unsafe extern "C" fn sengoo_async_channel_send__drop(handle: i64) {
+    let Some(state) = handle_take_box::<ChannelSendState>(handle) else {
+        return;
+    };
+    drop(state);
+}
+
 #[no_mangle]
 pub extern "C" fn sengoo_async_channel_recv_i64__start(receiver_handle: i64) -> i64 {
     let Some(receiver) = (unsafe { handle_ref::<ChannelReceiver>(receiver_handle) }) else {
         return 0;
     };
+    let Ok(inner) = receiver.channel.inner.lock() else {
+        return 0;
+    };
+    if inner.descriptor.is_some() {
+        return 0;
+    }
     let state = ChannelRecvI64State {
         channel: receiver.channel.clone(),
         lifecycle: PollLifecycle::default(),
@@ -804,10 +1064,20 @@ pub unsafe extern "C" fn sengoo_async_channel_recv_i64__poll(handle: i64) -> i64
         .inner
         .lock()
         .expect("channel inner mutex poisoned");
-    if let Some(value) = inner.queue.pop_front() {
-        state.outcome = Some(Ok(value));
-        guard.mark_ready();
-        return 1;
+    if let Some(entry) = inner.queue.pop_front() {
+        match entry {
+            ChannelQueueEntry::I64(value) => {
+                state.outcome = Some(Ok(value));
+                guard.mark_ready();
+                return 1;
+            }
+            ChannelQueueEntry::Descriptor(value) => {
+                inner.queue.push_front(ChannelQueueEntry::Descriptor(value));
+                state.outcome = Some(Err(STATUS_INVALID_HANDLE));
+                guard.mark_ready();
+                return 1;
+            }
+        }
     }
     if inner.closed {
         state.outcome = Some(Err(STATUS_INVALID_HANDLE));
@@ -879,6 +1149,151 @@ pub unsafe extern "C" fn sengoo_async_channel_recv_i64__cancel(handle: i64) -> b
 /// [`sengoo_async_channel_recv_i64__start`].
 pub unsafe extern "C" fn sengoo_async_channel_recv_i64__drop(handle: i64) {
     let Some(state) = handle_take_box::<ChannelRecvI64State>(handle) else {
+        return;
+    };
+    drop(state);
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_channel_recv__start(receiver_handle: i64) -> i64 {
+    let Some(receiver) = (unsafe { handle_ref::<ChannelReceiver>(receiver_handle) }) else {
+        return 0;
+    };
+    let Ok(inner) = receiver.channel.inner.lock() else {
+        return 0;
+    };
+    if inner.descriptor.is_none() {
+        return 0;
+    }
+    let state = ChannelRecvState {
+        channel: receiver.channel.clone(),
+        lifecycle: PollLifecycle::default(),
+        outcome: None,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be a live handle returned by
+/// [`sengoo_async_channel_recv__start`].
+pub unsafe extern "C" fn sengoo_async_channel_recv__poll(handle: i64) -> i64 {
+    let Some(state) = handle_mut::<ChannelRecvState>(handle) else {
+        return 1;
+    };
+    let guard = match state.lifecycle.enter() {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    if state.outcome.is_some() {
+        guard.mark_ready();
+        return 1;
+    }
+
+    let mut inner = state
+        .channel
+        .inner
+        .lock()
+        .expect("channel inner mutex poisoned");
+    if let Some(entry) = inner.queue.pop_front() {
+        match entry {
+            ChannelQueueEntry::Descriptor(value) => {
+                state.outcome = Some(Ok(value));
+                guard.mark_ready();
+                return 1;
+            }
+            ChannelQueueEntry::I64(value) => {
+                inner.queue.push_front(ChannelQueueEntry::I64(value));
+                state.outcome = Some(Err(-STATUS_INVALID_HANDLE));
+                guard.mark_ready();
+                return 1;
+            }
+        }
+    }
+    if inner.closed {
+        state.outcome = Some(Err(-STATUS_INVALID_HANDLE));
+        guard.mark_ready();
+        return 1;
+    }
+    record_poll_wakeup_hint(std::time::Instant::now());
+    0
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_recv__start`].
+pub unsafe extern "C" fn sengoo_async_channel_recv__result(handle: i64) -> i64 {
+    let Some(state) = handle_take_box::<ChannelRecvState>(handle) else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    match state.outcome {
+        Some(Ok(payload)) => Box::into_raw(Box::new(ChannelValueHandle {
+            payload: Some(payload),
+        })) as i64,
+        Some(Err(code)) => code,
+        None => -STATUS_INVALID_HANDLE,
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_recv__start`].
+pub unsafe extern "C" fn sengoo_async_channel_recv__cancel(handle: i64) -> bool {
+    let Some(state) = handle_take_box::<ChannelRecvState>(handle) else {
+        return false;
+    };
+    drop(state);
+    true
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be an unconsumed handle returned by
+/// [`sengoo_async_channel_recv__start`].
+pub unsafe extern "C" fn sengoo_async_channel_recv__drop(handle: i64) {
+    let Some(state) = handle_take_box::<ChannelRecvState>(handle) else {
+        return;
+    };
+    drop(state);
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `value_handle` must be a live handle returned by
+/// [`sengoo_async_channel_recv__result`] with a positive result, and
+/// `initialized_output_ptr` must point to an initialized value of the same
+/// descriptor-backed type.
+pub unsafe extern "C" fn sengoo_async_channel_value_move_into(
+    value_handle: i64,
+    initialized_output_ptr: *mut c_void,
+) -> i64 {
+    let Some(mut state) = handle_take_box::<ChannelValueHandle>(value_handle) else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    if initialized_output_ptr.is_null() {
+        return -STATUS_INVALID_ARGUMENT;
+    }
+    let Some(payload) = state.payload.take() else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    payload.replace_initialized_output(initialized_output_ptr);
+    0
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `value_handle` must be a live handle returned by
+/// [`sengoo_async_channel_recv__result`] with a positive result.
+pub unsafe extern "C" fn sengoo_async_channel_value_drop(value_handle: i64) {
+    let Some(state) = handle_take_box::<ChannelValueHandle>(value_handle) else {
         return;
     };
     drop(state);
@@ -1895,6 +2310,583 @@ pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_unlock_i64(
     unsafe { sengoo_async_rwlock_write_guard_unlock(lock_handle, guard_id) }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[repr(C)]
+    struct DropTrackedPayload {
+        tag: i64,
+        drop_counter: *const AtomicU32,
+    }
+
+    unsafe extern "C" fn drop_tracked_move(destination: *mut c_void, source: *mut c_void) {
+        std::ptr::copy_nonoverlapping(
+            source.cast::<u8>(),
+            destination.cast::<u8>(),
+            std::mem::size_of::<DropTrackedPayload>(),
+        );
+        std::ptr::write_bytes(
+            source.cast::<u8>(),
+            0,
+            std::mem::size_of::<DropTrackedPayload>(),
+        );
+    }
+
+    unsafe extern "C" fn drop_tracked_drop(value: *mut c_void) {
+        if value.is_null() {
+            return;
+        }
+        let payload = &*value.cast::<DropTrackedPayload>();
+        if let Some(counter) = payload.drop_counter.as_ref() {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn drop_tracked_payload(tag: i64, drop_counter: &AtomicU32) -> DropTrackedPayload {
+        DropTrackedPayload {
+            tag,
+            drop_counter: drop_counter as *const AtomicU32,
+        }
+    }
+
+    fn cleanup_channel_handles(pair: i64, sender: i64, receiver: i64) {
+        unsafe {
+            drop(handle_take_box::<ChannelSender>(sender));
+            sengoo_async_channel_receiver_drop(receiver);
+            drop(handle_take_box::<ChannelPair>(pair));
+        }
+    }
+
+    #[test]
+    fn generic_channel_queued_payload_drops_once_at_teardown() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        assert_ne!(pair, 0);
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let drop_counter = AtomicU32::new(0);
+        let mut payload = drop_tracked_payload(41, &drop_counter);
+        let send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut payload as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_ne!(send, 0);
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(send) }, 0);
+        assert_eq!(drop_counter.load(Ordering::SeqCst), 0);
+
+        cleanup_channel_handles(pair, sender, receiver);
+        assert_eq!(drop_counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn generic_channel_send_cancel_pending_closed_and_drop_paths_own_payload_exactly_once() {
+        let drop_before_poll = AtomicU32::new(0);
+        let pair_before_poll = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender_before_poll = unsafe { sengoo_async_channel_pair_sender(pair_before_poll) };
+        let receiver_before_poll = unsafe { sengoo_async_channel_pair_receiver(pair_before_poll) };
+        let mut before_poll = drop_tracked_payload(1, &drop_before_poll);
+        let send_before_poll = unsafe {
+            sengoo_async_channel_send__start(
+                sender_before_poll,
+                (&mut before_poll as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_ne!(send_before_poll, 0);
+        unsafe { sengoo_async_channel_send__drop(send_before_poll) };
+        assert_eq!(drop_before_poll.load(Ordering::SeqCst), 1);
+        cleanup_channel_handles(pair_before_poll, sender_before_poll, receiver_before_poll);
+
+        let queued_drop = AtomicU32::new(0);
+        let pending_drop = AtomicU32::new(0);
+        let pair_pending = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender_pending = unsafe { sengoo_async_channel_pair_sender(pair_pending) };
+        let receiver_pending = unsafe { sengoo_async_channel_pair_receiver(pair_pending) };
+
+        let mut queued = drop_tracked_payload(2, &queued_drop);
+        let queued_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender_pending,
+                (&mut queued as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(queued_send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(queued_send) }, 0);
+        assert_eq!(queued_drop.load(Ordering::SeqCst), 0);
+
+        let mut pending = drop_tracked_payload(3, &pending_drop);
+        let pending_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender_pending,
+                (&mut pending as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(pending_send) }, 0);
+        assert!(unsafe { sengoo_async_channel_send__cancel(pending_send) });
+        assert_eq!(pending_drop.load(Ordering::SeqCst), 1);
+        cleanup_channel_handles(pair_pending, sender_pending, receiver_pending);
+        assert_eq!(queued_drop.load(Ordering::SeqCst), 1);
+
+        let closed_drop = AtomicU32::new(0);
+        let pair_closed = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender_closed = unsafe { sengoo_async_channel_pair_sender(pair_closed) };
+        let receiver_closed = unsafe { sengoo_async_channel_pair_receiver(pair_closed) };
+        let mut closed = drop_tracked_payload(4, &closed_drop);
+        let closed_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender_closed,
+                (&mut closed as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        unsafe { sengoo_async_channel_sender_close(sender_closed) };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(closed_send) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(closed_send) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(closed_drop.load(Ordering::SeqCst), 1);
+        unsafe { sengoo_async_channel_receiver_drop(receiver_closed) };
+        unsafe { drop(handle_take_box::<ChannelPair>(pair_closed)) };
+    }
+
+    #[test]
+    fn generic_channel_received_payload_moves_out_once_and_replaces_initialized_output() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let received_drop = AtomicU32::new(0);
+        let replaced_drop = AtomicU32::new(0);
+        let mut sent = drop_tracked_payload(7, &received_drop);
+        let send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut sent as *mut DropTrackedPayload).cast(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(send) }, 0);
+
+        let recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(recv) }, 1);
+        let value_handle = unsafe { sengoo_async_channel_recv__result(recv) };
+        assert!(value_handle > 0);
+
+        let mut output = drop_tracked_payload(8, &replaced_drop);
+        assert_eq!(
+            unsafe {
+                sengoo_async_channel_value_move_into(
+                    value_handle,
+                    (&mut output as *mut DropTrackedPayload).cast::<c_void>(),
+                )
+            },
+            0
+        );
+        assert_eq!(replaced_drop.load(Ordering::SeqCst), 1);
+        assert_eq!(received_drop.load(Ordering::SeqCst), 0);
+        assert_eq!(output.tag, 7);
+
+        unsafe { drop_tracked_drop((&mut output as *mut DropTrackedPayload).cast::<c_void>()) };
+        assert_eq!(received_drop.load(Ordering::SeqCst), 1);
+        cleanup_channel_handles(pair, sender, receiver);
+    }
+
+    #[test]
+    fn generic_channel_value_move_into_consumes_handle_on_failure() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let received_drop = AtomicU32::new(0);
+        let mut sent = drop_tracked_payload(9, &received_drop);
+        let send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut sent as *mut DropTrackedPayload).cast(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(send) }, 0);
+
+        let recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(recv) }, 1);
+        let value_handle = unsafe { sengoo_async_channel_recv__result(recv) };
+        assert!(value_handle > 0);
+
+        assert_eq!(
+            unsafe { sengoo_async_channel_value_move_into(value_handle, std::ptr::null_mut()) },
+            -STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(received_drop.load(Ordering::SeqCst), 1);
+
+        cleanup_channel_handles(pair, sender, receiver);
+    }
+
+    #[test]
+    fn generic_channel_enforces_backpressure_and_close_semantics() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let first_drop = AtomicU32::new(0);
+        let second_drop = AtomicU32::new(0);
+        let mut first = drop_tracked_payload(11, &first_drop);
+        let first_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut first as *mut DropTrackedPayload).cast(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(first_send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(first_send) }, 0);
+
+        let mut second = drop_tracked_payload(12, &second_drop);
+        let second_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut second as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(second_send) }, 0);
+
+        let first_recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(first_recv) }, 1);
+        let first_value = unsafe { sengoo_async_channel_recv__result(first_recv) };
+        assert!(first_value > 0);
+        unsafe { sengoo_async_channel_value_drop(first_value) };
+        assert_eq!(first_drop.load(Ordering::SeqCst), 1);
+
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(second_send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(second_send) }, 0);
+
+        let second_recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(second_recv) }, 1);
+        let second_value = unsafe { sengoo_async_channel_recv__result(second_recv) };
+        assert!(second_value > 0);
+        unsafe { sengoo_async_channel_value_drop(second_value) };
+        assert_eq!(second_drop.load(Ordering::SeqCst), 1);
+
+        let closed_recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(closed_recv) }, 0);
+        unsafe { sengoo_async_channel_sender_close(sender) };
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(closed_recv) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv__result(closed_recv) },
+            -STATUS_INVALID_HANDLE
+        );
+
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+        unsafe { drop(handle_take_box::<ChannelPair>(pair)) };
+    }
+
+    #[test]
+    fn i64_channel_wrappers_stay_green() {
+        let pair = sengoo_async_channel_bounded_i64(2);
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+
+        let send = sengoo_async_channel_send_i64__start(sender, 41);
+        assert_eq!(unsafe { sengoo_async_channel_send_i64__poll(send) }, 1);
+        let send_result = unsafe { sengoo_async_channel_send_i64__result(send) };
+        assert!(send_result.is_ok);
+
+        let recv = sengoo_async_channel_recv_i64__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv_i64__poll(recv) }, 1);
+        let recv_result = unsafe { sengoo_async_channel_recv_i64__result(recv) };
+        assert!(recv_result.is_ok);
+        assert_eq!(recv_result.value, 41);
+
+        let pending = sengoo_async_channel_recv_i64__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv_i64__poll(pending) }, 0);
+        unsafe { sengoo_async_channel_sender_close(sender) };
+        assert_eq!(unsafe { sengoo_async_channel_recv_i64__poll(pending) }, 1);
+        let closed = unsafe { sengoo_async_channel_recv_i64__result(pending) };
+        assert!(!closed.is_ok);
+        assert_eq!(closed.error, STATUS_INVALID_HANDLE);
+
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+        unsafe { drop(handle_take_box::<ChannelPair>(pair)) };
+    }
+
+    #[test]
+    fn generic_channel_send_start_drops_payload_on_invalid_sender_and_zero_handle_stays_invalid() {
+        let dropped = AtomicU32::new(0);
+        let mut payload = drop_tracked_payload(13, &dropped);
+        let send = unsafe {
+            sengoo_async_channel_send__start(
+                0,
+                (&mut payload as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(send, 0);
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(send) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(send) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn channel_repeated_sender_extraction_is_one_shot_and_first_endpoint_stays_live() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        assert!(sender > 0);
+        assert_eq!(unsafe { sengoo_async_channel_pair_sender(pair) }, 0);
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+        unsafe { sengoo_async_channel_pair_free(pair) };
+
+        let payload_drop = AtomicU32::new(0);
+        let mut payload = drop_tracked_payload(21, &payload_drop);
+        let send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut payload as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(send) }, 0);
+
+        let recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(recv) }, 1);
+        let value = unsafe { sengoo_async_channel_recv__result(recv) };
+        assert!(value > 0);
+        unsafe { sengoo_async_channel_value_drop(value) };
+        assert_eq!(payload_drop.load(Ordering::SeqCst), 1);
+
+        let closed_recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(closed_recv) }, 0);
+        unsafe { sengoo_async_channel_sender_drop(sender) };
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(closed_recv) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv__result(closed_recv) },
+            -STATUS_INVALID_HANDLE
+        );
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+    }
+
+    #[test]
+    fn channel_pair_drop_preserves_extracted_endpoints() {
+        let pair = sengoo_async_channel_bounded_i64(2);
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+        unsafe { sengoo_async_channel_pair_free(pair) };
+
+        let send = sengoo_async_channel_send_i64__start(sender, 55);
+        assert_eq!(unsafe { sengoo_async_channel_send_i64__poll(send) }, 1);
+        let send_result = unsafe { sengoo_async_channel_send_i64__result(send) };
+        assert!(send_result.is_ok);
+
+        let recv = sengoo_async_channel_recv_i64__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv_i64__poll(recv) }, 1);
+        let result = unsafe { sengoo_async_channel_recv_i64__result(recv) };
+        assert!(result.is_ok);
+        assert_eq!(result.value, 55);
+
+        let closed_recv = sengoo_async_channel_recv_i64__start(receiver);
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv_i64__poll(closed_recv) },
+            0
+        );
+        unsafe { sengoo_async_channel_sender_drop(sender) };
+        assert_eq!(
+            unsafe { sengoo_async_channel_recv_i64__poll(closed_recv) },
+            1
+        );
+        let closed = unsafe { sengoo_async_channel_recv_i64__result(closed_recv) };
+        assert!(!closed.is_ok);
+        assert_eq!(closed.error, STATUS_INVALID_HANDLE);
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+    }
+
+    #[test]
+    fn channel_repeated_receiver_extraction_is_one_shot_and_live_receiver_accepts_sends() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+        assert!(receiver > 0);
+        assert_eq!(unsafe { sengoo_async_channel_pair_receiver(pair) }, 0);
+        unsafe { sengoo_async_channel_pair_free(pair) };
+
+        let delivered_drop = AtomicU32::new(0);
+        let mut delivered = drop_tracked_payload(31, &delivered_drop);
+        let delivered_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut delivered as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__poll(delivered_send) },
+            1
+        );
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(delivered_send) },
+            0
+        );
+
+        let recv = sengoo_async_channel_recv__start(receiver);
+        assert_eq!(unsafe { sengoo_async_channel_recv__poll(recv) }, 1);
+        let value = unsafe { sengoo_async_channel_recv__result(recv) };
+        assert!(value > 0);
+        unsafe { sengoo_async_channel_value_drop(value) };
+        assert_eq!(delivered_drop.load(Ordering::SeqCst), 1);
+
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+        let rejected_drop = AtomicU32::new(0);
+        let mut rejected = drop_tracked_payload(32, &rejected_drop);
+        let rejected_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut rejected as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(rejected_send) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(rejected_send) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(rejected_drop.load(Ordering::SeqCst), 1);
+        unsafe { sengoo_async_channel_sender_drop(sender) };
+    }
+
+    #[test]
+    fn channel_last_receiver_drop_discards_queue_and_fails_pending_and_new_sends_once() {
+        let pair = sengoo_async_channel_bounded_parts(
+            1,
+            std::mem::size_of::<DropTrackedPayload>() as i64,
+            std::mem::align_of::<DropTrackedPayload>() as i64,
+            Some(drop_tracked_move),
+            Some(drop_tracked_drop),
+        );
+        let sender = unsafe { sengoo_async_channel_pair_sender(pair) };
+        let receiver = unsafe { sengoo_async_channel_pair_receiver(pair) };
+        unsafe { sengoo_async_channel_pair_free(pair) };
+
+        let queued_drop = AtomicU32::new(0);
+        let mut queued = drop_tracked_payload(41, &queued_drop);
+        let queued_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut queued as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(queued_send) }, 1);
+        assert_eq!(unsafe { sengoo_async_channel_send__result(queued_send) }, 0);
+
+        let pending_drop = AtomicU32::new(0);
+        let mut pending = drop_tracked_payload(42, &pending_drop);
+        let pending_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut pending as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(pending_send) }, 0);
+
+        unsafe { sengoo_async_channel_receiver_drop(receiver) };
+        assert_eq!(queued_drop.load(Ordering::SeqCst), 1);
+        assert_eq!(pending_drop.load(Ordering::SeqCst), 0);
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(pending_send) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(pending_send) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(pending_drop.load(Ordering::SeqCst), 1);
+
+        let new_drop = AtomicU32::new(0);
+        let mut new_payload = drop_tracked_payload(43, &new_drop);
+        let new_send = unsafe {
+            sengoo_async_channel_send__start(
+                sender,
+                (&mut new_payload as *mut DropTrackedPayload).cast::<c_void>(),
+                Some(drop_tracked_drop),
+            )
+        };
+        assert_eq!(unsafe { sengoo_async_channel_send__poll(new_send) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_channel_send__result(new_send) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(new_drop.load(Ordering::SeqCst), 1);
+        unsafe { sengoo_async_channel_sender_drop(sender) };
+    }
+}
+
 pub(crate) fn retain_native_bridge_exports_for_linker() {
     macro_rules! export_addr {
         ($symbol:path) => {
@@ -1924,17 +2916,31 @@ pub(crate) fn retain_native_bridge_exports_for_linker() {
         export_addr!(sengoo_async_shared_counter_join_i64),
         export_addr!(sengoo_async_shared_counter_job_drop),
         export_addr!(sengoo_async_channel_bounded_i64),
+        export_addr!(sengoo_async_channel_bounded_parts),
         export_addr!(sengoo_async_channel_pair_sender),
         export_addr!(sengoo_async_channel_pair_receiver),
         export_addr!(sengoo_async_channel_pair_free),
+        export_addr!(sengoo_async_channel_receiver_drop),
         export_addr!(sengoo_async_channel_sender_clone),
         export_addr!(sengoo_async_channel_sender_close),
         export_addr!(sengoo_async_channel_sender_drop),
+        export_addr!(sengoo_async_channel_send__start),
+        export_addr!(sengoo_async_channel_send__poll),
+        export_addr!(sengoo_async_channel_send__result),
+        export_addr!(sengoo_async_channel_send__cancel),
+        export_addr!(sengoo_async_channel_send__drop),
         export_addr!(sengoo_async_channel_send_i64__start),
         export_addr!(sengoo_async_channel_send_i64__poll),
         export_addr!(sengoo_async_channel_send_i64__result),
         export_addr!(sengoo_async_channel_send_i64__cancel),
         export_addr!(sengoo_async_channel_send_i64__drop),
+        export_addr!(sengoo_async_channel_recv__start),
+        export_addr!(sengoo_async_channel_recv__poll),
+        export_addr!(sengoo_async_channel_recv__result),
+        export_addr!(sengoo_async_channel_recv__cancel),
+        export_addr!(sengoo_async_channel_recv__drop),
+        export_addr!(sengoo_async_channel_value_move_into),
+        export_addr!(sengoo_async_channel_value_drop),
         export_addr!(sengoo_async_channel_recv_i64__start),
         export_addr!(sengoo_async_channel_recv_i64__poll),
         export_addr!(sengoo_async_channel_recv_i64__result),
