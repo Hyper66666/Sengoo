@@ -35,8 +35,11 @@
 - [x] 4.2 Add the debug-mode dimension to the artifact-cache fingerprint;
   tests prove `-g` and non-`-g` artifacts never alias and cache reuse still
   works within each mode.
-- [ ] 4.3 Conformance examples run under `-g` with unchanged results through
+- [x] 4.3 Conformance examples run under `-g` with unchanged results through
   the real-CLI gate.
+  - `tools/sgc/tests/core_conformance.rs` runs every core case in both default
+    and `--debug-info` modes with forced rebuilds, then requires identical exit
+    codes and stdout. The complete 3-test integration target passes locally.
 
 ## 5. Debugger validation and docs
 
@@ -50,8 +53,11 @@
   only with passing reads in both debuggers, else record matrix-deferred.
 - [ ] 5.4 Upgrade `docs/debugging-native.md` to source-level workflows and
   link both transcripts; document `-g` in `docs/language-features.md`.
-- [ ] 5.5 Add the source-level debugging row to
+- [x] 5.5 Add the source-level debugging row to
   `examples/realworld/SUPPORT_MATRIX.md` with proof links.
+  - The matrix keeps the capability at `Supported subset`, links the compiler,
+    object, cache, and native-driver evidence, and explicitly leaves live
+    LLDB/CDB transcripts open.
 
 ## 6. Verification
 
@@ -69,6 +75,8 @@
   and Linux (DWARF) and are linked from the docs.
 - [ ] Non-`-g` IR is byte-identical to the pre-change baseline; conformance
   results are unchanged under `-g`.
-- [ ] Cache never aliases debug and non-debug artifacts.
+- [x] Cache never aliases debug and non-debug artifacts.
+  - Debug mode participates in run/build cache keys and mismatch tests prove a
+    mode change cannot reuse the opposite artifact.
 - [ ] The umbrella `mainstream-adoption-gap-closure` records Pillar A
   completion and the matrix row cites this change's proof.

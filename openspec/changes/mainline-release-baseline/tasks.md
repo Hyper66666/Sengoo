@@ -44,8 +44,12 @@
   - Numeric and generic-collection work is recorded as independent,
     evidence-bearing commits; `c4d0e9864` contains only the collection ABI,
     stdlib, tests, fixture, documentation, and its OpenSpec archive.
-- [ ] 2.4 Confirm no required commit remains only on a gone upstream branch or
+- [x] 2.4 Confirm no required commit remains only on a gone upstream branch or
   abandoned worktree.
+  - All linked worktrees were inspected. The only substantial dirty legacy
+    worktree implements an obsolete eager/always-ready async model; current
+    compiler async tests pass 91/91 and native frame/resume plus scheduler
+    smokes supersede every capability it attempted.
 
 ## 3. Reconcile truth sources
 
@@ -84,5 +88,9 @@
   `openspec validate --all --strict`.
   - `npx.cmd @fission-ai/openspec validate --all --strict` reports 47 passed,
     0 failed, including `mainline-release-baseline`.
-- [ ] 4.5 Push the integration branch and verify the exact tested SHA is visible
+- [x] 4.5 Push the integration branch and verify the exact tested SHA is visible
   on the configured GitHub remote.
+  - `404c2cb51` is visible on
+    `origin/codex/toolchain-transcript-evidence` after the topology-only main
+    merge, generic-collections archive, baseline truth refresh, and focused
+    Windows verification.

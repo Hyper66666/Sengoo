@@ -1,13 +1,21 @@
 use super::*;
 
-fn default_host_target_triple() -> &'static str {
-    if cfg!(target_os = "windows") {
+fn host_target_triple_for(target_os: &str, target_arch: &str) -> &'static str {
+    if target_os == "windows" {
         "x86_64-pc-windows-msvc"
-    } else if cfg!(target_os = "macos") {
-        "x86_64-apple-macosx"
+    } else if target_os == "macos" {
+        if target_arch == "aarch64" {
+            "aarch64-apple-macosx"
+        } else {
+            "x86_64-apple-macosx"
+        }
     } else {
         "x86_64-unknown-linux-gnu"
     }
+}
+
+fn default_host_target_triple() -> &'static str {
+    host_target_triple_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
 impl Codegen {
@@ -308,6 +316,22 @@ impl Codegen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_target_triple_uses_macos_x86_64_when_requested() {
+        assert_eq!(
+            host_target_triple_for("macos", "x86_64"),
+            "x86_64-apple-macosx"
+        );
+    }
+
+    #[test]
+    fn host_target_triple_uses_macos_aarch64_when_requested() {
+        assert_eq!(
+            host_target_triple_for("macos", "aarch64"),
+            "aarch64-apple-macosx"
+        );
+    }
 
     #[test]
     fn emit_export_symbol_wrappers_skips_duplicates_and_self_exports() {

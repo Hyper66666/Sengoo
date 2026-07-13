@@ -79,7 +79,16 @@ fn tool_versions_share_workspace_version_and_hash() {
         assert_tool_manifest_uses_workspace_version(&root, tool);
 
         let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()))
-            .args(["run", "--quiet", "-p", tool, "--", "--version"])
+            .args([
+                "run",
+                "--quiet",
+                "-p",
+                tool,
+                "--bin",
+                tool,
+                "--",
+                "--version",
+            ])
             .current_dir(&root)
             .output()
             .unwrap_or_else(|err| panic!("failed to run {tool} --version through cargo: {err}"));

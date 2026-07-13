@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const CONFORMANCE_RUN_MODES: &[&[&str]] = &[&[], &["--debug-info"]];
+
 fn sgc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
 }
@@ -15,12 +17,23 @@ fn workspace_root() -> PathBuf {
 
 fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_stdout: &str) {
     let path = workspace_root().join(relative_path);
-    let output = Command::new(sgc())
-        .arg("run")
-        .arg(&path)
-        .arg("--force-rebuild")
-        .output()
-        .unwrap_or_else(|err| panic!("failed to run sgc for {tag} ({relative_path}): {err}"));
+    let outputs = CONFORMANCE_RUN_MODES
+        .iter()
+        .map(|mode_args| {
+            Command::new(sgc())
+                .arg("run")
+                .arg(&path)
+                .arg("--force-rebuild")
+                .args(*mode_args)
+                .output()
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "failed to run sgc for {tag} ({relative_path}) with {mode_args:?}: {err}"
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    let output = &outputs[0];
 
     assert_eq!(
         output.status.code(),
@@ -37,6 +50,24 @@ fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_st
             "{tag} ({relative_path}) did not print expected line {expected_stdout:?}\nstdout:\n{}\nstderr:\n{}",
             stdout,
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    for (mode_args, mode_output) in CONFORMANCE_RUN_MODES.iter().zip(&outputs).skip(1) {
+        assert_eq!(
+            mode_output.status.code(),
+            output.status.code(),
+            "{tag} ({relative_path}) exit differs for {mode_args:?}\ndefault stdout:\n{}\nmode stdout:\n{}\nmode stderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&mode_output.stdout),
+            String::from_utf8_lossy(&mode_output.stderr)
+        );
+        assert_eq!(
+            mode_output.stdout,
+            output.stdout,
+            "{tag} ({relative_path}) stdout differs for {mode_args:?}\ndefault stderr:\n{}\nmode stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&mode_output.stderr)
         );
     }
 }
@@ -124,4 +155,11 @@ fn core_conformance_examples_are_real_workspace_paths() {
             "core conformance case must exist: {relative_path}"
         );
     }
+}
+
+#[test]
+fn core_conformance_run_modes_include_debug_info() {
+    let expected: &[&[&str]] = &[&[], &["--debug-info"]];
+
+    assert_eq!(CONFORMANCE_RUN_MODES, expected);
 }

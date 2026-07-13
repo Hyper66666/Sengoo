@@ -24,8 +24,10 @@ Phase 0 integration and whenever a child change archives.
 - Eight linked worktrees were inspected. Three only contain untracked
   `Cargo.lock` files, one contains two generated baseline logs, and one old
   `async-native-execution-sync` worktree contains 21 source/OpenSpec entries.
-  That async worktree remains preserved pending an equivalence audit against
-  the newer async implementation; it is not silently treated as integrated.
+  An equivalence audit found no unique required capability there: its eager
+  start/always-ready poll model and async-block rejection are superseded by the
+  current frame-backed scheduler implementation and stronger passing tests.
+  The worktree remains preserved, but none of its changes should be imported.
 - Workspace version remains `0.1.0`; no repository release tag is present.
 
 The source branch is integrated and reviewable, but host/release evidence and

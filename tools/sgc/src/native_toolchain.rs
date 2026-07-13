@@ -483,6 +483,16 @@ pub(crate) fn append_native_runtime_inputs(
     Ok(())
 }
 
+fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
+    if target.triple.ends_with("-apple-macosx") {
+        vec!["-framework", "Security", "-framework", "CoreFoundation"]
+    } else if target.is_linux_gnu() {
+        vec!["-lm"]
+    } else {
+        Vec::new()
+    }
+}
+
 fn link_cross_target(
     clang_exe: &str,
     object_paths: &[PathBuf],
@@ -501,6 +511,9 @@ fn link_cross_target(
         command.arg(object);
     }
     append_native_library_link_args(&mut command, native_link_libraries, target, &search_paths);
+    for arg in platform_linker_args(target) {
+        command.arg(arg);
+    }
     command.arg("-o").arg(executable_path);
     let status = command
         .status()
@@ -908,6 +921,9 @@ fn run_link_command(
         clang_cmd.arg(object);
     }
     append_native_library_link_args(&mut clang_cmd, native_link_libraries, target, &search_paths);
+    for arg in platform_linker_args(target) {
+        clang_cmd.arg(arg);
+    }
     clang_cmd.arg("-o").arg(executable_path);
     clang_cmd
         .status()
@@ -1396,5 +1412,24 @@ mod tests {
 
         std::env::remove_var("SENGOO_WINDOWS_SDK_ROOT");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn native_link_adds_macos_security_and_corefoundation_frameworks() {
+        let target = NativeBuildTarget {
+            triple: "aarch64-apple-macosx".to_string(),
+        };
+        assert_eq!(
+            platform_linker_args(&target),
+            vec!["-framework", "Security", "-framework", "CoreFoundation"]
+        );
+    }
+
+    #[test]
+    fn native_link_adds_libm_for_linux_targets() {
+        let target = NativeBuildTarget {
+            triple: crate::cross_compile::REFERENCE_TARGET_LINUX_GNU.to_string(),
+        };
+        assert_eq!(platform_linker_args(&target), vec!["-lm"]);
     }
 }

@@ -29,11 +29,18 @@
 - [ ] 3.2 macOS channel (arm64 + x86_64) artifacts.
   - Native `macos-15` arm64 and `macos-15-intel` x64 jobs are configured;
     keep open until the remote matrix produces and installs both archives.
+  - Local code now selects the LLVM host triple from macOS `target_arch` and
+    links Security/CoreFoundation; focused compiler/sgc tests pass. Artifact
+    production remains a remote-host acceptance requirement.
 - [x] 3.3 One-command installer / version manager.
   - Both installers select a pinned version, auto-detect architecture, verify
     SHA-256, and support explicit repeatable upgrades without auto-update.
 - [ ] 3.4 Release smoke matrix per platform (install -> `sgc run hello`).
-  - Four-platform workflow is implemented; remote macOS evidence is pending.
+  - Four-platform workflow is implemented. Native linking now supplies Linux
+    `libm` and the macOS system frameworks, while the Windows async mutex
+    compatibility wrapper returns its written value and its locked fixture
+    passes. Keep open until one remote four-host run reaches package, install,
+    and installed hello on every job.
 
 ## 4. Release process and docs
 

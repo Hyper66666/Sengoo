@@ -54,8 +54,12 @@
 
 ## 3. Phase 2 - external adoption and release
 
-- [ ] 3.1 Reconcile implemented sgpm registry/package-graph behavior with
+- [x] 3.1 Reconcile implemented sgpm registry/package-graph behavior with
   `package-registry-and-distribution` before adding more resolver code.
+  - The audit confirms the registry server, remote publish, hash-locked cache,
+    aliases, multiversion resolution, yank handling, and reference-server e2e
+    are implemented. Remaining child tasks are cross-host artifacts and install
+    evidence, not more resolver breadth.
 - [ ] 3.2 Complete and archive `package-registry-and-distribution`.
 - [ ] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
   reference registry, including checksum mismatch, yank, alias, multiversion,

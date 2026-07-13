@@ -8,6 +8,20 @@ pub const REFERENCE_TARGET_LINUX_GNU: &str = "x86_64-unknown-linux-gnu";
 
 pub const REFERENCE_TARGETS: &[&str] = &[REFERENCE_TARGET_WINDOWS_MSVC, REFERENCE_TARGET_LINUX_GNU];
 
+fn host_triple_for(target_os: &str, target_arch: &str) -> &'static str {
+    if target_os == "windows" {
+        REFERENCE_TARGET_WINDOWS_MSVC
+    } else if target_os == "macos" {
+        if target_arch == "aarch64" {
+            "aarch64-apple-macosx"
+        } else {
+            "x86_64-apple-macosx"
+        }
+    } else {
+        REFERENCE_TARGET_LINUX_GNU
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeBuildTarget {
     pub(crate) triple: String,
@@ -72,13 +86,7 @@ impl NativeBuildTarget {
 }
 
 pub(crate) fn host_triple() -> &'static str {
-    if cfg!(target_os = "windows") {
-        REFERENCE_TARGET_WINDOWS_MSVC
-    } else if cfg!(target_os = "macos") {
-        "x86_64-apple-macosx"
-    } else {
-        REFERENCE_TARGET_LINUX_GNU
-    }
+    host_triple_for(std::env::consts::OS, std::env::consts::ARCH)
 }
 
 pub(crate) fn linux_sysroot_from_env() -> Result<String> {
@@ -115,6 +123,16 @@ pub(crate) fn windows_cross_sdk_include_paths() -> Result<Vec<std::path::PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_compile_host_triple_uses_macos_x86_64_when_requested() {
+        assert_eq!(host_triple_for("macos", "x86_64"), "x86_64-apple-macosx");
+    }
+
+    #[test]
+    fn cross_compile_host_triple_uses_macos_aarch64_when_requested() {
+        assert_eq!(host_triple_for("macos", "aarch64"), "aarch64-apple-macosx");
+    }
 
     #[test]
     fn cross_compile_rejects_unsupported_target_triple() {
