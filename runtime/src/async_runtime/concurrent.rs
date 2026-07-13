@@ -1470,10 +1470,10 @@ enum RwLockGuardKind {
 struct AsyncRwLockInner {
     readers: usize,
     writer: bool,
-    value: i64,
     closed: bool,
     next_guard_id: i64,
     guards: HashMap<i64, RwLockGuardKind>,
+    payload: OwnedDescriptorValue,
 }
 
 struct AsyncRwLockState {
@@ -1495,15 +1495,27 @@ fn allocate_rwlock_guard_id(inner: &mut AsyncRwLockInner) -> i64 {
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_async_rwlock_new_i64(value: i64) -> i64 {
+/// # Safety
+///
+/// `descriptor` must describe the owned payload pointed to by `value`.
+pub unsafe extern "C" fn sengoo_async_rwlock_new(
+    descriptor: *const SengooTypeDescriptor,
+    value: *mut c_void,
+) -> i64 {
+    let Some(descriptor) = descriptor.as_ref() else {
+        return 0;
+    };
+    let Some(payload) = OwnedDescriptorValue::new(descriptor, value) else {
+        return 0;
+    };
     let state = AsyncRwLockState {
         inner: Arc::new(Mutex::new(AsyncRwLockInner {
             readers: 0,
             writer: false,
-            value,
             closed: false,
             next_guard_id: 1,
             guards: HashMap::new(),
+            payload,
         })),
     };
     Box::into_raw(Box::new(state)) as i64
@@ -1512,7 +1524,31 @@ pub extern "C" fn sengoo_async_rwlock_new_i64(value: i64) -> i64 {
 #[no_mangle]
 /// # Safety
 ///
-/// `handle` must be a live handle returned by [`sengoo_async_rwlock_new_i64`].
+/// `value` must point to an owned payload compatible with the supplied parts.
+pub unsafe extern "C" fn sengoo_async_rwlock_new_parts(
+    value: *mut c_void,
+    size: i64,
+    align: i64,
+    move_value: Option<SengooMoveFn>,
+    drop_value: Option<SengooDropFn>,
+) -> i64 {
+    let Some(descriptor) = descriptor_from_parts(size, align, move_value, drop_value) else {
+        return 0;
+    };
+    unsafe { sengoo_async_rwlock_new(&descriptor, value) }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_rwlock_new_i64(value: i64) -> i64 {
+    let descriptor = scalar_i64_descriptor();
+    let mut slot = value;
+    unsafe { sengoo_async_rwlock_new(&descriptor, (&mut slot as *mut i64).cast::<c_void>()) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be a live handle returned by [`sengoo_async_rwlock_new`].
 pub unsafe extern "C" fn sengoo_async_rwlock_close(handle: i64) {
     let Some(state) = handle_ref::<AsyncRwLockState>(handle) else {
         return;
@@ -1525,7 +1561,7 @@ pub unsafe extern "C" fn sengoo_async_rwlock_close(handle: i64) {
 #[no_mangle]
 /// # Safety
 ///
-/// `handle` must be a live handle returned by [`sengoo_async_rwlock_new_i64`]
+/// `handle` must be a live handle returned by [`sengoo_async_rwlock_new`]
 /// and no guard may outlive this call.
 pub unsafe extern "C" fn sengoo_async_rwlock_drop(handle: i64) {
     let Some(state) = handle_take_box::<AsyncRwLockState>(handle) else {
@@ -1538,7 +1574,7 @@ pub unsafe extern "C" fn sengoo_async_rwlock_drop(handle: i64) {
 }
 
 #[no_mangle]
-/// Attempts to acquire a scalar read guard without blocking.
+/// Attempts to acquire a generic read guard without blocking.
 ///
 /// Returns a positive guard token on success, `-STATUS_LOCK_UNAVAILABLE` when a
 /// writer owns the lock, or `-STATUS_INVALID_HANDLE` for a closed/invalid lock.
@@ -1546,8 +1582,8 @@ pub unsafe extern "C" fn sengoo_async_rwlock_drop(handle: i64) {
 /// # Safety
 ///
 /// `lock_handle` must be a live handle returned by
-/// [`sengoo_async_rwlock_new_i64`].
-pub unsafe extern "C" fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i64 {
+/// [`sengoo_async_rwlock_new`].
+pub unsafe extern "C" fn sengoo_async_rwlock_try_read(lock_handle: i64) -> i64 {
     let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
         return -STATUS_INVALID_HANDLE;
     };
@@ -1567,7 +1603,7 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i
 }
 
 #[no_mangle]
-/// Attempts to acquire a scalar write guard without blocking.
+/// Attempts to acquire a generic write guard without blocking.
 ///
 /// Returns a positive guard token on success, `-STATUS_LOCK_UNAVAILABLE` while
 /// any reader or writer owns the lock, or `-STATUS_INVALID_HANDLE` for a
@@ -1576,8 +1612,8 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i
 /// # Safety
 ///
 /// `lock_handle` must be a live handle returned by
-/// [`sengoo_async_rwlock_new_i64`].
-pub unsafe extern "C" fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> i64 {
+/// [`sengoo_async_rwlock_new`].
+pub unsafe extern "C" fn sengoo_async_rwlock_try_write(lock_handle: i64) -> i64 {
     let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
         return -STATUS_INVALID_HANDLE;
     };
@@ -1596,13 +1632,33 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> 
     guard_id
 }
 
-fn rwlock_guard_value(
+fn rwlock_guard_copy_into(
     state: &AsyncRwLockState,
     guard_id: i64,
     expected: RwLockGuardKind,
-) -> Option<i64> {
-    let inner = state.inner.lock().ok()?;
-    (inner.guards.get(&guard_id) == Some(&expected)).then_some(inner.value)
+    output: *mut c_void,
+    size: i64,
+) -> i64 {
+    if output.is_null() || size <= 0 {
+        return -STATUS_INVALID_ARGUMENT;
+    }
+    let Ok(inner) = state.inner.lock() else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    if inner.guards.get(&guard_id) != Some(&expected) {
+        return -STATUS_INVALID_HANDLE;
+    }
+    if size as usize != inner.payload.descriptor.size {
+        return -STATUS_INVALID_ARGUMENT;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            inner.payload.as_ptr().cast::<u8>(),
+            output.cast::<u8>(),
+            size as usize,
+        );
+    }
+    0
 }
 
 fn rwlock_guard_unlock(state: &AsyncRwLockState, guard_id: i64, expected: RwLockGuardKind) -> i64 {
@@ -1625,51 +1681,76 @@ fn rwlock_guard_unlock(state: &AsyncRwLockState, guard_id: i64, expected: RwLock
 ///
 /// `lock_handle` must identify a live rwlock and `guard_id` must identify one
 /// of its active read guards.
-pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_get_i64(
+pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_copy_into(
     lock_handle: i64,
     guard_id: i64,
-) -> i64 {
-    let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
-        return 0;
-    };
-    rwlock_guard_value(state, guard_id, RwLockGuardKind::Read).unwrap_or(0)
-}
-
-#[no_mangle]
-/// # Safety
-///
-/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
-/// of its active write guards.
-pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_get_i64(
-    lock_handle: i64,
-    guard_id: i64,
-) -> i64 {
-    let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
-        return 0;
-    };
-    rwlock_guard_value(state, guard_id, RwLockGuardKind::Write).unwrap_or(0)
-}
-
-#[no_mangle]
-/// # Safety
-///
-/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
-/// of its active write guards.
-pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_set_i64(
-    lock_handle: i64,
-    guard_id: i64,
-    value: i64,
+    output: *mut c_void,
+    size: i64,
 ) -> i64 {
     let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
         return -STATUS_INVALID_HANDLE;
     };
-    let Ok(mut inner) = state.inner.lock() else {
+    rwlock_guard_copy_into(state, guard_id, RwLockGuardKind::Read, output, size)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
+/// of its active write guards.
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_copy_into(
+    lock_handle: i64,
+    guard_id: i64,
+    output: *mut c_void,
+    size: i64,
+) -> i64 {
+    let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    rwlock_guard_copy_into(state, guard_id, RwLockGuardKind::Write, output, size)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
+/// of its active write guards. When `value` is non-null and `drop_value` is
+/// present, this function always consumes the payload: successful replacement
+/// moves it into the lock and every failure path drops it through `drop_value`.
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_set(
+    lock_handle: i64,
+    guard_id: i64,
+    value: *mut c_void,
+    drop_value: Option<SengooDropFn>,
+) -> i64 {
+    if value.is_null() {
+        return -STATUS_INVALID_ARGUMENT;
+    }
+    let Some(drop_value) = drop_value else {
+        return -STATUS_INVALID_ARGUMENT;
+    };
+    let Some(state) = handle_ref::<AsyncRwLockState>(lock_handle) else {
+        drop_value(value);
+        return -STATUS_INVALID_HANDLE;
+    };
+    let Ok(inner) = state.inner.lock() else {
+        drop_value(value);
         return -STATUS_INVALID_HANDLE;
     };
     if inner.guards.get(&guard_id) != Some(&RwLockGuardKind::Write) {
+        drop_value(value);
         return -STATUS_INVALID_HANDLE;
     }
-    inner.value = value;
+    inner
+        .payload
+        .descriptor
+        .drop_value
+        .expect("validated descriptor keeps drop")(inner.payload.as_ptr());
+    inner
+        .payload
+        .descriptor
+        .move_value
+        .expect("validated descriptor keeps move")(inner.payload.as_ptr(), value);
     0
 }
 
@@ -1678,7 +1759,7 @@ pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_set_i64(
 ///
 /// `lock_handle` must identify a live rwlock. Releasing an already released or
 /// mismatched guard token safely returns `-STATUS_INVALID_HANDLE`.
-pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_unlock_i64(
+pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_unlock(
     lock_handle: i64,
     guard_id: i64,
 ) -> i64 {
@@ -1693,7 +1774,7 @@ pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_unlock_i64(
 ///
 /// `lock_handle` must identify a live rwlock. Releasing an already released or
 /// mismatched guard token safely returns `-STATUS_INVALID_HANDLE`.
-pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_unlock_i64(
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_unlock(
     lock_handle: i64,
     guard_id: i64,
 ) -> i64 {
@@ -1701,6 +1782,117 @@ pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_unlock_i64(
         return -STATUS_INVALID_HANDLE;
     };
     rwlock_guard_unlock(state, guard_id, RwLockGuardKind::Write)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
+/// of its active read guards.
+pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_get_i64(
+    lock_handle: i64,
+    guard_id: i64,
+) -> i64 {
+    let mut value = 0_i64;
+    if unsafe {
+        sengoo_async_rwlock_read_guard_copy_into(
+            lock_handle,
+            guard_id,
+            (&mut value as *mut i64).cast::<c_void>(),
+            std::mem::size_of::<i64>() as i64,
+        )
+    } == 0
+    {
+        value
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
+/// of its active write guards.
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_get_i64(
+    lock_handle: i64,
+    guard_id: i64,
+) -> i64 {
+    let mut value = 0_i64;
+    if unsafe {
+        sengoo_async_rwlock_write_guard_copy_into(
+            lock_handle,
+            guard_id,
+            (&mut value as *mut i64).cast::<c_void>(),
+            std::mem::size_of::<i64>() as i64,
+        )
+    } == 0
+    {
+        value
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock and `guard_id` must identify one
+/// of its active write guards.
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_set_i64(
+    lock_handle: i64,
+    guard_id: i64,
+    value: i64,
+) -> i64 {
+    let mut slot = value;
+    unsafe {
+        sengoo_async_rwlock_write_guard_set(
+            lock_handle,
+            guard_id,
+            (&mut slot as *mut i64).cast::<c_void>(),
+            Some(sengoo_scalar_drop_i64),
+        )
+    }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must be a live handle returned by [`sengoo_async_rwlock_new`].
+pub unsafe extern "C" fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_try_read(lock_handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must be a live handle returned by [`sengoo_async_rwlock_new`].
+pub unsafe extern "C" fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_try_write(lock_handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock. Releasing an already released or
+/// mismatched guard token safely returns `-STATUS_INVALID_HANDLE`.
+pub unsafe extern "C" fn sengoo_async_rwlock_read_guard_unlock_i64(
+    lock_handle: i64,
+    guard_id: i64,
+) -> i64 {
+    unsafe { sengoo_async_rwlock_read_guard_unlock(lock_handle, guard_id) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `lock_handle` must identify a live rwlock. Releasing an already released or
+/// mismatched guard token safely returns `-STATUS_INVALID_HANDLE`.
+pub unsafe extern "C" fn sengoo_async_rwlock_write_guard_unlock_i64(
+    lock_handle: i64,
+    guard_id: i64,
+) -> i64 {
+    unsafe { sengoo_async_rwlock_write_guard_unlock(lock_handle, guard_id) }
 }
 
 pub(crate) fn retain_native_bridge_exports_for_linker() {
@@ -1771,14 +1963,23 @@ pub(crate) fn retain_native_bridge_exports_for_linker() {
         export_addr!(sengoo_async_mutex_guard_get_i64),
         export_addr!(sengoo_async_mutex_guard_set_i64),
         export_addr!(sengoo_async_mutex_guard_unlock_i64),
+        export_addr!(sengoo_async_rwlock_new),
+        export_addr!(sengoo_async_rwlock_new_parts),
         export_addr!(sengoo_async_rwlock_new_i64),
         export_addr!(sengoo_async_rwlock_close),
         export_addr!(sengoo_async_rwlock_drop),
+        export_addr!(sengoo_async_rwlock_try_read),
+        export_addr!(sengoo_async_rwlock_try_write),
         export_addr!(sengoo_async_rwlock_try_read_i64),
         export_addr!(sengoo_async_rwlock_try_write_i64),
+        export_addr!(sengoo_async_rwlock_read_guard_copy_into),
+        export_addr!(sengoo_async_rwlock_write_guard_copy_into),
         export_addr!(sengoo_async_rwlock_read_guard_get_i64),
         export_addr!(sengoo_async_rwlock_write_guard_get_i64),
+        export_addr!(sengoo_async_rwlock_write_guard_set),
         export_addr!(sengoo_async_rwlock_write_guard_set_i64),
+        export_addr!(sengoo_async_rwlock_read_guard_unlock),
+        export_addr!(sengoo_async_rwlock_write_guard_unlock),
         export_addr!(sengoo_async_rwlock_read_guard_unlock_i64),
         export_addr!(sengoo_async_rwlock_write_guard_unlock_i64),
     ];

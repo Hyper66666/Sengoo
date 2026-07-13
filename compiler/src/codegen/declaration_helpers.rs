@@ -978,6 +978,22 @@ impl Codegen {
                 "sengoo_async_mutex_guard_set",
                 "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
             ),
+            (
+                "sengoo_async_rwlock_new_parts",
+                "declare i64 @sengoo_async_rwlock_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_rwlock_read_guard_copy_into",
+                "declare i64 @sengoo_async_rwlock_read_guard_copy_into(i64, i64, i8*, i64)\n",
+            ),
+            (
+                "sengoo_async_rwlock_write_guard_copy_into",
+                "declare i64 @sengoo_async_rwlock_write_guard_copy_into(i64, i64, i8*, i64)\n",
+            ),
+            (
+                "sengoo_async_rwlock_write_guard_set",
+                "declare i64 @sengoo_async_rwlock_write_guard_set(i64, i64, i8*, void (i8*)*)\n",
+            ),
         ]
         .into_iter()
         .filter(|(name, _)| {
@@ -1196,6 +1212,10 @@ mod tests {
             "sengoo_async_mutex_new_parts",
             "sengoo_async_mutex_guard_copy_into",
             "sengoo_async_mutex_guard_set",
+            "sengoo_async_rwlock_new_parts",
+            "sengoo_async_rwlock_read_guard_copy_into",
+            "sengoo_async_rwlock_write_guard_copy_into",
+            "sengoo_async_rwlock_write_guard_set",
         ] {
             let destination = mir_fn.add_local(LocalKind::Temp, crate::mir::MIR_I64);
             mir_fn.push_inst_to_block(
@@ -1217,6 +1237,10 @@ mod tests {
             "declare i64 @sengoo_async_mutex_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
             "declare i64 @sengoo_async_mutex_guard_copy_into(i64, i8*, i64)\n",
             "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_rwlock_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_rwlock_read_guard_copy_into(i64, i64, i8*, i64)\n",
+            "declare i64 @sengoo_async_rwlock_write_guard_copy_into(i64, i64, i8*, i64)\n",
+            "declare i64 @sengoo_async_rwlock_write_guard_set(i64, i64, i8*, void (i8*)*)\n",
         ] {
             assert_eq!(cg.declarations.matches(declaration).count(), 1);
         }

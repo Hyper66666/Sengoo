@@ -46,10 +46,11 @@
     `MutexGuard<T>` with async acquisition, Copy-only reads, owned replacement,
     and automatic scope-exit unlock. Runtime and native tests cover arbitrary
     payload Drop, fresh lock acquisition, failed-lock cleanup, duplicate unlock
-    rejection, and public `Arc<Mutex<i64>>` worker composition. The scalar
-    transition surface still provides `RwLockI64` read/write guards and handoff
-    coverage. Generic `RwLock<T>`, async rwlock waiting, and compiler-enforced
-    lock-outlives-guard lifetimes remain open.
+    rejection, and public `Arc<Mutex<i64>>` worker composition. Descriptor-backed
+    `RwLock<T>` now provides multiple read guards, an exclusive write guard,
+    Copy-only reads, owned replacement, exact payload Drop, and automatic guard
+    unlock while preserving `RwLockI64` wrappers. Async rwlock waiting and
+    compiler-enforced lock-outlives-guard lifetimes remain open.
 - [x] 2.3 Tests: shared counter across threads via `Arc<Mutex<...>>`.
   - `runtime/src/async_runtime.rs::concurrent_shared_counter_joins_workers_deterministically`
     submits eight jobs to four workers against a real `Arc<Mutex<i64>>` payload

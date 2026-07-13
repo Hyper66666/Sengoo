@@ -4836,6 +4836,72 @@ def main() -> i64 {
 }
 
 #[test]
+fn async_stdlib_generic_rwlock_guards_release_and_write_back_on_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-guards",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+def read_pair(lock: &RwLock<Payload>) -> i64 {
+    let first_result = rwlock_try_read_guard(lock);
+    if !first_result.is_ok { return first_result.error; }
+    let first = first_result.value;
+    let second_result = rwlock_try_read_guard(lock);
+    if !second_result.is_ok { return second_result.error; }
+    let second = second_result.value;
+    let mut left = Payload { value: 0 };
+    let mut right = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&first, &mut left) { return 80; }
+    if !rwlock_read_guard_copy_into(&second, &mut right) { return 81; }
+    left.value + right.value
+}
+
+def write_value(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = rwlock_try_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let replacement = Payload { value: value };
+    let wrote = guard.set(replacement);
+    if !wrote { return 82; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 83; }
+    output.value
+}
+
+def read_value(lock: &RwLock<Payload>) -> i64 {
+    let result = rwlock_try_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 84; }
+    output.value
+}
+
+def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = read_pair(&lock);
+    let wrote = write_value(&lock, 17);
+    let after = read_value(&lock);
+    if before == 10 && wrote == 17 && after == 17 { 42 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;
