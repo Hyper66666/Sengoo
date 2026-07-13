@@ -819,6 +819,52 @@ impl TypeChecker {
             return Ok(self.env.int_ty(IntKind::I64));
         }
 
+        if builtin_name == Some("scope_spawn") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "scope_spawn is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+            let scope_ty = self.check_expr(&args[0])?;
+            let valid_scope = matches!(
+                &scope_ty.kind,
+                TyKind::Ref(_, inner)
+                    if matches!(&inner.kind, TyKind::Adt { name, .. } if name == "TaskScope")
+            );
+            if !valid_scope {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a borrowed TaskScope as its first argument".to_string(),
+                ));
+            }
+            let future_ty = self.check_expr(&args[1])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a Future value".to_string(),
+                ));
+            }
+            self.check_spawn_future_send("scope_spawn", &args[1])?;
+            return Ok(self.env.int_ty(IntKind::I64));
+        }
+
+        if builtin_name == Some("task_scope") {
+            if !args.is_empty() {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 0,
+                    found: args.len(),
+                });
+            }
+            return Ok(self.env.new_ty(TyKind::Adt {
+                name: "TaskScope".to_string(),
+                args: Vec::new(),
+            }));
+        }
+
         if builtin_name == Some("sleep") {
             if self.async_context_depth == 0 {
                 return Err(TypeckError::Other(

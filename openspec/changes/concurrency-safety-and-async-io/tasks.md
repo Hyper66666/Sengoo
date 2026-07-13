@@ -113,9 +113,20 @@
     value handles, and exact Drop. Compiler tests cover typed lowering plus
     public and raw `!Send` rejection, and a native `sgc` round trip moves a
     user-defined payload through the complete runtime ABI.
-- [ ] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
+- [x] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
   scope exit).
-- [ ] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.
+  - Frozen API: `task_scope()` returns a compiler-known `TaskScope` guard and
+    `scope_spawn(&scope, direct_send_future)` returns only `1`/`0`, never an
+    escaping child ID. Normal lexical fallthrough joins; early exits cancel then
+    join through idempotent Drop. `TaskScope` return, aggregate field, and local
+    aggregate escape is a compile-time error.
+- [x] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.
+  - Compiler tests cover normal join plus `return`/`?`/loop-exit cancellation
+    shape and reject scope forging/escape. Runtime tests cover normal and early
+    exact cleanup, rejected-frame cleanup, one-worker nested-scope progress,
+    and 100-scope stress with no live scope or executor task. Native `sgc`
+    covers the complete stdlib/compiler/runtime path; existing generic channel
+    ownership and cancellation coverage remains green.
 
 ## 6. Docs and matrix
 

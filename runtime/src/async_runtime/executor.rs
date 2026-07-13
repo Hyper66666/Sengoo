@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,6 +22,10 @@ static RETIRED_STATUSES: LazyLock<Mutex<RetiredTaskStatuses>> =
     LazyLock::new(|| Mutex::new(RetiredTaskStatuses::new(RETIRED_STATUS_CAPACITY)));
 #[cfg(test)]
 pub(crate) static EXECUTOR_TEST_GUARD: Mutex<()> = Mutex::new(());
+
+thread_local! {
+    static CURRENT_EXECUTOR_WORKER: Cell<Option<usize>> = const { Cell::new(None) };
+}
 
 struct RetiredTaskStatuses {
     capacity: usize,
@@ -299,6 +304,51 @@ pub(crate) fn is_enabled() -> bool {
         .is_some()
 }
 
+#[cfg(test)]
+pub(crate) fn active_task_count() -> usize {
+    EXECUTOR
+        .lock()
+        .expect("global executor mutex poisoned")
+        .as_ref()
+        .map_or(0, |executor| {
+            executor
+                .shared
+                .state
+                .lock()
+                .expect("executor state poisoned")
+                .active
+        })
+}
+
+#[cfg(test)]
+fn spawn_test_task<T>(task: T) -> i64
+where
+    T: CoroutineTask + Send + 'static,
+{
+    EXECUTOR
+        .lock()
+        .expect("global executor mutex poisoned")
+        .as_ref()
+        .and_then(|executor| executor.spawn(task).ok())
+        .and_then(encode_task_id)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+fn force_finish_test_task(task_id: i64, status: TaskLifecycleStatus) {
+    let Some(task_id) = decode_task_id(task_id) else {
+        return;
+    };
+    let shared = EXECUTOR
+        .lock()
+        .expect("global executor mutex poisoned")
+        .as_ref()
+        .map(|executor| executor.shared.clone());
+    if let Some(shared) = shared {
+        finish_task(&shared, task_id, status);
+    }
+}
+
 pub(crate) fn spawn_detached(kind: i64, handle: i64) -> i64 {
     let executor = EXECUTOR.lock().expect("global executor mutex poisoned");
     let Some(executor) = executor.as_ref() else {
@@ -438,6 +488,20 @@ fn notify_all_workers(shared: &ExecutorShared) {
 }
 
 fn join_shared(shared: &ExecutorShared, task_id: TaskId) -> TaskLifecycleStatus {
+    let current_worker = CURRENT_EXECUTOR_WORKER.with(Cell::get);
+    if let Some(worker_index) = current_worker {
+        let target_worker = shared
+            .state
+            .lock()
+            .expect("executor state poisoned")
+            .controls
+            .get(&task_id)
+            .map(|control| control.worker_index);
+        if target_worker == Some(worker_index) {
+            return help_join_on_worker(shared, task_id, worker_index);
+        }
+    }
+
     let mut state = shared.state.lock().expect("executor state poisoned");
     loop {
         let status = state
@@ -452,6 +516,42 @@ fn join_shared(shared: &ExecutorShared, task_id: TaskId) -> TaskLifecycleStatus 
             .task_finished
             .wait(state)
             .expect("executor join wait poisoned");
+    }
+}
+
+fn help_join_on_worker(
+    shared: &ExecutorShared,
+    task_id: TaskId,
+    worker_index: usize,
+) -> TaskLifecycleStatus {
+    loop {
+        let mut state = shared.state.lock().expect("executor state poisoned");
+        let status = state
+            .statuses
+            .get(&task_id)
+            .copied()
+            .unwrap_or(TaskLifecycleStatus::Unknown);
+        if status != TaskLifecycleStatus::Pending {
+            return status;
+        }
+
+        let (queued, delay) = next_ready_task(&mut state, worker_index);
+        if let Some(queued) = queued {
+            drop(state);
+            poll_task(shared, queued);
+            continue;
+        }
+        if let Some(delay) = delay {
+            let _state = shared.worker_ready[worker_index]
+                .wait_timeout(state, delay.min(IDLE_REPOLL_DELAY))
+                .expect("executor nested join wait poisoned")
+                .0;
+        } else {
+            let _state = shared
+                .task_finished
+                .wait(state)
+                .expect("executor nested join completion wait poisoned");
+        }
     }
 }
 
@@ -483,6 +583,15 @@ fn next_ready_task(
 }
 
 fn worker_loop(shared: Arc<ExecutorShared>, worker_index: usize) {
+    struct WorkerContextReset;
+    impl Drop for WorkerContextReset {
+        fn drop(&mut self) {
+            CURRENT_EXECUTOR_WORKER.with(|current| current.set(None));
+        }
+    }
+    CURRENT_EXECUTOR_WORKER.with(|current| current.set(Some(worker_index)));
+    let _reset = WorkerContextReset;
+
     loop {
         let queued = {
             let mut state = shared.state.lock().expect("executor state poisoned");
@@ -593,6 +702,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, Condvar, Mutex};
+    use std::time::{Duration, Instant};
 
     use super::{
         ConcurrentExecutor, ConcurrentShutdownMode, ConcurrentSubmitError, RetiredTaskStatuses,
@@ -605,6 +715,59 @@ mod tests {
         fn poll(&mut self) -> TaskState {
             TaskState::Complete
         }
+    }
+
+    struct NestedJoinTask {
+        child_id: Arc<std::sync::atomic::AtomicI64>,
+        observed: Arc<std::sync::atomic::AtomicI64>,
+    }
+
+    impl CoroutineTask for NestedJoinTask {
+        fn poll(&mut self) -> TaskState {
+            let child = super::spawn_test_task(ReadyTask);
+            self.child_id.store(child, Ordering::Release);
+            self.observed
+                .store(super::join(child) as i64, Ordering::Release);
+            TaskState::Complete
+        }
+    }
+
+    #[test]
+    fn executor_worker_helps_its_affinity_queue_while_joining_child() {
+        let _guard = super::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        super::shutdown(ConcurrentShutdownMode::Cancel);
+        assert_eq!(super::enable(1, 4), Ok(1));
+
+        let child_id = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let observed = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let parent = super::spawn_test_task(NestedJoinTask {
+            child_id: child_id.clone(),
+            observed: observed.clone(),
+        });
+        let watchdog = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(100);
+            let child = loop {
+                let child = child_id.load(Ordering::Acquire);
+                if child != 0 || Instant::now() >= deadline {
+                    break child;
+                }
+                std::thread::yield_now();
+            };
+            std::thread::sleep(Duration::from_millis(20));
+            if child != 0 {
+                super::force_finish_test_task(child, TaskLifecycleStatus::Canceled);
+            }
+        });
+
+        assert_eq!(super::join(parent), TaskLifecycleStatus::Completed);
+        watchdog.join().expect("watchdog should exit");
+        assert_eq!(
+            observed.load(Ordering::Acquire),
+            TaskLifecycleStatus::Completed as i64
+        );
+        super::shutdown(ConcurrentShutdownMode::Drain);
     }
 
     #[test]

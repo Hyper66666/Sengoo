@@ -179,16 +179,36 @@ impl Codegen {
 
     /// Declare the async spawn runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_spawn_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        for runtime_name in ["sengoo_async_spawn_raw", "sengoo_async_spawn_task_raw"] {
-            let declaration = format!("declare i64 @{runtime_name}(i64, i64)\n");
+        for (runtime_name, declaration) in [
+            (
+                "sengoo_async_spawn_raw",
+                "declare i64 @sengoo_async_spawn_raw(i64, i64)\n",
+            ),
+            (
+                "sengoo_async_spawn_task_raw",
+                "declare i64 @sengoo_async_spawn_task_raw(i64, i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_spawn_raw",
+                "declare i64 @sengoo_async_task_scope_spawn_raw(i64, i64, i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_join",
+                "declare i64 @sengoo_async_task_scope_join(i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_new",
+                "declare i64 @sengoo_async_task_scope_new()\n",
+            ),
+        ] {
             let needed = mir_fns.iter().any(|mir_fn| {
                 mir_fn.instructions.iter().any(|inst| match inst {
                     mir::Instruction::Call { func, .. } => func == runtime_name,
                     _ => false,
                 })
             });
-            if needed && !self.declarations.contains(&declaration) {
-                self.declarations.push_str(&declaration);
+            if needed && !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
             }
         }
     }

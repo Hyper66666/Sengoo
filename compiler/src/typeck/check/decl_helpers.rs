@@ -80,6 +80,7 @@ impl TypeChecker {
                 self.env.unit_ty()
             };
             Self::reject_escaping_lock_guard_return(fn_decl, &ret_ty)?;
+            Self::reject_escaping_task_scope_return(fn_decl, &ret_ty)?;
 
             self.validate_contracts_for_function(fn_decl, &ret_ty)?;
             self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
@@ -119,6 +120,7 @@ impl TypeChecker {
             self.env.unit_ty()
         };
         Self::reject_escaping_lock_guard_return(fn_decl, &ret_ty)?;
+        Self::reject_escaping_task_scope_return(fn_decl, &ret_ty)?;
         if Self::is_async_context_ty(&ret_ty) {
             return Err(CompileError::from(TypeckError::Other(
                 "AsyncContext is poll-scoped and cannot be returned".to_string(),
@@ -217,6 +219,33 @@ impl TypeChecker {
             | TyKind::Future(inner) => Self::ty_contains_lock_guard(inner),
             TyKind::Fn { params, ret, .. } => {
                 params.iter().any(Self::ty_contains_lock_guard) || Self::ty_contains_lock_guard(ret)
+            }
+            _ => false,
+        }
+    }
+
+    fn reject_escaping_task_scope_return(_fn_decl: &Function, ret_ty: &Ty) -> Result<()> {
+        if Self::ty_contains_task_scope(ret_ty) {
+            return Err(CompileError::from(TypeckError::Other(
+                "TaskScope cannot escape its lexical owner through a return type".to_string(),
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn ty_contains_task_scope(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, args } => {
+                name == "TaskScope" || args.iter().any(Self::ty_contains_task_scope)
+            }
+            TyKind::Tuple(items) => items.iter().any(Self::ty_contains_task_scope),
+            TyKind::Array(inner, _)
+            | TyKind::Slice(inner)
+            | TyKind::Ref(_, inner)
+            | TyKind::Ptr(inner)
+            | TyKind::Future(inner) => Self::ty_contains_task_scope(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::ty_contains_task_scope) || Self::ty_contains_task_scope(ret)
             }
             _ => false,
         }
@@ -388,6 +417,12 @@ impl TypeChecker {
                     "AsyncContext is poll-scoped and cannot be stored in a field".to_string(),
                 )));
             }
+            if Self::ty_contains_task_scope(&field_ty) {
+                return Err(CompileError::from(TypeckError::Other(
+                    "TaskScope cannot escape its lexical owner through an aggregate field"
+                        .to_string(),
+                )));
+            }
             let field_name = field
                 .name
                 .as_ref()
@@ -412,10 +447,22 @@ impl TypeChecker {
             for field in &variant.fields {
                 match field {
                     VariantField::Named(_, ty) => {
-                        self.check_type(ty)?;
+                        let field_ty = self.check_type(ty)?;
+                        if Self::ty_contains_task_scope(&field_ty) {
+                            return Err(CompileError::from(TypeckError::Other(
+                                "TaskScope cannot escape its lexical owner through an aggregate field"
+                                    .to_string(),
+                            )));
+                        }
                     }
                     VariantField::Unnamed(ty) => {
-                        self.check_type(ty)?;
+                        let field_ty = self.check_type(ty)?;
+                        if Self::ty_contains_task_scope(&field_ty) {
+                            return Err(CompileError::from(TypeckError::Other(
+                                "TaskScope cannot escape its lexical owner through an aggregate field"
+                                    .to_string(),
+                            )));
+                        }
                     }
                 }
             }
@@ -481,6 +528,11 @@ impl TypeChecker {
         } else {
             self.env.unit_ty()
         };
+        if Self::ty_contains_task_scope(&ret_ty) {
+            return Err(CompileError::from(TypeckError::Other(
+                "TaskScope cannot escape its lexical owner through a return type".to_string(),
+            )));
+        }
 
         self.expected_return_types.push(ret_ty.clone());
         let body_result = self.check_function_body_block(&method.body);

@@ -118,6 +118,30 @@ escape hatch.
 return/error/panic cancels then joins them. Children cannot escape the scope,
 and scope teardown has a bounded diagnostic timeout in tests.
 
+The v1 source shape is deliberately small:
+
+```sengoo
+let scope = task_scope();
+let accepted = scope_spawn(&scope, child());
+```
+
+`TaskScope` is an owned, non-`Send`, non-`Sync` compiler-known guard. Its lexical
+owner must be introduced directly by `let scope = task_scope()`; local tuple,
+array, constant, and other aggregate storage is rejected alongside aggregate
+fields and return types.
+`scope_spawn` accepts only a direct `Send` future, registers it before returning
+`1`, and returns `0` after releasing the rejected future when the executor or
+scope is closed. It does not expose a child task ID, so scoped children cannot
+be joined or retained outside the guard.
+
+MIR lowering distinguishes normal lexical fallthrough from early exits using
+the existing drop-scope stack. Normal fallthrough emits join-all before the
+guard's idempotent `Drop`; `return`, `?`, `break`, `continue`, contract abort,
+and unwind cleanup reach `Drop` without that marker, so teardown cancels every
+pending child and then joins all terminal states. The compiler rejects
+`TaskScope` in return positions and aggregate fields rather than allowing a
+guard to escape its lexical owner.
+
 ## Platform and evidence policy
 
 - Feature/unit evidence does not imply host support.
@@ -136,6 +160,9 @@ cancelling while `select_cancel` keeps its explicit semantics.
 
 - **Auto trait unsoundness:** recursive structural and explicit negative tests.
 - **Drop races:** generation tokens, exact drop counters, sanitizer/leak stress.
+- **Worker self-join:** executor workers help poll their own affinity queue while
+  joining scoped children so a one-worker executor cannot deadlock on nested
+  scope teardown.
 - **Deadlock:** not prevented generally; bounded test timeouts and lock-order
   documentation are required.
 - **Platform drift:** one shared scenario suite plus host-specific adapters.
