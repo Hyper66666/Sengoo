@@ -145,6 +145,15 @@ fn fnv1a64_hex(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+fn switch_terminator_has_debug_location(ir: &str) -> bool {
+    ir.match_indices("switch i64 ").any(|(start, _)| {
+        ir[start..]
+            .lines()
+            .find(|line| line.trim_start().starts_with("],"))
+            .is_some_and(|closing_line| closing_line.contains("!dbg !"))
+    })
+}
+
 fn assert_fixture_behavior(spec: &FixtureSpec) {
     let expected_ir_path = baseline_ir_path(spec.name);
     let expected_hash_path = baseline_hash_path(spec.name);
@@ -224,6 +233,12 @@ fn assert_fixture_behavior(spec: &FixtureSpec) {
             "debug-info LLVM IR should contain a DISubprogram for `{function}` in fixture {}:\n{}",
             spec.name,
             debug_ir
+        );
+    }
+    if spec.name == "async_main" {
+        assert!(
+            switch_terminator_has_debug_location(&debug_ir),
+            "async dispatch switch should carry a debug location:\n{debug_ir}"
         );
     }
     assert_ne!(

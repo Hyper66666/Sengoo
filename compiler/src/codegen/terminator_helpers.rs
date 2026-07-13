@@ -124,7 +124,7 @@ impl Codegen {
 
                 self.emit_indent();
 
-                self.ir.push_str("]\n");
+                self.ir.push_str(&format!("]{dbg}\n"));
             }
 
             mir::Terminator::Break { target } => {
