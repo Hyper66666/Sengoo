@@ -183,6 +183,8 @@ struct LoweringContext<'a> {
     contract_param_bindings: Vec<(String, SymbolId, Local)>,
     /// 当前基本块的索引（None表示未设置）。
     current_block: Option<usize>,
+    /// Byte offset of the nearest enclosing source statement.
+    current_source_site: Option<u32>,
     /// 错误信息列表，记录降级过程中遇到的错误。
     errors: Vec<String>,
     /// 循环上下文栈，记录嵌套循环的 `break/continue` 目标。

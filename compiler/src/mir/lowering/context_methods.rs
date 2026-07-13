@@ -36,6 +36,7 @@ impl<'a> LoweringContext<'a> {
             local_symbols: HashMap::new(),
             contract_param_bindings: Vec::new(),
             current_block: None,
+            current_source_site: None,
             errors: Vec::new(),
             loop_stack: Vec::new(),
             lambda_counter,

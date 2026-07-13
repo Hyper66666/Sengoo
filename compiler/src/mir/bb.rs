@@ -13,6 +13,8 @@ pub struct BasicBlock {
     pub instructions: Vec<InstId>,
     /// 终止符
     pub terminator: Option<Terminator>,
+    /// Byte offset of the source statement that produced the terminator.
+    pub terminator_source_site: Option<u32>,
 }
 
 impl BasicBlock {
@@ -21,6 +23,7 @@ impl BasicBlock {
             id,
             instructions: Vec::new(),
             terminator: None,
+            terminator_source_site: None,
         }
     }
 
@@ -32,6 +35,27 @@ impl BasicBlock {
     /// 设置终止符
     pub fn set_terminator(&mut self, term: Terminator) {
         self.terminator = Some(term);
+        self.terminator_source_site = None;
+    }
+
+    pub fn set_terminator_at(&mut self, term: Terminator, source_site: Option<u32>) {
+        self.terminator = Some(term);
+        self.terminator_source_site = source_site;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_terminator_replacement_clears_stale_source_site() {
+        let mut block = BasicBlock::new(0);
+        block.set_terminator_at(Terminator::Return(None), Some(17));
+
+        block.set_terminator(Terminator::Unreachable);
+
+        assert_eq!(block.terminator_source_site, None);
     }
 }
 

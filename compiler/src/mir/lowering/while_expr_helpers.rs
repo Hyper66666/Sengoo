@@ -26,17 +26,22 @@ pub(super) fn lower_while_expr(
     ctx.pop_loop();
 
     let body_end_block = ctx.current_block();
-    if body_end_block != body_block {
-        if let Some(block) = ctx.mir_fn.block_mut(body_end_block) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(cond_block));
-            }
-        }
+    if body_end_block != body_block
+        && ctx
+            .mir_fn
+            .basic_blocks
+            .get(body_end_block)
+            .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(body_end_block, Terminator::Goto(cond_block));
     }
-    if let Some(block) = ctx.mir_fn.block_mut(body_block) {
-        if block.terminator.is_none() {
-            block.set_terminator(Terminator::Goto(cond_block));
-        }
+    if ctx
+        .mir_fn
+        .basic_blocks
+        .get(body_block)
+        .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(body_block, Terminator::Goto(cond_block));
     }
 
     ctx.set_current_block(exit_block);

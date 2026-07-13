@@ -16,10 +16,21 @@
 
 ## 2. Span plumbing audit
 
-- [ ] 2.1 Audit HIR→MIR lowering for statements whose spans are dropped;
+- [x] 2.1 Audit HIR→MIR lowering for statements whose spans are dropped;
   thread or inherit spans so every MIR instruction maps to a source line.
-- [ ] 2.2 Add a compiler unit test asserting representative MIR functions
+  - AST statement byte offsets now survive as zero-codegen HIR source markers,
+    MIR records them beside instructions and terminators, and synthetic MIR
+    without a direct site inherits the active statement location in codegen.
+    Loop/match joins, Drop exit rewrites, postcondition CFG rewrites, and async
+    poll synthesis preserve the originating site; coverage registration
+    prologue instructions are explicitly hidden from user stepping.
+- [x] 2.2 Add a compiler unit test asserting representative MIR functions
   have line coverage for calls, branches, returns, and assignments.
+  - `debug_span_tests::mir_preserves_statement_sites_for_debuggable_operations`
+    checks call, Store assignment, If, and two explicit Return paths against
+    their exact source lines. Companion tests lock loop back-edges, Drop and
+    contract exit rewrites, async poll transformation, and debug+coverage
+    behavior.
 
 ## 3. DI emission
 
@@ -27,7 +38,12 @@
   (`Debug Info Version`, DWARF version) under `-g`.
 - [x] 3.2 Emit `DISubprogram` per function with `!dbg` attachment, including
   synthesized lambda names.
-- [ ] 3.3 Attach statement `!dbg` locations per design D-A2.
+- [x] 3.3 Attach statement `!dbg` locations per design D-A2.
+  - `debug_span_tests::llvm_debug_locations_follow_mir_statement_sites`
+    proves that call/store/branch/return LLVM instructions use the metadata id
+    for their own MIR source site. The older source scanner is retained only
+    for function entry and local-declaration naming, not statement assignment;
+    async poll IR retains each pre-transform statement line as well.
 - [x] 3.4 IR tests: DI presence/shape under `-g`; byte-identical IR without
   `-g` against §1.3 baselines.
 

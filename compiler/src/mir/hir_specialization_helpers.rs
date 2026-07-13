@@ -312,6 +312,7 @@ pub(crate) fn substitute_hir_expr(expr: &HIRExpr, subst: &HashMap<String, HIRTyp
 
 pub(crate) fn substitute_hir_stmt(stmt: &HIRStmt, subst: &HashMap<String, HIRType>) -> HIRStmt {
     match stmt {
+        HIRStmt::Source { site_lo } => HIRStmt::Source { site_lo: *site_lo },
         HIRStmt::Coverage { site_lo } => HIRStmt::Coverage { site_lo: *site_lo },
         HIRStmt::Let {
             name,

@@ -119,10 +119,13 @@ pub(super) fn lower_range_for_expr(
     ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
-    if let Some(block) = ctx.mir_fn.block_mut(body_block) {
-        if block.terminator.is_none() {
-            block.set_terminator(Terminator::Goto(inc_block));
-        }
+    if ctx
+        .mir_fn
+        .basic_blocks
+        .get(body_block)
+        .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(body_block, Terminator::Goto(inc_block));
     }
 
     ctx.set_current_block(inc_block);
@@ -251,10 +254,13 @@ pub(super) fn lower_array_for_expr(
     ctx.pop_drop_scope(None);
     ctx.pop_loop();
 
-    if let Some(block) = ctx.mir_fn.block_mut(body_block) {
-        if block.terminator.is_none() {
-            block.set_terminator(Terminator::Goto(inc_block));
-        }
+    if ctx
+        .mir_fn
+        .basic_blocks
+        .get(body_block)
+        .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(body_block, Terminator::Goto(inc_block));
     }
 
     ctx.set_current_block(inc_block);

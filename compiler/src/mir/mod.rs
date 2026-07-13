@@ -47,7 +47,7 @@ pub use lowering::{
 pub use op::{MirBinOp, MirConstant, MirUnOp};
 
 use crate::hir::HIRType;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// MIR 函数
 #[derive(Debug, Clone)]
@@ -63,6 +63,10 @@ pub struct MirFunction {
     /// 基本块
     pub basic_blocks: Vec<BasicBlock>,
     pub instructions: Vec<Instruction>,
+    /// Source byte offsets parallel to `instructions`.
+    pub instruction_source_sites: Vec<Option<u32>>,
+    /// Synthetic instructions that should not appear as user stepping points.
+    pub debug_hidden_instructions: HashSet<InstId>,
     /// Source-level names for params/user locals, keyed by MIR local index.
     pub local_debug_names: HashMap<usize, String>,
     /// 起始基本块索引
@@ -89,6 +93,8 @@ impl MirFunction {
             locals,
             basic_blocks,
             instructions: Vec::new(),
+            instruction_source_sites: Vec::new(),
+            debug_hidden_instructions: HashSet::new(),
             local_debug_names: HashMap::new(),
             start_block,
             is_async: false,
@@ -122,11 +128,35 @@ impl MirFunction {
             u32::MAX
         );
         self.instructions.push(inst);
+        self.instruction_source_sites.push(None);
         InstId(id as u32)
+    }
+
+    pub fn set_instruction_source_site(&mut self, id: InstId, source_site: Option<u32>) {
+        if let Some(slot) = self.instruction_source_sites.get_mut(id.0 as usize) {
+            *slot = source_site;
+        }
+    }
+
+    pub fn hide_instruction_from_debug(&mut self, id: InstId) {
+        self.debug_hidden_instructions.insert(id);
     }
 
     pub fn push_inst_to_block(&mut self, block_id: usize, inst: Instruction) {
         let inst_id = self.alloc_inst(inst);
+        if let Some(block) = self.basic_blocks.get_mut(block_id) {
+            block.push(inst_id);
+        }
+    }
+
+    pub fn push_inst_to_block_at(
+        &mut self,
+        block_id: usize,
+        inst: Instruction,
+        source_site: Option<u32>,
+    ) {
+        let inst_id = self.alloc_inst(inst);
+        self.set_instruction_source_site(inst_id, source_site);
         if let Some(block) = self.basic_blocks.get_mut(block_id) {
             block.push(inst_id);
         }

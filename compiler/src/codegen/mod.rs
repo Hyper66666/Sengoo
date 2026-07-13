@@ -344,13 +344,13 @@ impl Codegen {
         for inst_id in &bb.instructions {
             let inst = mir_fn.instruction(*inst_id);
 
-            self.codegen_instruction(inst, mir_fn)?;
+            self.codegen_instruction(*inst_id, inst, mir_fn)?;
         }
 
         self.emit_phi_incoming_loads_for_block(bb.id)?;
 
         if let Some(terminator) = &bb.terminator {
-            self.codegen_terminator(terminator, mir_fn)?;
+            self.codegen_terminator(bb.id, terminator, mir_fn)?;
         }
 
         self.indent -= 1;

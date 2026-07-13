@@ -108,7 +108,7 @@ fn collect_hir_call_targets_from_stmt(
     seen: &mut HashSet<usize>,
 ) {
     match stmt {
-        HIRStmt::Coverage { .. } => {}
+        HIRStmt::Source { .. } | HIRStmt::Coverage { .. } => {}
         HIRStmt::Let { value, .. } => {
             if let Some(expr) = value {
                 collect_hir_call_targets_from_expr(expr, index_by_name, targets, seen);

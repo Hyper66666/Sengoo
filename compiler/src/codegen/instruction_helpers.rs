@@ -92,11 +92,13 @@ impl Codegen {
     pub(super) fn codegen_instruction(
         &mut self,
 
+        inst_id: mir::InstId,
+
         inst: &mir::Instruction,
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
-        let dbg = self.debug_instruction_location_suffix(mir_fn, inst);
+        let dbg = self.debug_instruction_location_suffix(mir_fn, inst_id, inst);
         let instruction_ir_start = self.ir.len();
         match inst {
             mir::Instruction::Nop => {}

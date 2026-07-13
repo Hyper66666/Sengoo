@@ -1,6 +1,6 @@
 use super::*;
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -60,22 +60,36 @@ impl Codegen {
     pub(super) fn debug_instruction_location_suffix(
         &self,
         mir_fn: &MirFunction,
+        inst_id: mir::InstId,
         inst: &mir::Instruction,
     ) -> String {
+        if mir_fn.debug_hidden_instructions.contains(&inst_id) {
+            return String::new();
+        }
         let Some(ids) = self.debug_locations.get(&mir_fn.name) else {
             return String::new();
         };
-        let source_local = match inst {
-            mir::Instruction::Store { destination, .. } => Some(*destination),
-            _ => inst.destination(),
-        };
-        if let Some(line) = source_local
-            .filter(|local| local.kind == LocalKind::User)
-            .and_then(|local| mir_fn.local_debug_names.get(&local.index()))
-            .and_then(|name| ids.local_lines.get(name))
+        let source_line = mir_fn
+            .instruction_source_sites
+            .get(inst_id.0 as usize)
             .copied()
-        {
+            .flatten()
+            .and_then(|site| self.debug_line_for_site(site));
+        if let Some(line) = source_line {
             ids.current_line.set(line);
+        } else {
+            let source_local = match inst {
+                mir::Instruction::Store { destination, .. } => Some(*destination),
+                _ => inst.destination(),
+            };
+            if let Some(line) = source_local
+                .filter(|local| local.kind == LocalKind::User)
+                .and_then(|local| mir_fn.local_debug_names.get(&local.index()))
+                .and_then(|name| ids.local_lines.get(name))
+                .copied()
+            {
+                ids.current_line.set(line);
+            }
         }
         format!(", !dbg !{}", ids.location_for_line(ids.current_line.get()))
     }
@@ -83,12 +97,20 @@ impl Codegen {
     pub(super) fn debug_terminator_location_suffix(
         &self,
         mir_fn: &MirFunction,
+        block_id: usize,
         terminator: &mir::Terminator,
     ) -> String {
         let Some(ids) = self.debug_locations.get(&mir_fn.name) else {
             return String::new();
         };
-        if matches!(terminator, mir::Terminator::Return(_)) {
+        let source_line = mir_fn
+            .basic_blocks
+            .get(block_id)
+            .and_then(|block| block.terminator_source_site)
+            .and_then(|site| self.debug_line_for_site(site));
+        if let Some(line) = source_line {
+            ids.current_line.set(line);
+        } else if matches!(terminator, mir::Terminator::Return(_)) {
             ids.current_line.set(ids.last_statement_line);
         }
         format!(", !dbg !{}", ids.location_for_line(ids.current_line.get()))
@@ -156,7 +178,7 @@ impl Codegen {
             let subprogram = next_id;
             let entry_location = next_id + 1;
             next_id += 2;
-            let plan = self.function_debug_plan(&mir_fn.name);
+            let plan = self.function_debug_plan(mir_fn);
             let line = plan.entry_line.max(1);
             let debug_name = escape_metadata_string(&mir_fn.name);
             let linkage_name = escape_metadata_string(self.emitted_function_name(&mir_fn.name));
@@ -194,17 +216,40 @@ impl Codegen {
         self.declarations.push('\n');
     }
 
-    fn function_debug_plan(&self, function_name: &str) -> SourceFunctionDebugPlan {
+    fn function_debug_plan(&self, mir_fn: &MirFunction) -> SourceFunctionDebugPlan {
         let Some(source_text) = self.debug_info.source_text.as_deref() else {
             return SourceFunctionDebugPlan {
                 entry_line: 1,
                 ..SourceFunctionDebugPlan::default()
             };
         };
-        source_function_debug_plan(source_text, function_name).unwrap_or(SourceFunctionDebugPlan {
-            entry_line: 1,
-            ..SourceFunctionDebugPlan::default()
-        })
+        let mut plan = source_function_debug_plan(source_text, &mir_fn.name).unwrap_or(
+            SourceFunctionDebugPlan {
+                entry_line: 1,
+                ..SourceFunctionDebugPlan::default()
+            },
+        );
+        let statement_lines = mir_fn
+            .instruction_source_sites
+            .iter()
+            .copied()
+            .flatten()
+            .chain(
+                mir_fn
+                    .basic_blocks
+                    .iter()
+                    .filter_map(|block| block.terminator_source_site),
+            )
+            .filter_map(|site| source_line_for_site(source_text, site))
+            .collect::<BTreeSet<_>>();
+        if !statement_lines.is_empty() {
+            plan.statement_lines = statement_lines.into_iter().collect();
+        }
+        plan
+    }
+
+    fn debug_line_for_site(&self, site: u32) -> Option<u32> {
+        source_line_for_site(self.debug_info.source_text.as_deref()?, site)
     }
 
     fn debug_local_location(&self, mir_fn: &MirFunction, name: &str) -> Option<(u32, u32, u32)> {
@@ -465,6 +510,21 @@ fn source_function_debug_plan(
         }
     }
     Some(plan)
+}
+
+fn source_line_for_site(source: &str, site: u32) -> Option<u32> {
+    let site = usize::try_from(site).ok()?;
+    if site > source.len() || !source.is_char_boundary(site) {
+        return None;
+    }
+    u32::try_from(
+        source.as_bytes()[..site]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            + 1,
+    )
+    .ok()
 }
 
 fn is_debug_statement_line(trimmed: &str) -> bool {
