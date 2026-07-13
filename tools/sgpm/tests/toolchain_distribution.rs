@@ -25,6 +25,20 @@ fn workspace_version(root: &Path) -> String {
         .to_string()
 }
 
+fn workflow_step_block<'a>(workflow: &'a str, step_name: &str) -> &'a str {
+    let marker = format!("- name: {step_name}");
+    let start = workflow
+        .find(&marker)
+        .unwrap_or_else(|| panic!("workflow should contain step `{step_name}`"));
+    let rest = &workflow[start..];
+    let next = rest
+        .match_indices("\n      - name: ")
+        .next()
+        .map(|(index, _)| index)
+        .unwrap_or(rest.len());
+    &rest[..next]
+}
+
 fn assert_tool_manifest_uses_workspace_version(root: &Path, tool: &str) {
     let manifest = toml_value(&root.join("tools").join(tool).join("Cargo.toml"));
     let package = manifest["package"]
@@ -178,6 +192,9 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
     let root = workspace_root();
     let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
         .expect("read toolchain distribution workflow");
+    let prepare_release_feed = workflow_step_block(&workflow, "Prepare local release feed");
+    let upgrade_posix = workflow_step_block(&workflow, "Upgrade package by version (POSIX)");
+    let upgrade_windows = workflow_step_block(&workflow, "Upgrade package by version (Windows)");
     assert!(
         workflow.contains("Prepare local release feed"),
         "workflow should stage a local versioned release feed for deterministic dry-run upgrade smoke"
@@ -196,6 +213,23 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
         "workflow should stage a semantically newer patch prerelease for the upgrade smoke"
     );
     assert!(
+        prepare_release_feed.contains("$primaryBuildHash = $env:SENGOO_BUILD_HASH")
+            && prepare_release_feed.contains(
+                "$primaryBuildHash -notmatch '^[0-9a-fA-F]+$'"
+            )
+            && prepare_release_feed.contains("$firstNibble = [Convert]::ToInt32($primaryBuildHash.Substring(0, 1), 16)")
+            && prepare_release_feed.contains(
+                "$secondaryBuildHash = \"{0:x}{1}\" -f (($firstNibble + 1) % 16), $primaryBuildHash.Substring(1)"
+            )
+            && prepare_release_feed.contains("$secondaryBuildHash -eq $primaryBuildHash")
+            && prepare_release_feed.contains("$env:SENGOO_BUILD_HASH = $secondaryBuildHash")
+            && prepare_release_feed.contains("cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release")
+            && prepare_release_feed.contains(
+                "./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild"
+            ),
+        "workflow should rebuild release tools with a deterministic secondary hex hash before packaging the synthetic upgrade archive with -NoBuild"
+    );
+    assert!(
         workflow.contains("outside-checkout"),
         "workflow should run the upgrade smoke from a temp workspace outside the repository checkout"
     );
@@ -205,10 +239,26 @@ fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real
         "workflow should prove that installation content moves from the primary to secondary package manifest version"
     );
     assert!(
-        workflow.contains("Assert-InstalledToolVersions")
-            && workflow.contains("tool_versions.PSObject.Properties[$tool].Value")
-            && workflow.contains("payload does not match manifest"),
-        "workflow should compare every installed tool payload with manifest.tool_versions before and after upgrade"
+        upgrade_posix.contains("function Assert-InstalledToolVersions($Manifest, $BinDir)")
+            && upgrade_posix.contains("tool_versions.PSObject.Properties[$tool].Value")
+            && upgrade_posix.contains("payload does not match manifest")
+            && upgrade_posix.contains("return $expectedSignature")
+            && upgrade_posix.contains("$primarySignature = Assert-InstalledToolVersions $primaryManifest $bin")
+            && upgrade_posix.contains("$upgradedSignature = Assert-InstalledToolVersions $upgradedManifest $bin")
+            && upgrade_posix.contains("if ($upgradedSignature -eq $primarySignature)"),
+        "POSIX upgrade smoke should compare installed tool payloads against manifest.tool_versions and require the upgraded signature to change"
+    );
+    assert!(
+        upgrade_windows.contains("function Assert-InstalledToolVersions($Manifest, $BinDir)")
+            && upgrade_windows.contains("tool_versions.PSObject.Properties[$tool].Value")
+            && upgrade_windows.contains("payload does not match manifest")
+            && upgrade_windows.contains("return $expectedSignature")
+            && upgrade_windows.contains(
+                "$primarySignature = Assert-InstalledToolVersions $primaryManifest (Join-Path $installRoot \"bin\")"
+            )
+            && upgrade_windows.contains("$upgradedSignature = Assert-InstalledToolVersions $upgradedManifest $bin")
+            && upgrade_windows.contains("if ($upgradedSignature -eq $primarySignature)"),
+        "Windows upgrade smoke should compare installed tool payloads against manifest.tool_versions and require the upgraded signature to change"
     );
 }
 

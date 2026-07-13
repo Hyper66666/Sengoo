@@ -136,6 +136,15 @@ jobs:
           $parsedBaseVersion = [System.Management.Automation.SemanticVersion]$baseVersion
           $upgradePatch = $parsedBaseVersion.Patch + 1
           $upgradeVersion = "$($parsedBaseVersion.Major).$($parsedBaseVersion.Minor).$upgradePatch-upgrade-smoke"
+          $primaryBuildHash = $env:SENGOO_BUILD_HASH
+          if ($primaryBuildHash -notmatch '^[0-9a-fA-F]+$') {
+            throw "primary build hash must be hexadecimal, got $primaryBuildHash"
+          }
+          $firstNibble = [Convert]::ToInt32($primaryBuildHash.Substring(0, 1), 16)
+          $secondaryBuildHash = "{0:x}{1}" -f (($firstNibble + 1) % 16), $primaryBuildHash.Substring(1)
+          if ($secondaryBuildHash -eq $primaryBuildHash) {
+            throw "secondary build hash must differ from primary build hash"
+          }
 
           $releaseFeedRoot = Join-Path $env:RUNNER_TEMP "sengoo-local-release-feed-${{ matrix.artifact }}"
           Remove-Item -LiteralPath $releaseFeedRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -150,6 +159,11 @@ jobs:
 
           $upgradeOutputDir = "target/dist-upgrade-${{ matrix.artifact }}"
           Remove-Item -LiteralPath $upgradeOutputDir -Recurse -Force -ErrorAction SilentlyContinue
+          $env:SENGOO_BUILD_HASH = $secondaryBuildHash
+          cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+          if ($LASTEXITCODE -ne 0) {
+            throw "secondary release build failed"
+          }
           ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
           $upgradeArchive = (Get-Content (Join-Path $upgradeOutputDir "latest-archive.txt")).Trim()
           $upgradeReleaseDir = Join-Path $downloadRoot "v$upgradeVersion"
@@ -280,6 +294,7 @@ jobs:
                 throw "tool version/hash mismatch: expected $expectedSignature, got $signature from $tool"
               }
             }
+            return $expectedSignature
           }
 
           $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
@@ -289,7 +304,7 @@ jobs:
           if ($primaryManifest.version -ne $env:SENGOO_PRIMARY_UPGRADE_VERSION) {
             throw "initial installed manifest version mismatch: expected $env:SENGOO_PRIMARY_UPGRADE_VERSION, got $($primaryManifest.version)"
           }
-          Assert-InstalledToolVersions $primaryManifest $bin
+          $primarySignature = Assert-InstalledToolVersions $primaryManifest $bin
 
           & sh scripts/install.sh --version $env:SENGOO_SECONDARY_UPGRADE_VERSION --base-url $env:SENGOO_LOCAL_RELEASE_FEED --install-dir $installRoot
           if ($LASTEXITCODE -ne 0) {
@@ -299,7 +314,10 @@ jobs:
           if ($upgradedManifest.version -ne $env:SENGOO_SECONDARY_UPGRADE_VERSION) {
             throw "upgraded manifest version mismatch: expected $env:SENGOO_SECONDARY_UPGRADE_VERSION, got $($upgradedManifest.version)"
           }
-          Assert-InstalledToolVersions $upgradedManifest $bin
+          $upgradedSignature = Assert-InstalledToolVersions $upgradedManifest $bin
+          if ($upgradedSignature -eq $primarySignature) {
+            throw "upgraded installed tool signature should differ from the primary package signature"
+          }
 
           Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
           Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
@@ -340,6 +358,7 @@ jobs:
                 throw "tool version/hash mismatch: expected $expectedSignature, got $signature from $tool"
               }
             }
+            return $expectedSignature
           }
 
           $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
@@ -348,14 +367,17 @@ jobs:
           if ($primaryManifest.version -ne $env:SENGOO_PRIMARY_UPGRADE_VERSION) {
             throw "initial installed manifest version mismatch: expected $env:SENGOO_PRIMARY_UPGRADE_VERSION, got $($primaryManifest.version)"
           }
-          Assert-InstalledToolVersions $primaryManifest (Join-Path $installRoot "bin")
+          $primarySignature = Assert-InstalledToolVersions $primaryManifest (Join-Path $installRoot "bin")
           ./scripts/install.ps1 -Version $env:SENGOO_SECONDARY_UPGRADE_VERSION -BaseUrl $env:SENGOO_LOCAL_RELEASE_FEED -InstallDir $installRoot
           $upgradedManifest = Get-Content -LiteralPath (Join-Path $installRoot "manifest.json") -Raw | ConvertFrom-Json
           if ($upgradedManifest.version -ne $env:SENGOO_SECONDARY_UPGRADE_VERSION) {
             throw "upgraded manifest version mismatch: expected $env:SENGOO_SECONDARY_UPGRADE_VERSION, got $($upgradedManifest.version)"
           }
           $bin = Join-Path $installRoot "bin"
-          Assert-InstalledToolVersions $upgradedManifest $bin
+          $upgradedSignature = Assert-InstalledToolVersions $upgradedManifest $bin
+          if ($upgradedSignature -eq $primarySignature) {
+            throw "upgraded installed tool signature should differ from the primary package signature"
+          }
           Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
           Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
           Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
