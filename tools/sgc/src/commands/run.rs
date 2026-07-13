@@ -461,6 +461,7 @@ pub(crate) async fn cmd_run(
                                 &executable_path,
                                 runtime_c.as_deref(),
                                 opt_level,
+                                debug_info,
                                 Some(&native_link_libraries),
                             ) {
                                 Ok(recovery) => {
@@ -630,12 +631,13 @@ pub(crate) async fn cmd_run(
                 opt_level,
                 None,
             )?;
-            link_native_binary_from_objects(
+            link_native_binary_from_objects_with_debug(
                 clang,
                 &object_paths,
                 &executable_path,
                 None,
                 Some(&native_link_libraries),
+                debug_info,
             )?;
             native_exit_code = run_native_binary_with_args(&executable_path, args)?;
         }

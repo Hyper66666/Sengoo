@@ -409,6 +409,7 @@ pub(crate) async fn cmd_build(
                                     output_path,
                                     runtime_c.as_deref(),
                                     opt_level,
+                                    debug_info,
                                     Some(&native_link_libraries),
                                 ) {
                                     Ok(recovery) => {
@@ -618,12 +619,13 @@ pub(crate) async fn cmd_build(
         opt_level,
         Some(&build_target),
     )?;
-    link_native_binary_from_objects(
+    link_native_binary_from_objects_with_debug(
         &clang_exe,
         &object_paths,
         output_path,
         Some(&build_target),
         Some(&native_link_libraries),
+        debug_info,
     )?;
     maybe_emit_reflection_sidecar(
         Path::new(&output_file),

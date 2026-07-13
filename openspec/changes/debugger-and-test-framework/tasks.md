@@ -51,11 +51,13 @@
   - Command generation and transcript parsing have platform-independent unit
     coverage. Missing clang/debugger tools produce a visible `SKIP
     debugger_native::...` reason; once present, any build, breakpoint, step, or
-    value-reading failure is a hard test failure. The current Windows reference
-    host records the CDB-missing skip path rather than claiming a live CDB run.
-  - Remaining: record one live Windows CDB transcript and one live Unix-family
-    LLDB transcript on release hosts; skip-path coverage alone does not close
-    this task.
+    value-reading failure is a hard test failure. The Windows reference host
+    now has a live CDB run in
+    `docs/debugging-native-windows-cdb.transcript`: CodeView/PDB symbols bind
+    the source breakpoint, one source step advances from line 2 to line 3,
+    and CDB reads `value = 21` plus `doubled = 42` before normal completion.
+  - Remaining: record one live Unix-family LLDB transcript on a release host;
+    the Windows evidence alone does not close this cross-host task.
 
 ## 2. Editor / DAP integration
 

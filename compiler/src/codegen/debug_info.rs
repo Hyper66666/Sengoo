@@ -157,12 +157,17 @@ impl Codegen {
         self.declarations
             .push_str("!llvm.module.flags = !{!4, !5}\n");
         self.declarations.push_str("!llvm.ident = !{!6}\n");
+        let platform_debug_flag = if self.uses_codeview_debug_info() {
+            "CodeView\", i32 1"
+        } else {
+            "Dwarf Version\", i32 4"
+        };
         self.declarations.push_str(&format!(
             "!0 = distinct !DICompileUnit(language: DW_LANG_C99, file: !1, producer: \"Sengoo Compiler\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug)\n\
              !1 = !DIFile(filename: \"{}\", directory: \"{}\")\n\
              !2 = !DISubroutineType(types: !3)\n\
              !3 = !{{}}\n\
-             !4 = !{{i32 2, !\"Dwarf Version\", i32 4}}\n\
+             !4 = !{{i32 2, !\"{platform_debug_flag}}}\n\
              !5 = !{{i32 2, !\"Debug Info Version\", i32 3}}\n\
              !6 = !{{!\"Sengoo Compiler\"}}\n",
             filename, directory
@@ -214,6 +219,12 @@ impl Codegen {
         }
         self.debug_next_metadata_id = next_id;
         self.declarations.push('\n');
+    }
+
+    fn uses_codeview_debug_info(&self) -> bool {
+        self.target_triple
+            .as_deref()
+            .map_or(cfg!(windows), |triple| triple.contains("windows-msvc"))
     }
 
     fn function_debug_plan(&self, mir_fn: &MirFunction) -> SourceFunctionDebugPlan {
@@ -656,6 +667,30 @@ mod tests {
         assert!(codegen.declarations.contains("!DICompileUnit"));
         assert!(codegen.declarations.contains("name: \"main\""));
         assert!(codegen.declarations.contains("line: 3"));
+    }
+
+    #[test]
+    fn debug_metadata_selects_platform_format_from_target_triple() {
+        let debug = DebugInfoConfig::for_source("src/main.sg", "def main() -> i64 { 0 }\n");
+        let mir_fn = MirFunction::new("main".to_string(), vec![], MIRType::Int(64));
+        let mut windows = Codegen::with_ffi_target_and_debug(
+            FfiCodegenConfig::default(),
+            Some("x86_64-pc-windows-msvc".to_string()),
+            debug.clone(),
+        );
+        let mut linux = Codegen::with_ffi_target_and_debug(
+            FfiCodegenConfig::default(),
+            Some("x86_64-unknown-linux-gnu".to_string()),
+            debug,
+        );
+
+        windows.emit_debug_metadata(std::slice::from_ref(&mir_fn));
+        linux.emit_debug_metadata(&[mir_fn]);
+
+        assert!(windows.declarations.contains("!\"CodeView\", i32 1"));
+        assert!(!windows.declarations.contains("!\"Dwarf Version\""));
+        assert!(linux.declarations.contains("!\"Dwarf Version\", i32 4"));
+        assert!(!linux.declarations.contains("!\"CodeView\""));
     }
 
     #[test]

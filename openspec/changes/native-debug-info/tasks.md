@@ -69,9 +69,14 @@
 - [ ] 5.1 Linux: scripted lldb transcript
   `docs/debugging-native-linux-lldb.transcript` — breakpoint on a Sengoo
   file:line binds, hits, `next` steps one source line, `continue` exits 0.
-- [ ] 5.2 Windows: scripted cdb/WinDbg transcript
+- [x] 5.2 Windows: scripted cdb/WinDbg transcript
   `docs/debugging-native-windows-cdb.transcript` with the same assertions on
   the CodeView path.
+  - The Windows reference host emits CodeView into the native object, writes a
+    deterministic sibling PDB with `/DEBUG:FULL`, and passes the real CDB
+    driver: the source breakpoint binds and hits line 2, `p` reaches line 3,
+    `value = 21`, `doubled = 42`, and execution completes normally. The
+    normalized transcript preserves the actual debugger commands and values.
 - [ ] 5.3 Stretch: parameter `DILocalVariable` + `llvm.dbg.declare`; ship
   only with passing reads in both debuggers, else record matrix-deferred.
 - [ ] 5.4 Upgrade `docs/debugging-native.md` to source-level workflows and

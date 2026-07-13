@@ -1,0 +1,61 @@
+Windows CDB source-debugging transcript captured on 2026-07-13
+
+Host:
+  Windows 11 x64
+Debugger:
+  Microsoft WinDbg/CDB 10.0.29617.1000 AMD64
+Build:
+  sgc build debugger_probe.sg -O 0 --debug-info --force-rebuild
+Test:
+  cargo test -p sgc --test debugger_native native_debugger_breaks_steps_and_reads_local -- --nocapture
+
+The test generated `debugger_probe.exe` and `debugger_probe.pdb` beside each
+other, then drove CDB with the command sequence represented by this selected
+excerpt. Addresses, process identifiers, and the temporary root are normalized;
+repeated source-listing option output is omitted.
+
+```text
+Microsoft (R) Windows Debugger Version 10.0.29617.1000 AMD64
+CommandLine: <temp>\build\debugger_probe.exe
+
+0:000> .lines -e
+Line number information will be loaded
+0:000> l+t
+Source options are 1:
+     1/t - Step/trace by source line
+0:000> l+s
+Source options are 5:
+     1/t - Step/trace by source line
+     4/s - List source code at prompt
+0:000> .reload /f
+Reloading current modules
+0:000> bp `<temp>\debugger_probe.sg:2`
+0:000> bl
+ 0 e <address> [<temp>\debugger_probe.sg @ 2] debugger_probe!debug_probe+0x4
+0:000> .echo SENGOO_DEBUG_BREAK
+SENGOO_DEBUG_BREAK
+0:000> g
+Breakpoint 0 hit
+>    2:     let doubled = value * 2;
+debugger_probe!debug_probe+0x4
+0:000> dv /t value
+int64 value = 0n21
+0:000> .echo SENGOO_DEBUG_STEP
+SENGOO_DEBUG_STEP
+0:000> p
+>    3:     let stepped = doubled + 1;
+debugger_probe!debug_probe+0x2f
+0:000> dv /t doubled
+int64 doubled = 0n42
+0:000> g
+ntdll!NtTerminateProcess+0x14
+0:000> .if (@rdx == 0) { .echo SENGOO_DEBUG_EXIT_ZERO } .else { .echo SENGOO_DEBUG_EXIT_NONZERO; r rdx }
+SENGOO_DEBUG_EXIT_ZERO
+0:000> g
+0:000> q
+quit:
+```
+
+Result:
+  PASS - the source breakpoint bound and hit line 2, one source step reached
+  line 3, both scalar values were readable, and the program completed normally.

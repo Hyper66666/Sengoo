@@ -10009,6 +10009,32 @@ fn find_llvm_dwarfdump() -> Option<&'static str> {
         })
 }
 
+fn dwarf_debug_test_target() -> NativeBuildTarget {
+    NativeBuildTarget {
+        triple: crate::cross_compile::REFERENCE_TARGET_LINUX_GNU.to_string(),
+    }
+}
+
+fn compile_dwarf_debug_test_object(clang: &str, llvm_path: &Path, object_path: &Path) {
+    let output = Command::new(clang)
+        .arg(format!(
+            "--target={}",
+            crate::cross_compile::REFERENCE_TARGET_LINUX_GNU
+        ))
+        .args(["-c", "-x", "ir", "-g", "-O0", "-Wno-override-module"])
+        .arg(llvm_path)
+        .arg("-o")
+        .arg(object_path)
+        .output()
+        .expect("clang should compile DWARF test IR");
+    assert!(
+        output.status.success(),
+        "clang failed to compile DWARF test IR:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn parse_dwarf_line_rows(dump: &str) -> Vec<(u64, u64)> {
     dump.lines()
         .filter_map(|line| {
@@ -10091,19 +10117,17 @@ fn debug_info_line_table_survives_object_compilation() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
     let llvm_path = temp_artifact("debug-info-line-table", "ll");
-    let object_path = temp_artifact(
-        "debug-info-line-table",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-line-table", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/main.sg",
             source.to_string(),
@@ -10111,8 +10135,7 @@ fn debug_info_line_table_survives_object_compilation() {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let output = Command::new(dwarfdump)
         .arg("--debug-line")
@@ -10146,6 +10169,7 @@ fn debug_info_preserves_statement_and_local_declaration_lines() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"struct Pair {
     left: i64,
     enabled: bool,
@@ -10164,17 +10188,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-statements", "ll");
-    let object_path = temp_artifact(
-        "debug-info-statements",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-statements", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/debugger_probe.sg",
             source,
@@ -10182,8 +10203,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("statement-level debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let line_output = Command::new(dwarfdump)
         .arg("--debug-line")
@@ -10264,6 +10284,7 @@ fn debug_info_emits_parameter_and_local_variable_dies() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"
 def helper(value: i64) -> i64 {
     let doubled = value * 2;
@@ -10275,14 +10296,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-vars", "ll");
-    let object_path = temp_artifact("debug-info-vars", if cfg!(windows) { "obj" } else { "o" });
+    let object_path = temp_artifact("debug-info-vars", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/vars.sg",
             source.to_string(),
@@ -10290,8 +10311,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with local variables should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
@@ -10333,6 +10353,7 @@ fn debug_info_emits_struct_member_names_types_and_offsets() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"
 struct Pair {
     left: i64,
@@ -10349,14 +10370,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-struct", "ll");
-    let object_path = temp_artifact("debug-info-struct", if cfg!(windows) { "obj" } else { "o" });
+    let object_path = temp_artifact("debug-info-struct", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/struct.sg",
             source.to_string(),
@@ -10364,8 +10385,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with a struct local should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
         .arg(&object_path)
@@ -10410,6 +10430,7 @@ fn debug_info_emits_enum_tuple_string_and_vec_composite_layouts() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let stdlib = load_stdlib_surface_source();
     let program = r#"
 enum Choice { Empty, Value(i64) }
@@ -10428,17 +10449,14 @@ def main() -> i64 {
 "#;
     let source = format!("{stdlib}\n\n{program}");
     let llvm_path = temp_artifact("debug-info-composites", "ll");
-    let object_path = temp_artifact(
-        "debug-info-composites",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-composites", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         &source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/composites.sg",
             source.clone(),
@@ -10446,8 +10464,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with composite locals should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
         .arg(&object_path)
@@ -10566,6 +10583,7 @@ fn debug_info_tracks_multi_surface_function_entry_lines() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let stdlib = load_stdlib_surface_source();
     let program = r#"struct Pair {
     left: i64,
@@ -10634,17 +10652,14 @@ def main() -> i64 {
 "#;
     let source = format!("{stdlib}\n\n{program}");
     let llvm_path = temp_artifact("debug-info-surfaces", "ll");
-    let object_path = temp_artifact(
-        "debug-info-surfaces",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-surfaces", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         &source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/main.sg",
             source.clone(),
@@ -10652,8 +10667,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let line_output = Command::new(dwarfdump)
         .arg("--debug-line")

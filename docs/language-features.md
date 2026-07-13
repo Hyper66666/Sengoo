@@ -525,6 +525,17 @@ conformance CI pins clang 19 and runs the real `sgc` binary against the pinned
 examples. When `sgc build` or native `sgc run` detects an older clang, it reports
 an actionable toolchain error before surfacing raw LLVM verifier diagnostics.
 
+## 4.2 Native Debug Information
+
+`sgc build <file.sg> -O 0 --debug-info` (or `-g`) emits source locations and
+named scalar locals for native debugging. Windows-hosted MSVC builds use
+CodeView and produce a `.pdb` beside the executable; Linux/macOS targets retain
+DWARF. Cross-host Windows links do not yet promise PDB production. Debug mode
+has its own artifact-cache dimension, while builds without `-g` retain
+byte-identical debug-metadata-free LLVM IR. See
+[`debugging-native.md`](debugging-native.md) for CDB/WinDbg, LLDB, and VS Code
+launch workflows plus the current host-evidence boundary.
+
 ## 5. Best-Fit Scenarios
 
 - Python services with native-speed hotspot requirements

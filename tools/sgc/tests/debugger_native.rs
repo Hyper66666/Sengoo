@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const BREAK_MARKER: &str = "SENGOO_DEBUG_BREAK";
 const STEP_MARKER: &str = "SENGOO_DEBUG_STEP";
-const EXIT_MARKER: &str = "SENGOO_DEBUG_EXIT";
+const EXIT_MARKER: &str = "SENGOO_DEBUG_EXIT_ZERO";
 const PROBE_SOURCE_FILE: &str = "debugger_probe.sg";
 const PROBE_SOURCE: &str = r#"def debug_probe(value: i64) -> i64 {
     let doubled = value * 2;
@@ -153,7 +153,7 @@ fn lldb_arguments(executable: &Path, source: &Path, layout: &ProbeLayout) -> Vec
 
 fn cdb_script(source: &Path, layout: &ProbeLayout) -> String {
     format!(
-        ".lines\nl+t\nl+s\n.reload /f\nbp `{source}:{line}`\nbl\ng\n.echo {BREAK_MARKER}\nl+s\ndv /t value\np\n.echo {STEP_MARKER}\nl+s\ndv /t doubled\ng\n.echo {EXIT_MARKER}\nq\n",
+        ".lines -e\nl+t\nl+s\n.reload /f\nbp `{source}:{line}`\nbl\n.echo {BREAK_MARKER}\ng\nl+s\ndv /t value\n.echo {STEP_MARKER}\np\nl+s\ndv /t doubled\ng\n.if (@rdx == 0) {{ .echo {EXIT_MARKER} }} .else {{ .echo SENGOO_DEBUG_EXIT_NONZERO; r rdx }}\ng\nq\n",
         source = source.display(),
         line = layout.break_line
     )
@@ -195,7 +195,7 @@ fn contains_source_location(output: &str, source: &Path, line: usize) -> bool {
         .to_string_lossy()
         .replace('\\', "/")
         .to_ascii_lowercase();
-    [
+    let named_location = [
         format!("{file_name}:{line}"),
         format!("{file_name}({line})"),
         format!("{file_name} @ {line}"),
@@ -204,7 +204,14 @@ fn contains_source_location(output: &str, source: &Path, line: usize) -> bool {
         format!("{full_path} @ {line}"),
     ]
     .into_iter()
-    .any(|pattern| normalized_output.contains(&pattern))
+    .any(|pattern| normalized_output.contains(&pattern));
+    let cdb_source_prompt = normalized_output.lines().any(|candidate| {
+        candidate
+            .trim_start()
+            .strip_prefix('>')
+            .is_some_and(|rest| rest.trim_start().starts_with(&format!("{line}:")))
+    });
+    named_location || cdb_source_prompt
 }
 
 fn validate_debugger_output(
@@ -316,10 +323,12 @@ fn cdb_script_breaks_steps_and_reads_typed_values() {
     )));
     assert!(script.contains("l+t"));
     assert!(script.contains("l+s"));
+    assert!(script.contains(".lines -e"));
     assert!(script.contains("bl"));
     assert!(script.contains("dv /t value"));
     assert_eq!(script.lines().filter(|line| *line == "p").count(), 1);
     assert!(script.contains("dv /t doubled"));
+    assert!(script.contains(".if (@rdx == 0)"));
     assert!(script.contains(EXIT_MARKER));
     assert!(script.contains("q"));
 }
@@ -351,7 +360,7 @@ SENGOO_DEBUG_STEP
 frame #0: 0x0000000140001240 debugger_probe`debug_probe + 32 at debugger_probe.sg:3:5
 (long long) doubled = 42
 Process 123 exited with status = 0 (0x00000000)
-SENGOO_DEBUG_EXIT
+SENGOO_DEBUG_EXIT_ZERO
 "#;
     assert!(validate_debugger_output(lldb, Path::new("/tmp/debugger_probe.sg"), &layout).is_ok());
 
@@ -363,7 +372,7 @@ long long value = 0x0000000000000015
 SENGOO_DEBUG_STEP
 C:\probe\debugger_probe.sg(3)
 long long doubled = 0x000000000000002a
-SENGOO_DEBUG_EXIT
+SENGOO_DEBUG_EXIT_ZERO
 "#;
     assert!(
         validate_debugger_output(cdb, Path::new(r"C:\probe\debugger_probe.sg"), &layout).is_ok()
@@ -376,7 +385,7 @@ SENGOO_DEBUG_EXIT
     )
     .is_err());
     assert!(validate_debugger_output(
-        "SENGOO_DEBUG_BREAK\ndebugger_probe.sg:2\nvalue = 21\nSENGOO_DEBUG_STEP\ndebugger_probe.sg:2\ndoubled = 42\nSENGOO_DEBUG_EXIT",
+        "SENGOO_DEBUG_BREAK\ndebugger_probe.sg:2\nvalue = 21\nSENGOO_DEBUG_STEP\ndebugger_probe.sg:2\ndoubled = 42\nSENGOO_DEBUG_EXIT_ZERO",
         Path::new("/tmp/debugger_probe.sg"),
         &layout
     )
@@ -430,6 +439,13 @@ fn native_debugger_breaks_steps_and_reads_local() {
         executable.display(),
         combined_output(&build)
     );
+    #[cfg(windows)]
+    assert!(
+        executable.with_extension("pdb").is_file(),
+        "sgc did not create the CodeView PDB beside {}\nbuild output:\n{}",
+        executable.display(),
+        combined_output(&build)
+    );
 
     let output = match flavor {
         DebuggerFlavor::Lldb => Command::new(&debugger)
@@ -452,4 +468,52 @@ fn native_debugger_breaks_steps_and_reads_local() {
     );
     validate_debugger_output(&transcript, &source, &layout)
         .unwrap_or_else(|error| panic!("{debugger_name} validation failed: {error}"));
+}
+
+#[test]
+#[cfg(windows)]
+fn debug_build_cache_recovery_recreates_the_pdb() {
+    if find_tool("clang.exe").is_none() {
+        skip("native clang toolchain was not found on PATH");
+        return;
+    }
+
+    let project = TempProject::new();
+    let source = project.source_path();
+    fs::write(&source, PROBE_SOURCE).expect("write debugger cache-recovery probe source");
+
+    let initial = Command::new(sgc())
+        .arg("build")
+        .arg(&source)
+        .args(["-O", "0", "--debug-info", "--force-rebuild"])
+        .output()
+        .expect("run initial debug build");
+    assert!(
+        initial.status.success(),
+        "initial sgc debug build failed:\n{}",
+        combined_output(&initial)
+    );
+
+    let executable = project.executable_path();
+    let pdb = executable.with_extension("pdb");
+    assert!(executable.is_file() && pdb.is_file());
+    fs::remove_file(&executable).expect("remove cached debug executable");
+    fs::remove_file(&pdb).expect("remove cached debug PDB");
+
+    let recovered = Command::new(sgc())
+        .arg("build")
+        .arg(&source)
+        .args(["-O", "0", "--debug-info"])
+        .output()
+        .expect("recover debug build from cached artifacts");
+    assert!(
+        recovered.status.success(),
+        "cached sgc debug recovery failed:\n{}",
+        combined_output(&recovered)
+    );
+    assert!(
+        executable.is_file() && pdb.is_file(),
+        "debug cache recovery should recreate both executable and PDB:\n{}",
+        combined_output(&recovered)
+    );
 }

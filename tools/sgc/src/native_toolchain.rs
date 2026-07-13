@@ -638,6 +638,7 @@ fn run_windows_link_command(
     object_paths: &[PathBuf],
     executable_path: &Path,
     native_link_libraries: &[String],
+    debug_info: bool,
 ) -> Result<std::process::ExitStatus> {
     let link_exe = find_msvc_link_exe().ok_or_else(|| {
         miette::miette!("failed to locate MSVC link.exe for native async linking")
@@ -682,11 +683,34 @@ fn run_windows_link_command(
     }
     link_cmd.arg("/ENTRY:mainCRTStartup");
     link_cmd.arg("/SUBSYSTEM:CONSOLE");
+    append_windows_debug_link_args(&mut link_cmd, executable_path, debug_info);
     link_cmd.arg(format!("/OUT:{}", executable_path.display()));
     link_cmd
         .status()
         .into_diagnostic()
         .map_err(|e| miette::miette!("failed to invoke MSVC linker: {}", e))
+}
+
+fn append_windows_debug_link_args(command: &mut Command, executable_path: &Path, debug_info: bool) {
+    if !debug_info {
+        return;
+    }
+    command.arg("/DEBUG:FULL");
+    command.arg(format!(
+        "/PDB:{}",
+        executable_path.with_extension("pdb").display()
+    ));
+}
+
+fn append_debug_compile_arg(command: &mut Command, target: &NativeBuildTarget, debug_info: bool) {
+    if !debug_info {
+        return;
+    }
+    command.arg(if target.is_windows_msvc() {
+        "-gcodeview"
+    } else {
+        "-g"
+    });
 }
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
@@ -867,9 +891,7 @@ pub(crate) fn compile_ir_to_object(
     command
         .arg("-Wno-override-module")
         .arg(format!("-O{}", opt_level));
-    if debug_info {
-        command.arg("-g");
-    }
+    append_debug_compile_arg(&mut command, &target, debug_info);
     apply_clang_target_args(&mut command, &target)?;
 
     let status = command
@@ -939,13 +961,32 @@ pub(crate) fn link_native_binary_from_objects(
     target: Option<&NativeBuildTarget>,
     native_link_libraries: Option<&[String]>,
 ) -> Result<()> {
+    link_native_binary_from_objects_with_debug(
+        clang_exe,
+        object_paths,
+        executable_path,
+        target,
+        native_link_libraries,
+        false,
+    )
+}
+
+#[cfg(windows)]
+pub(crate) fn link_native_binary_from_objects_with_debug(
+    clang_exe: &str,
+    object_paths: &[PathBuf],
+    executable_path: &Path,
+    target: Option<&NativeBuildTarget>,
+    native_link_libraries: Option<&[String]>,
+    debug_info: bool,
+) -> Result<()> {
     let target = effective_target(target);
     let libraries = native_link_libraries.unwrap_or(&[]);
     if target.is_cross() {
         return link_cross_target(clang_exe, object_paths, executable_path, &target, libraries);
     }
     let _ = clang_exe;
-    let status = run_windows_link_command(object_paths, executable_path, libraries)?;
+    let status = run_windows_link_command(object_paths, executable_path, libraries, debug_info)?;
     if !status.success() {
         return Err(miette::miette!(format_native_link_failure_message(
             libraries
@@ -961,6 +1002,25 @@ pub(crate) fn link_native_binary_from_objects(
     executable_path: &Path,
     target: Option<&NativeBuildTarget>,
     native_link_libraries: Option<&[String]>,
+) -> Result<()> {
+    link_native_binary_from_objects_with_debug(
+        clang_exe,
+        object_paths,
+        executable_path,
+        target,
+        native_link_libraries,
+        false,
+    )
+}
+
+#[cfg(not(windows))]
+pub(crate) fn link_native_binary_from_objects_with_debug(
+    clang_exe: &str,
+    object_paths: &[PathBuf],
+    executable_path: &Path,
+    target: Option<&NativeBuildTarget>,
+    native_link_libraries: Option<&[String]>,
+    _debug_info: bool,
 ) -> Result<()> {
     let target = effective_target(target);
     let libraries = native_link_libraries.unwrap_or(&[]);
@@ -1147,6 +1207,7 @@ pub(crate) fn derive_cached_native_recovery_plan(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn recover_native_output_from_cached_artifacts(
     clang_exe: &str,
     llvm_ir_path: &Path,
@@ -1154,6 +1215,7 @@ pub(crate) fn recover_native_output_from_cached_artifacts(
     output_path: &Path,
     runtime_c: Option<&str>,
     opt_level: u8,
+    debug_info: bool,
     native_link_libraries: Option<&[String]>,
 ) -> Result<CachedNativeRecoveryPlan> {
     let recovery_plan =
@@ -1164,17 +1226,25 @@ pub(crate) fn recover_native_output_from_cached_artifacts(
         recovery_plan,
         CachedNativeRecoveryPlan::RebuildObjectFromCachedIr
     ) {
-        compile_ir_to_object(clang_exe, llvm_ir_path, object_path, opt_level, None, false)?;
+        compile_ir_to_object(
+            clang_exe,
+            llvm_ir_path,
+            object_path,
+            opt_level,
+            None,
+            debug_info,
+        )?;
     }
 
     let mut object_paths = vec![object_path.to_path_buf()];
     append_native_runtime_inputs(clang_exe, &mut object_paths, runtime_c, opt_level, None)?;
-    link_native_binary_from_objects(
+    link_native_binary_from_objects_with_debug(
         clang_exe,
         &object_paths,
         output_path,
         None,
         native_link_libraries,
+        debug_info,
     )?;
 
     Ok(recovery_plan)
@@ -1431,5 +1501,67 @@ mod tests {
             triple: crate::cross_compile::REFERENCE_TARGET_LINUX_GNU.to_string(),
         };
         assert_eq!(platform_linker_args(&target), vec!["-lm"]);
+    }
+
+    #[test]
+    fn debug_compile_uses_codeview_for_windows_msvc_and_dwarf_elsewhere() {
+        let windows = NativeBuildTarget {
+            triple: crate::cross_compile::REFERENCE_TARGET_WINDOWS_MSVC.to_string(),
+        };
+        let linux = NativeBuildTarget {
+            triple: crate::cross_compile::REFERENCE_TARGET_LINUX_GNU.to_string(),
+        };
+        let mut windows_command = Command::new("clang");
+        let mut linux_command = Command::new("clang");
+
+        append_debug_compile_arg(&mut windows_command, &windows, true);
+        append_debug_compile_arg(&mut linux_command, &linux, true);
+
+        assert_eq!(
+            windows_command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["-gcodeview"]
+        );
+        assert_eq!(
+            linux_command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["-g"]
+        );
+    }
+
+    #[test]
+    fn debug_windows_link_uses_full_symbols_and_deterministic_pdb_path() {
+        let executable = Path::new(r"C:\build\debugger_probe.exe");
+        let mut command = Command::new("link.exe");
+
+        append_windows_debug_link_args(&mut command, executable, true);
+
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec![
+                "/DEBUG:FULL".to_string(),
+                format!("/PDB:{}", executable.with_extension("pdb").display()),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_debug_windows_link_does_not_request_pdb_output() {
+        let mut command = Command::new("link.exe");
+
+        append_windows_debug_link_args(
+            &mut command,
+            Path::new(r"C:\build\debugger_probe.exe"),
+            false,
+        );
+
+        assert_eq!(command.get_args().count(), 0);
     }
 }
