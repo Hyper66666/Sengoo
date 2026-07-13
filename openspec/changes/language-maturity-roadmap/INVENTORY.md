@@ -44,8 +44,8 @@ the preserved async-worktree audit keep `mainline-release-baseline` open.
 | Generic collections | Archived `generic-collections`; ABI-v1 RawVec/RawHashMap/RawBTree storage, ownership callbacks, lazy adapters, and default-library fixture | Phase 1 collection gate complete; compatibility names share the generic runtime |
 | Debug/test | Test framework and coverage complete; two DWARF tasks open | Small, high-value closure lane |
 | Concurrency | Send/Sync complete; scalar Arc/locks/channel subsets | Generic storage, structured tasks, reactor evidence open |
-| Registry/package graph | Code includes semver, aliases, multiversion, remote publish/cache paths | Tasks/spec must be reconciled before new implementation |
-| Distribution | Four-host workflow covers Windows x64, Linux x64, macOS x64, and macOS arm64 packaging/install; no real release tag | External-adoption blocker until an actual signed prerelease is cut |
+| Registry/package graph | Reference-server e2e proves checksum/yank handling, alias+multiversion lock edges, hostile-archive rejection, and zero-network verified-cache locked check/test/build/run | Phase 2 resolver gate complete; retain protocol conformance tests |
+| Distribution | Four-host workflow covers Windows x64, Linux x64, macOS x64, and macOS arm64 packaging/install and now declares an outside-checkout local-feed upgrade smoke; no real release tag | Upgrade workflow needs host execution evidence; external-adoption blocker until an actual provenance-attested prerelease is cut |
 | WASM/bytecode | Capability matrix only; no complete backend | Deferred until stable ABI gate |
 | Language reference | Archived with executable examples; Phase 1 refresh adds production numeric semantics and checked-conversion proof | Phase 1 refreshed; refresh again when concurrency or release semantics change |
 | Flagship application | Archived package workflow proof; Phase 1 locked loop uses ABI-v1 generic maps, numeric casts, recursive walk, owned formatting, and deterministic shared-counter work | Phase 1 refreshed; released-toolchain and generic concurrency reruns remain open |

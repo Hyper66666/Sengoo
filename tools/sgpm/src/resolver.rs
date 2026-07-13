@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use miette::{Context, IntoDiagnostic, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -12,6 +12,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tar::Archive;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
 use walkdir::WalkDir;
@@ -20,6 +21,51 @@ static REMOTE_REGISTRY_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 static GIT_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 const REMOTE_ARCHIVE_CHECKSUM_FILE: &str = ".sgpm-archive.sha256";
 const REMOTE_CONTENT_CHECKSUM_FILE: &str = ".sgpm-content.sha256";
+const REMOTE_REGISTRY_METADATA_FILE: &str = ".sgpm-registry-metadata.json";
+const MAX_REMOTE_ARCHIVE_COMPRESSED_BYTES: usize = 64 * 1024 * 1024;
+const MAX_REMOTE_ARCHIVE_UNCOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_REMOTE_ARCHIVE_ENTRIES: usize = 10_000;
+
+#[derive(Default)]
+struct RemoteArchiveBudget {
+    entries: usize,
+    uncompressed_bytes: u64,
+}
+
+impl RemoteArchiveBudget {
+    fn observe(&mut self, entry_size: u64) -> Result<()> {
+        self.entries += 1;
+        if self.entries > MAX_REMOTE_ARCHIVE_ENTRIES {
+            miette::bail!(
+                "remote package archive exceeds entry limit of {}",
+                MAX_REMOTE_ARCHIVE_ENTRIES
+            );
+        }
+        self.uncompressed_bytes =
+            self.uncompressed_bytes
+                .checked_add(entry_size)
+                .ok_or_else(|| {
+                    miette::miette!("remote package archive uncompressed size overflows u64")
+                })?;
+        if self.uncompressed_bytes > MAX_REMOTE_ARCHIVE_UNCOMPRESSED_BYTES {
+            miette::bail!(
+                "remote package archive exceeds uncompressed size limit of {} bytes",
+                MAX_REMOTE_ARCHIVE_UNCOMPRESSED_BYTES
+            );
+        }
+        Ok(())
+    }
+}
+
+fn validate_remote_archive_compressed_size(size: usize) -> Result<()> {
+    if size > MAX_REMOTE_ARCHIVE_COMPRESSED_BYTES {
+        miette::bail!(
+            "remote package archive exceeds compressed size limit of {} bytes",
+            MAX_REMOTE_ARCHIVE_COMPRESSED_BYTES
+        );
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct DependencyEdge {
@@ -53,7 +99,7 @@ pub enum PackageSource {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RegistryPackageMetadata {
     pub checksum: Option<String>,
     pub yanked: bool,
@@ -69,10 +115,33 @@ pub struct Graph {
     pub registries: BTreeMap<String, RegistryConfig>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ResolveOptions {
     pub refresh_git: bool,
     pub allow_yanked: bool,
+    pub locked_registry: Option<Arc<LockedRegistryGraph>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LockedRegistryGraph {
+    pub(crate) packages: BTreeMap<String, LockedRegistryPackage>,
+    pub(crate) dependencies: BTreeMap<(String, String), String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LockedRegistryPackage {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) registry: String,
+    pub(crate) checksum: Option<String>,
+}
+
+impl LockedRegistryGraph {
+    fn dependency(&self, from: &str, alias: &str) -> Option<&LockedRegistryPackage> {
+        self.dependencies
+            .get(&(from.to_string(), alias.to_string()))
+            .and_then(|package_id| self.packages.get(package_id))
+    }
 }
 
 impl Graph {
@@ -228,8 +297,14 @@ impl GraphBuilder {
         validate_package_entries(&root_dir, &manifest)?;
 
         for (alias, dep) in &manifest.dependencies {
+            let locked_registry_package = self
+                .options
+                .locked_registry
+                .as_ref()
+                .and_then(|locked| locked.dependency(&package_id, alias))
+                .cloned();
             let (dep_manifest, dep_source) = self
-                .resolve_dependency_manifest(&root_dir, dep)
+                .resolve_dependency_manifest(&root_dir, dep, locked_registry_package.as_ref())
                 .with_context(|| format!("failed to resolve dependency '{}'", alias))?;
             validate_dependency_package_name(dep, &dep_manifest)?;
             let dep_manifest_data = Manifest::load(&dep_manifest)?;
@@ -281,6 +356,7 @@ impl GraphBuilder {
         &mut self,
         parent_dir: &Path,
         dep: &Dependency,
+        locked_registry_package: Option<&LockedRegistryPackage>,
     ) -> Result<(PathBuf, PackageSource)> {
         if let Some(dep_path) = &dep.path {
             return resolve_path_dependency_manifest(parent_dir, dep_path)
@@ -297,12 +373,13 @@ impl GraphBuilder {
             );
         }
 
-        self.resolve_registry_dependency_manifest(dep)
+        self.resolve_registry_dependency_manifest(dep, locked_registry_package)
     }
 
     fn resolve_registry_dependency_manifest(
         &mut self,
         dep: &Dependency,
+        locked_package: Option<&LockedRegistryPackage>,
     ) -> Result<(PathBuf, PackageSource)> {
         let requirement = dep
             .version_req
@@ -324,6 +401,22 @@ impl GraphBuilder {
                 registry_name
             )
         })?;
+        if let Some(locked_package) = locked_package {
+            return self.resolve_locked_registry_dependency_manifest(
+                dep,
+                registry_name,
+                package_name,
+                &req,
+                config,
+                locked_package,
+            );
+        }
+        if self.options.locked_registry.is_some() {
+            miette::bail!(
+                "Sengoo.lock has no registry package edge for dependency '{}'; run sgpm update",
+                dep.name
+            );
+        }
         let (version, manifest_path, metadata) = if let Some(registry_path) = config.path.as_ref() {
             let registry_root = resolve_registry_path(&self.root_dir, registry_path)?;
             let package_root = canonicalize_existing(&registry_root.join(package_name))
@@ -333,7 +426,13 @@ impl GraphBuilder {
                         registry_name, package_name
                     )
                 })?;
-            select_registry_package_manifest(&package_root, package_name, &req, requirement)?
+            select_registry_package_manifest(
+                &package_root,
+                package_name,
+                &req,
+                requirement,
+                self.options.allow_yanked,
+            )?
         } else {
             fetch_remote_registry_package_manifest(
                 &self.registry_cache_dir,
@@ -349,6 +448,106 @@ impl GraphBuilder {
             reject_yanked_package(package_name, &version, &metadata)?;
         }
 
+        Ok((
+            manifest_path,
+            PackageSource::Registry {
+                registry: registry_name.to_string(),
+                version: version.to_string(),
+                metadata,
+            },
+        ))
+    }
+
+    fn resolve_locked_registry_dependency_manifest(
+        &self,
+        dep: &Dependency,
+        registry_name: &str,
+        package_name: &str,
+        req: &VersionReq,
+        config: &RegistryConfig,
+        locked: &LockedRegistryPackage,
+    ) -> Result<(PathBuf, PackageSource)> {
+        if locked.name != package_name || locked.registry != registry_name {
+            miette::bail!(
+                "Sengoo.lock registry identity for dependency '{}' does not match {}/{}; run sgpm update",
+                dep.name,
+                registry_name,
+                package_name
+            );
+        }
+        let version = Version::parse(&locked.version)
+            .into_diagnostic()
+            .with_context(|| format!("invalid locked version for dependency '{}'", dep.name))?;
+        if !req.matches(&version) {
+            miette::bail!(
+                "Sengoo.lock pins dependency '{}' to {}, which does not satisfy {}; run sgpm update",
+                dep.name,
+                version,
+                dep.version_req.as_deref().unwrap_or("<missing>")
+            );
+        }
+
+        let (manifest_path, metadata) = if let Some(registry_path) = config.path.as_ref() {
+            let registry_root = resolve_registry_path(&self.root_dir, registry_path)?;
+            let manifest_path = registry_root
+                .join(package_name)
+                .join(version.to_string())
+                .join("Sengoo.toml");
+            let manifest_path = canonicalize_existing(&manifest_path)?;
+            let package_dir = manifest_path
+                .parent()
+                .ok_or_else(|| miette::miette!("invalid local registry package path"))?;
+            let metadata = load_local_registry_metadata(package_dir)?;
+            let checksum = locked.checksum.as_deref().ok_or_else(|| {
+                miette::miette!(
+                    "Sengoo.lock local registry entry for dependency '{}' has no checksum; run sgpm update",
+                    dep.name
+                )
+            })?;
+            let actual_checksum = metadata.checksum.as_deref().ok_or_else(|| {
+                miette::miette!(
+                    "local registry package '{}/{}@{}' has no content checksum; run sgpm update",
+                    registry_name,
+                    package_name,
+                    version
+                )
+            })?;
+            if actual_checksum != checksum {
+                miette::bail!(
+                    "Sengoo.lock local registry package content checksum mismatch for dependency '{}': expected {}, got {}; run sgpm update",
+                    dep.name,
+                    checksum,
+                    actual_checksum
+                );
+            }
+            (manifest_path, metadata)
+        } else {
+            let checksum = locked.checksum.as_deref().ok_or_else(|| {
+                miette::miette!(
+                    "Sengoo.lock remote registry entry for dependency '{}' has no checksum; run sgpm update",
+                    dep.name
+                )
+            })?;
+            let manifest_path = cached_remote_manifest_path(
+                &self.registry_cache_dir,
+                registry_name,
+                package_name,
+                &version.to_string(),
+            );
+            let package_dir = manifest_path
+                .parent()
+                .ok_or_else(|| miette::miette!("invalid registry cache path"))?;
+            validate_cached_remote_package(package_dir, package_name, &version, Some(checksum))
+                .with_context(|| {
+                    format!(
+                        "locked registry package {}/{}@{} is not present in the verified cache; run sgpm update while online",
+                        registry_name, package_name, version
+                    )
+                })?;
+            let metadata = load_cached_registry_metadata(package_dir, checksum)?;
+            (manifest_path, metadata)
+        };
+        validate_registry_package_manifest(&manifest_path, package_name, &version)?;
         Ok((
             manifest_path,
             PackageSource::Registry {
@@ -571,6 +770,7 @@ fn select_registry_package_manifest(
     package_name: &str,
     req: &VersionReq,
     requirement: &str,
+    allow_yanked: bool,
 ) -> Result<(Version, PathBuf, RegistryPackageMetadata)> {
     let mut candidates = Vec::new();
     for entry in fs::read_dir(package_root)
@@ -610,6 +810,9 @@ fn select_registry_package_manifest(
             );
         }
         let metadata = load_local_registry_metadata(&path)?;
+        if metadata.yanked && !allow_yanked {
+            continue;
+        }
         candidates.push((version, manifest_path, metadata));
     }
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
@@ -664,8 +867,11 @@ fn fetch_remote_registry_package_manifest(
     let base_url = url.trim_end_matches('/');
     let index_url = format!("{}/api/v1/packages/{}", base_url, package_name);
     let index = fetch_remote_registry_index(registry_name, config, &index_url)?;
-    let (version, checksum, metadata) =
-        select_remote_registry_version(&index, package_name, req, requirement)?;
+    let (version, checksum, metadata) = if allow_yanked {
+        select_remote_registry_version_with_policy(&index, package_name, req, requirement, true)?
+    } else {
+        select_remote_registry_version(&index, package_name, req, requirement)?
+    };
     if !allow_yanked {
         reject_yanked_package(package_name, &version, &metadata)?;
     }
@@ -700,13 +906,14 @@ fn fetch_remote_registry_package_manifest(
                 );
             }
         }
-        unpack_remote_registry_archive(
+        unpack_remote_registry_archive_with_metadata(
             registry_cache_dir,
             registry_name,
             package_name,
             &version,
             &archive,
             checksum.as_deref(),
+            Some(&metadata),
         )?;
     }
     validate_registry_package_manifest(&manifest_path, package_name, &version)?;
@@ -732,11 +939,16 @@ fn fetch_remote_registry_archive(
     download_url: &str,
 ) -> Result<Vec<u8>> {
     remote_registry_request(registry_name, config, download_url, |response| async move {
-        response
-            .bytes()
-            .await
-            .map(|bytes| bytes.to_vec())
-            .into_diagnostic()
+        let mut response = response;
+        let mut archive = Vec::new();
+        while let Some(chunk) = response.chunk().await.into_diagnostic()? {
+            let new_len = archive.len().checked_add(chunk.len()).ok_or_else(|| {
+                miette::miette!("remote package archive compressed size overflows usize")
+            })?;
+            validate_remote_archive_compressed_size(new_len)?;
+            archive.extend_from_slice(&chunk);
+        }
+        Ok(archive)
     })
 }
 
@@ -819,6 +1031,16 @@ fn select_remote_registry_version(
     req: &VersionReq,
     requirement: &str,
 ) -> Result<(Version, Option<String>, RegistryPackageMetadata)> {
+    select_remote_registry_version_with_policy(index, package_name, req, requirement, false)
+}
+
+fn select_remote_registry_version_with_policy(
+    index: &RemoteRegistryIndex,
+    package_name: &str,
+    req: &VersionReq,
+    requirement: &str,
+    allow_yanked: bool,
+) -> Result<(Version, Option<String>, RegistryPackageMetadata)> {
     let mut candidates = Vec::new();
     for entry in &index.versions {
         let version = Version::parse(&entry.version)
@@ -829,7 +1051,7 @@ fn select_remote_registry_version(
                     package_name, entry.version
                 )
             })?;
-        if req.matches(&version) {
+        if req.matches(&version) && (allow_yanked || !entry.yanked) {
             candidates.push((
                 version,
                 entry.checksum.clone(),
@@ -865,23 +1087,26 @@ struct LocalRegistryVersionMetadata {
 
 fn load_local_registry_metadata(package_version_dir: &Path) -> Result<RegistryPackageMetadata> {
     let metadata_path = package_version_dir.join("sgpm-index.toml");
-    if !metadata_path.exists() {
-        return Ok(RegistryPackageMetadata::default());
-    }
-    let source = fs::read_to_string(&metadata_path)
-        .into_diagnostic()
-        .with_context(|| format!("failed to read {}", metadata_path.display()))?;
-    let parsed: LocalRegistryVersionMetadata = toml::from_str(&source)
-        .into_diagnostic()
-        .with_context(|| format!("failed to parse {}", metadata_path.display()))?;
-    Ok(RegistryPackageMetadata {
-        checksum: None,
-        yanked: parsed.yanked,
-        yank_reason: parsed
-            .yank_reason
-            .filter(|reason| !reason.trim().is_empty()),
-        features: normalized_features(parsed.features),
-    })
+    let mut metadata = if !metadata_path.exists() {
+        RegistryPackageMetadata::default()
+    } else {
+        let source = fs::read_to_string(&metadata_path)
+            .into_diagnostic()
+            .with_context(|| format!("failed to read {}", metadata_path.display()))?;
+        let parsed: LocalRegistryVersionMetadata = toml::from_str(&source)
+            .into_diagnostic()
+            .with_context(|| format!("failed to parse {}", metadata_path.display()))?;
+        RegistryPackageMetadata {
+            checksum: None,
+            yanked: parsed.yanked,
+            yank_reason: parsed
+                .yank_reason
+                .filter(|reason| !reason.trim().is_empty()),
+            features: normalized_features(parsed.features),
+        }
+    };
+    metadata.checksum = Some(local_package_content_checksum(package_version_dir)?);
+    Ok(metadata)
 }
 
 #[derive(Debug, Deserialize)]
@@ -950,6 +1175,47 @@ fn cached_remote_manifest_path(
         .join("Sengoo.toml")
 }
 
+fn validated_remote_archive_path(path: &Path) -> Result<(PathBuf, String)> {
+    let rendered = path.to_string_lossy().replace('\\', "/");
+    let has_windows_prefix = rendered
+        .as_bytes()
+        .get(1)
+        .is_some_and(|separator| *separator == b':')
+        && rendered
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic);
+    if rendered.starts_with('/') || has_windows_prefix {
+        miette::bail!(
+            "unsafe archive path '{}': absolute paths are forbidden",
+            rendered
+        );
+    }
+
+    let mut safe_path = PathBuf::new();
+    let mut normalized = Vec::new();
+    for component in rendered.split('/') {
+        match component {
+            "" | "." => continue,
+            ".." => {
+                miette::bail!(
+                    "unsafe archive path '{}': parent traversal is forbidden",
+                    rendered
+                )
+            }
+            component => {
+                safe_path.push(component);
+                normalized.push(component);
+            }
+        }
+    }
+    if normalized.is_empty() {
+        miette::bail!("unsafe archive path '{}': path is empty", rendered);
+    }
+    Ok((safe_path, normalized.join("/")))
+}
+
+#[cfg(test)]
 fn unpack_remote_registry_archive(
     registry_cache_dir: &Path,
     registry_name: &str,
@@ -958,6 +1224,28 @@ fn unpack_remote_registry_archive(
     archive: &[u8],
     archive_checksum: Option<&str>,
 ) -> Result<()> {
+    unpack_remote_registry_archive_with_metadata(
+        registry_cache_dir,
+        registry_name,
+        package_name,
+        version,
+        archive,
+        archive_checksum,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn unpack_remote_registry_archive_with_metadata(
+    registry_cache_dir: &Path,
+    registry_name: &str,
+    package_name: &str,
+    version: &Version,
+    archive: &[u8],
+    archive_checksum: Option<&str>,
+    registry_metadata: Option<&RegistryPackageMetadata>,
+) -> Result<()> {
+    validate_remote_archive_compressed_size(archive.len())?;
     let package_dir = cached_remote_manifest_path(
         registry_cache_dir,
         registry_name,
@@ -977,14 +1265,55 @@ fn unpack_remote_registry_archive(
     let unpack_result = (|| {
         let decoder = GzDecoder::new(Cursor::new(archive));
         let mut tar = Archive::new(decoder);
-        tar.unpack(&staging_dir)
-            .into_diagnostic()
-            .with_context(|| {
+        let entries = tar.entries().into_diagnostic().with_context(|| {
+            format!(
+                "failed to unpack remote package into {}",
+                staging_dir.display()
+            )
+        })?;
+        let mut seen_paths = BTreeSet::new();
+        let mut budget = RemoteArchiveBudget::default();
+        for entry in entries {
+            let mut entry = entry.into_diagnostic().with_context(|| {
                 format!(
-                    "failed to unpack remote package into {}",
+                    "failed to unpack remote package entry into {}",
                     staging_dir.display()
                 )
             })?;
+            let entry_size = entry.header().size().into_diagnostic()?;
+            budget.observe(entry_size)?;
+            let path = entry.path().into_diagnostic()?.into_owned();
+            let (safe_path, normalized) = validated_remote_archive_path(&path)?;
+            if !seen_paths.insert(normalized.clone()) {
+                miette::bail!("duplicate archive path '{}'", normalized);
+            }
+            let entry_type = entry.header().entry_type();
+            if !entry_type.is_file() && !entry_type.is_dir() {
+                miette::bail!(
+                    "unsupported archive entry type 0x{:02x} for '{}'; only files and directories are allowed",
+                    entry_type.as_byte(),
+                    normalized
+                );
+            }
+            let destination = staging_dir.join(safe_path);
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)
+                    .into_diagnostic()
+                    .with_context(|| {
+                        format!("failed to create archive directory {}", parent.display())
+                    })?;
+            }
+            entry
+                .unpack(&destination)
+                .into_diagnostic()
+                .with_context(|| {
+                    format!(
+                        "failed to unpack remote package path '{}' into {}",
+                        normalized,
+                        staging_dir.display()
+                    )
+                })?;
+        }
         validate_registry_package_manifest(
             &staging_dir.join("Sengoo.toml"),
             package_name,
@@ -997,6 +1326,14 @@ fn unpack_remote_registry_archive(
             )
             .into_diagnostic()
             .context("failed to write remote archive checksum marker")?;
+        }
+        if let Some(metadata) = registry_metadata {
+            let encoded = serde_json::to_vec(metadata)
+                .into_diagnostic()
+                .context("failed to encode remote registry metadata")?;
+            fs::write(staging_dir.join(REMOTE_REGISTRY_METADATA_FILE), encoded)
+                .into_diagnostic()
+                .context("failed to write remote registry metadata marker")?;
         }
         let content_checksum = remote_package_content_checksum(&staging_dir)?;
         fs::write(
@@ -1029,6 +1366,33 @@ fn unpack_remote_registry_archive(
         let _ = fs::remove_dir_all(&staging_dir);
     }
     unpack_result
+}
+
+fn load_cached_registry_metadata(
+    package_dir: &Path,
+    expected_checksum: &str,
+) -> Result<RegistryPackageMetadata> {
+    let metadata_path = package_dir.join(REMOTE_REGISTRY_METADATA_FILE);
+    if !metadata_path.is_file() {
+        return Ok(RegistryPackageMetadata {
+            checksum: Some(expected_checksum.to_string()),
+            ..RegistryPackageMetadata::default()
+        });
+    }
+    let encoded = fs::read(&metadata_path)
+        .into_diagnostic()
+        .with_context(|| format!("failed to read {}", metadata_path.display()))?;
+    let metadata: RegistryPackageMetadata = serde_json::from_slice(&encoded)
+        .into_diagnostic()
+        .with_context(|| format!("failed to parse {}", metadata_path.display()))?;
+    if metadata.checksum.as_deref() != Some(expected_checksum) {
+        miette::bail!(
+            "cached registry metadata checksum mismatch: expected {}, got {}",
+            expected_checksum,
+            metadata.checksum.as_deref().unwrap_or("<missing>")
+        );
+    }
+    Ok(metadata)
 }
 
 fn validate_cached_remote_package(
@@ -1065,21 +1429,42 @@ fn validate_cached_remote_package(
 }
 
 fn remote_package_content_checksum(package_dir: &Path) -> Result<String> {
-    let mut files = WalkDir::new(package_dir)
-        .into_iter()
-        .filter_map(|entry| match entry {
-            Ok(entry) if entry.file_type().is_file() => Some(Ok(entry.into_path())),
-            Ok(_) => None,
-            Err(err) => Some(Err(err)),
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .into_diagnostic()
-        .with_context(|| format!("failed to enumerate {}", package_dir.display()))?;
+    package_content_checksum(
+        package_dir,
+        &[REMOTE_ARCHIVE_CHECKSUM_FILE, REMOTE_CONTENT_CHECKSUM_FILE],
+    )
+}
+
+fn local_package_content_checksum(package_dir: &Path) -> Result<String> {
+    package_content_checksum(package_dir, &["sgpm-index.toml"])
+}
+
+fn package_content_checksum(
+    package_dir: &Path,
+    excluded_relative_paths: &[&str],
+) -> Result<String> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(package_dir) {
+        let entry = entry
+            .into_diagnostic()
+            .with_context(|| format!("failed to enumerate {}", package_dir.display()))?;
+        if entry.file_type().is_symlink() {
+            miette::bail!(
+                "registry package content contains unsupported symbolic link '{}'",
+                entry.path().display()
+            );
+        }
+        if entry.file_type().is_file() {
+            files.push(entry.into_path());
+        }
+    }
     files.retain(|path| {
-        !matches!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some(REMOTE_ARCHIVE_CHECKSUM_FILE | REMOTE_CONTENT_CHECKSUM_FILE)
-        )
+        let relative = path
+            .strip_prefix(package_dir)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        !excluded_relative_paths.contains(&relative.as_str())
     });
     files.sort_by_key(|path| {
         path.strip_prefix(package_dir)
@@ -1392,6 +1777,7 @@ pub fn render_tree(graph: &Graph) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -1419,6 +1805,88 @@ mod tests {
             }
         }
         fs::write(root.join("Sengoo.toml"), text).unwrap();
+    }
+
+    fn registry_test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        for (path, contents) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive.append_data(&mut header, path, *contents).unwrap();
+        }
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn registry_test_archive_with_raw_path(raw_path: &[u8]) -> Vec<u8> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        let manifest =
+            b"[package]\nname = 'foo'\nversion = '1.0.0'\n\n[bin]\npath = 'src/main.sg'\n";
+        let mut manifest_header = tar::Header::new_gnu();
+        manifest_header.set_size(manifest.len() as u64);
+        manifest_header.set_mode(0o644);
+        manifest_header.set_cksum();
+        archive
+            .append_data(&mut manifest_header, "Sengoo.toml", &manifest[..])
+            .unwrap();
+
+        let source = b"def main() -> i64 { 0 }\n";
+        let mut raw_header = tar::Header::new_gnu();
+        raw_header.set_size(source.len() as u64);
+        raw_header.set_mode(0o644);
+        raw_header.as_mut_bytes()[..100].fill(0);
+        raw_header.as_mut_bytes()[..raw_path.len()].copy_from_slice(raw_path);
+        raw_header.set_cksum();
+        archive.append(&raw_header, &source[..]).unwrap();
+
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn registry_test_archive_with_link(entry_type: tar::EntryType) -> Vec<u8> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        for (path, contents) in [
+            (
+                "Sengoo.toml",
+                &b"[package]\nname = 'foo'\nversion = '1.0.0'\n\n[bin]\npath = 'src/main.sg'\n"[..],
+            ),
+            ("src/main.sg", &b"def main() -> i64 { 0 }\n"[..]),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive.append_data(&mut header, path, contents).unwrap();
+        }
+        let mut link = tar::Header::new_gnu();
+        link.set_size(0);
+        link.set_mode(0o777);
+        link.set_entry_type(entry_type);
+        link.set_link_name("../outside.sg").unwrap();
+        link.set_cksum();
+        archive
+            .append_data(&mut link, "src/link.sg", &b""[..])
+            .unwrap();
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn registry_test_archive_with_declared_size(size: u64) -> Vec<u8> {
+        let mut header = tar::Header::new_gnu();
+        header.set_path("huge.bin").unwrap();
+        header.set_size(size);
+        header.set_mode(0o644);
+        header.set_cksum();
+        let mut raw_tar = Vec::from(header.as_bytes());
+        raw_tar.extend_from_slice(&[0; 1024]);
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&raw_tar).unwrap();
+        encoder.finish().unwrap()
     }
 
     #[test]
@@ -1667,6 +2135,164 @@ mod tests {
 
         assert!(err.to_string().contains("failed to unpack remote package"));
         assert!(!dir.join("default/foo/1.0.0").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn remote_registry_unpack_rejects_duplicate_archive_paths() {
+        let dir = temp_dir("remote_unpack_duplicate");
+        let cache = fs::canonicalize(&dir).unwrap();
+        let version = Version::parse("1.0.0").unwrap();
+        let manifest =
+            b"[package]\nname = 'foo'\nversion = '1.0.0'\n\n[bin]\npath = 'src/main.sg'\n";
+        let archive = registry_test_archive(&[
+            ("Sengoo.toml", manifest),
+            ("src/main.sg", b"def main() -> i64 { 0 }\n"),
+            ("src/main.sg", b"def main() -> i64 { 1 }\n"),
+        ]);
+
+        let err =
+            unpack_remote_registry_archive(&cache, "default", "foo", &version, &archive, None)
+                .unwrap_err();
+
+        assert!(err.to_string().contains("duplicate archive path"), "{err}");
+        assert!(!cache.join("default/foo/1.0.0").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn remote_registry_unpack_rejects_traversal_and_absolute_paths() {
+        for raw_path in [&b"../outside.sg"[..], &b"/absolute.sg"[..]] {
+            let dir = temp_dir("remote_unpack_unsafe_path");
+            let cache = fs::canonicalize(&dir).unwrap();
+            let version = Version::parse("1.0.0").unwrap();
+            let archive = registry_test_archive_with_raw_path(raw_path);
+
+            let err =
+                unpack_remote_registry_archive(&cache, "default", "foo", &version, &archive, None)
+                    .unwrap_err();
+
+            assert!(err.to_string().contains("unsafe archive path"), "{err}");
+            assert!(!cache.join("default/foo/1.0.0").exists());
+            assert!(!dir.join("outside.sg").exists());
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn remote_registry_unpack_rejects_symbolic_and_hard_links() {
+        for entry_type in [tar::EntryType::Symlink, tar::EntryType::Link] {
+            let dir = temp_dir("remote_unpack_link");
+            let cache = fs::canonicalize(&dir).unwrap();
+            let version = Version::parse("1.0.0").unwrap();
+            let archive = registry_test_archive_with_link(entry_type);
+
+            let err =
+                unpack_remote_registry_archive(&cache, "default", "foo", &version, &archive, None)
+                    .unwrap_err();
+
+            assert!(
+                err.to_string().contains("unsupported archive entry type"),
+                "{err}"
+            );
+            assert!(!cache.join("default/foo/1.0.0").exists());
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn remote_registry_unpack_rejects_excessive_declared_output_size() {
+        let dir = temp_dir("remote_unpack_size_limit");
+        let cache = fs::canonicalize(&dir).unwrap();
+        let version = Version::parse("1.0.0").unwrap();
+        let archive = registry_test_archive_with_declared_size(256 * 1024 * 1024 + 1);
+
+        let err =
+            unpack_remote_registry_archive(&cache, "default", "foo", &version, &archive, None)
+                .unwrap_err();
+
+        assert!(err.to_string().contains("uncompressed size limit"), "{err}");
+        assert!(!cache.join("default/foo/1.0.0").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn remote_registry_archive_limits_cover_compressed_size_and_entry_count() {
+        assert!(
+            validate_remote_archive_compressed_size(MAX_REMOTE_ARCHIVE_COMPRESSED_BYTES).is_ok()
+        );
+        assert!(
+            validate_remote_archive_compressed_size(MAX_REMOTE_ARCHIVE_COMPRESSED_BYTES + 1)
+                .unwrap_err()
+                .to_string()
+                .contains("compressed size limit")
+        );
+
+        let mut budget = RemoteArchiveBudget::default();
+        for _ in 0..MAX_REMOTE_ARCHIVE_ENTRIES {
+            budget.observe(0).unwrap();
+        }
+        assert!(budget
+            .observe(0)
+            .unwrap_err()
+            .to_string()
+            .contains("entry limit"));
+    }
+
+    #[test]
+    fn unlocked_remote_selection_skips_a_higher_yanked_version() {
+        let index = RemoteRegistryIndex {
+            versions: vec![
+                RemoteRegistryVersion {
+                    version: "1.8.0".to_string(),
+                    checksum: Some("lower".to_string()),
+                    yanked: false,
+                    yank_reason: None,
+                    features: vec![],
+                },
+                RemoteRegistryVersion {
+                    version: "1.9.0".to_string(),
+                    checksum: Some("higher".to_string()),
+                    yanked: true,
+                    yank_reason: Some("withdrawn".to_string()),
+                    features: vec![],
+                },
+            ],
+        };
+        let requirement = "^1.0";
+        let req = VersionReq::parse(requirement).unwrap();
+
+        let (selected, checksum, metadata) =
+            select_remote_registry_version(&index, "foo", &req, requirement).unwrap();
+
+        assert_eq!(selected, Version::parse("1.8.0").unwrap());
+        assert_eq!(checksum.as_deref(), Some("lower"));
+        assert!(!metadata.yanked);
+    }
+
+    #[test]
+    fn unlocked_local_selection_skips_a_higher_yanked_version() {
+        let dir = temp_dir("local_yanked_selection");
+        let package_root = dir.join("foo");
+        let lower = package_root.join("1.8.0");
+        let higher = package_root.join("1.9.0");
+        write_pkg_version(&lower, "foo", "1.8.0", &[]);
+        write_pkg_version(&higher, "foo", "1.9.0", &[]);
+        fs::write(
+            higher.join("sgpm-index.toml"),
+            "yanked = true\nyank_reason = 'withdrawn'\n",
+        )
+        .unwrap();
+        let requirement = "^1.0";
+        let req = VersionReq::parse(requirement).unwrap();
+
+        let (selected, manifest, metadata) =
+            select_registry_package_manifest(&package_root, "foo", &req, requirement, false)
+                .unwrap();
+
+        assert_eq!(selected, Version::parse("1.8.0").unwrap());
+        assert!(manifest.ends_with("1.8.0/Sengoo.toml"));
+        assert!(!metadata.yanked);
         let _ = fs::remove_dir_all(dir);
     }
 }

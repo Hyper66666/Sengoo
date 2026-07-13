@@ -48,7 +48,8 @@
 
 ## 4. Release process and docs
 
-- [x] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
+- [x] 4.1 Toolchain semantic versioning + checksummed artifacts and GitHub
+  build-provenance attestations.
   - Workspace-coherent versions, SHA-256 sidecars, and GitHub build-provenance
     attestations are gated behind the complete platform smoke matrix.
 - [x] 4.2 Document install/upgrade and the registry workflow.

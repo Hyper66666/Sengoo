@@ -43,8 +43,9 @@ before cache publication. Failed staging is removed atomically.
 ### Decision 6: Release artifacts share one version source
 
 `sgc`, `sgpm`, `sgfmt`, `sglsp`, runtime metadata, archive manifest, installer,
-and Git tag report one semver. Archives are checksummed and signed. Install and
-upgrade smoke run outside the checkout on Windows, Linux, and macOS x64/arm64.
+and Git tag report one semver. Archives are checksummed and receive GitHub
+build-provenance attestations. Install and upgrade smoke run outside the
+checkout on Windows, Linux, and macOS x64/arm64.
 
 ## Reference-server scope
 

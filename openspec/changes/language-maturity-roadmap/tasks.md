@@ -74,12 +74,18 @@
 - [x] 3.2 Complete and archive `package-registry-and-distribution`.
   - Archived as `2026-07-13-package-registry-and-distribution`; the reference
     registry and resolver evidence is paired with four-host package artifacts.
-- [ ] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
+- [x] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
   reference registry, including checksum mismatch, yank, alias, multiversion,
   offline cache, and archive traversal failures.
-- [ ] 3.4 Produce signed/checksummed Windows x64, Linux x86_64, macOS x86_64,
-  and macOS arm64 release artifacts with install and upgrade smoke outside the
-  source checkout.
+  - `reference_registry_alias_multiversion_locked_tool_loop_is_offline` publishes
+    two versions, resolves aliased edges, stops the server, then passes locked
+    check/test/build/run from exact verified cache entries. Companion tests
+    reject offline cache tampering, bad upload/download checksums, higher yanked
+    candidates, traversal/absolute/link/duplicate archive entries, and bounded
+    compressed/uncompressed/entry counts before cache publication.
+- [ ] 3.4 Produce checksummed, provenance-attested Windows x64, Linux x86_64,
+  macOS x86_64, and macOS arm64 release artifacts with install and upgrade
+  smoke outside the source checkout.
 - [ ] 3.5 Cut a real prerelease tag and verify every tool reports one coherent
   version.
 

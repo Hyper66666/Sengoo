@@ -39,6 +39,15 @@ function Download-File($Url, $Destination) {
     Invoke-WebRequest -Uri $Url -OutFile $Destination
 }
 
+function Copy-OrDownloadFile($Source, $Destination) {
+    if (Test-Path -LiteralPath $Source) {
+        Write-Host "Copying $Source"
+        Copy-Item -LiteralPath $Source -Destination $Destination
+        return
+    }
+    Download-File $Source $Destination
+}
+
 if ($PrintTarget) {
     Write-Output (Default-Target)
     return
@@ -62,10 +71,18 @@ try {
         }
         $extension = if ($Target -like "*windows*") { "zip" } else { "tar.gz" }
         $archiveName = "sengoo-$Version-$Target.$extension"
-        $releaseBase = "$($BaseUrl.TrimEnd('/'))/v$Version"
         $Archive = Join-Path $tempRoot $archiveName
-        Download-File "$releaseBase/$archiveName" $Archive
-        Download-File "$releaseBase/$archiveName.sha256" "$Archive.sha256"
+        if (Test-Path -LiteralPath $BaseUrl) {
+            $releaseBase = Join-Path $BaseUrl "v$Version"
+            $Source = Join-Path $releaseBase $archiveName
+            $ChecksumSource = "$Source.sha256"
+        } else {
+            $releaseBase = "$($BaseUrl.TrimEnd('/'))/v$Version"
+            $Source = "$releaseBase/$archiveName"
+            $ChecksumSource = "$Source.sha256"
+        }
+        Copy-OrDownloadFile $Source $Archive
+        Copy-OrDownloadFile $ChecksumSource "$Archive.sha256"
     }
 
     $archivePath = (Resolve-Path $Archive).Path

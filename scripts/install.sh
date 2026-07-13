@@ -51,6 +51,17 @@ download_file() {
   fi
 }
 
+copy_or_download_file() {
+  source=$1
+  destination=$2
+  if [ -f "$source" ]; then
+    echo "Copying $source"
+    cp "$source" "$destination"
+  else
+    download_file "$source" "$destination"
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version)
@@ -124,10 +135,17 @@ if [ -n "$version" ]; then
     *) extension="tar.gz" ;;
   esac
   archive_name="sengoo-$version-$target.$extension"
-  release_base="${base_url%/}/v$version"
   archive="$tmp_dir/$archive_name"
-  download_file "$release_base/$archive_name" "$archive"
-  download_file "$release_base/$archive_name.sha256" "$archive.sha256"
+  if [ -d "$base_url" ]; then
+    source="${base_url%/}/v$version/$archive_name"
+    checksum_source="${source}.sha256"
+  else
+    release_base="${base_url%/}/v$version"
+    source="$release_base/$archive_name"
+    checksum_source="$source.sha256"
+  fi
+  copy_or_download_file "$source" "$archive"
+  copy_or_download_file "$checksum_source" "$archive.sha256"
 fi
 
 checksum_file="$archive.sha256"

@@ -6,9 +6,10 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
+use sha2::{Digest, Sha256};
 use tar::Archive;
 
 fn sgpm() -> PathBuf {
@@ -261,6 +262,87 @@ fn spawn_remote_package_server(
     });
 
     (format!("http://{}", addr), rx, handle)
+}
+
+type StreamingLimitServer = (
+    String,
+    mpsc::Receiver<(Vec<String>, usize)>,
+    thread::JoinHandle<()>,
+);
+
+fn spawn_streaming_limit_remote_package_server(
+    package: &str,
+    version: &str,
+    chunk_bytes: usize,
+) -> StreamingLimitServer {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let package = package.to_string();
+    let version = version.to_string();
+    let handle = thread::spawn(move || {
+        let mut seen_paths = Vec::new();
+        let mut bytes_sent = 0usize;
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_http_request(&mut stream);
+            seen_paths.push(request.path.clone());
+            if request.path == format!("/api/v1/packages/{}", package) {
+                let body = format!(r#"{{"versions":[{{"version":"{}"}}]}}"#, version);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+            } else if request.path == format!("/api/v1/packages/{}/{}/download", package, version) {
+                let header = "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+                stream.write_all(header.as_bytes()).unwrap();
+                let chunk = vec![b'a'; chunk_bytes];
+                loop {
+                    let chunk_header = format!("{:X}\r\n", chunk.len());
+                    if stream.write_all(chunk_header.as_bytes()).is_err() {
+                        break;
+                    }
+                    if stream.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    if stream.write_all(b"\r\n").is_err() {
+                        break;
+                    }
+                    bytes_sent += chunk.len();
+                    thread::sleep(Duration::from_millis(2));
+                }
+            } else {
+                let response =
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                stream.write_all(response).unwrap();
+            }
+        }
+        let _ = tx.send((seen_paths, bytes_sent));
+    });
+
+    (format!("http://{}", addr), rx, handle)
+}
+
+fn duplicate_path_registry_archive() -> Vec<u8> {
+    let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+    for (path, contents) in [
+        (
+            "Sengoo.toml",
+            &b"[package]\nname = 'foo'\nversion = '1.2.0'\n\n[bin]\npath = 'src/main.sg'\n"[..],
+        ),
+        ("src/main.sg", &b"def main() -> i64 { 0 }\n"[..]),
+        ("src/main.sg", &b"def main() -> i64 { 1 }\n"[..]),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, path, contents).unwrap();
+    }
+    archive.into_inner().unwrap().finish().unwrap()
 }
 
 #[test]
@@ -901,6 +983,161 @@ fn registry_dependency_fetches_highest_matching_remote_version() {
 }
 
 #[test]
+fn remote_registry_download_rejects_checksum_mismatch_before_cache_publication() {
+    let dir = temp_dir("registry_download_checksum_mismatch");
+    let remote_pkg = dir.join("remote/foo");
+    write_pkg_version(&remote_pkg, "foo", "1.2.0", &[]);
+    let package_output = run_sgpm(
+        &[
+            "publish",
+            "--dry-run",
+            "--manifest-path",
+            remote_pkg.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(package_output.status.success());
+    let archive = fs::read(remote_pkg.join("target/package/foo-1.2.0.tar.gz")).unwrap();
+    let bad_checksum = "0".repeat(64);
+    let (server_url, paths_rx, handle) =
+        spawn_remote_package_server("foo", "1.2.0", &bad_checksum, archive);
+
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'app'\nversion = '0.1.0'\n\n[registries.default]\nurl = '{server_url}'\n\n[dependencies]\nfoo = '1.2.0'\n"
+        ),
+    )
+    .unwrap();
+
+    let output = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("checksum mismatch"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    paths_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    handle.join().unwrap();
+    assert!(!app.join("target/sgpm/registry/default/foo/1.2.0").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn remote_registry_download_rejects_hostile_archive_before_cache_publication() {
+    let dir = temp_dir("registry_download_hostile_archive");
+    let archive = duplicate_path_registry_archive();
+    let checksum = format!("{:x}", Sha256::digest(&archive));
+    let (server_url, paths_rx, handle) =
+        spawn_remote_package_server("foo", "1.2.0", &checksum, archive);
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'app'\nversion = '0.1.0'\n\n[registries.default]\nurl = '{server_url}'\n\n[dependencies]\nfoo = '1.2.0'\n"
+        ),
+    )
+    .unwrap();
+
+    let output = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("duplicate archive path"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    paths_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    handle.join().unwrap();
+    assert!(!app.join("target/sgpm/registry/default/foo/1.2.0").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn remote_registry_download_aborts_when_stream_exceeds_compressed_limit() {
+    let dir = temp_dir("registry_download_stream_limit");
+    let max_compressed_bytes = 64 * 1024 * 1024;
+    let (server_url, paths_rx, handle) =
+        spawn_streaming_limit_remote_package_server("foo", "1.2.0", 256 * 1024);
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'app'\nversion = '0.1.0'\n\n[registries.default]\nurl = '{server_url}'\n\n[dependencies]\nfoo = '1.2.0'\n"
+        ),
+    )
+    .unwrap();
+
+    let mut child = Command::new(sgpm())
+        .args([
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run sgpm update against streaming limit server");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "sgpm update should fail as soon as the compressed stream exceeds the limit instead of waiting for EOF"
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let output = child.wait_with_output().expect("collect sgpm output");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("compressed size limit"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let (paths, bytes_sent) = paths_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("remote registry should receive index and streaming download requests");
+    handle.join().unwrap();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/v1/packages/foo".to_string(),
+            "/api/v1/packages/foo/1.2.0/download".to_string()
+        ]
+    );
+    assert!(
+        bytes_sent > max_compressed_bytes,
+        "the server should stream enough compressed bytes to cross the enforced limit"
+    );
+    assert!(!app.join("target/sgpm/registry/default/foo/1.2.0").exists());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn remote_registry_dependency_repairs_incomplete_package_cache() {
     let dir = temp_dir("registry_dep_remote_repair");
     let remote_pkg = dir.join("remote/foo");
@@ -1453,6 +1690,215 @@ fn update_writes_lockfile_for_local_registry_dependency() {
     assert!(
         lockfile.contains("source.kind = \"registry\""),
         "lockfile should record structured registry source:\n{lockfile}"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn locked_local_registry_resolution_rejects_tampered_same_version_contents() {
+    let dir = temp_dir("local_registry_locked_checksum");
+    let registry = dir.join("registry");
+    write_pkg_version(&registry.join("foo/1.2.0"), "foo", "1.2.0", &[]);
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[registries.local]\npath = '../registry'\n\n[dependencies]\nfoo = { version = '1.2.0', registry = 'local' }\n",
+    )
+    .unwrap();
+
+    let update = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        update.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let lockfile = fs::read_to_string(app.join("Sengoo.lock"))
+        .unwrap()
+        .replace('\\', "/");
+    assert!(
+        lockfile.contains("source.checksum = \""),
+        "local registry lock entries should record deterministic content hashes:\n{lockfile}"
+    );
+
+    let locked_ok = run_sgpm(
+        &[
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        locked_ok.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&locked_ok.stdout),
+        String::from_utf8_lossy(&locked_ok.stderr)
+    );
+
+    fs::write(
+        registry.join("foo/1.2.0/sgpm-index.toml"),
+        "yanked = true\nyank_reason = 'withdrawn'\n",
+    )
+    .unwrap();
+    let locked_after_yank = run_sgpm(
+        &[
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        locked_after_yank.status.success(),
+        "mutable yank metadata must not invalidate locked package contents\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&locked_after_yank.stdout),
+        String::from_utf8_lossy(&locked_after_yank.stderr)
+    );
+
+    fs::write(
+        registry.join("foo/1.2.0/src/main.sg"),
+        "def main() -> i64 { 99 }\n",
+    )
+    .unwrap();
+    let tampered = run_sgpm(
+        &[
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!tampered.status.success());
+    let stderr = String::from_utf8_lossy(&tampered.stderr);
+    assert!(stderr.contains("checksum"), "stderr:\n{stderr}");
+    assert!(stderr.contains("sgpm update"), "stderr:\n{stderr}");
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn locked_local_registry_hashes_nested_index_named_entry() {
+    let dir = temp_dir("local_registry_nested_index_checksum");
+    let registry = dir.join("registry");
+    let package = registry.join("foo/1.2.0");
+    write_pkg_version(&package, "foo", "1.2.0", &[]);
+    fs::write(
+        package.join("Sengoo.toml"),
+        "[package]\nname = 'foo'\nversion = '1.2.0'\nedition = '2026'\n\n[bin]\npath = 'src/sgpm-index.toml'\n",
+    )
+    .unwrap();
+    fs::write(
+        package.join("src/sgpm-index.toml"),
+        "def main() -> i64 { 7 }\n",
+    )
+    .unwrap();
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[registries.local]\npath = '../registry'\n\n[dependencies]\nfoo = { version = '1.2.0', registry = 'local' }\n",
+    )
+    .unwrap();
+
+    let update = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        update.status.success(),
+        "{}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+
+    fs::write(
+        package.join("src/sgpm-index.toml"),
+        "def main() -> i64 { 99 }\n",
+    )
+    .unwrap();
+    let tampered = run_sgpm(
+        &[
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!tampered.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered.stderr).contains("content checksum mismatch"),
+        "{}",
+        String::from_utf8_lossy(&tampered.stderr)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn locked_local_registry_rejects_entry_replaced_by_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("local_registry_symlink_checksum");
+    let registry = dir.join("registry");
+    let package = registry.join("foo/1.2.0");
+    write_pkg_version(&package, "foo", "1.2.0", &[]);
+    let app = dir.join("app");
+    write_pkg(&app, "app", &[]);
+    fs::write(
+        app.join("Sengoo.toml"),
+        "[package]\nname = 'app'\nversion = '0.1.0'\nedition = '2026'\n\n[registries.local]\npath = '../registry'\n\n[dependencies]\nfoo = { version = '1.2.0', registry = 'local' }\n",
+    )
+    .unwrap();
+
+    let update = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        update.status.success(),
+        "{}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+
+    fs::write(package.join("src/other.sg"), "def main() -> i64 { 99 }\n").unwrap();
+    fs::remove_file(package.join("src/main.sg")).unwrap();
+    symlink("other.sg", package.join("src/main.sg")).unwrap();
+    let tampered = run_sgpm(
+        &[
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(!tampered.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered.stderr).contains("unsupported symbolic link"),
+        "{}",
+        String::from_utf8_lossy(&tampered.stderr)
     );
 
     let _ = fs::remove_dir_all(dir);
@@ -2468,7 +2914,6 @@ fn reference_registry_serves_publish_download_and_name_reservation() {
     let run = Command::new(sgpm())
         .args([
             "run",
-            "--locked",
             "--manifest-path",
             consumer.join("Sengoo.toml").to_str().unwrap(),
         ])
@@ -2477,7 +2922,7 @@ fn reference_registry_serves_publish_download_and_name_reservation() {
         .env("SGPM_SGC", fake)
         .env("SGPM_RECORD", &record)
         .output()
-        .expect("run consumer with locked registry package");
+        .expect("run consumer with online registry cache repair");
     assert!(
         run.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -2488,7 +2933,7 @@ fn reference_registry_serves_publish_download_and_name_reservation() {
     assert_eq!(
         fs::read_to_string(&cached_source).unwrap(),
         "def main() -> i64 { 0 }\n",
-        "locked resolution should repair a content-tampered registry cache"
+        "unlocked resolution should repair a content-tampered registry cache"
     );
 
     let (index_status, index_body) =
@@ -2534,6 +2979,317 @@ fn reference_registry_serves_publish_download_and_name_reservation() {
 
     let status = server.wait().expect("reference registry exits");
     assert!(status.success());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn reference_registry_rejects_bad_upload_checksum() {
+    let dir = temp_dir("reference_registry_bad_upload_checksum");
+    let registry_root = dir.join("registry");
+    let addr = reserve_local_addr();
+    let mut server = spawn_reference_registry(&registry_root, &addr, 1);
+    let body = b"not-the-declared-bytes";
+    let (status, response) = send_http_request(
+        &addr,
+        "POST",
+        "/api/v1/packages/badpkg/1.0.0",
+        &[
+            ("Authorization", "Bearer owner-one"),
+            ("Content-Type", "application/gzip"),
+            ("x-sengoo-package", "badpkg"),
+            ("x-sengoo-version", "1.0.0"),
+            (
+                "x-sengoo-checksum",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ],
+        body,
+    );
+    assert_eq!(status, 400, "body: {}", String::from_utf8_lossy(&response));
+    assert!(
+        String::from_utf8_lossy(&response).contains("checksum mismatch"),
+        "body: {}",
+        String::from_utf8_lossy(&response)
+    );
+    assert!(server.wait().expect("reference registry exits").success());
+    assert!(!registry_root.join("packages/badpkg/1.0.0").exists());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unlocked_reference_registry_resolution_skips_higher_yanked_version() {
+    let dir = temp_dir("reference_registry_yanked_selection");
+    let registry_root = dir.join("registry");
+    let addr = reserve_local_addr();
+    let base_url = format!("http://{addr}");
+    let mut server = spawn_reference_registry(&registry_root, &addr, 5);
+
+    for version in ["1.8.0", "1.9.0"] {
+        let package = dir.join(format!("foo-{version}"));
+        write_pkg_version(&package, "foo", version, &[]);
+        let manifest_path = package.join("Sengoo.toml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap()
+            + &format!(
+                "\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n"
+            );
+        fs::write(&manifest_path, manifest).unwrap();
+        let publish = Command::new(sgpm())
+            .args([
+                "publish",
+                "--manifest-path",
+                manifest_path.to_str().unwrap(),
+            ])
+            .current_dir(&dir)
+            .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+            .output()
+            .expect("publish yanked-selection package");
+        assert!(publish.status.success());
+    }
+    let (yank_status, _) = send_http_request(
+        &addr,
+        "POST",
+        "/api/v1/packages/foo/1.9.0/yank",
+        &[
+            ("Authorization", "Bearer owner-one"),
+            ("Content-Type", "application/json"),
+        ],
+        br#"{"reason":"withdrawn"}"#,
+    );
+    assert_eq!(yank_status, 200);
+
+    let consumer = dir.join("consumer");
+    write_pkg(&consumer, "consumer", &[]);
+    fs::write(
+        consumer.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'consumer'\nversion = '0.1.0'\n\n[registries.default]\nurl = '{base_url}'\n\n[dependencies]\nfoo = '^1.0'\n"
+        ),
+    )
+    .unwrap();
+    let update = run_sgpm(
+        &[
+            "update",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert!(
+        update.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    assert!(server.wait().expect("reference registry exits").success());
+    let lockfile = fs::read_to_string(consumer.join("Sengoo.lock")).unwrap();
+    assert!(lockfile.contains("version = \"1.8.0\""), "{lockfile}");
+    assert!(!lockfile.contains("version = \"1.9.0\""), "{lockfile}");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn locked_remote_registry_resolution_uses_verified_cache_without_network() {
+    let dir = temp_dir("reference_registry_offline_locked");
+    let registry_root = dir.join("registry");
+    let package = dir.join("offlinepkg");
+    write_pkg_version(&package, "offlinepkg", "1.2.0", &[]);
+    let addr = reserve_local_addr();
+    let base_url = format!("http://{addr}");
+    let mut package_manifest = fs::read_to_string(package.join("Sengoo.toml")).unwrap();
+    package_manifest.push_str(&format!(
+        "\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n"
+    ));
+    fs::write(package.join("Sengoo.toml"), package_manifest).unwrap();
+
+    // Publish, fetch the index, and download the archive, then terminate the
+    // reference server before the locked resolution begins.
+    let mut server = spawn_reference_registry(&registry_root, &addr, 3);
+    let publish = Command::new(sgpm())
+        .args([
+            "publish",
+            "--manifest-path",
+            package.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("publish offline cache package");
+    assert!(
+        publish.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&publish.stdout),
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let consumer = dir.join("consumer");
+    write_pkg(&consumer, "consumer", &[]);
+    fs::write(
+        consumer.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'consumer'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n\n[dependencies]\nofflinepkg = '^1.0'\n"
+        ),
+    )
+    .unwrap();
+    let update = Command::new(sgpm())
+        .args([
+            "update",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("populate verified remote cache");
+    assert!(
+        update.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    assert!(server.wait().expect("reference registry exits").success());
+
+    let locked = Command::new(sgpm())
+        .args([
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("resolve locked graph with registry offline");
+
+    assert!(
+        locked.status.success(),
+        "locked resolution should use only verified cached bytes:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&locked.stdout),
+        String::from_utf8_lossy(&locked.stderr)
+    );
+
+    let cached_source = consumer.join("target/sgpm/registry/default/offlinepkg/1.2.0/src/main.sg");
+    fs::write(&cached_source, "def main() -> i64 { 99 }\n").unwrap();
+    let tampered = Command::new(sgpm())
+        .args([
+            "metadata",
+            "--locked",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("reject tampered locked cache while registry is offline");
+    assert!(!tampered.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered.stderr).contains("verified cache"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&tampered.stderr)
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn reference_registry_alias_multiversion_locked_tool_loop_is_offline() {
+    let dir = temp_dir("reference_registry_alias_multiversion_offline");
+    let registry_root = dir.join("registry");
+    let addr = reserve_local_addr();
+    let base_url = format!("http://{addr}");
+    let mut server = spawn_reference_registry(&registry_root, &addr, 6);
+
+    for version in ["1.0.0", "2.0.0"] {
+        let package = dir.join(format!("shared-{version}"));
+        write_pkg_version(&package, "shared_core", version, &[]);
+        let manifest_path = package.join("Sengoo.toml");
+        let manifest = fs::read_to_string(&manifest_path).unwrap()
+            + &format!(
+                "\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n"
+            );
+        fs::write(&manifest_path, manifest).unwrap();
+        let publish = Command::new(sgpm())
+            .args([
+                "publish",
+                "--manifest-path",
+                manifest_path.to_str().unwrap(),
+            ])
+            .current_dir(&dir)
+            .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+            .output()
+            .expect("publish multiversion package");
+        assert!(
+            publish.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&publish.stdout),
+            String::from_utf8_lossy(&publish.stderr)
+        );
+    }
+
+    let consumer = dir.join("consumer");
+    write_pkg(&consumer, "consumer", &[]);
+    fs::write(
+        consumer.join("Sengoo.toml"),
+        format!(
+            "[package]\nname = 'consumer'\nversion = '0.1.0'\nedition = '2026'\n\n[bin]\npath = 'src/main.sg'\n\n[registries.default]\nurl = '{base_url}'\ntoken_env = 'SGPM_TEST_OWNER_TOKEN'\n\n[dependencies]\nshared_v1 = {{ package = 'shared_core', version = '>=1.0.0, <2.0.0' }}\nshared_v2 = {{ package = 'shared_core', version = '>=2.0.0, <3.0.0' }}\n"
+        ),
+    )
+    .unwrap();
+    let update = Command::new(sgpm())
+        .args([
+            "update",
+            "--manifest-path",
+            consumer.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+        .output()
+        .expect("resolve aliased registry versions");
+    assert!(
+        update.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    assert!(server.wait().expect("reference registry exits").success());
+
+    let lockfile = fs::read_to_string(consumer.join("Sengoo.lock")).unwrap();
+    for expected in [
+        "version = \"1.0.0\"",
+        "version = \"2.0.0\"",
+        "alias = \"shared_v1\"",
+        "alias = \"shared_v2\"",
+    ] {
+        assert!(lockfile.contains(expected), "{lockfile}");
+    }
+
+    let fake = fake_sgc(&dir);
+    let record = dir.join("offline-tool-loop.txt");
+    install_success_executable(&consumer.join(if cfg!(windows) {
+        "target/debug/consumer.exe"
+    } else {
+        "target/debug/consumer"
+    }));
+    for command in ["check", "test", "build", "run"] {
+        let output = Command::new(sgpm())
+            .args([
+                command,
+                "--locked",
+                "--manifest-path",
+                consumer.join("Sengoo.toml").to_str().unwrap(),
+            ])
+            .current_dir(&dir)
+            .env("SGPM_TEST_OWNER_TOKEN", "owner-one")
+            .env("SGPM_SGC", &fake)
+            .env("SGPM_RECORD", &record)
+            .output()
+            .unwrap_or_else(|error| panic!("run locked {command}: {error}"));
+        assert!(
+            output.status.success(),
+            "locked {command} should use the cache with the registry offline:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert!(record.is_file(), "locked tool loop should invoke sgc");
     let _ = fs::remove_dir_all(dir);
 }
 
