@@ -13,12 +13,17 @@
 
 ## 1. Phase 0 - integrated release baseline
 
-- [ ] 1.1 Complete and archive `mainline-release-baseline`.
-- [ ] 1.2 Preserve all current work in reviewable commits/patches, reconcile the
+- [x] 1.1 Complete and archive `mainline-release-baseline`.
+  - Archived as `2026-07-13-mainline-release-baseline` after local and four-host
+    realworld/distribution gates closed.
+- [x] 1.2 Preserve all current work in reviewable commits/patches, reconcile the
   divergent branch with latest `main`, and resolve conflicts without dropping
   unexplained changes.
-- [ ] 1.3 Run the baseline gate: fmt, clippy, workspace tests, runtime native
+- [x] 1.3 Run the baseline gate: fmt, clippy, workspace tests, runtime native
   bridge tests, realworld package loop, and `openspec validate --all --strict`.
+  - Local compiler/sgc/sgpm/formatter gates and strict OpenSpec pass; Actions
+    run `29224930570` passes the complete package/install smoke on all four
+    release hosts.
 - [x] 1.4 Reconcile active tasks with implementation evidence, especially sgpm
   registry/alias/multiversion, debugger, numeric, and concurrency surfaces.
 - [x] 1.5 Update README, support matrix, branch/upstream metadata, and generated
@@ -60,7 +65,9 @@
     aliases, multiversion resolution, yank handling, and reference-server e2e
     are implemented. Remaining child tasks are cross-host artifacts and install
     evidence, not more resolver breadth.
-- [ ] 3.2 Complete and archive `package-registry-and-distribution`.
+- [x] 3.2 Complete and archive `package-registry-and-distribution`.
+  - Archived as `2026-07-13-package-registry-and-distribution`; the reference
+    registry and resolver evidence is paired with four-host package artifacts.
 - [ ] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
   reference registry, including checksum mismatch, yank, alias, multiversion,
   offline cache, and archive traversal failures.

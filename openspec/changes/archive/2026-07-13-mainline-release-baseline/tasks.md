@@ -82,8 +82,12 @@
     (68), sgc unit (459), and all integration targets except two test-report
     schema/source-map assertions. Their fix was then verified by 20 command
     tests and the complete 2/2 `test_discovery` e2e target.
-- [ ] 4.3 Run realworld locked package loops and toolchain distribution dry-run
+- [x] 4.3 Run realworld locked package loops and toolchain distribution dry-run
   smoke on Windows and Linux CI.
+  - The local real-binary locked loop passes without skipped `sgc`/`sgfmt`.
+    GitHub Actions run `29224930570` passes release build, realworld smoke,
+    package, install, installed stdlib smoke, and artifact upload on Windows,
+    Ubuntu, macOS arm64, and macOS x64.
 - [x] 4.4 Run `openspec validate mainline-release-baseline --strict` and
   `openspec validate --all --strict`.
   - `npx.cmd @fission-ai/openspec validate --all --strict` reports 47 passed,
