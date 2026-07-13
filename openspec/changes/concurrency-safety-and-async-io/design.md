@@ -56,6 +56,29 @@ multi-threaded executor accepts only `Send` futures. Its public contract covers:
 A fixed worker pool satisfies the release contract. Work stealing may be added
 later if reference benchmarks justify it and public semantics remain unchanged.
 
+The v1 source/runtime boundary is explicit:
+
+- `runtime_enable_executor(worker_count, capacity)` enables the executor; the
+  capacity bounds all accepted, non-terminal tasks rather than only idle queue
+  entries;
+- `spawn_task(future)` transfers a directly constructed `Send` future to the
+  executor when enabled and returns `0` when the bound rejects submission;
+- a transferred future is pinned to one worker for all polls, so values created
+  after transfer do not migrate between worker threads;
+- `task_join(id)` waits for and returns a stable lifecycle status (`2`
+  completed, `3` cancelled, `4` failed). Detached task outputs are deliberately
+  discarded and their frames are dropped exactly once;
+- terminal statuses remain queryable across explicit executor shutdown in a
+  bounded process-local history of the newest 4096 task IDs; older IDs report
+  `Unknown` rather than growing runtime memory without limit;
+- async-main exit drains accepted tasks. Explicit shutdown selects drain or
+  cancellation and rejects later submission.
+
+Joinable `spawn(future)` retains its cooperative return-a-future behavior in
+v1. Both `spawn` and `spawn_task` conservatively require directly constructed
+`Send` futures so a future variable with unknown capture provenance cannot be
+silently moved across an executor boundary in a later release.
+
 ### Decision 4: Cross-platform reactor
 
 Platform backends use poll/epoll or equivalent on Linux, IOCP/handles or
@@ -95,6 +118,30 @@ escape hatch.
 return/error/panic cancels then joins them. Children cannot escape the scope,
 and scope teardown has a bounded diagnostic timeout in tests.
 
+The v1 source shape is deliberately small:
+
+```sengoo
+let scope = task_scope();
+let accepted = scope_spawn(&scope, child());
+```
+
+`TaskScope` is an owned, non-`Send`, non-`Sync` compiler-known guard. Its lexical
+owner must be introduced directly by `let scope = task_scope()`; local tuple,
+array, constant, and other aggregate storage is rejected alongside aggregate
+fields and return types.
+`scope_spawn` accepts only a direct `Send` future, registers it before returning
+`1`, and returns `0` after releasing the rejected future when the executor or
+scope is closed. It does not expose a child task ID, so scoped children cannot
+be joined or retained outside the guard.
+
+MIR lowering distinguishes normal lexical fallthrough from early exits using
+the existing drop-scope stack. Normal fallthrough emits join-all before the
+guard's idempotent `Drop`; `return`, `?`, `break`, `continue`, contract abort,
+and unwind cleanup reach `Drop` without that marker, so teardown cancels every
+pending child and then joins all terminal states. The compiler rejects
+`TaskScope` in return positions and aggregate fields rather than allowing a
+guard to escape its lexical owner.
+
 ## Platform and evidence policy
 
 - Feature/unit evidence does not imply host support.
@@ -113,6 +160,9 @@ cancelling while `select_cancel` keeps its explicit semantics.
 
 - **Auto trait unsoundness:** recursive structural and explicit negative tests.
 - **Drop races:** generation tokens, exact drop counters, sanitizer/leak stress.
+- **Worker self-join:** executor workers help poll their own affinity queue while
+  joining scoped children so a one-worker executor cannot deadlock on nested
+  scope teardown.
 - **Deadlock:** not prevented generally; bounded test timeouts and lock-order
   documentation are required.
 - **Platform drift:** one shared scenario suite plus host-specific adapters.

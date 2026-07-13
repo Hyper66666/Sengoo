@@ -25,6 +25,26 @@
 `spawn_task` registers lifecycle status. `spawn(future)` returns an awaitable
 future without exposing lifecycle ids.
 
+## Structured task scopes
+
+- `task_scope()` creates an opaque, compiler-known `TaskScope` guard.
+  User-written `TaskScope { ... }` literals, local aggregate storage, aggregate
+  fields, and return types are rejected so the scope capability cannot escape
+  or be forged. The lexical owner is introduced directly with
+  `let scope = task_scope()`.
+- `scope_spawn(&scope, direct_send_future)` returns `1` when the child is
+  accepted and `0` when the scope/executor rejects it. It never exposes the
+  child task id. Rejected future frames are cancelled or dropped exactly once.
+- Normal lexical fallthrough joins every child before the guard's idempotent
+  `Drop`. `return`, `?`, `break`, `continue`, and abort cleanup skip that normal
+  marker, so `Drop` cancels pending children and then joins their terminal
+  states.
+- A worker joining a child pinned to its own affinity queue helps poll that
+  queue. This preserves progress for nested scopes on a one-worker executor
+  without changing fixed-affinity scheduling.
+- Scope registry entries are removed at teardown. Runtime stress coverage
+  asserts no live scope or executor task remains after repeated joins.
+
 ## Cancellation
 
 - `cancel_task(id)` removes a **pending** queued task and marks status
@@ -117,6 +137,8 @@ future without exposing lifecycle ids.
 | Canceled | Task removed; `cancel` + `drop` hooks run |
 | Timed out (inner still pending) | Timeout future dropped; inner future dropped when last handle released |
 | Scheduler dropped | All pending tasks receive `on_scheduler_drop` |
+| Normal `TaskScope` exit | All scoped children joined; guard Drop is idempotent |
+| Early `TaskScope` exit | Pending children canceled, then every child joined |
 
 ## Concurrent runtime (`std::async`, opt-in)
 

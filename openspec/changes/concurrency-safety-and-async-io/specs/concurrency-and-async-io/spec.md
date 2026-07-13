@@ -27,22 +27,31 @@ or moving non-thread-safe values across thread boundaries.
 ### Requirement: The runtime SHALL provide a multi-threaded executor
 
 The runtime SHALL offer a multi-threaded executor in addition to the cooperative
-scheduler, with `spawn` requiring `Send` futures. The public contract SHALL
-define bounded submission/backpressure, progress, cancellation, shutdown,
-error isolation, and join behavior independently of the scheduling algorithm.
+scheduler. `spawn` and executor-backed `spawn_task` SHALL require directly
+constructed `Send` futures. The public contract SHALL define bounded
+submission/backpressure, progress, cancellation, shutdown, error isolation,
+and join behavior independently of the scheduling algorithm.
 
 #### Scenario: Parallel tasks run and join
 
 - **WHEN** a program spawns multiple `Send` tasks on the multi-threaded executor
-- **THEN** the tasks make progress in parallel and their results join
-  deterministically
+- **THEN** the tasks make progress in parallel on fixed worker affinities
+- **AND** `task_join` reports deterministic terminal lifecycle status while
+  detached outputs are discarded and their future frames are dropped once
 
 #### Scenario: Executor is saturated or shut down
 
 - **WHEN** submission exceeds configured bounds or shutdown begins
-- **THEN** submission returns the documented status without unbounded growth
+- **THEN** `spawn_task` returns `0` without unbounded growth
 - **AND** accepted tasks are joined or cancelled per the shutdown contract
 - **AND** a task failure does not terminate unrelated worker tasks
+
+#### Scenario: Cooperative mode remains the default
+
+- **WHEN** a program does not enable the multi-threaded executor
+- **THEN** joinable `spawn` and detached `spawn_task` continue on the
+  cooperative scheduler
+- **AND** enabling the executor changes only detached `spawn_task` dispatch
 
 ### Requirement: The async runtime SHALL provide a cross-platform IO reactor
 
@@ -84,3 +93,12 @@ contract, an mpsc `channel<T>`, and a structured task scope.
 - **WHEN** tasks are spawned inside a `task_scope` and the scope exits
 - **THEN** all child tasks are joined on normal exit and cancelled on early exit,
   leaving no leaked tasks
+- **AND** `scope_spawn` does not expose a child task ID outside the scope
+- **AND** returning or aggregate-storing the `TaskScope` guard is rejected
+
+#### Scenario: Scoped submission is rejected
+
+- **WHEN** `scope_spawn` targets a closed scope or a saturated/shutting-down
+  executor
+- **THEN** it returns `0`
+- **AND** the rejected future frame is cancelled or dropped exactly once

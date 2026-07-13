@@ -64,18 +64,28 @@
 
 ## 3. Multi-threaded executor
 
-- [ ] 3.1 Add a multi-threaded executor selectable at startup; keep cooperative
+- [x] 3.1 Add a multi-threaded executor selectable at startup; keep cooperative
   default. Correctness, bounded queues/backpressure, shutdown, cancellation,
   and error isolation are required; work stealing is optional.
-  - Partial: the existing native thread pool is opt-in via
-    `runtime_enable_thread_pool`; the cooperative scheduler remains default.
-    Generic future scheduling, bounded backpressure, shutdown/cancellation, and
-    error isolation remain open. Work stealing does not block archive.
-- [ ] 3.2 `spawn` requires `Send` futures on the multi-threaded executor.
-- [ ] 3.3 Tests: parallel tasks complete and results join deterministically.
-  - Partial: native tests cover `spawn_blocking` completion and deterministic
-    joined shared-state jobs through the opt-in pool. Deterministic joined
-    `spawn` futures on the bounded multi-threaded executor remain open.
+  - `runtime_enable_executor(worker_count, capacity)` selects a fixed-worker
+    executor while the cooperative scheduler remains default. Capacity bounds
+    accepted non-terminal tasks; `spawn_task` returns `0` on saturation or
+    shutdown. Futures retain one worker affinity, poll panics become status `4`,
+    async-main exit drains, and explicit shutdown supports drain/cancel. Work
+    stealing remains optional.
+- [x] 3.2 `spawn` requires `Send` futures on the multi-threaded executor.
+  - `spawn` and executor-backed `spawn_task` conservatively accept only directly
+    constructed futures whose arguments/captures satisfy structural `Send`.
+    Negative-impl compiler tests cover both boundaries; unknown future-variable
+    provenance is rejected rather than moved across threads.
+- [x] 3.3 Tests: parallel tasks complete and terminal lifecycle statuses join
+  deterministically.
+  - Runtime tests prove two worker polls overlap, capacity is returned after
+    join, cancel/shutdown leave no pending tasks, panic isolation preserves a
+    healthy worker, and completed detached frames drop once. Native `sgc` tests
+    cover saturation, deterministic lifecycle joins, cancellation, and the
+    complete stdlib/compiler/runtime ABI. Stable name-derived dispatch IDs have
+    a regression for unused generic async templates.
 
 ## 4. Cross-platform reactor
 
@@ -103,9 +113,20 @@
     value handles, and exact Drop. Compiler tests cover typed lowering plus
     public and raw `!Send` rejection, and a native `sgc` round trip moves a
     user-defined payload through the complete runtime ABI.
-- [ ] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
+- [x] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
   scope exit).
-- [ ] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.
+  - Frozen API: `task_scope()` returns a compiler-known `TaskScope` guard and
+    `scope_spawn(&scope, direct_send_future)` returns only `1`/`0`, never an
+    escaping child ID. Normal lexical fallthrough joins; early exits cancel then
+    join through idempotent Drop. `TaskScope` return, aggregate field, and local
+    aggregate escape is a compile-time error.
+- [x] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.
+  - Compiler tests cover normal join plus `return`/`?`/loop-exit cancellation
+    shape and reject scope forging/escape. Runtime tests cover normal and early
+    exact cleanup, rejected-frame cleanup, one-worker nested-scope progress,
+    and 100-scope stress with no live scope or executor task. Native `sgc`
+    covers the complete stdlib/compiler/runtime path; existing generic channel
+    ownership and cancellation coverage remains green.
 
 ## 6. Docs and matrix
 

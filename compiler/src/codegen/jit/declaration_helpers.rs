@@ -52,6 +52,14 @@ impl JITCodegen {
         self.extern_decls
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
         self.extern_decls
+            .push_str("declare i64 @sengoo_async_spawn_task_raw(i64, i64)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_task_scope_spawn_raw(i64, i64, i64)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_task_scope_join(i64)\n");
+        self.extern_decls
+            .push_str("declare i64 @sengoo_async_task_scope_new()\n");
+        self.extern_decls
             .push_str(select_winner_runtime_declaration());
         self.extern_decls
             .push_str(select_n_winner_runtime_declaration());
@@ -106,6 +114,25 @@ impl JITCodegen {
         self.function_signatures.insert(
             "sengoo_async_spawn_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_spawn_task_raw".to_string(),
+            (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_task_scope_spawn_raw".to_string(),
+            (
+                vec![MIRType::Int(64), MIRType::Int(64), MIRType::Int(64)],
+                MIRType::Int(64),
+            ),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_task_scope_join".to_string(),
+            (vec![MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_task_scope_new".to_string(),
+            (Vec::new(), MIRType::Int(64)),
         );
         self.function_signatures.insert(
             select_winner_runtime_function_name().to_string(),

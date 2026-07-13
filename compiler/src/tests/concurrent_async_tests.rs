@@ -1017,3 +1017,333 @@ async def main() -> i64 { 0 }
         "expected guard escape diagnostic, got: {message}"
     );
 }
+
+#[test]
+fn concurrent_spawn_task_rejects_non_send_future_arguments() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    spawn_task(consume(local))
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn_task must require a Send future");
+    assert!(
+        error.to_string().contains("not Send"),
+        "expected stable Send diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_rejects_non_send_future_arguments() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    await spawn(consume(local))
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn must require a Send future");
+    assert!(
+        error.to_string().contains("not Send"),
+        "expected stable Send diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_task_rejects_capturing_future_factory() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    let factory = | | consume(local);
+    spawn_task(factory())
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn_task must reject callable captures");
+    assert!(
+        error.to_string().contains("directly called async function"),
+        "expected direct-future diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_rejects_capturing_future_factory() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    let factory = | | consume(local);
+    await spawn(factory())
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn must reject callable captures");
+    assert!(
+        error.to_string().contains("directly called async function"),
+        "expected direct-future diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_task_accepts_direct_multisegment_async_function_path() {
+    let source = r#"
+async def worker_child(value: i64) -> i64 { value }
+
+async def main() -> i64 {
+    spawn_task(worker::child(42))
+}
+"#;
+
+    compile_to_ir(source).expect("direct multi-segment async calls should remain spawnable");
+}
+
+fn task_scope_test_prelude() -> &'static str {
+    r#"
+struct TaskScope { handle: i64 }
+impl !Send for TaskScope {}
+impl !Sync for TaskScope {}
+
+impl Drop for TaskScope {
+    def drop(&mut self) {}
+}
+
+async def scoped_child() -> i64 { 7 }
+"#
+}
+
+#[test]
+fn structured_task_scope_normal_fallthrough_joins_before_drop() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+async def main() -> i64 {
+    let scope = task_scope();
+    scope_spawn(&scope, scoped_child());
+    42
+}
+"#
+    );
+
+    let mir = compile_to_mir(&source).expect("normal task scope should lower");
+    let body = mir
+        .iter()
+        .find(|function| function.name == "main__body")
+        .expect("async main body should exist");
+    let calls = body
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::Call { func, .. } => Some(func.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let join = calls
+        .iter()
+        .position(|name| *name == "sengoo_async_task_scope_join")
+        .expect("normal scope exit should join children");
+    let drop = calls
+        .iter()
+        .position(|name| *name == "TaskScope_Drop_drop")
+        .expect("scope guard should still run idempotent Drop");
+    assert!(join < drop, "normal join must run before guard Drop");
+}
+
+#[test]
+fn structured_task_scope_explicit_return_uses_cancel_drop_without_normal_join() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+async def main() -> i64 {
+    let scope = task_scope();
+    scope_spawn(&scope, scoped_child());
+    return 42;
+}
+"#
+    );
+
+    let mir = compile_to_mir(&source).expect("early task scope exit should lower");
+    let body = mir
+        .iter()
+        .find(|function| function.name == "main__body")
+        .expect("async main body should exist");
+    assert!(!body.instructions.iter().any(|instruction| {
+        matches!(instruction, Instruction::Call { func, .. } if func == "sengoo_async_task_scope_join")
+    }));
+    assert!(body.instructions.iter().any(|instruction| {
+        matches!(instruction, Instruction::Call { func, .. } if func == "TaskScope_Drop_drop")
+    }));
+}
+
+#[test]
+fn structured_task_scope_cannot_escape_through_return() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+def leak_scope() -> TaskScope { task_scope() }
+def main() -> i64 { 0 }
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("TaskScope return must be rejected");
+    assert!(error.to_string().contains("TaskScope cannot escape"));
+}
+
+#[test]
+fn structured_task_scope_cannot_be_stored_in_aggregate_fields() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+struct BadOwner { scope: TaskScope }
+def main() -> i64 { 0 }
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("TaskScope aggregate field must be rejected");
+    assert!(error.to_string().contains("TaskScope cannot escape"));
+}
+
+#[test]
+fn structured_task_scope_cannot_be_stored_in_local_aggregates() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+async def main() -> i64 {
+    let pair = (task_scope(), 1);
+    0
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("TaskScope local aggregate must be rejected");
+    assert!(
+        error.to_string().contains("TaskScope cannot escape"),
+        "expected lexical-owner diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn structured_task_scope_question_mark_failure_skips_normal_join() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+struct Result<T, E> { is_ok: bool, value: T, error: E }
+
+def fail() -> Result<i64, i64> {
+    Result { is_ok: false, value: 0, error: 9 }
+}
+
+async def scoped_result() -> Result<i64, i64> {
+    let scope = task_scope();
+    scope_spawn(&scope, scoped_child());
+    let value = fail()?;
+    Result { is_ok: true, value: value, error: 0 }
+}
+
+def main() -> i64 { 0 }
+"#
+    );
+
+    let mir = compile_to_mir(&source).expect("scoped Result propagation should lower");
+    let body = mir
+        .iter()
+        .find(|function| function.name == "scoped_result")
+        .expect("async Result body should exist");
+    let joins = body
+        .instructions
+        .iter()
+        .filter(|instruction| {
+            matches!(instruction, Instruction::Call { func, .. } if func == "sengoo_async_task_scope_join")
+        })
+        .count();
+    let drops = body
+        .instructions
+        .iter()
+        .filter(|instruction| {
+            matches!(instruction, Instruction::Call { func, .. } if func == "TaskScope_Drop_drop")
+        })
+        .count();
+    assert_eq!(
+        joins, 1,
+        "only the success fallthrough should join normally"
+    );
+    assert!(
+        drops >= 2,
+        "success and ? failure exits should both drop scope"
+    );
+}
+
+#[test]
+fn structured_task_scope_break_uses_cancel_drop_without_normal_join() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+async def main() -> i64 {
+    loop {
+        let scope = task_scope();
+        scope_spawn(&scope, scoped_child());
+        break;
+    }
+    42
+}
+"#
+    );
+
+    let mir = compile_to_mir(&source).expect("scoped break should lower");
+    let body = mir
+        .iter()
+        .find(|function| function.name == "main__body")
+        .expect("async main body should exist");
+    assert!(!body.instructions.iter().any(|instruction| {
+        matches!(instruction, Instruction::Call { func, .. } if func == "sengoo_async_task_scope_join")
+    }));
+    assert!(body.instructions.iter().any(|instruction| {
+        matches!(instruction, Instruction::Call { func, .. } if func == "TaskScope_Drop_drop")
+    }));
+}
+
+#[test]
+fn structured_task_scope_handle_cannot_be_forged_with_struct_literal() {
+    let source = format!(
+        "{}\n{}",
+        task_scope_test_prelude(),
+        r#"
+def main() -> i64 {
+    let forged = TaskScope { handle: 1 };
+    0
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("TaskScope construction must be opaque");
+    assert!(
+        error.to_string().contains("TaskScope is opaque"),
+        "expected opaque scope diagnostic, got: {error}"
+    );
+}

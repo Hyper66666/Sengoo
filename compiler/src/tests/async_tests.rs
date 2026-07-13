@@ -1,6 +1,6 @@
 use crate::ast::DeclKind;
 use crate::codegen::{Codegen, FfiCodegenConfig, JITCodegen};
-use crate::mir::{Instruction, LocalKind};
+use crate::mir::{Instruction, LocalKind, MirConstant, Terminator};
 use crate::CompileError;
 use crate::{compile_to_ir, compile_to_mir, Parser};
 
@@ -601,7 +601,7 @@ async def main() -> i64 {
         }
     }
 
-    assert!(call_names.contains("sengoo_async_spawn_raw"));
+    assert!(call_names.contains("sengoo_async_spawn_task_raw"));
     assert!(call_names.contains("sengoo_async_cancel_task"));
     assert!(call_names.contains("sengoo_async_task_status"));
 }
@@ -619,7 +619,7 @@ async def main() -> i64 {
 
     let ir = compile_to_ir(source).expect("task lifecycle source should compile to IR");
     assert!(
-        ir.contains("declare i64 @sengoo_async_spawn_raw(i64, i64)"),
+        ir.contains("declare i64 @sengoo_async_spawn_task_raw(i64, i64)"),
         "IR should declare spawn_task runtime helper"
     );
     assert!(
@@ -630,6 +630,68 @@ async def main() -> i64 {
         ir.contains("declare i64 @sengoo_async_task_status(i64)"),
         "IR should declare task_status runtime helper"
     );
+}
+
+#[test]
+fn spawn_task_kind_matches_dispatch_when_unused_generic_async_templates_exist() {
+    let source = r#"
+async def alpha_unused<T>(value: T) -> i64 { 0 }
+async def child() -> i64 { 7 }
+async def main() -> i64 { spawn_task(child()) }
+"#;
+
+    let mir = compile_to_mir(source).expect("async dispatch source should lower");
+    let main_body = mir
+        .iter()
+        .find(|function| function.name == "main__body")
+        .expect("main body should be materialized");
+    let kind_local = main_body
+        .instructions
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::Call { func, args, .. } if func == "sengoo_async_spawn_task_raw" => {
+                args.first().copied()
+            }
+            _ => None,
+        })
+        .expect("spawn_task kind local should exist");
+    let lowered_kind = main_body
+        .instructions
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::Assign {
+                destination,
+                value: MirConstant::Int(value),
+            } if *destination == kind_local => Some(*value as u32),
+            _ => None,
+        })
+        .expect("spawn_task kind constant should exist");
+
+    let dispatch = mir
+        .iter()
+        .find(|function| function.name == "sengoo_async_poll_dispatch")
+        .expect("poll dispatch should be synthesized");
+    let Terminator::Switch { targets, .. } = dispatch.basic_blocks[dispatch.start_block]
+        .terminator
+        .as_ref()
+        .expect("dispatch should terminate with a switch")
+    else {
+        panic!("poll dispatch should use a switch");
+    };
+    let child_kind = targets
+        .iter()
+        .find_map(|(kind, block)| {
+            dispatch.basic_blocks[*block]
+                .instructions
+                .iter()
+                .any(|instruction| {
+                    matches!(dispatch.instruction(*instruction), Instruction::Call { func, .. } if func == "child__poll")
+                })
+                .then_some(*kind)
+        })
+        .expect("child poll dispatch target should exist");
+
+    assert_eq!(lowered_kind, child_kind);
 }
 
 #[test]

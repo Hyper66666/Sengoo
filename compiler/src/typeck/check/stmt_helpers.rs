@@ -75,6 +75,14 @@ impl TypeChecker {
                         "AsyncContext is poll-scoped and cannot be stored".to_string(),
                     ));
                 }
+                if Self::ty_contains_task_scope(&value_ty)
+                    && !Self::is_direct_task_scope_constructor(value.as_deref())
+                {
+                    return Err(TypeckError::Other(
+                        "TaskScope cannot escape its lexical owner through local storage"
+                            .to_string(),
+                    ));
+                }
                 if !self.is_owned_dyn_unsize_coercion(&var_ty, &value_ty) {
                     self.infer.unify(&var_ty, &value_ty)?;
                 }
@@ -92,12 +100,24 @@ impl TypeChecker {
                         "AsyncContext is poll-scoped and cannot be stored".to_string(),
                     ));
                 }
+                if Self::ty_contains_task_scope(&value_ty) {
+                    return Err(TypeckError::Other(
+                        "TaskScope cannot escape its lexical owner through constant storage"
+                            .to_string(),
+                    ));
+                }
                 self.infer.unify(&var_ty, &value_ty)?;
                 self.env.insert_var(name.name.clone(), var_ty);
                 Ok(None)
             }
             StmtKind::Expr(expr) => {
                 let ty = self.check_expr(expr)?;
+                if Self::ty_contains_task_scope(&ty) {
+                    return Err(TypeckError::Other(
+                        "TaskScope must be bound directly by `let scope = task_scope()`"
+                            .to_string(),
+                    ));
+                }
                 Ok(Some(ty))
             }
             StmtKind::Item(item) => {
@@ -106,6 +126,21 @@ impl TypeChecker {
                 Ok(None)
             }
         }
+    }
+
+    fn is_direct_task_scope_constructor(value: Option<&Expr>) -> bool {
+        matches!(
+            value.map(|expr| &expr.kind),
+            Some(ExprKind::Call { func, args })
+                if args.is_empty()
+                    && match &func.kind {
+                        ExprKind::Ident(ident) => ident.name == "task_scope",
+                        ExprKind::Path(path) => {
+                            path.segments.len() == 1 && path.segments[0].name == "task_scope"
+                        }
+                        _ => false,
+                    }
+        )
     }
 
     /// 检查if条件表达式，验证条件为bool型且分支类型兼容。

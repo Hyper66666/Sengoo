@@ -544,6 +544,72 @@ impl TypeChecker {
         Ok(())
     }
 
+    fn check_spawn_future_send(&mut self, boundary: &str, future: &Expr) -> TyResult<()> {
+        match &future.kind {
+            ExprKind::Call { func, args } => {
+                let direct_function = Self::direct_callable_name(func).is_some_and(|name| {
+                    self.async_functions.contains(&name)
+                        || self.env.lookup(&name).is_some_and(|symbol| {
+                            matches!(symbol.kind, SymbolKind::Function { .. })
+                        })
+                        || matches!(
+                            name.as_str(),
+                            "sleep"
+                                | "timeout"
+                                | "spawn_blocking_future_i64"
+                                | "channel_send_i64"
+                                | "channel_recv_i64"
+                                | "raw_channel_send"
+                                | "raw_channel_recv"
+                                | "raw_rwlock_read_async"
+                                | "raw_rwlock_write_async"
+                                | "mutex_lock_async"
+                                | "raw_mutex_lock_async"
+                                | "HttpServer_next_request_async"
+                                | "sengoo_http_server_next_request_async__start"
+                        )
+                });
+                if !direct_function {
+                    return Err(TypeckError::Other(format!(
+                        "cross-thread {boundary} requires a directly called async function or async block"
+                    )));
+                }
+                for arg in args {
+                    let arg_ty = self.check_expr(arg)?;
+                    if !self.is_cross_thread_send_ty(&arg_ty) {
+                        return Err(TypeckError::Other(format!(
+                            "cross-thread {boundary} future argument is not Send"
+                        )));
+                    }
+                }
+                Ok(())
+            }
+            ExprKind::AsyncBlock(block) | ExprKind::ParallelBlock(block) => {
+                let params = HashSet::new();
+                let mut captures = Vec::new();
+                let mut seen = HashSet::new();
+                Self::collect_capture_from_block(block, &params, &mut captures, &mut seen);
+                for capture in captures {
+                    let Some(symbol) = self.env.lookup(&capture) else {
+                        continue;
+                    };
+                    let Some(ty) = symbol.get_ty() else {
+                        continue;
+                    };
+                    if !self.is_cross_thread_send_ty(ty) {
+                        return Err(TypeckError::Other(format!(
+                            "cross-thread {boundary} future capture `{capture}` is not Send"
+                        )));
+                    }
+                }
+                Ok(())
+            }
+            _ => Err(TypeckError::Other(format!(
+                "cross-thread {boundary} requires a directly constructed Send future"
+            ))),
+        }
+    }
+
     fn check_shared_state_send_argument(&mut self, args: &[Expr]) -> TyResult<()> {
         let Some(shared) = args.first() else {
             return Ok(());
@@ -724,6 +790,7 @@ impl TypeChecker {
                     "spawn requires a Future value".to_string(),
                 ));
             }
+            self.check_spawn_future_send("spawn", &args[0])?;
 
             return Ok(future_ty);
         }
@@ -747,8 +814,55 @@ impl TypeChecker {
                     "spawn_task requires a Future value".to_string(),
                 ));
             }
+            self.check_spawn_future_send("spawn_task", &args[0])?;
 
             return Ok(self.env.int_ty(IntKind::I64));
+        }
+
+        if builtin_name == Some("scope_spawn") {
+            if self.async_context_depth == 0 {
+                return Err(TypeckError::Other(
+                    "scope_spawn is only allowed in async contexts".to_string(),
+                ));
+            }
+            if args.len() != 2 {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 2,
+                    found: args.len(),
+                });
+            }
+            let scope_ty = self.check_expr(&args[0])?;
+            let valid_scope = matches!(
+                &scope_ty.kind,
+                TyKind::Ref(_, inner)
+                    if matches!(&inner.kind, TyKind::Adt { name, .. } if name == "TaskScope")
+            );
+            if !valid_scope {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a borrowed TaskScope as its first argument".to_string(),
+                ));
+            }
+            let future_ty = self.check_expr(&args[1])?;
+            if !future_ty.is_future() {
+                return Err(TypeckError::Other(
+                    "scope_spawn requires a Future value".to_string(),
+                ));
+            }
+            self.check_spawn_future_send("scope_spawn", &args[1])?;
+            return Ok(self.env.int_ty(IntKind::I64));
+        }
+
+        if builtin_name == Some("task_scope") {
+            if !args.is_empty() {
+                return Err(TypeckError::ArgumentCountMismatch {
+                    expected: 0,
+                    found: args.len(),
+                });
+            }
+            return Ok(self.env.new_ty(TyKind::Adt {
+                name: "TaskScope".to_string(),
+                args: Vec::new(),
+            }));
         }
 
         if builtin_name == Some("sleep") {

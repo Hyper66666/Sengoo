@@ -3,7 +3,7 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    concurrent, main__poll, main__result, main__start, sengoo_async_cancel_dispatch,
+    concurrent, executor, main__poll, main__result, main__start, sengoo_async_cancel_dispatch,
     sengoo_async_drop_dispatch, sengoo_async_poll_dispatch, CoroutineScheduler, CoroutineTask,
     TaskId, TaskLifecycleStatus, TaskState,
 };
@@ -182,6 +182,9 @@ pub unsafe extern "C" fn sengoo_async_scheduler_task_status(
 
 #[no_mangle]
 pub extern "C" fn sengoo_async_cancel_task(task_id: i64) -> bool {
+    if executor::is_concurrent_task_id(task_id) {
+        return executor::cancel(task_id);
+    }
     CURRENT_SCHEDULER.with(|cell| {
         let scheduler = cell.get();
         let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
@@ -196,6 +199,9 @@ pub extern "C" fn sengoo_async_cancel_task(task_id: i64) -> bool {
 
 #[no_mangle]
 pub extern "C" fn sengoo_async_task_status(task_id: i64) -> i64 {
+    if executor::is_concurrent_task_id(task_id) {
+        return executor::task_status(task_id) as i64;
+    }
     CURRENT_SCHEDULER.with(|cell| {
         let scheduler = cell.get();
         let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
@@ -221,6 +227,123 @@ pub extern "C" fn sengoo_async_spawn_raw(kind: i64, handle: i64) -> i64 {
     })
 }
 
+pub(super) struct DetachedForeignAsyncTask {
+    pub(super) kind: i64,
+    pub(super) handle: i64,
+}
+
+impl CoroutineTask for DetachedForeignAsyncTask {
+    fn foreign_identity(&self) -> Option<(i64, i64)> {
+        (self.handle != 0).then_some((self.kind, self.handle))
+    }
+
+    fn poll(&mut self) -> TaskState {
+        if unsafe { sengoo_async_poll_dispatch(self.kind, self.handle) } == 0 {
+            return TaskState::Pending;
+        }
+        if self.handle != 0 {
+            unsafe { sengoo_async_drop_dispatch(self.kind, self.handle) };
+            self.handle = 0;
+        }
+        TaskState::Complete
+    }
+
+    fn cancel(&mut self) -> bool {
+        if self.handle == 0 {
+            return true;
+        }
+        let canceled = unsafe { sengoo_async_cancel_dispatch(self.kind, self.handle) };
+        if canceled {
+            self.handle = 0;
+        }
+        canceled
+    }
+
+    fn on_scheduler_drop(&mut self) {
+        if self.handle != 0 {
+            unsafe { sengoo_async_drop_dispatch(self.kind, self.handle) };
+            self.handle = 0;
+        }
+    }
+}
+
+impl DetachedForeignAsyncTask {
+    pub(super) fn release_rejected(mut self) {
+        if self.handle == 0 {
+            return;
+        }
+        let canceled = unsafe { sengoo_async_cancel_dispatch(self.kind, self.handle) };
+        if !canceled {
+            unsafe { sengoo_async_drop_dispatch(self.kind, self.handle) };
+        }
+        self.handle = 0;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_runtime_enable_executor(worker_count: i64, capacity: i64) -> i64 {
+    executor::enable(worker_count, capacity).unwrap_or_else(|status| -status)
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_runtime_executor_enabled() -> bool {
+    executor::is_enabled()
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_spawn_task_raw(kind: i64, handle: i64) -> i64 {
+    if executor::is_enabled() {
+        executor::spawn_detached(kind, handle)
+    } else {
+        CURRENT_SCHEDULER.with(|cell| {
+            let scheduler = cell.get();
+            let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
+                return 0;
+            };
+            let task_id = scheduler.spawn(DetachedForeignAsyncTask { kind, handle });
+            let _ = scheduler.tick();
+            task_id as i64
+        })
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_join_task(task_id: i64) -> i64 {
+    if executor::is_concurrent_task_id(task_id) {
+        return executor::join(task_id) as i64;
+    }
+    CURRENT_SCHEDULER.with(|cell| {
+        let scheduler = cell.get();
+        let Some(scheduler) = (unsafe { scheduler_mut(scheduler) }) else {
+            return TaskLifecycleStatus::Unknown as i64;
+        };
+        let Ok(task_id) = TaskId::try_from(task_id) else {
+            return TaskLifecycleStatus::Unknown as i64;
+        };
+        if task_id == 0 {
+            return TaskLifecycleStatus::Unknown as i64;
+        }
+        loop {
+            let status = scheduler.task_status(task_id);
+            if status != TaskLifecycleStatus::Pending {
+                return status as i64;
+            }
+            let _ = scheduler.run_until_idle(1);
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_runtime_shutdown_executor(cancel_pending: bool) -> i64 {
+    let mode = if cancel_pending {
+        executor::ConcurrentShutdownMode::Cancel
+    } else {
+        executor::ConcurrentShutdownMode::Drain
+    };
+    executor::shutdown(mode);
+    0
+}
+
 #[no_mangle]
 pub extern "C" fn sengoo_async_run_main_i64() -> i64 {
     concurrent::retain_native_bridge_exports_for_linker();
@@ -235,6 +358,8 @@ pub extern "C" fn sengoo_async_run_main_i64() -> i64 {
         }
         cell.set(previous);
     });
+
+    executor::shutdown(executor::ConcurrentShutdownMode::Drain);
 
     let final_result = result
         .lock()
