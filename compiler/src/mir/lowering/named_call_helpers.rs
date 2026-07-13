@@ -9,6 +9,21 @@ pub(super) fn lower_named_call(
     if name == "rc_new" && arg_locals.len() == 1 {
         return lower_rc_new_call(ctx, arg_locals[0]);
     }
+    if name == "arc_new" && arg_locals.len() == 1 {
+        return lower_arc_new_call(ctx, arg_locals[0]);
+    }
+    if name == "mutex_new" && arg_locals.len() == 1 {
+        return lower_mutex_new_call(ctx, arg_locals[0]);
+    }
+    if name == "arc_borrow" && arg_locals.len() == 1 {
+        return lower_arc_borrow_call(ctx, arg_locals[0], expected_return_type);
+    }
+    if name == "mutex_guard_copy_into" && arg_locals.len() == 2 {
+        return lower_mutex_guard_copy_into_call(ctx, arg_locals[0], arg_locals[1]);
+    }
+    if name == "raw_mutex_guard_set" && arg_locals.len() == 2 {
+        return lower_raw_mutex_guard_set_call(ctx, arg_locals[0], arg_locals[1]);
+    }
     if name == "option_none"
         && arg_locals.is_empty()
         && expected_return_type.is_some_and(is_option_mir_type)
@@ -965,6 +980,21 @@ fn erased_function_pointer(
     params: Vec<MIRType>,
 ) -> Local {
     let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let function = typed_function_pointer(ctx, name, params);
+    let erased = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: erased,
+        value: function,
+        to: i8_ptr,
+    });
+    erased
+}
+
+fn typed_function_pointer(
+    ctx: &mut LoweringContext<'_>,
+    name: String,
+    params: Vec<MIRType>,
+) -> Local {
     let function = ctx.add_local(
         None,
         LocalKind::Temp,
@@ -977,13 +1007,7 @@ fn erased_function_pointer(
         destination: function,
         value: MirConstant::GlobalRef(name),
     });
-    let erased = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
-    ctx.push_inst(Instruction::Cast {
-        destination: erased,
-        value: function,
-        to: i8_ptr,
-    });
-    erased
+    function
 }
 
 fn synthesize_vec_move_thunk(
@@ -1521,6 +1545,301 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
         ty: rc_ty,
     });
     ctx.mark_drop_local_moved(payload_source);
+    result
+}
+
+fn lower_arc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local {
+    let value_ty = ctx.get_local_type(value_local).clone();
+    let Some(value_hir_ty) = ctx.concrete_type_registry.hir_type_for_mir(&value_ty) else {
+        ctx.errors
+            .push("arc_new<T>: concrete payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let arc_hir_ty = HIRType::named("Arc".to_string(), vec![value_hir_ty]);
+    let arc_name = crate::type_naming::hir_type_instance_name(&arc_hir_ty);
+    ctx.concrete_type_registry
+        .register_instance(arc_name.clone(), arc_hir_ty);
+    let arc_ty = MIRType::Struct {
+        name: arc_name.clone(),
+        fields: vec![
+            ("handle".to_string(), MIR_I64),
+            ("marker".to_string(), MIR_I64),
+        ],
+    };
+
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("ArcPayload_{callback_suffix}"));
+    let move_thunk =
+        synthesize_vec_move_thunk(ctx, &value_ty, &format!("ArcPayload_{callback_suffix}"));
+    let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
+
+    let value_ptr = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ptr(Box::new(value_ty.clone())),
+    );
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: payload_source,
+    });
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let erased_value_ptr = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: erased_value_ptr,
+        value: value_ptr,
+        to: i8_ptr.clone(),
+    });
+
+    let (payload_size, payload_align) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size_local,
+        value: MirConstant::Int(payload_size as i64),
+    });
+    let align_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: align_local,
+        value: MirConstant::Int(payload_align as i64),
+    });
+    let move_fn = typed_function_pointer(ctx, move_thunk, vec![i8_ptr.clone(), i8_ptr.clone()]);
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr.clone()]);
+
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: "sengoo_arc_new_parts".to_string(),
+        args: vec![erased_value_ptr, size_local, align_local, move_fn, drop_fn],
+    });
+
+    let marker = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: marker,
+        value: MirConstant::Int(0),
+    });
+
+    let result = ctx.add_local(None, LocalKind::Temp, arc_ty.clone());
+    ctx.type_names.insert(result, arc_name);
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle, marker],
+        ty: arc_ty,
+    });
+    ctx.mark_drop_local_moved(payload_source);
+    result
+}
+
+fn lower_mutex_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local {
+    let value_ty = ctx.get_local_type(value_local).clone();
+    let Some(value_hir_ty) = ctx.concrete_type_registry.hir_type_for_mir(&value_ty) else {
+        ctx.errors
+            .push("mutex_new<T>: concrete payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let mutex_hir_ty = HIRType::named("Mutex".to_string(), vec![value_hir_ty]);
+    let mutex_name = crate::type_naming::hir_type_instance_name(&mutex_hir_ty);
+    ctx.concrete_type_registry
+        .register_instance(mutex_name.clone(), mutex_hir_ty);
+    let mutex_ty = MIRType::Struct {
+        name: mutex_name.clone(),
+        fields: vec![
+            ("handle".to_string(), MIR_I64),
+            ("marker".to_string(), MIR_I64),
+        ],
+    };
+
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("MutexPayload_{callback_suffix}"));
+    let move_thunk =
+        synthesize_vec_move_thunk(ctx, &value_ty, &format!("MutexPayload_{callback_suffix}"));
+    let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
+
+    let value_ptr = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ptr(Box::new(value_ty.clone())),
+    );
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: payload_source,
+    });
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let erased_value_ptr = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: erased_value_ptr,
+        value: value_ptr,
+        to: i8_ptr.clone(),
+    });
+
+    let (payload_size, payload_align) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size_local,
+        value: MirConstant::Int(payload_size as i64),
+    });
+    let align_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: align_local,
+        value: MirConstant::Int(payload_align as i64),
+    });
+    let move_fn = typed_function_pointer(ctx, move_thunk, vec![i8_ptr.clone(), i8_ptr.clone()]);
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr.clone()]);
+
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: "sengoo_async_mutex_new_parts".to_string(),
+        args: vec![erased_value_ptr, size_local, align_local, move_fn, drop_fn],
+    });
+
+    let marker = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: marker,
+        value: MirConstant::Int(0),
+    });
+
+    let result = ctx.add_local(None, LocalKind::Temp, mutex_ty.clone());
+    ctx.type_names.insert(result, mutex_name);
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle, marker],
+        ty: mutex_ty,
+    });
+    ctx.mark_drop_local_moved(payload_source);
+    result
+}
+
+fn lower_arc_borrow_call(
+    ctx: &mut LoweringContext<'_>,
+    handle: Local,
+    expected_return_type: Option<&MIRType>,
+) -> Local {
+    let result_ty = expected_return_type
+        .cloned()
+        .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
+    let result_ty @ MIRType::Ref(_) = result_ty else {
+        ctx.errors
+            .push("arc_borrow<T>: expected concrete borrowed return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let erased_ty = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let erased = ctx.add_local(None, LocalKind::Temp, erased_ty);
+    ctx.push_inst(Instruction::Call {
+        destination: erased,
+        func: "sengoo_arc_borrow_ptr".to_string(),
+        args: vec![handle],
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, result_ty.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: result,
+        value: erased,
+        to: result_ty,
+    });
+    result
+}
+
+fn lower_mutex_guard_copy_into_call(
+    ctx: &mut LoweringContext<'_>,
+    guard: Local,
+    output: Local,
+) -> Local {
+    let guard_ty = ctx.get_local_type(guard).clone();
+    let guard_value_ty = match guard_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner,
+        _ => {
+            ctx.errors
+                .push("mutex_guard_copy_into<T>: expected guard reference".to_string());
+            return ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+        }
+    };
+    let guard_value = ctx.add_local(None, LocalKind::Temp, (*guard_value_ty).clone());
+    ctx.push_inst(Instruction::Load {
+        destination: guard_value,
+        source: guard,
+    });
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: handle,
+        value: guard_value,
+        index: 0,
+    });
+    let output_ty = ctx.get_local_type(output).clone();
+    let value_ty = match output_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner,
+        _ => {
+            ctx.errors
+                .push("mutex_guard_copy_into<T>: expected mutable output reference".to_string());
+            return ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+        }
+    };
+    let output = erase_borrowed_pointer(ctx, output);
+    let (value_size, _) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size,
+        value: MirConstant::Int(value_size as i64),
+    });
+    let status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: status,
+        func: "sengoo_async_mutex_guard_copy_into".to_string(),
+        args: vec![handle, output, size],
+    });
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: result,
+        op: MirBinOp::Eq,
+        left: status,
+        right: zero,
+    });
+    result
+}
+
+fn lower_raw_mutex_guard_set_call(
+    ctx: &mut LoweringContext<'_>,
+    handle: Local,
+    value: Local,
+) -> Local {
+    let value_ty = ctx.get_local_type(value).clone();
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("MutexSet_{callback_suffix}"));
+    let value_slot = materialize_rc_payload_source(ctx, value, &value_ty);
+    let value_ptr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(value_ty)));
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: value_slot,
+    });
+    let value_ptr = erase_borrowed_pointer(ctx, value_ptr);
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr]);
+    let status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: status,
+        func: "sengoo_async_mutex_guard_set".to_string(),
+        args: vec![handle, value_ptr, drop_fn],
+    });
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: result,
+        op: MirBinOp::Eq,
+        left: status,
+        right: zero,
+    });
+    ctx.mark_drop_local_moved(value_slot);
     result
 }
 

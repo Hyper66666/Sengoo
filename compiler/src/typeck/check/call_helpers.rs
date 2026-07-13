@@ -367,6 +367,10 @@ impl TypeChecker {
                     args: vec![],
                 }))),
             )),
+            "raw_mutex_lock_async" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
             "HttpServer_next_request_async" => Some(Ty::new(
                 0,
                 TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {

@@ -52,10 +52,13 @@ impl ConcreteTypeRegistry {
     }
 
     pub(crate) fn register_instance(&self, instance_name: String, ty: HIRType) {
-        self.inner
-            .borrow_mut()
-            .hir_by_instance_name
-            .insert(instance_name, ty);
+        let mut instances = vec![(instance_name, ty.clone())];
+        collect_nested_named_instances(&ty, &mut instances);
+
+        let mut inner = self.inner.borrow_mut();
+        for (name, ty) in instances {
+            inner.hir_by_instance_name.insert(name, ty);
+        }
     }
 
     pub(crate) fn hir_type_for_instance_name(&self, instance_name: &str) -> Option<HIRType> {
@@ -111,6 +114,38 @@ impl ConcreteTypeRegistry {
             }
             _ => None,
         }
+    }
+}
+
+fn collect_nested_named_instances(ty: &HIRType, instances: &mut Vec<(String, HIRType)>) {
+    match &ty.kind {
+        hir::HIRTypeKind::Named { args, .. } => {
+            for arg in args {
+                if matches!(arg.kind, hir::HIRTypeKind::Named { .. }) {
+                    instances.push((hir_type_instance_name(arg), arg.clone()));
+                }
+                collect_nested_named_instances(arg, instances);
+            }
+        }
+        hir::HIRTypeKind::Ref(_, inner)
+        | hir::HIRTypeKind::Ptr(inner)
+        | hir::HIRTypeKind::Slice(inner)
+        | hir::HIRTypeKind::Array(inner, _) => collect_nested_named_instances(inner, instances),
+        hir::HIRTypeKind::Tuple(items) => {
+            for item in items {
+                collect_nested_named_instances(item, instances);
+            }
+        }
+        hir::HIRTypeKind::Fn { params, ret } => {
+            for param in params {
+                collect_nested_named_instances(param, instances);
+            }
+            collect_nested_named_instances(ret, instances);
+        }
+        hir::HIRTypeKind::AssocProjection { base, .. } => {
+            collect_nested_named_instances(base, instances);
+        }
+        _ => {}
     }
 }
 

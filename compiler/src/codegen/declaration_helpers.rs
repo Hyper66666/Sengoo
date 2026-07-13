@@ -957,6 +957,38 @@ impl Codegen {
                 _ => false,
             })
         });
+        let needed_generic_concurrency = [
+            (
+                "sengoo_arc_new_parts",
+                "declare i64 @sengoo_arc_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_arc_borrow_ptr",
+                "declare i8* @sengoo_arc_borrow_ptr(i64)\n",
+            ),
+            (
+                "sengoo_async_mutex_new_parts",
+                "declare i64 @sengoo_async_mutex_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_mutex_guard_copy_into",
+                "declare i64 @sengoo_async_mutex_guard_copy_into(i64, i8*, i64)\n",
+            ),
+            (
+                "sengoo_async_mutex_guard_set",
+                "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
+            ),
+        ]
+        .into_iter()
+        .filter(|(name, _)| {
+            mir_fns.iter().any(|mir_fn| {
+                mir_fn
+                    .instructions
+                    .iter()
+                    .any(|inst| matches!(inst, mir::Instruction::Call { func, .. } if func == name))
+            })
+        })
+        .collect::<Vec<_>>();
         let copy_decl = "declare i64 @sengoo_rc_new_copy(i8*, i64, i8*)\n";
         let borrow_decl = "declare i8* @sengoo_rc_borrow_ptr(i64)\n";
         let raw_vec_decl = "declare i64 @sengoo_raw_vec_new_parts(i64, i64, i8*, i8*)\n";
@@ -995,7 +1027,11 @@ impl Codegen {
             || needs_raw_hashmap_remove_string
             || needs_raw_btreemap_new
             || needs_raw_map_key_iter_next;
-        if (needs_rc_copy || needs_rc_borrow || needs_raw_vec || needs_raw_vec_values)
+        if (needs_rc_copy
+            || needs_rc_borrow
+            || needs_raw_vec
+            || needs_raw_vec_values
+            || !needed_generic_concurrency.is_empty())
             && !self
                 .declarations
                 .contains("; Sengoo generic Rc runtime functions\n")
@@ -1062,7 +1098,18 @@ impl Codegen {
         if needs_raw_map_key_iter_next && !self.declarations.contains(raw_map_key_iter_next_decl) {
             self.declarations.push_str(raw_map_key_iter_next_decl);
         }
-        if needs_rc_copy || needs_rc_borrow || needs_raw_vec || needs_raw_vec_values {
+        let declared_generic_concurrency = !needed_generic_concurrency.is_empty();
+        for (_, declaration) in needed_generic_concurrency {
+            if !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
+            }
+        }
+        if needs_rc_copy
+            || needs_rc_borrow
+            || needs_raw_vec
+            || needs_raw_vec_values
+            || declared_generic_concurrency
+        {
             self.declarations.push('\n');
         }
     }
@@ -1137,5 +1184,41 @@ mod tests {
             true,
             "sengoo_http_server_next_request_async__result"
         ));
+    }
+
+    #[test]
+    fn maybe_declare_rc_runtime_functions_adds_generic_arc_mutex_abi_once() {
+        let mut cg = Codegen::new();
+        let mut mir_fn = MirFunction::new("test".to_string(), vec![], MIR_UNIT);
+        for name in [
+            "sengoo_arc_new_parts",
+            "sengoo_arc_borrow_ptr",
+            "sengoo_async_mutex_new_parts",
+            "sengoo_async_mutex_guard_copy_into",
+            "sengoo_async_mutex_guard_set",
+        ] {
+            let destination = mir_fn.add_local(LocalKind::Temp, crate::mir::MIR_I64);
+            mir_fn.push_inst_to_block(
+                mir_fn.start_block,
+                mir::Instruction::Call {
+                    destination,
+                    func: name.to_string(),
+                    args: vec![],
+                },
+            );
+        }
+
+        cg.maybe_declare_rc_runtime_functions(&[mir_fn.clone()]);
+        cg.maybe_declare_rc_runtime_functions(&[mir_fn]);
+
+        for declaration in [
+            "declare i64 @sengoo_arc_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            "declare i8* @sengoo_arc_borrow_ptr(i64)\n",
+            "declare i64 @sengoo_async_mutex_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_mutex_guard_copy_into(i64, i8*, i64)\n",
+            "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
+        ] {
+            assert_eq!(cg.declarations.matches(declaration).count(), 1);
+        }
     }
 }

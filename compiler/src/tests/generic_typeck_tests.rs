@@ -827,6 +827,30 @@ def f(x: Wrap<Box<i64>>) -> i64 {
 }
 
 #[test]
+fn nested_generic_struct_field_with_trailing_comma_typechecks() {
+    let source = r#"
+struct Box<T> {
+    value: T,
+}
+
+struct Wrap<T> {
+    value: T,
+}
+
+struct Shared<T> {
+    value: Wrap<Box<T>>,
+}
+"#;
+
+    let program = Parser::parse(source)
+        .expect("nested generic struct fields should close >> before the field comma");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("nested generic struct field should typecheck");
+}
+
+#[test]
 fn generic_struct_where_clause_is_supported() {
     let source = r#"
 trait Showable {

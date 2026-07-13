@@ -151,6 +151,154 @@ def main() -> i64 {
 }
 
 #[test]
+fn concurrent_generic_arc_mutex_surface_is_send_sync_and_lowers_raii() {
+    let source = r#"
+struct Payload {
+    value: i64,
+}
+
+impl Copy for Payload {}
+
+impl Payload {
+    def read(&self) -> i64 { self.value }
+}
+
+def require_send<T: Send>(value: T) -> i64 { 1 }
+def require_sync<T: Sync>(value: T) -> i64 { 2 }
+
+async def update(shared: Arc<Mutex<Payload>>) -> i64 {
+    let locked = await mutex_lock_guard(shared.borrow());
+    if !locked.is_ok { return locked.error; }
+    let mut guard = locked.value;
+    let mut before_snapshot = Payload { value: 0 };
+    if !mutex_guard_copy_into(&guard, &mut before_snapshot) { return 90; }
+    let before = before_snapshot.read();
+    guard.set(Payload { value: before + 4 });
+    let mut after_snapshot = Payload { value: 0 };
+    if !mutex_guard_copy_into(&guard, &mut after_snapshot) { return 91; }
+    after_snapshot.read()
+}
+
+async def main() -> i64 {
+    let shared = arc_new(mutex_new(Payload { value: 5 }));
+    require_send(shared.clone_arc()) + require_sync(shared.clone_arc()) + await update(shared)
+}
+"#;
+
+    let ir = compile_with_async_stdlib(source);
+    assert!(ir.contains("sengoo_arc_new"));
+    assert!(ir.contains("sengoo_arc_borrow_ptr"));
+    assert!(ir.contains("sengoo_async_mutex_new"));
+    assert!(ir.contains("sengoo_async_mutex_lock__start"));
+    assert!(ir.contains("sengoo_async_mutex_guard_copy_into"));
+    assert!(ir.contains("sengoo_async_mutex_guard_set"));
+    assert!(ir.contains("Arc_Mutex_Payload_clone_arc"));
+    assert!(ir.contains("MutexGuard_Payload_Drop_drop"));
+}
+
+#[test]
+fn concurrent_arc_mutex_public_shared_counter_uses_generic_composition() {
+    let source = r#"
+async def main() -> i64 {
+    let shared: Arc<Mutex<i64>> = arc_new(mutex_new(2));
+    let enabled = runtime_enable_thread_pool(4);
+    if !enabled.is_ok { return enabled.error; }
+
+    let first = spawn_shared_counter_i64(shared.clone_arc(), 1, 5);
+    let second = spawn_shared_counter_i64(shared.clone_arc(), 1, 5);
+    if !first.is_ok || !second.is_ok { return 1; }
+    first.value.join();
+    second.value.join();
+
+    let locked = await mutex_lock_guard(shared.borrow());
+    if !locked.is_ok { return locked.error; }
+    locked.value.get()
+}
+"#;
+
+    let ir = compile_with_async_stdlib(source);
+    assert!(ir.contains("Arc_Mutex_i64_clone_arc"));
+    assert!(ir.contains("spawn_shared_counter_i64"));
+    assert!(ir.contains("sengoo_async_shared_counter_spawn_add_i64"));
+    assert!(ir.contains("sengoo_async_mutex_guard_get"));
+    let generic_poll = ir
+        .split("; Function: mutex_lock_guard__generic_i64__poll")
+        .nth(1)
+        .and_then(|tail| tail.split("; Function:").next())
+        .expect("generic mutex guard poll helper should be emitted");
+    assert!(
+        generic_poll.contains("call i64 @sengoo_async_mutex_lock__poll"),
+        "generic Mutex<T> must use the descriptor-backed lock lifecycle:\n{generic_poll}"
+    );
+    assert!(
+        !generic_poll.contains("call i64 @sengoo_async_mutex_lock_i64__poll"),
+        "generic Mutex<i64> must not fall back to the legacy scalar lock lifecycle:\n{generic_poll}"
+    );
+}
+
+#[test]
+fn concurrent_generic_mutex_guard_get_requires_copy_payload() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct OwnedPayload {
+    value: i64,
+}
+
+impl Drop for OwnedPayload {
+    def drop(&mut self) {}
+}
+
+async def main() -> i64 {
+    let shared = arc_new(mutex_new(OwnedPayload { value: 5 }));
+    let locked = await mutex_lock_guard(shared.borrow());
+    if !locked.is_ok { return locked.error; }
+    let mut output = OwnedPayload { value: 0 };
+    mutex_guard_copy_into(&locked.value, &mut output);
+    output.value
+}
+"#
+    );
+
+    let error = compile_to_ir(&source)
+        .expect_err("non-Copy mutex payloads must not expose a borrowed get result");
+    let message = error.to_string();
+    assert!(
+        message.contains("Copy") || message.contains("method 'get' not found"),
+        "expected Copy-bound guard getter diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn concurrent_generic_arc_mutex_rejects_non_send_payload() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct LocalOnly {
+    value: i64,
+}
+
+impl !Send for LocalOnly {}
+
+def require_send<T: Send>(value: T) -> i64 { 1 }
+
+def main() -> i64 {
+    require_send(arc_new(mutex_new(LocalOnly { value: 1 })))
+}
+"#
+    );
+
+    let err = compile_to_ir(&source).expect_err("Arc<Mutex<!Send>> should fail a Send bound");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not Send") || msg.contains("does not implement `Send`"),
+        "expected Send marker diagnostic, got: {msg}"
+    );
+}
+
+#[test]
 fn concurrent_mutex_guard_i64_surface_lowers_raii_unlock() {
     let source = r#"
 async def update(mutex: MutexI64) -> i64 {

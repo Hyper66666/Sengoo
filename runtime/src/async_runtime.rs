@@ -32,7 +32,8 @@ pub use bridge::{
 };
 #[cfg(feature = "native-bridge")]
 pub use concurrent::{
-    sengoo_async_channel_bounded_i64, sengoo_async_channel_pair_free,
+    sengoo_arc_borrow_ptr, sengoo_arc_clone, sengoo_arc_drop, sengoo_arc_new, sengoo_arc_new_parts,
+    sengoo_arc_strong_count, sengoo_async_channel_bounded_i64, sengoo_async_channel_pair_free,
     sengoo_async_channel_pair_receiver, sengoo_async_channel_pair_sender,
     sengoo_async_channel_recv_i64__cancel, sengoo_async_channel_recv_i64__drop,
     sengoo_async_channel_recv_i64__poll, sengoo_async_channel_recv_i64__result,
@@ -41,24 +42,28 @@ pub use concurrent::{
     sengoo_async_channel_send_i64__result, sengoo_async_channel_send_i64__start,
     sengoo_async_channel_sender_clone, sengoo_async_channel_sender_close,
     sengoo_async_channel_sender_drop, sengoo_async_mutex_close, sengoo_async_mutex_drop,
-    sengoo_async_mutex_guard_get_i64, sengoo_async_mutex_guard_set_i64,
-    sengoo_async_mutex_guard_unlock_i64, sengoo_async_mutex_lock_i64__cancel,
+    sengoo_async_mutex_guard_copy_into, sengoo_async_mutex_guard_get,
+    sengoo_async_mutex_guard_get_i64, sengoo_async_mutex_guard_set,
+    sengoo_async_mutex_guard_set_i64, sengoo_async_mutex_guard_unlock,
+    sengoo_async_mutex_guard_unlock_i64, sengoo_async_mutex_lock__cancel,
+    sengoo_async_mutex_lock__drop, sengoo_async_mutex_lock__poll, sengoo_async_mutex_lock__result,
+    sengoo_async_mutex_lock__start, sengoo_async_mutex_lock_i64__cancel,
     sengoo_async_mutex_lock_i64__drop, sengoo_async_mutex_lock_i64__poll,
     sengoo_async_mutex_lock_i64__result, sengoo_async_mutex_lock_i64__start,
-    sengoo_async_mutex_new_i64, sengoo_async_mutex_unlock_i64,
-    sengoo_async_runtime_enable_thread_pool, sengoo_async_runtime_thread_pool_enabled,
-    sengoo_async_rwlock_close, sengoo_async_rwlock_drop, sengoo_async_rwlock_new_i64,
-    sengoo_async_rwlock_read_guard_get_i64, sengoo_async_rwlock_read_guard_unlock_i64,
-    sengoo_async_rwlock_try_read_i64, sengoo_async_rwlock_try_write_i64,
-    sengoo_async_rwlock_write_guard_get_i64, sengoo_async_rwlock_write_guard_set_i64,
-    sengoo_async_rwlock_write_guard_unlock_i64, sengoo_async_shared_counter_clone_i64,
-    sengoo_async_shared_counter_drop, sengoo_async_shared_counter_get_i64,
-    sengoo_async_shared_counter_job_drop, sengoo_async_shared_counter_join_i64,
-    sengoo_async_shared_counter_new_i64, sengoo_async_shared_counter_spawn_add_i64,
-    sengoo_async_spawn_blocking_i64__cancel, sengoo_async_spawn_blocking_i64__drop,
-    sengoo_async_spawn_blocking_i64__poll, sengoo_async_spawn_blocking_i64__result,
-    sengoo_async_spawn_blocking_i64__start, ChannelRecvI64Result, ChannelSendI64Result,
-    MutexLockI64Result,
+    sengoo_async_mutex_new, sengoo_async_mutex_new_i64, sengoo_async_mutex_new_parts,
+    sengoo_async_mutex_unlock_i64, sengoo_async_runtime_enable_thread_pool,
+    sengoo_async_runtime_thread_pool_enabled, sengoo_async_rwlock_close, sengoo_async_rwlock_drop,
+    sengoo_async_rwlock_new_i64, sengoo_async_rwlock_read_guard_get_i64,
+    sengoo_async_rwlock_read_guard_unlock_i64, sengoo_async_rwlock_try_read_i64,
+    sengoo_async_rwlock_try_write_i64, sengoo_async_rwlock_write_guard_get_i64,
+    sengoo_async_rwlock_write_guard_set_i64, sengoo_async_rwlock_write_guard_unlock_i64,
+    sengoo_async_shared_counter_clone_i64, sengoo_async_shared_counter_drop,
+    sengoo_async_shared_counter_get_i64, sengoo_async_shared_counter_job_drop,
+    sengoo_async_shared_counter_join_i64, sengoo_async_shared_counter_new_i64,
+    sengoo_async_shared_counter_spawn_add_i64, sengoo_async_spawn_blocking_i64__cancel,
+    sengoo_async_spawn_blocking_i64__drop, sengoo_async_spawn_blocking_i64__poll,
+    sengoo_async_spawn_blocking_i64__result, sengoo_async_spawn_blocking_i64__start,
+    ChannelRecvI64Result, ChannelSendI64Result, MutexLockI64Result,
 };
 #[cfg(feature = "native-bridge")]
 pub use futures::{
@@ -1382,6 +1387,316 @@ mod tests {
             42
         );
         unsafe { concurrent::sengoo_async_shared_counter_drop(counter) };
+    }
+
+    #[test]
+    fn concurrent_generic_arc_mutex_payload_drops_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_payload(
+            destination: *mut std::ffi::c_void,
+            source: *mut std::ffi::c_void,
+        ) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_payload(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let descriptor = concurrent::SengooTypeDescriptor {
+            abi_version: concurrent::SENGOO_COLLECTIONS_ABI_VERSION,
+            flags: 0,
+            size: 8,
+            align: 8,
+            move_value: Some(move_payload),
+            drop_value: Some(drop_payload),
+            clone_value: None,
+            hash_value: None,
+            eq_value: None,
+            compare_value: None,
+        };
+        let mut payload = 41_i64;
+        let arc = unsafe {
+            concurrent::sengoo_arc_new(
+                &descriptor,
+                (&mut payload as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(arc, 0);
+        let cloned = unsafe { concurrent::sengoo_arc_clone(arc) };
+        assert_ne!(cloned, 0);
+        unsafe { concurrent::sengoo_arc_drop(cloned) };
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_generic_parts_accept_typed_callbacks_and_reject_missing_callbacks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut arc_value = 17_i64;
+        let arc = unsafe {
+            concurrent::sengoo_arc_new_parts(
+                (&mut arc_value as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(arc, 0);
+        assert_eq!(
+            unsafe { *(concurrent::sengoo_arc_borrow_ptr(arc).cast::<i64>()) },
+            17
+        );
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+
+        let mut mutex_value = 29_i64;
+        let mutex = unsafe {
+            concurrent::sengoo_async_mutex_new_parts(
+                (&mut mutex_value as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(mutex, 0);
+        let lock = concurrent::sengoo_async_mutex_lock__start(mutex);
+        assert_ne!(lock, 0);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__poll(lock) },
+            1
+        );
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__result(lock) },
+            0
+        );
+        let mut copied = 0_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    mutex,
+                    (&mut copied as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(copied, 29);
+
+        let mut replacement = 31_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_set(
+                    mutex,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        let mut replaced = 0_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    mutex,
+                    (&mut replaced as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(replaced, 31);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_guard_unlock(mutex) },
+            0
+        );
+
+        let mut untouched = 9_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    0,
+                    (&mut untouched as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(untouched, 9);
+
+        let mut failed_replacement = 41_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_set(
+                    0,
+                    (&mut failed_replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        unsafe { concurrent::sengoo_async_mutex_drop(mutex) };
+
+        let mut rejected = 1_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_arc_new_parts(
+                    (&mut rejected as *mut i64).cast(),
+                    8,
+                    8,
+                    None,
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 3);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn concurrent_generic_arc_mutex_shared_counter_joins_workers_deterministically() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(4), 1);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {}
+
+        let descriptor = concurrent::SengooTypeDescriptor {
+            abi_version: concurrent::SENGOO_COLLECTIONS_ABI_VERSION,
+            flags: 0,
+            size: 8,
+            align: 8,
+            move_value: Some(move_i64),
+            drop_value: Some(drop_i64),
+            clone_value: None,
+            hash_value: None,
+            eq_value: None,
+            compare_value: None,
+        };
+        let mut initial = 2_i64;
+        let mut mutex = unsafe {
+            concurrent::sengoo_async_mutex_new(
+                &descriptor,
+                (&mut initial as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(mutex, 0);
+        let arc = unsafe {
+            concurrent::sengoo_arc_new(
+                &descriptor,
+                (&mut mutex as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(arc, 0);
+
+        let mut jobs = Vec::new();
+        for _ in 0..8 {
+            let cloned = unsafe { concurrent::sengoo_arc_clone(arc) };
+            let job =
+                unsafe { concurrent::sengoo_async_shared_counter_spawn_add_i64(cloned, 1, 5) };
+            assert_ne!(job, 0);
+            jobs.push((cloned, job));
+        }
+        for (cloned, job) in jobs {
+            assert!(unsafe { concurrent::sengoo_async_shared_counter_join_i64(job) } >= 2);
+            unsafe { concurrent::sengoo_async_shared_counter_job_drop(job) };
+            unsafe { concurrent::sengoo_arc_drop(cloned) };
+        }
+
+        let mutex_handle = unsafe { *(concurrent::sengoo_arc_borrow_ptr(arc).cast::<i64>()) };
+        let locked = concurrent::sengoo_async_mutex_lock__start(mutex_handle);
+        while unsafe { concurrent::sengoo_async_mutex_lock__poll(locked) } == 0 {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__result(locked) },
+            0
+        );
+        let value_ptr = unsafe { concurrent::sengoo_async_mutex_guard_get(mutex_handle) };
+        assert!(!value_ptr.is_null());
+        assert_eq!(unsafe { *(value_ptr.cast::<i64>()) }, 42);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_guard_unlock(mutex_handle) },
+            0
+        );
+
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+    }
+
+    #[test]
+    fn concurrent_shared_counter_job_keeps_last_source_arc_alive() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(1), 1);
+
+        let release = Arc::new(AtomicBool::new(false));
+        let worker_release = release.clone();
+        let blocker = thread_pool::test_only_submit_to_worker(
+            move || {
+                while !worker_release.load(Ordering::Acquire) {
+                    std::thread::yield_now();
+                }
+                0
+            },
+            0,
+        )
+        .expect("blocker should occupy the only worker");
+
+        let counter = concurrent::sengoo_async_shared_counter_new_i64(2);
+        assert_ne!(counter, 0);
+        let job = unsafe { concurrent::sengoo_async_shared_counter_spawn_add_i64(counter, 1, 40) };
+        assert_ne!(job, 0);
+        unsafe { concurrent::sengoo_async_shared_counter_drop(counter) };
+
+        release.store(true, Ordering::Release);
+        while !blocker.completed.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_shared_counter_join_i64(job) },
+            42
+        );
+        unsafe { concurrent::sengoo_async_shared_counter_job_drop(job) };
     }
 
     #[test]

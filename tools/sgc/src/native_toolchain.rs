@@ -286,6 +286,7 @@ pub(crate) fn ensure_runtime_objects(
 /// staticlib, compiling out fallback stubs that would otherwise shadow the
 /// real implementations during symbol resolution.
 pub(crate) const NATIVE_NET_RUNTIME_DEFINE: &str = "SENGOO_NATIVE_NET_RUNTIME";
+pub(crate) const NATIVE_ASYNC_RUNTIME_DEFINE: &str = "SENGOO_NATIVE_ASYNC_RUNTIME";
 
 pub(crate) fn ensure_runtime_objects_with_defines(
     clang_exe: &str,
@@ -476,7 +477,7 @@ pub(crate) fn append_native_runtime_inputs(
             runtime_c,
             opt_level,
             target,
-            &[NATIVE_NET_RUNTIME_DEFINE],
+            &[NATIVE_NET_RUNTIME_DEFINE, NATIVE_ASYNC_RUNTIME_DEFINE],
         )?);
     }
     object_paths.push(ensure_async_runtime_staticlib(opt_level)?);

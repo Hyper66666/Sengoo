@@ -1683,10 +1683,13 @@ impl TypeChecker {
     }
 
     pub(super) fn type_satisfies_auto_marker_bound(&self, trait_name: &str, ty: &Ty) -> bool {
+        let resolved = self.infer.apply_subst(ty);
+        if trait_name == "Copy" {
+            return resolved.is_copy_value();
+        }
         if !matches!(trait_name, "Send" | "Sync") {
             return false;
         }
-        let resolved = self.infer.apply_subst(ty);
         self.ty_satisfies_auto_marker(trait_name, &resolved, &mut HashSet::new())
     }
 
