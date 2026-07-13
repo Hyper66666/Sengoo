@@ -143,6 +143,10 @@ fn distribution_workflow_covers_native_macos_architectures() {
         workflow.contains("needs: package-smoke") && workflow.contains("attest-build-provenance"),
         "release publication should wait for every platform and emit GitHub provenance attestations"
     );
+    assert!(
+        workflow.contains("prerelease: ${{ contains(github.ref_name, '-') }}"),
+        "semver prerelease tags should publish as GitHub prereleases"
+    );
 }
 
 #[test]
