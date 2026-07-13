@@ -56,6 +56,29 @@ multi-threaded executor accepts only `Send` futures. Its public contract covers:
 A fixed worker pool satisfies the release contract. Work stealing may be added
 later if reference benchmarks justify it and public semantics remain unchanged.
 
+The v1 source/runtime boundary is explicit:
+
+- `runtime_enable_executor(worker_count, capacity)` enables the executor; the
+  capacity bounds all accepted, non-terminal tasks rather than only idle queue
+  entries;
+- `spawn_task(future)` transfers a directly constructed `Send` future to the
+  executor when enabled and returns `0` when the bound rejects submission;
+- a transferred future is pinned to one worker for all polls, so values created
+  after transfer do not migrate between worker threads;
+- `task_join(id)` waits for and returns a stable lifecycle status (`2`
+  completed, `3` cancelled, `4` failed). Detached task outputs are deliberately
+  discarded and their frames are dropped exactly once;
+- terminal statuses remain queryable across explicit executor shutdown in a
+  bounded process-local history of the newest 4096 task IDs; older IDs report
+  `Unknown` rather than growing runtime memory without limit;
+- async-main exit drains accepted tasks. Explicit shutdown selects drain or
+  cancellation and rejects later submission.
+
+Joinable `spawn(future)` retains its cooperative return-a-future behavior in
+v1. Both `spawn` and `spawn_task` conservatively require directly constructed
+`Send` futures so a future variable with unknown capture provenance cannot be
+silently moved across an executor boundary in a later release.
+
 ### Decision 4: Cross-platform reactor
 
 Platform backends use poll/epoll or equivalent on Linux, IOCP/handles or

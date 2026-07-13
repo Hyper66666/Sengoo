@@ -1017,3 +1017,102 @@ async def main() -> i64 { 0 }
         "expected guard escape diagnostic, got: {message}"
     );
 }
+
+#[test]
+fn concurrent_spawn_task_rejects_non_send_future_arguments() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    spawn_task(consume(local))
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn_task must require a Send future");
+    assert!(
+        error.to_string().contains("not Send"),
+        "expected stable Send diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_rejects_non_send_future_arguments() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    await spawn(consume(local))
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn must require a Send future");
+    assert!(
+        error.to_string().contains("not Send"),
+        "expected stable Send diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_task_rejects_capturing_future_factory() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    let factory = | | consume(local);
+    spawn_task(factory())
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn_task must reject callable captures");
+    assert!(
+        error.to_string().contains("directly called async function"),
+        "expected direct-future diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_rejects_capturing_future_factory() {
+    let source = r#"
+struct LocalHandle { raw: i64 }
+impl !Send for LocalHandle {}
+
+async def consume(value: LocalHandle) -> i64 { value.raw }
+
+async def main() -> i64 {
+    let local = LocalHandle { raw: 1 };
+    let factory = | | consume(local);
+    await spawn(factory())
+}
+"#;
+
+    let error = compile_to_ir(source).expect_err("spawn must reject callable captures");
+    assert!(
+        error.to_string().contains("directly called async function"),
+        "expected direct-future diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_spawn_task_accepts_direct_multisegment_async_function_path() {
+    let source = r#"
+async def worker_child(value: i64) -> i64 { value }
+
+async def main() -> i64 {
+    spawn_task(worker::child(42))
+}
+"#;
+
+    compile_to_ir(source).expect("direct multi-segment async calls should remain spawnable");
+}

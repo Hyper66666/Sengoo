@@ -121,7 +121,7 @@ impl<'a> LoweringContext<'a> {
         let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Call {
             destination: task_id,
-            func: "sengoo_async_spawn_raw".to_string(),
+            func: "sengoo_async_spawn_task_raw".to_string(),
             args: vec![kind_local, future_handle],
         });
 

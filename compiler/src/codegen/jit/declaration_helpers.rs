@@ -52,6 +52,8 @@ impl JITCodegen {
         self.extern_decls
             .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
         self.extern_decls
+            .push_str("declare i64 @sengoo_async_spawn_task_raw(i64, i64)\n");
+        self.extern_decls
             .push_str(select_winner_runtime_declaration());
         self.extern_decls
             .push_str(select_n_winner_runtime_declaration());
@@ -105,6 +107,10 @@ impl JITCodegen {
         );
         self.function_signatures.insert(
             "sengoo_async_spawn_raw".to_string(),
+            (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
+        );
+        self.function_signatures.insert(
+            "sengoo_async_spawn_task_raw".to_string(),
             (vec![MIRType::Int(64), MIRType::Int(64)], MIRType::Int(64)),
         );
         self.function_signatures.insert(
