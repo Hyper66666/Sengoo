@@ -15,6 +15,25 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn assert_expected_program_output(
+    tag: &str,
+    relative_path: &str,
+    mode_args: &[&str],
+    output: &std::process::Output,
+    expected_stdout: &str,
+) {
+    if expected_stdout.is_empty() {
+        return;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.lines().any(|line| line.trim() == expected_stdout),
+        "{tag} ({relative_path}) did not print expected line {expected_stdout:?} for {mode_args:?}\nstdout:\n{}\nstderr:\n{}",
+        stdout,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_stdout: &str) {
     let path = workspace_root().join(relative_path);
     let outputs = CONFORMANCE_RUN_MODES
@@ -43,15 +62,7 @@ fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_st
         String::from_utf8_lossy(&output.stderr)
     );
 
-    if !expected_stdout.is_empty() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.lines().any(|line| line.trim() == expected_stdout),
-            "{tag} ({relative_path}) did not print expected line {expected_stdout:?}\nstdout:\n{}\nstderr:\n{}",
-            stdout,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert_expected_program_output(tag, relative_path, &[], output, expected_stdout);
 
     for (mode_args, mode_output) in CONFORMANCE_RUN_MODES.iter().zip(&outputs).skip(1) {
         assert_eq!(
@@ -62,13 +73,7 @@ fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_st
             String::from_utf8_lossy(&mode_output.stdout),
             String::from_utf8_lossy(&mode_output.stderr)
         );
-        assert_eq!(
-            mode_output.stdout,
-            output.stdout,
-            "{tag} ({relative_path}) stdout differs for {mode_args:?}\ndefault stderr:\n{}\nmode stderr:\n{}",
-            String::from_utf8_lossy(&output.stderr),
-            String::from_utf8_lossy(&mode_output.stderr)
-        );
+        assert_expected_program_output(tag, relative_path, mode_args, mode_output, expected_stdout);
     }
 }
 

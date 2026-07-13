@@ -691,6 +691,7 @@ fn run_windows_link_command(
         .map_err(|e| miette::miette!("failed to invoke MSVC linker: {}", e))
 }
 
+#[cfg(any(windows, test))]
 fn append_windows_debug_link_args(command: &mut Command, executable_path: &Path, debug_info: bool) {
     if !debug_info {
         return;
