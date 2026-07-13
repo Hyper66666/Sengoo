@@ -480,6 +480,7 @@ unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
 #[cfg(all(test, feature = "native-bridge"))]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 
     unsafe extern "C" {
@@ -974,8 +975,58 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
+    }
+
+    #[test]
+    fn reactor_wait_cancel_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_wait_drop_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(1_000);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        unsafe { sengoo_async_reactor_wait__drop(handle) };
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_pending_wait_records_a_bounded_wakeup_hint() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        clear_poll_wakeup_hint();
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 0);
+        let hint =
+            take_poll_wakeup_hint().expect("pending reactor wait must allow scheduler sleep");
+        let now = Instant::now();
+        assert!(hint > now + Duration::from_millis(50));
+        assert!(hint <= now + Duration::from_millis(200));
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
     }
 
     #[cfg(unix)]
@@ -1019,7 +1070,6 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
 
         #[cfg(unix)]
@@ -1032,6 +1082,67 @@ mod tests {
             _close(fds[0]);
             _close(fds[1]);
         }
+    }
+
+    #[test]
+    fn reactor_tcp_registration_observes_socket_readiness() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test client");
+            std::thread::sleep(Duration::from_millis(20));
+            stream.write_all(b"x").expect("write readiness byte");
+        });
+
+        let tcp_handle = crate::net::sengoo_tcp_connect(c"127.0.0.1".as_ptr().cast(), port, 1_000);
+        assert_ne!(tcp_handle, 0);
+        let interest = sengoo_async_reactor_tcp_readable_register(tcp_handle);
+        let child = sengoo_async_sleep__start(1_000);
+        let wait =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(wait) }, 0);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while unsafe { sengoo_async_reactor_wait__poll(wait) } == 0 {
+            assert!(Instant::now() < deadline, "TCP reactor readiness timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        unsafe { sengoo_async_reactor_wait__result(wait) };
+        assert_eq!(crate::net::sengoo_tcp_close(tcp_handle), 1);
+        server.join().expect("test server should finish");
+    }
+
+    #[test]
+    fn reactor_owned_fd_close_wakes_without_stale_interest() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let baseline = reactor::interest_count();
+        let mut fds = [-1i32; 2];
+        #[cfg(unix)]
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        #[cfg(windows)]
+        assert_eq!(unsafe { _pipe(fds.as_mut_ptr(), 4096, 0x8000) }, 0);
+
+        let interest = sengoo_async_reactor_fd_readable_register(i64::from(fds[0]));
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(reactor::interest_count(), baseline + 1);
+
+        #[cfg(unix)]
+        unsafe {
+            close(fds[0]);
+            close(fds[1]);
+        }
+        #[cfg(windows)]
+        unsafe {
+            _close(fds[0]);
+            _close(fds[1]);
+        }
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
+        unsafe { sengoo_async_reactor_wait__result(handle) };
+        assert_eq!(reactor::interest_count(), baseline);
     }
 
     #[test]

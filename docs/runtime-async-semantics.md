@@ -99,11 +99,17 @@ future without exposing lifecycle ids.
 - `CoroutineScheduler` remains cooperative; a reactor layer registers timer, TCP
   readable, and owned-fd interests that feed scheduler wakeup deadlines.
 - `sengoo_async_reactor_*` helpers bridge readiness into poll wakeup hints.
+- A reactor wait owns its child future after `start`. Result, cancellation, and
+  Drop unregister the interest first, then cancel-or-drop that child exactly
+  once; callers must not retain or release the transferred child handle.
 - Owned-fd readiness is platform-specific in the current supported subset:
   POSIX hosts use `poll(2)` for poll-backed fds; Windows maps CRT fds to OS
-  handles and supports disk files plus named/anonymous pipes. Unsupported hosts
-  or file kinds do not claim readiness support; all-host owned-fd readiness
-  remains Deferred.
+  handles and supports disk files plus named/anonymous pipes. Registration owns
+  a duplicated descriptor/handle until unregister, preventing numeric handle
+  reuse from retargeting a stale interest after the caller closes the original.
+  Unsupported hosts or file kinds do not claim readiness support; all-host
+  owned-fd readiness remains Deferred until the four-host workflow evidence
+  passes.
 
 ## User `Future` surface
 

@@ -11,12 +11,20 @@ use std::time::{Duration, Instant};
 
 use super::record_poll_wakeup_hint;
 #[cfg(feature = "native-bridge")]
-use super::sengoo_async_poll_dispatch;
+use super::{sengoo_async_cancel_dispatch, sengoo_async_drop_dispatch, sengoo_async_poll_dispatch};
 
 #[cfg(not(feature = "native-bridge"))]
 unsafe fn sengoo_async_poll_dispatch(_kind: i64, _handle: i64) -> i64 {
     1
 }
+
+#[cfg(not(feature = "native-bridge"))]
+unsafe fn sengoo_async_cancel_dispatch(_kind: i64, _handle: i64) -> bool {
+    false
+}
+
+#[cfg(not(feature = "native-bridge"))]
+unsafe fn sengoo_async_drop_dispatch(_kind: i64, _handle: i64) {}
 
 #[cfg(feature = "native-bridge")]
 const STATUS_TIMEOUT: i64 = 11;
@@ -38,6 +46,25 @@ struct Interest {
     http_listener: Option<TcpListener>,
     accepted_stream: Option<TcpStream>,
     listener_error: Option<ErrorKind>,
+}
+
+impl Drop for Interest {
+    fn drop(&mut self) {
+        if self.kind != InterestKind::OwnedFdReadable {
+            return;
+        }
+        let Some(handle) = self.owned_fd.take() else {
+            return;
+        };
+        #[cfg(unix)]
+        unsafe {
+            close(handle as i32);
+        }
+        #[cfg(windows)]
+        unsafe {
+            CloseHandle(handle as isize);
+        }
+    }
 }
 
 static REACTOR: OnceLock<Mutex<Reactor>> = OnceLock::new();
@@ -173,6 +200,15 @@ pub(crate) fn http_listener_interest_count() -> usize {
         .count()
 }
 
+#[cfg(test)]
+pub(crate) fn interest_count() -> usize {
+    reactor()
+        .lock()
+        .expect("reactor mutex poisoned")
+        .interests
+        .len()
+}
+
 #[cfg(all(feature = "native-bridge", not(windows)))]
 unsafe extern "C" {
     fn sengoo_tcp_poll_readable(handle: u64) -> i64;
@@ -223,6 +259,8 @@ struct PollFd {
 #[cfg(unix)]
 unsafe extern "C" {
     fn poll(fds: *mut PollFd, nfds: usize, timeout: i32) -> i32;
+    fn dup(fd: i32) -> i32;
+    fn close(fd: i32) -> i32;
 }
 
 #[cfg(windows)]
@@ -238,18 +276,28 @@ unsafe extern "C" {
     ) -> i32;
     fn GetFileType(handle: isize) -> u32;
     fn GetLastError() -> u32;
+    fn GetCurrentProcess() -> isize;
+    fn DuplicateHandle(
+        source_process: isize,
+        source_handle: isize,
+        target_process: isize,
+        target_handle: *mut isize,
+        desired_access: u32,
+        inherit_handle: i32,
+        options: u32,
+    ) -> i32;
+    fn CloseHandle(handle: isize) -> i32;
 }
 
 fn owned_fd_readable(fd: i64) -> bool {
-    let Ok(fd) = i32::try_from(fd) else {
-        return false;
-    };
-    if fd < 0 {
-        return false;
-    }
-
     #[cfg(unix)]
     {
+        let Ok(fd) = i32::try_from(fd) else {
+            return false;
+        };
+        if fd < 0 {
+            return false;
+        }
         const POLLIN: i16 = 0x0001;
         const POLLERR: i16 = 0x0008;
         const POLLHUP: i16 = 0x0010;
@@ -272,7 +320,9 @@ fn owned_fd_readable(fd: i64) -> bool {
         const FILE_TYPE_PIPE: u32 = 0x0003;
         const ERROR_BROKEN_PIPE: u32 = 109;
 
-        let handle = unsafe { _get_osfhandle(fd) };
+        let Ok(handle) = isize::try_from(fd) else {
+            return false;
+        };
         if handle == INVALID_HANDLE_VALUE {
             return false;
         }
@@ -304,10 +354,60 @@ fn owned_fd_readable(fd: i64) -> bool {
     }
 }
 
+fn registered_owned_fd(fd: i64) -> Option<i64> {
+    let fd = i32::try_from(fd).ok().filter(|fd| *fd >= 0)?;
+    #[cfg(windows)]
+    {
+        const INVALID_HANDLE_VALUE: isize = -1;
+        const DUPLICATE_SAME_ACCESS: u32 = 0x0000_0002;
+        let source = unsafe { _get_osfhandle(fd) };
+        if source == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let process = unsafe { GetCurrentProcess() };
+        let mut duplicate = INVALID_HANDLE_VALUE;
+        let duplicated = unsafe {
+            DuplicateHandle(
+                process,
+                source,
+                process,
+                &mut duplicate,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        (duplicated != 0 && duplicate != INVALID_HANDLE_VALUE).then_some(duplicate as i64)
+    }
+    #[cfg(unix)]
+    {
+        let duplicate = unsafe { dup(fd) };
+        (duplicate >= 0).then_some(i64::from(duplicate))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
+}
+
 struct ReactorWaitState {
     interest_id: u64,
     child_kind: i64,
     child_handle: i64,
+}
+
+fn release_wait_state(state: ReactorWaitState) {
+    let _ = reactor()
+        .lock()
+        .expect("reactor mutex poisoned")
+        .unregister(state.interest_id);
+    if state.child_handle == 0 {
+        return;
+    }
+    let canceled = unsafe { sengoo_async_cancel_dispatch(state.child_kind, state.child_handle) };
+    if !canceled {
+        unsafe { sengoo_async_drop_dispatch(state.child_kind, state.child_handle) };
+    }
 }
 
 #[no_mangle]
@@ -345,6 +445,7 @@ pub extern "C" fn sengoo_async_reactor_tcp_readable_register(tcp_handle: u64) ->
 
 #[no_mangle]
 pub extern "C" fn sengoo_async_reactor_fd_readable_register(owned_fd: i64) -> u64 {
+    let owned_fd = registered_owned_fd(owned_fd);
     reactor()
         .lock()
         .expect("reactor mutex poisoned")
@@ -352,7 +453,7 @@ pub extern "C" fn sengoo_async_reactor_fd_readable_register(owned_fd: i64) -> u6
             kind: InterestKind::OwnedFdReadable,
             deadline: None,
             tcp_handle: None,
-            owned_fd: Some(owned_fd),
+            owned_fd,
             http_listener: None,
             accepted_stream: None,
             listener_error: None,
@@ -415,10 +516,7 @@ pub unsafe extern "C" fn sengoo_async_reactor_wait__result(handle: i64) {
     let Some(state) = super::handle_take_box::<ReactorWaitState>(handle) else {
         return;
     };
-    let _ = reactor()
-        .lock()
-        .expect("reactor mutex poisoned")
-        .unregister(state.interest_id);
+    release_wait_state(*state);
 }
 
 #[no_mangle]
@@ -430,10 +528,7 @@ pub unsafe extern "C" fn sengoo_async_reactor_wait__cancel(handle: i64) -> bool 
     let Some(state) = super::handle_take_box::<ReactorWaitState>(handle) else {
         return false;
     };
-    let _ = reactor()
-        .lock()
-        .expect("reactor mutex poisoned")
-        .unregister(state.interest_id);
+    release_wait_state(*state);
     true
 }
 
@@ -446,10 +541,7 @@ pub unsafe extern "C" fn sengoo_async_reactor_wait__drop(handle: i64) {
     let Some(state) = super::handle_take_box::<ReactorWaitState>(handle) else {
         return;
     };
-    let _ = reactor()
-        .lock()
-        .expect("reactor mutex poisoned")
-        .unregister(state.interest_id);
+    release_wait_state(*state);
 }
 
 #[cfg(feature = "native-bridge")]

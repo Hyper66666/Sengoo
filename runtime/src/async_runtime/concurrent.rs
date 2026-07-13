@@ -3599,6 +3599,7 @@ mod tests {
     }
 }
 
+#[allow(clippy::items_after_test_module)]
 pub(crate) fn retain_native_bridge_exports_for_linker() {
     macro_rules! export_addr {
         ($symbol:path) => {

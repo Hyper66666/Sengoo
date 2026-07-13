@@ -91,10 +91,18 @@
 
 - [ ] 4.1 Reactor abstraction with Linux, Windows, and supported macOS backends
   for timer/socket/owned-handle readiness.
+  - Partial: the shared timer/TCP/owned-fd registry uses finite scheduler wakeup
+    hints, duplicates Unix descriptors and Windows CRT-backed OS handles at
+    registration, and has one cross-platform scenario suite. Four-host CI
+    evidence is pending.
 - [ ] 4.2 Wire stdlib async net/file helpers to the reactor.
+  - Partial: async HTTP listener readiness is reactor-backed. A public owned-file
+    readiness surface is not yet exposed by `std::file`.
 - [ ] 4.3 Reference-host tests closing the owned-handle readiness deferral for
   Windows, Linux, and the supported macOS release channel, including no-busy-
   poll, cancellation, timeout, and close behavior.
+  - Partial: `toolchain-distribution` now runs the seven reactor scenarios on
+    Linux, Windows, macOS x64, and macOS arm64; the first all-host run is pending.
 
 ## 5. Future trait, channels, structured concurrency
 
