@@ -83,11 +83,18 @@
     reject offline cache tampering, bad upload/download checksums, higher yanked
     candidates, traversal/absolute/link/duplicate archive entries, and bounded
     compressed/uncompressed/entry counts before cache publication.
-- [ ] 3.4 Produce checksummed, provenance-attested Windows x64, Linux x86_64,
+- [x] 3.4 Produce checksummed, provenance-attested Windows x64, Linux x86_64,
   macOS x86_64, and macOS arm64 release artifacts with install and upgrade
   smoke outside the source checkout.
-- [ ] 3.5 Cut a real prerelease tag and verify every tool reports one coherent
+  - Tag run `29259068988` passes version validation, build, install, explicit
+    upgrade, installed stdlib/run smoke, and artifact upload on all four hosts.
+    Release `v0.1.0-rc.1` publishes four archives plus SHA-256 sidecars and
+    provenance attestation `35090674` from commit `f6ef96cdd`.
+- [x] 3.5 Cut a real prerelease tag and verify every tool reports one coherent
   version.
+  - `v0.1.0-rc.1` is a real GitHub prerelease. Every host verifies
+    `sgc`/`sgpm`/`sgfmt`/`sglsp` against `manifest.tool_versions` and requires
+    one shared `0.1.0-rc.1 (<build-hash>)` signature before publishing.
 
 ## 4. Phase 3 - safe concurrency and async IO
 
