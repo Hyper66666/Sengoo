@@ -33,9 +33,14 @@ release on `Drop`. Generic payload representation reuses the type descriptor
 and typed drop callback contract from `generic-collections` rather than adding
 per-scalar storage families.
 
-Locks must outlive guards. Moving a guard across threads follows explicit marker
-rules. Poisoning is not required for v1, but panic/error isolation and guard
-release are required.
+Locks must outlive guards. The v1 compiler enforces this conservatively:
+acquisition borrows the lock for the lexical guard scope, moving that lock is
+rejected while the borrow is active, and guard-bearing return types may only be
+produced by the compiler-known stdlib acquisition functions. Arbitrary wrapper
+functions cannot let a guard escape a borrowed lock. This is intentionally
+stricter than a future NLL-style lifetime system. Moving a guard across threads
+follows explicit marker rules. Poisoning is not required for v1, but
+panic/error isolation and guard release are required.
 
 ### Decision 3: Executor contract is algorithm-independent
 

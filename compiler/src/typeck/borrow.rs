@@ -479,6 +479,10 @@ impl BorrowChecker {
         if ty.is_copy_value() {
             return false;
         }
+        if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Mutex" | "RwLock"))
+        {
+            return true;
+        }
         if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if name == "Rc") {
             return true;
         }

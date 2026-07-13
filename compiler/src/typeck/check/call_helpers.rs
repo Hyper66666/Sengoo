@@ -364,6 +364,10 @@ impl TypeChecker {
                 0,
                 TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
             )),
+            "raw_rwlock_read_async" | "raw_rwlock_write_async" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
             "mutex_lock_async" => Some(Ty::new(
                 0,
                 TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
@@ -678,6 +682,15 @@ impl TypeChecker {
                         }
                     }
                     "raw_channel_recv" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
+                    "raw_rwlock_read_async" | "raw_rwlock_write_async" => {
                         if args.len() != 1 {
                             return Err(TypeckError::ArgumentCountMismatch {
                                 expected: 1,

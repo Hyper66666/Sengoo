@@ -43,6 +43,8 @@ extern "C" {
     fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> i64;
     fn sengoo_async_rwlock_try_read(lock_handle: i64) -> i64;
     fn sengoo_async_rwlock_try_write(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_read__start(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_write__start(lock_handle: i64) -> i64;
     fn sengoo_async_rwlock_read_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_set_i64(lock_handle: i64, guard_id: i64, value: i64) -> i64;
@@ -344,6 +346,14 @@ def raw_mutex_lock_async<T>(mutex: &Mutex<T>) -> i64 {
     sengoo_async_mutex_lock__start(mutex.raw_handle())
 }
 
+def raw_rwlock_read_async<T>(lock: &RwLock<T>) -> i64 {
+    sengoo_async_rwlock_read__start((*lock).handle)
+}
+
+def raw_rwlock_write_async<T>(lock: &RwLock<T>) -> i64 {
+    sengoo_async_rwlock_write__start((*lock).handle)
+}
+
 impl<T> Drop for Mutex<T> {
     def drop(&mut self) {
         sengoo_async_mutex_drop(self.handle);
@@ -543,6 +553,40 @@ async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
             error: status,
         };
         result
+    }
+}
+
+async def rwlock_read_guard<T>(lock: &RwLock<T>) -> Result<RwLockReadGuard<T>, i64> {
+    let guard_id = await raw_rwlock_read_async(lock);
+    if guard_id > 0 {
+        Result {
+            is_ok: true,
+            value: lock.make_read_guard(guard_id, true),
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: lock.make_read_guard(0, false),
+            error: status_from_raw_ffi(guard_id),
+        }
+    }
+}
+
+async def rwlock_write_guard<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<T>, i64> {
+    let guard_id = await raw_rwlock_write_async(lock);
+    if guard_id > 0 {
+        Result {
+            is_ok: true,
+            value: lock.make_write_guard(guard_id, true),
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: lock.make_write_guard(0, false),
+            error: status_from_raw_ffi(guard_id),
+        }
     }
 }
 

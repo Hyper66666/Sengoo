@@ -79,6 +79,7 @@ impl TypeChecker {
             } else {
                 self.env.unit_ty()
             };
+            Self::reject_escaping_lock_guard_return(fn_decl, &ret_ty)?;
 
             self.validate_contracts_for_function(fn_decl, &ret_ty)?;
             self.validate_ffi_function_decl(fn_decl, &param_types, &ret_ty)?;
@@ -117,6 +118,7 @@ impl TypeChecker {
         } else {
             self.env.unit_ty()
         };
+        Self::reject_escaping_lock_guard_return(fn_decl, &ret_ty)?;
         if Self::is_async_context_ty(&ret_ty) {
             return Err(CompileError::from(TypeckError::Other(
                 "AsyncContext is poll-scoped and cannot be returned".to_string(),
@@ -169,6 +171,55 @@ impl TypeChecker {
         self.set_generic_function_meta(fn_decl.name.name.clone(), generic_meta);
 
         Ok(())
+    }
+
+    fn reject_escaping_lock_guard_return(fn_decl: &Function, ret_ty: &Ty) -> Result<()> {
+        const ACQUISITION_FUNCTIONS: &[&str] = &[
+            "mutex_lock_guard",
+            "mutex_lock_guard_i64",
+            "rwlock_try_read_guard",
+            "rwlock_try_write_guard",
+            "rwlock_try_read_guard_i64",
+            "rwlock_try_write_guard_i64",
+            "rwlock_read_guard",
+            "rwlock_write_guard",
+        ];
+        if ACQUISITION_FUNCTIONS.contains(&fn_decl.name.name.as_str()) {
+            return Ok(());
+        }
+        if Self::ty_contains_lock_guard(ret_ty) {
+            return Err(CompileError::from(TypeckError::Other(
+                "lock guard cannot escape its acquisition function; the lock must outlive the guard"
+                    .to_string(),
+            )));
+        }
+        Ok(())
+    }
+
+    fn ty_contains_lock_guard(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, args } => {
+                matches!(
+                    name.as_str(),
+                    "MutexGuard"
+                        | "MutexGuardI64"
+                        | "RwLockReadGuard"
+                        | "RwLockWriteGuard"
+                        | "RwLockReadGuardI64"
+                        | "RwLockWriteGuardI64"
+                ) || args.iter().any(Self::ty_contains_lock_guard)
+            }
+            TyKind::Tuple(items) => items.iter().any(Self::ty_contains_lock_guard),
+            TyKind::Array(inner, _)
+            | TyKind::Slice(inner)
+            | TyKind::Ref(_, inner)
+            | TyKind::Ptr(inner)
+            | TyKind::Future(inner) => Self::ty_contains_lock_guard(inner),
+            TyKind::Fn { params, ret, .. } => {
+                params.iter().any(Self::ty_contains_lock_guard) || Self::ty_contains_lock_guard(ret)
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn validate_ffi_function_decl(

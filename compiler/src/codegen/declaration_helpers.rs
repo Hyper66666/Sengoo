@@ -508,6 +508,8 @@ impl Codegen {
             "sengoo_async_channel_send__start",
             "sengoo_async_channel_recv__start",
             "sengoo_async_channel_value_move_into",
+            "sengoo_async_rwlock_read__start",
+            "sengoo_async_rwlock_write__start",
             "sengoo_async_channel_send_i64",
             "sengoo_async_channel_recv_i64",
             "sengoo_async_mutex_lock_i64",
@@ -533,6 +535,8 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_mutex_lock_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_read")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_write")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
         {
             return;
@@ -696,6 +700,49 @@ impl Codegen {
                 (
                     "drop",
                     "declare void @sengoo_async_mutex_lock_i64__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_rwlock_read",
+            &[
+                ("poll", "declare i64 @sengoo_async_rwlock_read__poll(i64)\n"),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_rwlock_read__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_rwlock_read__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_rwlock_read__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_rwlock_write",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_rwlock_write__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_rwlock_write__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_rwlock_write__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_rwlock_write__drop(i64)\n",
                 ),
             ],
         );

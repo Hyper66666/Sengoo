@@ -4956,6 +4956,57 @@ def main() -> i64 {
 }
 
 #[test]
+fn async_stdlib_generic_rwlock_waits_and_releases_guards() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-wait",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+async def read_once(lock: &RwLock<Payload>) -> i64 {
+    let result = await rwlock_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 80; }
+    output.value
+}
+
+async def write_once(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = await rwlock_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let wrote = guard.set(Payload { value: value });
+    if !wrote { return 81; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 82; }
+    output.value
+}
+
+async def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = await read_once(&lock);
+    let wrote = await write_once(&lock, 17);
+    let after = await read_once(&lock);
+    if before == 5 && wrote == 17 && after == 17 { 42 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn incremental_link_output_matches_full_link_output() {
     let Some(clang) = find_clang() else {
         return;

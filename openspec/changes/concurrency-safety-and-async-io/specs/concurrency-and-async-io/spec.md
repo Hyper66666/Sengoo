@@ -17,6 +17,13 @@ or moving non-thread-safe values across thread boundaries.
 - **THEN** the program type-checks, the lock guard releases on `Drop`, and the
   shared state is updated without a data race
 
+#### Scenario: Lock outlives its guard
+
+- **WHEN** a program acquires a `Mutex<T>` or `RwLock<T>` guard
+- **THEN** moving the owning lock while the guard borrow is active is rejected
+- **AND** returning a guard from a non-acquisition wrapper is rejected so a
+  guard cannot escape a borrowed lock
+
 ### Requirement: The runtime SHALL provide a multi-threaded executor
 
 The runtime SHALL offer a multi-threaded executor in addition to the cooperative

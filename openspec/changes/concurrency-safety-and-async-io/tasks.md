@@ -41,16 +41,19 @@
     `Drop`. Compiler tests cover arbitrary Copy payloads plus Send/Sync bounds,
     runtime tests prove exact generic payload move/drop, and native `sgc`
     tests exercise public `Arc<Mutex<i64>>` composition across worker threads.
-- [ ] 2.2 `Mutex<T>` / `RwLock<T>` with RAII guards that release on `Drop`.
-  - Partial: `std::async` now exposes descriptor-backed `Mutex<T>` and
+- [x] 2.2 `Mutex<T>` / `RwLock<T>` with RAII guards that release on `Drop`.
+  - `std::async` exposes descriptor-backed `Mutex<T>` and
     `MutexGuard<T>` with async acquisition, Copy-only reads, owned replacement,
     and automatic scope-exit unlock. Runtime and native tests cover arbitrary
     payload Drop, fresh lock acquisition, failed-lock cleanup, duplicate unlock
     rejection, and public `Arc<Mutex<i64>>` worker composition. Descriptor-backed
     `RwLock<T>` now provides multiple read guards, an exclusive write guard,
     Copy-only reads, owned replacement, exact payload Drop, and automatic guard
-    unlock while preserving `RwLockI64` wrappers. Async rwlock waiting and
-    compiler-enforced lock-outlives-guard lifetimes remain open.
+    unlock while preserving `RwLockI64` wrappers. Generic async read/write
+    acquisition uses FIFO waiter registration, writer-fair admission,
+    cancellation-safe unregister, and close propagation. The compiler rejects
+    moving a borrowed lock and guard escape through non-acquisition returns;
+    runtime, compiler, and native `sgc` tests cover both lifecycles.
 - [x] 2.3 Tests: shared counter across threads via `Arc<Mutex<...>>`.
   - `runtime/src/async_runtime.rs::concurrent_shared_counter_joins_workers_deterministically`
     submits eight jobs to four workers against a real `Arc<Mutex<i64>>` payload

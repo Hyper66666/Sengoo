@@ -869,3 +869,151 @@ async def main() -> i64 {
         "expected a non-Future await diagnostic, got: {message}"
     );
 }
+
+#[test]
+fn concurrent_rwlock_guard_prevents_moving_its_lock() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct Payload { value: i64 }
+
+def consume(lock: RwLock<Payload>) -> i64 { 0 }
+
+def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 1 });
+    let acquired = rwlock_try_read_guard(&lock);
+    if !acquired.is_ok { return acquired.error; }
+    let guard = acquired.value;
+    consume(lock)
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("a lock must outlive its guard");
+    assert!(
+        error.to_string().contains("cannot move borrowed value"),
+        "expected lock-outlives-guard diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_rwlock_guard_cannot_escape_a_borrowed_lock() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct Payload { value: i64 }
+
+def leak_guard(lock: &RwLock<Payload>) -> Result<RwLockReadGuard<Payload>, i64> {
+    rwlock_try_read_guard(lock)
+}
+
+def main() -> i64 { 0 }
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("a guard must not escape a borrowed lock");
+    let message = error.to_string();
+    assert!(
+        message.contains("guard") && (message.contains("escape") || message.contains("outlive")),
+        "expected guard escape diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn concurrent_async_generic_rwlock_guards_lower_read_and_write_lifecycles() {
+    let source = r#"
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+async def read_once(lock: &RwLock<Payload>) -> i64 {
+    let acquired = await rwlock_read_guard(lock);
+    if !acquired.is_ok { return acquired.error; }
+    let guard = acquired.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 80; }
+    output.value
+}
+
+async def write_once(lock: &RwLock<Payload>) -> i64 {
+    let acquired = await rwlock_write_guard(lock);
+    if !acquired.is_ok { return acquired.error; }
+    let mut guard = acquired.value;
+    guard.set(Payload { value: 9 });
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 81; }
+    output.value
+}
+
+async def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    await read_once(&lock) + await write_once(&lock)
+}
+"#;
+
+    let ir = compile_with_async_stdlib(source);
+    for symbol in [
+        "sengoo_async_rwlock_read__start",
+        "sengoo_async_rwlock_read__poll",
+        "sengoo_async_rwlock_read__result",
+        "sengoo_async_rwlock_write__start",
+        "sengoo_async_rwlock_write__poll",
+        "sengoo_async_rwlock_write__result",
+    ] {
+        assert!(ir.contains(symbol), "missing async RwLock symbol {symbol}");
+    }
+    assert!(ir.contains("RwLockReadGuard_Payload_Drop_drop"));
+    assert!(ir.contains("RwLockWriteGuard_Payload_Drop_drop"));
+}
+
+#[test]
+fn concurrent_mutex_guard_prevents_moving_its_lock() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct Payload { value: i64 }
+
+def consume(lock: Mutex<Payload>) -> i64 { 0 }
+
+async def main() -> i64 {
+    let lock = mutex_new(Payload { value: 1 });
+    let acquired = await mutex_lock_guard(&lock);
+    if !acquired.is_ok { return acquired.error; }
+    let guard = acquired.value;
+    consume(lock)
+}
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("a mutex must outlive its guard");
+    assert!(
+        error.to_string().contains("cannot move borrowed value"),
+        "expected lock-outlives-guard diagnostic, got: {error}"
+    );
+}
+
+#[test]
+fn concurrent_mutex_guard_cannot_escape_a_borrowed_lock() {
+    let source = format!(
+        "{}\n\n{}",
+        async_stdlib_prefix(),
+        r#"
+struct Payload { value: i64 }
+
+async def leak_guard(lock: &Mutex<Payload>) -> Result<MutexGuard<Payload>, i64> {
+    await mutex_lock_guard(lock)
+}
+
+async def main() -> i64 { 0 }
+"#
+    );
+
+    let error = compile_to_ir(&source).expect_err("a mutex guard must not escape");
+    let message = error.to_string();
+    assert!(
+        message.contains("guard") && (message.contains("escape") || message.contains("outlive")),
+        "expected guard escape diagnostic, got: {message}"
+    );
+}

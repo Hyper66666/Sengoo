@@ -100,8 +100,12 @@
 
 - [ ] 4.1 Complete and archive `concurrency-safety-and-async-io` with scheduler
   correctness independent of work-stealing implementation.
-- [ ] 4.2 Deliver generic `Arc<T>`, `Mutex<T>`, `RwLock<T>`, and `channel<T>` with
+- [x] 4.2 Deliver generic `Arc<T>`, `Mutex<T>`, `RwLock<T>`, and `channel<T>` with
   exact Drop and Send/Sync bounds.
+  - Descriptor-backed ownership now covers all four public types. Compiler
+    negatives enforce Send and lock/guard lifetime boundaries; runtime tests
+    cover exact payload/endpoint/guard Drop, cancellation, close, fairness, and
+    scalar compatibility; native `sgc` tests exercise generic composition.
 - [ ] 4.3 Deliver `task_scope` normal/early-exit join/cancel semantics and stress
   cancellation without leaked tasks.
 - [ ] 4.4 Prove timer/socket/owned-handle reactor progress on Linux, Windows, and
