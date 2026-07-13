@@ -214,8 +214,8 @@ bb_0:
 define i64 @sengoo_async_poll_dispatch(i64 %l_1, i64 %l_2) {
 bb_0:
     switch i64 %l_1, label %bb_1 [
-      i64 4, label %bb_2
-      i64 3, label %bb_3
+      i64 3343129106, label %bb_2
+      i64 3935363595, label %bb_3
       i64 1, label %bb_4
       i64 2, label %bb_5
     ]
@@ -240,8 +240,8 @@ bb_5:
 define i1 @sengoo_async_cancel_dispatch(i64 %l_1, i64 %l_2) {
 bb_0:
     switch i64 %l_1, label %bb_1 [
-      i64 4, label %bb_2
-      i64 3, label %bb_3
+      i64 3343129106, label %bb_2
+      i64 3935363595, label %bb_3
       i64 1, label %bb_4
       i64 2, label %bb_5
     ]
@@ -268,8 +268,8 @@ bb_5:
 define void @sengoo_async_drop_dispatch(i64 %l_1, i64 %l_2) {
 bb_0:
     switch i64 %l_1, label %bb_1 [
-      i64 4, label %bb_2
-      i64 3, label %bb_3
+      i64 3343129106, label %bb_2
+      i64 3935363595, label %bb_3
       i64 1, label %bb_4
       i64 2, label %bb_5
     ]
@@ -343,8 +343,8 @@ bb_1:
 define i64 @sengoo_async_result_dispatch_i64(i64 %l_1, i64 %l_2) {
 bb_0:
     switch i64 %l_1, label %bb_1 [
-      i64 4, label %bb_2
-      i64 3, label %bb_3
+      i64 3343129106, label %bb_2
+      i64 3935363595, label %bb_3
     ]
 bb_1:
     %t_5 = add i64 0, 0
