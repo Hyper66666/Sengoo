@@ -1,0 +1,12 @@
+async def step(value: i64) -> i64 {
+    value + 1
+}
+
+async def main() -> i64 {
+    let first = await step(40);
+    if first == 41 {
+        first
+    } else {
+        0
+    }
+}

@@ -27,12 +27,14 @@ impl<'a> LoweringContext<'a> {
             .iter()
             .enumerate()
             .filter_map(|(block_id, block)| match &block.terminator {
-                Some(Terminator::Return(value)) => Some((block_id, *value)),
+                Some(Terminator::Return(value)) => {
+                    Some((block_id, *value, block.terminator_source_site))
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
 
-        for (return_block, return_value) in return_sites {
+        for (return_block, return_value, return_source_site) in return_sites {
             let Some(return_local) = return_value else {
                 continue;
             };
@@ -41,10 +43,13 @@ impl<'a> LoweringContext<'a> {
             let success_block = self.new_block();
             let fail_block = self.new_block();
 
-            if let Some(block) = self.mir_fn.block_mut(return_block) {
-                block.set_terminator(Terminator::Goto(check_block));
-            }
+            self.set_block_terminator_at(
+                return_block,
+                Terminator::Goto(check_block),
+                return_source_site,
+            );
 
+            self.current_source_site = return_source_site;
             self.set_current_block(check_block);
             let cond_local = self.lower_contract_condition(postcondition, Some(return_local));
             self.set_terminator(Terminator::If {

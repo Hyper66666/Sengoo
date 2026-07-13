@@ -19,19 +19,25 @@ pub(super) fn lower_if_expr(
 
     let then_val = ctx.lower_scoped_body_to_block_val(then_branch, then_block);
     let then_end = ctx.current_block();
-    if let Some(block) = ctx.mir_fn.block_mut(then_end) {
-        if block.terminator.is_none() {
-            block.set_terminator(Terminator::Goto(join_block));
-        }
+    if ctx
+        .mir_fn
+        .basic_blocks
+        .get(then_end)
+        .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(then_end, Terminator::Goto(join_block));
     }
 
     if let Some(e) = else_branch {
         let else_val = ctx.lower_scoped_body_to_block_val(e, else_block);
         let else_end = ctx.current_block();
-        if let Some(block) = ctx.mir_fn.block_mut(else_end) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(join_block));
-            }
+        if ctx
+            .mir_fn
+            .basic_blocks
+            .get(else_end)
+            .is_some_and(|block| block.terminator.is_none())
+        {
+            ctx.set_block_terminator(else_end, Terminator::Goto(join_block));
         }
 
         ctx.set_current_block(join_block);
@@ -49,10 +55,13 @@ pub(super) fn lower_if_expr(
             result
         }
     } else {
-        if let Some(block) = ctx.mir_fn.block_mut(else_block) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(join_block));
-            }
+        if ctx
+            .mir_fn
+            .basic_blocks
+            .get(else_block)
+            .is_some_and(|block| block.terminator.is_none())
+        {
+            ctx.set_block_terminator(else_block, Terminator::Goto(join_block));
         }
         ctx.set_current_block(join_block);
         ctx.add_local(None, LocalKind::Temp, MIR_UNIT)

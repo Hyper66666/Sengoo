@@ -1,0 +1,62 @@
+import std::collections;
+
+import std::math;
+
+import std::string;
+
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Record {
+    name: String,
+    score: i64,
+}
+
+impl Record {
+    def is_selected(&self) -> bool {
+        self.score >= 20;
+    }
+    def score_value(&self) -> i64 {
+        self.score;
+    }
+    def into_score(self) -> i64 {
+        self.score;
+    }
+}
+
+def keep_record(record: &Record) -> bool {
+    record.is_selected();
+}
+
+def record_score(record: Record) -> i64 {
+    record.into_score();
+}
+
+def exercise_default_library() -> i64 {
+    let records: Vec<Record> = vec_new();
+    records.push(Record { name: string_from_str("alpha").unwrap_or(String { handle: 0 }), score: 20 });
+    records.push(Record { name: string_from_str("beta").unwrap_or(String { handle: 0 }), score: 22 });
+    let predicate: fn(&Record) -> bool = keep_record;
+    let mapper: fn(Record) -> i64 = record_score;
+    let total = records.into_iter().filter(predicate).map(mapper).sum();
+    let by_name: HashMap<String, Record> = hashmap_new();
+    let inserted = by_name.insert(string_from_str("answer").unwrap_or(String { handle: 0 }), Record { name: string_from_str("mapped").unwrap_or(String { handle: 0 }), score: total });
+    if inserted == false { return 10; };
+    let lookup = string_from_str("answer").unwrap_or(String { handle: 0 });
+    if by_name.contains(&lookup) == false { return 11; };
+    let mapped = by_name.get(&lookup);
+    if mapped.score_value() != 42 { return 12; };
+    let narrowed = checked_i64_to_u8(total);
+    if narrowed.is_err() { return 13; };
+    let widened = checked_u8_to_i64(narrowed.value);
+    if widened.is_err() or widened.value != 42 { return 13; };
+    42;
+}
+
+def conformance_status() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let result = exercise_default_library();
+    let after = sengoo_string_live_handle_count();
+    if result == 42 and after == before { 0; } else { result; };
+}

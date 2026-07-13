@@ -26,18 +26,30 @@
 ## 3. Binary distribution
 
 - [x] 3.1 Versioned release artifacts for Linux x86_64 and Windows x64.
-- [ ] 3.2 macOS channel (arm64 + x86_64) artifacts.
+- [x] 3.2 macOS channel (arm64 + x86_64) artifacts.
   - Native `macos-15` arm64 and `macos-15-intel` x64 jobs are configured;
     keep open until the remote matrix produces and installs both archives.
+  - Local code now selects the LLVM host triple from macOS `target_arch` and
+    links Security/CoreFoundation; focused compiler/sgc tests pass. Artifact
+    production remains a remote-host acceptance requirement.
+  - GitHub Actions run `29224930570` builds, installs, smokes, and uploads both
+    `macos-15` arm64 and `macos-15-intel` x64 archives.
 - [x] 3.3 One-command installer / version manager.
   - Both installers select a pinned version, auto-detect architecture, verify
     SHA-256, and support explicit repeatable upgrades without auto-update.
-- [ ] 3.4 Release smoke matrix per platform (install -> `sgc run hello`).
-  - Four-platform workflow is implemented; remote macOS evidence is pending.
+- [x] 3.4 Release smoke matrix per platform (install -> `sgc run hello`).
+  - Four-platform workflow is implemented. Native linking now supplies Linux
+    `libm` and the macOS system frameworks, while the Windows async mutex
+    compatibility wrapper returns its written value and its locked fixture
+    passes. Remote acceptance requires package, install, and installed hello
+    on every job.
+  - Run `29224930570` reaches every required step successfully on all four
+    jobs and retains the uploaded toolchain artifacts.
 
 ## 4. Release process and docs
 
-- [x] 4.1 Toolchain semantic versioning + checksummed/signed artifacts.
+- [x] 4.1 Toolchain semantic versioning + checksummed artifacts and GitHub
+  build-provenance attestations.
   - Workspace-coherent versions, SHA-256 sidecars, and GitHub build-provenance
     attestations are gated behind the complete platform smoke matrix.
 - [x] 4.2 Document install/upgrade and the registry workflow.

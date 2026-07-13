@@ -1,12 +1,14 @@
 # Sengoo Target Capability Matrix
 
 This matrix defines the intended target split for `sgc build --target` work.
-Only `native` is implemented today. `wasm` and `bytecode` are planned targets
-under `openspec/changes/wasm-and-bytecode-backends`.
+`native` is the only production target today. `wasm` and `bytecode` have
+experimental scalar-control-flow slices under
+`openspec/changes/wasm-and-bytecode-backends`; they are not default-library or
+ownership-capable backends.
 
 | Capability | native | wasm | bytecode |
 | --- | --- | --- | --- |
-| Core scalar arithmetic/control flow | Supported | Planned | Planned |
+| Core scalar arithmetic/control flow | Supported | Experimental subset | Experimental subset |
 | Structs/enums/match | Supported | Planned | Planned |
 | Ownership + Drop | Supported subset | Planned subset | Planned |
 | Generics/monomorphization | Supported subset | Planned | Planned |
@@ -48,7 +50,7 @@ small bridge table so unsupported domains fail predictably.
 
 ## CLI Contract
 
-Planned spelling:
+Current spelling (portable targets are experimental):
 
 ```bash
 sgc build --target native path/to/main.sg
@@ -56,5 +58,5 @@ sgc build --target wasm path/to/main.sg
 sgc build --target bytecode path/to/main.sg
 ```
 
-Until `wasm` and `bytecode` are implemented, the CLI should reject those target
-values or mark them experimental instead of silently falling back to native.
+Unsupported MIR, FFI, heap, ownership, and stdlib surfaces fail explicitly;
+portable targets never silently fall back to native.

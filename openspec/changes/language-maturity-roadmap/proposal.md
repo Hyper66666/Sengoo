@@ -47,7 +47,7 @@ Deliver the remaining work through independently archivable execution lanes:
 | 1 | `numeric-type-system` | Complete documented numeric semantics on the production backend |
 | 1 | `generic-collections` | True generic owning collections and iterator pipeline |
 | 1 | `debugger-and-test-framework` | Statement stepping and live scalar/composite inspection |
-| 2 | `package-registry-and-distribution` | Registry e2e plus installable signed releases on three desktop OS families |
+| 2 | `package-registry-and-distribution` | Registry e2e plus installable checksummed and provenance-attested releases on three desktop OS families |
 | 3 | `concurrency-safety-and-async-io` | Generic shared-state primitives, structured tasks, and cross-platform reactor evidence |
 | 4 | `production-hardening-v1` | Fuzz/sanitizer/leak/soak/ABI/performance and ecosystem release gates |
 | Post-v1 | `wasm-and-bytecode-backends` | Alternative targets only after the native MIR/runtime ABI is versioned |

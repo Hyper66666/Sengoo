@@ -1,0 +1,11 @@
+[package]
+name = "default_library_conformance"
+version = "0.1.0"
+edition = "2026"
+description = "Default-library conformance over generic collections, numeric checks, and automatic Drop."
+
+[bin]
+path = "src/main.sg"
+
+[lib]
+path = "src/lib.sg"

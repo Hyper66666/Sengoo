@@ -107,13 +107,25 @@ def propagate(value: Result<i64, i64>) -> Result<i64, i64> {
 def main() -> i64 { 0 }
 ```
 
+```sg run
+// doctest-stdout: 42
+import std::math;
+
+def main() -> i64 {
+    let narrowed = checked_i64_to_u8(42);
+    let widened = checked_u8_to_i64(narrowed.unwrap_or(0u8));
+    println(widened.unwrap_or(0));
+    0
+}
+```
+
 ## Lexical Grammar
 
 | Construct | Status | Proof / notes |
 | --- | --- | --- |
 | Identifiers and keywords | Supported | Parser and lexer tests under `compiler/src/tests/`. |
-| Integer literals | Subset | Decimal, `0x`, `0o`, `0b`, `_` separators, signed/unsigned suffixes; see `compiler/src/tests/cast_semantics_tests.rs`. |
-| Float literals | Subset | `f32`/`f64` suffixes and basic arithmetic are supported; full edge-case conformance remains under `numeric-type-system`. |
+| Integer literals | Supported | Decimal, `0x`, `0o`, `0b`, `_` separators, and signed/unsigned suffixes; see `compiler/src/tests/cast_semantics_tests.rs`. |
+| Float literals | Supported | `f32`/`f64` suffixes preserve their source type through parsing, MIR, and production codegen. |
 | String literals and `&str` | Supported | `tools/stdlib/string.sg`, `compiler/src/tests/stdlib_surface_tests.rs`. |
 | Character literals | Subset | Unicode scalar value surface exists; broader char casts and iterator item typing remain open. |
 | Comments | Supported | Line comments are used throughout examples. |
@@ -123,14 +135,15 @@ def main() -> i64 { 0 }
 | Construct | Status | Proof / notes |
 | --- | --- | --- |
 | `bool` | Supported | Core examples and typechecker tests. |
-| Signed integers | Subset | `i8/i16/i32/i64/isize`; current pointer-sized policy is 64-bit native. |
-| Unsigned integers | Subset | `u8/u16/u32/u64/usize`; large suffixed `u64`/`usize` literals are supported. |
-| Floats | Subset | `f32/f64` arithmetic and stdlib math helpers; exhaustive IEEE edge cases remain open. |
+| Signed integers | Supported | `i8/i16/i32/i64/isize`; `isize` follows the selected target triple's 32-bit or 64-bit pointer width. |
+| Unsigned integers | Supported | `u8/u16/u32/u64/usize`; `usize` follows the selected target and large suffixed `u64`/`usize` literals are supported. |
+| Floats | Supported | `f32/f64` IEEE-754 arithmetic, predicates, parsing, precision formatting, and stdlib math helpers on the production backend. |
 | `&str` | Supported | Borrowed text view for literals and runtime string pointers. |
 | `String` | Supported | Owned UTF-8 handle with move/drop, formatting, comparison, slicing, and push helpers. |
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
 | Arrays | Subset | Fixed array syntax is covered in examples; collection work focuses on `Vec<T>`. |
+| Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
 | References | Subset | Borrowing and move blocking are lexical and conservative. |
 | `dyn Trait` | Experimental | Single-trait `&self`/`&mut self` dispatch and owned vtable-drop glue exist; `Box<dyn>`, multi-trait objects, value receivers, and Cranelift dispatch remain open. |
 
@@ -181,6 +194,54 @@ Known open work:
 | `dyn Trait` | Experimental | See Types section. |
 | `#[derive]` | Subset | Clone/Copy/Eq/Ord/Hash/Default/Debug surfaces exist for current named shapes. |
 | Static trait functions | Unsupported | Blocks Rust-style `From<T>::from` today. |
+
+## Generic Collections And Iterators
+
+Generic owning collections move values into storage, borrow values on reads,
+move values back out on removal, and drop every still-owned element exactly
+once. Constructors infer their type arguments from the expected result type:
+
+```sg compile
+import std::collections;
+import std::string;
+
+struct Row {
+    name: String,
+}
+
+def main() -> i64 {
+    let rows: Vec<Row> = vec_new();
+    let by_name: HashMap<String, Row> = hashmap_new();
+    rows.len() + by_name.len();
+}
+```
+
+Owning Vec iteration preserves insertion order. The lazy iterator surface
+includes `map`, `filter`, `take`, `skip`, and `enumerate`; consuming terminals
+include `count`, accumulator-generic `fold`, `collect() -> Vec<T>`, numeric
+`sum() -> T` for `T: SumValue`, `collect_hashset()`, and
+`collect_hashmap(projector)`. The map projector returns `MapEntry<K,V>`, which
+keeps K/V inference argument-driven rather than relying on return-type-only
+generic method inference. Empty numeric sums return the numeric identity.
+
+Mutation that may move collection storage is rejected while an element borrow
+or borrowing iterator is live. Existing scalar constructor names remain a
+source-compatibility surface and route through the same generic storage ABI.
+
+## Numeric Model
+
+LLVM-text plus clang is the production semantic reference for numeric code.
+Debug `+`, `-`, and `*` trap on overflow, release builds wrap, and explicit
+`wrapping_*`, `checked_*`, and `saturating_*` operations are independent of the
+build mode. The concrete `checked_<source>_to_<target>` family covers every
+non-identity integer pair and reports overflow or invalid signedness through
+`Result`. Lossless widening is also available through `From`/`Into`; narrowing
+requires an explicit cast or checked conversion.
+
+The opt-in Cranelift fast path remains experimental. It must match the
+production semantics for accepted primitive programs and reject unsupported
+programs explicitly; its intentionally smaller surface does not reduce the
+supported LLVM-text language contract.
 
 ## Modules And Visibility
 

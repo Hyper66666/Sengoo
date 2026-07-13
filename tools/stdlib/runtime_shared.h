@@ -80,6 +80,8 @@ long long sengoo_raw_vec_pop(long long handle, void* out_value);
 long long sengoo_raw_vec_remove(long long handle, long long index, void* out_value);
 long long sengoo_raw_vec_clear(long long handle);
 long long sengoo_raw_vec_free(long long handle);
+void sengoo_raw_zero_bytes(void* value, long long size);
+long long sengoo_raw_vec_remove_string(long long handle, long long index);
 long long sengoo_raw_vec_iter_new(long long handle);
 void* sengoo_raw_vec_iter_next(long long handle);
 long long sengoo_raw_vec_iter_free(long long handle);
@@ -95,6 +97,7 @@ long long sengoo_raw_hashmap_contains(long long handle, const void* key);
 long long sengoo_raw_hashmap_remove(long long handle, const void* key, void* out_value);
 long long sengoo_raw_hashmap_clear(long long handle);
 long long sengoo_raw_hashmap_free(long long handle);
+long long sengoo_raw_hashmap_remove_string(long long handle, const void* key);
 long long sengoo_raw_btreemap_new_parts(
     long long key_size, long long key_align, void* key_move, void* key_drop,
     void* key_compare, long long value_size, long long value_align,
@@ -102,6 +105,9 @@ long long sengoo_raw_btreemap_new_parts(
 );
 long long sengoo_raw_map_key_iter_new(long long handle);
 void* sengoo_raw_map_key_iter_next(long long handle);
+long long sengoo_raw_map_key_iter_done(long long handle);
+long long sengoo_raw_map_key_iter_reset(long long handle);
+long long sengoo_raw_map_key_iter_index(long long handle);
 long long sengoo_raw_map_key_iter_free(long long handle);
 
 long long sengoo_ptr_to_handle(void* ptr);

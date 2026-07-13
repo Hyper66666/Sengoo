@@ -46,12 +46,33 @@ types, own their elements, and drop them automatically.
 The standard library SHALL provide `map`, `filter`, `fold`, `enumerate`, `take`,
 `skip`, `count`, `sum`, and `collect` over the `Iterator` trait.
 
+Generic `sum` SHALL preserve the iterator item type and SHALL only be available
+when that type implements the numeric `SumValue` identity-and-combine contract.
+An empty iterator SHALL return the stable identity for that numeric type.
+Collection targets SHALL use explicit `collect_hashset` and
+`collect_hashmap(projector)` sinks rather than relying on return-type-only
+generic method inference.
+
 #### Scenario: Adapter chain collected into a Vec
 
 - **WHEN** a program iterates a collection through `map` and `filter` and calls
   `collect`
 - **THEN** the result is a new collection containing the transformed, filtered
   elements
+
+#### Scenario: Empty and chained numeric sums use the declared identity
+
+- **WHEN** a numeric owning iterator is empty or is transformed through lazy
+  adapters and then summed
+- **THEN** the empty result is the numeric identity
+- **AND** each yielded item is combined exactly once without an `i64` fallback
+
+#### Scenario: Explicit set and map sinks preserve generic ownership
+
+- **WHEN** an owning iterator collects into a hash set or projects items into
+  `MapEntry<K,V>` values for a hash map
+- **THEN** keys and values move into the generic collection core
+- **AND** duplicate entries follow the target collection replacement semantics
 
 ### Requirement: Existing scalar collection helpers SHALL remain source-compatible
 

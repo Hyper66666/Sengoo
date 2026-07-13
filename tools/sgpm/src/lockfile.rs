@@ -1,4 +1,7 @@
-use crate::resolver::{graph_requires_lockfile_v2, Graph, PackageNode, PackageSource};
+use crate::resolver::{
+    graph_requires_lockfile_v2, Graph, LockedRegistryGraph, LockedRegistryPackage, PackageNode,
+    PackageSource,
+};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeSet;
 use std::fs;
@@ -6,10 +9,113 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[derive(serde::Deserialize)]
+struct LockedDocument {
+    version: u32,
+    #[serde(default)]
+    package: Vec<LockedPackageEntry>,
+    #[serde(default)]
+    dependency: Vec<LockedDependencyEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct LockedPackageEntry {
+    id: Option<String>,
+    name: String,
+    version: String,
+    source: LockedSourceEntry,
+}
+
+#[derive(serde::Deserialize)]
+struct LockedSourceEntry {
+    kind: String,
+    registry: Option<String>,
+    version: Option<String>,
+    checksum: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct LockedDependencyEntry {
+    from: String,
+    alias: String,
+    to: String,
+}
+
 static LOCKFILE_STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub const LOCKFILE_VERSION_V1: u32 = 1;
 pub const LOCKFILE_VERSION_V2: u32 = 2;
+
+pub fn read_locked_registry_graph(lockfile_path: &Path) -> Result<LockedRegistryGraph> {
+    let source = fs::read_to_string(lockfile_path)
+        .map_err(|_| miette::miette!("Sengoo.lock is out of date; run sgpm update"))?;
+    let document: LockedDocument = toml::from_str(&source)
+        .map_err(|_| miette::miette!("Sengoo.lock is out of date; run sgpm update"))?;
+    if document.version != LOCKFILE_VERSION_V2 {
+        return Ok(LockedRegistryGraph::default());
+    }
+
+    let mut graph = LockedRegistryGraph::default();
+    for package in document.package {
+        if package.source.kind != "registry" {
+            continue;
+        }
+        let id = package.id.ok_or_else(|| {
+            miette::miette!("registry package in Sengoo.lock version 2 has no id; run sgpm update")
+        })?;
+        let registry = package.source.registry.ok_or_else(|| {
+            miette::miette!(
+                "registry package '{}' has no registry; run sgpm update",
+                package.name
+            )
+        })?;
+        let source_version = package
+            .source
+            .version
+            .unwrap_or_else(|| package.version.clone());
+        if source_version != package.version {
+            miette::bail!(
+                "registry package '{}' has inconsistent locked versions {} and {}; run sgpm update",
+                package.name,
+                package.version,
+                source_version
+            );
+        }
+        if graph
+            .packages
+            .insert(
+                id.clone(),
+                LockedRegistryPackage {
+                    name: package.name,
+                    version: package.version,
+                    registry,
+                    checksum: package.source.checksum,
+                },
+            )
+            .is_some()
+        {
+            miette::bail!(
+                "duplicate package id '{}' in Sengoo.lock; run sgpm update",
+                id
+            );
+        }
+    }
+    for dependency in document.dependency {
+        let key = (dependency.from, dependency.alias);
+        if graph
+            .dependencies
+            .insert(key.clone(), dependency.to)
+            .is_some()
+        {
+            miette::bail!(
+                "duplicate dependency edge '{}:{}' in Sengoo.lock; run sgpm update",
+                key.0,
+                key.1
+            );
+        }
+    }
+    Ok(graph)
+}
 
 pub fn write_lockfile(graph: &Graph) -> Result<PathBuf> {
     let root = root_package(graph)?;

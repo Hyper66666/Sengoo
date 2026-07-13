@@ -6174,6 +6174,8 @@ def main() -> i64 {
     let second_len = second.copy_to_buffer(second_buffer).unwrap_or(0);
     let first_written = io_stdout_write_raw(first_buffer.ptr(), first_len).unwrap_or(0);
     let second_written = io_stdout_write_raw(second_buffer.ptr(), second_len).unwrap_or(0);
+    if first.handle == 0 { return 20; }
+    if second.handle == 0 { return 21; }
     if first_len != 1 { return 10; }
     if second_len != 1 { return 11; }
     if third.len() != 0 { return 12; }
@@ -9334,11 +9336,220 @@ def main() -> i64 {
     let before = sengoo_string_live_handle_count();
     let count = make_shared_pair();
     let after = sengoo_string_live_handle_count();
-    if count == 4 and after == before {
-        42
-    } else {
-        1
-    }
+    if count == 4 and after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_filter_skips_rejected_items() {
+    let output = require_stdlib_runtime_output!(
+        "generic-filter-i64",
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let keep: fn(&i64) -> bool = |value| *value == 20;
+    let iter = values.into_iter().filter(keep);
+    let first: Option<i64> = iter.next();
+    if first.is_some && first.value == 20 { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_filter_drops_owned_items_once() {
+    let output = require_stdlib_runtime_output!(
+        "generic-filter-owned-drop",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Payload {
+    text: String,
+    keep: bool,
+}
+
+impl Payload {
+    def should_keep(&self) -> bool { self.keep }
+}
+
+def exercise_filter() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload {
+        text: string_from_str("rejected").unwrap_or(String { handle: 0 }),
+        keep: false,
+    });
+    values.push(Payload {
+        text: string_from_str("accepted").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    values.push(Payload {
+        text: string_from_str("remaining").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    let predicate: fn(&Payload) -> bool = |payload| payload.should_keep();
+    let iter = values.into_iter().filter(predicate);
+    let accepted: Option<Payload> = iter.next();
+    if accepted.is_some { accepted.value.text.len() } else { 0 }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let accepted_len = exercise_filter();
+    let after = sengoo_string_live_handle_count();
+    if accepted_len == 8 && after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_collect_preserves_owned_items() {
+    let output = require_stdlib_runtime_output!(
+        "generic-collect-owned",
+        r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+struct Payload {
+    text: String,
+    keep: bool,
+}
+
+impl Payload {
+    def should_keep(&self) -> bool { self.keep }
+}
+
+def exercise_collect() -> i64 {
+    let values: Vec<Payload> = vec_new();
+    values.push(Payload {
+        text: string_from_str("skip").unwrap_or(String { handle: 0 }),
+        keep: false,
+    });
+    values.push(Payload {
+        text: string_from_str("accepted").unwrap_or(String { handle: 0 }),
+        keep: true,
+    });
+    let predicate: fn(&Payload) -> bool = |payload| payload.should_keep();
+    let collected: Vec<Payload> = values.into_iter().filter(predicate).collect();
+    let accepted: Option<Payload> = collected.pop();
+    if accepted.is_some { accepted.value.text.len() } else { 0 }
+}
+
+def main() -> i64 {
+    let before = sengoo_string_live_handle_count();
+    let accepted_len = exercise_collect();
+    let after = sengoo_string_live_handle_count();
+    if accepted_len == 8 && after == before { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_count_and_fold_execute() {
+    let output = require_stdlib_runtime_output!(
+        "generic-count-fold",
+        r#"
+def main() -> i64 {
+    let values: Vec<i64> = vec_new();
+    values.push(10);
+    values.push(20);
+    values.push(30);
+    let add: fn(i64, i64) -> i64 = |total, value| total + value;
+    let total = values.into_iter().fold(0, add);
+
+    let flags: Vec<i64> = vec_new();
+    flags.push(1);
+    flags.push(2);
+    flags.push(3);
+    let keep: fn(&i64) -> bool = |value| *value >= 2;
+    let count = flags.into_iter().filter(keep).count();
+    if total == 60 && count == 2 { 42 } else { 1 }
+}
+"#,
+    );
+
+    assert_eq!(output.status.code(), Some(42));
+}
+
+#[test]
+fn stdlib_surface_runtime_generic_sum_and_explicit_collection_sinks_execute() {
+    let output = require_stdlib_runtime_output!(
+        "generic-sum-collection-sinks",
+        r#"
+#[derive(Hash, PartialEq, Eq)]
+struct Key {
+    value: i64,
+}
+
+def keep(value: &i64) -> bool { *value >= 2 }
+def to_key(value: i64) -> Key { Key { value: value } }
+def identity(value: i64) -> i64 { value }
+def to_entry(value: i64) -> MapEntry<Key, i64> {
+    MapEntry { key: Key { value: value }, value: value + 10 }
+}
+
+def main() -> i64 {
+    let sum_values: Vec<i64> = vec_new();
+    sum_values.push(1);
+    sum_values.push(2);
+    sum_values.push(3);
+    sum_values.push(4);
+    let total = sum_values.into_iter().skip(1).take(2).sum();
+
+    let set_values: Vec<i64> = vec_new();
+    set_values.push(1);
+    set_values.push(2);
+    set_values.push(2);
+    set_values.push(3);
+    let predicate: fn(&i64) -> bool = keep;
+    let mapper: fn(i64) -> Key = to_key;
+    let set: HashSet<Key> = set_values.into_iter().filter(predicate).map(mapper).collect_hashset();
+
+    let map_values: Vec<i64> = vec_new();
+    map_values.push(4);
+    map_values.push(5);
+    let projector: fn(i64) -> MapEntry<Key, i64> = to_entry;
+    let map: HashMap<Key, i64> = map_values.into_iter().collect_hashmap(projector);
+
+    let chain_values: Vec<i64> = vec_new();
+    chain_values.push(1);
+    chain_values.push(2);
+    chain_values.push(3);
+    let identity_fn: fn(i64) -> i64 = identity;
+    let chain_count = chain_values.into_iter().map(identity_fn).take(2).skip(1).count();
+
+    let indexed_values: Vec<i64> = vec_new();
+    indexed_values.push(1);
+    indexed_values.push(2);
+    indexed_values.push(3);
+    let indexed = indexed_values.into_iter().filter(predicate).skip(1).take(1).enumerate();
+    let first: Option<EnumeratedItem<i64>> = indexed.next();
+
+    if total != 5 { 11 }
+    else if set.len() != 2 { 12 }
+    else if map.len() != 2 { 13 }
+    else if chain_count != 1 { 14 }
+    else if first.is_none() { 15 }
+    else if first.value.index != 0 { 16 }
+    else if first.value.value != 3 { 17 }
+    else { 42 }
 }
 "#,
     );
@@ -9798,6 +10009,32 @@ fn find_llvm_dwarfdump() -> Option<&'static str> {
         })
 }
 
+fn dwarf_debug_test_target() -> NativeBuildTarget {
+    NativeBuildTarget {
+        triple: crate::cross_compile::REFERENCE_TARGET_LINUX_GNU.to_string(),
+    }
+}
+
+fn compile_dwarf_debug_test_object(clang: &str, llvm_path: &Path, object_path: &Path) {
+    let output = Command::new(clang)
+        .arg(format!(
+            "--target={}",
+            crate::cross_compile::REFERENCE_TARGET_LINUX_GNU
+        ))
+        .args(["-c", "-x", "ir", "-g", "-O0", "-Wno-override-module"])
+        .arg(llvm_path)
+        .arg("-o")
+        .arg(object_path)
+        .output()
+        .expect("clang should compile DWARF test IR");
+    assert!(
+        output.status.success(),
+        "clang failed to compile DWARF test IR:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn parse_dwarf_line_rows(dump: &str) -> Vec<(u64, u64)> {
     dump.lines()
         .filter_map(|line| {
@@ -9880,19 +10117,17 @@ fn debug_info_line_table_survives_object_compilation() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = "def helper() -> i64 { 1 }\n\ndef main() -> i64 { helper() }\n";
     let llvm_path = temp_artifact("debug-info-line-table", "ll");
-    let object_path = temp_artifact(
-        "debug-info-line-table",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-line-table", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/main.sg",
             source.to_string(),
@@ -9900,8 +10135,7 @@ fn debug_info_line_table_survives_object_compilation() {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let output = Command::new(dwarfdump)
         .arg("--debug-line")
@@ -9935,6 +10169,7 @@ fn debug_info_preserves_statement_and_local_declaration_lines() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"struct Pair {
     left: i64,
     enabled: bool,
@@ -9953,17 +10188,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-statements", "ll");
-    let object_path = temp_artifact(
-        "debug-info-statements",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-statements", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/debugger_probe.sg",
             source,
@@ -9971,8 +10203,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("statement-level debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let line_output = Command::new(dwarfdump)
         .arg("--debug-line")
@@ -10053,6 +10284,7 @@ fn debug_info_emits_parameter_and_local_variable_dies() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"
 def helper(value: i64) -> i64 {
     let doubled = value * 2;
@@ -10064,14 +10296,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-vars", "ll");
-    let object_path = temp_artifact("debug-info-vars", if cfg!(windows) { "obj" } else { "o" });
+    let object_path = temp_artifact("debug-info-vars", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/vars.sg",
             source.to_string(),
@@ -10079,8 +10311,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with local variables should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
@@ -10122,6 +10353,7 @@ fn debug_info_emits_struct_member_names_types_and_offsets() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let source = r#"
 struct Pair {
     left: i64,
@@ -10138,14 +10370,14 @@ def main() -> i64 {
 }
 "#;
     let llvm_path = temp_artifact("debug-info-struct", "ll");
-    let object_path = temp_artifact("debug-info-struct", if cfg!(windows) { "obj" } else { "o" });
+    let object_path = temp_artifact("debug-info-struct", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/struct.sg",
             source.to_string(),
@@ -10153,8 +10385,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with a struct local should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
         .arg(&object_path)
@@ -10199,6 +10430,7 @@ fn debug_info_emits_enum_tuple_string_and_vec_composite_layouts() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let stdlib = load_stdlib_surface_source();
     let program = r#"
 enum Choice { Empty, Value(i64) }
@@ -10217,17 +10449,14 @@ def main() -> i64 {
 "#;
     let source = format!("{stdlib}\n\n{program}");
     let llvm_path = temp_artifact("debug-info-composites", "ll");
-    let object_path = temp_artifact(
-        "debug-info-composites",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-composites", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         &source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/composites.sg",
             source.clone(),
@@ -10235,8 +10464,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR with composite locals should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
     let output = Command::new(dwarfdump)
         .arg("--debug-info")
         .arg(&object_path)
@@ -10355,6 +10583,7 @@ fn debug_info_tracks_multi_surface_function_entry_lines() {
         return;
     };
 
+    let target = dwarf_debug_test_target();
     let stdlib = load_stdlib_surface_source();
     let program = r#"struct Pair {
     left: i64,
@@ -10423,17 +10652,14 @@ def main() -> i64 {
 "#;
     let source = format!("{stdlib}\n\n{program}");
     let llvm_path = temp_artifact("debug-info-surfaces", "ll");
-    let object_path = temp_artifact(
-        "debug-info-surfaces",
-        if cfg!(windows) { "obj" } else { "o" },
-    );
+    let object_path = temp_artifact("debug-info-surfaces", target.object_extension());
     compile_source_to_llvm_file_with_phase_timings_with_mode(
         &source,
         0,
         &llvm_path,
         None,
         None,
-        None,
+        Some(&target.triple),
         Some(DebugInfoConfig::for_source(
             "examples/debug/main.sg",
             source.clone(),
@@ -10441,8 +10667,7 @@ def main() -> i64 {
     )
     .unwrap();
 
-    compile_ir_to_object(&clang, &llvm_path, &object_path, 0, None, true)
-        .expect("debug-info LLVM IR should compile to an object");
+    compile_dwarf_debug_test_object(&clang, &llvm_path, &object_path);
 
     let line_output = Command::new(dwarfdump)
         .arg("--debug-line")
@@ -12932,34 +13157,85 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_surface_runtime_string_vec_set_and_insert_transfer_values() {
+fn stdlib_surface_runtime_string_vec_wrapper_and_generic_constructors_match_and_drop_cleanly() {
     let output = require_stdlib_runtime_output!(
-        "string-vec-set-insert",
+        "string-vec-wrapper-generic-equivalence",
         r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def exercise_string_vecs() -> i64 {
+    let status = {
+        let wrapped = vec_new_string();
+        let wrapped_pushed = wrapped.push(string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let wrapped_inserted = wrapped.insert(0, string_from_str("go").unwrap_or(String { handle: 0 }));
+        let wrapped_set = wrapped.set(1, string_from_str("rust").unwrap_or(String { handle: 0 }));
+        let wrapped_first = wrapped.get(0).unwrap_or(String { handle: 0 });
+        let wrapped_second = wrapped.get(1).unwrap_or(String { handle: 0 });
+        let wrapped_iter = wrapped.iter();
+        let wrapped_iter_value = wrapped_iter.next().unwrap_or(String { handle: 0 });
+        let wrapped_done_before = wrapped_iter.done();
+        wrapped_iter.reset();
+        let wrapped_taken = wrapped_iter.take(1);
+        wrapped_iter.free();
+        let wrapped_removed = wrapped.remove(0).unwrap_or(String { handle: 0 });
+        let wrapped_remaining = wrapped.get(0).unwrap_or(String { handle: 0 });
+
+        let generic: Vec<String> = vec_new();
+        let generic_pushed = generic.push(string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let generic_inserted = generic.insert(0, string_from_str("go").unwrap_or(String { handle: 0 }));
+        let generic_set = generic.set(1, string_from_str("rust").unwrap_or(String { handle: 0 }));
+        let generic_first = generic.get(0).unwrap_or(String { handle: 0 });
+        let generic_second = generic.get(1).unwrap_or(String { handle: 0 });
+        let generic_iter = generic.iter();
+        let generic_iter_value = generic_iter.next().unwrap_or(String { handle: 0 });
+        let generic_done_before = generic_iter.done();
+        generic_iter.reset();
+        let generic_taken = generic_iter.take(1);
+        generic_iter.free();
+        let generic_removed = generic.remove(0).unwrap_or(String { handle: 0 });
+        let generic_remaining = generic.get(0).unwrap_or(String { handle: 0 });
+
+        let wrapped_status = if !wrapped_pushed { 1 }
+            else if !wrapped_inserted { 2 }
+            else if !wrapped_set { 3 }
+            else if wrapped_done_before { 4 }
+            else if wrapped_taken.len() != 1 { 5 }
+            else if wrapped_first.len() != 2 { 6 }
+            else if wrapped_second.len() != 4 { 7 }
+            else if wrapped_iter_value.len() != 2 { 8 }
+            else if wrapped_removed.len() != 2 { 9 }
+            else if wrapped_remaining.len() != 4 { 10 }
+            else { 0 };
+        let generic_status = if !generic_pushed { 21 }
+            else if !generic_inserted { 22 }
+            else if !generic_set { 23 }
+            else if generic_done_before { 24 }
+            else if generic_taken.len() != 1 { 25 }
+            else if generic_first.len() != 2 { 26 }
+            else if generic_second.len() != 4 { 27 }
+            else if generic_iter_value.len() != 2 { 28 }
+            else if generic_removed.len() != 2 { 29 }
+            else if generic_remaining.len() != 4 { 30 }
+            else { 0 };
+
+        if wrapped_status != 0 { wrapped_status } else { generic_status }
+    };
+    status
+}
+
 def main() -> i64 {
-    let vec = vec_new_string();
-    let pushed = vec.push(string_from_str("alpha").unwrap_or(string_new()));
-    let inserted = vec.insert(0, string_from_str("go").unwrap_or(string_new()));
-    let set = vec.set(1, string_from_str("rust").unwrap_or(string_new()));
-    let first = vec.get(0).unwrap_or(string_new());
-    let second = vec.get(1).unwrap_or(string_new());
-    let removed = vec.remove(0).unwrap_or(string_new());
-    let remaining = vec.get(0).unwrap_or(string_new());
+    let before = sengoo_string_live_handle_count();
+    let status = exercise_string_vecs();
+    let after = sengoo_string_live_handle_count();
 
-    let ok = pushed
-        && inserted
-        && set
-        && vec.len() == 1
-        && first.len() == 2
-        && second.len() == 4
-        && removed.len() == 2
-        && remaining.len() == 4;
-    vec.free();
-
-    if ok {
+    if status == 0 && after == before {
         42
     } else {
-        0
+        status + if after == before { 40 } else {
+            if after > before { 100 + (after - before) } else { 90 }
+        }
     }
 }
 "#,
@@ -13047,147 +13323,153 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_import_runtime_string_maps_copy_keys_and_iterate_deterministically() {
-    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
-        "string-maps",
+fn stdlib_surface_runtime_string_map_compatibility_wrappers_match_generic_and_drop_cleanly() {
+    let output = require_stdlib_runtime_output!(
+        "string-map-wrapper-generic-equivalence",
         r#"
-import std::collections;
-import std::io;
-import std::string;
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
 
 def main() -> i64 {
-    let numbers = string_map_i64_new();
-    let flags = string_map_bool_new();
-    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let before = sengoo_string_live_handle_count();
+    let status = {
+        let numbers = string_map_i64_new();
+        let flags = string_map_bool_new();
+        let texts = string_map_string_new();
 
-    let inserted_beta = numbers.insert(str_append("be", "ta"), 1);
-    let inserted_alpha = numbers.insert("alpha", 2);
-    let replaced_beta = numbers.insert("beta", 7);
-    let contains_alpha = numbers.contains("alpha");
-    let beta_value = numbers.get("beta").unwrap_or(0);
-    let removed_alpha = numbers.remove("alpha");
-    let missing_alpha = !numbers.contains("alpha");
+        let inserted_beta = numbers.insert(str_append("be", "ta"), 1);
+        let inserted_alpha = numbers.insert("alpha", 2);
+        let replaced_beta = numbers.insert("beta", 7);
+        let contains_alpha = numbers.contains("alpha");
+        let beta_value = numbers.get("beta").unwrap_or(0);
+        let removed_alpha = numbers.remove("alpha");
+        let missing_alpha = !numbers.contains("alpha");
+        let number_keys = numbers.iter_keys();
+        let number_key = number_keys.next().unwrap_or(String { handle: 0 });
+        let number_done_before = number_keys.done();
+        number_keys.reset();
+        let number_taken = number_keys.take(1);
+        number_keys.free();
 
-    let inserted_on = flags.insert(str_append("o", "n"), true);
-    let inserted_off = flags.insert("off", false);
-    let replaced_on = flags.insert("on", false);
-    let on_value = flags.get("on").unwrap_or(true);
-    let off_value = flags.get("off").unwrap_or(true);
+        let inserted_on = flags.insert(str_append("o", "n"), true);
+        let inserted_off = flags.insert("off", false);
+        let replaced_on = flags.insert("on", false);
+        let on_value = flags.get("on").unwrap_or(true);
+        let off_value = flags.get("off").unwrap_or(true);
+        let flag_keys = flags.iter_keys().collect();
 
-    let generic_numbers: HashMap<String, i64> = hashmap_new_string_i64();
-    let generic_inserted = generic_numbers.insert(str_append("ga", "mma"), 11);
-    let generic_replaced = generic_numbers.insert("gamma", 12);
-    let generic_number_keys = generic_numbers.iter_keys().collect();
-    let generic_value = generic_numbers.get("gamma").unwrap_or(0);
-    let generic_missing_value = generic_numbers.get("missing").unwrap_or(5);
-    let generic_removed = generic_numbers.remove("gamma");
-    let generic_missing_after = !generic_numbers.contains("gamma");
+        let text_inserted = texts.insert("title", string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let text_replaced = texts.insert("title", string_from_str("gamma").unwrap_or(String { handle: 0 }));
+        let text_value = texts.get("title").unwrap_or(String { handle: 0 });
+        let text_removed = texts.remove("title").unwrap_or(String { handle: 0 });
+        let text_missing = !texts.contains("title");
 
-    let generic_flags: HashMap<String, bool> = hashmap_new_string_bool();
-    let generic_flag_inserted = generic_flags.insert("enabled", true);
-    let generic_flag_replaced = generic_flags.insert("enabled", false);
-    let generic_flag_value = generic_flags.get("enabled").unwrap_or(true);
-    let generic_flag_removed = generic_flags.remove("enabled");
-    let generic_flag_missing = !generic_flags.contains("enabled");
+        let generic_numbers: HashMap<String, i64> = hashmap_new();
+        let generic_inserted_beta = generic_numbers.insert("beta", 1);
+        let generic_inserted_alpha = generic_numbers.insert("alpha", 2);
+        let generic_replaced_beta = generic_numbers.insert("beta", 7);
+        let generic_beta_value = generic_numbers.get("beta").unwrap_or(0);
+        let generic_contains_alpha = generic_numbers.contains("alpha");
+        let generic_removed_alpha = generic_numbers.remove("alpha");
+        let generic_number_keys = generic_numbers.iter_keys().collect();
 
-    let generic_texts: HashMap<String, String> = hashmap_new_string_string();
-    let generic_text_inserted = generic_texts.insert("title", string_from_str("alpha").unwrap_or(string_new()));
-    let generic_text_replaced = generic_texts.insert("title", string_from_str("gamma").unwrap_or(string_new()));
-    let generic_text_key_count = generic_texts.iter_keys().count();
-    let generic_text_taken = generic_texts.iter_keys().take(1);
-    let generic_text_keys = generic_texts.iter_keys().collect();
-    let generic_text_skipped_count = generic_texts.iter_keys().skip(1).count();
-    let generic_text_value = generic_texts.get("title").unwrap_or(string_new());
-    let generic_text_removed = generic_texts.remove("title").unwrap_or(string_new());
-    let generic_text_missing = !generic_texts.contains("title");
+        let generic_flags: HashMap<String, bool> = hashmap_new();
+        let generic_flag_inserted = generic_flags.insert("on", true);
+        let generic_flag_replaced = generic_flags.insert("on", false);
+        let generic_flag_value = generic_flags.get("on").unwrap_or(true);
+        let generic_flag_removed = generic_flags.remove("on");
 
-    let iter = numbers.iter_keys();
-    let first = iter.next_copy(buffer).unwrap_or(0);
-    let wrote_first = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
-    let wrote_sep = io_stdout_write("|").unwrap_or(0);
-    let second = iter.next_copy(buffer).unwrap_or(0);
-    let wrote_second = io_stdout_write_raw(buffer.ptr(), second).unwrap_or(0);
-    let iter_done = iter.done();
-    iter.free();
+        let generic_texts: HashMap<String, String> = hashmap_new();
+        let generic_text_inserted = generic_texts.insert(
+            "title",
+            string_from_str("alpha").unwrap_or(String { handle: 0 }),
+        );
+        let generic_text_replaced = generic_texts.insert(
+            "title",
+            string_from_str("gamma").unwrap_or(String { handle: 0 }),
+        );
+        let generic_text_value = generic_texts.get("title").unwrap_or(String { handle: 0 });
+        let generic_text_removed = generic_texts.remove("title").unwrap_or(String { handle: 0 });
+        let generic_text_key_count = generic_texts.iter_keys().count();
 
-    let flag_iter = flags.iter_keys();
-    let flag_sep_one = io_stdout_write("|").unwrap_or(0);
-    let flag_first = flag_iter.next_copy(buffer).unwrap_or(0);
-    let flag_wrote_first = io_stdout_write_raw(buffer.ptr(), flag_first).unwrap_or(0);
-    let flag_sep_two = io_stdout_write("|").unwrap_or(0);
-    let flag_second = flag_iter.next_copy(buffer).unwrap_or(0);
-    let flag_wrote_second = io_stdout_write_raw(buffer.ptr(), flag_second).unwrap_or(0);
-    let flag_iter_done = flag_iter.done();
-    flag_iter.free();
+        let string_set = hashset_new_string();
+        string_set.insert("ready");
+        let set_contains = string_set.contains("ready");
+        let set_iter = string_set.iter().collect();
+        let set_removed = string_set.remove("ready");
 
-    buffer.free();
-    numbers.free();
-    flags.free();
+        let generic_set: HashSet<String> = hashset_new();
+        generic_set.insert("ready");
+        let generic_set_contains = generic_set.contains("ready");
+        let generic_set_iter = generic_set.iter().collect();
+        let generic_set_removed = generic_set.remove("ready");
 
-    if inserted_beta
-        && inserted_alpha
-        && replaced_beta
-        && contains_alpha
-        && beta_value == 7
-        && removed_alpha
-        && missing_alpha
-        && inserted_on
-        && inserted_off
-        && replaced_on
-        && !on_value
-        && !off_value
-        && generic_inserted
-        && generic_replaced
-        && generic_number_keys.len() == 1
-        && generic_value == 12
-        && generic_missing_value == 5
-        && generic_removed
-        && generic_missing_after
-        && generic_flag_inserted
-        && generic_flag_replaced
-        && !generic_flag_value
-        && generic_flag_removed
-        && generic_flag_missing
-        && generic_text_inserted
-        && generic_text_replaced
-        && generic_text_key_count == 1
-        && generic_text_taken.len() == 1
-        && generic_text_keys.len() == 1
-        && generic_text_skipped_count == 0
-        && generic_text_value.len() == 5
-        && generic_text_removed.len() == 5
-        && generic_text_missing
-        && first == 4
-        && wrote_first == 4
-        && wrote_sep == 1
-        && second == 0
-        && wrote_second == 0
-        && iter_done
-        && flag_sep_one == 1
-        && flag_first == 3
-        && flag_wrote_first == 3
-        && flag_sep_two == 1
-        && flag_second == 2
-        && flag_wrote_second == 2
-        && flag_iter_done {
-        0
+        let wrapper_status = if !inserted_beta { 1 }
+            else if !inserted_alpha { 2 }
+            else if !replaced_beta { 3 }
+            else if !contains_alpha { 4 }
+            else if beta_value != 7 { 5 }
+            else if !removed_alpha { 6 }
+            else if !missing_alpha { 7 }
+            else if !number_done_before { 8 }
+            else if number_key.len() != 4 { 9 }
+            else if number_taken.len() != 1 { 10 }
+            else if !inserted_on { 11 }
+            else if !inserted_off { 12 }
+            else if !replaced_on { 13 }
+            else if on_value { 14 }
+            else if off_value { 15 }
+            else if flag_keys.len() != 2 { 16 }
+            else if !text_inserted { 17 }
+            else if !text_replaced { 18 }
+            else if text_value.len() != 5 { 19 }
+            else if text_removed.len() != 5 { 20 }
+            else if !text_missing { 21 }
+            else if !set_contains { 22 }
+            else if set_iter.len() != 1 { 23 }
+            else if !set_removed { 24 }
+            else { 0 };
+        let generic_ok = generic_inserted_beta
+            && generic_inserted_alpha
+            && generic_replaced_beta
+            && generic_contains_alpha
+            && generic_beta_value == 7
+            && generic_removed_alpha
+            && generic_number_keys.len() == 1
+            && generic_flag_inserted
+            && generic_flag_replaced
+            && !generic_flag_value
+            && generic_flag_removed
+            && generic_text_inserted
+            && generic_text_replaced
+            && generic_text_value.len() == 5
+            && generic_text_removed.len() == 5
+            && generic_text_key_count == 0
+            && generic_set_contains
+            && generic_set_iter.len() == 1
+            && generic_set_removed;
+
+        if wrapper_status == 0 {
+            if generic_ok { 0 } else { 30 }
+        } else {
+            wrapper_status
+        }
+    };
+    let after = sengoo_string_live_handle_count();
+
+    if status == 0 && after == before {
+        42
     } else {
-        1
+        status + if after == before { 40 } else {
+            if after > before { 100 + (after - before) } else { 90 }
+        }
     }
 }
 "#,
-        "",
-    ) else {
-        return;
-    };
-
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "beta||off|on");
+
+    assert_eq!(output.status.code(), Some(42));
 }
 
 #[test]

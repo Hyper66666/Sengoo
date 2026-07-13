@@ -1,0 +1,5 @@
+import default_library_conformance;
+
+def main() -> i64 {
+    conformance_status();
+}

@@ -4,11 +4,13 @@ impl Codegen {
     pub(super) fn codegen_terminator(
         &mut self,
 
+        block_id: usize,
+
         terminator: &mir::Terminator,
 
         mir_fn: &MirFunction,
     ) -> Result<(), String> {
-        let dbg = self.debug_terminator_location_suffix(mir_fn, terminator);
+        let dbg = self.debug_terminator_location_suffix(mir_fn, block_id, terminator);
         match terminator {
             mir::Terminator::Return(value) => {
                 if let Some(v) = value {
@@ -124,7 +126,7 @@ impl Codegen {
 
                 self.emit_indent();
 
-                self.ir.push_str("]\n");
+                self.ir.push_str(&format!("]{dbg}\n"));
             }
 
             mir::Terminator::Break { target } => {

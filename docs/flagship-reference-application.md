@@ -41,15 +41,21 @@ shared-counter workers compute source/test/manifest/byte score components over
 - Run through `sgpm check`, `sgpm test`, `sgpm fmt --check`, `sgpm doc`,
   `sgpm build`, and `sgpm run`.
 
-Deferred until the owned-handle receiver surface is tightened:
+## Phase 1 Refresh
 
-- Runtime collection handles inside the flagship app.
-- Recursive `DirWalk` as the app's primary scan engine.
-- Owned `String` builder-heavy report formatting.
+The Phase 1 refresh moved report counters to inferred `hashmap_new()` on the
+ABI-v1 generic collection surface. The app now exercises target-defined
+numeric casts when serializing counters, recursive `DirWalk`, and owned
+formatting without scalar collection constructors or manual resource release.
+The locked package loop is therefore evidence for the archived numeric and
+generic-collection gates, not only the earlier P0 language surface.
 
-Deferred until concurrency P1 closes:
+Concurrency remains a supported subset: the useful workload currently uses
+the transition `ArcMutex<i64>` shared-counter API. Replacing that compatibility
+surface with generic `Arc<Mutex<T>>`, structured task scopes, and an
+event-driven all-host reactor remains owned by
+`concurrency-safety-and-async-io`.
 
-- Parallel file probes through safe shared state.
 - Async network or status checks.
 - A long-running watch mode.
 

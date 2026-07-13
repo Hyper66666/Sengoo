@@ -275,15 +275,40 @@ impl<'a> LoweringContext<'a> {
     /// 向当前基本块追加一条MIR指令。
     pub(super) fn push_inst(&mut self, inst: Instruction) {
         let block_id = self.current_block_or_error("emitting MIR instruction");
-        self.mir_fn.push_inst_to_block(block_id, inst);
+        self.mir_fn
+            .push_inst_to_block_at(block_id, inst, self.current_source_site);
     }
 
     /// 向当前基本块追加terminator终止指令。
     pub(super) fn set_terminator(&mut self, term: Terminator) {
         let block_id = self.current_block_or_error("emitting MIR terminator");
+        self.set_block_terminator_at(block_id, term, self.current_source_site);
+    }
+
+    pub(super) fn set_block_terminator(&mut self, block_id: usize, term: Terminator) {
+        self.set_block_terminator_at(block_id, term, self.current_source_site);
+    }
+
+    pub(super) fn set_block_terminator_at(
+        &mut self,
+        block_id: usize,
+        term: Terminator,
+        source_site: Option<u32>,
+    ) {
         if let Some(block) = self.mir_fn.block_mut(block_id) {
-            block.set_terminator(term);
+            block.set_terminator_at(term, source_site);
         }
+    }
+
+    pub(super) fn alloc_inst_at(
+        &mut self,
+        inst: Instruction,
+        source_site: Option<u32>,
+    ) -> crate::mir::InstId {
+        let inst_id = self.mir_fn.alloc_inst(inst);
+        self.mir_fn
+            .set_instruction_source_site(inst_id, source_site);
+        inst_id
     }
 }
 

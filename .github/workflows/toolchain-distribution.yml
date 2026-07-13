@@ -122,6 +122,45 @@ jobs:
           }
           ./scripts/package-toolchain.ps1 -Version $version -NoBuild -SmokeEvidence "toolchain-distribution workflow package-smoke ${{ matrix.os }} ${{ github.sha }}"
 
+      - name: Prepare local release feed
+        shell: pwsh
+        env:
+          SENGOO_BUILD_HASH: ${{ github.sha }}
+          SENGOO_DIST_TARGET: ${{ matrix.target }}
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $baseVersion = "${{ github.ref_name }}".Substring(1)
+          } else {
+            $baseVersion = "0.1.0-ci"
+          }
+          $parsedBaseVersion = [System.Management.Automation.SemanticVersion]$baseVersion
+          $upgradePatch = $parsedBaseVersion.Patch + 1
+          $upgradeVersion = "$($parsedBaseVersion.Major).$($parsedBaseVersion.Minor).$upgradePatch-upgrade-smoke"
+
+          $releaseFeedRoot = Join-Path $env:RUNNER_TEMP "sengoo-local-release-feed-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $releaseFeedRoot -Recurse -Force -ErrorAction SilentlyContinue
+          $downloadRoot = Join-Path $releaseFeedRoot "releases/download"
+          New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+
+          $primaryArchive = (Get-Content target/dist/latest-archive.txt).Trim()
+          $primaryReleaseDir = Join-Path $downloadRoot "v$baseVersion"
+          New-Item -ItemType Directory -Force -Path $primaryReleaseDir | Out-Null
+          Copy-Item -LiteralPath $primaryArchive -Destination (Join-Path $primaryReleaseDir (Split-Path -Leaf $primaryArchive))
+          Copy-Item -LiteralPath "$primaryArchive.sha256" -Destination (Join-Path $primaryReleaseDir (Split-Path -Leaf "$primaryArchive.sha256"))
+
+          $upgradeOutputDir = "target/dist-upgrade-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $upgradeOutputDir -Recurse -Force -ErrorAction SilentlyContinue
+          ./scripts/package-toolchain.ps1 -Version $upgradeVersion -OutputDir $upgradeOutputDir -NoBuild -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
+          $upgradeArchive = (Get-Content (Join-Path $upgradeOutputDir "latest-archive.txt")).Trim()
+          $upgradeReleaseDir = Join-Path $downloadRoot "v$upgradeVersion"
+          New-Item -ItemType Directory -Force -Path $upgradeReleaseDir | Out-Null
+          Copy-Item -LiteralPath $upgradeArchive -Destination (Join-Path $upgradeReleaseDir (Split-Path -Leaf $upgradeArchive))
+          Copy-Item -LiteralPath "$upgradeArchive.sha256" -Destination (Join-Path $upgradeReleaseDir (Split-Path -Leaf "$upgradeArchive.sha256"))
+
+          "SENGOO_LOCAL_RELEASE_FEED=$downloadRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SENGOO_PRIMARY_UPGRADE_VERSION=$baseVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SENGOO_SECONDARY_UPGRADE_VERSION=$upgradeVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install package (POSIX)
         if: runner.os != 'Windows'
         shell: bash
@@ -140,6 +179,7 @@ jobs:
         shell: pwsh
         run: |
           $bin = Join-Path (Resolve-Path target/install-smoke) "bin"
+          $manifest = Get-Content -LiteralPath (Join-Path (Resolve-Path target/install-smoke) "manifest.json") -Raw | ConvertFrom-Json
           $suffix = ""
           if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
             $suffix = ".exe"
@@ -154,6 +194,10 @@ jobs:
             $expectedPattern = "^$tool $([regex]::Escape($workspaceVersion)) \((?<hash>[0-9a-fA-F]{7,40})\)$"
             if ($version -notmatch $expectedPattern) {
               throw "unexpected $tool version output: $version"
+            }
+            $manifestVersion = $manifest.tool_versions.PSObject.Properties[$tool].Value
+            if ($version -ne $manifestVersion) {
+              throw "$tool payload does not match manifest: expected $manifestVersion, got $version"
             }
             $versionSignatures[$tool] = "$workspaceVersion|$($Matches.hash)"
           }
@@ -193,6 +237,139 @@ jobs:
           & $sgc run $smokeSource --force-rebuild
           if ($LASTEXITCODE -ne 0) {
             throw "installed sgc run smoke failed"
+          }
+
+      - name: Install package by version (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          work_root="${RUNNER_TEMP}/sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
+          rm -rf "$work_root"
+          mkdir -p "$work_root"
+          sh scripts/install.sh --version "$SENGOO_PRIMARY_UPGRADE_VERSION" --base-url "$SENGOO_LOCAL_RELEASE_FEED" --install-dir "$work_root/toolchain"
+
+      - name: Install package by version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
+          Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+          ./scripts/install.ps1 -Version $env:SENGOO_PRIMARY_UPGRADE_VERSION -BaseUrl $env:SENGOO_LOCAL_RELEASE_FEED -InstallDir (Join-Path $workRoot "toolchain")
+
+      - name: Upgrade package by version (POSIX)
+        if: runner.os != 'Windows'
+        shell: pwsh
+        run: |
+          function Assert-InstalledToolVersions($Manifest, $BinDir) {
+            $expectedSignature = $null
+            foreach ($tool in @("sgc", "sgpm", "sgfmt", "sglsp")) {
+              $version = & (Join-Path $BinDir $tool) --version
+              Write-Host "$tool version: $version"
+              $manifestVersion = $Manifest.tool_versions.PSObject.Properties[$tool].Value
+              if ($version -ne $manifestVersion) {
+                throw "$tool payload does not match manifest: expected $manifestVersion, got $version"
+              }
+              $signature = $version -replace "^$tool ", ""
+              if ($signature -eq $version) {
+                throw "unexpected $tool version output: $version"
+              }
+              if (-not $expectedSignature) {
+                $expectedSignature = $signature
+              } elseif ($signature -ne $expectedSignature) {
+                throw "tool version/hash mismatch: expected $expectedSignature, got $signature from $tool"
+              }
+            }
+          }
+
+          $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
+          $installRoot = Join-Path $workRoot "toolchain"
+          $bin = Join-Path $installRoot "bin"
+          $primaryManifest = Get-Content -LiteralPath (Join-Path $installRoot "manifest.json") -Raw | ConvertFrom-Json
+          if ($primaryManifest.version -ne $env:SENGOO_PRIMARY_UPGRADE_VERSION) {
+            throw "initial installed manifest version mismatch: expected $env:SENGOO_PRIMARY_UPGRADE_VERSION, got $($primaryManifest.version)"
+          }
+          Assert-InstalledToolVersions $primaryManifest $bin
+
+          & sh scripts/install.sh --version $env:SENGOO_SECONDARY_UPGRADE_VERSION --base-url $env:SENGOO_LOCAL_RELEASE_FEED --install-dir $installRoot
+          if ($LASTEXITCODE -ne 0) {
+            throw "POSIX toolchain upgrade failed"
+          }
+          $upgradedManifest = Get-Content -LiteralPath (Join-Path $installRoot "manifest.json") -Raw | ConvertFrom-Json
+          if ($upgradedManifest.version -ne $env:SENGOO_SECONDARY_UPGRADE_VERSION) {
+            throw "upgraded manifest version mismatch: expected $env:SENGOO_SECONDARY_UPGRADE_VERSION, got $($upgradedManifest.version)"
+          }
+          Assert-InstalledToolVersions $upgradedManifest $bin
+
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+          $smokeSource = Join-Path $workRoot "outside-checkout-main.sg"
+          @'
+          import std::status;
+
+          def main() -> i64 {
+              STATUS_OK()
+          }
+          '@ | Set-Content -LiteralPath $smokeSource -Encoding UTF8
+          & (Join-Path $bin "sgc") run $smokeSource --force-rebuild
+          if ($LASTEXITCODE -ne 0) {
+            throw "upgraded sgc outside-checkout smoke failed"
+          }
+
+      - name: Upgrade package by version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          function Assert-InstalledToolVersions($Manifest, $BinDir) {
+            $expectedSignature = $null
+            foreach ($tool in @("sgc", "sgpm", "sgfmt", "sglsp")) {
+              $version = & (Join-Path $BinDir "$tool.exe") --version
+              Write-Host "$tool version: $version"
+              $manifestVersion = $Manifest.tool_versions.PSObject.Properties[$tool].Value
+              if ($version -ne $manifestVersion) {
+                throw "$tool payload does not match manifest: expected $manifestVersion, got $version"
+              }
+              $signature = $version -replace "^$tool ", ""
+              if ($signature -eq $version) {
+                throw "unexpected $tool version output: $version"
+              }
+              if (-not $expectedSignature) {
+                $expectedSignature = $signature
+              } elseif ($signature -ne $expectedSignature) {
+                throw "tool version/hash mismatch: expected $expectedSignature, got $signature from $tool"
+              }
+            }
+          }
+
+          $workRoot = Join-Path $env:RUNNER_TEMP "sengoo-upgrade-smoke-${{ matrix.artifact }}-outside-checkout"
+          $installRoot = Join-Path $workRoot "toolchain"
+          $primaryManifest = Get-Content -LiteralPath (Join-Path $installRoot "manifest.json") -Raw | ConvertFrom-Json
+          if ($primaryManifest.version -ne $env:SENGOO_PRIMARY_UPGRADE_VERSION) {
+            throw "initial installed manifest version mismatch: expected $env:SENGOO_PRIMARY_UPGRADE_VERSION, got $($primaryManifest.version)"
+          }
+          Assert-InstalledToolVersions $primaryManifest (Join-Path $installRoot "bin")
+          ./scripts/install.ps1 -Version $env:SENGOO_SECONDARY_UPGRADE_VERSION -BaseUrl $env:SENGOO_LOCAL_RELEASE_FEED -InstallDir $installRoot
+          $upgradedManifest = Get-Content -LiteralPath (Join-Path $installRoot "manifest.json") -Raw | ConvertFrom-Json
+          if ($upgradedManifest.version -ne $env:SENGOO_SECONDARY_UPGRADE_VERSION) {
+            throw "upgraded manifest version mismatch: expected $env:SENGOO_SECONDARY_UPGRADE_VERSION, got $($upgradedManifest.version)"
+          }
+          $bin = Join-Path $installRoot "bin"
+          Assert-InstalledToolVersions $upgradedManifest $bin
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+          $smokeSource = Join-Path $workRoot "outside-checkout-main.sg"
+          @'
+          import std::status;
+
+          def main() -> i64 {
+              STATUS_OK()
+          }
+          '@ | Set-Content -LiteralPath $smokeSource -Encoding UTF8
+          & (Join-Path $bin "sgc.exe") run $smokeSource --force-rebuild
+          if ($LASTEXITCODE -ne 0) {
+            throw "upgraded sgc outside-checkout smoke failed"
           }
 
       - name: Upload packaged toolchain

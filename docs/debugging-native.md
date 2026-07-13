@@ -11,6 +11,9 @@ sgc build path/to/main.sg -O 0 --debug-info
 ```
 
 The native object and executable land under `build/` next to the source file (for example `build/main.exe` on Windows).
+Windows-hosted MSVC debug builds also emit `build/main.pdb`; the compiler
+selects CodeView metadata for that target and the linker writes full private
+symbols. Cross-host Windows linking does not yet promise PDB production.
 Without `--debug-info` / `-g`, Sengoo keeps the default IR free of debug
 metadata and uses a separate artifact-cache dimension for debug builds.
 
@@ -20,6 +23,13 @@ metadata and uses a separate artifact-cache dimension for debug builds.
 2. Open the generated executable in Visual Studio (**Debug → Open Debug → File**) or launch WinDbg.
 3. Set breakpoints on exported runtime helpers (for example `sengoo_assert_failure_v1`) when investigating assertion transport.
 4. Pass program arguments through `sgc run` to reproduce CLI behavior, or run the executable directly from `build/`.
+
+The Windows reference-host CDB proof is recorded in
+[`debugging-native-windows-cdb.transcript`](debugging-native-windows-cdb.transcript).
+It binds a Sengoo file/line breakpoint, steps from line 2 to line 3, reads the
+`value` parameter as `21` and `doubled` local as `42`, then continues to normal
+program completion. A Linux LLDB transcript remains a separate release-host
+gate; Windows evidence is not used as a substitute for it.
 
 ### Windows VS Code launch configuration
 

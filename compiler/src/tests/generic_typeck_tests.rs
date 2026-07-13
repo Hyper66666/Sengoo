@@ -621,6 +621,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn primitive_types_satisfy_builtin_collection_trait_bounds() {
+    let source = r#"
+def needs_hash_eq<T: Hash + Eq>(value: T) -> i64 { 0 }
+def needs_order<T: PartialEq + Eq + PartialOrd + Ord>(value: T) -> i64 { 0 }
+
+def main() -> i64 {
+    needs_hash_eq(1) + needs_hash_eq(true) + needs_order(1) + needs_order(true)
+}
+"#;
+
+    let program = Parser::parse(source).expect("primitive trait-bound source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("primitive collection traits should be compiler-known");
+}
+
+#[test]
 fn copy_and_drop_impls_are_mutually_exclusive() {
     let source = r#"
 #[derive(Copy)]
@@ -1685,9 +1703,10 @@ impl<I, T> Adapter<I, T> {
 }
 
 def main() -> i64 {
+    let next: fn(&Counter) -> Option<i64> = counter_next;
     let adapter = Adapter {
         inner: Counter { value: 42 },
-        next_fn: counter_next,
+        next_fn: next,
     };
     adapter.next().value
 }
@@ -1698,6 +1717,52 @@ def main() -> i64 {
         ir.contains("call %Option_i64 %") || ir.contains("call %Option_i64 @counter_next"),
         "expected a concrete adapter next call in:\n{ir}"
     );
+}
+
+#[test]
+fn generic_zero_arg_constructor_infers_from_variable_and_field_assignment_targets() {
+    let source = r#"
+struct Holder<T> { handle: i64 }
+struct Outer<T> { inner: Holder<T> }
+
+def holder_new<T>() -> Holder<T> {
+    Holder { handle: 1 }
+}
+
+def main() -> i64 {
+    let mut holder: Holder<bool> = holder_new();
+    holder = holder_new();
+    let initial: Holder<bool> = holder_new();
+    let mut outer: Outer<bool> = Outer { inner: initial };
+    outer.inner = holder_new();
+    holder.handle + outer.inner.handle
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("assignment targets should infer constructor generics");
+    assert!(ir.contains("holder_new_bool"));
+}
+
+#[test]
+fn local_function_value_shadowing_wins_over_global_function_reference() {
+    let source = r#"
+def counter_next(value: i64) -> i64 { value + 1 }
+def alt_next(value: i64) -> i64 { value + 9 }
+
+def main() -> i64 {
+    let counter_next: fn(i64) -> i64 = alt_next;
+    let alias: fn(i64) -> i64 = counter_next;
+    alias(1)
+}
+"#;
+
+    let ir = compile_to_ir(source).expect("local function values should shadow globals");
+    let main = ir
+        .split("; Function: main")
+        .nth(1)
+        .expect("main should be emitted");
+    assert!(main.contains("@alt_next"));
+    assert!(!main.contains("@counter_next"));
 }
 
 #[test]

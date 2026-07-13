@@ -37,9 +37,11 @@ Pinned release install or upgrade:
 sh scripts/install.sh --version 0.1.0
 ```
 
-The release workflow builds native Windows x64, Linux x64, macOS arm64, and
-macOS x64 archives, verifies SHA-256 during installation, and publishes signed
-GitHub build provenance only after every platform smoke passes.
+The release workflow is configured to build native Windows x64, Linux x64,
+macOS arm64, and macOS x64 archives, verify SHA-256 during installation, and
+publish signed GitHub build provenance only after every platform smoke passes.
+No public release tag has been cut yet; current cross-host failures remain
+tracked by `package-registry-and-distribution`.
 
 Native debug-info builds use `-g` / `--debug-info`:
 

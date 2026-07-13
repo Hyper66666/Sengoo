@@ -14,10 +14,31 @@ pub(super) fn lower_let_stmt(
     let mir_ty = ty.clone().into();
 
     if let Some(value_expr) = value {
-        let value_local = if let HIRExpr::Lambda { params, body } = value_expr {
-            lower_lambda_expr_with_expected(ctx, params, body, Some(ctx.hir_type_to_mir(ty)))
-        } else {
-            ctx.lower_expr(value_expr)
+        let expected_mir = ctx.hir_type_to_mir(ty);
+        let value_local = match value_expr {
+            HIRExpr::Var { name, symbol }
+                if matches!(expected_mir, MIRType::Fn { .. })
+                    && ctx.is_known_function(name)
+                    && !((symbol.is_valid() && ctx.local_symbols.contains_key(symbol))
+                        || ctx.local_names.contains_key(name)) =>
+            {
+                let local = ctx.add_local(None, LocalKind::Temp, expected_mir.clone());
+                ctx.push_inst(Instruction::Assign {
+                    destination: local,
+                    value: MirConstant::GlobalRef(name.clone()),
+                });
+                local
+            }
+            HIRExpr::Lambda { params, body } => {
+                lower_lambda_expr_with_expected(ctx, params, body, Some(expected_mir))
+            }
+            HIRExpr::Call {
+                func,
+                args,
+                site_lo,
+                expected_return_type: None,
+            } => lower_call_expr_with_expected_mir(ctx, func, args, *site_lo, Some(&expected_mir)),
+            _ => ctx.lower_expr(value_expr),
         };
         let lambda_name = ctx.lambda_names.get(&value_local).cloned();
 

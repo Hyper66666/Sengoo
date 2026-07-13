@@ -32,6 +32,24 @@ pub(super) fn lower_call_expr(
     site_lo: Option<u32>,
     expected_return_type: Option<&HIRType>,
 ) -> Local {
+    let expected_mir = expected_return_type.map(|ty| {
+        crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+            ty,
+            ctx.struct_defs,
+            &ctx.options.enum_defs,
+            &HashMap::new(),
+        )
+    });
+    lower_call_expr_with_expected_mir(ctx, func, args, site_lo, expected_mir.as_ref())
+}
+
+pub(super) fn lower_call_expr_with_expected_mir(
+    ctx: &mut LoweringContext<'_>,
+    func: &HIRExpr,
+    args: &[HIRExpr],
+    site_lo: Option<u32>,
+    expected_return_type: Option<&MIRType>,
+) -> Local {
     if let HIRExpr::Var { name, .. } = func {
         if name == "format" {
             return ctx.lower_format_call(args);
@@ -59,15 +77,7 @@ pub(super) fn lower_call_expr(
                 site_lo,
                 &mut arg_locals,
             );
-            let expected_mir = expected_return_type.map(|ty| {
-                crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
-                    ty,
-                    ctx.struct_defs,
-                    &ctx.options.enum_defs,
-                    &HashMap::new(),
-                )
-            });
-            lower_named_call(ctx, name, &arg_locals, expected_mir.as_ref())
+            lower_named_call(ctx, name, &arg_locals, expected_return_type)
         }
         _ => lower_non_named_call(ctx, &arg_locals),
     };

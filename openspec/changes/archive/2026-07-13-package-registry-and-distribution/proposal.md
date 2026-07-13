@@ -21,8 +21,8 @@ is added.
 - **Binary distribution**: real, versioned toolchain release artifacts for
   Linux x86_64 and Windows x64, plus a **macOS channel** (arm64/x86_64), with a
   one-command installer/version-manager and a smoke matrix.
-- **Release process**: semantic versioning of the toolchain, signed/checksummed
-  artifacts, and documented upgrade.
+- **Release process**: semantic versioning of the toolchain, checksummed
+  artifacts with GitHub build-provenance attestations, and documented upgrade.
 
 ## What changes
 

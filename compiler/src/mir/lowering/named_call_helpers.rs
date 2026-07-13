@@ -19,6 +19,12 @@ pub(super) fn lower_named_call(
         let return_type = ctx.mir_fn.return_type.clone();
         return lower_option_none_call(ctx, Some(&return_type));
     }
+    if name == "sum_identity" && arg_locals.is_empty() {
+        let identity_ty = expected_return_type
+            .cloned()
+            .unwrap_or_else(|| ctx.mir_fn.return_type.clone());
+        return super::try_expr_helpers::default_value_for_type(ctx, &identity_ty);
+    }
     if name == "vec_new" && arg_locals.is_empty() {
         return lower_vec_new_call(ctx, expected_return_type);
     }
@@ -114,6 +120,16 @@ pub(super) fn lower_named_call(
             arg_locals[1],
             expected_return_type,
         );
+    }
+    if name == "raw_hashmap_remove_string_handle" && arg_locals.len() == 2 {
+        let key = erase_borrowed_pointer(ctx, arg_locals[1]);
+        let result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        ctx.push_inst(Instruction::Call {
+            destination: result,
+            func: "sengoo_raw_hashmap_remove_string".to_string(),
+            args: vec![arg_locals[0], key],
+        });
+        return result;
     }
     if name == "raw_hashset_insert" && arg_locals.len() == 2 {
         let unit = ctx.add_local(None, LocalKind::Temp, MIR_I64);
@@ -1019,6 +1035,33 @@ fn synthesize_vec_move_thunk(
             value,
         },
     );
+    let erased_source = function.add_local(LocalKind::Temp, i8_ptr);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Cast {
+            destination: erased_source,
+            value: typed_source,
+            to: MIRType::Ptr(Box::new(MIRType::Int(8))),
+        },
+    );
+    let (element_size, _) = crate::codegen::common::mir_type_size_align(element_ty);
+    let size = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Assign {
+            destination: size,
+            value: MirConstant::Int(element_size as i64),
+        },
+    );
+    let ignored = function.add_local(LocalKind::Temp, MIR_UNIT);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Call {
+            destination: ignored,
+            func: "sengoo_raw_zero_bytes".to_string(),
+            args: vec![erased_source, size],
+        },
+    );
     function.basic_blocks[function.start_block].set_terminator(Terminator::Return(None));
     ctx.lambda_functions.push(function);
     ctx.insert_known_function(name.clone());
@@ -1215,12 +1258,17 @@ fn synthesize_eq_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix: 
             );
             return name;
         };
+        let right_arg = if matches!(key_ty, MIRType::Struct { name, .. } if name == "String") {
+            right
+        } else {
+            right_ptr
+        };
         function.push_inst_to_block(
             function.start_block,
             Instruction::Call {
                 destination: equal,
                 func: candidate,
-                args: vec![left, right_ptr],
+                args: vec![left, right_arg],
             },
         );
     }
@@ -1365,12 +1413,17 @@ fn synthesize_compare_thunk(
             return name;
         };
         let result = function.add_local(LocalKind::Temp, MIR_I64);
+        let right_arg = if matches!(key_ty, MIRType::Struct { name, .. } if name == "String") {
+            right
+        } else {
+            right_ptr
+        };
         function.push_inst_to_block(
             function.start_block,
             Instruction::Call {
                 destination: result,
                 func: candidate,
-                args: vec![left, right_ptr],
+                args: vec![left, right_arg],
             },
         );
         function.basic_blocks[function.start_block]
@@ -1404,6 +1457,7 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
         name: rc_name.clone(),
         fields: vec![("handle".to_string(), MIR_I64)],
     };
+    synthesize_rc_owner_drop(ctx, &rc_ty, &rc_name);
 
     let drop_thunk = synthesize_rc_drop_thunk(ctx, &value_ty, &rc_name);
     let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
@@ -1468,6 +1522,44 @@ fn lower_rc_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local
     });
     ctx.mark_drop_local_moved(payload_source);
     result
+}
+
+fn synthesize_rc_owner_drop(ctx: &mut LoweringContext<'_>, rc_ty: &MIRType, rc_name: &str) {
+    let drop_name = format!("{rc_name}_Drop_drop");
+    if ctx.is_known_function(&drop_name) {
+        return;
+    }
+    let mut function = MirFunction::new(drop_name.clone(), vec![rc_ty.clone()], MIR_UNIT);
+    let owner = Local::new(1, LocalKind::Param);
+    let handle = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Extract {
+            destination: handle,
+            value: owner,
+            index: 0,
+        },
+    );
+    let status = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Call {
+            destination: status,
+            func: "sengoo_rc_drop".to_string(),
+            args: vec![handle],
+        },
+    );
+    function.basic_blocks[function.start_block].set_terminator(Terminator::Return(None));
+    ctx.lambda_functions.push(function);
+    ctx.insert_known_function(drop_name.clone());
+    ctx.insert_function_sig(
+        drop_name,
+        FunctionSig {
+            ret_type: MIR_UNIT,
+            param_count: 1,
+            env: Vec::new(),
+        },
+    );
 }
 
 /// Coerce an owned concrete value into an owned `dyn Trait` fat pointer. The

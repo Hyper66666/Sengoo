@@ -172,7 +172,7 @@ pub(crate) fn collect_concrete_named_types_from_body(
 ) {
     for stmt in &body.stmts {
         match stmt {
-            HIRStmt::Coverage { .. } => {}
+            HIRStmt::Source { .. } | HIRStmt::Coverage { .. } => {}
             HIRStmt::Let { ty, value, .. } => {
                 collect_concrete_named_types_from_type(ty, known_named_types, out);
                 if let Some(value) = value {
@@ -311,10 +311,45 @@ pub(crate) fn collect_concrete_named_types_from_impl(
 ) {
     collect_concrete_named_types_from_type(&impl_item.target_type, known_named_types, out);
     for method in &impl_item.items {
+        // Terminal materializers must only be specialized when selected. Feeding their return
+        // type back into eager impl discovery creates recursive type graphs
+        // such as Vec<T> -> IntoIter<T> -> collect -> Vec<T>. The concrete
+        // return is still registered when the method is actually selected.
+        if is_terminal_iterator_method(&method.name)
+            || is_iterator_adapter_builder(&impl_item.target_type, &method.name)
+        {
+            continue;
+        }
         for param in &method.params {
             collect_concrete_named_types_from_type(&param.ty, known_named_types, out);
         }
         collect_concrete_named_types_from_type(&method.return_type, known_named_types, out);
         collect_concrete_named_types_from_body(&method.body, known_named_types, out);
     }
+}
+
+fn is_iterator_adapter_builder(target: &HIRType, method_name: &str) -> bool {
+    let is_builder = ["map", "filter", "take", "skip", "enumerate"]
+        .iter()
+        .any(|name| method_name == *name || method_name.ends_with(&format!("_{name}")));
+    is_builder
+        && matches!(
+            &target.kind,
+            HIRTypeKind::Named { name, .. }
+                if matches!(
+                    name.as_str(),
+                    "RawVecIntoIter"
+                        | "TakeIter"
+                        | "SkipIter"
+                        | "EnumerateIter"
+                        | "MapIter"
+                        | "FilterIter"
+                )
+        )
+}
+
+pub(crate) fn is_terminal_iterator_method(name: &str) -> bool {
+    ["collect", "sum", "collect_hashset", "collect_hashmap"]
+        .iter()
+        .any(|terminal| name == *terminal || name.ends_with(&format!("_{terminal}")))
 }

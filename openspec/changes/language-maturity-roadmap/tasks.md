@@ -6,22 +6,27 @@
   evidence changes.
 - [x] 0.3 Record the 2026-07-11 repository/capability snapshot in
   `INVENTORY.md`.
-- [ ] 0.4 Recompute `INVENTORY.md` from integrated `main` and remove statements
+- [x] 0.4 Recompute `INVENTORY.md` from integrated `main` and remove statements
   that were true only of the pre-integration worktree.
-- [ ] 0.5 Ensure each active capability has exactly one implementation owner;
+- [x] 0.5 Ensure each active capability has exactly one implementation owner;
   archive or mark overlapping umbrellas historical.
 
 ## 1. Phase 0 - integrated release baseline
 
-- [ ] 1.1 Complete and archive `mainline-release-baseline`.
-- [ ] 1.2 Preserve all current work in reviewable commits/patches, reconcile the
+- [x] 1.1 Complete and archive `mainline-release-baseline`.
+  - Archived as `2026-07-13-mainline-release-baseline` after local and four-host
+    realworld/distribution gates closed.
+- [x] 1.2 Preserve all current work in reviewable commits/patches, reconcile the
   divergent branch with latest `main`, and resolve conflicts without dropping
   unexplained changes.
-- [ ] 1.3 Run the baseline gate: fmt, clippy, workspace tests, runtime native
+- [x] 1.3 Run the baseline gate: fmt, clippy, workspace tests, runtime native
   bridge tests, realworld package loop, and `openspec validate --all --strict`.
-- [ ] 1.4 Reconcile active tasks with implementation evidence, especially sgpm
+  - Local compiler/sgc/sgpm/formatter gates and strict OpenSpec pass; Actions
+    run `29224930570` passes the complete package/install smoke on all four
+    release hosts.
+- [x] 1.4 Reconcile active tasks with implementation evidence, especially sgpm
   registry/alias/multiversion, debugger, numeric, and concurrency surfaces.
-- [ ] 1.5 Update README, support matrix, branch/upstream metadata, and generated
+- [x] 1.5 Update README, support matrix, branch/upstream metadata, and generated
   artifact ignore/cleanup policy from the integrated baseline.
 
 ## 2. Phase 1 - mainstream default language and library
@@ -31,28 +36,56 @@
   - Archived as `2026-07-11-numeric-type-system` after the 994-test compiler
     library gate, native numeric/runtime and Cranelift suites, core conformance,
     warning-free compiler/sgc clippy, and strict OpenSpec validation passed.
-- [ ] 2.2 Complete and archive `generic-collections` using the frozen generic
+- [x] 2.2 Complete and archive `generic-collections` using the frozen generic
   storage/drop/callback ABI; scalar helpers become thin compatibility wrappers.
+  - Archived as `2026-07-13-generic-collections` after the compiler library and
+    complete `sgc` suites, native collection ownership/Drop coverage, the
+    default-library locked package loop, warning-free compiler clippy, and
+    strict OpenSpec validation passed.
 - [ ] 2.3 Complete and archive `debugger-and-test-framework`, including actual
   statement stepping and live scalar/composite inspection on installed
   reference-host debuggers.
-- [ ] 2.4 Add a default-library conformance package using `Vec<struct>`, a
+- [x] 2.4 Add a default-library conformance package using `Vec<struct>`, a
   string-keyed map with struct values, iterator adapters, checked numeric
   conversion, and automatic Drop with no scalar-only constructors.
-- [ ] 2.5 Refresh the language reference and flagship application against the
+  - `examples/realworld/default-library-conformance` uses the ABI-v1 generic
+    `vec_new()` / `hashmap_new()` paths, runs `filter -> map -> sum`, checks an
+    `i64 -> u8` conversion, and compares owned-String live handles across scope
+    exit without manual release calls. Its locked `sgpm check`, `test`,
+    `fmt --check`, `doc`, and `build` loop plus native
+    `sgc run --force-rebuild` pass on the Windows reference workspace.
+- [x] 2.5 Refresh the language reference and flagship application against the
   Phase 1 public surface.
+  - The authoritative reference now records the archived numeric contract,
+    includes an executable checked-conversion proof, and retains the explicit
+    experimental Cranelift boundary. The flagship guide records its ABI-v1
+    generic map, numeric casts, recursive walk, owned formatting, and current
+    scalar concurrency transition boundary. Reference doctests pass 2/2 and
+    the flagship locked check/test/fmt/doc/build loop passes locally.
 
 ## 3. Phase 2 - external adoption and release
 
-- [ ] 3.1 Reconcile implemented sgpm registry/package-graph behavior with
+- [x] 3.1 Reconcile implemented sgpm registry/package-graph behavior with
   `package-registry-and-distribution` before adding more resolver code.
-- [ ] 3.2 Complete and archive `package-registry-and-distribution`.
-- [ ] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
+  - The audit confirms the registry server, remote publish, hash-locked cache,
+    aliases, multiversion resolution, yank handling, and reference-server e2e
+    are implemented. Remaining child tasks are cross-host artifacts and install
+    evidence, not more resolver breadth.
+- [x] 3.2 Complete and archive `package-registry-and-distribution`.
+  - Archived as `2026-07-13-package-registry-and-distribution`; the reference
+    registry and resolver evidence is paired with four-host package artifacts.
+- [x] 3.3 Prove publish -> resolve -> locked build -> test -> run against the
   reference registry, including checksum mismatch, yank, alias, multiversion,
   offline cache, and archive traversal failures.
-- [ ] 3.4 Produce signed/checksummed Windows x64, Linux x86_64, macOS x86_64,
-  and macOS arm64 release artifacts with install and upgrade smoke outside the
-  source checkout.
+  - `reference_registry_alias_multiversion_locked_tool_loop_is_offline` publishes
+    two versions, resolves aliased edges, stops the server, then passes locked
+    check/test/build/run from exact verified cache entries. Companion tests
+    reject offline cache tampering, bad upload/download checksums, higher yanked
+    candidates, traversal/absolute/link/duplicate archive entries, and bounded
+    compressed/uncompressed/entry counts before cache publication.
+- [ ] 3.4 Produce checksummed, provenance-attested Windows x64, Linux x86_64,
+  macOS x86_64, and macOS arm64 release artifacts with install and upgrade
+  smoke outside the source checkout.
 - [ ] 3.5 Cut a real prerelease tag and verify every tool reports one coherent
   version.
 

@@ -7,32 +7,25 @@ struct Label {
 impl Display for Label {
     def to_string(&self) -> String {
         let rendered = format("Label({})", self.id);
-        rendered
+        rendered;
     }
 }
 
 def score_result() -> Result<i64, i64> {
-    result_ok_with(42, 0)
+    result_ok_with(42, 0);
 }
 
 def text_result() -> Result<String, i64> {
-    string_from_str("p0-ready")
+    string_from_str("p0-ready");
 }
 
 def main() -> i64 {
     let score = score_result();
-    if score.is_ok == false {
-        return 1;
-    }
-
+    if score.is_ok == false { return 1; };
     let text = text_result();
-    if text.is_ok == false {
-        return 1;
-    }
-
+    if text.is_ok == false { return 1; };
     let label = Label { id: score.value };
     println(text.value);
     println(label);
-
-    0
+    0;
 }

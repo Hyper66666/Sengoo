@@ -60,4 +60,6 @@ x86_64, Windows x64, and macOS, installable via one command.
 - **AND** `sgc run` on a hello-world program succeeds on that platform per the
   release smoke matrix
 - **AND** an upgrade preserves one coherent tool/runtime version and fails
-  safely on checksum or signature mismatch
+  safely on checksum mismatch
+- **AND** release provenance attestations are published for independent
+  verification through the documented GitHub verification path

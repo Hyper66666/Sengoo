@@ -308,6 +308,37 @@ def main() -> i64 {
         && ordered_id_keys.get(0).unwrap_or(0) == -8
         && ordered_id_keys.get(1).unwrap_or(1) == 0
         && ordered_id_keys.get(2).unwrap_or(0) == 8;
+    let ordered_status = if !ordered_inserted_z { 1 }
+        else if !ordered_inserted_a { 2 }
+        else if ordered_score_keys.len() != 2 { 3 }
+        else if ordered_first_key.len() != 5 { 4 }
+        else if ordered_second_key.len() != 4 { 5 }
+        else if !ordered_name_z { 6 }
+        else if !ordered_name_a { 7 }
+        else if ordered_name_keys.len() != 2 { 8 }
+        else if ordered_first_name.len() != 1 { 9 }
+        else if !ordered_number_high { 10 }
+        else if !ordered_number_low { 11 }
+        else if !ordered_number_mid { 12 }
+        else if !ordered_number_replaced { 13 }
+        else if ordered_number_keys.len() != 3 { 14 }
+        else if ordered_number_keys.get(0).unwrap_or(0) != -4 { 15 }
+        else if ordered_number_keys.get(1).unwrap_or(0) != 10 { 16 }
+        else if ordered_number_keys.get(2).unwrap_or(0) != 30 { 17 }
+        else if ordered_numbers.get(10).unwrap_or(0) != 99 { 18 }
+        else if !ordered_number_removed { 19 }
+        else if ordered_numbers.len() != 2 { 20 }
+        else if !ordered_flag_inserted { 21 }
+        else if !ordered_flag_replaced { 22 }
+        else if ordered_flag_value { 23 }
+        else if !ordered_id_high { 24 }
+        else if !ordered_id_low { 25 }
+        else if !ordered_id_mid { 26 }
+        else if ordered_id_keys.len() != 3 { 27 }
+        else if ordered_id_keys.get(0).unwrap_or(0) != -8 { 28 }
+        else if ordered_id_keys.get(1).unwrap_or(1) != 0 { 29 }
+        else if ordered_id_keys.get(2).unwrap_or(0) != 8 { 30 }
+        else { 0 };
     let sets_ok = id_inserted
         && id_present
         && first_id.index == 0
@@ -331,8 +362,14 @@ def main() -> i64 {
         && word_keys.len() == 1
         && word_removed
         && word_missing;
-    let ok = vectors_ok && maps_ok && text_ok && string_maps_ok && ordered_ok && sets_ok;
+    let result = if !vectors_ok { 1 }
+        else if !maps_ok { 2 }
+        else if !text_ok { 3 }
+        else if !string_maps_ok { 4 }
+        else if !ordered_ok { 50 + ordered_status }
+        else if !sets_ok { 6 }
+        else { 60 };
 
-    print(if ok { 60 } else { 0 });
+    print(result);
     0
 }

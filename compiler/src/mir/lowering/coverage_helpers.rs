@@ -53,16 +53,20 @@ pub(super) fn inject_coverage_registration(
     let mut registration = Vec::with_capacity(lines.len() * 2);
     for line in lines {
         let line_local = main.add_local(LocalKind::Temp, MIR_I64);
-        registration.push(main.alloc_inst(Instruction::Assign {
+        let assign = main.alloc_inst(Instruction::Assign {
             destination: line_local,
             value: MirConstant::Int(i64::from(line)),
-        }));
+        });
         let result = main.add_local(LocalKind::Temp, MIR_UNIT);
-        registration.push(main.alloc_inst(Instruction::Call {
+        let call = main.alloc_inst(Instruction::Call {
             destination: result,
             func: COVERAGE_REGISTER_RUNTIME.to_string(),
             args: vec![line_local],
-        }));
+        });
+        main.hide_instruction_from_debug(assign);
+        main.hide_instruction_from_debug(call);
+        registration.push(assign);
+        registration.push(call);
     }
 
     main.basic_blocks[main.start_block]

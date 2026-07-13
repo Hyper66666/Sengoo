@@ -396,6 +396,17 @@ impl Drop for String {
     }
 }
 
+impl Option<String> {
+    def unwrap_or(self, fallback: String) -> String {
+        let selected = if self.is_some { self.value.handle } else { fallback.handle };
+        if selected == 0 {
+            String { handle: 0 }
+        } else {
+            String { handle: sengoo_string_clone_status(selected) }
+        }
+    }
+}
+
 impl PartialEq for String {
 }
 

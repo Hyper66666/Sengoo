@@ -78,11 +78,27 @@ fn tool_versions_share_workspace_version_and_hash() {
     for tool in tools {
         assert_tool_manifest_uses_workspace_version(&root, tool);
 
-        let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()))
-            .args(["run", "--quiet", "-p", tool, "--", "--version"])
-            .current_dir(&root)
-            .output()
-            .unwrap_or_else(|err| panic!("failed to run {tool} --version through cargo: {err}"));
+        let output = if tool == "sgpm" {
+            Command::new(env!("CARGO_BIN_EXE_sgpm"))
+                .arg("--version")
+                .output()
+                .unwrap_or_else(|err| panic!("failed to run built sgpm --version: {err}"))
+        } else {
+            Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()))
+                .args([
+                    "run",
+                    "--quiet",
+                    "-p",
+                    tool,
+                    "--bin",
+                    tool,
+                    "--",
+                    "--version",
+                ])
+                .current_dir(&root)
+                .output()
+                .unwrap_or_else(|err| panic!("failed to run {tool} --version through cargo: {err}"))
+        };
         assert!(
             output.status.success(),
             "{tool} --version failed\nstdout:\n{}\nstderr:\n{}",
@@ -125,7 +141,7 @@ fn distribution_workflow_covers_native_macos_architectures() {
     );
     assert!(
         workflow.contains("needs: package-smoke") && workflow.contains("attest-build-provenance"),
-        "release publication should wait for every platform and emit signed provenance"
+        "release publication should wait for every platform and emit GitHub provenance attestations"
     );
 }
 
@@ -150,5 +166,68 @@ fn installers_detect_darwin_architecture_instead_of_assuming_x86_64() {
     assert!(
         powershell.contains("aarch64-apple-darwin"),
         "install.ps1 should select the Apple Silicon archive"
+    );
+}
+
+#[test]
+fn distribution_workflow_smokes_explicit_upgrade_outside_checkout_without_a_real_tag() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+        .expect("read toolchain distribution workflow");
+    assert!(
+        workflow.contains("Prepare local release feed"),
+        "workflow should stage a local versioned release feed for deterministic dry-run upgrade smoke"
+    );
+    assert!(
+        workflow.contains("Install package by version")
+            && workflow.contains("Upgrade package by version"),
+        "workflow should install and then upgrade through the documented pinned-version path"
+    );
+    assert!(
+        workflow.contains("--base-url") && workflow.contains("-BaseUrl"),
+        "workflow should exercise install-script version mode against a local release feed"
+    );
+    assert!(
+        workflow.contains("SemanticVersion") && workflow.contains("$upgradePatch-upgrade-smoke"),
+        "workflow should stage a semantically newer patch prerelease for the upgrade smoke"
+    );
+    assert!(
+        workflow.contains("outside-checkout"),
+        "workflow should run the upgrade smoke from a temp workspace outside the repository checkout"
+    );
+    assert!(
+        workflow.contains("primaryManifest.version")
+            && workflow.contains("upgradedManifest.version"),
+        "workflow should prove that installation content moves from the primary to secondary package manifest version"
+    );
+    assert!(
+        workflow.contains("Assert-InstalledToolVersions")
+            && workflow.contains("tool_versions.PSObject.Properties[$tool].Value")
+            && workflow.contains("payload does not match manifest"),
+        "workflow should compare every installed tool payload with manifest.tool_versions before and after upgrade"
+    );
+}
+
+#[test]
+fn installers_support_local_release_feeds_for_deterministic_upgrade_smoke() {
+    let root = workspace_root();
+    let shell = fs::read_to_string(root.join("scripts/install.sh")).expect("read install.sh");
+    assert!(
+        shell.contains("[ -d \"$base_url\" ]"),
+        "install.sh should treat a local release-feed directory as a valid version source"
+    );
+    assert!(
+        shell.contains("cp \"$source\" \"$destination\""),
+        "install.sh should copy versioned archives from a local release feed during dry-run smoke"
+    );
+    let powershell =
+        fs::read_to_string(root.join("scripts/install.ps1")).expect("read install.ps1");
+    assert!(
+        powershell.contains("Test-Path -LiteralPath $BaseUrl"),
+        "install.ps1 should treat a local release-feed directory as a valid version source"
+    );
+    assert!(
+        powershell.contains("Copy-Item -LiteralPath $Source -Destination $Destination"),
+        "install.ps1 should copy versioned archives from a local release feed during dry-run smoke"
     );
 }

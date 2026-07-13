@@ -26,6 +26,10 @@ cd examples/realworld/compressed-json-artifact
 ```
 
 ```powershell
+cd examples/realworld/default-library-conformance
+```
+
+```powershell
 cd examples/realworld/http-client-status
 ```
 
@@ -53,6 +57,9 @@ Packages:
   status, and collections helpers.
 - `compressed-json-artifact`: compressed JSON artifact smoke using public
   `std::compress` gzip Buffer helpers and `std::json` parse verification.
+- `default-library-conformance`: Phase 1 gate using `Vec<struct>`, a
+  string-keyed generic map with struct values, lazy iterator adapters, checked
+  numeric conversion, and automatic Drop without scalar-only constructors.
 - `http-client-status`: HTTP/status example using the public `std::http`
   wrapper and a stable unsupported-scheme path.
 - `http-echo-service`: dynamic HTTP echo service using the reactor-backed

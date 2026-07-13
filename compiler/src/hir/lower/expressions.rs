@@ -61,6 +61,9 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
     };
 
     for stmt in stmts_to_process {
+        hir_body.add_stmt(HIRStmt::Source {
+            site_lo: stmt.span.lo,
+        });
         match &stmt.kind {
             ast::StmtKind::Let {
                 name,
@@ -127,6 +130,9 @@ pub(super) fn lower_body(block: &ast::Block, type_env: &TypeEnv) -> HIRBody {
         if let Some(stmt) = stmts.get(last_idx) {
             if let ast::StmtKind::Expr(expr) = &stmt.kind {
                 if let Ok(hir_expr) = lower_expr(expr, type_env) {
+                    hir_body.add_stmt(HIRStmt::Source {
+                        site_lo: stmt.span.lo,
+                    });
                     if coverage_markers_enabled() {
                         hir_body.add_stmt(HIRStmt::Coverage {
                             site_lo: stmt.span.lo,
@@ -200,6 +206,7 @@ pub(super) fn lower_expr(expr: &ast::Expr, type_env: &TypeEnv) -> Result<HIRExpr
                             // 将表达式包装在块中
                             let mut body = HIRBody::new();
                             if let Ok(expr) = lower_expr(e, type_env) {
+                                body.add_stmt(HIRStmt::Source { site_lo: e.span.lo });
                                 if coverage_markers_enabled() {
                                     body.add_stmt(HIRStmt::Coverage { site_lo: e.span.lo });
                                 }

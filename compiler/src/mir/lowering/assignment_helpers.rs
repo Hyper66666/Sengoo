@@ -5,7 +5,20 @@ pub(super) fn lower_assign_expr(
     target: &HIRExpr,
     value: &HIRExpr,
 ) -> Local {
-    let value_local = ctx.lower_expr(value);
+    let expected_value_ty = ctx
+        .resolve_drop_place(target)
+        .and_then(|(local, field_path)| ctx.drop_place_type(local, &field_path));
+    let value_local = match value {
+        HIRExpr::Call {
+            func,
+            args,
+            site_lo,
+            expected_return_type: None,
+        } => {
+            lower_call_expr_with_expected_mir(ctx, func, args, *site_lo, expected_value_ty.as_ref())
+        }
+        _ => ctx.lower_expr(value),
+    };
 
     match target {
         HIRExpr::Var { name, symbol } => {

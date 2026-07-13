@@ -13,8 +13,11 @@
     before final integration. `git status` was clean immediately after the
     commit, proving no source/test/doc/example/OpenSpec path remained only in
     the worktree.
-- [ ] 1.3 Classify paths by OpenSpec owner and generated/source status; flag
+- [x] 1.3 Classify paths by OpenSpec owner and generated/source status; flag
   unknown ownership rather than guessing.
+  - The refreshed roadmap inventory assigns all 25 primary-worktree entries to
+    `enhance-sglsp-smart-completion`, records generated target sizes separately,
+    and preserves the older async worktree for an explicit equivalence audit.
 - [x] 1.4 Verify cleanup targets resolve inside the workspace before removing
   generated caches; update ignore/cleanup documentation where needed.
   - Added `/target-*/` beside the canonical `/target/` ignore rule. Before
@@ -36,19 +39,33 @@
     portable-backend surfaces. Conflict follow-ups restored strict native
     collections execution, DWARF statement lines, test discovery source maps,
     and race-free runtime object publication.
-- [ ] 2.3 Split changes into reviewable Lore-protocol commits tied to owning
+- [x] 2.3 Split changes into reviewable Lore-protocol commits tied to owning
   OpenSpec changes; do not create one opaque mega-commit.
-- [ ] 2.4 Confirm no required commit remains only on a gone upstream branch or
+  - Numeric and generic-collection work is recorded as independent,
+    evidence-bearing commits; `c4d0e9864` contains only the collection ABI,
+    stdlib, tests, fixture, documentation, and its OpenSpec archive.
+- [x] 2.4 Confirm no required commit remains only on a gone upstream branch or
   abandoned worktree.
+  - All linked worktrees were inspected. The only substantial dirty legacy
+    worktree implements an obsolete eager/always-ready async model; current
+    compiler async tests pass 91/91 and native frame/resume plus scheduler
+    smokes supersede every capability it attempted.
 
 ## 3. Reconcile truth sources
 
-- [ ] 3.1 Audit every active change task against code/tests; record partial
+- [x] 3.1 Audit every active change task against code/tests; record partial
   evidence and remove stale `Why` claims.
-- [ ] 3.2 Update `language-maturity-roadmap/INVENTORY.md` from integrated main.
-- [ ] 3.3 Update README and `examples/realworld/SUPPORT_MATRIX.md` to match
+  - The roadmap audit rechecked debugger/native-DI, registry/distribution,
+    concurrency, hardening, and both portable backend owners. Implemented
+    subsets, local failures, host-only evidence, and true code gaps are now
+    separated in the inventory and support documentation.
+- [x] 3.2 Update `language-maturity-roadmap/INVENTORY.md` from integrated main.
+- [x] 3.3 Update README and `examples/realworld/SUPPORT_MATRIX.md` to match
   capability and host evidence, without promoting skips to success.
-- [ ] 3.4 Identify overlapping active umbrellas and record one active
+  - Distribution is described as configured rather than released, the current
+    four-host failure is not counted as artifact evidence, and real-binary
+    package loops explicitly reject skipped-tool success.
+- [x] 3.4 Identify overlapping active umbrellas and record one active
   implementation owner in the roadmap inventory. Preserve the support matrix's
   `Upstream spec/change` column as historical evidence lineage rather than
   misusing it as an active-owner registry.
@@ -65,11 +82,19 @@
     (68), sgc unit (459), and all integration targets except two test-report
     schema/source-map assertions. Their fix was then verified by 20 command
     tests and the complete 2/2 `test_discovery` e2e target.
-- [ ] 4.3 Run realworld locked package loops and toolchain distribution dry-run
+- [x] 4.3 Run realworld locked package loops and toolchain distribution dry-run
   smoke on Windows and Linux CI.
+  - The local real-binary locked loop passes without skipped `sgc`/`sgfmt`.
+    GitHub Actions run `29224930570` passes release build, realworld smoke,
+    package, install, installed stdlib smoke, and artifact upload on Windows,
+    Ubuntu, macOS arm64, and macOS x64.
 - [x] 4.4 Run `openspec validate mainline-release-baseline --strict` and
   `openspec validate --all --strict`.
   - `npx.cmd @fission-ai/openspec validate --all --strict` reports 47 passed,
     0 failed, including `mainline-release-baseline`.
-- [ ] 4.5 Push the integration branch and verify the exact tested SHA is visible
+- [x] 4.5 Push the integration branch and verify the exact tested SHA is visible
   on the configured GitHub remote.
+  - `404c2cb51` is visible on
+    `origin/codex/toolchain-transcript-evidence` after the topology-only main
+    merge, generic-collections archive, baseline truth refresh, and focused
+    Windows verification.

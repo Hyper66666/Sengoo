@@ -223,6 +223,11 @@ pub(super) fn lower_unary_expr(
 ) -> Local {
     match op {
         hir::HIRUnaryOp::Ref | hir::HIRUnaryOp::RefMut => {
+            if let Some(field_ref) =
+                super::pointer_expr_helpers::try_lower_addressable_field_ref(ctx, operand)
+            {
+                return field_ref;
+            }
             let expr_local = ctx.lower_expr(operand);
             let expr_ty = ctx.get_local_type(expr_local).clone();
 

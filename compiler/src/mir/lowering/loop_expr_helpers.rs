@@ -12,18 +12,23 @@ pub(super) fn lower_loop_expr(ctx: &mut LoweringContext<'_>, body: &HIRBody) -> 
     ctx.pop_loop();
 
     let end_block = ctx.current_block();
-    if end_block != loop_block {
-        if let Some(block) = ctx.mir_fn.block_mut(end_block) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(loop_block));
-            }
-        }
+    if end_block != loop_block
+        && ctx
+            .mir_fn
+            .basic_blocks
+            .get(end_block)
+            .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(end_block, Terminator::Goto(loop_block));
     }
 
-    if let Some(block) = ctx.mir_fn.block_mut(loop_block) {
-        if block.terminator.is_none() {
-            block.set_terminator(Terminator::Goto(loop_block));
-        }
+    if ctx
+        .mir_fn
+        .basic_blocks
+        .get(loop_block)
+        .is_some_and(|block| block.terminator.is_none())
+    {
+        ctx.set_block_terminator(loop_block, Terminator::Goto(loop_block));
     }
 
     ctx.set_current_block(exit_block);

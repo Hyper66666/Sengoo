@@ -12,6 +12,30 @@ use crate::mir::{
 use crate::CompileError;
 use std::collections::{HashMap, HashSet};
 
+fn stamp_new_mir_with_source_site(
+    function: &mut MirFunction,
+    first_instruction: usize,
+    terminated_before: &[bool],
+    source_site: Option<u32>,
+) {
+    let Some(source_site) = source_site else {
+        return;
+    };
+    for instruction_index in first_instruction..function.instructions.len() {
+        if function.instruction_source_sites[instruction_index].is_none() {
+            function.instruction_source_sites[instruction_index] = Some(source_site);
+        }
+    }
+    for (block_index, block) in function.basic_blocks.iter_mut().enumerate() {
+        if !terminated_before.get(block_index).copied().unwrap_or(false)
+            && block.terminator.is_some()
+            && block.terminator_source_site.is_none()
+        {
+            block.terminator_source_site = Some(source_site);
+        }
+    }
+}
+
 fn clone_local_kind(kind: LocalKind) -> LocalKind {
     match kind {
         LocalKind::Param => LocalKind::Temp,
@@ -535,8 +559,25 @@ pub(crate) fn synthesize_cfg_poll(
                 &translated_blocks,
             )?;
             let new_id = f.alloc_inst(cloned);
+            let source_site = mir_fn
+                .instruction_source_sites
+                .get(inst_id.0 as usize)
+                .copied()
+                .flatten();
+            f.set_instruction_source_site(new_id, source_site);
+            if mir_fn.debug_hidden_instructions.contains(inst_id) {
+                f.hide_instruction_from_debug(new_id);
+            }
             f.basic_blocks[translated].push(new_id);
         }
+
+        let first_generated_instruction = f.instructions.len();
+        let terminated_before = f
+            .basic_blocks
+            .iter()
+            .map(|block| block.terminator.is_some())
+            .collect::<Vec<_>>();
+        let terminator_source_site = original_block.terminator_source_site;
 
         match original_block
             .terminator
@@ -635,9 +676,22 @@ pub(crate) fn synthesize_cfg_poll(
                 )));
             }
         }
+        stamp_new_mir_with_source_site(
+            &mut f,
+            first_generated_instruction,
+            &terminated_before,
+            terminator_source_site,
+        );
     }
 
     for point in &plan.suspend_points {
+        let first_generated_instruction = f.instructions.len();
+        let terminated_before = f
+            .basic_blocks
+            .iter()
+            .map(|block| block.terminator.is_some())
+            .collect::<Vec<_>>();
+        let source_site = mir_fn.basic_blocks[point.block].terminator_source_site;
         let resume_block = resume_blocks[&point.block];
         for slot in live_user_slots
             .get(&point.block)
@@ -716,9 +770,16 @@ pub(crate) fn synthesize_cfg_poll(
             resume_local_map,
             &rebase_pointer_locals,
         )?;
+        stamp_new_mir_with_source_site(
+            &mut f,
+            first_generated_instruction,
+            &terminated_before,
+            source_site,
+        );
     }
 
     for point in &plan.suspend_points {
+        let source_site = mir_fn.basic_blocks[point.block].terminator_source_site;
         let ready_handle_block = ready_handle_blocks[&point.block];
         let initial_handle = ready_handle_initial_values
             .get(&point.block)
@@ -742,11 +803,14 @@ pub(crate) fn synthesize_cfg_poll(
                 (restored_handle, resume_blocks[&point.block]),
             ],
         });
+        f.set_instruction_source_site(phi_inst, source_site);
         f.basic_blocks[ready_handle_block]
             .instructions
             .insert(0, phi_inst);
-        f.basic_blocks[ready_handle_block]
-            .set_terminator(Terminator::Goto(translated_blocks[&point.ready_block]));
+        f.basic_blocks[ready_handle_block].set_terminator_at(
+            Terminator::Goto(translated_blocks[&point.ready_block]),
+            source_site,
+        );
     }
 
     Ok(f)

@@ -17,6 +17,7 @@ use runner::{BuildProfile, Toolchain};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const SGPM_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -743,12 +744,24 @@ fn load_graphs_with_options(
 ) -> Result<Vec<Graph>> {
     if locked {
         options.allow_yanked = true;
+        let root_manifest = resolver::resolve_manifest_path(manifest_path)?;
+        let lockfile_path = root_manifest
+            .parent()
+            .ok_or_else(|| miette::miette!("manifest has no parent directory"))?
+            .join("Sengoo.lock");
+        options.locked_registry = Some(Arc::new(lockfile::read_locked_registry_graph(
+            &lockfile_path,
+        )?));
     }
     let selections = workspace::select_manifests(manifest_path, package, workspace_all)
         .with_context(|| format!("failed to select package from {}", manifest_path.display()))?;
     let mut graphs = Vec::new();
     for selection in selections {
-        graphs.push(resolve_graph(selection, locked && !workspace_all, options)?);
+        graphs.push(resolve_graph(
+            selection,
+            locked && !workspace_all,
+            options.clone(),
+        )?);
     }
     if locked && workspace_all {
         let workspace_manifest = resolver::resolve_manifest_path(manifest_path)?;

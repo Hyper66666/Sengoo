@@ -93,6 +93,7 @@ impl<'a> LoweringContext<'a> {
     /// 将单条HIR语句降级为MIR指令序列。
     fn lower_stmt(&mut self, stmt: &HIRStmt) {
         match stmt {
+            HIRStmt::Source { site_lo } => self.current_source_site = Some(*site_lo),
             HIRStmt::Coverage { site_lo } => self.emit_coverage_hit(*site_lo),
             HIRStmt::Let {
                 name,

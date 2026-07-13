@@ -18,7 +18,9 @@ use crate::mir::async_origin_helpers::{
     infer_async_base_name_from_instructions, infer_last_async_start_base,
 };
 use crate::mir::build_enum_defs;
-use crate::mir::concrete_type_helpers::collect_concrete_named_types_with_impl_variants;
+use crate::mir::concrete_type_helpers::{
+    collect_concrete_named_types_with_impl_variants, is_terminal_iterator_method,
+};
 use crate::mir::function_sig_helpers::{build_function_sig, build_hir_function_sig_with_enums};
 use crate::mir::hir_specialization_helpers::hir_type_is_concrete;
 use crate::mir::impl_specialization_helpers::{
@@ -92,7 +94,7 @@ use self::aggregate_expr_helpers::{
 use self::assignment_helpers::{lower_assign_expr, lower_assign_op_expr};
 use self::block_async_expr_helpers::{lower_async_block_expr, lower_await_expr, lower_block_expr};
 use self::call_emission_helpers::emit_call_from_plan;
-use self::call_expr_helpers::lower_call_expr;
+use self::call_expr_helpers::{lower_call_expr, lower_call_expr_with_expected_mir};
 use self::call_invocation_helpers::build_call_invocation_plan;
 use self::call_target_helpers::{CallTargetPlan, CallTargetResolution};
 use self::enum_expr_helpers::lower_enum_construct_expr;
@@ -181,6 +183,8 @@ struct LoweringContext<'a> {
     contract_param_bindings: Vec<(String, SymbolId, Local)>,
     /// 当前基本块的索引（None表示未设置）。
     current_block: Option<usize>,
+    /// Byte offset of the nearest enclosing source statement.
+    current_source_site: Option<u32>,
     /// 错误信息列表，记录降级过程中遇到的错误。
     errors: Vec<String>,
     /// 循环上下文栈，记录嵌套循环的 `break/continue` 目标。

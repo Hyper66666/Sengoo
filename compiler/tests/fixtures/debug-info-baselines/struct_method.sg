@@ -1,0 +1,12 @@
+struct Point { x: i64, y: i64 }
+
+impl Point {
+    def sum(self) -> i64 {
+        self.x + self.y
+    }
+}
+
+def main() -> i64 {
+    let point = Point { x: 3, y: 4 };
+    point.sum()
+}

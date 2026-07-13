@@ -960,6 +960,16 @@ long long sengoo_raw_vec_remove(long long handle, long long index, void* out_val
     return SENGOO_STATUS_OK;
 }
 
+void sengoo_raw_zero_bytes(void* value, long long size) {
+    if (value && size > 0) memset(value, 0, (size_t)size);
+}
+
+long long sengoo_raw_vec_remove_string(long long handle, long long index) {
+    long long value = 0;
+    long long status = sengoo_raw_vec_remove(handle, index, &value);
+    return status == SENGOO_STATUS_OK ? value : -status;
+}
+
 long long sengoo_raw_vec_clear(long long handle) {
     SengooRawVec* vec = sengoo_raw_vec_from_handle(handle);
     if (!vec) {
@@ -1006,6 +1016,25 @@ void* sengoo_raw_vec_iter_next(long long handle) {
     SengooRawVec* vec = sengoo_raw_vec_from_handle(iter->vec_handle);
     if (!vec || iter->index >= vec->len) return NULL;
     return sengoo_raw_vec_slot(vec, iter->index++);
+}
+
+long long sengoo_raw_vec_iter_done(long long handle) {
+    SengooRawVecIter* iter = (SengooRawVecIter*)sengoo_opaque_handle_get(handle);
+    if (!iter) return 1;
+    SengooRawVec* vec = sengoo_raw_vec_from_handle(iter->vec_handle);
+    return !vec || iter->index >= vec->len;
+}
+
+long long sengoo_raw_vec_iter_reset(long long handle) {
+    SengooRawVecIter* iter = (SengooRawVecIter*)sengoo_opaque_handle_get(handle);
+    if (!iter) return SENGOO_STATUS_INVALID_HANDLE;
+    iter->index = 0;
+    return SENGOO_STATUS_OK;
+}
+
+long long sengoo_raw_vec_iter_index(long long handle) {
+    SengooRawVecIter* iter = (SengooRawVecIter*)sengoo_opaque_handle_get(handle);
+    return iter ? (long long)iter->index : 0;
 }
 
 long long sengoo_raw_vec_iter_free(long long handle) {
@@ -1219,6 +1248,12 @@ long long sengoo_raw_hashmap_remove(long long handle, const void* key, void* out
     return SENGOO_STATUS_OK;
 }
 
+long long sengoo_raw_hashmap_remove_string(long long handle, const void* key) {
+    long long value = 0;
+    long long status = sengoo_raw_hashmap_remove(handle, key, &value);
+    return status == SENGOO_STATUS_OK ? value : -status;
+}
+
 long long sengoo_raw_hashmap_clear(long long handle) {
     SengooRawHashMap* map = sengoo_raw_hashmap_from_handle(handle);
     if (!map) return SENGOO_STATUS_INVALID_HANDLE;
@@ -1262,6 +1297,26 @@ void* sengoo_raw_map_key_iter_next(long long handle) {
     SengooRawHashMap* map = sengoo_raw_hashmap_from_handle(iter->map_handle);
     if (!map || iter->index >= map->len) return NULL;
     return sengoo_raw_hashmap_key(map, iter->index++);
+}
+
+long long sengoo_raw_map_key_iter_done(long long handle) {
+    SengooRawMapKeyIter* iter = (SengooRawMapKeyIter*)sengoo_opaque_handle_get(handle);
+    if (!iter) return 1;
+    SengooRawHashMap* map = sengoo_raw_hashmap_from_handle(iter->map_handle);
+    return !map || iter->index >= map->len;
+}
+
+long long sengoo_raw_map_key_iter_reset(long long handle) {
+    SengooRawMapKeyIter* iter = (SengooRawMapKeyIter*)sengoo_opaque_handle_get(handle);
+    if (!iter) return SENGOO_STATUS_INVALID_HANDLE;
+    iter->index = 0;
+    return SENGOO_STATUS_OK;
+}
+
+long long sengoo_raw_map_key_iter_index(long long handle) {
+    SengooRawMapKeyIter* iter = (SengooRawMapKeyIter*)sengoo_opaque_handle_get(handle);
+    if (!iter) return 0;
+    return (long long)iter->index;
 }
 
 long long sengoo_raw_map_key_iter_free(long long handle) {

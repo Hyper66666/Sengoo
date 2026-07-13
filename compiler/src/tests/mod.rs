@@ -17,6 +17,7 @@ mod concurrent_async_tests;
 pub mod constant_folding_tests;
 pub mod contracts_tests;
 pub mod core_language_correctness_tests;
+pub mod debug_span_tests;
 pub mod derive_macro_tests;
 pub mod diagnostics_tests;
 pub mod direct_call_helpers_tests;

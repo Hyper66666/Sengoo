@@ -78,7 +78,7 @@ pub(super) fn lower_enum_match_expr(
         targets: switch_plan.targets,
         otherwise: switch_plan.otherwise_block,
     });
-    ctx.mir_fn.basic_blocks[unreachable_block].set_terminator(Terminator::Unreachable);
+    ctx.set_block_terminator(unreachable_block, Terminator::Unreachable);
 
     let mut incoming_values: Vec<(Local, usize)> = Vec::new();
     for (i, arm) in arms.iter().enumerate() {
@@ -87,11 +87,14 @@ pub(super) fn lower_enum_match_expr(
         let arm_result = ctx.lower_expr(&arm.body);
         let arm_end = ctx.current_block();
 
-        if let Some(block) = ctx.mir_fn.block_mut(arm_end) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(join_block));
-                incoming_values.push((arm_result, arm_end));
-            }
+        if ctx
+            .mir_fn
+            .basic_blocks
+            .get(arm_end)
+            .is_some_and(|block| block.terminator.is_none())
+        {
+            ctx.set_block_terminator(arm_end, Terminator::Goto(join_block));
+            incoming_values.push((arm_result, arm_end));
         }
     }
 
@@ -114,11 +117,14 @@ pub(super) fn lower_non_enum_match_expr(
             ctx.lower_pattern_bindings(&arm.pat, scrutinee_local);
             let arm_result = ctx.lower_expr(&arm.body);
             let arm_end = ctx.current_block();
-            if let Some(block) = ctx.mir_fn.block_mut(arm_end) {
-                if block.terminator.is_none() {
-                    block.set_terminator(Terminator::Goto(join_block));
-                    incoming_values.push((arm_result, arm_end));
-                }
+            if ctx
+                .mir_fn
+                .basic_blocks
+                .get(arm_end)
+                .is_some_and(|block| block.terminator.is_none())
+            {
+                ctx.set_block_terminator(arm_end, Terminator::Goto(join_block));
+                incoming_values.push((arm_result, arm_end));
             }
             continue;
         }
@@ -138,11 +144,14 @@ pub(super) fn lower_non_enum_match_expr(
         }
         let arm_result = ctx.lower_expr(&arm.body);
         let arm_end = ctx.current_block();
-        if let Some(block) = ctx.mir_fn.block_mut(arm_end) {
-            if block.terminator.is_none() {
-                block.set_terminator(Terminator::Goto(join_block));
-                incoming_values.push((arm_result, arm_end));
-            }
+        if ctx
+            .mir_fn
+            .basic_blocks
+            .get(arm_end)
+            .is_some_and(|block| block.terminator.is_none())
+        {
+            ctx.set_block_terminator(arm_end, Terminator::Goto(join_block));
+            incoming_values.push((arm_result, arm_end));
         }
 
         if !is_last {

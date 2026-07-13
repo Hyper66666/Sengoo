@@ -81,7 +81,15 @@ Returns the same version object used by the index.
 Returns the published archive as `application/gzip`. `sgpm` verifies its
 SHA-256 before unpacking. The cache stores both the archive checksum and a
 deterministic hash of the extracted file tree; a later locked resolution
-repairs missing or modified cache contents before invoking the toolchain.
+rejects missing or modified cache contents before invoking the toolchain and
+does not contact the registry. An unlocked resolution may repair the cache by
+downloading and verifying the immutable archive again.
+
+Client extraction treats archives as hostile input. Protocol v1 permits at
+most 64 MiB compressed bytes, 256 MiB total declared uncompressed bytes, and
+10,000 entries. Absolute paths, `..` traversal, symbolic links, hard links,
+special entry types, and duplicate normalized paths are rejected in an
+isolated staging directory before cache publication.
 
 ### Yank or unyank
 
@@ -129,6 +137,9 @@ source.version = "1.2.0"
 source.checksum = "<sha256>"
 ```
 
-`sgpm update --check` and commands using `--locked` regenerate the graph and
-compare this checksum with the current registry index. Path and git source
-formats are unchanged.
+`sgpm update --check` resolves the current registry index. Commands using
+`--locked` instead follow schema-v2 dependency edges to exact package ids,
+versions, registries, and checksums, validate the verified cache, and perform
+no network request. A missing, incomplete, or content-tampered cache fails with
+an instruction to run `sgpm update` while online. Path and git source formats
+are unchanged.
