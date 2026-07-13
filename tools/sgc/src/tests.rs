@@ -4502,6 +4502,60 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_generic_channel_round_trip() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let source = format!(
+        "{}\n\n{}",
+        load_async_runtime_stdlib(),
+        r#"
+struct Payload {
+    value: i64,
+}
+
+impl Drop for Payload {
+    def drop(&mut self) {}
+}
+
+async def main() -> i64 {
+    let pair: ChannelPair<Payload> = channel(2);
+    let sender = channel_sender(&pair);
+    let receiver = channel_receiver(&pair);
+    let sent = await channel_send(&sender, Payload { value: 41 });
+    if !sent.is_ok { return 10; }
+    let mut output = Payload { value: 0 };
+    let received = await channel_recv_into(&receiver, &mut output);
+    if !received.is_ok { return 11; }
+    output.value
+}
+"#
+    );
+
+    let llvm_ir = compile_source(&source, 1).expect("generic channel source should compile");
+    let ll_path = temp_artifact("async-generic-channel", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let exe_path = temp_artifact(
+        "async-generic-channel",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("generic channel executable should run");
+    assert_eq!(output.status.code(), Some(41));
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_stdlib_arc_i64_bool_runtime_counts_and_reads() {
     let Some(clang) = find_clang() else {
         return;
@@ -4820,6 +4874,72 @@ def main() -> i64 {
     } else {
         1
     }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_rwlock_guards_release_and_write_back_on_drop() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-guards",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+def read_pair(lock: &RwLock<Payload>) -> i64 {
+    let first_result = rwlock_try_read_guard(lock);
+    if !first_result.is_ok { return first_result.error; }
+    let first = first_result.value;
+    let second_result = rwlock_try_read_guard(lock);
+    if !second_result.is_ok { return second_result.error; }
+    let second = second_result.value;
+    let mut left = Payload { value: 0 };
+    let mut right = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&first, &mut left) { return 80; }
+    if !rwlock_read_guard_copy_into(&second, &mut right) { return 81; }
+    left.value + right.value
+}
+
+def write_value(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = rwlock_try_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let replacement = Payload { value: value };
+    let wrote = guard.set(replacement);
+    if !wrote { return 82; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 83; }
+    output.value
+}
+
+def read_value(lock: &RwLock<Payload>) -> i64 {
+    let result = rwlock_try_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 84; }
+    output.value
+}
+
+def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = read_pair(&lock);
+    let wrote = write_value(&lock, 17);
+    let after = read_value(&lock);
+    if before == 10 && wrote == 17 && after == 17 { 42 } else { 1 }
 }
 "#,
     ) else {

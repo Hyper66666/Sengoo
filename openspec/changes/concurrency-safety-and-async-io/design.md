@@ -72,10 +72,17 @@ negative tests.
 ### Decision 6: Generic channels
 
 `channel<T>(capacity)` returns sender/receiver endpoints. Send moves `T` into
-the channel and requires `T: Send` when crossing threads. Receive moves it out.
-Close wakes waiters; queued values are dropped exactly once; cancellation does
-not lose or double-drop values. Capacity is bounded and backpressure is
-explicit.
+the channel and requires `T: Send` when crossing threads. The v1 receive
+surface is `channel_recv_into<T>(&receiver, &mut initialized_output)`: success
+drops the previous output value and moves the queued value into that storage
+exactly once. This shape keeps all `T` supported without inventing an invalid
+`Result<T, E>` placeholder or imposing a `Default` bound; a direct value-
+returning convenience API may follow once the language has a matching
+discriminated result representation. Close wakes waiters; queued values are
+dropped exactly once; cancellation does not lose or double-drop values.
+Capacity is bounded and backpressure is explicit. Compiler-known raw helpers
+enforce the same `Send` boundary as the public wrapper and are not a safety
+escape hatch.
 
 ### Decision 7: Structured concurrency
 

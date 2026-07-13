@@ -15,6 +15,48 @@ pub(super) fn lower_named_call(
     if name == "mutex_new" && arg_locals.len() == 1 {
         return lower_mutex_new_call(ctx, arg_locals[0]);
     }
+    if name == "rwlock_new" && arg_locals.len() == 1 {
+        return lower_rwlock_new_call(ctx, arg_locals[0]);
+    }
+    if name == "channel" && arg_locals.len() == 1 {
+        return lower_channel_new_call(ctx, arg_locals[0], expected_return_type);
+    }
+    if name == "channel_sender" && arg_locals.len() == 1 {
+        return lower_channel_endpoint_call(
+            ctx,
+            arg_locals[0],
+            "ChannelSender",
+            "sengoo_async_channel_pair_sender",
+            "sengoo_async_channel_sender_drop",
+        );
+    }
+    if name == "channel_receiver" && arg_locals.len() == 1 {
+        return lower_channel_endpoint_call(
+            ctx,
+            arg_locals[0],
+            "ChannelReceiver",
+            "sengoo_async_channel_pair_receiver",
+            "sengoo_async_channel_receiver_drop",
+        );
+    }
+    if name == "channel_clone_sender" && arg_locals.len() == 1 {
+        return lower_channel_endpoint_call(
+            ctx,
+            arg_locals[0],
+            "ChannelSender",
+            "sengoo_async_channel_sender_clone",
+            "sengoo_async_channel_sender_drop",
+        );
+    }
+    if name == "raw_channel_send" && arg_locals.len() == 2 {
+        return lower_raw_channel_send_call(ctx, arg_locals[0], arg_locals[1]);
+    }
+    if name == "raw_channel_recv" && arg_locals.len() == 1 {
+        return lower_raw_channel_recv_call(ctx, arg_locals[0]);
+    }
+    if name == "raw_channel_value_move_into" && arg_locals.len() == 3 {
+        return lower_raw_channel_value_move_into_call(ctx, arg_locals[1], arg_locals[2]);
+    }
     if name == "arc_borrow" && arg_locals.len() == 1 {
         return lower_arc_borrow_call(ctx, arg_locals[0], expected_return_type);
     }
@@ -23,6 +65,30 @@ pub(super) fn lower_named_call(
     }
     if name == "raw_mutex_guard_set" && arg_locals.len() == 2 {
         return lower_raw_mutex_guard_set_call(ctx, arg_locals[0], arg_locals[1]);
+    }
+    if name == "rwlock_read_guard_copy_into" && arg_locals.len() == 2 {
+        return lower_rwlock_guard_copy_into_call(
+            ctx,
+            arg_locals[0],
+            arg_locals[1],
+            "sengoo_async_rwlock_read_guard_copy_into",
+        );
+    }
+    if name == "rwlock_write_guard_copy_into" && arg_locals.len() == 2 {
+        return lower_rwlock_guard_copy_into_call(
+            ctx,
+            arg_locals[0],
+            arg_locals[1],
+            "sengoo_async_rwlock_write_guard_copy_into",
+        );
+    }
+    if name == "raw_rwlock_write_guard_set" && arg_locals.len() == 3 {
+        return lower_raw_rwlock_write_guard_set_call(
+            ctx,
+            arg_locals[0],
+            arg_locals[1],
+            arg_locals[2],
+        );
     }
     if name == "option_none"
         && arg_locals.is_empty()
@@ -1712,6 +1778,375 @@ fn lower_mutex_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Lo
     result
 }
 
+fn lower_rwlock_new_call(ctx: &mut LoweringContext<'_>, value_local: Local) -> Local {
+    let value_ty = ctx.get_local_type(value_local).clone();
+    let Some(value_hir_ty) = ctx.concrete_type_registry.hir_type_for_mir(&value_ty) else {
+        ctx.errors
+            .push("rwlock_new<T>: concrete payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let rwlock_hir_ty = HIRType::named("RwLock".to_string(), vec![value_hir_ty]);
+    let rwlock_name = crate::type_naming::hir_type_instance_name(&rwlock_hir_ty);
+    ctx.concrete_type_registry
+        .register_instance(rwlock_name.clone(), rwlock_hir_ty);
+    let rwlock_ty = MIRType::Struct {
+        name: rwlock_name.clone(),
+        fields: vec![
+            ("handle".to_string(), MIR_I64),
+            ("marker".to_string(), MIR_I64),
+        ],
+    };
+
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("RwLockPayload_{callback_suffix}"));
+    let move_thunk =
+        synthesize_vec_move_thunk(ctx, &value_ty, &format!("RwLockPayload_{callback_suffix}"));
+    let payload_source = materialize_rc_payload_source(ctx, value_local, &value_ty);
+
+    let value_ptr = ctx.add_local(
+        None,
+        LocalKind::Temp,
+        MIRType::Ptr(Box::new(value_ty.clone())),
+    );
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: payload_source,
+    });
+
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let erased_value_ptr = ctx.add_local(None, LocalKind::Temp, i8_ptr.clone());
+    ctx.push_inst(Instruction::Cast {
+        destination: erased_value_ptr,
+        value: value_ptr,
+        to: i8_ptr.clone(),
+    });
+
+    let (payload_size, payload_align) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size_local,
+        value: MirConstant::Int(payload_size as i64),
+    });
+    let align_local = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: align_local,
+        value: MirConstant::Int(payload_align as i64),
+    });
+    let move_fn = typed_function_pointer(ctx, move_thunk, vec![i8_ptr.clone(), i8_ptr.clone()]);
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr]);
+
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: "sengoo_async_rwlock_new_parts".to_string(),
+        args: vec![erased_value_ptr, size_local, align_local, move_fn, drop_fn],
+    });
+
+    let marker = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: marker,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, rwlock_ty.clone());
+    ctx.type_names.insert(result, rwlock_name);
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle, marker],
+        ty: rwlock_ty,
+    });
+    ctx.mark_drop_local_moved(payload_source);
+    result
+}
+
+fn lower_channel_new_call(
+    ctx: &mut LoweringContext<'_>,
+    capacity: Local,
+    expected_return_type: Option<&MIRType>,
+) -> Local {
+    let Some(channel_ty @ MIRType::Struct { .. }) = expected_return_type.cloned() else {
+        ctx.errors.push(
+            "channel<T>: concrete ChannelPair<T> return type could not be resolved".to_string(),
+        );
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let MIRType::Struct {
+        name: channel_name, ..
+    } = &channel_ty
+    else {
+        unreachable!();
+    };
+    let Some(HIRType {
+        kind: hir::HIRTypeKind::Named { name, args },
+        ..
+    }) = ctx.concrete_type_registry.hir_type_for_mir(&channel_ty)
+    else {
+        ctx.errors
+            .push("channel<T>: concrete payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    if name != "ChannelPair" || args.len() != 1 {
+        ctx.errors
+            .push("channel<T>: expected a concrete ChannelPair<T> return type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    }
+    let payload_ty = crate::mir::type_mapping_helpers::hir_type_to_mir_with_structs_and_enums(
+        &args[0],
+        ctx.struct_defs,
+        &ctx.options.enum_defs,
+        &HashMap::new(),
+    );
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&payload_ty);
+    let drop_thunk = synthesize_rc_drop_thunk(
+        ctx,
+        &payload_ty,
+        &format!("ChannelPayload_{callback_suffix}"),
+    );
+    let move_thunk = synthesize_vec_move_thunk(
+        ctx,
+        &payload_ty,
+        &format!("ChannelPayload_{callback_suffix}"),
+    );
+    let (payload_size, payload_align) = crate::codegen::common::mir_type_size_align(&payload_ty);
+    let size = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size,
+        value: MirConstant::Int(payload_size as i64),
+    });
+    let align = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: align,
+        value: MirConstant::Int(payload_align as i64),
+    });
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let move_fn = typed_function_pointer(ctx, move_thunk, vec![i8_ptr.clone(), i8_ptr.clone()]);
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr]);
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: "sengoo_async_channel_bounded_parts".to_string(),
+        args: vec![capacity, size, align, move_fn, drop_fn],
+    });
+    let marker = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: marker,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, channel_ty.clone());
+    ctx.type_names.insert(result, channel_name.clone());
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle, marker],
+        ty: channel_ty,
+    });
+    result
+}
+
+fn load_channel_endpoint_handle(ctx: &mut LoweringContext<'_>, endpoint: Local) -> Option<Local> {
+    let endpoint_ty = ctx.get_local_type(endpoint).clone();
+    let (MIRType::Ref(inner) | MIRType::Ptr(inner)) = endpoint_ty else {
+        ctx.errors
+            .push("channel endpoint must be passed by reference".to_string());
+        return None;
+    };
+    let endpoint_value = ctx.add_local(None, LocalKind::Temp, (*inner).clone());
+    ctx.push_inst(Instruction::Load {
+        destination: endpoint_value,
+        source: endpoint,
+    });
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: handle,
+        value: endpoint_value,
+        index: 0,
+    });
+    Some(handle)
+}
+
+fn lower_channel_endpoint_call(
+    ctx: &mut LoweringContext<'_>,
+    owner: Local,
+    endpoint_base_name: &str,
+    runtime_constructor: &str,
+    runtime_drop: &str,
+) -> Local {
+    let owner_ty = ctx.get_local_type(owner).clone();
+    let owner_value_ty = match owner_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => *inner,
+        _ => {
+            ctx.errors
+                .push("channel endpoint constructor expects a borrowed owner".to_string());
+            return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+    };
+    let Some(HIRType {
+        kind: hir::HIRTypeKind::Named { args, .. },
+        ..
+    }) = ctx.concrete_type_registry.hir_type_for_mir(&owner_value_ty)
+    else {
+        ctx.errors
+            .push("channel endpoint payload type could not be resolved".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    if args.len() != 1 {
+        ctx.errors
+            .push("channel endpoint expected one concrete payload type".to_string());
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    }
+    let endpoint_hir_ty = HIRType::named(endpoint_base_name.to_string(), vec![args[0].clone()]);
+    let endpoint_name = crate::type_naming::hir_type_instance_name(&endpoint_hir_ty);
+    ctx.concrete_type_registry
+        .register_instance(endpoint_name.clone(), endpoint_hir_ty);
+    let endpoint_ty = MIRType::Struct {
+        name: endpoint_name.clone(),
+        fields: vec![
+            ("handle".to_string(), MIR_I64),
+            ("marker".to_string(), MIR_I64),
+        ],
+    };
+    synthesize_channel_endpoint_drop_if_missing(ctx, &endpoint_ty, &endpoint_name, runtime_drop);
+    let Some(owner_handle) = load_channel_endpoint_handle(ctx, owner) else {
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: handle,
+        func: runtime_constructor.to_string(),
+        args: vec![owner_handle],
+    });
+    let marker = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: marker,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, endpoint_ty.clone());
+    ctx.type_names.insert(result, endpoint_name);
+    ctx.push_inst(Instruction::Aggregate {
+        destination: result,
+        fields: vec![handle, marker],
+        ty: endpoint_ty,
+    });
+    result
+}
+
+fn synthesize_channel_endpoint_drop_if_missing(
+    ctx: &mut LoweringContext<'_>,
+    endpoint_ty: &MIRType,
+    endpoint_name: &str,
+    runtime_drop: &str,
+) {
+    let drop_name = format!("{endpoint_name}_Drop_drop");
+    if ctx.is_known_function(&drop_name) {
+        return;
+    }
+    let mut function = MirFunction::new(drop_name.clone(), vec![endpoint_ty.clone()], MIR_UNIT);
+    let owner = Local::new(1, LocalKind::Param);
+    let handle = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Extract {
+            destination: handle,
+            value: owner,
+            index: 0,
+        },
+    );
+    let ignored = function.add_local(LocalKind::Temp, MIR_UNIT);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Call {
+            destination: ignored,
+            func: runtime_drop.to_string(),
+            args: vec![handle],
+        },
+    );
+    function.basic_blocks[function.start_block].set_terminator(Terminator::Return(None));
+    ctx.lambda_functions.push(function);
+    ctx.insert_known_function(drop_name.clone());
+    ctx.insert_function_sig(
+        drop_name,
+        FunctionSig {
+            ret_type: MIR_UNIT,
+            param_count: 1,
+            env: Vec::new(),
+        },
+    );
+}
+
+fn lower_raw_channel_send_call(
+    ctx: &mut LoweringContext<'_>,
+    sender: Local,
+    value: Local,
+) -> Local {
+    let Some(handle) = load_channel_endpoint_handle(ctx, sender) else {
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let value_ty = ctx.get_local_type(value).clone();
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("ChannelSend_{callback_suffix}"));
+    let value_slot = materialize_rc_payload_source(ctx, value, &value_ty);
+    let value_ptr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(value_ty)));
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: value_slot,
+    });
+    let value_ptr = erase_borrowed_pointer(ctx, value_ptr);
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr]);
+    let future = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_I64)));
+    ctx.push_inst(Instruction::Call {
+        destination: future,
+        func: "sengoo_async_channel_send__start".to_string(),
+        args: vec![handle, value_ptr, drop_fn],
+    });
+    ctx.future_origins
+        .insert(future, "sengoo_async_channel_send".to_string());
+    ctx.mark_drop_local_moved(value_slot);
+    future
+}
+
+fn lower_raw_channel_recv_call(ctx: &mut LoweringContext<'_>, receiver: Local) -> Local {
+    let Some(handle) = load_channel_endpoint_handle(ctx, receiver) else {
+        return ctx.add_local(None, LocalKind::Temp, MIR_UNIT);
+    };
+    let future = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_I64)));
+    ctx.push_inst(Instruction::Call {
+        destination: future,
+        func: "sengoo_async_channel_recv__start".to_string(),
+        args: vec![handle],
+    });
+    ctx.future_origins
+        .insert(future, "sengoo_async_channel_recv".to_string());
+    future
+}
+
+fn lower_raw_channel_value_move_into_call(
+    ctx: &mut LoweringContext<'_>,
+    value_handle: Local,
+    output: Local,
+) -> Local {
+    let output = erase_borrowed_pointer(ctx, output);
+    let status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: status,
+        func: "sengoo_async_channel_value_move_into".to_string(),
+        args: vec![value_handle, output],
+    });
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: result,
+        op: MirBinOp::Eq,
+        left: status,
+        right: zero,
+    });
+    result
+}
+
 fn lower_arc_borrow_call(
     ctx: &mut LoweringContext<'_>,
     handle: Local,
@@ -1826,6 +2261,117 @@ fn lower_raw_mutex_guard_set_call(
         destination: status,
         func: "sengoo_async_mutex_guard_set".to_string(),
         args: vec![handle, value_ptr, drop_fn],
+    });
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: result,
+        op: MirBinOp::Eq,
+        left: status,
+        right: zero,
+    });
+    ctx.mark_drop_local_moved(value_slot);
+    result
+}
+
+fn lower_rwlock_guard_copy_into_call(
+    ctx: &mut LoweringContext<'_>,
+    guard: Local,
+    output: Local,
+    runtime_func: &str,
+) -> Local {
+    let guard_ty = ctx.get_local_type(guard).clone();
+    let guard_value_ty = match guard_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner,
+        _ => {
+            ctx.errors
+                .push("rwlock guard copy: expected guard reference".to_string());
+            return ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+        }
+    };
+    let guard_value = ctx.add_local(None, LocalKind::Temp, (*guard_value_ty).clone());
+    ctx.push_inst(Instruction::Load {
+        destination: guard_value,
+        source: guard,
+    });
+    let handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: handle,
+        value: guard_value,
+        index: 0,
+    });
+    let guard_id = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Extract {
+        destination: guard_id,
+        value: guard_value,
+        index: 1,
+    });
+
+    let output_ty = ctx.get_local_type(output).clone();
+    let value_ty = match output_ty {
+        MIRType::Ref(inner) | MIRType::Ptr(inner) => inner,
+        _ => {
+            ctx.errors
+                .push("rwlock guard copy: expected mutable output reference".to_string());
+            return ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+        }
+    };
+    let output = erase_borrowed_pointer(ctx, output);
+    let (value_size, _) = crate::codegen::common::mir_type_size_align(&value_ty);
+    let size = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: size,
+        value: MirConstant::Int(value_size as i64),
+    });
+    let status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: status,
+        func: runtime_func.to_string(),
+        args: vec![handle, guard_id, output, size],
+    });
+    let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Assign {
+        destination: zero,
+        value: MirConstant::Int(0),
+    });
+    let result = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Binary {
+        destination: result,
+        op: MirBinOp::Eq,
+        left: status,
+        right: zero,
+    });
+    result
+}
+
+fn lower_raw_rwlock_write_guard_set_call(
+    ctx: &mut LoweringContext<'_>,
+    handle: Local,
+    guard_id: Local,
+    value: Local,
+) -> Local {
+    let value_ty = ctx.get_local_type(value).clone();
+    let callback_suffix = crate::type_naming::mir_type_instance_name(&value_ty);
+    let drop_thunk =
+        synthesize_rc_drop_thunk(ctx, &value_ty, &format!("RwLockSet_{callback_suffix}"));
+    let value_slot = materialize_rc_payload_source(ctx, value, &value_ty);
+    let value_ptr = ctx.add_local(None, LocalKind::Temp, MIRType::Ptr(Box::new(value_ty)));
+    ctx.push_inst(Instruction::AddrOf {
+        destination: value_ptr,
+        source: value_slot,
+    });
+    let value_ptr = erase_borrowed_pointer(ctx, value_ptr);
+    let i8_ptr = MIRType::Ptr(Box::new(MIRType::Int(8)));
+    let drop_fn = typed_function_pointer(ctx, drop_thunk, vec![i8_ptr]);
+    let status = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+    ctx.push_inst(Instruction::Call {
+        destination: status,
+        func: "sengoo_async_rwlock_write_guard_set".to_string(),
+        args: vec![handle, guard_id, value_ptr, drop_fn],
     });
     let zero = ctx.add_local(None, LocalKind::Temp, MIR_I64);
     ctx.push_inst(Instruction::Assign {

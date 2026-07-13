@@ -360,6 +360,10 @@ impl TypeChecker {
                     args: vec![],
                 }))),
             )),
+            "raw_channel_send" | "raw_channel_recv" => Some(Ty::new(
+                0,
+                TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
+            )),
             "mutex_lock_async" => Some(Ty::new(
                 0,
                 TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
@@ -650,6 +654,30 @@ impl TypeChecker {
                         }
                     }
                     "channel_recv_i64" | "mutex_lock_async" | "HttpServer_next_request_async" => {
+                        if args.len() != 1 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                    }
+                    "raw_channel_send" => {
+                        if args.len() != 2 {
+                            return Err(TypeckError::ArgumentCountMismatch {
+                                expected: 2,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                        let value_ty = self.check_expr(&args[1])?;
+                        if Self::type_is_fully_concrete(&value_ty)
+                            && !self.is_cross_thread_send_ty(&value_ty)
+                        {
+                            return Err(Self::cross_thread_send_error("value"));
+                        }
+                    }
+                    "raw_channel_recv" => {
                         if args.len() != 1 {
                             return Err(TypeckError::ArgumentCountMismatch {
                                 expected: 1,

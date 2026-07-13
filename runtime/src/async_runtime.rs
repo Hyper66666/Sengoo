@@ -53,17 +53,21 @@ pub use concurrent::{
     sengoo_async_mutex_new, sengoo_async_mutex_new_i64, sengoo_async_mutex_new_parts,
     sengoo_async_mutex_unlock_i64, sengoo_async_runtime_enable_thread_pool,
     sengoo_async_runtime_thread_pool_enabled, sengoo_async_rwlock_close, sengoo_async_rwlock_drop,
-    sengoo_async_rwlock_new_i64, sengoo_async_rwlock_read_guard_get_i64,
-    sengoo_async_rwlock_read_guard_unlock_i64, sengoo_async_rwlock_try_read_i64,
-    sengoo_async_rwlock_try_write_i64, sengoo_async_rwlock_write_guard_get_i64,
-    sengoo_async_rwlock_write_guard_set_i64, sengoo_async_rwlock_write_guard_unlock_i64,
-    sengoo_async_shared_counter_clone_i64, sengoo_async_shared_counter_drop,
-    sengoo_async_shared_counter_get_i64, sengoo_async_shared_counter_job_drop,
-    sengoo_async_shared_counter_join_i64, sengoo_async_shared_counter_new_i64,
-    sengoo_async_shared_counter_spawn_add_i64, sengoo_async_spawn_blocking_i64__cancel,
-    sengoo_async_spawn_blocking_i64__drop, sengoo_async_spawn_blocking_i64__poll,
-    sengoo_async_spawn_blocking_i64__result, sengoo_async_spawn_blocking_i64__start,
-    ChannelRecvI64Result, ChannelSendI64Result, MutexLockI64Result,
+    sengoo_async_rwlock_new, sengoo_async_rwlock_new_i64, sengoo_async_rwlock_new_parts,
+    sengoo_async_rwlock_read_guard_copy_into, sengoo_async_rwlock_read_guard_get_i64,
+    sengoo_async_rwlock_read_guard_unlock, sengoo_async_rwlock_read_guard_unlock_i64,
+    sengoo_async_rwlock_try_read, sengoo_async_rwlock_try_read_i64, sengoo_async_rwlock_try_write,
+    sengoo_async_rwlock_try_write_i64, sengoo_async_rwlock_write_guard_copy_into,
+    sengoo_async_rwlock_write_guard_get_i64, sengoo_async_rwlock_write_guard_set,
+    sengoo_async_rwlock_write_guard_set_i64, sengoo_async_rwlock_write_guard_unlock,
+    sengoo_async_rwlock_write_guard_unlock_i64, sengoo_async_shared_counter_clone_i64,
+    sengoo_async_shared_counter_drop, sengoo_async_shared_counter_get_i64,
+    sengoo_async_shared_counter_job_drop, sengoo_async_shared_counter_join_i64,
+    sengoo_async_shared_counter_new_i64, sengoo_async_shared_counter_spawn_add_i64,
+    sengoo_async_spawn_blocking_i64__cancel, sengoo_async_spawn_blocking_i64__drop,
+    sengoo_async_spawn_blocking_i64__poll, sengoo_async_spawn_blocking_i64__result,
+    sengoo_async_spawn_blocking_i64__start, ChannelRecvI64Result, ChannelSendI64Result,
+    MutexLockI64Result,
 };
 #[cfg(feature = "native-bridge")]
 pub use futures::{
@@ -1788,26 +1792,43 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_rwlock_guards_support_readers_writer_and_safe_duplicate_unlock() {
+    fn concurrent_generic_rwlock_supports_multiple_readers_exclusive_writer_and_i64_wrappers() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         thread_pool::test_only_disable_thread_pool();
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {}
+
         let lock = sengoo_async_rwlock_new_i64(5);
 
-        let first_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        let first_reader = unsafe { sengoo_async_rwlock_try_read(lock) };
         let second_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
         assert!(first_reader > 0);
         assert!(second_reader > 0);
+
+        let mut copied = 0_i64;
         assert_eq!(
-            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, first_reader) },
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    first_reader,
+                    (&mut copied as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(copied, 5);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, second_reader) },
             5
         );
         assert_eq!(
-            unsafe { sengoo_async_rwlock_try_write_i64(lock) },
+            unsafe { sengoo_async_rwlock_try_write(lock) },
             -concurrent::STATUS_LOCK_UNAVAILABLE
         );
 
         assert_eq!(
-            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, first_reader) },
+            unsafe { sengoo_async_rwlock_read_guard_unlock(lock, first_reader) },
             0
         );
         assert_eq!(
@@ -1825,16 +1846,28 @@ mod tests {
 
         let writer = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
         assert!(writer > 0);
+        let mut replacement = 9_i64;
         assert_eq!(
-            unsafe { sengoo_async_rwlock_write_guard_set_i64(lock, writer, 9) },
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    writer,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
             0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_get_i64(lock, writer) },
+            9
         );
         assert_eq!(
             unsafe { sengoo_async_rwlock_try_read_i64(lock) },
             -concurrent::STATUS_LOCK_UNAVAILABLE
         );
         assert_eq!(
-            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
             0
         );
         assert_eq!(
@@ -1854,10 +1887,222 @@ mod tests {
         );
         unsafe { sengoo_async_rwlock_close(lock) };
         assert_eq!(
-            unsafe { sengoo_async_rwlock_try_read_i64(lock) },
+            unsafe { sengoo_async_rwlock_try_read(lock) },
             -concurrent::STATUS_INVALID_HANDLE
         );
         unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn concurrent_generic_rwlock_invalid_copy_and_set_preserve_output_and_consume_inputs() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut initial = 7_i64;
+        let lock = unsafe {
+            sengoo_async_rwlock_new_parts(
+                (&mut initial as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(lock, 0);
+
+        let reader = unsafe { sengoo_async_rwlock_try_read(lock) };
+        assert!(reader > 0);
+
+        let mut read_output = 123_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    reader,
+                    (&mut read_output as *mut i64).cast(),
+                    4,
+                )
+            },
+            -concurrent::STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(read_output, 123);
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    0,
+                    (&mut read_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(read_output, 123);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock(lock, reader) },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    reader,
+                    (&mut read_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(read_output, 123);
+
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let mut rejected = 11_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    0,
+                    (&mut rejected as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+
+        let mut write_output = 456_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    writer,
+                    (&mut write_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(write_output, 7);
+
+        write_output = 789;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    writer,
+                    (&mut write_output as *mut i64).cast(),
+                    4,
+                )
+            },
+            -concurrent::STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(write_output, 789);
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    999_999,
+                    (&mut write_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(write_output, 789);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn concurrent_generic_rwlock_close_and_drop_stay_stable_and_drop_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut initial = 5_i64;
+        let lock = unsafe {
+            sengoo_async_rwlock_new_parts(
+                (&mut initial as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(lock, 0);
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 0);
+
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let mut replacement = 13_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    writer,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_close(lock) };
+        unsafe { sengoo_async_rwlock_close(lock) };
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        unsafe { sengoo_async_rwlock_drop(lock) };
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 2);
     }
 
     #[test]

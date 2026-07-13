@@ -2,7 +2,11 @@ use super::call_invocation_helpers::CallInvocationPlan;
 use super::*;
 
 fn runtime_async_wrapper_name(func_name: &str) -> &str {
-    const GENERIC_WRAPPERS: &[&str] = &["raw_mutex_lock_async"];
+    const GENERIC_WRAPPERS: &[&str] = &[
+        "raw_mutex_lock_async",
+        "raw_channel_send",
+        "raw_channel_recv",
+    ];
 
     GENERIC_WRAPPERS
         .iter()
@@ -21,6 +25,8 @@ fn runtime_async_wrapper_origin(func_name: &str) -> Option<&'static str> {
         "spawn_blocking_future_i64" => Some("sengoo_async_spawn_blocking_i64"),
         "channel_send_i64" => Some("sengoo_async_channel_send_i64"),
         "channel_recv_i64" => Some("sengoo_async_channel_recv_i64"),
+        "raw_channel_send" => Some("sengoo_async_channel_send"),
+        "raw_channel_recv" => Some("sengoo_async_channel_recv"),
         "mutex_lock_async" => Some("sengoo_async_mutex_lock_i64"),
         "raw_mutex_lock_async" => Some("sengoo_async_mutex_lock"),
         "HttpServer_next_request_async" => Some("sengoo_http_server_next_request_async"),
@@ -46,6 +52,7 @@ fn runtime_async_wrapper_future_ty(func_name: &str) -> Option<MIRType> {
                 ("error".to_string(), MIR_I64),
             ],
         }))),
+        "raw_channel_send" | "raw_channel_recv" => Some(MIRType::Future(Box::new(MIR_I64))),
         "mutex_lock_async" => Some(MIRType::Future(Box::new(MIRType::Struct {
             name: "MutexLockOutcome".to_string(),
             fields: vec![

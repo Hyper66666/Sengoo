@@ -504,6 +504,10 @@ impl Codegen {
             "sengoo_async_runtime_enable_thread_pool",
             "sengoo_async_spawn_blocking_i64",
             "sengoo_async_channel_bounded_i64",
+            "sengoo_async_channel_bounded_parts",
+            "sengoo_async_channel_send__start",
+            "sengoo_async_channel_recv__start",
+            "sengoo_async_channel_value_move_into",
             "sengoo_async_channel_send_i64",
             "sengoo_async_channel_recv_i64",
             "sengoo_async_mutex_lock_i64",
@@ -526,6 +530,8 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_spawn_blocking_i64")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send_i64")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_mutex_lock_i64")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
         {
@@ -614,6 +620,52 @@ impl Codegen {
                 (
                     "drop",
                     "declare void @sengoo_async_channel_recv_i64__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_channel_send",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_channel_send__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_channel_send__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_channel_send__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_channel_send__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_channel_recv",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_channel_recv__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_channel_recv__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_channel_recv__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_channel_recv__drop(i64)\n",
                 ),
             ],
         );
@@ -978,6 +1030,38 @@ impl Codegen {
                 "sengoo_async_mutex_guard_set",
                 "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
             ),
+            (
+                "sengoo_async_rwlock_new_parts",
+                "declare i64 @sengoo_async_rwlock_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_rwlock_read_guard_copy_into",
+                "declare i64 @sengoo_async_rwlock_read_guard_copy_into(i64, i64, i8*, i64)\n",
+            ),
+            (
+                "sengoo_async_rwlock_write_guard_copy_into",
+                "declare i64 @sengoo_async_rwlock_write_guard_copy_into(i64, i64, i8*, i64)\n",
+            ),
+            (
+                "sengoo_async_rwlock_write_guard_set",
+                "declare i64 @sengoo_async_rwlock_write_guard_set(i64, i64, i8*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_channel_bounded_parts",
+                "declare i64 @sengoo_async_channel_bounded_parts(i64, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_channel_send__start",
+                "declare i64 @sengoo_async_channel_send__start(i64, i8*, void (i8*)*)\n",
+            ),
+            (
+                "sengoo_async_channel_recv__start",
+                "declare i64 @sengoo_async_channel_recv__start(i64)\n",
+            ),
+            (
+                "sengoo_async_channel_value_move_into",
+                "declare i64 @sengoo_async_channel_value_move_into(i64, i8*)\n",
+            ),
         ]
         .into_iter()
         .filter(|(name, _)| {
@@ -1196,6 +1280,14 @@ mod tests {
             "sengoo_async_mutex_new_parts",
             "sengoo_async_mutex_guard_copy_into",
             "sengoo_async_mutex_guard_set",
+            "sengoo_async_rwlock_new_parts",
+            "sengoo_async_rwlock_read_guard_copy_into",
+            "sengoo_async_rwlock_write_guard_copy_into",
+            "sengoo_async_rwlock_write_guard_set",
+            "sengoo_async_channel_bounded_parts",
+            "sengoo_async_channel_send__start",
+            "sengoo_async_channel_recv__start",
+            "sengoo_async_channel_value_move_into",
         ] {
             let destination = mir_fn.add_local(LocalKind::Temp, crate::mir::MIR_I64);
             mir_fn.push_inst_to_block(
@@ -1217,6 +1309,14 @@ mod tests {
             "declare i64 @sengoo_async_mutex_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
             "declare i64 @sengoo_async_mutex_guard_copy_into(i64, i8*, i64)\n",
             "declare i64 @sengoo_async_mutex_guard_set(i64, i8*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_rwlock_new_parts(i8*, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_rwlock_read_guard_copy_into(i64, i64, i8*, i64)\n",
+            "declare i64 @sengoo_async_rwlock_write_guard_copy_into(i64, i64, i8*, i64)\n",
+            "declare i64 @sengoo_async_rwlock_write_guard_set(i64, i64, i8*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_channel_bounded_parts(i64, i64, i64, void (i8*, i8*)*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_channel_send__start(i64, i8*, void (i8*)*)\n",
+            "declare i64 @sengoo_async_channel_recv__start(i64)\n",
+            "declare i64 @sengoo_async_channel_value_move_into(i64, i8*)\n",
         ] {
             assert_eq!(cg.declarations.matches(declaration).count(), 1);
         }

@@ -17,6 +17,7 @@ extern "C" {
     fn sengoo_async_channel_sender_clone(sender_handle: i64) -> i64;
     fn sengoo_async_channel_sender_close(sender_handle: i64);
     fn sengoo_async_channel_sender_drop(sender_handle: i64);
+    fn sengoo_async_channel_receiver_drop(receiver_handle: i64);
     fn sengoo_async_channel_send_i64__start(sender_handle: i64, value: i64) -> i64;
     fn sengoo_async_channel_recv_i64__start(receiver_handle: i64) -> i64;
 
@@ -40,11 +41,15 @@ extern "C" {
     fn sengoo_async_rwlock_drop(lock_handle: i64);
     fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i64;
     fn sengoo_async_rwlock_try_write_i64(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_try_read(lock_handle: i64) -> i64;
+    fn sengoo_async_rwlock_try_write(lock_handle: i64) -> i64;
     fn sengoo_async_rwlock_read_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_get_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_set_i64(lock_handle: i64, guard_id: i64, value: i64) -> i64;
     fn sengoo_async_rwlock_read_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
+    fn sengoo_async_rwlock_read_guard_unlock(lock_handle: i64, guard_id: i64) -> i64;
+    fn sengoo_async_rwlock_write_guard_unlock(lock_handle: i64, guard_id: i64) -> i64;
 
     fn sengoo_arc_clone(handle: i64) -> i64;
     fn sengoo_arc_strong_count(handle: i64) -> i64;
@@ -82,6 +87,23 @@ struct ChannelReceiverI64 {
     handle: i64,
 }
 
+struct ChannelPair<T> {
+    handle: i64,
+    marker: i64,
+}
+
+struct ChannelSender<T> {
+    handle: i64,
+    marker: i64,
+}
+
+struct ChannelReceiver<T> {
+    handle: i64,
+    marker: i64,
+}
+
+impl<T> !Sync for ChannelReceiver<T> {}
+
 struct MutexI64 {
     handle: i64,
 }
@@ -107,9 +129,21 @@ struct RwLockI64 {
     handle: i64,
 }
 
+struct RwLock<T> {
+    handle: i64,
+    marker: i64,
+}
+
 struct RwLockReadGuardI64 {
     lock_handle: i64,
     guard_id: i64,
+    active: bool,
+}
+
+struct RwLockReadGuard<T> {
+    lock_handle: i64,
+    guard_id: i64,
+    marker: i64,
     active: bool,
 }
 
@@ -119,14 +153,25 @@ struct RwLockWriteGuardI64 {
     active: bool,
 }
 
+struct RwLockWriteGuard<T> {
+    lock_handle: i64,
+    guard_id: i64,
+    marker: i64,
+    active: bool,
+}
+
 impl !Send for MutexGuardI64 {}
 impl !Sync for MutexGuardI64 {}
 impl<T> !Send for MutexGuard<T> {}
 impl<T> !Sync for MutexGuard<T> {}
 impl !Send for RwLockReadGuardI64 {}
 impl !Sync for RwLockReadGuardI64 {}
+impl<T> !Send for RwLockReadGuard<T> {}
+impl<T> !Sync for RwLockReadGuard<T> {}
 impl !Send for RwLockWriteGuardI64 {}
 impl !Sync for RwLockWriteGuardI64 {}
+impl<T> !Send for RwLockWriteGuard<T> {}
+impl<T> !Sync for RwLockWriteGuard<T> {}
 
 struct Arc<T> {
     handle: i64,
@@ -161,7 +206,31 @@ def mutex_new<T>(value: T) -> Mutex<T> {
     Mutex { handle: 0, marker: 0 }
 }
 
+def rwlock_new<T>(value: T) -> RwLock<T> {
+    RwLock { handle: 0, marker: 0 }
+}
+
 def raw_mutex_guard_set<T>(handle: i64, value: T) -> bool {
+    false
+}
+
+def raw_rwlock_write_guard_set<T>(handle: i64, guard_id: i64, value: T) -> bool {
+    false
+}
+
+def raw_channel_send<T>(sender: &ChannelSender<T>, value: T) -> i64 {
+    0
+}
+
+def raw_channel_recv<T>(receiver: &ChannelReceiver<T>) -> i64 {
+    0
+}
+
+def raw_channel_value_move_into<T>(
+    receiver: &ChannelReceiver<T>,
+    value_handle: i64,
+    output: &mut T,
+) -> bool {
     false
 }
 
@@ -297,6 +366,76 @@ impl Drop for MutexGuardI64 {
     }
 }
 
+impl<T> RwLock<T> {
+    def raw_handle(&self) -> i64 {
+        self.handle
+    }
+
+    def make_read_guard(&self, guard_id: i64, active: bool) -> RwLockReadGuard<T> {
+        RwLockReadGuard {
+            lock_handle: self.handle,
+            guard_id: guard_id,
+            marker: 0,
+            active: active,
+        }
+    }
+
+    def make_write_guard(&self, guard_id: i64, active: bool) -> RwLockWriteGuard<T> {
+        RwLockWriteGuard {
+            lock_handle: self.handle,
+            guard_id: guard_id,
+            marker: 0,
+            active: active,
+        }
+    }
+
+    def close(&self) {
+        sengoo_async_rwlock_close(self.handle);
+    }
+}
+
+impl<T> Drop for RwLock<T> {
+    def drop(&mut self) {
+        sengoo_async_rwlock_drop(self.handle);
+    }
+}
+
+def rwlock_read_guard_copy_into<T: Copy>(
+    guard: &RwLockReadGuard<T>,
+    output: &mut T,
+) -> bool {
+    false
+}
+
+def rwlock_write_guard_copy_into<T: Copy>(
+    guard: &RwLockWriteGuard<T>,
+    output: &mut T,
+) -> bool {
+    false
+}
+
+impl<T> RwLockWriteGuard<T> {
+    def set(&mut self, value: T) -> bool {
+        raw_rwlock_write_guard_set(self.lock_handle, self.guard_id, value)
+    }
+}
+
+impl<T> Drop for RwLockReadGuard<T> {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_rwlock_read_guard_unlock(self.lock_handle, self.guard_id);
+        }
+    }
+}
+
+impl<T> Drop for RwLockWriteGuard<T> {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_rwlock_write_guard_unlock(self.lock_handle, self.guard_id);
+        }
+    }
+}
+
 impl RwLockReadGuardI64 {
     def get(&self) -> i64 {
         sengoo_async_rwlock_read_guard_get_i64(self.lock_handle, self.guard_id)
@@ -407,6 +546,91 @@ async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
     }
 }
 
+def channel<T: Send>(capacity: i64) -> ChannelPair<T> {
+    ChannelPair { handle: 0, marker: 0 }
+}
+
+def channel_sender<T>(pair: &ChannelPair<T>) -> ChannelSender<T> {
+    ChannelSender {
+        handle: sengoo_async_channel_pair_sender((*pair).handle),
+        marker: 0,
+    }
+}
+
+def channel_receiver<T>(pair: &ChannelPair<T>) -> ChannelReceiver<T> {
+    ChannelReceiver {
+        handle: sengoo_async_channel_pair_receiver((*pair).handle),
+        marker: 0,
+    }
+}
+
+def channel_clone_sender<T>(sender: &ChannelSender<T>) -> ChannelSender<T> {
+    ChannelSender {
+        handle: sengoo_async_channel_sender_clone((*sender).handle),
+        marker: 0,
+    }
+}
+
+async def channel_send<T: Send>(
+    sender: &ChannelSender<T>,
+    value: T,
+) -> Result<i64, i64> {
+    let status = await raw_channel_send(sender, value);
+    if status == 0 {
+        Result { is_ok: true, value: 0, error: 0 }
+    } else {
+        Result {
+            is_ok: false,
+            value: 0,
+            error: status_from_raw_ffi(status),
+        }
+    }
+}
+
+async def channel_recv_into<T>(
+    receiver: &ChannelReceiver<T>,
+    output: &mut T,
+) -> Result<i64, i64> {
+    let value_handle = await raw_channel_recv(receiver);
+    if value_handle > 0 {
+        if raw_channel_value_move_into(receiver, value_handle, output) {
+            Result { is_ok: true, value: 0, error: 0 }
+        } else {
+            Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: 0,
+            error: if value_handle < 0 { status_from_raw_ffi(value_handle) } else { STATUS_INVALID_HANDLE() },
+        }
+    }
+}
+
+impl<T> Drop for ChannelPair<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_pair_free(self.handle);
+        }
+    }
+}
+
+impl<T> Drop for ChannelSender<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_sender_drop(self.handle);
+        }
+    }
+}
+
+impl<T> Drop for ChannelReceiver<T> {
+    def drop(&mut self) {
+        if self.handle != 0 {
+            sengoo_async_channel_receiver_drop(self.handle);
+        }
+    }
+}
+
 def channel_bounded(capacity: i64) -> Result<ChannelPairI64, i64> {
     channel_bounded_i64(capacity)
 }
@@ -508,6 +732,40 @@ def rwlock_close(lock: RwLockI64) {
 
 def rwlock_drop(lock: RwLockI64) {
     sengoo_async_rwlock_drop(lock.handle);
+}
+
+def rwlock_try_read_guard<T>(lock: &RwLock<T>) -> Result<RwLockReadGuard<T>, i64> {
+    let raw = sengoo_async_rwlock_try_read(lock.raw_handle());
+    if raw > 0 {
+        Result {
+            is_ok: true,
+            value: lock.make_read_guard(raw, true),
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: lock.make_read_guard(0, false),
+            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
+        }
+    }
+}
+
+def rwlock_try_write_guard<T>(lock: &RwLock<T>) -> Result<RwLockWriteGuard<T>, i64> {
+    let raw = sengoo_async_rwlock_try_write(lock.raw_handle());
+    if raw > 0 {
+        Result {
+            is_ok: true,
+            value: lock.make_write_guard(raw, true),
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: lock.make_write_guard(0, false),
+            error: if raw == -11 { STATUS_TIMEOUT() } else { STATUS_INVALID_HANDLE() },
+        }
+    }
 }
 
 def rwlock_try_read_guard_i64(lock: RwLockI64) -> Result<RwLockReadGuardI64, i64> {

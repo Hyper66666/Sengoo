@@ -68,6 +68,9 @@ contract, an mpsc `channel<T>`, and a structured task scope.
 - **WHEN** one task sends values on a `channel<T>` and another receives them
 - **THEN** the receiver observes the sent values in order and is woken
   asynchronously when data arrives
+- **AND** the v1 `channel_recv_into` operation replaces an initialized output
+  by moving the received `T` exactly once, without requiring `T: Default`
+- **AND** public and compiler-known send entry points reject a `!Send` payload
 
 #### Scenario: Structured task scope joins children
 

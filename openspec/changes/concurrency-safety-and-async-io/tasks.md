@@ -46,10 +46,11 @@
     `MutexGuard<T>` with async acquisition, Copy-only reads, owned replacement,
     and automatic scope-exit unlock. Runtime and native tests cover arbitrary
     payload Drop, fresh lock acquisition, failed-lock cleanup, duplicate unlock
-    rejection, and public `Arc<Mutex<i64>>` worker composition. The scalar
-    transition surface still provides `RwLockI64` read/write guards and handoff
-    coverage. Generic `RwLock<T>`, async rwlock waiting, and compiler-enforced
-    lock-outlives-guard lifetimes remain open.
+    rejection, and public `Arc<Mutex<i64>>` worker composition. Descriptor-backed
+    `RwLock<T>` now provides multiple read guards, an exclusive write guard,
+    Copy-only reads, owned replacement, exact payload Drop, and automatic guard
+    unlock while preserving `RwLockI64` wrappers. Async rwlock waiting and
+    compiler-enforced lock-outlives-guard lifetimes remain open.
 - [x] 2.3 Tests: shared counter across threads via `Arc<Mutex<...>>`.
   - `runtime/src/async_runtime.rs::concurrent_shared_counter_joins_workers_deterministically`
     submits eight jobs to four workers against a real `Arc<Mutex<i64>>` payload
@@ -90,9 +91,15 @@
   - Partial: `tools/stdlib/async_futures.sg` defines `Poll<T>`,
     `AsyncContext`, and `Future<T>::poll`, with compiler and native tests for
     ready/pending user futures plus rejected Poll/receiver shapes.
-- [ ] 5.2 `channel<T>()` mpsc with async-aware send/recv.
-  - Partial: `std::async` exposes bounded i64 channels with async send/recv
-    outcomes and realworld smoke coverage. Generic `channel<T>` remains open.
+- [x] 5.2 `channel<T>()` mpsc with async-aware send/recv.
+  - `std::async` exposes descriptor-backed `ChannelPair<T>`, sender and
+    receiver endpoints, async `channel_send`, and the v1 no-`Default`
+    `channel_recv_into` move-out contract while retaining the bounded i64
+    wrappers. Runtime tests cover backpressure, close, queued teardown,
+    pending/closed/cancelled send ownership, receive replacement, abandoned
+    value handles, and exact Drop. Compiler tests cover typed lowering plus
+    public and raw `!Send` rejection, and a native `sgc` round trip moves a
+    user-defined payload through the complete runtime ABI.
 - [ ] 5.3 `task_scope` structured-concurrency helper (join/cancel children on
   scope exit).
 - [ ] 5.4 Tests for channels, scoped tasks, and cancellation boundaries.
