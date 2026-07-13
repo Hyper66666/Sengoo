@@ -31,7 +31,7 @@ Build release artifacts:
 
 ```powershell
 cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
-.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.1.0-rc.1 -NoBuild
 ```
 
 The packaging script writes a release-shaped archive, `manifest.json`, and a
@@ -39,8 +39,8 @@ The packaging script writes a release-shaped archive, `manifest.json`, and a
 `share/sengoo/stdlib` and `share/sengoo/runtime`, so installed `sgc` can resolve
 stdlib imports without `SENGOO_ROOT` or a source checkout.
 
-Name archives with the toolchain tag and host triple, for example
-`sengoo-toolchain-2026.06.08-x86_64-pc-windows-msvc.zip`.
+The packaging script names archives from the workspace version and target
+triple, for example `sengoo-0.1.0-rc.1-x86_64-pc-windows-msvc.zip`.
 
 Each archive must include a plain-text or JSON manifest recording:
 
@@ -55,13 +55,13 @@ Each archive must include a plain-text or JSON manifest recording:
 Verify the archive before tagging:
 
 ```powershell
-Get-FileHash .\sengoo-toolchain-<tag>-<host>.zip -Algorithm SHA256
+Get-FileHash .\target\dist\sengoo-<version>-<target>.zip -Algorithm SHA256
 ```
 
 On POSIX hosts:
 
 ```bash
-sha256sum sengoo-toolchain-<tag>-<host>.tar.gz
+sha256sum target/dist/sengoo-<version>-<target>.tar.gz
 ```
 
 ## Smoke tests before tagging
@@ -103,11 +103,11 @@ The install scripts choose the current host channel, download the pinned tag,
 verify its SHA-256, and replace the selected install directory:
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0 -AddToPath
+.\scripts\install.ps1 -Version 0.1.0-rc.1 -AddToPath
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0 --add-to-path
+sh scripts/install.sh --version 0.1.0-rc.1 --add-to-path
 ```
 
 Run the same command with a newer explicit version to upgrade. There is no
