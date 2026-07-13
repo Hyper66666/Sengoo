@@ -505,6 +505,11 @@ impl Codegen {
                 let dest = self.local_name(*destination);
 
                 let base_reg = self.local_name(*base);
+                let destination_ty = self.get_local_type(mir_fn, *destination).clone();
+                let (MIRType::Ptr(element_ty) | MIRType::Ref(element_ty)) = destination_ty else {
+                    return Err("index address destination must be pointer-like".to_string());
+                };
+                let element_llvm = self.mir_type_to_llvm_cached(&element_ty);
 
                 // User index locals must be loaded before getelementptr.
                 let idx_local_info = &mir_fn.locals[index.index()].0;
@@ -523,16 +528,16 @@ impl Codegen {
                     self.emit_indent();
 
                     self.ir.push_str(&format!(
-                        "{} = getelementptr i64, i64* {}, i64 {}\n",
-                        dest, base_reg, idx_temp
+                        "{} = getelementptr {}, {}* {}, i64 {}\n",
+                        dest, element_llvm, element_llvm, base_reg, idx_temp
                     ));
                 } else {
                     // Non-user index locals can be used directly in getelementptr.
                     let idx_reg = self.local_name(*index);
 
                     self.ir.push_str(&format!(
-                        "{} = getelementptr i64, i64* {}, i64 {}\n",
-                        dest, base_reg, idx_reg
+                        "{} = getelementptr {}, {}* {}, i64 {}\n",
+                        dest, element_llvm, element_llvm, base_reg, idx_reg
                     ));
                 }
             }

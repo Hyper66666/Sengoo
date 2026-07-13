@@ -1,0 +1,7 @@
+import std::assert;
+
+import default_library_conformance;
+
+def test_default_library_conformance() -> i64 {
+    conformance_status();
+}

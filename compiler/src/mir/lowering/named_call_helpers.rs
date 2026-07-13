@@ -121,6 +121,16 @@ pub(super) fn lower_named_call(
             expected_return_type,
         );
     }
+    if name == "raw_hashmap_remove_string_handle" && arg_locals.len() == 2 {
+        let key = erase_borrowed_pointer(ctx, arg_locals[1]);
+        let result = ctx.add_local(None, LocalKind::Temp, MIR_I64);
+        ctx.push_inst(Instruction::Call {
+            destination: result,
+            func: "sengoo_raw_hashmap_remove_string".to_string(),
+            args: vec![arg_locals[0], key],
+        });
+        return result;
+    }
     if name == "raw_hashset_insert" && arg_locals.len() == 2 {
         let unit = ctx.add_local(None, LocalKind::Temp, MIR_I64);
         ctx.push_inst(Instruction::Assign {
@@ -1025,6 +1035,33 @@ fn synthesize_vec_move_thunk(
             value,
         },
     );
+    let erased_source = function.add_local(LocalKind::Temp, i8_ptr);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Cast {
+            destination: erased_source,
+            value: typed_source,
+            to: MIRType::Ptr(Box::new(MIRType::Int(8))),
+        },
+    );
+    let (element_size, _) = crate::codegen::common::mir_type_size_align(element_ty);
+    let size = function.add_local(LocalKind::Temp, MIR_I64);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Assign {
+            destination: size,
+            value: MirConstant::Int(element_size as i64),
+        },
+    );
+    let ignored = function.add_local(LocalKind::Temp, MIR_UNIT);
+    function.push_inst_to_block(
+        function.start_block,
+        Instruction::Call {
+            destination: ignored,
+            func: "sengoo_raw_zero_bytes".to_string(),
+            args: vec![erased_source, size],
+        },
+    );
     function.basic_blocks[function.start_block].set_terminator(Terminator::Return(None));
     ctx.lambda_functions.push(function);
     ctx.insert_known_function(name.clone());
@@ -1221,12 +1258,17 @@ fn synthesize_eq_thunk(ctx: &mut LoweringContext<'_>, key_ty: &MIRType, suffix: 
             );
             return name;
         };
+        let right_arg = if matches!(key_ty, MIRType::Struct { name, .. } if name == "String") {
+            right
+        } else {
+            right_ptr
+        };
         function.push_inst_to_block(
             function.start_block,
             Instruction::Call {
                 destination: equal,
                 func: candidate,
-                args: vec![left, right_ptr],
+                args: vec![left, right_arg],
             },
         );
     }
@@ -1371,12 +1413,17 @@ fn synthesize_compare_thunk(
             return name;
         };
         let result = function.add_local(LocalKind::Temp, MIR_I64);
+        let right_arg = if matches!(key_ty, MIRType::Struct { name, .. } if name == "String") {
+            right
+        } else {
+            right_ptr
+        };
         function.push_inst_to_block(
             function.start_block,
             Instruction::Call {
                 destination: result,
                 func: candidate,
-                args: vec![left, right_ptr],
+                args: vec![left, right_arg],
             },
         );
         function.basic_blocks[function.start_block]

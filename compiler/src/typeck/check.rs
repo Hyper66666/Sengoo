@@ -251,6 +251,16 @@ impl TypeChecker {
         numeric_types.push(env.float_ty(FloatKind::F64));
         for ty in numeric_types {
             let key = type_key(&ty);
+            for trait_name in ["PartialEq", "PartialOrd"] {
+                let info = ImplInfo::new(ty.clone(), Some(trait_name.to_string()), Vec::new());
+                registry.register_trait_impl(trait_name.to_string(), key.clone(), info);
+            }
+            if !matches!(ty.kind, TyKind::Float(_)) {
+                for trait_name in ["Eq", "Ord", "Hash"] {
+                    let info = ImplInfo::new(ty.clone(), Some(trait_name.to_string()), Vec::new());
+                    registry.register_trait_impl(trait_name.to_string(), key.clone(), info);
+                }
+            }
             for trait_name in ["Add", "Sub", "Mul", "Div", "Rem"] {
                 let info = ImplInfo::new(
                     ty.clone(),
@@ -261,6 +271,12 @@ impl TypeChecker {
             }
             let info = ImplInfo::new(ty.clone(), Some("Neg".to_string()), vec![ty]);
             registry.register_trait_impl("Neg".to_string(), key, info);
+        }
+        let bool_ty = env.bool_ty();
+        let bool_key = type_key(&bool_ty);
+        for trait_name in ["PartialEq", "Eq", "PartialOrd", "Ord", "Hash"] {
+            let info = ImplInfo::new(bool_ty.clone(), Some(trait_name.to_string()), Vec::new());
+            registry.register_trait_impl(trait_name.to_string(), bool_key.clone(), info);
         }
         registry
     }

@@ -2974,12 +2974,13 @@ def main() -> i64 {
         "btreemap_new_i64_i64",
         "btreemap_new_i64_bool",
         "btreeset_new_i64",
-        "sengoo_btreemap_insert_i64",
-        "sengoo_btreemap_get_or_default_i64",
-        "sengoo_btreemap_remove_i64",
-        "sengoo_btreemap_key_iter_new_i64",
-        "sengoo_btreemap_key_iter_next_or_default_i64",
-        "sengoo_btreemap_free_i64_status",
+        "sengoo_raw_btreemap_new_parts",
+        "sengoo_raw_hashmap_insert",
+        "sengoo_raw_hashmap_get",
+        "sengoo_raw_hashmap_remove",
+        "sengoo_raw_map_key_iter_new",
+        "sengoo_raw_map_key_iter_next",
+        "sengoo_raw_hashmap_free",
     ] {
         assert!(
             ir.contains(symbol),
@@ -2991,8 +2992,7 @@ def main() -> i64 {
     assert!(ir.contains("BTreeSet_i64_Drop_drop"));
 
     let ordered_iter = llvm_function_section(&ir, "; Function: BTreeMap_i64_i64_iter_keys");
-    assert!(ordered_iter.contains("@sengoo_btreemap_key_iter_new_i64"));
-    assert!(!ordered_iter.contains("@sengoo_hashmap_key_iter_new_i64"));
+    assert!(ordered_iter.contains("@sengoo_raw_map_key_iter_new"));
     for method in [
         "BTreeMap_i64_i64_insert",
         "BTreeMap_i64_i64_get",
@@ -3282,12 +3282,62 @@ fn stdlib_surface_hashmap_runtime_mutators_support_i64_and_bool() {
     let i64_ir = compile_with_stdlib(
         r#"
 def main() -> i64 {
-    let map: HashMap<i64, i64> = HashMap { handle: 0, key_marker: 0, value_marker: 0 };
-    if map.insert(1, 2) { 1 } else { 0 }
+    let map = hashmap_new_i64_i64();
+    map.insert(1, 2);
+    let value = map.get(1).unwrap_or(0);
+    let iter = map.iter();
+    let next = iter.next().unwrap_or(0);
+    iter.reset();
+    iter.free();
+    if value == 2 && next == 2 && map.remove(1) { 1 } else { 0 }
 }
 "#,
     );
-    assert!(i64_ir.contains("sengoo_hashmap_insert_i64"));
+    let i64_ctor_section =
+        llvm_function_section(&i64_ir, "define %HashMap_i64_i64 @hashmap_new_i64_i64");
+    assert!(
+        i64_ctor_section.contains("sengoo_raw_hashmap_new_parts")
+            && !i64_ctor_section.contains("sengoo_hashmap_new_i64"),
+        "hashmap_new_i64_i64 should be a thin raw-hashmap wrapper:\n{i64_ctor_section}"
+    );
+    let i64_insert_section = i64_ir
+        .split("; Function: HashMap_i64_i64_insert")
+        .nth(1)
+        .expect("HashMap<i64, i64>.insert should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        i64_insert_section.contains("sengoo_raw_hashmap_insert")
+            && !i64_insert_section.contains("sengoo_hashmap_insert_i64"),
+        "HashMap<i64, i64>.insert should use RawHashMap:\n{}",
+        i64_insert_section
+    );
+    let i64_iter_section = i64_ir
+        .split("; Function: HashMap_i64_i64_iter")
+        .nth(1)
+        .expect("HashMap<i64, i64>.iter should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        i64_iter_section.contains("sengoo_raw_map_key_iter_new")
+            && !i64_iter_section.contains("sengoo_hashmap_iter_new_i64"),
+        "HashMap<i64, i64>.iter should wrap a raw key iterator:\n{}",
+        i64_iter_section
+    );
+    let i64_iter_next_section = i64_ir
+        .split("; Function: HashMapIter_i64_Iterator_next")
+        .nth(1)
+        .expect("HashMapIter<i64>.next should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        i64_iter_next_section.contains("raw_vec_iter_next_i64"),
+        "HashMapIter<i64>.next should read the raw value snapshot:\n{}",
+        i64_iter_next_section
+    );
 
     let bool_ir = compile_with_stdlib(
         r#"
@@ -3327,6 +3377,13 @@ def main() -> i64 {
     assert!(bool_ir.contains("HashMap_bool_bool_insert"));
     assert!(bool_ir.contains("HashMap_bool_i64_get"));
     assert!(bool_ir.contains("HashMap_i64_bool_get"));
+    let bool_ctor_section =
+        llvm_function_section(&bool_ir, "define %HashMap_bool_bool @hashmap_new_bool_bool");
+    assert!(
+        bool_ctor_section.contains("sengoo_raw_hashmap_new_parts")
+            && !bool_ctor_section.contains("sengoo_hashmap_new_i64"),
+        "hashmap_new_bool_bool should be a thin raw-hashmap wrapper:\n{bool_ctor_section}"
+    );
 
     let string_i64_ir = compile_with_stdlib(
         r#"
@@ -3355,6 +3412,15 @@ def main() -> i64 {
     assert!(string_i64_ir.contains("HashMap_String_i64_remove"));
     assert!(string_i64_ir.contains("HashMap_String_i64_len"));
     assert!(string_i64_ir.contains("HashMap_String_i64_clear"));
+    let string_i64_ctor_section = llvm_function_section(
+        &string_i64_ir,
+        "define %HashMap_String_i64 @hashmap_new_string_i64",
+    );
+    assert!(
+        string_i64_ctor_section.contains("sengoo_raw_hashmap_new_parts")
+            && !string_i64_ctor_section.contains("sengoo_string_map_new"),
+        "hashmap_new_string_i64 should be a thin raw-hashmap wrapper:\n{string_i64_ctor_section}"
+    );
     let insert_section = string_i64_ir
         .split("; Function: HashMap_String_i64_insert")
         .nth(1)
@@ -3363,8 +3429,10 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        insert_section.contains("sengoo_string_map_insert_i64"),
-        "HashMap<String, i64>.insert should call the string-keyed runtime:\n{}",
+        insert_section.contains("sengoo_string_from_str_copy")
+            && insert_section.contains("sengoo_raw_hashmap_insert")
+            && !insert_section.contains("sengoo_string_map_insert_i64"),
+        "HashMap<String, i64>.insert should materialize an owned key and use RawHashMap:\n{}",
         insert_section
     );
     let get_section = string_i64_ir
@@ -3375,8 +3443,11 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        get_section.contains("sengoo_string_map_get_or_default_i64"),
-        "HashMap<String, i64>.get should call the string-keyed runtime:\n{}",
+        get_section.contains("sengoo_string_from_str_copy")
+            && get_section.contains("sengoo_raw_hashmap_contains")
+            && get_section.contains("sengoo_raw_hashmap_get")
+            && !get_section.contains("sengoo_string_map_get_or_default_i64"),
+        "HashMap<String, i64>.get should query RawHashMap through an owned temporary key:\n{}",
         get_section
     );
     let len_section = string_i64_ir
@@ -3387,9 +3458,9 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        len_section.contains("sengoo_string_map_len")
-            && !len_section.contains("sengoo_hashmap_len_i64"),
-        "HashMap<String, i64>.len should use the string-keyed runtime:\n{}",
+        len_section.contains("sengoo_raw_hashmap_len")
+            && !len_section.contains("sengoo_string_map_len"),
+        "HashMap<String, i64>.len should use RawHashMap length:\n{}",
         len_section
     );
     let clear_section = string_i64_ir
@@ -3400,9 +3471,23 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        clear_section.contains("sengoo_string_map_clear_status"),
-        "HashMap<String, i64>.clear should use the string-keyed runtime:\n{}",
+        clear_section.contains("sengoo_raw_hashmap_clear")
+            && !clear_section.contains("sengoo_string_map_clear_status"),
+        "HashMap<String, i64>.clear should use RawHashMap clear:\n{}",
         clear_section
+    );
+    let key_iter_section = string_i64_ir
+        .split("; Function: HashMap_String_i64_iter_keys")
+        .nth(1)
+        .expect("HashMap<String, i64>.iter_keys should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        key_iter_section.contains("sengoo_raw_map_key_iter_new")
+            && !key_iter_section.contains("sengoo_string_map_key_iter_new"),
+        "HashMap<String, i64>.iter_keys should wrap the raw key iterator:\n{}",
+        key_iter_section
     );
 
     let string_bool_ir = compile_with_stdlib(
@@ -3438,8 +3523,10 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        string_bool_insert_section.contains("sengoo_string_map_insert_bool"),
-        "HashMap<String, bool>.insert should call the string-bool runtime:\n{}",
+        string_bool_insert_section.contains("sengoo_string_from_str_copy")
+            && string_bool_insert_section.contains("sengoo_raw_hashmap_insert")
+            && !string_bool_insert_section.contains("sengoo_string_map_insert_bool"),
+        "HashMap<String, bool>.insert should materialize an owned key and use RawHashMap:\n{}",
         string_bool_insert_section
     );
 
@@ -3474,6 +3561,15 @@ def main() -> i64 {
     assert!(string_string_ir.contains("HashMap_String_String_remove"));
     assert!(string_string_ir.contains("StringMapStringKeyIter_count"));
     assert!(string_string_ir.contains("StringMapStringKeyIter_take"));
+    let string_string_ctor_section = llvm_function_section(
+        &string_string_ir,
+        "define %HashMap_String_String @hashmap_new_string_string",
+    );
+    assert!(
+        string_string_ctor_section.contains("sengoo_raw_hashmap_new_parts")
+            && !string_string_ctor_section.contains("sengoo_string_map_string_new"),
+        "hashmap_new_string_string should be a thin raw-hashmap wrapper:\n{string_string_ctor_section}"
+    );
     let string_insert_section = string_string_ir
         .split("; Function: HashMap_String_String_insert")
         .nth(1)
@@ -3482,8 +3578,10 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        string_insert_section.contains("sengoo_string_map_string_insert"),
-        "HashMap<String, String>.insert should call the string-string runtime:\n{}",
+        string_insert_section.contains("sengoo_string_from_str_copy")
+            && string_insert_section.contains("sengoo_raw_hashmap_insert")
+            && !string_insert_section.contains("sengoo_string_map_string_insert"),
+        "HashMap<String, String>.insert should materialize an owned key and use RawHashMap:\n{}",
         string_insert_section
     );
     let string_get_section = string_string_ir
@@ -3494,9 +3592,137 @@ def main() -> i64 {
         .next()
         .unwrap();
     assert!(
-        string_get_section.contains("sengoo_string_map_string_get_clone"),
-        "HashMap<String, String>.get should call the string-string runtime:\n{}",
+        string_get_section.contains("sengoo_string_from_str_copy")
+            && string_get_section.contains("sengoo_raw_hashmap_get")
+            && string_get_section.contains("sengoo_string_clone_status")
+            && !string_get_section.contains("sengoo_string_map_string_get_clone"),
+        "HashMap<String, String>.get should clone from RawHashMap borrows:\n{}",
         string_get_section
+    );
+}
+
+#[test]
+fn stdlib_surface_string_map_compatibility_wrappers_use_raw_hashmap_runtime() {
+    let ir = compile_with_stdlib(
+        r#"
+def main() -> i64 {
+    let numbers = string_map_i64_new();
+    numbers.insert("alpha", 7);
+    let numbers_value = numbers.get("alpha").unwrap_or(0);
+    let keys = numbers.iter_keys();
+    let first_key = keys.next().unwrap_or(String { handle: 0 });
+    let numbers_done = keys.done();
+    keys.reset();
+    keys.free();
+
+    let flags = string_map_bool_new();
+    flags.insert("enabled", true);
+    let flag_value = flags.get("enabled").unwrap_or(false);
+
+    let texts = string_map_string_new();
+    texts.insert("title", string_from_str("alpha").unwrap_or(String { handle: 0 }));
+    let text_value = texts.get("title").unwrap_or(String { handle: 0 });
+
+    if numbers_value == 7 && !numbers_done && flag_value && first_key.len() == 5 && text_value.len() == 5 {
+        1
+    } else {
+        0
+    }
+}
+"#,
+    );
+
+    for (header, legacy_symbol) in [
+        (
+            "define %StringMapI64 @string_map_i64_new",
+            "sengoo_string_map_new",
+        ),
+        (
+            "define %StringMapBool @string_map_bool_new",
+            "sengoo_string_map_new",
+        ),
+        (
+            "define %StringMapString @string_map_string_new",
+            "sengoo_string_map_string_new",
+        ),
+    ] {
+        let section = llvm_function_section(&ir, header);
+        assert!(
+            section.contains("sengoo_raw_hashmap_new_parts") && !section.contains(legacy_symbol),
+            "compatibility constructor should route through RawHashMap:\n{section}"
+        );
+    }
+
+    let compat_insert_section = ir
+        .split("; Function: StringMapI64_insert_raw")
+        .nth(1)
+        .expect("StringMapI64.insert_raw should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        compat_insert_section.contains("sengoo_raw_hashmap_insert")
+            && !compat_insert_section.contains("sengoo_string_map_insert_i64"),
+        "StringMapI64.insert_raw should use RawHashMap:\n{}",
+        compat_insert_section
+    );
+
+    let compat_get_section = ir
+        .split("; Function: StringMapString_get_raw")
+        .nth(1)
+        .expect("StringMapString.get_raw should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        compat_get_section.contains("sengoo_raw_hashmap_get")
+            && compat_get_section.contains("sengoo_string_clone_status")
+            && !compat_get_section.contains("sengoo_string_map_string_get_clone"),
+        "StringMapString.get_raw should clone borrowed RawHashMap values:\n{}",
+        compat_get_section
+    );
+
+    let compat_iter_section = ir
+        .split("; Function: StringMapI64_iter_keys")
+        .nth(1)
+        .expect("StringMapI64.iter_keys should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        compat_iter_section.contains("sengoo_raw_map_key_iter_new")
+            && !compat_iter_section.contains("sengoo_string_map_key_iter_new"),
+        "StringMapI64.iter_keys should allocate a raw key iterator wrapper:\n{}",
+        compat_iter_section
+    );
+
+    let compat_next_section = ir
+        .split("; Function: StringMapKeyIter_next")
+        .nth(1)
+        .expect("StringMapKeyIter.next should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        compat_next_section.contains("sengoo_raw_map_key_iter_next")
+            && compat_next_section.contains("sengoo_string_clone_status")
+            && !compat_next_section.contains("sengoo_string_map_key_iter_next_string"),
+        "StringMapKeyIter.next should clone borrowed raw keys:\n{}",
+        compat_next_section
+    );
+
+    let compat_drop_section = ir
+        .split("; Function: StringMapI64_Drop_drop")
+        .nth(1)
+        .expect("StringMapI64 drop should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        compat_drop_section.contains("sengoo_raw_hashmap_free")
+            && !compat_drop_section.contains("sengoo_string_map_free_status"),
+        "StringMapI64 drop should free through RawHashMap:\n{}",
+        compat_drop_section
     );
 }
 
@@ -3766,25 +3992,39 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_surface_vec_string_methods_use_string_runtime() {
+fn stdlib_surface_legacy_vec_wrappers_use_raw_vec_runtime() {
     let ir = compile_with_stdlib(
         r#"
 def main() -> i64 {
-    let vec: Vec<String> = vec_new_string();
-    let first = string_from_str("alpha").unwrap_or(String { handle: 0 });
-    let second = string_from_str("beta").unwrap_or(String { handle: 0 });
-    let middle = string_from_str("mid").unwrap_or(String { handle: 0 });
-    let replacement = string_from_str("gamma").unwrap_or(String { handle: 0 });
-    let initially_empty = vec.is_empty();
-    vec.push(first);
-    vec.push(second);
-    vec.insert(1, middle);
-    vec.set(2, replacement);
-    let inserted = vec.get(1).unwrap_or(String { handle: 0 });
-    let replaced = vec.get(2).unwrap_or(String { handle: 0 });
-    let length = vec.len();
-    vec.clear();
-    if initially_empty && length == 3 && inserted.len() == 3 && replaced.len() == 5 && vec.is_empty() {
+    let ints = vec_new_i64();
+    ints.push(41);
+    ints.insert(0, 7);
+    let ints_first = ints.get(0).unwrap_or(0);
+    let ints_iter = ints.iter();
+    let ints_next = ints_iter.next().unwrap_or(0);
+    ints_iter.reset();
+    ints_iter.free();
+
+    let flags = vec_new_bool();
+    flags.push(true);
+    flags.push(false);
+    let flags_iter = flags.iter();
+    let flag_next = flags_iter.next().unwrap_or(false);
+    flags_iter.reset();
+    flags_iter.free();
+
+    let names = vec_new_string();
+    names.push(string_from_str("alpha").unwrap_or(String { handle: 0 }));
+    names.insert(1, string_from_str("beta").unwrap_or(String { handle: 0 }));
+    names.set(0, string_from_str("gamma").unwrap_or(String { handle: 0 }));
+    let first_name = names.get(0).unwrap_or(String { handle: 0 });
+    let names_iter = names.iter();
+    let iter_name = names_iter.next().unwrap_or(String { handle: 0 });
+    let names_done = names_iter.done();
+    names_iter.reset();
+    names_iter.free();
+
+    if ints_first == 7 && ints_next == 7 && flag_next && first_name.len() == 5 && iter_name.len() == 5 && !names_done {
         1
     } else {
         0
@@ -3793,59 +4033,133 @@ def main() -> i64 {
 "#,
     );
 
-    assert!(ir.contains("vec_new_string"));
-    assert!(ir.contains("Vec_String_len"));
-    assert!(ir.contains("Vec_String_clear"));
-    assert!(ir.contains("Vec_String_set"));
-    assert!(ir.contains("Vec_String_insert"));
-    let len_section = ir
-        .split("; Function: Vec_String_len")
+    for (constructor, header) in [
+        ("vec_new_i64", "define %Vec_i64 @vec_new_i64"),
+        ("vec_new_bool", "define %Vec_bool @vec_new_bool"),
+        ("vec_new_string", "define %Vec_String @vec_new_string"),
+    ] {
+        let section = llvm_function_section(&ir, header);
+        assert!(
+            section.contains("call i64 @sengoo_raw_vec_new_parts"),
+            "wrapper constructor {constructor} should route through the raw vec runtime\n{section}"
+        );
+        assert!(
+            !section.contains("sengoo_vec_new_i64") && !section.contains("sengoo_vec_new_string"),
+            "wrapper constructors must not call legacy vec constructors\n{section}"
+        );
+    }
+
+    let i64_get_section = ir
+        .split("; Function: Vec_i64_get")
         .nth(1)
-        .expect("Vec<String>.len should be emitted")
+        .expect("Vec<i64>.get should be emitted")
         .split("; Function: ")
         .next()
         .unwrap();
     assert!(
-        len_section.contains("sengoo_vec_string_len")
-            && !len_section.contains("sengoo_vec_len_i64"),
-        "Vec<String>.len should use the string vector runtime:\n{}",
-        len_section
+        i64_get_section.contains("sengoo_raw_vec_get")
+            && !i64_get_section.contains("sengoo_vec_get_or_default_i64"),
+        "Vec<i64>.get should use RawVec borrows instead of the legacy scalar helper:\n{}",
+        i64_get_section
     );
-    let clear_section = ir
-        .split("; Function: Vec_String_clear")
+
+    let i64_iter_section = ir
+        .split("; Function: Vec_i64_iter")
         .nth(1)
-        .expect("Vec<String>.clear should be emitted")
+        .expect("Vec<i64>.iter should be emitted")
         .split("; Function: ")
         .next()
         .unwrap();
     assert!(
-        clear_section.contains("sengoo_vec_string_clear_status"),
-        "Vec<String>.clear should use the string vector runtime:\n{}",
-        clear_section
+        i64_iter_section.contains("sengoo_raw_vec_iter_new")
+            && !i64_iter_section.contains("sengoo_vec_iter_new_i64"),
+        "Vec<i64>.iter should allocate a raw iterator wrapper:\n{}",
+        i64_iter_section
     );
-    let set_section = ir
-        .split("; Function: Vec_String_set")
+
+    let i64_iter_next_section = ir
+        .split("; Function: VecIter_i64_Iterator_next")
         .nth(1)
-        .expect("Vec<String>.set should be emitted")
+        .expect("VecIter<i64>.next should be emitted")
         .split("; Function: ")
         .next()
         .unwrap();
     assert!(
-        set_section.contains("sengoo_vec_string_set"),
-        "Vec<String>.set should use the string vector runtime:\n{}",
-        set_section
+        i64_iter_next_section.contains("raw_vec_iter_next_i64"),
+        "VecIter<i64>.next should read from the raw iterator runtime:\n{}",
+        i64_iter_next_section
     );
-    let insert_section = ir
-        .split("; Function: Vec_String_insert")
+
+    let bool_get_section = ir
+        .split("; Function: Vec_bool_get")
         .nth(1)
-        .expect("Vec<String>.insert should be emitted")
+        .expect("Vec<bool>.get should be emitted")
         .split("; Function: ")
         .next()
         .unwrap();
     assert!(
-        insert_section.contains("sengoo_vec_string_insert"),
-        "Vec<String>.insert should use the string vector runtime:\n{}",
-        insert_section
+        bool_get_section.contains("sengoo_raw_vec_get")
+            && !bool_get_section.contains("sengoo_vec_get_or_default_i64"),
+        "Vec<bool>.get should use RawVec borrows instead of the legacy scalar helper:\n{}",
+        bool_get_section
+    );
+
+    let string_get_section = ir
+        .split("; Function: Vec_String_get")
+        .nth(1)
+        .expect("Vec<String>.get should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        string_get_section.contains("sengoo_raw_vec_get")
+            && string_get_section.contains("sengoo_string_clone_status")
+            && !string_get_section.contains("sengoo_vec_string_get_clone"),
+        "Vec<String>.get should clone borrowed raw elements rather than call the legacy string runtime:\n{}",
+        string_get_section
+    );
+
+    let string_iter_section = ir
+        .split("; Function: Vec_String_iter")
+        .nth(1)
+        .expect("Vec<String>.iter should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        string_iter_section.contains("sengoo_raw_vec_iter_new")
+            && !string_iter_section.contains("sengoo_vec_string_iter_new"),
+        "Vec<String>.iter should allocate a raw iterator wrapper:\n{}",
+        string_iter_section
+    );
+
+    let string_iter_next_section = ir
+        .split("; Function: VecStringIter_next")
+        .nth(1)
+        .expect("VecStringIter.next should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        string_iter_next_section.contains("sengoo_raw_vec_iter_next")
+            && string_iter_next_section.contains("sengoo_string_clone_status")
+            && !string_iter_next_section.contains("sengoo_vec_string_iter_next_clone"),
+        "VecStringIter.next should clone from the raw iterator runtime:\n{}",
+        string_iter_next_section
+    );
+
+    let vec_drop_section = ir
+        .split("; Function: Vec_String_Drop_drop")
+        .nth(1)
+        .expect("Vec<String> drop should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        vec_drop_section.contains("sengoo_raw_vec_free")
+            && !vec_drop_section.contains("sengoo_vec_string_free_status"),
+        "Vec<String> drop should free through RawVec:\n{}",
+        vec_drop_section
     );
 }
 
@@ -3883,8 +4197,37 @@ def main() -> i64 {
     assert!(ir.contains("HashSet_i64_insert"));
     assert!(ir.contains("HashSet_bool_contains"));
     assert!(ir.contains("HashSet_String_remove"));
-    assert!(ir.contains("sengoo_hashmap_insert_i64"));
-    assert!(ir.contains("sengoo_string_map_insert_bool"));
+    assert!(ir.contains("sengoo_raw_hashmap_new_parts"));
+    assert!(ir.contains("sengoo_raw_hashmap_insert"));
+
+    let string_insert_section = ir
+        .split("; Function: HashSet_String_insert")
+        .nth(1)
+        .expect("HashSet<String>.insert should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        string_insert_section.contains("sengoo_string_from_str_copy")
+            && string_insert_section.contains("sengoo_raw_hashmap_insert")
+            && !string_insert_section.contains("sengoo_string_map_insert_bool"),
+        "HashSet<String>.insert should materialize an owned String key and use RawHashMap:\n{}",
+        string_insert_section
+    );
+
+    let string_iter_section = ir
+        .split("; Function: HashSet_String_iter")
+        .nth(1)
+        .expect("HashSet<String>.iter should be emitted")
+        .split("; Function: ")
+        .next()
+        .unwrap();
+    assert!(
+        string_iter_section.contains("sengoo_raw_map_key_iter_new")
+            && !string_iter_section.contains("sengoo_string_map_key_iter_new"),
+        "HashSet<String>.iter should allocate a raw key iterator wrapper:\n{}",
+        string_iter_section
+    );
 }
 
 #[test]

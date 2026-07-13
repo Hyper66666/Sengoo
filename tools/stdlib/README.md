@@ -9,10 +9,9 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `result.sg`: generic `Result<T, E>`, generic constructors (`result_ok_with`,
   `result_err_with`), i64 and `Result<bool, i64>` convenience constructors, and
   bool/i64 unwrap, map, and projection helpers.
-- `collections.sg`: runtime-backed `Vec<T>`, `HashMap<K, V>`, transitional
-  `HashSet<T>` for i64/bool/string keys, deterministic
-  `BTreeMap<String, ...>` / `BTreeMap<i64, ...>` and matching sets, iterators,
-  i64/bool collection mutators, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared
+- `collections.sg`: ABI-v1 runtime-backed `Vec<T>`, `HashMap<K, V>`,
+  `HashSet<T>`, deterministic `BTreeMap<K, V>` / `BTreeSet<T>`, iterators,
+  source-compatible scalar/string helper names, `Rc<i64>`/`Rc<bool>`/`Rc<String>` shared
   ownership with `RcValue` generic construction, copied-text lists, and
   string-key maps for scalar i64/bool values.
 - `string.sg`: borrowed `&str` helpers (`str_len`, equality, search, repeat) plus owned `String` (`string_new`, `string_from_str`, `string_from_buffer`, borrow via `as_str`, `clone`, `push_str`, `push_i64`, `push_char`, `clear`, `copy_to_buffer`, `drop`, `eq`) backed by `runtime_string.c`.
@@ -135,33 +134,30 @@ borrowed get, set/insert/remove, length/empty checks, clear, and automatic
 element Drop. Borrowing `iter()` yields `&T`, owning `into_iter()` yields moved
 `T`, and a live borrowed element or iterator blocks mutations that could move
 storage.
-The existing scalar `Vec<T>` and `HashMap<K, V>` helpers remain compatible for
-i64/bool combinations, alongside runtime-owned text shapes for common tooling
-workloads. Generic `VecDeque<T>` shares the descriptor-backed RawVec core and
+The existing scalar `Vec<T>` and `HashMap<K, V>` helper names remain compatible
+for i64/bool/string combinations and are thin wrappers over the same ABI-v1
+RawVec/RawHashMap descriptors as generic constructors. Generic `VecDeque<T>` shares the descriptor-backed RawVec core and
 supports borrowed front/back, push/pop at both ends, clear, and automatic Drop.
 Transitional `VecDeque<i64>` and `VecDeque<bool>` support `push_front`,
 `push_back`, `pop_front`, `pop_back`, `front`, `back`, `len`, `clear`, and
-automatic scope-exit `Drop` over the same i64 vector runtime; manual `free()`
+automatic scope-exit `Drop` over RawVec; manual `free()`
 remains source-compatible. `Vec<String>` supports
 owned-string `push`, `set`, `insert`, cloned reads, transfer removal, cloned
-iteration, and consuming iterator `collect()` through the existing
-string-vector runtime. `HashMap<String, i64>`, `HashMap<String, bool>`, and
-`HashMap<String, String>` are transition spellings over the copied-key string
-map runtimes: they copy `&str` keys on insert, replace existing values for
+iteration, and consuming iterator `collect()` through RawVec. `HashMap<String, i64>`, `HashMap<String, bool>`, and
+`HashMap<String, String>` preserve their copied-`&str` compatibility methods
+over RawHashMap: they own copied keys on insert, replace existing values for
 duplicate keys, and expose deterministic key iteration by unsigned byte
 ordering, including consuming `count`, `skip`, and bounded `take` on owned-key
-iterators, plus `collect()` into `Vec<String>`. The same sorted runtime now
-backs explicit `BTreeMap<String, i64/bool/String>` and `BTreeSet<String>`
-transition types, whose iteration order is independent of insertion order.
-`BTreeMap<i64, i64>`, `BTreeMap<i64, bool>`, and `BTreeSet<i64>` use a
-separate sorted integer runtime rather than the hash-map slot order. They
+iterators, plus `collect()` into `Vec<String>`. The RawBTree descriptor path
+backs explicit `BTreeMap<String, i64/bool/String>`, `BTreeSet<String>`,
+`BTreeMap<i64, i64/bool>`, and `BTreeSet<i64>` compatibility spellings. They
 support insertion and replacement, lookup, removal, length/clear, automatic
 `Drop`, and deterministic ascending key iteration (including negative keys).
 `TextList`
 copies inserted `&str` values and can copy elements back into a managed
 `Buffer` with `get_copy`, `remove_copy`, and iterator `next_copy`.
-`StringMapI64` and `StringMapBool` remain source-compatible aliases for the
-same copied-key scalar map family. Runtime-backed Vec i64 iterators support
+`StringMapI64`, `StringMapBool`, and `StringMapString` remain source-compatible
+thin wrappers over RawHashMap. Runtime-backed Vec i64 iterators support
 single-step `map_with`/`filter_with` plus consuming `count`, `sum`, `skip`,
 `take`, `collect`, and transitional `enumerate()`; bool vector iterators
 support `map_with`/`filter_with` plus consuming `count`, `skip`, `take`,

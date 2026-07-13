@@ -100,7 +100,7 @@ def summarize_workspace(root: &str, config: AuditConfig) -> Result<WorkspaceSumm
 }
 
 def write_json_report(path_name: &str, summary: WorkspaceSummary) -> Result<i64, i64> {
-    let counts = hashmap_new_string_i64();
+    let counts: HashMap<String, i64> = hashmap_new();
     counts.insert("source_files", summary.source_files);
     counts.insert("test_files", summary.test_files);
     counts.insert("manifests", summary.manifests);

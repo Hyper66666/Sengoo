@@ -31,14 +31,24 @@
   - Archived as `2026-07-11-numeric-type-system` after the 994-test compiler
     library gate, native numeric/runtime and Cranelift suites, core conformance,
     warning-free compiler/sgc clippy, and strict OpenSpec validation passed.
-- [ ] 2.2 Complete and archive `generic-collections` using the frozen generic
+- [x] 2.2 Complete and archive `generic-collections` using the frozen generic
   storage/drop/callback ABI; scalar helpers become thin compatibility wrappers.
+  - Archived as `2026-07-13-generic-collections` after the compiler library and
+    complete `sgc` suites, native collection ownership/Drop coverage, the
+    default-library locked package loop, warning-free compiler clippy, and
+    strict OpenSpec validation passed.
 - [ ] 2.3 Complete and archive `debugger-and-test-framework`, including actual
   statement stepping and live scalar/composite inspection on installed
   reference-host debuggers.
-- [ ] 2.4 Add a default-library conformance package using `Vec<struct>`, a
+- [x] 2.4 Add a default-library conformance package using `Vec<struct>`, a
   string-keyed map with struct values, iterator adapters, checked numeric
   conversion, and automatic Drop with no scalar-only constructors.
+  - `examples/realworld/default-library-conformance` uses the ABI-v1 generic
+    `vec_new()` / `hashmap_new()` paths, runs `filter -> map -> sum`, checks an
+    `i64 -> u8` conversion, and compares owned-String live handles across scope
+    exit without manual release calls. Its locked `sgpm check`, `test`,
+    `fmt --check`, `doc`, and `build` loop plus native
+    `sgc run --force-rebuild` pass on the Windows reference workspace.
 - [ ] 2.5 Refresh the language reference and flagship application against the
   Phase 1 public surface.
 

@@ -861,6 +861,12 @@ impl Codegen {
                 _ => false,
             })
         });
+        let needs_raw_zero_bytes = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_zero_bytes",
+                _ => false,
+            })
+        });
         let needs_raw_vec_push = mir_fns.iter().any(|mir_fn| {
             mir_fn.instructions.iter().any(|inst| match inst {
                 mir::Instruction::Call { func, .. } => func == "sengoo_raw_vec_push",
@@ -933,6 +939,12 @@ impl Codegen {
                 _ => false,
             })
         });
+        let needs_raw_hashmap_remove_string = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|inst| match inst {
+                mir::Instruction::Call { func, .. } => func == "sengoo_raw_hashmap_remove_string",
+                _ => false,
+            })
+        });
         let needs_raw_btreemap_new = mir_fns.iter().any(|mir_fn| {
             mir_fn.instructions.iter().any(|inst| match inst {
                 mir::Instruction::Call { func, .. } => func == "sengoo_raw_btreemap_new_parts",
@@ -948,6 +960,7 @@ impl Codegen {
         let copy_decl = "declare i64 @sengoo_rc_new_copy(i8*, i64, i8*)\n";
         let borrow_decl = "declare i8* @sengoo_rc_borrow_ptr(i64)\n";
         let raw_vec_decl = "declare i64 @sengoo_raw_vec_new_parts(i64, i64, i8*, i8*)\n";
+        let raw_zero_bytes_decl = "declare void @sengoo_raw_zero_bytes(i8*, i64)\n";
         let raw_vec_push_decl = "declare i64 @sengoo_raw_vec_push(i64, i8*)\n";
         let raw_vec_set_decl = "declare i64 @sengoo_raw_vec_set(i64, i64, i8*)\n";
         let raw_vec_insert_decl = "declare i64 @sengoo_raw_vec_insert(i64, i64, i8*)\n";
@@ -961,10 +974,13 @@ impl Codegen {
         let raw_hashmap_get_decl = "declare i8* @sengoo_raw_hashmap_get(i64, i8*)\n";
         let raw_hashmap_contains_decl = "declare i64 @sengoo_raw_hashmap_contains(i64, i8*)\n";
         let raw_hashmap_remove_decl = "declare i64 @sengoo_raw_hashmap_remove(i64, i8*, i8*)\n";
+        let raw_hashmap_remove_string_decl =
+            "declare i64 @sengoo_raw_hashmap_remove_string(i64, i8*)\n";
         let raw_btreemap_new_decl =
             "declare i64 @sengoo_raw_btreemap_new_parts(i64, i64, i8*, i8*, i8*, i64, i64, i8*, i8*)\n";
         let raw_map_key_iter_next_decl = "declare i8* @sengoo_raw_map_key_iter_next(i64)\n";
-        let needs_raw_vec_values = needs_raw_vec_push
+        let needs_raw_vec_values = needs_raw_zero_bytes
+            || needs_raw_vec_push
             || needs_raw_vec_set
             || needs_raw_vec_insert
             || needs_raw_vec_get
@@ -976,6 +992,7 @@ impl Codegen {
             || needs_raw_hashmap_get
             || needs_raw_hashmap_contains
             || needs_raw_hashmap_remove
+            || needs_raw_hashmap_remove_string
             || needs_raw_btreemap_new
             || needs_raw_map_key_iter_next;
         if (needs_rc_copy || needs_rc_borrow || needs_raw_vec || needs_raw_vec_values)
@@ -994,6 +1011,9 @@ impl Codegen {
         }
         if needs_raw_vec && !self.declarations.contains(raw_vec_decl) {
             self.declarations.push_str(raw_vec_decl);
+        }
+        if needs_raw_zero_bytes && !self.declarations.contains(raw_zero_bytes_decl) {
+            self.declarations.push_str(raw_zero_bytes_decl);
         }
         if needs_raw_vec_push && !self.declarations.contains(raw_vec_push_decl) {
             self.declarations.push_str(raw_vec_push_decl);
@@ -1030,6 +1050,11 @@ impl Codegen {
         }
         if needs_raw_hashmap_remove && !self.declarations.contains(raw_hashmap_remove_decl) {
             self.declarations.push_str(raw_hashmap_remove_decl);
+        }
+        if needs_raw_hashmap_remove_string
+            && !self.declarations.contains(raw_hashmap_remove_string_decl)
+        {
+            self.declarations.push_str(raw_hashmap_remove_string_decl);
         }
         if needs_raw_btreemap_new && !self.declarations.contains(raw_btreemap_new_decl) {
             self.declarations.push_str(raw_btreemap_new_decl);

@@ -542,7 +542,7 @@ def scoped() -> i64 {
         (*first).id == 1 && (*second).id == 2 && (*third).id == 3
     };
     let lookup = key(2, "lookup");
-    let removed = map.remove(&lookup).unwrap_or(payload("missing"));
+    let removed = map.remove(&lookup).unwrap_or(Payload { text: String { handle: 0 } });
 
     let set: BTreeSet<Key> = btreeset_new();
     set.insert(key(9, "nine"));

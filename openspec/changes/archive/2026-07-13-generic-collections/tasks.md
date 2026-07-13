@@ -230,15 +230,17 @@
 
 ## 4. Migration and docs
 
-- [ ] 4.1 Re-express the scalar helpers (`vec_new_i64`, `StringMapI64`, ...) as
+- [x] 4.1 Re-express the scalar helpers (`vec_new_i64`, `StringMapI64`, ...) as
   thin wrappers over the generic types, keeping their names source-compatible.
-  - Partial: `Vec<String>` and `HashMap<String, i64>` concrete methods now use
-    their string-backed runtimes for lifecycle, length, and core mutator
-    operations, and `HashMap<String, String>` now wraps the existing
-    `StringMapString` runtime while `HashMap<String, bool>` wraps
-    `StringMapBool`. This reduces the transitional gap where generic-looking
-    handles accidentally fell back to i64 runtime helpers. The full legacy
-    scalar helper migration remains open.
+  - Scalar/string `Vec`, `VecDeque`, `HashMap`, `HashSet`, `BTreeMap`,
+    `BTreeSet`, and `StringMap*` constructors and methods now share the ABI-v1
+    RawVec/RawHashMap/RawBTree handle families. Compatibility iterators use raw
+    cursors (map-value iterators own a RawVec value snapshot), String reads
+    clone raw borrows, and transfer removal preserves exact ownership.
+  - Compiler surface tests reject legacy runtime routing, native wrapper versus
+    generic-constructor tests cover i64/bool/String mutation and iteration, and
+    live String-handle baselines plus the ordered-collection suite prove exact
+    Drop after replacement, removal, iteration, clear, and scope exit.
 - [x] 4.2 Update `tools/stdlib/README.md` collections section.
   - Documented the current transition surface: `Vec<String>`,
     including set/insert, `VecDeque<i64>`, `HashMap<String, i64>` /

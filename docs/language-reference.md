@@ -131,6 +131,7 @@ def main() -> i64 { 0 }
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
 | Arrays | Subset | Fixed array syntax is covered in examples; collection work focuses on `Vec<T>`. |
+| Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
 | References | Subset | Borrowing and move blocking are lexical and conservative. |
 | `dyn Trait` | Experimental | Single-trait `&self`/`&mut self` dispatch and owned vtable-drop glue exist; `Box<dyn>`, multi-trait objects, value receivers, and Cranelift dispatch remain open. |
 
@@ -181,6 +182,39 @@ Known open work:
 | `dyn Trait` | Experimental | See Types section. |
 | `#[derive]` | Subset | Clone/Copy/Eq/Ord/Hash/Default/Debug surfaces exist for current named shapes. |
 | Static trait functions | Unsupported | Blocks Rust-style `From<T>::from` today. |
+
+## Generic Collections And Iterators
+
+Generic owning collections move values into storage, borrow values on reads,
+move values back out on removal, and drop every still-owned element exactly
+once. Constructors infer their type arguments from the expected result type:
+
+```sg compile
+import std::collections;
+import std::string;
+
+struct Row {
+    name: String,
+}
+
+def main() -> i64 {
+    let rows: Vec<Row> = vec_new();
+    let by_name: HashMap<String, Row> = hashmap_new();
+    rows.len() + by_name.len();
+}
+```
+
+Owning Vec iteration preserves insertion order. The lazy iterator surface
+includes `map`, `filter`, `take`, `skip`, and `enumerate`; consuming terminals
+include `count`, accumulator-generic `fold`, `collect() -> Vec<T>`, numeric
+`sum() -> T` for `T: SumValue`, `collect_hashset()`, and
+`collect_hashmap(projector)`. The map projector returns `MapEntry<K,V>`, which
+keeps K/V inference argument-driven rather than relying on return-type-only
+generic method inference. Empty numeric sums return the numeric identity.
+
+Mutation that may move collection storage is rejected while an element borrow
+or borrowing iterator is live. Existing scalar constructor names remain a
+source-compatibility surface and route through the same generic storage ABI.
 
 ## Modules And Visibility
 

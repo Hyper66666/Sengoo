@@ -621,6 +621,24 @@ def main() -> i64 {
 }
 
 #[test]
+fn primitive_types_satisfy_builtin_collection_trait_bounds() {
+    let source = r#"
+def needs_hash_eq<T: Hash + Eq>(value: T) -> i64 { 0 }
+def needs_order<T: PartialEq + Eq + PartialOrd + Ord>(value: T) -> i64 { 0 }
+
+def main() -> i64 {
+    needs_hash_eq(1) + needs_hash_eq(true) + needs_order(1) + needs_order(true)
+}
+"#;
+
+    let program = Parser::parse(source).expect("primitive trait-bound source should parse");
+    let mut checker = TypeChecker::new();
+    checker
+        .check_program(&program)
+        .expect("primitive collection traits should be compiler-known");
+}
+
+#[test]
 fn copy_and_drop_impls_are_mutually_exclusive() {
     let source = r#"
 #[derive(Copy)]

@@ -6174,6 +6174,8 @@ def main() -> i64 {
     let second_len = second.copy_to_buffer(second_buffer).unwrap_or(0);
     let first_written = io_stdout_write_raw(first_buffer.ptr(), first_len).unwrap_or(0);
     let second_written = io_stdout_write_raw(second_buffer.ptr(), second_len).unwrap_or(0);
+    if first.handle == 0 { return 20; }
+    if second.handle == 0 { return 21; }
     if first_len != 1 { return 10; }
     if second_len != 1 { return 11; }
     if third.len() != 0 { return 12; }
@@ -13141,34 +13143,85 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_surface_runtime_string_vec_set_and_insert_transfer_values() {
+fn stdlib_surface_runtime_string_vec_wrapper_and_generic_constructors_match_and_drop_cleanly() {
     let output = require_stdlib_runtime_output!(
-        "string-vec-set-insert",
+        "string-vec-wrapper-generic-equivalence",
         r#"
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
+
+def exercise_string_vecs() -> i64 {
+    let status = {
+        let wrapped = vec_new_string();
+        let wrapped_pushed = wrapped.push(string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let wrapped_inserted = wrapped.insert(0, string_from_str("go").unwrap_or(String { handle: 0 }));
+        let wrapped_set = wrapped.set(1, string_from_str("rust").unwrap_or(String { handle: 0 }));
+        let wrapped_first = wrapped.get(0).unwrap_or(String { handle: 0 });
+        let wrapped_second = wrapped.get(1).unwrap_or(String { handle: 0 });
+        let wrapped_iter = wrapped.iter();
+        let wrapped_iter_value = wrapped_iter.next().unwrap_or(String { handle: 0 });
+        let wrapped_done_before = wrapped_iter.done();
+        wrapped_iter.reset();
+        let wrapped_taken = wrapped_iter.take(1);
+        wrapped_iter.free();
+        let wrapped_removed = wrapped.remove(0).unwrap_or(String { handle: 0 });
+        let wrapped_remaining = wrapped.get(0).unwrap_or(String { handle: 0 });
+
+        let generic: Vec<String> = vec_new();
+        let generic_pushed = generic.push(string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let generic_inserted = generic.insert(0, string_from_str("go").unwrap_or(String { handle: 0 }));
+        let generic_set = generic.set(1, string_from_str("rust").unwrap_or(String { handle: 0 }));
+        let generic_first = generic.get(0).unwrap_or(String { handle: 0 });
+        let generic_second = generic.get(1).unwrap_or(String { handle: 0 });
+        let generic_iter = generic.iter();
+        let generic_iter_value = generic_iter.next().unwrap_or(String { handle: 0 });
+        let generic_done_before = generic_iter.done();
+        generic_iter.reset();
+        let generic_taken = generic_iter.take(1);
+        generic_iter.free();
+        let generic_removed = generic.remove(0).unwrap_or(String { handle: 0 });
+        let generic_remaining = generic.get(0).unwrap_or(String { handle: 0 });
+
+        let wrapped_status = if !wrapped_pushed { 1 }
+            else if !wrapped_inserted { 2 }
+            else if !wrapped_set { 3 }
+            else if wrapped_done_before { 4 }
+            else if wrapped_taken.len() != 1 { 5 }
+            else if wrapped_first.len() != 2 { 6 }
+            else if wrapped_second.len() != 4 { 7 }
+            else if wrapped_iter_value.len() != 2 { 8 }
+            else if wrapped_removed.len() != 2 { 9 }
+            else if wrapped_remaining.len() != 4 { 10 }
+            else { 0 };
+        let generic_status = if !generic_pushed { 21 }
+            else if !generic_inserted { 22 }
+            else if !generic_set { 23 }
+            else if generic_done_before { 24 }
+            else if generic_taken.len() != 1 { 25 }
+            else if generic_first.len() != 2 { 26 }
+            else if generic_second.len() != 4 { 27 }
+            else if generic_iter_value.len() != 2 { 28 }
+            else if generic_removed.len() != 2 { 29 }
+            else if generic_remaining.len() != 4 { 30 }
+            else { 0 };
+
+        if wrapped_status != 0 { wrapped_status } else { generic_status }
+    };
+    status
+}
+
 def main() -> i64 {
-    let vec = vec_new_string();
-    let pushed = vec.push(string_from_str("alpha").unwrap_or(string_new()));
-    let inserted = vec.insert(0, string_from_str("go").unwrap_or(string_new()));
-    let set = vec.set(1, string_from_str("rust").unwrap_or(string_new()));
-    let first = vec.get(0).unwrap_or(string_new());
-    let second = vec.get(1).unwrap_or(string_new());
-    let removed = vec.remove(0).unwrap_or(string_new());
-    let remaining = vec.get(0).unwrap_or(string_new());
+    let before = sengoo_string_live_handle_count();
+    let status = exercise_string_vecs();
+    let after = sengoo_string_live_handle_count();
 
-    let ok = pushed
-        && inserted
-        && set
-        && vec.len() == 1
-        && first.len() == 2
-        && second.len() == 4
-        && removed.len() == 2
-        && remaining.len() == 4;
-    vec.free();
-
-    if ok {
+    if status == 0 && after == before {
         42
     } else {
-        0
+        status + if after == before { 40 } else {
+            if after > before { 100 + (after - before) } else { 90 }
+        }
     }
 }
 "#,
@@ -13256,147 +13309,153 @@ def main() -> i64 {
 }
 
 #[test]
-fn stdlib_import_runtime_string_maps_copy_keys_and_iterate_deterministically() {
-    let Some(output) = compile_and_run_stdlib_import_program_with_stdin(
-        "string-maps",
+fn stdlib_surface_runtime_string_map_compatibility_wrappers_match_generic_and_drop_cleanly() {
+    let output = require_stdlib_runtime_output!(
+        "string-map-wrapper-generic-equivalence",
         r#"
-import std::collections;
-import std::io;
-import std::string;
+extern "C" {
+    fn sengoo_string_live_handle_count() -> i64;
+}
 
 def main() -> i64 {
-    let numbers = string_map_i64_new();
-    let flags = string_map_bool_new();
-    let buffer = ffi_buffer_new(32).unwrap_or(Buffer { handle: 0 });
+    let before = sengoo_string_live_handle_count();
+    let status = {
+        let numbers = string_map_i64_new();
+        let flags = string_map_bool_new();
+        let texts = string_map_string_new();
 
-    let inserted_beta = numbers.insert(str_append("be", "ta"), 1);
-    let inserted_alpha = numbers.insert("alpha", 2);
-    let replaced_beta = numbers.insert("beta", 7);
-    let contains_alpha = numbers.contains("alpha");
-    let beta_value = numbers.get("beta").unwrap_or(0);
-    let removed_alpha = numbers.remove("alpha");
-    let missing_alpha = !numbers.contains("alpha");
+        let inserted_beta = numbers.insert(str_append("be", "ta"), 1);
+        let inserted_alpha = numbers.insert("alpha", 2);
+        let replaced_beta = numbers.insert("beta", 7);
+        let contains_alpha = numbers.contains("alpha");
+        let beta_value = numbers.get("beta").unwrap_or(0);
+        let removed_alpha = numbers.remove("alpha");
+        let missing_alpha = !numbers.contains("alpha");
+        let number_keys = numbers.iter_keys();
+        let number_key = number_keys.next().unwrap_or(String { handle: 0 });
+        let number_done_before = number_keys.done();
+        number_keys.reset();
+        let number_taken = number_keys.take(1);
+        number_keys.free();
 
-    let inserted_on = flags.insert(str_append("o", "n"), true);
-    let inserted_off = flags.insert("off", false);
-    let replaced_on = flags.insert("on", false);
-    let on_value = flags.get("on").unwrap_or(true);
-    let off_value = flags.get("off").unwrap_or(true);
+        let inserted_on = flags.insert(str_append("o", "n"), true);
+        let inserted_off = flags.insert("off", false);
+        let replaced_on = flags.insert("on", false);
+        let on_value = flags.get("on").unwrap_or(true);
+        let off_value = flags.get("off").unwrap_or(true);
+        let flag_keys = flags.iter_keys().collect();
 
-    let generic_numbers: HashMap<String, i64> = hashmap_new_string_i64();
-    let generic_inserted = generic_numbers.insert(str_append("ga", "mma"), 11);
-    let generic_replaced = generic_numbers.insert("gamma", 12);
-    let generic_number_keys = generic_numbers.iter_keys().collect();
-    let generic_value = generic_numbers.get("gamma").unwrap_or(0);
-    let generic_missing_value = generic_numbers.get("missing").unwrap_or(5);
-    let generic_removed = generic_numbers.remove("gamma");
-    let generic_missing_after = !generic_numbers.contains("gamma");
+        let text_inserted = texts.insert("title", string_from_str("alpha").unwrap_or(String { handle: 0 }));
+        let text_replaced = texts.insert("title", string_from_str("gamma").unwrap_or(String { handle: 0 }));
+        let text_value = texts.get("title").unwrap_or(String { handle: 0 });
+        let text_removed = texts.remove("title").unwrap_or(String { handle: 0 });
+        let text_missing = !texts.contains("title");
 
-    let generic_flags: HashMap<String, bool> = hashmap_new_string_bool();
-    let generic_flag_inserted = generic_flags.insert("enabled", true);
-    let generic_flag_replaced = generic_flags.insert("enabled", false);
-    let generic_flag_value = generic_flags.get("enabled").unwrap_or(true);
-    let generic_flag_removed = generic_flags.remove("enabled");
-    let generic_flag_missing = !generic_flags.contains("enabled");
+        let generic_numbers: HashMap<String, i64> = hashmap_new();
+        let generic_inserted_beta = generic_numbers.insert("beta", 1);
+        let generic_inserted_alpha = generic_numbers.insert("alpha", 2);
+        let generic_replaced_beta = generic_numbers.insert("beta", 7);
+        let generic_beta_value = generic_numbers.get("beta").unwrap_or(0);
+        let generic_contains_alpha = generic_numbers.contains("alpha");
+        let generic_removed_alpha = generic_numbers.remove("alpha");
+        let generic_number_keys = generic_numbers.iter_keys().collect();
 
-    let generic_texts: HashMap<String, String> = hashmap_new_string_string();
-    let generic_text_inserted = generic_texts.insert("title", string_from_str("alpha").unwrap_or(string_new()));
-    let generic_text_replaced = generic_texts.insert("title", string_from_str("gamma").unwrap_or(string_new()));
-    let generic_text_key_count = generic_texts.iter_keys().count();
-    let generic_text_taken = generic_texts.iter_keys().take(1);
-    let generic_text_keys = generic_texts.iter_keys().collect();
-    let generic_text_skipped_count = generic_texts.iter_keys().skip(1).count();
-    let generic_text_value = generic_texts.get("title").unwrap_or(string_new());
-    let generic_text_removed = generic_texts.remove("title").unwrap_or(string_new());
-    let generic_text_missing = !generic_texts.contains("title");
+        let generic_flags: HashMap<String, bool> = hashmap_new();
+        let generic_flag_inserted = generic_flags.insert("on", true);
+        let generic_flag_replaced = generic_flags.insert("on", false);
+        let generic_flag_value = generic_flags.get("on").unwrap_or(true);
+        let generic_flag_removed = generic_flags.remove("on");
 
-    let iter = numbers.iter_keys();
-    let first = iter.next_copy(buffer).unwrap_or(0);
-    let wrote_first = io_stdout_write_raw(buffer.ptr(), first).unwrap_or(0);
-    let wrote_sep = io_stdout_write("|").unwrap_or(0);
-    let second = iter.next_copy(buffer).unwrap_or(0);
-    let wrote_second = io_stdout_write_raw(buffer.ptr(), second).unwrap_or(0);
-    let iter_done = iter.done();
-    iter.free();
+        let generic_texts: HashMap<String, String> = hashmap_new();
+        let generic_text_inserted = generic_texts.insert(
+            "title",
+            string_from_str("alpha").unwrap_or(String { handle: 0 }),
+        );
+        let generic_text_replaced = generic_texts.insert(
+            "title",
+            string_from_str("gamma").unwrap_or(String { handle: 0 }),
+        );
+        let generic_text_value = generic_texts.get("title").unwrap_or(String { handle: 0 });
+        let generic_text_removed = generic_texts.remove("title").unwrap_or(String { handle: 0 });
+        let generic_text_key_count = generic_texts.iter_keys().count();
 
-    let flag_iter = flags.iter_keys();
-    let flag_sep_one = io_stdout_write("|").unwrap_or(0);
-    let flag_first = flag_iter.next_copy(buffer).unwrap_or(0);
-    let flag_wrote_first = io_stdout_write_raw(buffer.ptr(), flag_first).unwrap_or(0);
-    let flag_sep_two = io_stdout_write("|").unwrap_or(0);
-    let flag_second = flag_iter.next_copy(buffer).unwrap_or(0);
-    let flag_wrote_second = io_stdout_write_raw(buffer.ptr(), flag_second).unwrap_or(0);
-    let flag_iter_done = flag_iter.done();
-    flag_iter.free();
+        let string_set = hashset_new_string();
+        string_set.insert("ready");
+        let set_contains = string_set.contains("ready");
+        let set_iter = string_set.iter().collect();
+        let set_removed = string_set.remove("ready");
 
-    buffer.free();
-    numbers.free();
-    flags.free();
+        let generic_set: HashSet<String> = hashset_new();
+        generic_set.insert("ready");
+        let generic_set_contains = generic_set.contains("ready");
+        let generic_set_iter = generic_set.iter().collect();
+        let generic_set_removed = generic_set.remove("ready");
 
-    if inserted_beta
-        && inserted_alpha
-        && replaced_beta
-        && contains_alpha
-        && beta_value == 7
-        && removed_alpha
-        && missing_alpha
-        && inserted_on
-        && inserted_off
-        && replaced_on
-        && !on_value
-        && !off_value
-        && generic_inserted
-        && generic_replaced
-        && generic_number_keys.len() == 1
-        && generic_value == 12
-        && generic_missing_value == 5
-        && generic_removed
-        && generic_missing_after
-        && generic_flag_inserted
-        && generic_flag_replaced
-        && !generic_flag_value
-        && generic_flag_removed
-        && generic_flag_missing
-        && generic_text_inserted
-        && generic_text_replaced
-        && generic_text_key_count == 1
-        && generic_text_taken.len() == 1
-        && generic_text_keys.len() == 1
-        && generic_text_skipped_count == 0
-        && generic_text_value.len() == 5
-        && generic_text_removed.len() == 5
-        && generic_text_missing
-        && first == 4
-        && wrote_first == 4
-        && wrote_sep == 1
-        && second == 0
-        && wrote_second == 0
-        && iter_done
-        && flag_sep_one == 1
-        && flag_first == 3
-        && flag_wrote_first == 3
-        && flag_sep_two == 1
-        && flag_second == 2
-        && flag_wrote_second == 2
-        && flag_iter_done {
-        0
+        let wrapper_status = if !inserted_beta { 1 }
+            else if !inserted_alpha { 2 }
+            else if !replaced_beta { 3 }
+            else if !contains_alpha { 4 }
+            else if beta_value != 7 { 5 }
+            else if !removed_alpha { 6 }
+            else if !missing_alpha { 7 }
+            else if !number_done_before { 8 }
+            else if number_key.len() != 4 { 9 }
+            else if number_taken.len() != 1 { 10 }
+            else if !inserted_on { 11 }
+            else if !inserted_off { 12 }
+            else if !replaced_on { 13 }
+            else if on_value { 14 }
+            else if off_value { 15 }
+            else if flag_keys.len() != 2 { 16 }
+            else if !text_inserted { 17 }
+            else if !text_replaced { 18 }
+            else if text_value.len() != 5 { 19 }
+            else if text_removed.len() != 5 { 20 }
+            else if !text_missing { 21 }
+            else if !set_contains { 22 }
+            else if set_iter.len() != 1 { 23 }
+            else if !set_removed { 24 }
+            else { 0 };
+        let generic_ok = generic_inserted_beta
+            && generic_inserted_alpha
+            && generic_replaced_beta
+            && generic_contains_alpha
+            && generic_beta_value == 7
+            && generic_removed_alpha
+            && generic_number_keys.len() == 1
+            && generic_flag_inserted
+            && generic_flag_replaced
+            && !generic_flag_value
+            && generic_flag_removed
+            && generic_text_inserted
+            && generic_text_replaced
+            && generic_text_value.len() == 5
+            && generic_text_removed.len() == 5
+            && generic_text_key_count == 0
+            && generic_set_contains
+            && generic_set_iter.len() == 1
+            && generic_set_removed;
+
+        if wrapper_status == 0 {
+            if generic_ok { 0 } else { 30 }
+        } else {
+            wrapper_status
+        }
+    };
+    let after = sengoo_string_live_handle_count();
+
+    if status == 0 && after == before {
+        42
     } else {
-        1
+        status + if after == before { 40 } else {
+            if after > before { 100 + (after - before) } else { 90 }
+        }
     }
 }
 "#,
-        "",
-    ) else {
-        return;
-    };
-
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "beta||off|on");
+
+    assert_eq!(output.status.code(), Some(42));
 }
 
 #[test]

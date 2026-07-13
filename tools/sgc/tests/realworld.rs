@@ -54,6 +54,15 @@ fn realworld_sources_check_through_sgc_command() {
         &realworld("compressed-json-artifact").join("src/main.sg"),
         None,
     );
+    let default_library = realworld("default-library-conformance");
+    let default_library_map = format!(
+        "default_library_conformance={}",
+        default_library.join("src/lib.sg").display()
+    );
+    assert_sgc_check(
+        &default_library.join("src/main.sg"),
+        Some(default_library_map),
+    );
     assert_sgc_check(&realworld("http-client-status").join("src/main.sg"), None);
     assert_sgc_check(&realworld("p0-foundations").join("src/main.sg"), None);
 
@@ -63,6 +72,28 @@ fn realworld_sources_check_through_sgc_command() {
         workspace_doc_loop.join("src/lib.sg").display()
     );
     assert_sgc_check(&workspace_doc_loop.join("src/main.sg"), Some(module_map));
+}
+
+#[test]
+fn default_library_conformance_runs_generic_string_keyed_map_natively() {
+    let fixture = realworld("default-library-conformance");
+    let module_map = format!(
+        "default_library_conformance={}",
+        fixture.join("src/lib.sg").display()
+    );
+    let output = Command::new(sgc())
+        .arg("run")
+        .arg(fixture.join("src/main.sg"))
+        .arg("--force-rebuild")
+        .env("SENGOO_MODULE_MAP", module_map)
+        .output()
+        .expect("run default-library conformance fixture");
+    assert!(
+        output.status.success(),
+        "default-library conformance failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
