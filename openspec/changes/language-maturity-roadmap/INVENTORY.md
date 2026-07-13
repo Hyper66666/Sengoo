@@ -47,8 +47,8 @@ the preserved async-worktree audit keep `mainline-release-baseline` open.
 | Registry/package graph | Code includes semver, aliases, multiversion, remote publish/cache paths | Tasks/spec must be reconciled before new implementation |
 | Distribution | Four-host workflow covers Windows x64, Linux x64, macOS x64, and macOS arm64 packaging/install; no real release tag | External-adoption blocker until an actual signed prerelease is cut |
 | WASM/bytecode | Capability matrix only; no complete backend | Deferred until stable ABI gate |
-| Language reference | Archived with executable examples | Refresh at milestone boundaries |
-| Flagship application | Archived package workflow proof | Re-run with generic collections and released toolchain |
+| Language reference | Archived with executable examples; Phase 1 refresh adds production numeric semantics and checked-conversion proof | Phase 1 refreshed; refresh again when concurrency or release semantics change |
+| Flagship application | Archived package workflow proof; Phase 1 locked loop uses ABI-v1 generic maps, numeric casts, recursive walk, owned formatting, and deterministic shared-counter work | Phase 1 refreshed; released-toolchain and generic concurrency reruns remain open |
 
 ## Active implementation owners
 

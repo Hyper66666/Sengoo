@@ -54,8 +54,14 @@
     exit without manual release calls. Its locked `sgpm check`, `test`,
     `fmt --check`, `doc`, and `build` loop plus native
     `sgc run --force-rebuild` pass on the Windows reference workspace.
-- [ ] 2.5 Refresh the language reference and flagship application against the
+- [x] 2.5 Refresh the language reference and flagship application against the
   Phase 1 public surface.
+  - The authoritative reference now records the archived numeric contract,
+    includes an executable checked-conversion proof, and retains the explicit
+    experimental Cranelift boundary. The flagship guide records its ABI-v1
+    generic map, numeric casts, recursive walk, owned formatting, and current
+    scalar concurrency transition boundary. Reference doctests pass 2/2 and
+    the flagship locked check/test/fmt/doc/build loop passes locally.
 
 ## 3. Phase 2 - external adoption and release
 
