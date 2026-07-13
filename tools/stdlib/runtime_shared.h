@@ -64,6 +64,18 @@ typedef struct {
 
 long long sengoo_collections_abi_version(void);
 long long sengoo_type_descriptor_validate(const SengooTypeDescriptor* descriptor);
+long long sengoo_arc_new(const SengooTypeDescriptor* descriptor, void* value);
+long long sengoo_arc_new_parts(
+    void* value,
+    long long size,
+    long long align,
+    SengooMoveFn move_value,
+    SengooDropFn drop_value
+);
+long long sengoo_arc_clone(long long handle);
+long long sengoo_arc_strong_count(long long handle);
+void* sengoo_arc_borrow_ptr(long long handle);
+long long sengoo_arc_drop(long long handle);
 long long sengoo_raw_vec_new(const SengooTypeDescriptor* descriptor);
 long long sengoo_raw_vec_new_parts(
     long long size,

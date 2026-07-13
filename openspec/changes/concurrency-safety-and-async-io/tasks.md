@@ -35,36 +35,28 @@
 
 ## 2. Shared ownership and mutation
 
-- [ ] 2.1 `Arc<T>` atomic-refcounted shared ownership.
-  - Partial: `std::async` now exposes an atomic-refcounted transition surface
-    for `Arc<i64>` and `Arc<bool>` with `clone_arc`, `strong_count`, `get`, and
-    automatic scope-exit `Drop`. Compiler marker-bound tests accept these
-    scalar Arc values as Send/Sync, and a native `sgc` test proves clone/drop
-    count transitions. A pinned `ArcMutex<i64>` bridge now backs the shared
-    counter proof with a real runtime `Arc<Mutex<i64>>`; fully generic payload
-    storage and public `Arc<Mutex<T>>` composition remain open.
+- [x] 2.1 `Arc<T>` atomic-refcounted shared ownership.
+  - `std::async` exposes descriptor-backed `Arc<T>` with `arc_new`,
+    `clone_arc`, `strong_count`, typed borrowing, and automatic scope-exit
+    `Drop`. Compiler tests cover arbitrary Copy payloads plus Send/Sync bounds,
+    runtime tests prove exact generic payload move/drop, and native `sgc`
+    tests exercise public `Arc<Mutex<i64>>` composition across worker threads.
 - [ ] 2.2 `Mutex<T>` / `RwLock<T>` with RAII guards that release on `Drop`.
-  - Partial: `std::async` now exposes `await mutex_lock_guard_i64(mutex)` and
-    `MutexGuardI64` with `get`/`set` plus automatic scope-exit unlock. Native
-    evidence proves a guard writes back its updated i64 value, releases the
-    lock before a second acquisition, and leaves failed-lock payloads inactive;
-    the runtime rejects duplicate unlocks without corrupting the next lock.
-    The scalar transition surface also provides `RwLockI64` with non-blocking
-    `rwlock_try_read_guard_i64` / `rwlock_try_write_guard_i64`, multiple read
-    guards, exclusive write guards, writeback, and token-checked Drop unlocks;
-    runtime and native `sgc` tests cover duplicate unlock safety and read/write
-    handoff. The pinned `ArcMutex<i64>` shared-counter bridge supplies real
-    cross-thread Arc/Mutex composition while generic `Mutex<T>` / `RwLock<T>`,
-    async rwlock waiting, public generic `Arc<Mutex<T>>`, and compiler-enforced
+  - Partial: `std::async` now exposes descriptor-backed `Mutex<T>` and
+    `MutexGuard<T>` with async acquisition, Copy-only reads, owned replacement,
+    and automatic scope-exit unlock. Runtime and native tests cover arbitrary
+    payload Drop, fresh lock acquisition, failed-lock cleanup, duplicate unlock
+    rejection, and public `Arc<Mutex<i64>>` worker composition. The scalar
+    transition surface still provides `RwLockI64` read/write guards and handoff
+    coverage. Generic `RwLock<T>`, async rwlock waiting, and compiler-enforced
     lock-outlives-guard lifetimes remain open.
 - [x] 2.3 Tests: shared counter across threads via `Arc<Mutex<...>>`.
   - `runtime/src/async_runtime.rs::concurrent_shared_counter_joins_workers_deterministically`
     submits eight jobs to four workers against a real `Arc<Mutex<i64>>` payload
     and joins every job before asserting `42`. The native Sengoo test
-    `tools/sgc/src/tests.rs::async_stdlib_shared_counter_joins_cross_thread_workers`
-    proves the public `ArcMutex<i64>` transition API follows the same path;
-    generic public composition remains tracked by 2.1/2.2 rather than hidden by
-    this fixed-type evidence.
+    `tools/sgc/src/tests.rs::async_stdlib_generic_arc_mutex_joins_cross_thread_workers`
+    proves public `Arc<Mutex<i64>>` composition follows the same path, and the
+    compiler suite covers `Arc<Mutex<Payload>>` with a user-defined payload.
 
 ## 3. Multi-threaded executor
 

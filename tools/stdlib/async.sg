@@ -23,8 +23,14 @@ extern "C" {
     fn sengoo_async_mutex_new_i64(value: i64) -> i64;
     fn sengoo_async_mutex_close(mutex_handle: i64);
     fn sengoo_async_mutex_drop(mutex_handle: i64);
+    fn sengoo_async_mutex_lock__start(mutex_handle: i64) -> i64;
+    fn sengoo_async_mutex_lock__poll(handle: i64) -> i64;
+    fn sengoo_async_mutex_lock__result(handle: i64) -> i64;
+    fn sengoo_async_mutex_lock__cancel(handle: i64) -> bool;
+    fn sengoo_async_mutex_lock__drop(handle: i64);
     fn sengoo_async_mutex_lock_i64__start(mutex_handle: i64) -> i64;
     fn sengoo_async_mutex_unlock_i64(mutex_handle: i64, value: i64) -> i64;
+    fn sengoo_async_mutex_guard_unlock(mutex_handle: i64) -> i64;
     fn sengoo_async_mutex_guard_get_i64(mutex_handle: i64) -> i64;
     fn sengoo_async_mutex_guard_set_i64(mutex_handle: i64, value: i64) -> i64;
     fn sengoo_async_mutex_guard_unlock_i64(mutex_handle: i64) -> i64;
@@ -40,8 +46,6 @@ extern "C" {
     fn sengoo_async_rwlock_read_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
     fn sengoo_async_rwlock_write_guard_unlock_i64(lock_handle: i64, guard_id: i64) -> i64;
 
-    fn sengoo_arc_new_i64(value: i64) -> i64;
-    fn sengoo_arc_new_bool(value: i64) -> i64;
     fn sengoo_arc_clone(handle: i64) -> i64;
     fn sengoo_arc_strong_count(handle: i64) -> i64;
     fn sengoo_arc_get_i64(handle: i64) -> i64;
@@ -82,9 +86,20 @@ struct MutexI64 {
     handle: i64,
 }
 
+struct Mutex<T> {
+    handle: i64,
+    marker: i64,
+}
+
 struct MutexGuardI64 {
     mutex_handle: i64,
     value: i64,
+    active: bool,
+}
+
+struct MutexGuard<T> {
+    mutex_handle: i64,
+    marker: i64,
     active: bool,
 }
 
@@ -106,6 +121,8 @@ struct RwLockWriteGuardI64 {
 
 impl !Send for MutexGuardI64 {}
 impl !Sync for MutexGuardI64 {}
+impl<T> !Send for MutexGuard<T> {}
+impl<T> !Sync for MutexGuard<T> {}
 impl !Send for RwLockReadGuardI64 {}
 impl !Sync for RwLockReadGuardI64 {}
 impl !Send for RwLockWriteGuardI64 {}
@@ -113,50 +130,64 @@ impl !Sync for RwLockWriteGuardI64 {}
 
 struct Arc<T> {
     handle: i64,
-    marker: T,
+    marker: i64,
 }
 
-// Pinned Arc<Mutex<i64>> transition surface until generic runtime payloads land.
 struct ArcMutex<T> {
-    handle: i64,
-    marker: T,
+    inner: Arc<Mutex<T>>,
 }
 
 struct SharedCounterJobI64 {
     handle: i64,
 }
 
+def arc_new<T>(value: T) -> Arc<T> {
+    Arc { handle: 0, marker: 0 }
+}
+
 def arc_new_i64(value: i64) -> Arc<i64> {
-    Arc { handle: sengoo_arc_new_i64(value), marker: 0 }
+    arc_new(value)
 }
 
 def arc_new_bool(value: bool) -> Arc<bool> {
-    Arc { handle: sengoo_arc_new_bool(if value { 1 } else { 0 }), marker: false }
+    arc_new(value)
+}
+
+def arc_borrow<T>(handle: i64) -> &T {
+    arc_borrow(handle)
+}
+
+def mutex_new<T>(value: T) -> Mutex<T> {
+    Mutex { handle: 0, marker: 0 }
+}
+
+def raw_mutex_guard_set<T>(handle: i64, value: T) -> bool {
+    false
 }
 
 impl<T> Arc<T> {
+    def clone_arc(&self) -> Arc<T> {
+        Arc { handle: sengoo_arc_clone(self.handle), marker: 0 }
+    }
+
     def strong_count(&self) -> i64 {
         sengoo_arc_strong_count(self.handle)
+    }
+
+    def borrow(&self) -> &T {
+        arc_borrow(self.handle)
     }
 }
 
 impl Arc<i64> {
-    def clone_arc(&self) -> Arc<i64> {
-        Arc { handle: sengoo_arc_clone(self.handle), marker: 0 }
-    }
-
     def get(&self) -> i64 {
-        sengoo_arc_get_i64(self.handle)
+        *self.borrow()
     }
 }
 
 impl Arc<bool> {
-    def clone_arc(&self) -> Arc<bool> {
-        Arc { handle: sengoo_arc_clone(self.handle), marker: false }
-    }
-
     def get(&self) -> bool {
-        sengoo_arc_get_bool(self.handle) != 0
+        *self.borrow()
     }
 }
 
@@ -167,22 +198,16 @@ impl<T> Drop for Arc<T> {
 }
 
 def arc_mutex_new_i64(value: i64) -> ArcMutex<i64> {
-    ArcMutex { handle: sengoo_async_shared_counter_new_i64(value), marker: 0 }
+    ArcMutex { inner: arc_new(mutex_new(value)) }
 }
 
 impl ArcMutex<i64> {
-    def clone_arc_mutex(&self) -> ArcMutex<i64> {
-        ArcMutex { handle: sengoo_async_shared_counter_clone_i64(self.handle), marker: 0 }
+    def clone_arc_mutex(&self) -> Arc<Mutex<i64>> {
+        self.inner.clone_arc()
     }
 
     def get(&self) -> i64 {
-        sengoo_async_shared_counter_get_i64(self.handle)
-    }
-}
-
-impl<T> Drop for ArcMutex<T> {
-    def drop(&mut self) {
-        sengoo_async_shared_counter_drop(self.handle);
+        sengoo_async_shared_counter_get_i64(self.inner.handle)
     }
 }
 
@@ -205,6 +230,62 @@ impl MutexGuardI64 {
 
     def set(&self, value: i64) {
         sengoo_async_mutex_guard_set_i64(self.mutex_handle, value);
+    }
+}
+
+impl<T> MutexGuard<T> {
+    def set(&mut self, value: T) -> bool {
+        raw_mutex_guard_set(self.mutex_handle, value)
+    }
+}
+
+def mutex_guard_copy_into<T: Copy>(guard: &MutexGuard<T>, output: &mut T) -> bool {
+    false
+}
+
+impl MutexGuard<i64> {
+    def get(&self) -> i64 {
+        if !self.active { return 0; }
+        sengoo_async_mutex_guard_get_i64(self.mutex_handle)
+    }
+}
+
+impl MutexGuard<bool> {
+    def get(&self) -> bool {
+        if !self.active { return false; }
+        sengoo_async_mutex_guard_get_i64(self.mutex_handle) != 0
+    }
+}
+
+impl<T> Mutex<T> {
+    def raw_handle(&self) -> i64 {
+        self.handle
+    }
+
+    def make_guard(&self, handle: i64, active: bool) -> MutexGuard<T> {
+        MutexGuard {
+            mutex_handle: handle,
+            marker: 0,
+            active: active,
+        }
+    }
+}
+
+def raw_mutex_lock_async<T>(mutex: &Mutex<T>) -> i64 {
+    sengoo_async_mutex_lock__start(mutex.raw_handle())
+}
+
+impl<T> Drop for Mutex<T> {
+    def drop(&mut self) {
+        sengoo_async_mutex_drop(self.handle);
+    }
+}
+
+impl<T> Drop for MutexGuard<T> {
+    def drop(&mut self) {
+        if self.active {
+            sengoo_async_mutex_guard_unlock(self.mutex_handle);
+        }
     }
 }
 
@@ -275,7 +356,7 @@ def spawn_blocking_i64(work: fn() -> i64) -> Result<i64, i64> {
 }
 
 def spawn_shared_counter_i64(
-    shared: ArcMutex<i64>,
+    shared: Arc<Mutex<i64>>,
     delta: i64,
     repetitions: i64,
 ) -> Result<SharedCounterJobI64, i64> {
@@ -304,6 +385,25 @@ def spawn_shared_counter_i64(
                 error: 0,
             }
         }
+    }
+}
+
+async def mutex_lock_guard<T>(mutex: &Mutex<T>) -> Result<MutexGuard<T>, i64> {
+    let status = await raw_mutex_lock_async(mutex);
+    if status == 0 {
+        let result: Result<MutexGuard<T>, i64> = Result {
+            is_ok: true,
+            value: mutex.make_guard(mutex.raw_handle(), true),
+            error: 0,
+        };
+        result
+    } else {
+        let result: Result<MutexGuard<T>, i64> = Result {
+            is_ok: false,
+            value: mutex.make_guard(0, false),
+            error: status,
+        };
+        result
     }
 }
 

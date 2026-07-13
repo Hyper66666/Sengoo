@@ -4566,6 +4566,115 @@ def main() -> i64 {
 }
 
 #[test]
+fn async_stdlib_generic_arc_mutex_joins_cross_thread_workers() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-arc-mutex",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let enabled = runtime_enable_thread_pool(4);
+    if !enabled.is_ok { return enabled.error; }
+
+    let counter: Arc<Mutex<i64>> = arc_new(mutex_new(2));
+    let first = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let second = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let third = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let fourth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let fifth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let sixth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let seventh = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    let eighth = spawn_shared_counter_i64(counter.clone_arc(), 1, 5);
+    if !first.is_ok || !second.is_ok || !third.is_ok || !fourth.is_ok
+        || !fifth.is_ok || !sixth.is_ok || !seventh.is_ok || !eighth.is_ok {
+        return 1;
+    }
+
+    first.value.join();
+    second.value.join();
+    third.value.join();
+    fourth.value.join();
+    fifth.value.join();
+    sixth.value.join();
+    seventh.value.join();
+    eighth.value.join();
+
+    let locked = await mutex_lock_guard(counter.borrow());
+    if !locked.is_ok { return locked.error; }
+    locked.value.get()
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_arc_mutex_locks_fresh_payload() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-arc-mutex-fresh-lock",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let counter: Arc<Mutex<i64>> = arc_new(mutex_new(2));
+    let locked = await mutex_lock_guard(counter.borrow());
+    if !locked.is_ok { return locked.error; }
+    locked.value.get()
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_mutex_failed_lock_copy_leaves_output_untouched() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-mutex-failed-copy",
+        r#"
+import std::async;
+
+async def main() -> i64 {
+    let invalid: Mutex<i64> = Mutex { handle: 0, marker: 0 };
+    let locked = await mutex_lock_guard(&invalid);
+    if locked.is_ok { return 1; }
+
+    let mut output = 9;
+    if mutex_guard_copy_into(&locked.value, &mut output) { return 2; }
+    if output == 9 { 42 } else { 3 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn async_stdlib_shared_counter_joins_cross_thread_workers() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "async-shared-counter",
