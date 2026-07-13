@@ -1,0 +1,12 @@
+def classify(value: i64) -> i64 {
+    let next = value + 1;
+    if next > 10 {
+        next - 2
+    } else {
+        next + 3
+    }
+}
+
+def main() -> i64 {
+    classify(9)
+}

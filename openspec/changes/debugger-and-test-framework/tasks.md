@@ -45,8 +45,9 @@
   to set a breakpoint, step, and read a local, asserting on output.
   - `tools/sgc/tests/debugger_native.rs` builds a fresh `-O 0 --debug-info`
     executable, drives LLDB in batch mode on Unix or CDB from a command file on
-    Windows, and requires breakpoint/step markers plus `value = 21` and
-    `doubled = 42` in the debugger transcript.
+    Windows, sets a Sengoo file:line breakpoint, and requires the target source
+    line, a `next` advance, `value = 21`, `doubled = 42`, and normal continue
+    completion in the debugger transcript.
   - Command generation and transcript parsing have platform-independent unit
     coverage. Missing clang/debugger tools produce a visible `SKIP
     debugger_native::...` reason; once present, any build, breakpoint, step, or

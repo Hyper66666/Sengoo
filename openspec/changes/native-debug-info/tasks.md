@@ -4,9 +4,12 @@
 - [x] 1.2 Confirm `codegen-ir-correctness-and-gate` is archived (conformance
   gate drives the real `sgc` CLI); otherwise record it as the active blocker
   and stop before §3.
-- [ ] 1.3 Record the no-`-g` baseline: pick three fixtures (scalar control
+- [x] 1.3 Record the no-`-g` baseline: pick three fixtures (scalar control
   flow, struct/method, async main) and check in their emitted IR hashes to
   prove later byte-identity without `-g`.
+  - `compiler/tests/fixtures/debug-info-baselines/` contains source, LLVM IR,
+    and FNV64 records for all three shapes. The integration test pins one
+    reference triple so byte identity is reproducible across build hosts.
 - [x] 1.4 Pin explicit deferrals: no `sgpm build` debug-profile forwarding,
   no DAP/IDE debug UI, no pretty-printers, and no full local-variable
   inspection in v1.
@@ -25,8 +28,12 @@
 - [x] 3.2 Emit `DISubprogram` per function with `!dbg` attachment, including
   synthesized lambda names.
 - [ ] 3.3 Attach statement `!dbg` locations per design D-A2.
-- [ ] 3.4 IR tests: DI presence/shape under `-g`; byte-identical IR without
+- [x] 3.4 IR tests: DI presence/shape under `-g`; byte-identical IR without
   `-g` against §1.3 baselines.
+
+  - `tools/sgc/tests/debug_info_baselines.rs` proves exact non-debug IR and
+    hash identity before and after a debug build, while requiring compile-unit,
+    file, subprogram, and location metadata only in debug mode.
 
 ## 4. CLI and cache
 
