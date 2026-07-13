@@ -112,8 +112,12 @@
     normal fallthrough and cancel-then-join on `return`, `?`, and loop exits.
     Forged/escaping guards are rejected; runtime/native tests cover one-worker
     nested progress, exact rejected-frame cleanup, and 100-scope leak stress.
-- [ ] 4.4 Prove timer/socket/owned-handle reactor progress on Linux, Windows, and
+- [x] 4.4 Prove timer/socket/owned-handle reactor progress on Linux, Windows, and
   the supported macOS release channel without busy polling.
+  - Actions run `29292788788` passes the shared seven-scenario reactor suite on
+    Ubuntu, Windows, macOS x64, and macOS arm64. The suite covers timer, TCP,
+    pipe/fd readiness, finite wakeup hints, close, cancellation, and exact
+    child-future cleanup.
 - [ ] 4.5 Refresh the flagship application with a useful concurrent workload and
   retain a deterministic serial oracle.
 

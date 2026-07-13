@@ -43,7 +43,7 @@ the preserved async-worktree audit keep `mainline-release-baseline` open.
 | Numeric types | Archived `numeric-type-system`; compiler, native runtime, and experimental Cranelift numeric suites | Phase 1 numeric gate complete; LLVM-text remains the production backend |
 | Generic collections | Archived `generic-collections`; ABI-v1 RawVec/RawHashMap/RawBTree storage, ownership callbacks, lazy adapters, and default-library fixture | Phase 1 collection gate complete; compatibility names share the generic runtime |
 | Debug/test | Test framework and coverage complete; two DWARF tasks open | Small, high-value closure lane |
-| Concurrency | Send/Sync complete; scalar Arc/locks/channel subsets | Generic storage, structured tasks, reactor evidence open |
+| Concurrency | Generic Arc/locks/channel, bounded executor, structured task scopes, and four-host reactor evidence complete | Public owned-file async readiness, user-Future wake/poll hardening, and flagship concurrency refresh remain open |
 | Registry/package graph | Reference-server e2e proves checksum/yank handling, alias+multiversion lock edges, hostile-archive rejection, and zero-network verified-cache locked check/test/build/run | Phase 2 resolver gate complete; retain protocol conformance tests |
 | Distribution | `v0.1.0-rc.1` run `29259068988` passes checksummed install/upgrade on Windows x64, Linux x64, macOS x64, and macOS arm64 and publishes provenance-attested release assets | Phase 2 release gate complete; retain tag/version/tool-manifest coherence on every candidate |
 | WASM/bytecode | Capability matrix only; no complete backend | Deferred until stable ABI gate |

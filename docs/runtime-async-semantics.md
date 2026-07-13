@@ -107,9 +107,10 @@ future without exposing lifecycle ids.
   handles and supports disk files plus named/anonymous pipes. Registration owns
   a duplicated descriptor/handle until unregister, preventing numeric handle
   reuse from retargeting a stale interest after the caller closes the original.
-  Unsupported hosts or file kinds do not claim readiness support; all-host
-  owned-fd readiness remains Deferred until the four-host workflow evidence
-  passes.
+  Unsupported hosts or file kinds do not claim readiness support. Actions run
+  `29292788788` proves the shared timer/TCP/owned-handle suite on Ubuntu,
+  Windows, macOS x64, and macOS arm64 without extending that claim to other
+  hosts or file kinds.
 
 ## User `Future` surface
 
