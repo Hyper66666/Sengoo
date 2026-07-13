@@ -93,3 +93,12 @@ contract, an mpsc `channel<T>`, and a structured task scope.
 - **WHEN** tasks are spawned inside a `task_scope` and the scope exits
 - **THEN** all child tasks are joined on normal exit and cancelled on early exit,
   leaving no leaked tasks
+- **AND** `scope_spawn` does not expose a child task ID outside the scope
+- **AND** returning or aggregate-storing the `TaskScope` guard is rejected
+
+#### Scenario: Scoped submission is rejected
+
+- **WHEN** `scope_spawn` targets a closed scope or a saturated/shutting-down
+  executor
+- **THEN** it returns `0`
+- **AND** the rejected future frame is cancelled or dropped exactly once

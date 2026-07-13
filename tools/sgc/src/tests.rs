@@ -4998,6 +4998,57 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_structured_task_scope_joins_and_cancels_children() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-structured-task-scope",
+        r#"
+import std::async;
+
+async def child(delay: i64) -> i64 {
+    await sleep(delay);
+    7
+}
+
+async def nested_parent() -> i64 {
+    let scope = task_scope();
+    if scope_spawn(&scope, child(5)) != 1 { return 80; }
+    9
+}
+
+async def main() -> i64 {
+    let enabled = runtime_enable_executor(1, 4);
+    if !enabled.is_ok { return enabled.error; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(10)) != 1 { return 90; }
+        if scope_spawn(&scope, child(15)) != 1 { return 91; }
+    }
+
+    let nested = spawn_task(nested_parent());
+    if nested == 0 || task_join(nested) != 2 { return 93; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(1000)) != 1 { return 92; }
+        return 42;
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn async_stdlib_generic_rwlock_waits_and_releases_guards() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "async-generic-rwlock-wait",

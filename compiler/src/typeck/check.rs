@@ -1425,6 +1425,11 @@ impl TypeChecker {
                         "AsyncContext is opaque and cannot be constructed by user code".to_string(),
                     ));
                 }
+                if name == "TaskScope" {
+                    return Err(TypeckError::Other(
+                        "TaskScope is opaque and cannot be constructed by user code".to_string(),
+                    ));
+                }
 
                 let field_defs = self
                     .struct_field_defs

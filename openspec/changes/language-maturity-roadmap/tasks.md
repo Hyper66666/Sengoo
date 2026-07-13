@@ -106,8 +106,12 @@
     negatives enforce Send and lock/guard lifetime boundaries; runtime tests
     cover exact payload/endpoint/guard Drop, cancellation, close, fairness, and
     scalar compatibility; native `sgc` tests exercise generic composition.
-- [ ] 4.3 Deliver `task_scope` normal/early-exit join/cancel semantics and stress
+- [x] 4.3 Deliver `task_scope` normal/early-exit join/cancel semantics and stress
   cancellation without leaked tasks.
+  - Opaque compiler-created `TaskScope` guards join direct `Send` children on
+    normal fallthrough and cancel-then-join on `return`, `?`, and loop exits.
+    Forged/escaping guards are rejected; runtime/native tests cover one-worker
+    nested progress, exact rejected-frame cleanup, and 100-scope leak stress.
 - [ ] 4.4 Prove timer/socket/owned-handle reactor progress on Linux, Windows, and
   the supported macOS release channel without busy polling.
 - [ ] 4.5 Refresh the flagship application with a useful concurrent workload and

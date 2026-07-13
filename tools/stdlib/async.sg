@@ -5,6 +5,9 @@ extern "C" {
     fn sengoo_async_runtime_executor_enabled() -> bool;
     fn sengoo_async_join_task(task_id: i64) -> i64;
     fn sengoo_async_runtime_shutdown_executor(cancel_pending: bool) -> i64;
+    fn sengoo_async_task_scope_new() -> i64;
+    fn sengoo_async_task_scope_join(scope_id: i64) -> i64;
+    fn sengoo_async_task_scope_cancel_join(scope_id: i64) -> i64;
     fn sengoo_async_spawn_blocking_i64__start(work_ptr: i64) -> i64;
     fn sengoo_async_shared_counter_new_i64(value: i64) -> i64;
     fn sengoo_async_shared_counter_clone_i64(handle: i64) -> i64;
@@ -62,6 +65,21 @@ extern "C" {
     fn sengoo_arc_get_i64(handle: i64) -> i64;
     fn sengoo_arc_get_bool(handle: i64) -> i64;
     fn sengoo_arc_drop(handle: i64);
+}
+
+struct TaskScope {
+    handle: i64,
+}
+
+impl !Send for TaskScope {}
+impl !Sync for TaskScope {}
+
+impl Drop for TaskScope {
+    def drop(&mut self) {
+        if self.handle > 0 {
+            sengoo_async_task_scope_cancel_join(self.handle);
+        }
+    }
 }
 
 struct ChannelSendOutcome {
