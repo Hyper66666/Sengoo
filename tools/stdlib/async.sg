@@ -392,7 +392,7 @@ async def mutex_lock_guard_i64(mutex: MutexI64) -> Result<MutexGuardI64, i64> {
 def mutex_unlock_i64(mutex: MutexI64, value: i64) -> Result<i64, i64> {
     let raw = sengoo_async_mutex_unlock_i64(mutex.handle, value);
     if raw >= 0 {
-        Result { is_ok: true, value: raw, error: 0 }
+        Result { is_ok: true, value: value, error: 0 }
     } else {
         Result { is_ok: false, value: 0, error: STATUS_INVALID_HANDLE() }
     }

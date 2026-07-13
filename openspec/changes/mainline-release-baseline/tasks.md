@@ -13,8 +13,11 @@
     before final integration. `git status` was clean immediately after the
     commit, proving no source/test/doc/example/OpenSpec path remained only in
     the worktree.
-- [ ] 1.3 Classify paths by OpenSpec owner and generated/source status; flag
+- [x] 1.3 Classify paths by OpenSpec owner and generated/source status; flag
   unknown ownership rather than guessing.
+  - The refreshed roadmap inventory assigns all 25 primary-worktree entries to
+    `enhance-sglsp-smart-completion`, records generated target sizes separately,
+    and preserves the older async worktree for an explicit equivalence audit.
 - [x] 1.4 Verify cleanup targets resolve inside the workspace before removing
   generated caches; update ignore/cleanup documentation where needed.
   - Added `/target-*/` beside the canonical `/target/` ignore rule. Before
@@ -36,19 +39,29 @@
     portable-backend surfaces. Conflict follow-ups restored strict native
     collections execution, DWARF statement lines, test discovery source maps,
     and race-free runtime object publication.
-- [ ] 2.3 Split changes into reviewable Lore-protocol commits tied to owning
+- [x] 2.3 Split changes into reviewable Lore-protocol commits tied to owning
   OpenSpec changes; do not create one opaque mega-commit.
+  - Numeric and generic-collection work is recorded as independent,
+    evidence-bearing commits; `c4d0e9864` contains only the collection ABI,
+    stdlib, tests, fixture, documentation, and its OpenSpec archive.
 - [ ] 2.4 Confirm no required commit remains only on a gone upstream branch or
   abandoned worktree.
 
 ## 3. Reconcile truth sources
 
-- [ ] 3.1 Audit every active change task against code/tests; record partial
+- [x] 3.1 Audit every active change task against code/tests; record partial
   evidence and remove stale `Why` claims.
-- [ ] 3.2 Update `language-maturity-roadmap/INVENTORY.md` from integrated main.
-- [ ] 3.3 Update README and `examples/realworld/SUPPORT_MATRIX.md` to match
+  - The roadmap audit rechecked debugger/native-DI, registry/distribution,
+    concurrency, hardening, and both portable backend owners. Implemented
+    subsets, local failures, host-only evidence, and true code gaps are now
+    separated in the inventory and support documentation.
+- [x] 3.2 Update `language-maturity-roadmap/INVENTORY.md` from integrated main.
+- [x] 3.3 Update README and `examples/realworld/SUPPORT_MATRIX.md` to match
   capability and host evidence, without promoting skips to success.
-- [ ] 3.4 Identify overlapping active umbrellas and record one active
+  - Distribution is described as configured rather than released, the current
+    four-host failure is not counted as artifact evidence, and real-binary
+    package loops explicitly reject skipped-tool success.
+- [x] 3.4 Identify overlapping active umbrellas and record one active
   implementation owner in the roadmap inventory. Preserve the support matrix's
   `Upstream spec/change` column as historical evidence lineage rather than
   misusing it as an active-owner registry.

@@ -6,9 +6,9 @@
   evidence changes.
 - [x] 0.3 Record the 2026-07-11 repository/capability snapshot in
   `INVENTORY.md`.
-- [ ] 0.4 Recompute `INVENTORY.md` from integrated `main` and remove statements
+- [x] 0.4 Recompute `INVENTORY.md` from integrated `main` and remove statements
   that were true only of the pre-integration worktree.
-- [ ] 0.5 Ensure each active capability has exactly one implementation owner;
+- [x] 0.5 Ensure each active capability has exactly one implementation owner;
   archive or mark overlapping umbrellas historical.
 
 ## 1. Phase 0 - integrated release baseline
@@ -19,9 +19,9 @@
   unexplained changes.
 - [ ] 1.3 Run the baseline gate: fmt, clippy, workspace tests, runtime native
   bridge tests, realworld package loop, and `openspec validate --all --strict`.
-- [ ] 1.4 Reconcile active tasks with implementation evidence, especially sgpm
+- [x] 1.4 Reconcile active tasks with implementation evidence, especially sgpm
   registry/alias/multiversion, debugger, numeric, and concurrency surfaces.
-- [ ] 1.5 Update README, support matrix, branch/upstream metadata, and generated
+- [x] 1.5 Update README, support matrix, branch/upstream metadata, and generated
   artifact ignore/cleanup policy from the integrated baseline.
 
 ## 2. Phase 1 - mainstream default language and library
