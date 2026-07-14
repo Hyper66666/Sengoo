@@ -1,0 +1,60 @@
+import std::ffi;
+
+import std::string;
+
+import senline_domain_worker;
+
+import senline_http_dogfood;
+
+def http_payload_body(payload: &str) -> Result<String, i64> {
+    let input_result = ffi_buffer_from_bytes(payload);
+    if input_result.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: input_result.error }; };
+    let input = input_result.value;
+    let response = senline_http_process_payload(input, payload.len());
+    input.free();
+    if response.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: response.error }; };
+    let encoded = response.value;
+    let output = encoded.payload;
+    let body = string_from_buffer(output, encoded.len);
+    output.free();
+    body;
+}
+
+def worker_payload_body(payload: &str) -> Result<String, i64> {
+    let input_result = ffi_buffer_from_bytes(payload);
+    if input_result.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: input_result.error }; };
+    let input = input_result.value;
+    let response = worker_process_payload_v1(input, payload.len());
+    input.free();
+    if response.is_err() { return Result { is_ok: false, value: String { handle: 0 }, error: response.error }; };
+    let encoded = response.value;
+    let output = encoded.payload;
+    let body = string_from_buffer(output, encoded.len);
+    output.free();
+    body;
+}
+
+def main() -> i64 {
+    let malformed = http_payload_body("{");
+    if malformed.is_err() { return 10; };
+    if not str_eq(malformed.value.as_str(), "{\"kind\":\"error\",\"schema_version\":1,\"scope\":\"protocol\",\"code\":\"malformed_json\",\"evaluation_id\":null}\n") { return 10; };
+    let duplicate = http_payload_body("{\"kind\":\"evaluation\",\"kind\":\"evaluation\"}");
+    if duplicate.is_err() { return 11; };
+    if not str_eq(duplicate.value.as_str(), "{\"kind\":\"error\",\"schema_version\":1,\"scope\":\"protocol\",\"code\":\"duplicate_field\",\"evaluation_id\":null}\n") { return 11; };
+    let trailing = http_payload_body("{} trailing");
+    if trailing.is_err() { return 12; };
+    if not str_eq(trailing.value.as_str(), "{\"kind\":\"error\",\"schema_version\":1,\"scope\":\"protocol\",\"code\":\"trailing_bytes\",\"evaluation_id\":null}\n") { return 12; };
+    let unsupported = http_payload_body("{\"context\":{\"contract_version\":1,\"operation\":\"submit-envelope\",\"operation_version\":2,\"evaluation_id\":\"00000000000000000000000000000001\",\"operation_epoch\":0,\"worker_generation\":0,\"execution_mode\":\"fixture\",\"worker_bundle_id\":\"b\",\"facts_binding\":\"0000000000000000000000000000000000000000000000000000000000000000\"},\"facts\":{\"contract_version\":1,\"operation_version\":2,\"identifiers\":{\"correlation_ref\":\"c\",\"source_account_ref\":\"sa\",\"source_device_ref\":\"sd\",\"recipient_account_ref\":\"ra\",\"recipient_device_ref\":\"rd\",\"conversation_ref\":\"v\",\"envelope_ref\":\"e\"},\"source_device_status\":\"active\",\"source_device_capabilities\":[],\"envelope_protocol_version\":2,\"ciphertext_length_bytes\":0,\"idempotency_status\":\"new\",\"recipient_pending_count\":0,\"recipient_pending_limit\":1,\"application_envelopes_used\":0,\"application_envelopes_limit\":1,\"ciphertext_limit_bytes\":0,\"feature_flags\":[]},\"kind\":\"evaluation\",\"schema_version\":1}");
+    if unsupported.is_err() { return 13; };
+    if not str_eq(unsupported.value.as_str(), "{\"kind\":\"error\",\"schema_version\":1,\"scope\":\"evaluation\",\"code\":\"unsupported_operation_version\",\"evaluation_id\":\"00000000000000000000000000000001\"}\n") { return 13; };
+    let shadow = http_payload_body("{\"context\":{\"contract_version\":1,\"operation\":\"submit-envelope\",\"operation_version\":1,\"evaluation_id\":\"00000000000000000000000000000001\",\"operation_epoch\":0,\"worker_generation\":0,\"execution_mode\":\"shadow\",\"worker_bundle_id\":\"b\",\"facts_binding\":\"0000000000000000000000000000000000000000000000000000000000000000\"},\"facts\":{\"contract_version\":1,\"operation_version\":1,\"identifiers\":{\"correlation_ref\":\"c\",\"source_account_ref\":\"sa\",\"source_device_ref\":\"sd\",\"recipient_account_ref\":\"ra\",\"recipient_device_ref\":\"rd\",\"conversation_ref\":\"v\",\"envelope_ref\":\"e\"},\"source_device_status\":\"active\",\"source_device_capabilities\":[],\"envelope_protocol_version\":2,\"ciphertext_length_bytes\":0,\"idempotency_status\":\"new\",\"recipient_pending_count\":0,\"recipient_pending_limit\":1,\"application_envelopes_used\":0,\"application_envelopes_limit\":1,\"ciphertext_limit_bytes\":0,\"feature_flags\":[]},\"kind\":\"evaluation\",\"schema_version\":1}");
+    if shadow.is_err() { return 14; };
+    if not str_eq(shadow.value.as_str(), "{\"kind\":\"error\",\"schema_version\":1,\"scope\":\"protocol\",\"code\":\"unknown_enum\",\"evaluation_id\":null}\n") { return 14; };
+    let fixture = "{\"context\":{\"contract_version\":1,\"operation\":\"submit-envelope\",\"operation_version\":1,\"evaluation_id\":\"00000000000000000000000000000001\",\"operation_epoch\":0,\"worker_generation\":0,\"execution_mode\":\"fixture\",\"worker_bundle_id\":\"b\",\"facts_binding\":\"0000000000000000000000000000000000000000000000000000000000000000\"},\"facts\":{\"contract_version\":1,\"operation_version\":1,\"identifiers\":{\"correlation_ref\":\"c\",\"source_account_ref\":\"sa\",\"source_device_ref\":\"sd\",\"recipient_account_ref\":\"ra\",\"recipient_device_ref\":\"rd\",\"conversation_ref\":\"v\",\"envelope_ref\":\"e\"},\"source_device_status\":\"active\",\"source_device_capabilities\":[],\"envelope_protocol_version\":2,\"ciphertext_length_bytes\":0,\"idempotency_status\":\"new\",\"recipient_pending_count\":0,\"recipient_pending_limit\":1,\"application_envelopes_used\":0,\"application_envelopes_limit\":1,\"ciphertext_limit_bytes\":0,\"feature_flags\":[]},\"kind\":\"evaluation\",\"schema_version\":1}";
+    let http_fixture = http_payload_body(fixture);
+    let worker_fixture = worker_payload_body(fixture);
+    if http_fixture.is_err() { return 15; };
+    if worker_fixture.is_err() { return 15; };
+    if not str_eq(http_fixture.value.as_str(), worker_fixture.value.as_str()) { return 15; };
+    0;
+}

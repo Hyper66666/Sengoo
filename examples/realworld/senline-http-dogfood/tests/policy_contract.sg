@@ -1,0 +1,22 @@
+import senline_http_dogfood;
+
+def main() -> i64 {
+    if not senline_http_bind_allowed("127.0.0.1", 0) { return 10; };
+    if senline_http_bind_allowed("0.0.0.0", 0) { return 11; };
+    if senline_http_bind_allowed("192.0.2.10", 0) { return 12; };
+    if senline_http_bind_allowed("127.0.0.1", 43123) { return 13; };
+    if senline_http_header_limit() != 4096 { return 14; };
+    if senline_http_body_limit() != 32768 { return 15; };
+    if senline_http_output_limit() != 8192 { return 16; };
+    if senline_http_request_timeout_ms() != 5000 { return 17; };
+    if not senline_http_method_allowed("POST") or senline_http_method_allowed("GET") { return 18; };
+    if not senline_http_path_allowed("/v1/submit-envelope", "") { return 19; };
+    if senline_http_path_allowed("/v1/submit-envelope", "debug=1") or senline_http_path_allowed("/v1/other", "") { return 20; };
+    if not senline_http_version_allowed("HTTP/1.1") or senline_http_version_allowed("HTTP/1.0") or senline_http_version_allowed("HTTP/2") { return 21; };
+    if not senline_http_content_type_allowed("application/json") or senline_http_content_type_allowed("application/json; charset=utf-8") { return 22; };
+    if not senline_http_transfer_encoding_allowed(false) or senline_http_transfer_encoding_allowed(true) { return 23; };
+    if not senline_http_header_length_supported(0) or not senline_http_header_length_supported(4096) or senline_http_header_length_supported(4097) { return 24; };
+    if senline_http_body_length_supported(0) or not senline_http_body_length_supported(1) or not senline_http_body_length_supported(32768) or senline_http_body_length_supported(32769) { return 25; };
+    if senline_http_max_requests_per_process() != 1 or senline_http_max_pending_requests() != 1 { return 26; };
+    0;
+}
