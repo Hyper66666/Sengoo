@@ -161,7 +161,7 @@ impl BorrowChecker {
     }
 
     pub(crate) fn check_function_block(&mut self, block: &Block) {
-        self.check_block_inner(block, true);
+        self.check_block_inner(block, true, true);
     }
 
     /// Check one statement.
@@ -206,15 +206,19 @@ impl BorrowChecker {
         self.moved = HashSet::new();
     }
 
-    fn pop_scope(&mut self) {
+    fn pop_scope(&mut self, merge_moves: bool) {
         if let Some(prev) = self.borrow_stack.pop() {
             self.borrows = prev;
         }
         if let Some(mut prev_moved) = self.moved_stack.pop() {
             for path in std::mem::take(&mut self.moved) {
-                if let Some(span) = self.move_spans.remove(&path) {
-                    prev_moved.insert(path.clone());
-                    self.move_spans.insert(path, span);
+                if merge_moves {
+                    if let Some(span) = self.move_spans.remove(&path) {
+                        prev_moved.insert(path.clone());
+                        self.move_spans.insert(path, span);
+                    }
+                } else if !prev_moved.contains(&path) {
+                    self.move_spans.remove(&path);
                 }
             }
             self.moved = prev_moved;
@@ -222,10 +226,10 @@ impl BorrowChecker {
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) {
-        self.check_block_inner(block, false);
+        self.check_block_inner(block, false, true);
     }
 
-    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool) {
+    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool, merge_moves: bool) {
         self.push_scope();
         for (index, stmt) in block.stmts.iter().enumerate() {
             let _ = self.check_stmt(stmt);
@@ -237,7 +241,13 @@ impl BorrowChecker {
                 }
             }
         }
-        self.pop_scope();
+        self.pop_scope(merge_moves);
+    }
+
+    fn block_has_unconditional_return_stmt(block: &Block) -> bool {
+        block.stmts.iter().any(
+            |stmt| matches!(&stmt.kind, StmtKind::Expr(expr) if matches!(expr.kind, ExprKind::Return(_))),
+        )
     }
 
     fn check_expr(&mut self, expr: &Expr) {
@@ -294,7 +304,11 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 self.check_expr(cond);
-                self.check_block(then_branch);
+                self.check_block_inner(
+                    then_branch,
+                    false,
+                    !Self::block_has_unconditional_return_stmt(then_branch),
+                );
                 if let Some(else_expr) = else_branch {
                     self.check_expr(else_expr);
                 }

@@ -365,6 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn binary_io_import_expands_exact_buffer_and_pipe_surface() {
+        let expanded =
+            expand_stdlib_imports_for_source("import std::io;\ndef main() -> i64 { 0 }\n")
+                .expect("binary I/O stdlib import should expand");
+
+        for signature in [
+            "def get_u8(self, index: i64) -> Result<i64, i64>",
+            "def set_u8(self, index: i64, value: i64) -> Result<bool, i64>",
+            "def read_u32_be(self, offset: i64) -> Result<i64, i64>",
+            "def write_u32_be(self, offset: i64, value: i64) -> Result<bool, i64>",
+            "fn sengoo_io_protocol_binary_mode() -> i64",
+            "fn sengoo_io_stdin_read_exact(buffer_handle: i64, offset: i64, len: i64) -> i64",
+            "fn sengoo_io_stdout_write_all(buffer_handle: i64, offset: i64, len: i64) -> i64",
+            "def io_protocol_binary_mode() -> Result<bool, i64>",
+            "def io_stdin_read_exact(buffer: Buffer, offset: i64, len: i64) -> Result<i64, i64>",
+            "def io_stdout_write_all(buffer: Buffer, offset: i64, len: i64) -> Result<i64, i64>",
+        ] {
+            assert!(
+                expanded.contains(signature),
+                "expanded std::io is missing `{signature}`"
+            );
+        }
+    }
+
+    #[test]
     fn args_import_expands_ffi_and_result_dependencies() {
         let expanded =
             expand_stdlib_imports_for_source("import std::args;\ndef main() -> i64 { 0 }\n")
@@ -427,6 +452,20 @@ mod tests {
         assert!(expanded.contains("struct JsonValue"));
         assert!(expanded.contains("def json_parse"));
         assert!(expanded.contains("def json_doc_object"));
+        assert!(expanded.contains("fn sengoo_json_last_error_kind() -> i64"));
+        assert!(expanded.contains("def JSON_ERROR_KIND_DUPLICATE_FIELD() -> i64"));
+        assert!(expanded.contains("def JSON_ERROR_KIND_INVALID_UNICODE() -> i64"));
+        assert!(expanded.contains("def JSON_ERROR_KIND_TRAILING_BYTES() -> i64"));
+        assert!(expanded.contains("def json_last_error_kind() -> i64"));
+        assert!(expanded.contains(
+            "fn sengoo_json_doc_new_string_len(handle: i64, value: i64, value_len: i64) -> i64"
+        ));
+        assert!(expanded.contains(
+            "fn sengoo_json_doc_new_string_from_string(handle: i64, string_handle: i64) -> i64"
+        ));
+        assert!(expanded.contains(
+            "def new_string_from_string(self, value: &String) -> Result<JsonValue, i64>"
+        ));
         assert!(expanded.contains("struct Buffer"));
         assert!(expanded.contains("struct Result"));
     }
