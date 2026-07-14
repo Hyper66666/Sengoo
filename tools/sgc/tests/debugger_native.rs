@@ -7,8 +7,8 @@ const BREAK_MARKER: &str = "SENGOO_DEBUG_BREAK";
 const STEP_MARKER: &str = "SENGOO_DEBUG_STEP";
 const COMPOSITE_MARKER: &str = "SENGOO_DEBUG_COMPOSITES";
 const CALL_MARKER: &str = "SENGOO_DEBUG_CALL";
-const CALL_LINE_MARKER: &str = "SENGOO_DEBUG_CALL_LINE";
 const CALL_STEP_MARKER: &str = "SENGOO_DEBUG_CALL_STEP";
+const CALL_BODY_MARKER: &str = "SENGOO_DEBUG_CALL_BODY";
 const CLOSURE_MARKER: &str = "SENGOO_DEBUG_CLOSURE";
 const CLOSURE_STEP_MARKER: &str = "SENGOO_DEBUG_CLOSURE_STEP";
 const EXIT_MARKER: &str = "SENGOO_DEBUG_EXIT_ZERO";
@@ -84,7 +84,7 @@ struct ProbeLayout {
 struct CompositeProbeLayout {
     composite_line: usize,
     call_entry_line: usize,
-    call_line: usize,
+    helper_entry_line: usize,
     helper_line: usize,
     closure_call_line: usize,
     closure_step_line: usize,
@@ -263,12 +263,12 @@ fn composite_lldb_arguments(
         "thread backtrace".to_string(),
         "frame variable value".to_string(),
         "step".to_string(),
-        format!("script print(\"{CALL_LINE_MARKER}\")"),
-        "frame info".to_string(),
-        "step".to_string(),
         format!("script print(\"{CALL_STEP_MARKER}\")"),
         "frame info".to_string(),
         "frame variable value".to_string(),
+        "step".to_string(),
+        format!("script print(\"{CALL_BODY_MARKER}\")"),
+        "frame info".to_string(),
         "finish".to_string(),
         "continue".to_string(),
         format!("script print(\"{CLOSURE_MARKER}\")"),
@@ -502,7 +502,7 @@ fn validate_composite_debugger_output(
         ));
     }
 
-    let call = marker_segment(output, CALL_MARKER, CALL_LINE_MARKER)?;
+    let call = marker_segment(output, CALL_MARKER, CALL_STEP_MARKER)?;
     if !contains_source_location(call, source, layout.call_entry_line)
         || !call.contains("call_surface")
         || !call.contains("main")
@@ -514,23 +514,23 @@ fn validate_composite_debugger_output(
             "debugger did not expose the call_surface entry stack and live parameter:\n{output}"
         ));
     }
-    let call_line = marker_segment(output, CALL_LINE_MARKER, CALL_STEP_MARKER)?;
-    if !contains_source_location(call_line, source, layout.call_line)
-        || !call_line.contains("call_surface")
-    {
-        return Err(format!(
-            "debugger did not step from call_surface entry to its call statement:\n{output}"
-        ));
-    }
-    let call_step = marker_segment(output, CALL_STEP_MARKER, CLOSURE_MARKER)?;
-    if !contains_source_location(call_step, source, layout.helper_line)
+    let call_step = marker_segment(output, CALL_STEP_MARKER, CALL_BODY_MARKER)?;
+    if !contains_source_location(call_step, source, layout.helper_entry_line)
         || !call_step.contains("scalar_helper")
         || !call_step
             .lines()
             .any(|line| line_has_named_value(line, "value", 21, "15"))
     {
         return Err(format!(
-            "debugger did not step into scalar_helper with its live parameter:\n{output}"
+            "debugger did not step from call_surface into scalar_helper with its live parameter:\n{output}"
+        ));
+    }
+    let call_body = marker_segment(output, CALL_BODY_MARKER, CLOSURE_MARKER)?;
+    if !contains_source_location(call_body, source, layout.helper_line)
+        || !call_body.contains("scalar_helper")
+    {
+        return Err(format!(
+            "debugger did not step from scalar_helper entry to its first statement:\n{output}"
         ));
     }
 
@@ -703,7 +703,7 @@ fn composite_probe_layout() -> CompositeProbeLayout {
     CompositeProbeLayout {
         composite_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let observed ="),
         call_entry_line: source_line_number(COMPOSITE_PROBE_SOURCE, "def call_surface"),
-        call_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let called = scalar_helper"),
+        helper_entry_line: source_line_number(COMPOSITE_PROBE_SOURCE, "def scalar_helper"),
         helper_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let adjusted ="),
         closure_call_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let closed = add"),
         closure_step_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let result ="),
@@ -755,8 +755,8 @@ fn lldb_composite_commands_inspect_live_values_calls_and_closures() {
     for marker in [
         COMPOSITE_MARKER,
         CALL_MARKER,
-        CALL_LINE_MARKER,
         CALL_STEP_MARKER,
+        CALL_BODY_MARKER,
         CLOSURE_MARKER,
         CLOSURE_STEP_MARKER,
         EXIT_MARKER,
@@ -792,11 +792,11 @@ thread backtrace:
 frame #0: call_surface at debugger_composite_probe.sg:{call_entry_line}:5
 frame #1: main
 (i64) value = 21
-{CALL_LINE_MARKER}
-frame #0: call_surface at debugger_composite_probe.sg:{call_line}:5
 {CALL_STEP_MARKER}
-frame #0: scalar_helper at debugger_composite_probe.sg:{helper_line}:5
+frame #0: scalar_helper at debugger_composite_probe.sg:{helper_entry_line}:5
 (i64) value = 21
+{CALL_BODY_MARKER}
+frame #0: scalar_helper at debugger_composite_probe.sg:{helper_line}:5
 {CLOSURE_MARKER}
 frame #0: closure_surface at debugger_composite_probe.sg:{closure_call_line}:5
 {CLOSURE_STEP_MARKER}
@@ -805,7 +805,7 @@ frame #0: closure_surface at debugger_composite_probe.sg:{closure_step_line}:5
 "#,
         composite_line = layout.composite_line,
         call_entry_line = layout.call_entry_line,
-        call_line = layout.call_line,
+        helper_entry_line = layout.helper_entry_line,
         helper_line = layout.helper_line,
         closure_call_line = layout.closure_call_line,
         closure_step_line = layout.closure_step_line,
