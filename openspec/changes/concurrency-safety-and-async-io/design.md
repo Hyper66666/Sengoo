@@ -105,6 +105,12 @@ the future never borrows a user-visible raw fd and remains memory-safe if the
 source `AsyncFile` is closed while the wait is pending. Cancellation, future
 Drop, and result consumption unregister that duplicate exactly once.
 
+The `FileReadinessOutcome` runtime boundary uses one explicit caller-provided
+output pointer on every host. It does not rely on the platform C ABI's small
+aggregate return classification: Rust and generated LLVM otherwise disagree
+about the SysV register representation of `{ bool, bool, i64 }`. The explicit
+pointer keeps Windows MSVC, Linux SysV, and macOS SysV on one stable layout.
+
 `read_into(&mut Buffer)` performs one bounded read into the initialized managed
 buffer and reports the byte count or stable status category. It does not claim
 general asynchronous disk throughput: regular files may be immediately ready,

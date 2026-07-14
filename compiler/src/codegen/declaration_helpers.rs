@@ -860,6 +860,9 @@ impl Codegen {
     }
 
     pub(super) fn async_result_uses_sret(targets_windows_msvc: bool, func: &str) -> bool {
+        if func == "sengoo_async_file_wait_readable__result" {
+            return true;
+        }
         if targets_windows_msvc {
             return matches!(
                 func,
@@ -868,7 +871,6 @@ impl Codegen {
                     | "sengoo_async_channel_recv_i64__result"
                     | "sengoo_async_mutex_lock_i64__result"
                     | "sengoo_http_server_next_request_async__result"
-                    | "sengoo_async_file_wait_readable__result"
             );
         }
 
@@ -1372,7 +1374,7 @@ mod tests {
             true,
             "sengoo_http_server_next_request_async__result"
         ));
-        assert!(!Codegen::async_result_uses_sret(
+        assert!(Codegen::async_result_uses_sret(
             false,
             "sengoo_async_file_wait_readable__result"
         ));

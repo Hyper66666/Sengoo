@@ -263,18 +263,25 @@ pub unsafe extern "C" fn sengoo_async_file_wait_readable__poll(handle: i64) -> i
 #[no_mangle]
 /// # Safety
 ///
+/// `output` must be null or valid for one initialized
+/// [`AsyncFileReadinessOutcome`] write.
 /// `handle` must be zero or an unconsumed handle returned by
 /// [`sengoo_async_file_wait_readable__start`].
 pub unsafe extern "C" fn sengoo_async_file_wait_readable__result(
+    output: *mut AsyncFileReadinessOutcome,
     handle: i64,
-) -> AsyncFileReadinessOutcome {
-    let Some(mut state) = handle_take_box::<AsyncFileWaitState>(handle) else {
-        return readiness_error(STATUS_INVALID_HANDLE);
+) {
+    let outcome = if let Some(mut state) = handle_take_box::<AsyncFileWaitState>(handle) {
+        release_wait_interest(&mut state.interest_id);
+        match state.outcome {
+            AsyncFileWaitOutcome::Ready(outcome) => outcome,
+            AsyncFileWaitOutcome::Pending => readiness_error(STATUS_UNKNOWN),
+        }
+    } else {
+        readiness_error(STATUS_INVALID_HANDLE)
     };
-    release_wait_interest(&mut state.interest_id);
-    match state.outcome {
-        AsyncFileWaitOutcome::Ready(outcome) => outcome,
-        AsyncFileWaitOutcome::Pending => readiness_error(STATUS_UNKNOWN),
+    if !output.is_null() {
+        unsafe { output.write(outcome) };
     }
 }
 
@@ -332,6 +339,12 @@ mod tests {
         (path, c_path)
     }
 
+    fn wait_result(handle: i64) -> AsyncFileReadinessOutcome {
+        let mut outcome = readiness_error(STATUS_UNKNOWN);
+        unsafe { sengoo_async_file_wait_readable__result(&mut outcome, handle) };
+        outcome
+    }
+
     #[test]
     fn reactor_async_file_open_wait_read_and_close_is_owned() {
         let (path, c_path) = temp_file(b"ready");
@@ -342,7 +355,7 @@ mod tests {
         let wait = sengoo_async_file_wait_readable__start(file, 1_000);
         assert!(wait > 0);
         assert_eq!(unsafe { sengoo_async_file_wait_readable__poll(wait) }, 1);
-        let outcome = unsafe { sengoo_async_file_wait_readable__result(wait) };
+        let outcome = wait_result(wait);
         assert!(outcome.is_ok);
         assert!(outcome.value);
         assert_eq!(outcome.error, 0);
@@ -365,7 +378,7 @@ mod tests {
         let wait = sengoo_async_file_wait_readable__start(0, 10);
         assert!(wait > 0);
         assert_eq!(unsafe { sengoo_async_file_wait_readable__poll(wait) }, 1);
-        let outcome = unsafe { sengoo_async_file_wait_readable__result(wait) };
+        let outcome = wait_result(wait);
         assert!(!outcome.is_ok);
         assert!(!outcome.value);
         assert_eq!(outcome.error, 3);
@@ -382,7 +395,7 @@ mod tests {
         assert!(sengoo_async_file_close(file));
 
         assert_eq!(unsafe { sengoo_async_file_wait_readable__poll(wait) }, 1);
-        let outcome = unsafe { sengoo_async_file_wait_readable__result(wait) };
+        let outcome = wait_result(wait);
         assert!(outcome.is_ok);
         assert!(outcome.value);
         assert_eq!(super::super::reactor::interest_count(), baseline);
