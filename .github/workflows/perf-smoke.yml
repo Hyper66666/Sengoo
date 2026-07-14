@@ -21,19 +21,56 @@ jobs:
       - name: Build sgc (release)
         run: cargo build -p sgc --release
 
+      - name: Smoke release_resource_gate against the real sgc
+        shell: pwsh
+        run: |
+          $smokePass = "bench/results/release-resource-smoke-pass-${{ github.run_id }}.json"
+          python bench/scripts/release_resource_gate.py `
+            --sgc target/release/sgc.exe `
+            --scenario bench/scenarios/release-resource/runtime_loop.sg `
+            --iterations 3 `
+            --max-sgc-artifact-mib 512 `
+            --max-program-artifact-mib 512 `
+            --max-startup-avg-ms 5000 `
+            --max-check-avg-ms 5000 `
+            --max-full-build-ms 60000 `
+            --max-runtime-avg-ms 5000 `
+            --output $smokePass
+          if ($LASTEXITCODE -ne 0) {
+            throw "release_resource_gate smoke should pass with relaxed budgets"
+          }
+
+          $smokeFail = "bench/results/release-resource-smoke-budget-violation-${{ github.run_id }}.json"
+          python bench/scripts/release_resource_gate.py `
+            --sgc target/release/sgc.exe `
+            --scenario bench/scenarios/release-resource/runtime_loop.sg `
+            --iterations 3 `
+            --max-full-build-ms 0.01 `
+            --output $smokeFail
+          if ($LASTEXITCODE -eq 0) {
+            throw "expected a budget violation from release_resource_gate smoke"
+          }
+
       - name: Run advanced pipeline benchmark
         env:
           CI: "true"
           SENGOO_ROOT: ${{ github.workspace }}
         run: python bench/advanced_pipeline_bench.py
 
-      - name: Report ladder + regression gates (non-blocking until reference host closure)
+      - name: Enforce compile wall-time, RSS, and regression budgets
         shell: pwsh
-        continue-on-error: true
         run: |
           pwsh ./scripts/frontend-1000k-perf-gate.ps1 -Mode hard -SkipAbsoluteTargets
 
-      - name: Report 1000k absolute target status (informational until targets met)
+      - name: Enforce artifact, startup, CLI, and runtime budgets
+        shell: pwsh
+        run: |
+          python bench/scripts/release_resource_gate.py `
+            --sgc target/release/sgc.exe `
+            --scenario bench/scenarios/release-resource/runtime_loop.sg `
+            --output bench/results/release-resource-${{ github.run_id }}.json
+
+      - name: Report cross-language absolute target status (informational)
         shell: pwsh
         continue-on-error: true
         run: |
@@ -49,3 +86,11 @@ jobs:
           if ($null -eq $latest) { exit 0 }
           python bench/scripts/advanced-kpi-gate.py --mode soft --sample $latest.FullName |
             Select-String -Pattern "ladder_stretch"
+
+      - name: Preserve raw benchmark and decision metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-performance-evidence
+          path: bench/results/*.json
+          if-no-files-found: error

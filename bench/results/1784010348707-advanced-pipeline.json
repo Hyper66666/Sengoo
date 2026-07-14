@@ -1,0 +1,191 @@
+{
+  "schema_version": 2,
+  "generated_at_unix_ms": 1784010348707,
+  "config": {
+    "incremental_iterations": 5,
+    "p0_evidence_only": false,
+    "scale_loc_buckets": [
+      "1000",
+      "10000",
+      "100000",
+      "1000000"
+    ],
+    "memory_loc_buckets": [
+      "10000",
+      "100000",
+      "1000000"
+    ],
+    "ladder_stretch_enabled": false,
+    "ladder_stretch_loc": 2500000,
+    "reachability_loc": 100000
+  },
+  "host": {
+    "os": "github-actions-windows-latest",
+    "actions_run": 29309313924
+  },
+  "real_incremental": {
+    "loop_body_change": {
+      "sengoo": {
+        "before_avg_ms": 13.19,
+        "after_avg_ms": 13.93
+      }
+    },
+    "function_signature_change": {
+      "sengoo": {
+        "before_avg_ms": 13.59,
+        "after_avg_ms": 14.21
+      }
+    },
+    "add_new_function": {
+      "sengoo": {
+        "before_avg_ms": 12.99,
+        "after_avg_ms": 14.12
+      }
+    }
+  },
+  "scale_curve": {
+    "1000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 17.52,
+        "codegen_obj_avg_ms": 43.32,
+        "link_avg_ms": 181.17,
+        "e2e_avg_ms": 242.0
+      },
+      "cpp": {
+        "e2e_avg_ms": 534.48
+      },
+      "rust": {
+        "e2e_avg_ms": 454.24
+      },
+      "python": {
+        "e2e_avg_ms": 63.43
+      }
+    },
+    "10000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 54.17,
+        "codegen_obj_avg_ms": 43.29,
+        "link_avg_ms": 113.28,
+        "e2e_avg_ms": 210.74
+      },
+      "cpp": {
+        "e2e_avg_ms": 580.07
+      },
+      "rust": {
+        "e2e_avg_ms": 1337.83
+      },
+      "python": {
+        "e2e_avg_ms": 130.73
+      }
+    },
+    "100000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 394.76,
+        "codegen_obj_avg_ms": 41.85,
+        "link_avg_ms": 109.77,
+        "e2e_avg_ms": 546.38
+      },
+      "cpp": {
+        "e2e_avg_ms": 974.96
+      },
+      "rust": {
+        "e2e_avg_ms": 9676.08
+      },
+      "python": {
+        "e2e_avg_ms": 899.73
+      }
+    },
+    "1000000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 1347.34,
+        "codegen_obj_avg_ms": 39.94,
+        "link_avg_ms": 106.2,
+        "e2e_avg_ms": 1493.49
+      },
+      "cpp": {
+        "e2e_avg_ms": 4845.43
+      },
+      "rust": {
+        "e2e_avg_ms": 81215.42
+      },
+      "python": {
+        "e2e_avg_ms": 8640.76
+      }
+    }
+  },
+  "compile_memory_compare": {
+    "10000": {
+      "sengoo": {
+        "peak_rss_mb_avg": 27.33
+      },
+      "cpp": {
+        "peak_rss_mb_avg": 74.62
+      },
+      "rust": {
+        "peak_rss_mb_avg": 70.98
+      },
+      "python": {
+        "peak_rss_mb_avg": 39.24
+      }
+    },
+    "100000": {
+      "sengoo": {
+        "peak_rss_mb_avg": 82.34
+      },
+      "cpp": {
+        "peak_rss_mb_avg": 118.29
+      },
+      "rust": {
+        "peak_rss_mb_avg": 331.88
+      },
+      "python": {
+        "peak_rss_mb_avg": 280.37
+      }
+    },
+    "1000000": {
+      "sengoo": {
+        "peak_rss_mb_avg": 613.84
+      },
+      "cpp": {
+        "peak_rss_mb_avg": 432.23
+      },
+      "rust": {
+        "peak_rss_mb_avg": 2686.63
+      },
+      "python": {
+        "peak_rss_mb_avg": 2557.29
+      }
+    }
+  },
+  "reachability_matrix": {
+    "all_reachable": {
+      "compile_frontend_llvm_avg_ms": 530.2,
+      "codegen_obj_avg_ms": 6024.49,
+      "link_avg_ms": 115.65,
+      "e2e_avg_ms": 6670.35
+    },
+    "half_reachable": {
+      "compile_frontend_llvm_avg_ms": 453.0,
+      "codegen_obj_avg_ms": 2938.07,
+      "link_avg_ms": 117.66,
+      "e2e_avg_ms": 3508.73
+    },
+    "library_entryless": {
+      "compile_frontend_llvm_avg_ms": 538.39,
+      "codegen_obj_avg_ms": 6080.89,
+      "e2e_avg_ms": 6619.28
+    },
+    "delta_vs_all_reachable_ms": {
+      "half_reachable": {
+        "e2e_delta_ms": -3161.62
+      },
+      "library_entryless": {
+        "e2e_delta_ms": -51.06
+      }
+    }
+  },
+  "notes": [
+    "Retained production-hardening-v1 baseline report reconstructed from the surviving GitHub Actions log after artifact expiry.",
+    "Cross-language ratios remain trend evidence only; wall-time and RSS budgets are enforced by the production gate."
+  ]
+}

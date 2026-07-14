@@ -1,5 +1,6 @@
 # Generated benchmark outputs
 results/*.json
+!results/1784010348707-advanced-pipeline.json
 results/*.env
 .cross-lang-work/
 .scenario-matrix-work/

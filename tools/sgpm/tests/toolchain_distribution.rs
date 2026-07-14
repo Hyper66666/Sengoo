@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -399,5 +400,123 @@ fn native_safety_workflow_is_fail_closed_and_preserves_longevity_evidence() {
     assert!(
         !workflow.contains("continue-on-error"),
         "native safety jobs must fail closed"
+    );
+}
+
+#[test]
+fn performance_workflow_blocks_project_budgets_and_preserves_raw_evidence() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/perf-smoke.yml"))
+        .expect("read performance workflow")
+        .replace("\r\n", "\n");
+    let blocking_compile = "- name: Enforce compile wall-time, RSS, and regression budgets\n        shell: pwsh\n        run:";
+    let blocking_resources =
+        "- name: Enforce artifact, startup, CLI, and runtime budgets\n        shell: pwsh\n        run:";
+
+    assert!(
+        workflow.contains(blocking_compile),
+        "compile and RSS budget step must not use continue-on-error"
+    );
+    assert!(
+        workflow.contains(blocking_resources),
+        "release resource budget step must not use continue-on-error"
+    );
+    for needle in [
+        "-Mode hard -SkipAbsoluteTargets",
+        "release_resource_gate.py",
+        "runtime_loop.sg",
+        "production-performance-evidence",
+        "bench/results/*.json",
+        "if-no-files-found: error",
+        "Report cross-language absolute target status (informational)",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "performance workflow should contain `{needle}`"
+        );
+    }
+    let smoke_release_gate = workflow_step_block(
+        &workflow,
+        "Smoke release_resource_gate against the real sgc",
+    );
+    for needle in [
+        "--iterations 3",
+        "runtime_loop.sg",
+        "--max-full-build-ms 0.01",
+        "if ($LASTEXITCODE -eq 0)",
+        "expected a budget violation",
+    ] {
+        assert!(
+            smoke_release_gate.contains(needle),
+            "release resource smoke should contain `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn frontend_bootstrap_baseline_points_at_a_retained_local_raw_report() {
+    let root = workspace_root();
+    let baseline = fs::read_to_string(root.join("bench/frontend-memory-baseline.json"))
+        .expect("read frontend baseline profile");
+    let baseline: Value = serde_json::from_str(&baseline).expect("parse frontend baseline profile");
+    let docs = fs::read_to_string(root.join("bench/FRONTEND_BASELINE.md"))
+        .expect("read frontend baseline documentation");
+    let retained_report_path = baseline["baseline_report_path"]
+        .as_str()
+        .expect("baseline should declare baseline_report_path");
+    let retained_report = root.join(retained_report_path);
+    let retained_report_json = fs::read_to_string(&retained_report)
+        .unwrap_or_else(|err| panic!("read retained report {}: {err}", retained_report.display()));
+    let retained_report_json: Value =
+        serde_json::from_str(&retained_report_json).expect("parse retained raw report");
+    let expected_report_id = format!(
+        "{}-advanced-pipeline",
+        retained_report_json["generated_at_unix_ms"]
+            .as_i64()
+            .expect("retained report should expose generated_at_unix_ms")
+    );
+
+    assert!(
+        retained_report.is_file(),
+        "frontend baseline should retain the pinned advanced benchmark report in-repo"
+    );
+    assert!(
+        retained_report_path.starts_with("bench/results/")
+            && retained_report_path.ends_with("-advanced-pipeline.json"),
+        "baseline profile should reference a retained local advanced benchmark report"
+    );
+    assert!(
+        docs.contains(retained_report_path),
+        "frontend baseline documentation should point at the retained local benchmark report"
+    );
+    assert_eq!(
+        baseline["bootstrap_pending_raw_ci_report"].as_bool(),
+        Some(true),
+        "bootstrap baseline should stay explicitly marked until a raw CI artifact is retained"
+    );
+    assert!(
+        docs.contains("pending the next perf-smoke artifact upload"),
+        "frontend baseline documentation should explain that the retained report is only a bootstrap"
+    );
+    assert_eq!(
+        baseline["baseline_report_id"].as_str(),
+        Some(expected_report_id.as_str()),
+        "baseline report id should match the raw producer report id"
+    );
+    assert_eq!(
+        baseline["baseline_actions_run"].as_i64(),
+        retained_report_json["host"]["actions_run"].as_i64(),
+        "baseline provenance should match the retained raw report host metadata"
+    );
+    let notes = retained_report_json["notes"]
+        .as_array()
+        .expect("retained bootstrap report should preserve notes");
+    assert!(
+        notes.iter().any(|note| {
+            note.as_str()
+                .map(|note| note.contains("reconstructed"))
+                .unwrap_or(false)
+        }),
+        "bootstrap raw report should stay clearly marked as reconstructed until replacement"
     );
 }
