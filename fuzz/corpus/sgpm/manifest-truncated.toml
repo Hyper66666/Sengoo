@@ -1,0 +1,4 @@
+sengoo-schema = 1
+[package
+name = "../escape"
+version = "not-semver"

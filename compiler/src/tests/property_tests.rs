@@ -4,8 +4,68 @@
 
 use proptest::prelude::*;
 use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 
 use crate::{compile_to_ir, Keyword};
+
+#[test]
+fn retained_compiler_fuzz_corpus_never_panics() {
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fuzz/corpus/compiler-source");
+    let mut entries = fs::read_dir(&corpus)
+        .unwrap_or_else(|err| panic!("read retained compiler corpus {}: {err}", corpus.display()))
+        .map(|entry| entry.expect("read retained compiler corpus entry").path())
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    entries.sort();
+    assert!(
+        !entries.is_empty(),
+        "compiler fuzz corpus must not be empty"
+    );
+
+    for path in entries {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read retained input {}: {err}", path.display()));
+        assert!(
+            source.len() <= 64 * 1024,
+            "retained compiler input {} exceeds the 64 KiB smoke limit",
+            path.display()
+        );
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_to_ir(&source)));
+        assert!(
+            result.is_ok(),
+            "compiler panicked on retained input {}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn bounded_fuzz_compiler_pipeline_never_panics() {
+    let cases = std::env::var("SENGOO_FUZZ_CASES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(512)
+        .clamp(1, 20_000);
+    let alphabet = b"{}[]()<>=+-*/:;,.!_ abcdefghijklmnopqrstuvwxyz0123456789\n\t";
+    let mut state = 0xbb67_ae85_84ca_a73b_u64;
+
+    for case in 0..cases {
+        let len = case % 4096;
+        let mut bytes = Vec::with_capacity(len);
+        for _ in 0..len {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            bytes.push(alphabet[(state as usize) % alphabet.len()]);
+        }
+        let source = String::from_utf8(bytes).expect("fuzz alphabet is ASCII");
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile_to_ir(&source)));
+        assert!(result.is_ok(), "compiler panicked on bounded case {case}");
+    }
+}
 
 // ============================================================================
 // Property 10: Compilation pipeline produces valid output or descriptive error

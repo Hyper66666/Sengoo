@@ -566,8 +566,9 @@ pub fn validate_lockfile_version(lockfile_path: &Path) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        render_lockfile_v1, render_lockfile_v2, validate_lockfile_version, write_lockfile_content,
-        LOCKFILE_VERSION_V1, LOCKFILE_VERSION_V2,
+        read_locked_registry_graph, render_lockfile_v1, render_lockfile_v2,
+        validate_lockfile_version, write_lockfile_content, LOCKFILE_VERSION_V1,
+        LOCKFILE_VERSION_V2,
     };
     use crate::manifest::Manifest;
     use crate::resolver::{
@@ -823,6 +824,36 @@ mod tests {
             "leftover staging files: {leftovers:?}"
         );
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bounded_fuzz_lockfile_parser_never_panics() {
+        let cases = std::env::var("SENGOO_FUZZ_CASES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(256)
+            .clamp(1, 10_000);
+        let dir = temp_dir("bounded_fuzz");
+        let lockfile = dir.join("Sengoo.lock");
+        let alphabet = b"[]{}='\".,:/\\_-+0123456789abcdefghijklmnopqrstuvwxyz\n\t ";
+        let mut state = 0xa409_3822_299f_31d0_u64;
+        for case in 0..cases {
+            let len = case % 2048;
+            let mut bytes = Vec::with_capacity(len);
+            for _ in 0..len {
+                state = state
+                    .wrapping_mul(2_862_933_555_777_941_757)
+                    .wrapping_add(3_037_000_493);
+                bytes.push(alphabet[(state as usize) % alphabet.len()]);
+            }
+            fs::write(&lockfile, bytes).unwrap();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = validate_lockfile_version(&lockfile);
+                let _ = read_locked_registry_graph(&lockfile);
+            }));
+            assert!(result.is_ok(), "lockfile parser panicked on case {case}");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }

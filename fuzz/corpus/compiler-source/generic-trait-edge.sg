@@ -1,0 +1,3 @@
+trait Render<T> { def render(self, value: T) -> i64; }
+impl<T> Render<T> for T { def render(self, value: T) -> i64 { value } }
+def main() -> i64 { 0.render(true) }
