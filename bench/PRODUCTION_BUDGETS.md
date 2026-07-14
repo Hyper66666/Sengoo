@@ -7,9 +7,11 @@ and the frozen advanced-pipeline baseline report is retained in-repo.
 ## Compile scenarios
 
 `bench/advanced_pipeline_bench.py` deterministically generates and measures
-1k, 10k, 100k, and 1M-line programs plus loop-body, signature-change, and
-new-function incremental edits. The blocking hard gate uses Actions run
-`29309313924` as its frozen Windows reference, enforces 30% regression limits
+small (1k), medium (10k), large (100k), and release-scale (1M) programs plus
+full incremental loop-body, signature-change, and new-function edits. These
+names and line-count buckets are the frozen production scenarios. The blocking
+hard gate uses Actions run `29327347740` as its frozen Windows reference,
+enforces 30% regression limits
 to account for shared-runner variance, and applies these absolute ceilings:
 
 - real incremental edit: 200 ms;

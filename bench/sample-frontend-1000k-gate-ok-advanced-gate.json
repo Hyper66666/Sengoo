@@ -4,8 +4,8 @@
   "p0_evidence_only": false,
   "sample": "D:\\Sengoo\\.worktrees\\production-hardening-v1\\bench\\sample-frontend-1000k-gate-ok.json",
   "baseline_profile": "D:\\Sengoo\\.worktrees\\production-hardening-v1\\bench\\frontend-memory-baseline.json",
-  "baseline_report_id": "1784010348707-advanced-pipeline",
-  "baseline_report_path": "bench/results/1784010348707-advanced-pipeline.json",
+  "baseline_report_id": "1784029453392-advanced-pipeline",
+  "baseline_report_path": "bench/results/1784029453395-advanced-pipeline.json",
   "thresholds": {
     "frontend_regression_pct": {
       "100000": 30.0,
@@ -45,8 +45,8 @@
       "metric": "e2e_avg_ms",
       "metric_label": "full_build_time",
       "measured": 546.38,
-      "baseline": 546.38,
-      "delta_pct": 0.0,
+      "baseline": 530.9264999999641,
+      "delta_pct": 2.910666542362631,
       "max_regression_pct": 30.0,
       "pass": true
     },
@@ -55,8 +55,8 @@
       "metric": "compile_frontend_llvm_avg_ms",
       "metric_label": "frontend_time",
       "measured": 394.76,
-      "baseline": 394.76,
-      "delta_pct": 0.0,
+      "baseline": 379.45510000001076,
+      "delta_pct": 4.033388930597797,
       "max_regression_pct": 30.0,
       "pass": true
     },
@@ -65,8 +65,8 @@
       "metric": "compile_frontend_llvm_avg_ms",
       "metric_label": "frontend_time",
       "measured": 1347.34,
-      "baseline": 1347.34,
-      "delta_pct": 0.0,
+      "baseline": 1373.469699999987,
+      "delta_pct": -1.9024591514459506,
       "max_regression_pct": 30.0,
       "pass": true
     },
@@ -75,8 +75,8 @@
       "metric": "frontend_share_pct",
       "metric_label": "frontend_share",
       "measured": 90.21419627851542,
-      "baseline": 90.21,
-      "delta_pp": 0.004196278515422591,
+      "baseline": 89.76477906593429,
+      "delta_pp": 0.44941721258112466,
       "max_regression_pp": 10.0,
       "pass": true
     },
@@ -85,8 +85,8 @@
       "metric": "e2e_avg_ms",
       "metric_label": "full_build_time",
       "measured": 1493.49,
-      "baseline": 1493.49,
-      "delta_pct": 0.0,
+      "baseline": 1530.0763999999845,
+      "delta_pct": -2.3911485727108017,
       "max_regression_pct": 30.0,
       "pass": true
     },
@@ -95,8 +95,8 @@
       "metric": "peak_rss_mb_avg",
       "metric_label": "frontend_rss",
       "measured": 82.34,
-      "baseline": 82.34,
-      "delta_pct": 0.0,
+      "baseline": 82.943359375,
+      "delta_pct": -0.7274354204441055,
       "max_regression_pct": 30.0,
       "pass": true
     },
@@ -105,8 +105,8 @@
       "metric": "peak_rss_mb_avg",
       "metric_label": "frontend_rss",
       "measured": 613.84,
-      "baseline": 613.84,
-      "delta_pct": 0.0,
+      "baseline": 614.05859375,
+      "delta_pct": -0.03559819082818075,
       "max_regression_pct": 30.0,
       "pass": true
     }

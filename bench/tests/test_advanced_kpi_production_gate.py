@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -24,7 +25,7 @@ class AdvancedKpiProductionGateTests(unittest.TestCase):
     def full_shape_report(self):
         baseline = self.baseline_profile()
         report = json.loads(self.raw_baseline_path().read_text(encoding="utf-8"))
-        report["host"]["actions_run"] = baseline["baseline_actions_run"]
+        report["host"] = {"actions_run": baseline["baseline_actions_run"]}
         report["config"]["scale_iterations_by_loc"] = {
             "1000": 5,
             "10000": 5,
@@ -120,23 +121,35 @@ class AdvancedKpiProductionGateTests(unittest.TestCase):
         self.assertTrue(baseline["baseline_report_path"].endswith("-advanced-pipeline.json"))
         self.assertTrue(raw_baseline.is_file())
 
-    def test_bootstrap_baseline_is_explicitly_marked_pending_raw_ci_artifact(self):
+    def test_baseline_profile_points_to_retained_raw_ci_artifact_without_bootstrap_marker(
+        self,
+    ):
         baseline = self.baseline_profile()
-        report = json.loads(self.raw_baseline_path().read_text(encoding="utf-8"))
+        raw_baseline = self.raw_baseline_path()
+        report = json.loads(raw_baseline.read_text(encoding="utf-8"))
         docs = BASELINE_DOC.read_text(encoding="utf-8")
 
-        self.assertTrue(baseline["bootstrap_pending_raw_ci_report"])
+        self.assertNotIn("bootstrap_pending_raw_ci_report", baseline)
+        self.assertNotIn("provenance_status", baseline)
         self.assertEqual(
             baseline["baseline_report_id"],
             f"{report['generated_at_unix_ms']}-advanced-pipeline",
         )
+        self.assertNotIn("host", report)
+        self.assertEqual(baseline["baseline_actions_run"], 29327347740)
+        self.assertEqual(baseline["baseline_artifact_id"], 8309522200)
         self.assertEqual(
-            report["host"]["actions_run"],
-            baseline["baseline_actions_run"],
+            baseline["baseline_artifact_digest"],
+            "sha256:f999a550126ab198f13cbb33c878f60f9d1bf4ff9787221ccb0ab96d5d9d497f",
         )
-        self.assertIn("bootstrap", docs.lower())
-        self.assertIn("pending the next perf-smoke artifact upload", docs)
-        self.assertIn("reconstructed", "\n".join(report["notes"]).lower())
+        self.assertEqual(
+            hashlib.sha256(raw_baseline.read_bytes()).hexdigest(),
+            baseline["baseline_report_sha256"],
+        )
+        self.assertIn("29327347740", docs)
+        self.assertIn("1784029453395-advanced-pipeline.json", docs)
+        self.assertNotIn("pending the next perf-smoke artifact upload", docs)
+        self.assertNotIn("reconstructed", "\n".join(report["notes"]).lower())
 
     def test_gate_accepts_full_shape_baseline_report_metadata(self):
         with tempfile.TemporaryDirectory(prefix="sengoo-full-baseline-") as temp:
@@ -149,7 +162,6 @@ class AdvancedKpiProductionGateTests(unittest.TestCase):
                 encoding="utf-8",
             )
             baseline = self.baseline_profile()
-            baseline.pop("bootstrap_pending_raw_ci_report", None)
             baseline["baseline_report_path"] = str(raw_report_path)
             baseline_profile_path.write_text(
                 json.dumps(baseline, indent=2),
@@ -177,7 +189,6 @@ class AdvancedKpiProductionGateTests(unittest.TestCase):
             )
 
             baseline = self.baseline_profile()
-            baseline.pop("bootstrap_pending_raw_ci_report", None)
             baseline["baseline_report_path"] = str(trimmed_report_path)
             trimmed_baseline_path.write_text(
                 json.dumps(baseline, indent=2),

@@ -2,12 +2,13 @@
   "schema_version": 2,
   "frozen_on": "2026-07-14",
   "change": "production-hardening-v1",
-  "bootstrap_pending_raw_ci_report": true,
-  "provenance_status": "bootstrap-reconstructed-pending-raw-ci-artifact",
-  "supersedes": "1780946346830-advanced-pipeline",
-  "baseline_report_id": "1784010348707-advanced-pipeline",
-  "baseline_report_path": "bench/results/1784010348707-advanced-pipeline.json",
-  "baseline_actions_run": 29309313924,
+  "supersedes": "1784010348707-advanced-pipeline",
+  "baseline_report_id": "1784029453392-advanced-pipeline",
+  "baseline_report_path": "bench/results/1784029453395-advanced-pipeline.json",
+  "baseline_actions_run": 29327347740,
+  "baseline_artifact_id": 8309522200,
+  "baseline_artifact_digest": "sha256:f999a550126ab198f13cbb33c878f60f9d1bf4ff9787221ccb0ab96d5d9d497f",
+  "baseline_report_sha256": "ce52f25330e860c65919bad4b3831017c629158f91a127b3686c794876a32d29",
   "host_profile": {
     "os": "github-actions-windows-latest",
     "generator": "advanced_pipeline_bench.py::make_scale_source_sengoo",
@@ -16,20 +17,20 @@
   },
   "metrics": {
     "100000": {
-      "compile_frontend_llvm_avg_ms": 394.76,
-      "e2e_avg_ms": 546.38,
-      "peak_rss_mb_avg": 82.34,
-      "cpp_peak_rss_mb_avg": 118.29,
-      "rss_ratio_vs_cpp": 0.6960858906078282,
-      "frontend_share_pct": 72.25
+      "compile_frontend_llvm_avg_ms": 379.45510000001076,
+      "e2e_avg_ms": 530.9264999999641,
+      "peak_rss_mb_avg": 82.943359375,
+      "cpp_peak_rss_mb_avg": 118.251953125,
+      "rss_ratio_vs_cpp": 0.7014121727640598,
+      "frontend_share_pct": 71.47036360024154
     },
     "1000000": {
-      "compile_frontend_llvm_avg_ms": 1347.34,
-      "e2e_avg_ms": 1493.49,
-      "peak_rss_mb_avg": 613.84,
-      "cpp_peak_rss_mb_avg": 432.23,
-      "rss_ratio_vs_cpp": 1.420169816995581,
-      "frontend_share_pct": 90.21
+      "compile_frontend_llvm_avg_ms": 1373.469699999987,
+      "e2e_avg_ms": 1530.0763999999845,
+      "peak_rss_mb_avg": 614.05859375,
+      "cpp_peak_rss_mb_avg": 432.7265625,
+      "rss_ratio_vs_cpp": 1.4190452978028127,
+      "frontend_share_pct": 89.76477906593429
     }
   },
   "thresholds": {
