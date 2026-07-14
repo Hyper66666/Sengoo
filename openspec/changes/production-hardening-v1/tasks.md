@@ -1,12 +1,22 @@
 ## 1. Fuzzing and malformed input
 
-- [ ] 1.1 Add bounded fuzz targets for lexer/parser, typecheck, and MIR lowering
+- [x] 1.1 Add bounded fuzz targets for lexer/parser, typecheck, and MIR lowering
   with stable no-panic/no-OOM contracts.
-- [ ] 1.2 Add fuzz targets for manifest/lockfile, registry metadata, package
+  - Compiler retained inputs, bounded generated input, arbitrary-source
+    proptest, MIR stress, and direct MIR lowering all pass in Actions run
+    `29308521559`; input bytes and case counts have enforced ceilings.
+- [x] 1.2 Add fuzz targets for manifest/lockfile, registry metadata, package
   archive extraction, and selected runtime parsers/decoders.
-- [ ] 1.3 Check in minimized regression inputs or deterministic tests for every
+  - The same run exercises manifest/workspace, lockfile, registry JSON,
+    compressed archive, native JSON, and config decoder boundaries.
+- [x] 1.3 Check in minimized regression inputs or deterministic tests for every
   fixed crash; retain seed corpora in CI artifacts/cache.
-- [ ] 1.4 Run bounded per-commit fuzz smoke and longer scheduled fuzz jobs.
+  - `fuzz/corpus` retains compiler and package/archive seeds, tests replay it
+    before generated cases, and Actions uploads it even when the job fails.
+- [x] 1.4 Run bounded per-commit fuzz smoke and longer scheduled fuzz jobs.
+  - `.github/workflows/hardening-fuzz.yml` is fail-closed on pull requests and
+    `main`; twice-weekly jobs expand the bounded case count from 512 to 4096.
+    The first per-commit evidence is Actions run `29308521559`.
 
 ## 2. Native safety and longevity
 
