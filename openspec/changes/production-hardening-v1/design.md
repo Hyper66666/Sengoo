@@ -51,6 +51,20 @@ Official package and flagship gates install the packaged toolchain into a clean
 temporary prefix, resolve locked dependencies, then check/test/doc/build/run.
 Workspace path leakage is a failure.
 
+### Decision 7: Native runtime bundles carry one whole-runtime ABI version
+
+`runtime_shared.h` is the source of truth for
+`SENGOO_RUNTIME_ABI_VERSION`. `sgc` carries the ABI version it requires and
+reads the selected runtime bundle's header before compiling cached runtime
+objects or linking a native program. A missing declaration or mismatch fails
+before unsafe execution and reports both required and available versions.
+
+The shared header participates in the runtime bundle fingerprint, including
+when a temporary `runtime.c` uses the canonical split runtime siblings. The C
+runtime exposes `sengoo_runtime_abi_version()` for direct native probes. This
+v1 gate versions the complete C/native bundle independently of narrower
+descriptor schemas such as the collections ABI.
+
 ## Required host matrix
 
 - Windows x64.

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define SENGOO_RUNTIME_ABI_VERSION 1
 #define SENGOO_COLLECTIONS_ABI_VERSION 1
 
 enum {
@@ -62,6 +63,7 @@ typedef struct {
     SengooCompareFn compare_value;
 } SengooTypeDescriptor;
 
+long long sengoo_runtime_abi_version(void);
 long long sengoo_collections_abi_version(void);
 long long sengoo_type_descriptor_validate(const SengooTypeDescriptor* descriptor);
 long long sengoo_arc_new(const SengooTypeDescriptor* descriptor, void* value);

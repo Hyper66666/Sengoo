@@ -4,7 +4,7 @@ use sengoo_compiler::{CompileError, CompileWarning, Span};
 
 use super::{
     current_error_format, CompilerErrorJson, CompilerErrorLocationJson, CompilerErrorSpanJson,
-    ErrorFormat,
+    ErrorFormat, DIAGNOSTIC_JSON_SCHEMA_VERSION,
 };
 
 fn compile_error_details(raw: &str) -> Vec<String> {
@@ -59,6 +59,7 @@ fn compile_error_payload(
         _ => "use --error-format text for human-friendly diagnostics",
     };
     CompilerErrorJson {
+        schema_version: DIAGNOSTIC_JSON_SCHEMA_VERSION,
         ok: false,
         kind: "compile_error",
         stage,
@@ -91,7 +92,7 @@ pub(crate) fn render_compile_error_json_for_stage(
     }
 
     format!(
-        r#"{{"ok":false,"kind":"compile_error","stage":"{}","message":"{}"}}"#,
+        r#"{{"schema_version":{DIAGNOSTIC_JSON_SCHEMA_VERSION},"ok":false,"kind":"compile_error","stage":"{}","message":"{}"}}"#,
         payload.stage,
         raw.replace('"', "\\\"")
     )

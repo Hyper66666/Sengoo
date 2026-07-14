@@ -15,6 +15,10 @@
 
 #include "runtime_shared.h"
 
+long long sengoo_runtime_abi_version(void) {
+    return SENGOO_RUNTIME_ABI_VERSION;
+}
+
 extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
 extern long long sengoo_string_as_str_ptr(long long handle);
 

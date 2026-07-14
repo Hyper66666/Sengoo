@@ -28,8 +28,16 @@
     window, migration requirements, and the narrow security/soundness
     exception. Manifest and distribution tests lock the edition rejection and
     published policy.
-- [ ] 3.2 Version runtime ABI, manifest, lockfile, diagnostic JSON, and test-report
+- [x] 3.2 Version runtime ABI, manifest, lockfile, diagnostic JSON, and test-report
   schemas; reject incompatible combinations with stable diagnostics.
+  - The whole native bundle now declares runtime ABI v1 in
+    `runtime_shared.h`; `sgc` rejects missing/mismatched headers before
+    object compilation/link with required and available versions, fingerprints
+    the selected header, and a native probe calls
+    `sengoo_runtime_abi_version()`. Manifest schema 1, lockfile 1/2, compiler
+    diagnostic JSON 1, test/assertion JSON 1, package metadata 2, publish
+    metadata 1, and reflection metadata 1 are documented and retain their
+    existing unknown-version rejection tests where they are consumed.
 - [ ] 3.3 Add retained compatibility projects spanning the previous supported
   prerelease and current toolchain.
 - [x] 3.4 Publish the supported host/architecture/toolchain matrix and release

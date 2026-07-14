@@ -626,7 +626,11 @@ fn native_runtime_bundle_links_split_sources_for_full_and_object_link_paths() {
         b"/* anchor runtime source intentionally empty */\n",
     )
     .unwrap();
-    fs::write(root.join("runtime_shared.h"), b"/* shared header */\n").unwrap();
+    fs::write(
+        root.join("runtime_shared.h"),
+        b"#define SENGOO_RUNTIME_ABI_VERSION 1\n",
+    )
+    .unwrap();
     fs::write(
         root.join("runtime_json.c"),
         b"long long sengoo_runtime_split_probe(void) { return 42; }\n",
@@ -1058,6 +1062,7 @@ fn render_compile_error_json_contains_expected_fields() {
     let json = super::render_compile_error_json(Some("tests/demo.sg"), raw);
     let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
 
+    assert_eq!(value["schema_version"], 1);
     assert_eq!(value["ok"], false);
     assert_eq!(value["kind"], "compile_error");
     assert_eq!(value["stage"], "typecheck");

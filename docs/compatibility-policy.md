@@ -38,18 +38,22 @@ The current repository has these explicit formats:
 
 | Surface | Current accepted version |
 | --- | --- |
+| Native runtime bundle ABI | `1` |
 | Generic collections descriptor ABI | `1` |
 | `Sengoo.toml` `sengoo-schema` | omitted legacy form or `1` |
 | `Sengoo.lock` | `1` and `2`; new graphs write `2` |
 | Test report and assertion JSON | `1` |
+| Compiler diagnostic JSON | `1` |
 | Package metadata JSON | `2` |
 | Publish metadata JSON | `1` |
 | Reflection metadata | `1` |
 
 Readers reject unknown explicit versions before consuming version-dependent
-fields. The production-hardening runtime ABI task remains open until native
-artifacts also carry and validate one whole-runtime ABI version at link or
-launch time.
+fields. Before compiling or linking a selected native runtime bundle, `sgc`
+compares its required whole-runtime ABI with
+`SENGOO_RUNTIME_ABI_VERSION` from that bundle's shared header and reports both
+versions on mismatch. The runtime also exports
+`sengoo_runtime_abi_version()` for native probes.
 
 ## Supported release hosts
 
