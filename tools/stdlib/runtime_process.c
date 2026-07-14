@@ -1159,7 +1159,8 @@ static int sengoo_process_handle_slot_ensure_capacity(size_t min_slots) {
 static long long sengoo_process_handle_alloc(SengooProcessHandleState* state) {
     size_t index = 0;
     for (; index < g_process_handle_slot_count; ++index) {
-        if (!g_process_handle_slots[index].alive) {
+        if (!g_process_handle_slots[index].alive &&
+            sengoo_runtime_next_handle_generation(g_process_handle_slots[index].generation) != 0) {
             break;
         }
     }
@@ -1170,13 +1171,15 @@ static long long sengoo_process_handle_alloc(SengooProcessHandleState* state) {
         g_process_handle_slot_count += 1;
     }
     SengooProcessHandleSlot* slot = &g_process_handle_slots[index];
+    uint32_t generation = sengoo_runtime_next_handle_generation(slot->generation);
+    long long handle = sengoo_runtime_encode_handle(generation, index);
+    if (handle == 0) {
+        return -(long long)SENGOO_STATUS_OUT_OF_MEMORY;
+    }
     slot->state = state;
     slot->alive = 1;
-    slot->generation += 1;
-    if (slot->generation == 0) {
-        slot->generation = 1;
-    }
-    return ((long long)slot->generation << 32) | (long long)(index + 1);
+    slot->generation = generation;
+    return handle;
 }
 
 static SengooProcessHandleState* sengoo_process_handle_resolve(long long handle) {

@@ -20,6 +20,7 @@ extern long long sengoo_string_as_str_ptr(long long handle);
 
 #ifdef _WIN32
 #include <direct.h>
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #else
@@ -934,7 +935,8 @@ static int sengoo_buffer_slot_ensure_capacity(size_t min_slots) {
 static long long sengoo_buffer_alloc_handle(SengooFfiBuffer* buffer) {
     size_t index = 0;
     for (; index < g_buffer_slot_count; ++index) {
-        if (!g_buffer_slots[index].alive) {
+        if (!g_buffer_slots[index].alive &&
+            sengoo_runtime_next_handle_generation(g_buffer_slots[index].generation) != 0) {
             break;
         }
     }
@@ -946,13 +948,15 @@ static long long sengoo_buffer_alloc_handle(SengooFfiBuffer* buffer) {
     }
 
     SengooBufferSlot* slot = &g_buffer_slots[index];
+    uint32_t generation = sengoo_runtime_next_handle_generation(slot->generation);
+    long long handle = sengoo_runtime_encode_handle(generation, index);
+    if (handle == 0) {
+        return 0;
+    }
     slot->buffer = buffer;
     slot->alive = 1;
-    slot->generation += 1;
-    if (slot->generation == 0) {
-        slot->generation = 1;
-    }
-    return ((long long)slot->generation << 32) | (long long)(index + 1);
+    slot->generation = generation;
+    return handle;
 }
 
 static int sengoo_buffer_decode_handle(long long handle, size_t* out_index, uint32_t* out_generation) {
@@ -1075,6 +1079,103 @@ long long sengoo_ffi_buffer_used_len(long long buffer_handle) {
         return sengoo_ffi_set_error(SENGOO_FFI_ERR_INVALID_HANDLE, "buffer handle not found");
     }
     return (long long)buffer->used_len;
+}
+
+long long sengoo_ffi_buffer_commit_used_len(long long buffer_handle, long long used_len) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (used_len < 0 || (unsigned long long)used_len > (unsigned long long)buffer->capacity) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    buffer->used_len = (size_t)used_len;
+    return 1;
+}
+
+long long sengoo_ffi_buffer_get_u8(long long buffer_handle, long long index) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (index < 0 || (unsigned long long)index >= (unsigned long long)buffer->used_len) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    return (long long)buffer->bytes[(size_t)index];
+}
+
+long long sengoo_ffi_buffer_set_u8(long long buffer_handle, long long index, long long value) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (index < 0 || value < 0 || value > 255 ||
+        (unsigned long long)index >= (unsigned long long)buffer->capacity) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    size_t byte_index = (size_t)index;
+    if (byte_index > buffer->used_len) {
+        memset(buffer->bytes + buffer->used_len, 0, byte_index - buffer->used_len);
+    }
+    buffer->bytes[byte_index] = (unsigned char)value;
+    if (buffer->used_len <= byte_index) {
+        buffer->used_len = byte_index + 1;
+    }
+    return 1;
+}
+
+long long sengoo_ffi_buffer_read_u32_be(long long buffer_handle, long long offset) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (offset < 0) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (offset > LLONG_MAX - 4) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    if ((unsigned long long)offset > (unsigned long long)buffer->used_len ||
+        buffer->used_len - (size_t)offset < 4) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    const unsigned char* bytes = buffer->bytes + (size_t)offset;
+    uint32_t value = ((uint32_t)bytes[0] << 24) |
+                     ((uint32_t)bytes[1] << 16) |
+                     ((uint32_t)bytes[2] << 8) |
+                     (uint32_t)bytes[3];
+    return (long long)value;
+}
+
+long long sengoo_ffi_buffer_write_u32_be(long long buffer_handle, long long offset, long long value) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    if (offset < 0 || value < 0) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (offset > LLONG_MAX - 4 || (unsigned long long)value > UINT32_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    if ((unsigned long long)offset > (unsigned long long)buffer->capacity ||
+        buffer->capacity - (size_t)offset < 4) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if ((size_t)offset > buffer->used_len) {
+        memset(buffer->bytes + buffer->used_len, 0, (size_t)offset - buffer->used_len);
+    }
+    unsigned char* bytes = buffer->bytes + (size_t)offset;
+    uint32_t encoded = (uint32_t)value;
+    bytes[0] = (unsigned char)(encoded >> 24);
+    bytes[1] = (unsigned char)(encoded >> 16);
+    bytes[2] = (unsigned char)(encoded >> 8);
+    bytes[3] = (unsigned char)encoded;
+    size_t end = (size_t)offset + 4;
+    if (buffer->used_len < end) {
+        buffer->used_len = end;
+    }
+    return 1;
 }
 
 long long sengoo_ffi_buffer_ptr(long long buffer_handle) {
@@ -3222,6 +3323,198 @@ long long sengoo_io_stdin_read(long long out_buffer, long long out_capacity) {
     return (long long)read;
 }
 
+long long sengoo_io_protocol_binary_mode(void) {
+#ifdef _WIN32
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 ||
+        _setmode(_fileno(stdout), _O_BINARY) == -1) {
+        return -SENGOO_STATUS_IO;
+    }
+#endif
+    return 0;
+}
+
+static int sengoo_io_buffer_range(
+    SengooFfiBuffer* buffer,
+    long long offset,
+    long long len,
+    int require_initialized,
+    size_t* out_offset,
+    size_t* out_len) {
+    if (!buffer || offset < 0 || len < 0) {
+        return 0;
+    }
+    if ((unsigned long long)offset > (unsigned long long)buffer->capacity) {
+        return 0;
+    }
+    size_t start = (size_t)offset;
+    size_t count = (size_t)len;
+    size_t limit = require_initialized ? buffer->used_len : buffer->capacity;
+    if (start > limit || count > limit - start) {
+        return 0;
+    }
+    *out_offset = start;
+    *out_len = count;
+    return 1;
+}
+
+long long sengoo_runtime_read_exact(
+    SengooRuntimeReadFn read_fn,
+    void* context,
+    unsigned char* destination,
+    size_t expected) {
+    if (!read_fn || (expected > 0 && !destination)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (expected == 0) {
+        return 0;
+    }
+    if (expected > (size_t)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+
+    unsigned char* pending = (unsigned char*)malloc(expected);
+    if (!pending) {
+        return -SENGOO_STATUS_OUT_OF_MEMORY;
+    }
+
+    size_t total = 0;
+    while (total < expected) {
+        size_t remaining = expected - total;
+        SengooRuntimeReadResult result = read_fn(
+            context,
+            pending + total,
+            remaining);
+        if (result.error || result.count > remaining) {
+            free(pending);
+            return -SENGOO_STATUS_IO;
+        }
+        if (result.count > 0) {
+            total += result.count;
+            if (total == expected) {
+                break;
+            }
+            if (result.eof) {
+                free(pending);
+                return -SENGOO_STATUS_IO;
+            }
+            continue;
+        }
+        if (result.eof) {
+            free(pending);
+            return total == 0 ? 0 : -SENGOO_STATUS_IO;
+        }
+        free(pending);
+        return -SENGOO_STATUS_IO;
+    }
+
+    memcpy(destination, pending, expected);
+    free(pending);
+    return (long long)expected;
+}
+
+static SengooRuntimeReadResult sengoo_io_stdin_read_some(
+    void* context,
+    unsigned char* destination,
+    size_t capacity) {
+    FILE* stream = (FILE*)context;
+    SengooRuntimeReadResult result;
+    result.count = fread(destination, 1, capacity, stream);
+    result.eof = feof(stream) ? 1 : 0;
+    result.error = ferror(stream) ? 1 : 0;
+    return result;
+}
+
+long long sengoo_io_stdin_read_exact(long long buffer_handle, long long offset, long long len) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    size_t start = 0;
+    size_t expected = 0;
+    if (!sengoo_io_buffer_range(buffer, offset, len, 0, &start, &expected)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (expected == 0) {
+        return 0;
+    }
+    long long status = sengoo_runtime_read_exact(
+        sengoo_io_stdin_read_some,
+        stdin,
+        buffer->bytes + start,
+        expected);
+    if (status <= 0) {
+        return status;
+    }
+    if (start > buffer->used_len) {
+        memset(buffer->bytes + buffer->used_len, 0, start - buffer->used_len);
+    }
+    if (buffer->used_len < start + expected) {
+        buffer->used_len = start + expected;
+    }
+    return (long long)expected;
+}
+
+long long sengoo_runtime_write_all(
+    SengooRuntimeWriteFn write_fn,
+    void* context,
+    const unsigned char* source,
+    size_t expected) {
+    if (!write_fn || (expected > 0 && !source)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (expected == 0) {
+        return 0;
+    }
+    if (expected > (size_t)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+
+    size_t total = 0;
+    while (total < expected) {
+        size_t remaining = expected - total;
+        SengooRuntimeWriteResult result = write_fn(
+            context,
+            source + total,
+            remaining);
+        if (result.error || result.count == 0 || result.count > remaining) {
+            return -SENGOO_STATUS_IO;
+        }
+        total += result.count;
+    }
+    return (long long)total;
+}
+
+static SengooRuntimeWriteResult sengoo_io_stdout_write_some(
+    void* context,
+    const unsigned char* source,
+    size_t capacity) {
+    FILE* stream = (FILE*)context;
+    SengooRuntimeWriteResult result;
+    result.count = fwrite(source, 1, capacity, stream);
+    result.error = ferror(stream) ? 1 : 0;
+    return result;
+}
+
+long long sengoo_io_stdout_write_all(long long buffer_handle, long long offset, long long len) {
+    SengooFfiBuffer* buffer = sengoo_ffi_buffer_from_handle(buffer_handle);
+    if (!buffer) {
+        return -SENGOO_STATUS_INVALID_HANDLE;
+    }
+    size_t start = 0;
+    size_t expected = 0;
+    if (!sengoo_io_buffer_range(buffer, offset, len, 1, &start, &expected)) {
+        return -SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    if (expected == 0) {
+        return 0;
+    }
+    return sengoo_runtime_write_all(
+        sengoo_io_stdout_write_some,
+        stdout,
+        buffer->bytes + start,
+        expected);
+}
+
 long long sengoo_io_stdin_read_line(long long out_buffer, long long out_capacity) {
     char* out = (char*)(intptr_t)out_buffer;
     if (out_capacity < 0 || (out_capacity > 0 && !out)) {
@@ -4213,7 +4506,8 @@ long long sengoo_opaque_handle_new(void* ptr) {
     }
     size_t index = g_opaque_handle_slot_count;
     for (size_t i = 0; i < g_opaque_handle_slot_count; ++i) {
-        if (!g_opaque_handle_slots[i].alive) {
+        if (!g_opaque_handle_slots[i].alive &&
+            sengoo_runtime_next_handle_generation(g_opaque_handle_slots[i].generation) != 0) {
             index = i;
             break;
         }
@@ -4225,13 +4519,15 @@ long long sengoo_opaque_handle_new(void* ptr) {
         g_opaque_handle_slot_count += 1;
     }
     SengooOpaqueHandleSlot* slot = &g_opaque_handle_slots[index];
+    uint32_t generation = sengoo_runtime_next_handle_generation(slot->generation);
+    long long handle = sengoo_runtime_encode_handle(generation, index);
+    if (handle == 0) {
+        return 0;
+    }
     slot->ptr = ptr;
     slot->alive = 1;
-    slot->generation += 1;
-    if (slot->generation == 0) {
-        slot->generation = 1;
-    }
-    return ((long long)slot->generation << 32) | (long long)(index + 1);
+    slot->generation = generation;
+    return handle;
 }
 
 void* sengoo_opaque_handle_get(long long handle) {
