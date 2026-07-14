@@ -358,3 +358,46 @@ fn compatibility_workflow_runs_retained_project_with_previous_and_current_toolch
         );
     }
 }
+
+#[test]
+fn native_safety_workflow_is_fail_closed_and_preserves_longevity_evidence() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/native-safety.yml"))
+        .expect("read native safety workflow");
+    let script = fs::read_to_string(root.join("scripts/runtime-sanitizer-gate.sh"))
+        .expect("read runtime sanitizer gate");
+    let probe = root.join("tools/stdlib/tests/runtime_sanitizer_probe.c");
+
+    assert!(probe.is_file(), "native sanitizer probe should be retained");
+    for needle in [
+        "bash scripts/runtime-sanitizer-gate.sh",
+        "nightly-2026-07-01",
+        "-Zsanitizer=address",
+        "detect_leaks=1:halt_on_error=1",
+        "--features native-bridge",
+        "timeout 1800",
+        "seq 1 10",
+        "native-longevity-transcript",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "native safety workflow should contain `{needle}`"
+        );
+    }
+    for needle in [
+        "set -euo pipefail",
+        "-fsanitize=address,undefined",
+        "detect_leaks=1:halt_on_error=1",
+        "runtime_sanitizer_probe.c",
+    ] {
+        assert!(
+            script.contains(needle),
+            "runtime sanitizer gate should contain `{needle}`"
+        );
+    }
+    assert!(
+        !workflow.contains("continue-on-error"),
+        "native safety jobs must fail closed"
+    );
+}
