@@ -1,0 +1,469 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sengoo.dev/schema/senline-dogfood-evidence-v1.json",
+  "title": "Senline-driven Sengoo defect evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "change", "linked_senline_change", "records"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "change": { "const": "senline-service-dogfood" },
+    "linked_senline_change": { "const": "adopt-sengoo-backend-slice" },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nullable_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_revision": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "senline_failure",
+        "ownership",
+        "minimized_regression",
+        "fix",
+        "target_artifacts",
+        "senline_pin",
+        "final_consumer_gate",
+        "workaround"
+      ],
+      "properties": {
+        "record_id": { "type": "string", "pattern": "^SGDOG-[0-9]{4}-[0-9]{3}$" },
+        "senline_failure": { "$ref": "#/$defs/senline_failure" },
+        "ownership": { "$ref": "#/$defs/ownership" },
+        "minimized_regression": { "$ref": "#/$defs/minimized_regression" },
+        "fix": { "$ref": "#/$defs/fix" },
+        "target_artifacts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/target_artifact" },
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "required": ["target"],
+                "properties": {
+                  "target": { "const": "x86_64-pc-windows-msvc" }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "type": "object",
+                "required": ["target"],
+                "properties": {
+                  "target": { "const": "x86_64-unknown-linux-gnu" }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        },
+        "senline_pin": { "$ref": "#/$defs/senline_pin" },
+        "final_consumer_gate": { "$ref": "#/$defs/final_consumer_gate" },
+        "workaround": { "$ref": "#/$defs/workaround" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["final_consumer_gate"],
+            "properties": {
+              "final_consumer_gate": {
+                "required": ["status"],
+                "properties": {
+                  "status": { "const": "green" }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "minimized_regression": {
+                "properties": {
+                  "red_status": { "const": "preserved" },
+                  "red_commit": { "$ref": "#/$defs/revision" }
+                }
+              },
+              "fix": {
+                "properties": {
+                  "fixing_commit": { "$ref": "#/$defs/revision" }
+                }
+              },
+              "target_artifacts": {
+                "items": {
+                  "properties": {
+                    "status": { "const": "verified" }
+                  }
+                }
+              },
+              "senline_pin": {
+                "properties": {
+                  "status": { "const": "verified" }
+                }
+              },
+              "workaround": {
+                "properties": {
+                  "active": { "const": false }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["senline_pin"],
+            "properties": {
+              "senline_pin": {
+                "required": ["status"],
+                "properties": {
+                  "status": { "const": "verified" }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "minimized_regression": {
+                "properties": {
+                  "red_status": { "const": "preserved" },
+                  "red_commit": { "$ref": "#/$defs/revision" }
+                }
+              },
+              "fix": {
+                "properties": {
+                  "fixing_commit": { "$ref": "#/$defs/revision" }
+                }
+              },
+              "target_artifacts": {
+                "items": {
+                  "properties": {
+                    "status": { "const": "verified" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "senline_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "failure_id",
+        "change",
+        "fixture",
+        "fixture_mirror",
+        "fixture_sha256",
+        "evidence_kind",
+        "consumer_record",
+        "consumer_record_sha256"
+      ],
+      "properties": {
+        "failure_id": { "type": "string", "minLength": 1 },
+        "change": { "const": "adopt-sengoo-backend-slice" },
+        "fixture": { "type": "string", "minLength": 1 },
+        "fixture_mirror": { "type": "string", "minLength": 1 },
+        "fixture_sha256": { "$ref": "#/$defs/sha256" },
+        "evidence_kind": {
+          "enum": ["consumer-failure", "known-baseline-rehearsal", "injected-rehearsal"]
+        },
+        "consumer_record": { "type": "string", "minLength": 1 },
+        "consumer_record_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "component_classification", "owner", "discovery_status"],
+      "properties": {
+        "authority": {
+          "enum": ["sengoo-owned", "senline-owned", "shared-contract"]
+        },
+        "component_classification": {
+          "enum": [
+            "sengoo-compiler",
+            "sengoo-runtime",
+            "sengoo-standard-library",
+            "sengoo-package-toolchain",
+            "sengoo-product-package",
+            "senline-rust-host",
+            "shared-contract"
+          ]
+        },
+        "owner": { "type": "string", "minLength": 1 },
+        "discovery_status": {
+          "enum": ["consumer-discovered", "known-baseline", "injected-rehearsal"]
+        }
+      }
+    },
+    "minimized_regression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "test", "selector", "red_command", "red_status", "red_commit"],
+      "properties": {
+        "repository": { "const": "Sengoo" },
+        "test": { "type": "string", "minLength": 1 },
+        "selector": { "$ref": "#/$defs/test_selector" },
+        "red_command": { "type": "string", "minLength": 1 },
+        "red_status": { "enum": ["preserved", "pending-commit"] },
+        "red_commit": { "$ref": "#/$defs/nullable_revision" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["red_status"],
+            "properties": {
+              "red_status": { "const": "preserved" }
+            }
+          },
+          "then": {
+            "properties": {
+              "red_commit": { "$ref": "#/$defs/revision" }
+            }
+          }
+        }
+      ]
+    },
+    "test_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "target_kind", "target_name", "test_name"],
+      "properties": {
+        "package": { "type": "string", "minLength": 1 },
+        "target_kind": { "enum": ["bin", "test"] },
+        "target_name": { "type": "string", "minLength": 1 },
+        "test_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "fixing_commit",
+        "affected_gates",
+        "rejected_workarounds",
+        "remaining_platform_gaps"
+      ],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "fixing_commit": { "$ref": "#/$defs/nullable_revision" },
+        "affected_gates": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rejected_workarounds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "remaining_platform_gaps": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "target_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "status",
+        "source_revision",
+        "build_manifest_id",
+        "provenance",
+        "archive",
+        "manifest",
+        "archive_sha256",
+        "manifest_sha256"
+      ],
+      "properties": {
+        "target": { "enum": ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"] },
+        "status": { "enum": ["pending", "verified"] },
+        "source_revision": { "$ref": "#/$defs/nullable_revision" },
+        "build_manifest_id": { "$ref": "#/$defs/nullable_sha256" },
+        "provenance": { "type": ["string", "null"] },
+        "archive": { "type": ["string", "null"] },
+        "manifest": { "type": ["string", "null"] },
+        "archive_sha256": { "$ref": "#/$defs/nullable_sha256" },
+        "manifest_sha256": { "$ref": "#/$defs/nullable_sha256" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "verified" }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_revision": { "$ref": "#/$defs/revision" },
+              "build_manifest_id": { "$ref": "#/$defs/sha256" },
+              "provenance": { "type": "string", "minLength": 1 },
+              "archive": { "type": "string", "minLength": 1 },
+              "manifest": { "type": "string", "minLength": 1 },
+              "archive_sha256": { "$ref": "#/$defs/sha256" },
+              "manifest_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      ]
+    },
+    "pin_target_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "manifest_sha256"],
+      "properties": {
+        "target": { "enum": ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"] },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "senline_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "senline_pin_revision",
+        "pinned_sengoo_revision",
+        "target_manifests"
+      ],
+      "properties": {
+        "status": { "enum": ["pending", "verified"] },
+        "senline_pin_revision": { "$ref": "#/$defs/nullable_revision" },
+        "pinned_sengoo_revision": { "$ref": "#/$defs/nullable_revision" },
+        "target_manifests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/pin_target_manifest" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "verified" }
+            }
+          },
+          "then": {
+            "properties": {
+              "senline_pin_revision": { "$ref": "#/$defs/revision" },
+              "pinned_sengoo_revision": { "$ref": "#/$defs/revision" },
+              "target_manifests": {
+                "minItems": 2,
+                "maxItems": 2,
+                "allOf": [
+                  {
+                    "contains": {
+                      "properties": {
+                        "target": { "const": "x86_64-pc-windows-msvc" }
+                      }
+                    },
+                    "minContains": 1,
+                    "maxContains": 1
+                  },
+                  {
+                    "contains": {
+                      "properties": {
+                        "target": { "const": "x86_64-unknown-linux-gnu" }
+                      }
+                    },
+                    "minContains": 1,
+                    "maxContains": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "final_consumer_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "command", "evidence"],
+      "properties": {
+        "status": { "enum": ["pending", "failed", "green"] },
+        "command": { "type": "string", "minLength": 1 },
+        "evidence": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "green" }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "workaround": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "owner", "linked_defect", "expiry_condition", "removal_test"],
+      "properties": {
+        "active": { "type": "boolean" },
+        "owner": { "type": ["string", "null"] },
+        "linked_defect": { "type": ["string", "null"] },
+        "expiry_condition": { "type": ["string", "null"] },
+        "removal_test": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["active"],
+            "properties": {
+              "active": { "const": true }
+            }
+          },
+          "then": {
+            "properties": {
+              "owner": { "type": "string", "minLength": 1 },
+              "linked_defect": { "type": "string", "minLength": 1 },
+              "expiry_condition": { "type": "string", "minLength": 1 },
+              "removal_test": { "type": "string", "minLength": 1 }
+            }
+          },
+          "else": {
+            "properties": {
+              "owner": { "type": "null" },
+              "linked_defect": { "type": "null" },
+              "expiry_condition": { "type": "null" },
+              "removal_test": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
