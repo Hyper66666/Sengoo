@@ -141,14 +141,22 @@
 ## 5. Phase 4 - production hardening and ecosystem
 
 - [ ] 5.1 Complete and archive `production-hardening-v1`.
-- [ ] 5.2 Enforce fuzz, sanitizer, leak, long-running concurrency, ABI/versioning,
+- [x] 5.2 Enforce fuzz, sanitizer, leak, long-running concurrency, ABI/versioning,
   and compile/runtime/RSS performance gates.
-- [ ] 5.3 Run every realworld fixture and selected official packages with an
+  - Production hardening records green fuzz/native safety/compatibility gates
+    plus performance run `29327347740` and its retained raw artifact.
+- [x] 5.3 Run every realworld fixture and selected official packages with an
   installed released toolchain rather than workspace binaries.
-- [ ] 5.4 Publish compatibility and support policies, including editions,
+  - Actions run `29333253316` passes the complete installed-toolchain loop and
+    reviewed package set on all four supported release hosts.
+- [x] 5.4 Publish compatibility and support policies, including editions,
   deprecation windows, runtime ABI versioning, and supported host matrix.
-- [ ] 5.5 Grow a reviewed first-party package set for the chosen CLI/Python-hot-
+  - `docs/compatibility-policy.md`, runtime ABI v1 checks, and the updated
+    support matrix define the current release contract.
+- [x] 5.5 Grow a reviewed first-party package set for the chosen CLI/Python-hot-
   path/light-service product target; package count alone is not acceptance.
+  - The reviewed CLI, flagship, light-service, publish/resolve, and Python
+    `ctypes` set passes in run `29333253316`.
 
 ## 6. Post-v1 alternative targets
 

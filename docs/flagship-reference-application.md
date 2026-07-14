@@ -69,8 +69,9 @@ flagship CLI package. The neighboring release-smoke fixtures are
 `cli-json-audit`, `http-client-status`, `http-echo-service`, and
 `package-release-loop`, plus the manifest-backed `python-hot-path` interop
 fixture. The installed release gate runs that package's Python `ctypes` smoke
-with the installed `sgc` outside the checkout; fresh four-host workflow
-evidence is still pending after this change.
+with the installed `sgc` outside the checkout. Actions run `29333253316` passes
+the complete reviewed set and the flagship locked loop on Windows x64, Linux
+x64, macOS arm64, and macOS x64.
 
 - Async network or status checks.
 - A long-running watch mode.

@@ -109,11 +109,19 @@
     prefixes on Windows x64, Linux x64, macOS x64, and macOS arm64, verifies
     coherent tool versions/checksums/provenance, and runs installed hello plus
     stdlib build/run smoke without checkout environment overrides.
-- [ ] 5.2 Run all realworld fixtures through locked check/test/fmt/doc/build/run
+- [x] 5.2 Run all realworld fixtures through locked check/test/fmt/doc/build/run
   using installed binaries and stdlib.
-- [ ] 5.3 Select a reviewed official package set for CLI, Python interop, and
+  - Actions run `29333253316` passes every manifest-backed realworld fixture
+    outside the checkout with installed archives on Windows x64, Linux x64,
+    macOS arm64, and macOS x64.
+- [x] 5.3 Select a reviewed official package set for CLI, Python interop, and
   light-service workflows; verify publish/resolve/build/run against the release.
-- [ ] 5.4 Refresh flagship docs and support matrix with release-host evidence.
+  - The same run passes the reviewed CLI, flagship, light-service,
+    publish/resolve, and Python `ctypes` set through the installed toolchain.
+- [x] 5.4 Refresh flagship docs and support matrix with release-host evidence.
+  - `examples/realworld/SUPPORT_MATRIX.md`, the flagship guide, and release
+    guide cite run `29333253316`; distribution run `29333253290` independently
+    passes package/install/upgrade on all four hosts.
 
 ## 6. Validation
 

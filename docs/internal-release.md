@@ -123,10 +123,10 @@ The current reviewed first-party release set is:
 | Publish/resolve package workflow | `examples/realworld/package-release-loop` | Installed release lane reruns `metadata --format json --locked`, `publish --dry-run --locked --format json --output target/package`, and `publish --registry local --locked --format json`. |
 | Python hot-path interop | `examples/realworld/python-hot-path` | Installed release lane runs `python_smoke.py` with the installed `sgc`, parses `.sgreflect.json`, compiles emitted `.ll` with `clang`, and invokes the reflected symbol through Python `ctypes`. |
 
-This repository now ships the manifest-backed `python-hot-path` package, but a
-fresh post-change four-host workflow rerun is still required before the
-reviewed-set evidence can replace the retained Windows/Linux transcripts in the
-release notes.
+Actions run `29333253316` passes this reviewed set with installed archives on
+Windows x64, Linux x64, macOS arm64, and macOS x64. Toolchain distribution run
+`29333253290` independently passes package/install/upgrade and installed stdlib
+smoke on the same four host targets.
 
 ## Tagging
 
