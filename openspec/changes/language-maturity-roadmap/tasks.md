@@ -118,8 +118,14 @@
     Ubuntu, Windows, macOS x64, and macOS arm64. The suite covers timer, TCP,
     pipe/fd readiness, finite wakeup hints, close, cancellation, and exact
     child-future cleanup.
-- [ ] 4.5 Refresh the flagship application with a useful concurrent workload and
+- [x] 4.5 Refresh the flagship application with a useful concurrent workload and
   retain a deterministic serial oracle.
+  - `examples/realworld/workspace-audit` computes four real report-score
+    dimensions as joined worker jobs over an owned generic
+    `Arc<Mutex<i64>>` inner value. Production code rejects any mismatch with
+    `WorkspaceSummary::score()`, and
+    `test_parallel_score_matches_serial_oracle` fixes a known summary at score
+    `52` so the concurrent path and serial oracle gate each other.
 
 ## 5. Phase 4 - production hardening and ecosystem
 
