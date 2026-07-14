@@ -115,7 +115,10 @@ future without exposing lifecycle ids.
   registers a clone of the runtime file resource, and result, cancellation, or
   future Drop unregisters it exactly once. `read_into(&mut Buffer)` performs a
   single capacity-bounded read after readiness; it does not promise background
-  disk throughput or async writes.
+  disk throughput or async writes. Actions run `29298052840` passes the
+  AsyncFile runtime ownership/readiness/read/close/cancel/drop suite on Ubuntu,
+  Windows, macOS x64, and macOS arm64. Run `29298052830` additionally passes
+  the generated-code `sgc` AsyncFile E2E on Ubuntu.
 
 ## User `Future` surface
 

@@ -96,10 +96,13 @@
     registration, and has one cross-platform scenario suite. Actions run
     `29292788788` passes that suite on Ubuntu, Windows, macOS x64, and macOS
     arm64.
-- [ ] 4.2 Wire stdlib async net/file helpers to the reactor.
-  - Partial: async HTTP listener readiness is reactor-backed. The frozen file
-    surface is owned `AsyncFile`, `wait_readable(timeout_ms)`, and bounded
-    `read_into(&mut Buffer)`; implementation and native evidence remain open.
+- [x] 4.2 Wire stdlib async net/file helpers to the reactor.
+  - Async HTTP listener readiness is reactor-backed. `std::file` exposes the
+    owned `AsyncFile`, `wait_readable(timeout_ms)`, and bounded
+    `read_into(&mut Buffer)` surface with exact close/cancel/drop ownership.
+    Actions run `29298052840` passes the `reactor_async_file_*` runtime suite
+    on Ubuntu, Windows, macOS x64, and macOS arm64; run `29298052830` passes
+    the real generated-code `sgc` AsyncFile read/close E2E on Ubuntu.
 - [x] 4.3 Reference-host tests closing the owned-handle readiness deferral for
   Windows, Linux, and the supported macOS release channel, including no-busy-
   poll, cancellation, timeout, and close behavior.
@@ -154,8 +157,9 @@
   - The runtime semantics and realworld matrix record structural `Send`/`Sync`
     bounds and explicit negative impls, generic `Arc<T>` / `Mutex<T>` /
     `RwLock<T>` / `channel<T>`, task scopes, the all-host timer/TCP/owned-handle
-    reactor evidence, owned `AsyncFile` local evidence and pending four-host
-    boundary, and the complete same-thread user-Future wakeup contract. The
+    reactor evidence, owned `AsyncFile` four-host runtime evidence and native
+    generated-code E2E, and the complete same-thread user-Future wakeup
+    contract. The
     unsupported rows retain inline user futures at runtime-handle `select` /
     cross-thread spawn and unsupported file kinds/background IO instead of
     claiming broader support.

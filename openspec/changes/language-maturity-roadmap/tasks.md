@@ -98,8 +98,12 @@
 
 ## 4. Phase 3 - safe concurrency and async IO
 
-- [ ] 4.1 Complete and archive `concurrency-safety-and-async-io` with scheduler
+- [x] 4.1 Complete and archive `concurrency-safety-and-async-io` with scheduler
   correctness independent of work-stealing implementation.
+  - Archived as `2026-07-14-concurrency-safety-and-async-io` after generic
+    shared-state/channel ownership, bounded executor and structured-scope
+    semantics, user-Future wake contracts, four-host reactor/AsyncFile runtime
+    evidence, and native generated-code E2E gates passed.
 - [x] 4.2 Deliver generic `Arc<T>`, `Mutex<T>`, `RwLock<T>`, and `channel<T>` with
   exact Drop and Send/Sync bounds.
   - Descriptor-backed ownership now covers all four public types. Compiler
