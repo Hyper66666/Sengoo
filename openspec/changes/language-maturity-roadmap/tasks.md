@@ -140,7 +140,10 @@
 
 ## 5. Phase 4 - production hardening and ecosystem
 
-- [ ] 5.1 Complete and archive `production-hardening-v1`.
+- [x] 5.1 Complete and archive `production-hardening-v1`.
+  - Archived as `2026-07-14-production-hardening-v1` after its performance,
+    four-host installed-release, strict validation, and support-policy gates
+    closed.
 - [x] 5.2 Enforce fuzz, sanitizer, leak, long-running concurrency, ABI/versioning,
   and compile/runtime/RSS performance gates.
   - Production hardening records green fuzz/native safety/compatibility gates
