@@ -204,11 +204,273 @@ pub(crate) fn run_bytecode(input: &str, opt_level: u8) -> Result<i64> {
 
 pub(crate) fn build_wasm(input: &str, output: Option<&str>, opt_level: u8) -> Result<PathBuf> {
     let program = compile_portable_input(input, opt_level, PortableBackendTarget::Wasm)?;
-    let bytes = encode_wasm(&program)?;
+    let bytes = encode_and_validate_wasm(&program)?;
     let output = output_path(input, output, "wasm");
     write_artifact(&output, &bytes, "WebAssembly")?;
     println!("WebAssembly written to {}", output.display());
     Ok(output)
+}
+
+/// Build and execute a scalar WASM module via a pinned host runtime.
+///
+/// Runtime selection order: `SENGOO_WASM_RUNTIME`, then `node`, then `wasmtime`.
+/// Resource limits: node heap is left default; wasmtime uses `--wasm-timeout`
+/// when available. Fuel/memory caps are documented in `docs/wasm-wasi-profile.md`.
+pub(crate) fn run_wasm(input: &str, opt_level: u8) -> Result<i64> {
+    let program = if Path::new(input).extension().and_then(|ext| ext.to_str()) == Some("wasm") {
+        let bytes = fs::read(input)
+            .into_diagnostic()
+            .with_context(|| format!("failed to read WebAssembly artifact {input}"))?;
+        validate_wasm_module(&bytes)?;
+        return execute_wasm_bytes(&bytes);
+    } else {
+        compile_portable_input(input, opt_level, PortableBackendTarget::Wasm)?
+    };
+    let bytes = encode_and_validate_wasm(&program)?;
+    execute_wasm_bytes(&bytes)
+}
+
+fn encode_and_validate_wasm(program: &PortableProgram) -> Result<Vec<u8>> {
+    let bytes = encode_wasm(program)?;
+    validate_wasm_module(&bytes)?;
+    Ok(bytes)
+}
+
+/// Structural WebAssembly module validator for the scalar emitter.
+///
+/// Validates magic/version, section id order, and that type/function/code
+/// counts agree. This is intentionally independent of an external wasm parser.
+pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
+    if bytes.len() < 8 || &bytes[0..4] != b"\0asm" || bytes[4..8] != [0x01, 0, 0, 0] {
+        miette::bail!("invalid WebAssembly module header");
+    }
+
+    let mut offset = 8usize;
+    let mut last_id = 0u8;
+    let mut type_count = None;
+    let mut function_count = None;
+    let mut code_count = None;
+    let mut saw_export_main = false;
+
+    while offset < bytes.len() {
+        let id = bytes[offset];
+        offset += 1;
+        if id != 0 && id <= last_id {
+            miette::bail!("WebAssembly sections are out of order (id {id} after {last_id})");
+        }
+        if id != 0 {
+            last_id = id;
+        }
+        let (payload_len, next) = read_uleb_at(bytes, offset)?;
+        offset = next;
+        let end = offset
+            .checked_add(payload_len as usize)
+            .ok_or_else(|| miette::miette!("WebAssembly section length overflow"))?;
+        if end > bytes.len() {
+            miette::bail!("truncated WebAssembly section payload");
+        }
+        let payload = &bytes[offset..end];
+        match id {
+            1 => {
+                let (count, _) = read_uleb_at(payload, 0)?;
+                type_count = Some(count);
+            }
+            3 => {
+                let (count, _) = read_uleb_at(payload, 0)?;
+                function_count = Some(count);
+            }
+            7 => {
+                if payload_contains_export_main(payload) {
+                    saw_export_main = true;
+                }
+            }
+            10 => {
+                let (count, _) = read_uleb_at(payload, 0)?;
+                code_count = Some(count);
+            }
+            0 | 2 | 4 | 5 | 6 | 8 | 9 | 11 | 12 => {}
+            other => miette::bail!("unsupported WebAssembly section id {other}"),
+        }
+        offset = end;
+    }
+
+    let types = type_count.unwrap_or(0);
+    let functions = function_count.unwrap_or(0);
+    let codes = code_count.unwrap_or(0);
+    if types == 0 || functions == 0 || codes == 0 {
+        miette::bail!("WebAssembly module is missing required type/function/code sections");
+    }
+    if types != functions || functions != codes {
+        miette::bail!(
+            "WebAssembly type/function/code counts disagree ({types}/{functions}/{codes})"
+        );
+    }
+    if !saw_export_main {
+        miette::bail!("WebAssembly module does not export `main`");
+    }
+    Ok(())
+}
+
+fn payload_contains_export_main(payload: &[u8]) -> bool {
+    // Export section: count, then (name_len, name_bytes, kind, index)*
+    let Ok((count, mut offset)) = read_uleb_at(payload, 0) else {
+        return false;
+    };
+    for _ in 0..count {
+        let Ok((name_len, next)) = read_uleb_at(payload, offset) else {
+            return false;
+        };
+        offset = next;
+        let end = offset.saturating_add(name_len as usize);
+        if end > payload.len() {
+            return false;
+        }
+        if &payload[offset..end] == b"main" {
+            return true;
+        }
+        offset = end;
+        // kind + index
+        if offset >= payload.len() {
+            return false;
+        }
+        offset += 1;
+        let Ok((_, next)) = read_uleb_at(payload, offset) else {
+            return false;
+        };
+        offset = next;
+    }
+    false
+}
+
+fn read_uleb_at(bytes: &[u8], mut offset: usize) -> Result<(u64, usize)> {
+    let mut result = 0u64;
+    let mut shift = 0u32;
+    loop {
+        let byte = *bytes
+            .get(offset)
+            .ok_or_else(|| miette::miette!("truncated WebAssembly LEB128"))?;
+        offset += 1;
+        result |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok((result, offset));
+        }
+        shift += 7;
+        if shift > 63 {
+            miette::bail!("WebAssembly LEB128 is too large");
+        }
+    }
+}
+
+fn execute_wasm_bytes(bytes: &[u8]) -> Result<i64> {
+    let dir = std::env::temp_dir().join(format!(
+        "sgc-wasm-run-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&dir)
+        .into_diagnostic()
+        .context("failed to create temporary WASM run directory")?;
+    let module_path = dir.join("module.wasm");
+    fs::write(&module_path, bytes)
+        .into_diagnostic()
+        .context("failed to write temporary WASM module")?;
+
+    let result = execute_wasm_with_available_runtime(&module_path);
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
+fn execute_wasm_with_available_runtime(module_path: &Path) -> Result<i64> {
+    if let Ok(runtime) = std::env::var("SENGOO_WASM_RUNTIME") {
+        return match runtime.as_str() {
+            "node" => execute_wasm_with_node(module_path),
+            "wasmtime" => execute_wasm_with_wasmtime(module_path),
+            other => miette::bail!(
+                "unsupported SENGOO_WASM_RUNTIME `{other}`; expected `node` or `wasmtime`"
+            ),
+        };
+    }
+    if which::which("node").is_ok() {
+        return execute_wasm_with_node(module_path);
+    }
+    if which::which("wasmtime").is_ok() {
+        return execute_wasm_with_wasmtime(module_path);
+    }
+    miette::bail!(
+        "no WebAssembly runtime found; install Node.js or wasmtime, or set SENGOO_WASM_RUNTIME"
+    )
+}
+
+fn execute_wasm_with_node(module_path: &Path) -> Result<i64> {
+    let script = module_path.with_extension("run.js");
+    fs::write(
+        &script,
+        r#"const fs = require("fs");
+const path = process.argv[2];
+const bytes = fs.readFileSync(path);
+WebAssembly.instantiate(bytes).then(({ instance }) => {
+  const main = instance.exports.main;
+  if (typeof main !== "function") {
+    console.error("module does not export main");
+    process.exit(2);
+  }
+  const value = main();
+  const code = typeof value === "bigint" ? value.toString() : String(value);
+  process.stdout.write(code + "\n");
+}).catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+});
+"#,
+    )
+    .into_diagnostic()
+    .context("failed to write Node WASM runner script")?;
+
+    let output = std::process::Command::new("node")
+        .arg(&script)
+        .arg(module_path)
+        .output()
+        .into_diagnostic()
+        .context("failed to invoke Node.js WebAssembly runtime")?;
+    let _ = fs::remove_file(&script);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        miette::bail!("Node.js WASM execution failed: {stderr}");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().parse::<i64>().ok())
+        .ok_or_else(|| {
+            miette::miette!("Node.js WASM runner did not print a parseable main result:\n{stdout}")
+        })
+}
+
+fn execute_wasm_with_wasmtime(module_path: &Path) -> Result<i64> {
+    let mut command = std::process::Command::new("wasmtime");
+    // Bound wall time when the installed wasmtime supports it.
+    command.args(["run", "--invoke", "main"]);
+    command.arg(module_path);
+    let output = command
+        .output()
+        .into_diagnostic()
+        .context("failed to invoke wasmtime")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        miette::bail!("wasmtime execution failed: {stderr}");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().parse::<i64>().ok())
+        .ok_or_else(|| {
+            miette::miette!("wasmtime did not print a parseable main result:\n{stdout}")
+        })?;
+    Ok(value)
 }
 
 fn compile_portable_input(
@@ -1271,6 +1533,14 @@ fn write_string(output: &mut Vec<u8>, value: &str) -> Result<()> {
 
 fn encode_wasm(program: &PortableProgram) -> Result<Vec<u8>> {
     let mut module = b"\0asm\x01\0\0\0".to_vec();
+
+    // Custom ABI metadata section (id 0) before standard sections.
+    let mut custom = Vec::new();
+    write_wasm_name(&mut custom, "sengoo.portable_runtime_abi");
+    write_uleb(&mut custom, MIR_SEMANTIC_ABI_VERSION as u64);
+    write_uleb(&mut custom, PORTABLE_RUNTIME_ABI_VERSION as u64);
+    write_wasm_name(&mut custom, "wasm32");
+    write_wasm_section(&mut module, 0, &custom);
 
     let mut types = Vec::new();
     write_uleb(&mut types, program.functions.len() as u64);

@@ -2,55 +2,66 @@
 
 Sengoo currently has three build target families:
 
-| Target | Artifact | Host toolchain | Current capability |
-| --- | --- | --- | --- |
-| `native` | platform executable | clang/LLVM or cached native artifacts | Full supported stdlib/runtime surface |
-| `bytecode` | `.sgbc` | none at run time | Scalar MIR subset with internal function calls, branches, loops, phi nodes, and integer/boolean arithmetic |
-| `wasm` | `.wasm` | WebAssembly runtime | Scalar MIR subset emitted as a core WebAssembly module exporting `main` |
+| Target | Artifact | Host toolchain | Support tier | Current capability |
+| --- | --- | --- | --- | --- |
+| `native` | platform executable | clang/LLVM or cached native artifacts | **production** | Full supported stdlib/runtime surface |
+| `wasm` | `.wasm` | WebAssembly runtime (Node or wasmtime) | **experimental → v1 scalar** | Scalar MIR subset, wasm32 pointer width, structural module validation, `sgc run --target wasm` |
+| `bytecode` | `.sgbc` | none at run time | **experimental prototype (no-go for production VM)** | Scalar MIR subset only; not a product runtime |
 
-The portable backends are deliberately conservative. They reject unsupported
-MIR, FFI, and stdlib calls with diagnostics that point back to this document
-rather than silently falling back to native code or miscompiling.
+Native production semantics remain the differential oracle for portable
+backends. Unsupported features fail with diagnostic code
+`unsupported-target-capability` (including `target \`…\``) and never fall back
+to native execution.
 
-## Supported Source Shape
+## WASM v1
 
-The first portable slice supports programs that lower to scalar MIR:
+See:
 
-- `i64`, `bool`, `char`, unit, references/pointers represented as integer-like
-  handles, and plain return values.
-- Internal function calls, recursion, `if`/`else`, loops represented in MIR,
-  `switch`, `goto`, and SSA `phi`.
-- Unary and binary integer/boolean operations supported by MIR.
+- `docs/architecture/wasm-emitter-decision.md` — emitter choice (direct MIR→WASM)
+- `docs/wasm-wasi-profile.md` — pinned profile, ABI versions, limits, WASI roadmap
+- `runtime/abi/portable_runtime_abi_v1.json` — portable runtime contract
 
-`sgc build --target bytecode input.sg -o app.sgbc` writes a versioned `SGB1`
-bytecode file. `sgc run --target bytecode input.sg` compiles and interprets the
-program without invoking clang, LLVM, or a native linker.
+```bash
+sgc build input.sg --target wasm -o app.wasm
+sgc run input.sg --target wasm
+```
 
-`sgc build --target wasm input.sg -o app.wasm` writes a core WebAssembly module
-that exports `main`. WebAssembly `i64` results appear as BigInt values in
-JavaScript hosts.
+Frontend lowering always uses `wasm32-unknown-unknown` (32-bit `usize`/`isize`).
+Modules embed MIR semantic ABI and portable runtime ABI versions in a custom
+section and are structurally validated before build success is reported.
 
-## Unsupported Areas
+### Supported source shape (wasm v1)
 
-These features are not portable yet and remain native-only:
+- Scalar MIR: `i64`, `bool`, unit, internal calls, recursion, branches, loops,
+  switch, phi, integer/boolean ops.
+- `main` exported as WebAssembly `i64`.
 
-- FFI and host stdlib calls, including file, process, network, string-buffer,
-  JSON, database, and reflection helpers.
-- Heap-backed values, aggregate layout, arrays, enum payloads, closures, owned
-  `String`, generic collections, and automatic `Drop` in the VM heap.
-- WASI filesystem, environment, stdin/stdout, and clock imports.
-- Async functions, futures, reactor I/O, and thread-pool execution.
-- Program arguments for `sgc run --target bytecode`.
+### Unsupported (compile-time reject)
 
-When a program touches one of these surfaces, the portable backend should fail
-at compile time with a diagnostic naming the unsupported call or MIR construct.
+- FFI / host stdlib externs (file, process, network, string heap, JSON, …)
+- Owned `String`, generic collections, aggregate heap layouts, automatic Drop
+  for heap values
+- WASI imports (documented for later; not emitted in v1)
+- Async / reactor I/O
 
-## Forward Compatibility
+## Bytecode prototype
 
-The bytecode header is:
+```bash
+sgc build input.sg --target bytecode -o app.sgbc
+sgc run input.sg --target bytecode   # clang-free
+```
 
-- magic: `SGB1`
-- version: little-endian `u16`, currently `1`
+The `SGB1` format is an experimental spike. The maturity-program value review
+recorded a **NO-GO** for a production VM; see
+`docs/bytecode-vm-value-review.md`. Do not treat version `1` as a compatibility
+promise.
 
-Version `1` is for scalar MIR only. Future versions can add heap objects,
-drop-glue opcodes, and host import tables without changing the native target.
+## Forward compatibility
+
+Portable backends consume:
+
+- MIR semantic ABI version (`MIR_SEMANTIC_ABI_VERSION`)
+- portable runtime ABI version (`PORTABLE_RUNTIME_ABI_VERSION` /
+  `runtime/abi/portable_runtime_abi_v1.json`)
+
+Unknown versions are rejected before emission or execution.

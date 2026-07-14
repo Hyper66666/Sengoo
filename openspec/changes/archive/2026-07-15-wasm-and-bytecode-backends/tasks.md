@@ -26,14 +26,18 @@
   `bytecode-vm-v1` owner changes.
 - [x] 2.2 Classify the current scalar WASM emitter and `SGB1` interpreter as
   experimental prototypes with no artifact compatibility promise.
-- [ ] 2.3 Record the entry-review result and activate each child only after it
+- [x] 2.3 Record the entry-review result and activate each child only after it
   consumes the shared MIR/runtime contract.
+  - WASM activated and archived as scalar v1; bytecode NO-GO archived with
+    `docs/bytecode-vm-value-review.md`.
 
 ## 3. Cross-target closure
 
-- [ ] 3.1 Keep native semantics as the differential oracle and one capability
+- [x] 3.1 Keep native semantics as the differential oracle and one capability
   matrix as the support truth source.
-- [ ] 3.2 Record the bytecode value-review decision without treating prototype
+  - `docs/portable-targets.md` is the portable matrix; native remains oracle.
+- [x] 3.2 Record the bytecode value-review decision without treating prototype
   implementation as evidence that the VM must ship.
-- [ ] 3.3 Run `openspec validate wasm-and-bytecode-backends --strict` and
+  - NO-GO recorded; production VM cancelled.
+- [x] 3.3 Run `openspec validate wasm-and-bytecode-backends --strict` and
   `openspec validate --all --strict`.

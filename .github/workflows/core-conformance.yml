@@ -35,8 +35,11 @@ jobs:
       - name: Run core conformance examples
         run: cargo test --locked -p sgc core_conformance_examples_compile_link_and_run -- --nocapture
 
-      - name: Run portable target smoke tests
-        run: cargo test --locked -p sgc --test portable_targets -- --nocapture --test-threads=1
+      - name: Run portable target and ABI contract smoke tests
+        run: |
+          cargo test --locked -p sgc --test portable_targets -- --nocapture --test-threads=1
+          cargo test --locked -p sgc --test portable_abi_contract -- --nocapture
+          cargo test --locked -p sengoo-compiler --test mir_target_contract -- --nocapture
 
       - name: Capture required LLDB debugger evidence
         env:

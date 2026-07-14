@@ -215,6 +215,61 @@ def main() -> i64 {
 }
 
 #[test]
+fn wasm_target_runs_scalar_main_with_host_runtime() {
+    let dir = temp_dir("wasm_run");
+    let source = write_scalar_program(&dir);
+    let run = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run wasm");
+    assert_eq!(
+        run.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wasm_target_rejects_aggregate_and_host_stdlib_with_stable_capability_diagnostic() {
+    let dir = temp_dir("wasm_aggregate");
+    let source = dir.join("main.sg");
+    // Struct aggregates typecheck natively but are outside the scalar WASM MIR
+    // subset; rejection must use the stable capability diagnostic code.
+    fs::write(
+        &source,
+        r#"
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+def main() -> i64 {
+    let p = Point { x: 1, y: 2 };
+    p.x + p.y
+}
+"#,
+    )
+    .unwrap();
+    let build = Command::new(sgc())
+        .args(["build", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("build aggregate wasm");
+    assert!(
+        !build.status.success(),
+        "aggregates must fail closed on wasm v1"
+    );
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(
+        stderr.contains("unsupported-target-capability") && stderr.contains("target `wasm`"),
+        "stderr:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wasm_target_uses_wasm32_pointer_sized_literal_bounds() {
     let dir = temp_dir("wasm32_usize_bounds");
     let source = dir.join("main.sg");

@@ -170,20 +170,31 @@
     `unsupported-target-capability` diagnostics, and regression tests pass.
 - [x] 6.2 Split WASM and bytecode into independently archivable
   `wasm-backend-v1` and `bytecode-vm-v1` owner changes before implementation.
-- [ ] 6.3 Complete and archive `wasm-backend-v1` with WASM/WASI conformance and
+- [x] 6.3 Complete and archive `wasm-backend-v1` with WASM/WASI conformance and
   capability diagnostics.
-- [ ] 6.4 Complete and archive `bytecode-vm-v1` with ownership/Drop semantics
+  - Archived as `2026-07-15-wasm-backend-v1` after direct-emitter promotion,
+    wasm32 ABI/profile docs, module validation, `sgc run --target wasm`,
+    portable capability diagnostics, and CI portable smoke updates.
+- [x] 6.4 Complete and archive `bytecode-vm-v1` with ownership/Drop semantics
   and native differential conformance, or archive a replacement OpenSpec
   decision cancelling the VM with evidence.
+  - Archived as `2026-07-15-bytecode-vm-v1` with NO-GO value review
+    (`docs/bytecode-vm-value-review.md`); production VM cancelled.
 
 ## 7. Program closure
 
-- [ ] 7.1 All required child changes pass strict validation and archive in
+- [x] 7.1 All required child changes pass strict validation and archive in
   dependency order.
-- [ ] 7.2 `examples/realworld/SUPPORT_MATRIX.md` contains no unsupported
+  - Post-v1 children archived: wasm backend, bytecode cancellation, and
+    coordinator `wasm-and-bytecode-backends`.
+- [x] 7.2 `examples/realworld/SUPPORT_MATRIX.md` contains no unsupported
   `Supported` claim and links
   unit, integration, realworld, and host evidence at the appropriate level.
-- [ ] 7.3 A clean clone can install or build the released toolchain, resolve a
+  - Portable targets row records experimental wasm scalar v1 and bytecode
+    prototype NO-GO without overclaiming native production support.
+- [x] 7.3 A clean clone can install or build the released toolchain, resolve a
   package, test it, debug it, and run the flagship on each supported host.
-- [ ] 7.4 Run `openspec validate language-maturity-roadmap --strict` and
+  - Evidence retained from Phase 2–4 release/install/debug/flagship gates
+    (`v0.1.0-rc.1`, Actions `29259068988` / `29333253316` / `29305786087`).
+- [x] 7.4 Run `openspec validate language-maturity-roadmap --strict` and
   `openspec validate --all --strict`.
