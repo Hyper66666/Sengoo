@@ -245,10 +245,16 @@ function Normalize-Manifest($Manifest, [string]$Label) {
 }
 
 function Canonical-Json($Value, [switch]$Pretty) {
+    if ($null -eq $Value) {
+        return "null"
+    }
     $json = if ($Pretty) {
         $Value | ConvertTo-Json -Depth 12
     } else {
         $Value | ConvertTo-Json -Depth 12 -Compress
+    }
+    if ($null -eq $json) {
+        return "null"
     }
     return $json.Replace("`r`n", "`n")
 }
