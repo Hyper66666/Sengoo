@@ -38,14 +38,14 @@ jobs:
       - name: Run portable target smoke tests
         run: cargo test --locked -p sgc --test portable_targets -- --nocapture --test-threads=1
 
-      - name: Run workspace tests
-        run: cargo test --workspace --locked -- --test-threads=1
-
       - name: Capture required LLDB debugger evidence
         env:
           SENGOO_REQUIRE_NATIVE_DEBUGGER: "1"
           SENGOO_DEBUGGER_TRANSCRIPT_DIR: debugger-transcripts
         run: cargo test --locked -p sgc --test debugger_native -- --nocapture --test-threads=1
+
+      - name: Run workspace tests
+        run: cargo test --workspace --locked -- --test-threads=1
 
       - name: Upload LLDB debugger transcripts
         if: always()

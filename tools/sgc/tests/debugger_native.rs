@@ -7,6 +7,7 @@ const BREAK_MARKER: &str = "SENGOO_DEBUG_BREAK";
 const STEP_MARKER: &str = "SENGOO_DEBUG_STEP";
 const COMPOSITE_MARKER: &str = "SENGOO_DEBUG_COMPOSITES";
 const CALL_MARKER: &str = "SENGOO_DEBUG_CALL";
+const CALL_LINE_MARKER: &str = "SENGOO_DEBUG_CALL_LINE";
 const CALL_STEP_MARKER: &str = "SENGOO_DEBUG_CALL_STEP";
 const CLOSURE_MARKER: &str = "SENGOO_DEBUG_CLOSURE";
 const CLOSURE_STEP_MARKER: &str = "SENGOO_DEBUG_CLOSURE_STEP";
@@ -82,6 +83,7 @@ struct ProbeLayout {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CompositeProbeLayout {
     composite_line: usize,
+    call_entry_line: usize,
     call_line: usize,
     helper_line: usize,
     closure_call_line: usize,
@@ -232,7 +234,8 @@ fn composite_lldb_arguments(
     let mut args = vec!["--batch".to_string()];
     for line in [
         layout.composite_line,
-        layout.call_line,
+        layout.call_entry_line,
+        layout.helper_line,
         layout.closure_call_line,
     ] {
         args.extend([
@@ -244,7 +247,6 @@ fn composite_lldb_arguments(
         "run".to_string(),
         format!("script print(\"{COMPOSITE_MARKER}\")"),
         "frame info".to_string(),
-        "frame variable value".to_string(),
         "frame variable pair".to_string(),
         "frame variable pair.left".to_string(),
         "frame variable pair.enabled".to_string(),
@@ -259,6 +261,10 @@ fn composite_lldb_arguments(
         format!("script print(\"{CALL_MARKER}\")"),
         "frame info".to_string(),
         "thread backtrace".to_string(),
+        "frame variable value".to_string(),
+        "step".to_string(),
+        format!("script print(\"{CALL_LINE_MARKER}\")"),
+        "frame info".to_string(),
         "step".to_string(),
         format!("script print(\"{CALL_STEP_MARKER}\")"),
         "frame info".to_string(),
@@ -465,11 +471,7 @@ fn validate_composite_debugger_output(
             ));
         }
     }
-    for (name, decimal, hex) in [
-        ("value", 21, "15"),
-        ("pair.left", 21, "15"),
-        ("picked.discriminant", 1, "1"),
-    ] {
+    for (name, decimal, hex) in [("pair.left", 21, "15"), ("picked.discriminant", 1, "1")] {
         if !composites
             .lines()
             .any(|line| line_has_named_value(line, name, decimal, hex))
@@ -500,13 +502,24 @@ fn validate_composite_debugger_output(
         ));
     }
 
-    let call = marker_segment(output, CALL_MARKER, CALL_STEP_MARKER)?;
-    if !contains_source_location(call, source, layout.call_line)
+    let call = marker_segment(output, CALL_MARKER, CALL_LINE_MARKER)?;
+    if !contains_source_location(call, source, layout.call_entry_line)
         || !call.contains("call_surface")
         || !call.contains("main")
+        || !call
+            .lines()
+            .any(|line| line_has_named_value(line, "value", 21, "15"))
     {
         return Err(format!(
-            "debugger did not expose the call_surface stack boundary:\n{output}"
+            "debugger did not expose the call_surface entry stack and live parameter:\n{output}"
+        ));
+    }
+    let call_line = marker_segment(output, CALL_LINE_MARKER, CALL_STEP_MARKER)?;
+    if !contains_source_location(call_line, source, layout.call_line)
+        || !call_line.contains("call_surface")
+    {
+        return Err(format!(
+            "debugger did not step from call_surface entry to its call statement:\n{output}"
         ));
     }
     let call_step = marker_segment(output, CALL_STEP_MARKER, CLOSURE_MARKER)?;
@@ -689,6 +702,7 @@ SENGOO_DEBUG_EXIT_ZERO
 fn composite_probe_layout() -> CompositeProbeLayout {
     CompositeProbeLayout {
         composite_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let observed ="),
+        call_entry_line: source_line_number(COMPOSITE_PROBE_SOURCE, "def call_surface"),
         call_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let called = scalar_helper"),
         helper_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let adjusted ="),
         closure_call_line: source_line_number(COMPOSITE_PROBE_SOURCE, "let closed = add"),
@@ -708,7 +722,8 @@ fn lldb_composite_commands_inspect_live_values_calls_and_closures() {
 
     for line in [
         layout.composite_line,
-        layout.call_line,
+        layout.call_entry_line,
+        layout.helper_line,
         layout.closure_call_line,
     ] {
         assert!(joined.contains(&format!(
@@ -740,6 +755,7 @@ fn lldb_composite_commands_inspect_live_values_calls_and_closures() {
     for marker in [
         COMPOSITE_MARKER,
         CALL_MARKER,
+        CALL_LINE_MARKER,
         CALL_STEP_MARKER,
         CLOSURE_MARKER,
         CLOSURE_STEP_MARKER,
@@ -760,7 +776,6 @@ fn composite_debugger_output_requires_live_layouts_and_surface_steps() {
 Breakpoint 1: debugger_composite_probe.sg:{composite_line}:5
 {COMPOSITE_MARKER}
 frame #0: inspect_composites at debugger_composite_probe.sg:{composite_line}:5
-(i64) value = 21
 (Pair) pair = (left = 21, enabled = true)
 (i64) pair.left = 21
 (bool) pair.enabled = true
@@ -772,10 +787,13 @@ frame #0: inspect_composites at debugger_composite_probe.sg:{composite_line}:5
 (i64) values.handle = 18
 (i64) values.marker = 0
 {CALL_MARKER}
-frame #0: call_surface at debugger_composite_probe.sg:{call_line}:5
+frame #0: call_surface at debugger_composite_probe.sg:{call_entry_line}:5
 thread backtrace:
-frame #0: call_surface at debugger_composite_probe.sg:{call_line}:5
+frame #0: call_surface at debugger_composite_probe.sg:{call_entry_line}:5
 frame #1: main
+(i64) value = 21
+{CALL_LINE_MARKER}
+frame #0: call_surface at debugger_composite_probe.sg:{call_line}:5
 {CALL_STEP_MARKER}
 frame #0: scalar_helper at debugger_composite_probe.sg:{helper_line}:5
 (i64) value = 21
@@ -786,6 +804,7 @@ frame #0: closure_surface at debugger_composite_probe.sg:{closure_step_line}:5
 {EXIT_MARKER}
 "#,
         composite_line = layout.composite_line,
+        call_entry_line = layout.call_entry_line,
         call_line = layout.call_line,
         helper_line = layout.helper_line,
         closure_call_line = layout.closure_call_line,
