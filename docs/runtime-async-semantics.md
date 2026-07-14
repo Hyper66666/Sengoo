@@ -111,6 +111,11 @@ future without exposing lifecycle ids.
   `29292788788` proves the shared timer/TCP/owned-handle suite on Ubuntu,
   Windows, macOS x64, and macOS arm64 without extending that claim to other
   hosts or file kinds.
+- `std::file` exposes owned `AsyncFile` handles. `wait_readable(timeout_ms)`
+  registers a clone of the runtime file resource, and result, cancellation, or
+  future Drop unregisters it exactly once. `read_into(&mut Buffer)` performs a
+  single capacity-bounded read after readiness; it does not promise background
+  disk throughput or async writes.
 
 ## User `Future` surface
 

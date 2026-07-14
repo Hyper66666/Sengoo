@@ -2469,6 +2469,57 @@ async def main() -> i64 {
 }
 
 #[test]
+fn async_native_runtime_owned_file_waits_reads_and_closes() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let input_path = temp_artifact("async-owned-file-input", "txt");
+    fs::write(&input_path, b"ready").expect("write async owned-file fixture");
+    let source_path = input_path.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::file;
+import std::ffi;
+
+async def main() -> i64 {{
+    let opened = async_file_open("{source_path}");
+    if !opened.is_ok {{ return 10; }}
+    let file = opened.value;
+    let ready = await file.wait_readable(1000);
+    if !ready.is_ok || !ready.value {{ return 11; }}
+    let mut buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let count = file.read_into(&mut buffer).unwrap_or(0);
+    if count == 5 {{ 42 }} else {{ 12 }}
+}}
+"#
+    );
+    let expanded =
+        expand_stdlib_imports_for_source(&source).expect("async file stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&expanded, 1).expect("async file source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-owned-file", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-owned-file", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async owned-file native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&input_path);
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
 fn async_native_runtime_waits_for_spawned_sleep_future_before_exit() {
     let Some(clang) = find_clang() else {
         return;

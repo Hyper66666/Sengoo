@@ -554,6 +554,7 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_read")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_write")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_file_wait_readable")
         {
             return;
         }
@@ -792,6 +793,36 @@ impl Codegen {
                 ),
             ],
         );
+        Self::maybe_declare_optional_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_file_wait_readable",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_file_wait_readable__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_async_file_wait_readable__result",
+                        ),
+                        "sengoo_async_file_wait_readable__result",
+                        "%FileReadinessOutcome",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_file_wait_readable__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_file_wait_readable__drop(i64)\n",
+                ),
+            ],
+        );
     }
 
     fn maybe_declare_optional_async_runtime_lifecycle(
@@ -837,6 +868,7 @@ impl Codegen {
                     | "sengoo_async_channel_recv_i64__result"
                     | "sengoo_async_mutex_lock_i64__result"
                     | "sengoo_http_server_next_request_async__result"
+                    | "sengoo_async_file_wait_readable__result"
             );
         }
 
@@ -869,6 +901,9 @@ impl Codegen {
                 "sengoo_http_server_next_request_async__result" => {
                     "declare %HttpServerNextRequestOutcome @sengoo_http_server_next_request_async__result(i64)\n"
                 }
+                "sengoo_async_file_wait_readable__result" => {
+                    "declare %FileReadinessOutcome @sengoo_async_file_wait_readable__result(i64)\n"
+                }
                 _ => unreachable!("unsupported async result declaration"),
             };
         }
@@ -891,6 +926,12 @@ impl Codegen {
                 "%HttpServerNextRequestOutcome",
             ) => {
                 "declare void @sengoo_http_server_next_request_async__result(%HttpServerNextRequestOutcome* sret(%HttpServerNextRequestOutcome) align 8, i64)\n"
+            }
+            (
+                "sengoo_async_file_wait_readable__result",
+                "%FileReadinessOutcome",
+            ) => {
+                "declare void @sengoo_async_file_wait_readable__result(%FileReadinessOutcome* sret(%FileReadinessOutcome) align 8, i64)\n"
             }
             _ => unreachable!("unsupported async result declaration"),
         }
@@ -1330,6 +1371,14 @@ mod tests {
         assert!(Codegen::async_result_uses_sret(
             true,
             "sengoo_http_server_next_request_async__result"
+        ));
+        assert!(!Codegen::async_result_uses_sret(
+            false,
+            "sengoo_async_file_wait_readable__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            true,
+            "sengoo_async_file_wait_readable__result"
         ));
     }
 

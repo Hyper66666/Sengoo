@@ -89,6 +89,29 @@ Registration, wakeup, timeout, cancellation, and close are generation-safe.
 Reference-host tests prove progress without busy polling and verify stale
 wakeups cannot target reused handles.
 
+The v1 public file surface is deliberately owned and read-only:
+
+```sengoo
+let opened = async_file_open(path);
+let ready = await opened.value.wait_readable(timeout_ms);
+let count = opened.value.read_into(&mut buffer);
+```
+
+`AsyncFile` owns one runtime file entry and closes it on `Drop` or explicit
+`close`. `wait_readable` returns `Future<FileReadinessOutcome>`, where success
+has `value = true` and timeout has `error = STATUS_TIMEOUT`. Starting a wait
+duplicates the underlying descriptor/handle into the reactor registration, so
+the future never borrows a user-visible raw fd and remains memory-safe if the
+source `AsyncFile` is closed while the wait is pending. Cancellation, future
+Drop, and result consumption unregister that duplicate exactly once.
+
+`read_into(&mut Buffer)` performs one bounded read into the initialized managed
+buffer and reports the byte count or stable status category. It does not claim
+general asynchronous disk throughput: regular files may be immediately ready,
+while pipes and other supported pollable file kinds use the same reactor
+backend and host support policy as the owned-handle tests. Raw descriptor
+construction is not public in v1.
+
 ### Decision 5: Future and wakeup contract
 
 `Future<T>::poll(&mut self, cx: &mut AsyncContext) -> Poll<T>` is the canonical

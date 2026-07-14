@@ -68,6 +68,18 @@ deferral for those hosts.
 - **AND** timeout, cancellation, and close unregister the wait without stale
   wakeups or leaked registrations
 
+#### Scenario: Owned async file waits and reads without exposing raw handles
+
+- **WHEN** a program opens an `AsyncFile`, awaits `wait_readable(timeout_ms)`,
+  and reads into an initialized managed `Buffer`
+- **THEN** readiness is driven by the shared reactor and the read is bounded by
+  the buffer capacity
+- **AND** timeout returns `STATUS_TIMEOUT`
+- **AND** result, cancellation, future Drop, and file Drop release each owned
+  runtime resource exactly once
+- **AND** closing the source file while a wait is pending cannot retarget a
+  stale registration because the reactor owns a duplicated descriptor/handle
+
 ### Requirement: The runtime SHALL provide a Future trait, channels, and structured concurrency
 
 The runtime SHALL expose a general `Future` trait with a documented `poll`

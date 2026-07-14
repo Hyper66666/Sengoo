@@ -97,8 +97,9 @@
     `29292788788` passes that suite on Ubuntu, Windows, macOS x64, and macOS
     arm64.
 - [ ] 4.2 Wire stdlib async net/file helpers to the reactor.
-  - Partial: async HTTP listener readiness is reactor-backed. A public owned-file
-    readiness surface is not yet exposed by `std::file`.
+  - Partial: async HTTP listener readiness is reactor-backed. The frozen file
+    surface is owned `AsyncFile`, `wait_readable(timeout_ms)`, and bounded
+    `read_into(&mut Buffer)`; implementation and native evidence remain open.
 - [x] 4.3 Reference-host tests closing the owned-handle readiness deferral for
   Windows, Linux, and the supported macOS release channel, including no-busy-
   poll, cancellation, timeout, and close behavior.

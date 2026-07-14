@@ -11,6 +11,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(feature = "native-bridge")]
+mod async_file;
+#[cfg(feature = "native-bridge")]
 mod bridge;
 #[cfg(feature = "native-bridge")]
 mod concurrent;
@@ -26,6 +28,13 @@ mod task_scope;
 #[cfg(feature = "native-bridge")]
 mod thread_pool;
 
+#[cfg(feature = "native-bridge")]
+pub use async_file::{
+    sengoo_async_file_close, sengoo_async_file_open_read, sengoo_async_file_read_into,
+    sengoo_async_file_wait_readable__cancel, sengoo_async_file_wait_readable__drop,
+    sengoo_async_file_wait_readable__poll, sengoo_async_file_wait_readable__result,
+    sengoo_async_file_wait_readable__start, AsyncFileReadinessOutcome,
+};
 #[cfg(all(test, feature = "native-bridge"))]
 use bridge::{scheduler_mut, ForeignAsyncTask, CURRENT_SCHEDULER};
 #[cfg(feature = "native-bridge")]

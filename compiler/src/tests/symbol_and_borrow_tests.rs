@@ -99,6 +99,7 @@ def main() -> i64 {
     let b = &x;
     0
 }
+
 "#;
 
     let mut program = Parser::parse(source).expect("source should parse");
@@ -135,4 +136,23 @@ def main() -> i64 {
                 || msg.contains("multiple mutable borrows")),
         "unexpected borrow-check error message: {msg}"
     );
+}
+
+#[test]
+fn borrow_check_deduplicates_one_explicit_mut_borrow_ast_node() {
+    let source = r#"
+def read_mut(value: &mut i64) -> i64 { 1 }
+
+def main() -> i64 {
+    let mut value = 1;
+    let observed = read_mut(&mut value);
+    observed
+}
+"#;
+
+    let program = Parser::parse(source).expect("source should parse");
+    let mut type_checker = TypeChecker::new();
+    type_checker
+        .check_program(&program)
+        .expect("one explicit mutable borrow must not conflict with its alias-tracking visit");
 }

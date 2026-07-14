@@ -525,6 +525,7 @@ def main() -> i64 {
         + output.handle + process.handle + stream.handle + socket.handle
         + client.handle + server.handle + request.handle
 }
+
 "##,
     );
 
@@ -547,6 +548,39 @@ def main() -> i64 {
             "expected stdlib owning handle auto-drop symbol {symbol}\n{ir}"
         );
     }
+}
+
+#[test]
+fn stdlib_async_file_uses_owned_reactor_future_and_mutable_buffer() {
+    let ir = compile_with_stdlib_modules(
+        &[
+            "option.sg",
+            "result.sg",
+            "ffi.sg",
+            "status.sg",
+            "async_futures.sg",
+            "file.sg",
+        ],
+        r#"
+async def main() -> i64 {
+    let opened = async_file_open("fixture.txt");
+    if !opened.is_ok { return opened.error; }
+    let file = opened.value;
+    let ready = await file.wait_readable(10);
+    let mut buffer = ffi_buffer_new(8).unwrap_or(Buffer { handle: 0 });
+    let count = if ready.is_ok { file.read_into(&mut buffer).unwrap_or(0) } else { 0 };
+    count
+}
+"#,
+    );
+
+    assert!(ir.contains("sengoo_async_file_open_read"));
+    assert!(ir.contains("sengoo_async_file_wait_readable__start"));
+    assert!(ir.contains("sengoo_async_file_wait_readable__poll"));
+    assert!(ir.contains("sengoo_async_file_wait_readable__result"));
+    assert!(ir.contains("sengoo_async_file_read_into"));
+    assert!(ir.contains("sengoo_async_file_close"));
+    assert!(ir.contains("AsyncFile_Drop_drop"));
 }
 
 #[test]

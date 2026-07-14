@@ -4,8 +4,14 @@
 //! existing poll wakeup hint thread-local.
 
 use std::collections::HashMap;
+#[cfg(feature = "native-bridge")]
+use std::fs::File;
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
+#[cfg(all(feature = "native-bridge", unix))]
+use std::os::fd::IntoRawFd;
+#[cfg(all(feature = "native-bridge", windows))]
+use std::os::windows::io::IntoRawHandle;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -184,6 +190,57 @@ pub(crate) fn http_listener_poll_accept(id: u64) -> Result<Option<TcpStream>, Er
 }
 
 pub(crate) fn http_listener_unregister(id: u64) -> bool {
+    reactor()
+        .lock()
+        .expect("reactor mutex poisoned")
+        .unregister(id)
+}
+
+#[cfg(feature = "native-bridge")]
+pub(crate) fn owned_file_register(file: &File) -> Result<u64, ErrorKind> {
+    let duplicate = file.try_clone().map_err(|error| error.kind())?;
+    #[cfg(unix)]
+    let owned_fd = i64::from(duplicate.into_raw_fd());
+    #[cfg(windows)]
+    let owned_fd = duplicate.into_raw_handle() as isize as i64;
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = duplicate;
+        return Err(ErrorKind::Unsupported);
+    }
+
+    let mut reactor = reactor().lock().expect("reactor mutex poisoned");
+    Ok(reactor.register(Interest {
+        kind: InterestKind::OwnedFdReadable,
+        deadline: None,
+        tcp_handle: None,
+        owned_fd: Some(owned_fd),
+        http_listener: None,
+        accepted_stream: None,
+        listener_error: None,
+    }))
+}
+
+#[cfg(feature = "native-bridge")]
+pub(crate) fn owned_file_poll_readable(id: u64) -> Result<bool, ErrorKind> {
+    let mut reactor = reactor().lock().expect("reactor mutex poisoned");
+    let Some(interest) = reactor.interests.get(&id) else {
+        return Err(ErrorKind::NotFound);
+    };
+    if interest.kind != InterestKind::OwnedFdReadable {
+        return Err(ErrorKind::InvalidInput);
+    }
+    let ready = reactor.poll_interest(id);
+    if !ready {
+        if let Some(deadline) = reactor.interest_wakeup_deadline(id) {
+            record_poll_wakeup_hint(deadline);
+        }
+    }
+    Ok(ready)
+}
+
+#[cfg(feature = "native-bridge")]
+pub(crate) fn owned_file_unregister(id: u64) -> bool {
     reactor()
         .lock()
         .expect("reactor mutex poisoned")
