@@ -27,6 +27,8 @@ mod select;
 mod task_scope;
 #[cfg(feature = "native-bridge")]
 mod thread_pool;
+#[cfg(feature = "native-bridge")]
+mod user_context;
 
 #[cfg(feature = "native-bridge")]
 pub use async_file::{
@@ -120,6 +122,11 @@ pub use select::{
 pub use task_scope::{
     sengoo_async_task_scope_cancel_join, sengoo_async_task_scope_join, sengoo_async_task_scope_new,
     sengoo_async_task_scope_spawn_raw,
+};
+#[cfg(feature = "native-bridge")]
+pub use user_context::{
+    sengoo_async_context_begin, sengoo_async_context_drop, sengoo_async_context_finish_delay,
+    sengoo_async_context_wake, sengoo_async_context_wake_after,
 };
 
 pub type TaskId = u64;

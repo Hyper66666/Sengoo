@@ -90,6 +90,18 @@ contract, an mpsc `channel<T>`, and a structured task scope.
 - **WHEN** a user type implements `Future` and is awaited
 - **THEN** it is polled per the documented contract and completes with its
   `Output`
+- **AND** every Pending path registers `AsyncContext.wake()` or
+  `AsyncContext.wake_after(delay_ms)` before yielding
+- **AND** one owning task serializes polling and does not poll again after Ready
+
+#### Scenario: Invalid user-future lifecycle is rejected
+
+- **WHEN** an evident Pending path omits wakeup registration, source tries to
+  retain/forge `AsyncContext`, or a user future is passed to runtime-handle
+  `select` or cross-thread spawn
+- **THEN** compilation fails with a stable async-contract diagnostic
+- **AND** no unsupported operation silently falls back to concurrent polling or
+  an unbounded busy loop
 
 #### Scenario: Channel message passing
 

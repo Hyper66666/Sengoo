@@ -1126,6 +1126,17 @@ fn render_compile_error_json_extracts_user_future_contract_code() {
 }
 
 #[test]
+fn render_compile_error_json_preserves_user_future_missing_wakeup_code() {
+    let raw = "type check error: [async::user_future_missing_wakeup] Future<T>::poll returns Pending without wakeup registration";
+    let json = super::render_compile_error_json(Some("tests/async_future.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "async::user_future_missing_wakeup");
+    assert!(value["message"].as_str().unwrap_or("").contains("Pending"));
+}
+
+#[test]
 fn render_compile_error_json_keeps_multiline_details() {
     let raw = "parse failed: unexpected token\nline 1, col 8\nnote: expected `}`";
     let json = super::render_compile_error_json(Some("tests/broken.sg"), raw);
@@ -2219,6 +2230,7 @@ long long sengoo_test_user_future_calls(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
     fn sengoo_test_user_future_calls() -> i64;
 }
 
@@ -2229,6 +2241,12 @@ struct Poll<T> {
 
 struct AsyncContext {
     handle: i64,
+}
+
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
 }
 
 trait Future<T> {
@@ -2316,6 +2334,7 @@ long long sengoo_test_user_future_tick(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
 }
 
 struct Poll<T> {
@@ -2333,14 +2352,26 @@ trait Future<T> {
     }
 }
 
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
+}
+
 struct PendingOnceFuture {
     value: i64,
 }
 
 impl Future<i64> for PendingOnceFuture {
     def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        if ctx.handle <= 0 {
+            return Poll { is_ready: true, value: 13 };
+        }
         let calls = sengoo_test_user_future_tick();
-        if calls < 2 {
+        if calls < 3 {
+            if !ctx.wake_after(5) {
+                return Poll { is_ready: true, value: 13 };
+            }
             Poll { is_ready: false, value: 0 }
         } else {
             Poll { is_ready: true, value: self.value }

@@ -110,12 +110,19 @@
 
 ## 5. Future trait, channels, structured concurrency
 
-- [ ] 5.1 Generalize user futures to a `Future` trait with a documented `poll`
+- [x] 5.1 Generalize user futures to a `Future` trait with a documented `poll`
   contract; relax `select`/user-future restrictions where sound, keeping
   negative tests.
-  - Partial: `tools/stdlib/async_futures.sg` defines `Poll<T>`,
-    `AsyncContext`, and `Future<T>::poll`, with compiler and native tests for
-    ready/pending user futures plus rejected Poll/receiver shapes.
+  - `tools/stdlib/async_futures.sg` defines `Poll<T>`, opaque poll-scoped
+    `AsyncContext`, and `Future<T>::poll`. `wake()` / `wake_after` feed a
+    generation-safe runtime context registry; evident Pending without the
+    actual context registration is rejected as
+    `async::user_future_missing_wakeup`, while dynamic omission gets a bounded
+    fallback rather than a busy loop. Compiler, native `sgc`, JSON, and LSP
+    tests cover Ready, Pending-then-Ready, stable context handles, serialized
+    polling, no poll after Ready, malformed contracts, unrelated wake calls,
+    and the retained inline-user-future `select` / cross-thread spawn
+    restrictions.
 - [x] 5.2 `channel<T>()` mpsc with async-aware send/recv.
   - `std::async` exposes descriptor-backed `ChannelPair<T>`, sender and
     receiver endpoints, async `channel_send`, and the v1 no-`Default`
@@ -142,16 +149,16 @@
 
 ## 6. Docs and matrix
 
-- [ ] 6.1 Update `docs/runtime-async-semantics.md` and
+- [x] 6.1 Update `docs/runtime-async-semantics.md` and
   `examples/realworld/SUPPORT_MATRIX.md` (reactor + Send/Sync rows).
-  - Partial: docs and the realworld support matrix now record the current
-    `Send`/`Sync` marker surface, scalar impls, known `spawn_blocking_i64`
-    non-send diagnostics, structural generic bounds for user structs, and
-    source-level negative impl semantics and explicit stdlib single-thread
-    handle declarations. Current blocking, channel-transfer, and shared-state
-    boundaries are enforced; future thread APIs must preserve those bounds.
-    Reactor rows pre-existed for the current supported subset; all-host
-    owned-fd readiness remains open.
+  - The runtime semantics and realworld matrix record structural `Send`/`Sync`
+    bounds and explicit negative impls, generic `Arc<T>` / `Mutex<T>` /
+    `RwLock<T>` / `channel<T>`, task scopes, the all-host timer/TCP/owned-handle
+    reactor evidence, owned `AsyncFile` local evidence and pending four-host
+    boundary, and the complete same-thread user-Future wakeup contract. The
+    unsupported rows retain inline user futures at runtime-handle `select` /
+    cross-thread spawn and unsupported file kinds/background IO instead of
+    claiming broader support.
 - [x] 6.2 Run `openspec validate concurrency-safety-and-async-io --strict`.
 
 ## Verification

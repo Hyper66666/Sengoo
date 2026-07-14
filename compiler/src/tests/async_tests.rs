@@ -2255,6 +2255,16 @@ async def main() -> i64 {
         call_names.contains(&"ImmediateFuture_Future_i64_poll"),
         "user Future await should call the trait poll implementation: {call_names:?}"
     );
+    for context_call in [
+        "sengoo_async_context_begin",
+        "sengoo_async_context_finish_delay",
+        "sengoo_async_context_drop",
+    ] {
+        assert!(
+            call_names.contains(&context_call),
+            "user Future await should manage poll-scoped context through {context_call}: {call_names:?}"
+        );
+    }
     assert!(
         mir.iter().any(
             |function| function.instructions.iter().any(|instruction| matches!(
@@ -2331,6 +2341,196 @@ async def main() -> i64 {
         "multiple user Future await points should call the user poll implementation, got calls: {call_names:?}"
     );
     compile_to_ir(source).expect("user Future local/parameter/return flow should reach LLVM IR");
+}
+
+#[test]
+fn user_future_rejects_evident_pending_without_wakeup_registration() {
+    let source = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+
+struct NeverWakes {}
+impl Future<i64> for NeverWakes {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+async def main() -> i64 { await NeverWakes {} }
+"#;
+
+    let error = compile_to_ir(source).expect_err("Pending without wakeup registration must fail");
+    let message = error.to_string();
+    assert!(
+        message.contains("async::user_future_missing_wakeup"),
+        "unexpected missing-wakeup diagnostic: {message}"
+    );
+}
+
+#[test]
+fn user_future_does_not_accept_unrelated_wake_method_as_context_registration() {
+    let source = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct OtherWake {}
+impl OtherWake { def wake(&self) -> bool { true } }
+struct NeverWakes {}
+impl Future<i64> for NeverWakes {
+    def poll(&mut self, context: AsyncContext) -> Poll<i64> {
+        let other = OtherWake {};
+        other.wake();
+        Poll { is_ready: false, value: 0 }
+    }
+}
+async def main() -> i64 { await NeverWakes {} }
+"#;
+
+    let error = compile_to_ir(source).expect_err("unrelated wake method must not satisfy contract");
+    assert!(
+        error
+            .to_string()
+            .contains("async::user_future_missing_wakeup"),
+        "unexpected unrelated-wake diagnostic: {error}"
+    );
+}
+
+#[test]
+fn user_future_does_not_accept_raw_wake_with_unrelated_handle() {
+    let source = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+def sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool { true }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct NeverWakes {}
+impl Future<i64> for NeverWakes {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        sengoo_async_context_wake_after(0, 1);
+        Poll { is_ready: false, value: 0 }
+    }
+}
+async def main() -> i64 { await NeverWakes {} }
+"#;
+
+    let error = compile_to_ir(source).expect_err("a raw wake with a foreign handle must not count");
+    assert!(
+        error
+            .to_string()
+            .contains("async::user_future_missing_wakeup"),
+        "unexpected raw-wake diagnostic: {error}"
+    );
+}
+
+#[test]
+fn user_future_requires_wakeup_on_each_evident_pending_branch() {
+    let source = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+impl AsyncContext { def wake(&self) -> bool { true } }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct BranchFuture {}
+impl Future<i64> for BranchFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        if true {
+            ctx.wake();
+            Poll { is_ready: true, value: 1 }
+        } else {
+            Poll { is_ready: false, value: 0 }
+        }
+    }
+}
+async def main() -> i64 { await BranchFuture {} }
+"#;
+
+    let error = compile_to_ir(source).expect_err("every evident Pending branch must wake");
+    assert!(
+        error
+            .to_string()
+            .contains("async::user_future_missing_wakeup"),
+        "unexpected branch-wakeup diagnostic: {error}"
+    );
+}
+
+#[test]
+fn user_future_accepts_context_wake_after_registration() {
+    let source = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool { delay_ms >= 0 }
+}
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct WakesLater {}
+impl Future<i64> for WakesLater {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        ctx.wake_after(5);
+        Poll { is_ready: false, value: 0 }
+    }
+}
+async def main() -> i64 { await WakesLater {} }
+"#;
+
+    compile_to_ir(source).expect("the actual AsyncContext parameter should register wake_after");
+}
+
+#[test]
+fn user_future_rejects_select_and_cross_thread_spawn_boundaries() {
+    let prelude = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct InlineFuture { value: i64 }
+impl Future<i64> for InlineFuture {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: true, value: self.value }
+    }
+}
+"#;
+
+    let select_source = format!(
+        "{prelude}\nasync def main() -> i64 {{ select(InlineFuture {{ value: 1 }}, InlineFuture {{ value: 2 }}) }}"
+    );
+    let select_error =
+        compile_to_ir(&select_source).expect_err("inline user futures must not enter select");
+    assert!(
+        select_error.to_string().contains("select") && select_error.to_string().contains("Future"),
+        "unexpected user-future select diagnostic: {select_error}"
+    );
+
+    let spawn_source =
+        format!("{prelude}\nasync def main() -> i64 {{ spawn_task(InlineFuture {{ value: 1 }}) }}");
+    let spawn_error = compile_to_ir(&spawn_source)
+        .expect_err("inline user futures must not cross spawn_task boundary");
+    assert!(
+        spawn_error
+            .to_string()
+            .contains("spawn_task requires a Future value"),
+        "unexpected user-future spawn diagnostic: {spawn_error}"
+    );
 }
 
 #[test]

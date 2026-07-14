@@ -8,6 +8,28 @@ use crate::mir::async_dispatch_synthesis_helpers::{
 };
 
 impl Codegen {
+    pub(super) fn maybe_declare_user_context_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let uses_context = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|instruction| {
+                matches!(instruction, mir::Instruction::Call { func, .. } if func.starts_with("sengoo_async_context_"))
+            })
+        });
+        if !uses_context {
+            return;
+        }
+        for declaration in [
+            "declare i64 @sengoo_async_context_begin()\n",
+            "declare i1 @sengoo_async_context_wake(i64)\n",
+            "declare i1 @sengoo_async_context_wake_after(i64, i64)\n",
+            "declare i64 @sengoo_async_context_finish_delay(i64)\n",
+            "declare i1 @sengoo_async_context_drop(i64)\n",
+        ] {
+            if !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
+            }
+        }
+    }
+
     /// Declare external runtime functions used by generated LLVM IR.
     pub(super) fn declare_runtime_functions(&mut self) {
         self.declarations

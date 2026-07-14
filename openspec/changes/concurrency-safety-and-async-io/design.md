@@ -120,11 +120,25 @@ construction is not public in v1.
 
 ### Decision 5: Future and wakeup contract
 
-`Future<T>::poll(&mut self, cx: &mut AsyncContext) -> Poll<T>` is the canonical
-user-future shape. Pending futures must arrange a wakeup or be documented as
-manual-poll values. Concurrent/reentrant polling of one future is rejected or
-serialized by its owning task. Poll-after-Ready is invalid and covered by
-negative tests.
+`Future<T>::poll(&mut self, ctx: AsyncContext) -> Poll<T>` is the canonical
+user-future shape. `AsyncContext` is an opaque by-value poll token because it
+cannot escape the dynamic poll call; user code cannot construct, copy-store,
+return, compare, or move it across threads.
+
+`ctx.wake_after(delay_ms)` registers the earliest non-negative retry deadline,
+and `ctx.wake()` is the zero-delay form. Every path that returns Pending must
+register one of those wakeups. The compiler rejects an evident Pending path
+without registration with the stable `async::user_future_missing_wakeup`
+diagnostic; the runtime also converts a missing dynamic registration into a
+bounded fallback retry rather than busy polling.
+
+One cooperative owning task serializes calls to a user future. The generated
+await control flow never calls poll again after Ready, and direct source-level
+poll-after-Ready is unavailable because a valid `AsyncContext` cannot be
+constructed or retained. User futures remain excluded from `select` and
+cross-thread spawn in v1: select operands must be runtime future handles with
+defined cancellation/drop dispatch, while inline user futures remain pinned to
+their owning task. Stable negative tests document those boundaries.
 
 ### Decision 6: Generic channels
 

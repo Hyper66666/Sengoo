@@ -37,9 +37,10 @@ fn lower_user_future_wait(ctx: &mut LoweringContext<'_>, future: Local) -> Local
             .collect(),
     };
     let context_handle = ctx.add_local(None, LocalKind::Temp, MIR_I64);
-    ctx.push_inst(Instruction::Assign {
+    ctx.push_inst(Instruction::Call {
         destination: context_handle,
-        value: MirConstant::Int(0),
+        func: "sengoo_async_context_begin".to_string(),
+        args: vec![],
     });
     let context = ctx.add_local(None, LocalKind::Temp, context_ty.clone());
     ctx.push_inst(Instruction::Aggregate {
@@ -84,9 +85,10 @@ fn lower_user_future_wait(ctx: &mut LoweringContext<'_>, future: Local) -> Local
 
     ctx.set_current_block(pending_block);
     let retry_delay = ctx.add_local(None, LocalKind::Temp, MIR_I64);
-    ctx.push_inst(Instruction::Assign {
+    ctx.push_inst(Instruction::Call {
         destination: retry_delay,
-        value: MirConstant::Int(1),
+        func: "sengoo_async_context_finish_delay".to_string(),
+        args: vec![context_handle],
     });
     let retry = ctx.add_local(None, LocalKind::Temp, MIRType::Future(Box::new(MIR_UNIT)));
     ctx.push_inst(Instruction::Call {
@@ -100,6 +102,12 @@ fn lower_user_future_wait(ctx: &mut LoweringContext<'_>, future: Local) -> Local
     ctx.set_terminator(Terminator::Goto(poll_block));
 
     ctx.set_current_block(ready_block);
+    let context_dropped = ctx.add_local(None, LocalKind::Temp, MIR_BOOL);
+    ctx.push_inst(Instruction::Call {
+        destination: context_dropped,
+        func: "sengoo_async_context_drop".to_string(),
+        args: vec![context_handle],
+    });
     value
 }
 
