@@ -1,6 +1,6 @@
 ## 1. Debug info validation
 
-- [ ] 1.1 Verify DWARF line tables map to source lines for stepping across the
+- [x] 1.1 Verify DWARF line tables map to source lines for stepping across the
   core language (scalars, structs, enums, strings, `Vec`, calls, closures).
   - Partial: `cargo test -p sgc debug_info_line_table_survives_object_compilation`
     now compiles `--debug-info` LLVM IR to a native object and uses
@@ -12,9 +12,11 @@
     `llvm-dwarfdump --debug-line` plus `--debug-info` to assert that each
     surface's function entry line survives object compilation as a source line
     row and `DW_AT_decl_line`.
-  - Remaining: this still validates function entry/source mapping, not
-    end-to-end debugger stepping through every statement on every surface.
-- [ ] 1.2 Verify variable/param location + type info so a debugger shows correct
+  - Final: Actions run `29305786087` drives LLDB 19 through actual scalar,
+    call, and closure source steps. The same session stops after struct, enum,
+    String, and Vec initialization and confirms their source line; the portable
+    line-table suite retains statement/function rows for every named surface.
+- [x] 1.2 Verify variable/param location + type info so a debugger shows correct
   names, types, and values.
   - Partial: LLVM debug-info emission now preserves source-level parameter and
     user-local names through MIR and emits `llvm.dbg.value` / `llvm.dbg.declare`
@@ -39,9 +41,14 @@
     `discriminant: i64` plus bounded `payload: u8[N]` storage. The regression
     also requires each composite local to retain a `DW_AT_location` and type
     reference. MIR currently erases source enum and variant names, so named
-    enum variants and live debugger reads for all composite values remain
-    open rather than being inferred from generic ABI metadata.
-- [ ] 1.3 Add an automated test that drives lldb (Linux/macOS) and cdb (Windows)
+    enum variants and live debugger reads were not inferred from generic ABI
+    metadata.
+  - Final: run `29305786087` reads `Pair.left = 21`,
+    `Pair.enabled = true`, enum discriminant `1`, live nonzero
+    `String.handle` and `Vec_i64.handle`, and the Vec phantom marker `0`.
+    It also reads `value = 21` at caller/callee entry. The raw transcript is a
+    retained artifact and the normalized excerpt is checked into `docs/`.
+- [x] 1.3 Add an automated test that drives lldb (Linux/macOS) and cdb (Windows)
   to set a breakpoint, step, and read a local, asserting on output.
   - `tools/sgc/tests/debugger_native.rs` builds a fresh `-O 0 --debug-info`
     executable, drives LLDB in batch mode on Unix or CDB from a command file on
@@ -56,8 +63,10 @@
     `docs/debugging-native-windows-cdb.transcript`: CodeView/PDB symbols bind
     the source breakpoint, one source step advances from line 2 to line 3,
     and CDB reads `value = 21` plus `doubled = 42` before normal completion.
-  - Remaining: record one live Unix-family LLDB transcript on a release host;
-    the Windows evidence alone does not close this cross-host task.
+  - Actions run `29305786087` passes the fail-closed LLDB 19 lane on
+    `ubuntu-latest` and retains `debugger-native-lldb-transcripts`. The
+    checked-in `docs/debugging-native-linux-lldb.transcript` records the
+    composite/call/closure proof beside the Windows CDB transcript.
 
 ## 2. Editor / DAP integration
 

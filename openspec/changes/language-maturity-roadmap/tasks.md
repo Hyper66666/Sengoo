@@ -42,9 +42,16 @@
     complete `sgc` suites, native collection ownership/Drop coverage, the
     default-library locked package loop, warning-free compiler clippy, and
     strict OpenSpec validation passed.
-- [ ] 2.3 Complete and archive `debugger-and-test-framework`, including actual
+- [x] 2.3 Complete and archive `debugger-and-test-framework`, including actual
   statement stepping and live scalar/composite inspection on installed
   reference-host debuggers.
+  - Archived as `2026-07-14-debugger-and-test-framework`. Windows CDB and
+    Actions run `29305786087` Linux LLDB transcripts prove source
+    breakpoint/step/backtrace behavior, scalar parameters/locals, live
+    struct/enum/String/Vec layouts, ordinary call entry/body stepping, and
+    closure step-over. Test discovery, fixtures, parametrization, structured
+    failures, coverage, and editor launch documentation remain compatibility
+    gates.
 - [x] 2.4 Add a default-library conformance package using `Vec<struct>`, a
   string-keyed map with struct values, iterator adapters, checked numeric
   conversion, and automatic Drop with no scalar-only constructors.

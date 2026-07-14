@@ -28,8 +28,10 @@ The Windows reference-host CDB proof is recorded in
 [`debugging-native-windows-cdb.transcript`](debugging-native-windows-cdb.transcript).
 It binds a Sengoo file/line breakpoint, steps from line 2 to line 3, reads the
 `value` parameter as `21` and `doubled` local as `42`, then continues to normal
-program completion. A Linux LLDB transcript remains a separate release-host
-gate; Windows evidence is not used as a substitute for it.
+program completion. The matching Linux release-host proof is recorded in
+[`debugging-native-linux-lldb.transcript`](debugging-native-linux-lldb.transcript);
+Windows and Unix evidence gate each other rather than being treated as
+substitutes.
 
 ### Windows VS Code launch configuration
 

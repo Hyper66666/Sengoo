@@ -42,7 +42,7 @@ the preserved async-worktree audit keep `mainline-release-baseline` open.
 | Strings/formatting | P0 archived; owned String, UTF-8 boundaries, formatting | Foundation complete; no new breadth before Phase 1 closes |
 | Numeric types | Archived `numeric-type-system`; compiler, native runtime, and experimental Cranelift numeric suites | Phase 1 numeric gate complete; LLVM-text remains the production backend |
 | Generic collections | Archived `generic-collections`; ABI-v1 RawVec/RawHashMap/RawBTree storage, ownership callbacks, lazy adapters, and default-library fixture | Phase 1 collection gate complete; compatibility names share the generic runtime |
-| Debug/test | Test framework and coverage complete; two DWARF tasks open | Small, high-value closure lane |
+| Debug/test | Archived `debugger-and-test-framework`; discovery/fixtures/parametrization/coverage plus Windows CDB and Linux LLDB live source proofs | Retain O0 debugger transcripts and fail-closed release-host automation; optimized debug quality remains outside the supported subset |
 | Concurrency | Archived `concurrency-safety-and-async-io`; generic Arc/locks/channel, bounded executor, structured task scopes, user-Future wake/poll hardening, and flagship concurrent workload | Actions run `29298052840` closes AsyncFile runtime evidence on all four release hosts; run `29298052830` closes the generated-code Ubuntu E2E |
 | Registry/package graph | Reference-server e2e proves checksum/yank handling, alias+multiversion lock edges, hostile-archive rejection, and zero-network verified-cache locked check/test/build/run | Phase 2 resolver gate complete; retain protocol conformance tests |
 | Distribution | `v0.1.0-rc.1` run `29259068988` passes checksummed install/upgrade on Windows x64, Linux x64, macOS x64, and macOS arm64 and publishes provenance-attested release assets | Phase 2 release gate complete; retain tag/version/tool-manifest coherence on every candidate |
@@ -55,7 +55,6 @@ the preserved async-worktree audit keep `mainline-release-baseline` open.
 | Capability | Active owner | Overlap disposition |
 | --- | --- | --- |
 | Integrated branch and truth sources | `mainline-release-baseline` | `language-maturity-roadmap` only coordinates and records gates |
-| Native debug metadata and debugger UX | `debugger-and-test-framework` | `native-debug-info` supplies evidence and must archive into the owner before closure |
 | Registry, resolver, publish, and release artifacts | `package-registry-and-distribution` | older package/toolchain changes are evidence lineage, not active owners |
 | Fuzz, sanitizer, ABI, performance, and release soak | `production-hardening-v1` | `mainstream-adoption-gap-closure` and `six-pillar-gap-closure` are historical umbrellas for this program |
 | Alternative-backend entry decision | `wasm-and-bytecode-backends` | `wasm-backend-v1` and `bytecode-vm-v1` become implementation owners only after the entry review passes |
