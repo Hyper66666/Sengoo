@@ -7,15 +7,17 @@ clearly where native stdlib assumptions do not apply.
 
 ## Proposal
 
-- Add a `wasm32-wasi`-class target producing validated `.wasm` modules.
+- Promote or replace the existing scalar prototype with a
+  `wasm32-wasi`-class target producing validated `.wasm` modules; current
+  prototype artifacts have no compatibility promise.
 - Select LLVM-to-WASM or a direct MIR emitter through a bounded implementation
   spike, then record the decision before production code.
 - Define a versioned WASI host import layer for supported io/env/args/time/file
   capabilities.
 - Reuse the native conformance corpus and add target-specific resource,
   unsupported-capability, ownership, and deterministic execution tests.
-- Expose target selection through `sgc build/run --target wasm` with explicit
-  runtime selection.
+- Promote the experimental `sgc build --target wasm` surface and add explicit
+  runtime selection for `sgc run --target wasm`.
 
 ## Impact
 

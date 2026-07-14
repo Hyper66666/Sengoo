@@ -4,10 +4,16 @@ Sengoo MIR and runtime currently assume native pointers, C/native runtime
 objects, and platform handles in several stdlib areas. WASM requires a bounded
 linear-memory ABI and a documented host capability subset.
 
+The repository already contains a scalar direct emitter. It is a disposable
+prototype: this change must promote, replace, or discard it after comparing it
+with the LLVM-target path. Existing `.wasm` bytes are not a compatibility
+contract.
+
 ## Entry gate
 
-Implementation starts only after `wasm-and-bytecode-backends` task 1.2/1.3 pass
-and the native MIR/runtime ABI version is frozen.
+Implementation starts only after `wasm-and-bytecode-backends` tasks 1.2-1.6
+pass. The child consumes MIR semantic ABI v1 and the canonical portable runtime
+ABI; it does not consume native C pointers from `runtime_shared.h`.
 
 ## Decisions
 
@@ -36,6 +42,9 @@ MIR allocation, aggregate layout, String/Vec descriptors, trait-object
 vtables, and drop glue use 32-bit linear-memory offsets under the target ABI.
 Each owned value drops exactly once. Traps and early returns run required cleanup
 unless the runtime terminates the whole instance.
+
+WASM v1 always requests `TargetPointerWidth::Bits32`. A host-width MIR bundle is
+an input error, not something the emitter truncates during code generation.
 
 ### Decision 4: Validate modules and bound resources
 

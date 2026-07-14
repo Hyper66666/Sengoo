@@ -4,11 +4,17 @@ The VM must reproduce native language semantics while treating bytecode as
 hostile input. Its value is unproven until measured against packaged native and
 WASM alternatives.
 
+The repository already contains a scalar `SGB1` emitter/interpreter. It is a
+disposable prototype, not a stable format. Its current version byte does not
+pre-empt the value review, threat model, verifier design, or compatibility
+decision in this change.
+
 ## Entry and cancellation gate
 
-Implementation starts only after the coordinator's stable-ABI gate and a
-documented go decision. The change may be replaced by a cancellation decision
-without implementing tasks 2+.
+Implementation starts only after coordinator tasks 1.2-1.6 pass and a
+documented go decision. The VM consumes the versioned portable runtime ABI and
+never embeds native runtime addresses. The change may be replaced by a
+cancellation decision without implementing tasks 2+.
 
 ## Decisions
 

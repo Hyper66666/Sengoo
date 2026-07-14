@@ -163,8 +163,11 @@
 
 ## 6. Post-v1 alternative targets
 
-- [ ] 6.1 Pass the stable-MIR/runtime-ABI entry review for
+- [x] 6.1 Pass the stable-MIR/runtime-ABI entry review for
   `wasm-and-bytecode-backends`.
+  - Entry-contract tasks 1.2-1.6 are closed: target-aware `MirBundle`, portable
+    runtime ABI JSON, wasm32 frontend routing, ABI version rejection, stable
+    `unsupported-target-capability` diagnostics, and regression tests pass.
 - [x] 6.2 Split WASM and bytecode into independently archivable
   `wasm-backend-v1` and `bytecode-vm-v1` owner changes before implementation.
 - [ ] 6.3 Complete and archive `wasm-backend-v1` with WASM/WASI conformance and

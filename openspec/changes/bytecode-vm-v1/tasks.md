@@ -1,8 +1,8 @@
 ## 1. Entry and value review
 
-- [ ] 1.1 Confirm coordinator stable-ABI gate.
-- [ ] 1.2 Measure packaged native/experimental alternatives and record a go/no-
-  go decision for the VM.
+- [ ] 1.1 Confirm coordinator MIR semantic and portable runtime ABI gates.
+- [ ] 1.2 Measure packaged native, WASM, and the existing scalar `SGB1`
+  prototype; record a go/no-go decision for a production VM.
 - [ ] 1.3 If no-go, create and archive the replacement cancellation decision;
   otherwise continue.
 
@@ -24,8 +24,8 @@
 
 ## 4. CLI and differential conformance
 
-- [ ] 4.1 Add `sgc build --target bytecode` and clang-free
-  `sgc run --target bytecode`.
+- [ ] 4.1 Promote or replace the experimental `sgc build --target bytecode` and
+  clang-free `sgc run --target bytecode` paths.
 - [ ] 4.2 Run core conformance identically on native and VM, including stable
   failure categories.
 - [ ] 4.3 Prove clang is absent/unusable during VM e2e on Windows, Linux, macOS.

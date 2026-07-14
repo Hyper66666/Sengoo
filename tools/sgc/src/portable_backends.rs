@@ -2,6 +2,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use sengoo_compiler::mir::{
     CallArg, Instruction, MIRType, MirBinOp, MirConstant, MirFunction, MirUnOp, Terminator,
 };
+use sengoo_compiler::{TargetPointerWidth, MIR_SEMANTIC_ABI_VERSION};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,63 @@ const BYTECODE_MAGIC: &[u8; 4] = b"SGB1";
 const BYTECODE_VERSION: u16 = 1;
 const VM_STEP_LIMIT: u64 = 10_000_000;
 const VM_RECURSION_LIMIT: usize = 1024;
+
+/// Portable runtime ABI version consumed by experimental WASM/bytecode backends.
+pub(crate) const PORTABLE_RUNTIME_ABI_VERSION: u32 = 1;
+const WASM_TARGET_TRIPLE: &str = "wasm32-unknown-unknown";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortableBackendTarget {
+    Wasm,
+    Bytecode,
+}
+
+impl PortableBackendTarget {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Wasm => "wasm",
+            Self::Bytecode => "bytecode",
+        }
+    }
+
+    fn target_triple(self) -> Option<&'static str> {
+        match self {
+            Self::Wasm => Some(WASM_TARGET_TRIPLE),
+            // Bytecode prototype remains host-width until the child value review
+            // freezes a portable layout contract.
+            Self::Bytecode => None,
+        }
+    }
+}
+
+/// Reject unknown MIR semantic / portable runtime ABI versions before lowering.
+pub(crate) fn validate_portable_abi_versions(
+    mir_semantic_abi_version: u32,
+    portable_runtime_abi_version: u32,
+) -> Result<()> {
+    if mir_semantic_abi_version != MIR_SEMANTIC_ABI_VERSION {
+        miette::bail!(
+            "unsupported-mir-semantic-abi: unsupported MIR semantic ABI version {mir_semantic_abi_version} (expected {MIR_SEMANTIC_ABI_VERSION})"
+        );
+    }
+    if portable_runtime_abi_version != PORTABLE_RUNTIME_ABI_VERSION {
+        miette::bail!(
+            "unsupported-portable-runtime-abi: unsupported portable runtime ABI version {portable_runtime_abi_version} (expected {PORTABLE_RUNTIME_ABI_VERSION})"
+        );
+    }
+    Ok(())
+}
+
+fn unsupported_target_capability(
+    target: PortableBackendTarget,
+    capability: impl std::fmt::Display,
+) -> miette::Error {
+    miette::miette!(
+        "unsupported-target-capability: target `{}` does not support {}; see docs/portable-targets.md",
+        target.name(),
+        capability
+    )
+}
 
 #[derive(Debug, Clone)]
 struct PortableProgram {
@@ -124,7 +182,7 @@ enum PortableBinary {
 }
 
 pub(crate) fn build_bytecode(input: &str, output: Option<&str>, opt_level: u8) -> Result<PathBuf> {
-    let program = compile_portable_input(input, opt_level)?;
+    let program = compile_portable_input(input, opt_level, PortableBackendTarget::Bytecode)?;
     let bytes = encode_bytecode(&program)?;
     let output = output_path(input, output, "sgbc");
     write_artifact(&output, &bytes, "bytecode")?;
@@ -139,13 +197,13 @@ pub(crate) fn run_bytecode(input: &str, opt_level: u8) -> Result<i64> {
             .with_context(|| format!("failed to read bytecode artifact {input}"))?;
         decode_bytecode(&bytes)?
     } else {
-        compile_portable_input(input, opt_level)?
+        compile_portable_input(input, opt_level, PortableBackendTarget::Bytecode)?
     };
     execute_bytecode(&program)
 }
 
 pub(crate) fn build_wasm(input: &str, output: Option<&str>, opt_level: u8) -> Result<PathBuf> {
-    let program = compile_portable_input(input, opt_level)?;
+    let program = compile_portable_input(input, opt_level, PortableBackendTarget::Wasm)?;
     let bytes = encode_wasm(&program)?;
     let output = output_path(input, output, "wasm");
     write_artifact(&output, &bytes, "WebAssembly")?;
@@ -153,36 +211,57 @@ pub(crate) fn build_wasm(input: &str, output: Option<&str>, opt_level: u8) -> Re
     Ok(output)
 }
 
-fn compile_portable_input(input: &str, opt_level: u8) -> Result<PortableProgram> {
+fn compile_portable_input(
+    input: &str,
+    opt_level: u8,
+    target: PortableBackendTarget,
+) -> Result<PortableProgram> {
     let source = fs::read_to_string(input)
         .into_diagnostic()
         .with_context(|| format!("failed to read source {input}"))?;
     let source = crate::expand_imports_for_source(Path::new(input), &source)?;
-    let (functions, ffi) =
-        crate::pipeline::compile_source_to_mir_bundle_for_fast_jit(&source, opt_level)
-            .map_err(|err| miette::miette!("portable target frontend failed: {err}"))?;
-    if let Some(extern_decl) = ffi.extern_decls.first() {
-        miette::bail!(
-            "portable target does not support FFI or host stdlib call `{}`; see docs/portable-targets.md",
-            extern_decl.name
-        );
+    let bundle = crate::pipeline::compile_source_to_mir_bundle(
+        &source,
+        opt_level,
+        target.target_triple(),
+    )
+    .map_err(|err| miette::miette!("portable target frontend failed: {err}"))?;
+
+    validate_portable_abi_versions(bundle.semantic_abi_version, PORTABLE_RUNTIME_ABI_VERSION)?;
+    if matches!(target, PortableBackendTarget::Wasm)
+        && bundle.target_pointer_width != TargetPointerWidth::Bits32
+    {
+        return Err(unsupported_target_capability(
+            target,
+            format!(
+                "non-wasm32 pointer width {:?}",
+                bundle.target_pointer_width
+            ),
+        ));
     }
-    PortableProgram::from_mir(&functions)
+
+    if let Some(extern_decl) = bundle.ffi_codegen.extern_decls.first() {
+        return Err(unsupported_target_capability(
+            target,
+            format!("FFI or host stdlib call `{}`", extern_decl.name),
+        ));
+    }
+    PortableProgram::from_mir(target, &bundle.functions)
 }
 
 impl PortableProgram {
-    fn from_mir(functions: &[MirFunction]) -> Result<Self> {
+    fn from_mir(target: PortableBackendTarget, functions: &[MirFunction]) -> Result<Self> {
         let function_indices = functions
             .iter()
             .enumerate()
             .map(|(index, function)| (function.name.as_str(), index as u32))
             .collect::<BTreeMap<_, _>>();
-        let main_index = *function_indices
-            .get("main")
-            .ok_or_else(|| miette::miette!("portable target requires `main`"))?;
+        let main_index = *function_indices.get("main").ok_or_else(|| {
+            unsupported_target_capability(target, "programs without a `main` entry point")
+        })?;
         let functions = functions
             .iter()
-            .map(|function| PortableFunction::from_mir(function, &function_indices))
+            .map(|function| PortableFunction::from_mir(target, function, &function_indices))
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             functions,
@@ -192,15 +271,19 @@ impl PortableProgram {
 }
 
 impl PortableFunction {
-    fn from_mir(function: &MirFunction, function_indices: &BTreeMap<&str, u32>) -> Result<Self> {
+    fn from_mir(
+        target: PortableBackendTarget,
+        function: &MirFunction,
+        function_indices: &BTreeMap<&str, u32>,
+    ) -> Result<Self> {
         if function.is_async {
-            miette::bail!(
-                "portable target does not support async function `{}` yet",
-                function.name
-            );
+            return Err(unsupported_target_capability(
+                target,
+                format!("async function `{}`", function.name),
+            ));
         }
         for (_, ty) in &function.locals {
-            validate_portable_type(&function.name, ty)?;
+            validate_portable_type(target, &function.name, ty)?;
         }
         let blocks = function
             .basic_blocks
@@ -209,21 +292,33 @@ impl PortableFunction {
                 let instructions = function
                     .block_instructions(block)
                     .map(|instruction| {
-                        PortableInstruction::from_mir(&function.name, instruction, function_indices)
+                        PortableInstruction::from_mir(
+                            target,
+                            &function.name,
+                            instruction,
+                            function_indices,
+                        )
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let terminator = block
                     .terminator
                     .as_ref()
                     .ok_or_else(|| {
-                        miette::miette!(
-                            "portable target found unterminated MIR block {} in `{}`",
-                            block.id,
-                            function.name
+                        unsupported_target_capability(
+                            target,
+                            format!(
+                                "unterminated MIR block {} in `{}`",
+                                block.id, function.name
+                            ),
                         )
                     })
                     .and_then(|terminator| {
-                        PortableTerminator::from_mir(&function.name, terminator, function_indices)
+                        PortableTerminator::from_mir(
+                            target,
+                            &function.name,
+                            terminator,
+                            function_indices,
+                        )
                     })?;
                 Ok(PortableBlock {
                     instructions,
@@ -243,6 +338,7 @@ impl PortableFunction {
 
 impl PortableInstruction {
     fn from_mir(
+        target: PortableBackendTarget,
         function: &str,
         instruction: &Instruction,
         function_indices: &BTreeMap<&str, u32>,
@@ -250,7 +346,7 @@ impl PortableInstruction {
         Ok(match instruction {
             Instruction::Assign { destination, value } => Self::Const {
                 destination: destination.id,
-                value: portable_constant(function, value)?,
+                value: portable_constant(target, function, value)?,
             },
             Instruction::Unary {
                 destination,
@@ -303,7 +399,7 @@ impl PortableInstruction {
                 args,
             } => Self::Call {
                 destination: destination.id,
-                function: resolve_function(function, func, function_indices)?,
+                function: resolve_function(target, function, func, function_indices)?,
                 args: args.iter().map(|local| local.id).collect(),
             },
             Instruction::Phi {
@@ -318,11 +414,10 @@ impl PortableInstruction {
             },
             Instruction::Nop => Self::Nop,
             other => {
-                miette::bail!(
-                    "portable target does not support MIR instruction {:?} in `{}`",
-                    other,
-                    function
-                )
+                return Err(unsupported_target_capability(
+                    target,
+                    format!("MIR instruction {:?} in `{function}`", other),
+                ));
             }
         })
     }
@@ -330,15 +425,16 @@ impl PortableInstruction {
 
 impl PortableTerminator {
     fn from_mir(
+        target: PortableBackendTarget,
         function: &str,
         terminator: &Terminator,
         function_indices: &BTreeMap<&str, u32>,
     ) -> Result<Self> {
         Ok(match terminator {
             Terminator::Return(local) => Self::Return(local.map(|local| local.id)),
-            Terminator::Goto(target)
-            | Terminator::Break { target }
-            | Terminator::Continue { target } => Self::Goto(*target as u32),
+            Terminator::Goto(block)
+            | Terminator::Break { target: block }
+            | Terminator::Continue { target: block } => Self::Goto(*block as u32),
             Terminator::If {
                 cond,
                 then_block,
@@ -364,28 +460,27 @@ impl PortableTerminator {
                 func,
                 args,
                 destination,
-                target,
+                target: next,
             } => Self::Call {
-                function: resolve_function(function, func, function_indices)?,
+                function: resolve_function(target, function, func, function_indices)?,
                 args: args
                     .iter()
                     .map(|arg| match arg {
                         CallArg::Local(local) => Ok(PortableArg::Local(local.id)),
-                        CallArg::Constant(value) => {
-                            Ok(PortableArg::Constant(portable_constant(function, value)?))
-                        }
+                        CallArg::Constant(value) => Ok(PortableArg::Constant(portable_constant(
+                            target, function, value,
+                        )?)),
                     })
                     .collect::<Result<Vec<_>>>()?,
                 destination: destination.id,
-                target: *target as u32,
+                target: *next as u32,
             },
             Terminator::Unreachable => Self::Unreachable,
             other => {
-                miette::bail!(
-                    "portable target does not support MIR terminator {:?} in `{}`",
-                    other,
-                    function
-                )
+                return Err(unsupported_target_capability(
+                    target,
+                    format!("MIR terminator {:?} in `{function}`", other),
+                ));
             }
         })
     }
@@ -426,27 +521,35 @@ impl From<MirBinOp> for PortableBinary {
     }
 }
 
-fn validate_portable_type(function: &str, ty: &MIRType) -> Result<()> {
+fn validate_portable_type(
+    target: PortableBackendTarget,
+    function: &str,
+    ty: &MIRType,
+) -> Result<()> {
     if matches!(
         ty,
         MIRType::Unit
             | MIRType::Never
             | MIRType::Bool
             | MIRType::Int(_)
+            | MIRType::UInt(_)
             | MIRType::Ref(_)
             | MIRType::Ptr(_)
             | MIRType::Future(_)
     ) {
         return Ok(());
     }
-    miette::bail!(
-        "portable target does not support MIR type {:?} in `{}`; see docs/portable-targets.md",
-        ty,
-        function
-    )
+    Err(unsupported_target_capability(
+        target,
+        format!("MIR type {:?} in `{function}`", ty),
+    ))
 }
 
-fn portable_constant(function: &str, value: &MirConstant) -> Result<i64> {
+fn portable_constant(
+    target: PortableBackendTarget,
+    function: &str,
+    value: &MirConstant,
+) -> Result<i64> {
     match value {
         MirConstant::Unit => Ok(0),
         MirConstant::Bool(value) => Ok(i64::from(*value)),
@@ -454,24 +557,23 @@ fn portable_constant(function: &str, value: &MirConstant) -> Result<i64> {
         MirConstant::Uint(value) => Ok(*value as i64),
         MirConstant::Char(value) => Ok(*value as i64),
         MirConstant::GlobalRef(_) => Ok(0),
-        other => Err(miette::miette!(
-            "portable target does not support constant {:?} in `{}`",
-            other,
-            function
+        other => Err(unsupported_target_capability(
+            target,
+            format!("constant {:?} in `{function}`", other),
         )),
     }
 }
 
 fn resolve_function(
+    target: PortableBackendTarget,
     caller: &str,
     callee: &str,
     function_indices: &BTreeMap<&str, u32>,
 ) -> Result<u32> {
     function_indices.get(callee).copied().ok_or_else(|| {
-        miette::miette!(
-            "portable target does not support host/stdlib call `{}` from `{}`; see docs/portable-targets.md",
-            callee,
-            caller
+        unsupported_target_capability(
+            target,
+            format!("host/stdlib call `{callee}` from `{caller}`"),
         )
     })
 }
@@ -1555,7 +1657,11 @@ fn write_sleb(output: &mut Vec<u8>, mut value: i64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_bytecode, encode_bytecode, execute_bytecode, PortableProgram};
+    use super::{
+        decode_bytecode, encode_bytecode, execute_bytecode, validate_portable_abi_versions,
+        PortableProgram, PORTABLE_RUNTIME_ABI_VERSION,
+    };
+    use sengoo_compiler::MIR_SEMANTIC_ABI_VERSION;
     use sengoo_compiler::mir::{
         Instruction, LocalKind, MIRType, MirConstant, MirFunction, Terminator,
     };
@@ -1574,10 +1680,30 @@ mod tests {
         main.block_mut(0)
             .unwrap()
             .set_terminator(Terminator::Return(Some(value)));
-        let program = PortableProgram::from_mir(&[main]).unwrap();
+        let program =
+            PortableProgram::from_mir(super::PortableBackendTarget::Bytecode, &[main]).unwrap();
         let encoded = encode_bytecode(&program).unwrap();
         assert!(encoded.starts_with(b"SGB1"));
         let decoded = decode_bytecode(&encoded).unwrap();
         assert_eq!(execute_bytecode(&decoded).unwrap(), 42);
+    }
+
+    #[test]
+    fn portable_backends_reject_unknown_mir_and_runtime_abi_versions() {
+        let mir_error = validate_portable_abi_versions(
+            MIR_SEMANTIC_ABI_VERSION + 1,
+            PORTABLE_RUNTIME_ABI_VERSION,
+        )
+        .expect_err("unknown MIR semantic ABI must fail")
+        .to_string();
+        assert!(mir_error.contains("unsupported-mir-semantic-abi"));
+
+        let runtime_error = validate_portable_abi_versions(
+            MIR_SEMANTIC_ABI_VERSION,
+            PORTABLE_RUNTIME_ABI_VERSION + 1,
+        )
+        .expect_err("unknown portable runtime ABI must fail")
+        .to_string();
+        assert!(runtime_error.contains("unsupported-portable-runtime-abi"));
     }
 }

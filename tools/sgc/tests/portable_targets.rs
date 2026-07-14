@@ -202,9 +202,40 @@ def main() -> i64 {
         String::from_utf8_lossy(&build.stderr)
     );
     let stderr = String::from_utf8_lossy(&build.stderr);
+    // miette may soft-wrap long diagnostics and inject box-drawing prefixes, so
+    // match the stable code, target field, and path fragments independently.
     assert!(
-        stderr.contains("portable target does not support")
-            && stderr.contains("docs/portable-targets.md"),
+        stderr.contains("unsupported-target-capability")
+            && stderr.contains("target `bytecode`")
+            && stderr.contains("docs/portable")
+            && stderr.contains("targets.md"),
+        "stderr:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wasm_target_uses_wasm32_pointer_sized_literal_bounds() {
+    let dir = temp_dir("wasm32_usize_bounds");
+    let source = dir.join("main.sg");
+    fs::write(
+        &source,
+        "def main() -> usize { 4294967296usize }\n",
+    )
+    .unwrap();
+
+    let build = Command::new(sgc())
+        .args(["build", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("build wasm32 usize boundary");
+
+    assert!(
+        !build.status.success(),
+        "2^32 must not type-check as wasm32 usize"
+    );
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(
+        stderr.contains("exceeds range of `usize`"),
         "stderr:\n{stderr}"
     );
     let _ = fs::remove_dir_all(dir);

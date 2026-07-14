@@ -1,7 +1,9 @@
 # production-hardening Specification
 
 ## Purpose
-TBD - created by archiving change production-hardening-v1. Update Purpose after archive.
+Define the retained safety, compatibility, performance, and installed-release
+evidence required before Sengoo can claim its native toolchain is production
+ready on a supported host.
 ## Requirements
 ### Requirement: Public input boundaries SHALL be fuzzed and regression-retained
 
@@ -64,4 +66,3 @@ artifacts outside the source checkout on every supported host.
   leakage
 - **AND** skipped jobs outside the support matrix are documented rather than
   counted as success
-

@@ -1,43 +1,39 @@
-## 1. WASM backend
+## 1. Shared entry contract
 
-- [~] 1.1 Lower scalar MIR to WebAssembly with a direct emitter producing
-  `.wasm` modules. Covered today: integer/bool scalar functions, calls,
-  branches, switch/goto, phi, and recursion. Deferred: aggregates, heap,
-  stdlib/FFI, async, and WASI imports.
-- [~] 1.2 Define a WASI-based host-interface subset for stdlib (io/env/time/file
-  where the sandbox allows); document unsupported host APIs. Current slice
-  documents the capability matrix and rejects unsupported stdlib/FFI with
-  `docs/portable-targets.md`; real WASI host imports remain open.
-- [~] 1.3 Tests: compile and run representative programs under a WASM runtime
-  (e.g. wasmtime) in CI. Current CI runs scalar `.wasm` generation and executes
-  it with Node when available; WASI runtime coverage remains open.
+- [x] 1.1 Archive the native default-library, distribution, concurrency, and
+  production-hardening prerequisites and retain their evidence links.
+- [x] 1.2 Version the in-process MIR semantic contract and expose target-aware
+  compiler plus `sgc` MIR bundle APIs.
+  - `MIR_SEMANTIC_ABI_VERSION` / `MirBundle` live in `compiler/src/lib.rs`;
+    `sgc` exposes `pipeline::compile_source_to_mir_bundle(source, opt, triple)`.
+- [x] 1.3 Add and validate `runtime/abi/portable_runtime_abi_v1.json`, including
+  required semantic IDs, stable ordinals, and forbidden native vocabulary.
+  - Contract suite: `cargo test -p sgc --test portable_abi_contract`.
+- [x] 1.4 Route WASM frontend lowering through explicit wasm32 semantics and
+  reject unknown MIR/runtime ABI versions before backend lowering.
+  - `build_wasm` lowers via `wasm32-unknown-unknown`; unknown MIR/runtime ABI
+    versions fail before emission (`validate_portable_abi_versions`).
+- [x] 1.5 Emit stable `unsupported-target-capability` diagnostics with target
+  and capability fields and no native fallback.
+- [x] 1.6 Add entry-contract tests for 32-bit pointer-sized lowering, out-of-
+  range `usize`, ABI mismatch, portable ABI linting, and target diagnostics.
+  - `cargo test -p sengoo-compiler --test mir_target_contract`
+  - `cargo test -p sgc --test portable_abi_contract --test portable_targets`
 
-## 2. Bytecode VM
+## 2. Independent backend owners
 
-- [x] 2.1 Define a portable bytecode format and instruction set for scalar MIR
-  (`SGB1` version 1).
-- [~] 2.2 Define the VM value/heap model consistent with ownership + `Drop`.
-  Current VM is scalar-only with no heap objects; heap/drop opcodes remain open.
-- [~] 2.3 Implement the interpreter and a stdlib bridge. Current interpreter
-  executes scalar internal calls and rejects stdlib/FFI with documented
-  diagnostics; stdlib bridge remains open.
-- [~] 2.4 `sgc run` clang-free mode using the VM; measure startup vs native.
-  Clang-free execution is implemented and tested with `PATH` removed; startup
-  measurement remains open.
-- [~] 2.5 Tests: core conformance programs run identically on the VM. Current
-  coverage proves scalar branching/calls and recursion; aggregate/stdlib core
-  cases remain open pending heap and bridge support.
+- [x] 2.1 Create independently archivable `wasm-backend-v1` and
+  `bytecode-vm-v1` owner changes.
+- [x] 2.2 Classify the current scalar WASM emitter and `SGB1` interpreter as
+  experimental prototypes with no artifact compatibility promise.
+- [ ] 2.3 Record the entry-review result and activate each child only after it
+  consumes the shared MIR/runtime contract.
 
-## 3. Target selection and matrix
+## 3. Cross-target closure
 
-- [~] 3.1 `sgc build --target {native,wasm,bytecode}`. `build` supports all
-  three; `run --target bytecode` is implemented and `run --target wasm` is
-  intentionally build-only until a bundled WASM runner exists.
-- [x] 3.2 Per-target capability matrix doc (which stdlib areas work per target).
-- [ ] 3.3 Run `openspec validate wasm-and-bytecode-backends --strict`.
-
-## Verification
-
-- WASM programs run under the chosen WASM runtime in CI (task 1.3)
-- Core conformance suite passes on the bytecode VM (task 2.5)
-- `sgc build --target` produces artifacts for each target
+- [ ] 3.1 Keep native semantics as the differential oracle and one capability
+  matrix as the support truth source.
+- [ ] 3.2 Record the bytecode value-review decision without treating prototype
+  implementation as evidence that the VM must ship.
+- [ ] 3.3 Run `openspec validate wasm-and-bytecode-backends --strict` and
+  `openspec validate --all --strict`.
