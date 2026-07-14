@@ -347,6 +347,9 @@ mod tests {
 
     #[test]
     fn reactor_async_file_open_wait_read_and_close_is_owned() {
+        let _guard = super::super::ASYNC_RUNTIME_TEST_GUARD
+            .lock()
+            .expect("async runtime test guard mutex poisoned");
         let (path, c_path) = temp_file(b"ready");
         let file = sengoo_async_file_open_read(c_path.as_ptr() as i64);
         assert!(file > 0);
@@ -374,6 +377,9 @@ mod tests {
 
     #[test]
     fn reactor_async_file_invalid_handle_has_stable_status_and_no_interest() {
+        let _guard = super::super::ASYNC_RUNTIME_TEST_GUARD
+            .lock()
+            .expect("async runtime test guard mutex poisoned");
         let before = super::super::reactor::interest_count();
         let wait = sengoo_async_file_wait_readable__start(0, 10);
         assert!(wait > 0);
@@ -387,6 +393,9 @@ mod tests {
 
     #[test]
     fn reactor_async_file_wait_owns_duplicate_after_source_close() {
+        let _guard = super::super::ASYNC_RUNTIME_TEST_GUARD
+            .lock()
+            .expect("async runtime test guard mutex poisoned");
         let (path, c_path) = temp_file(b"owned");
         let baseline = super::super::reactor::interest_count();
         let file = sengoo_async_file_open_read(c_path.as_ptr() as i64);
@@ -405,6 +414,9 @@ mod tests {
 
     #[test]
     fn reactor_async_file_cancel_and_drop_unregister_without_polling() {
+        let _guard = super::super::ASYNC_RUNTIME_TEST_GUARD
+            .lock()
+            .expect("async runtime test guard mutex poisoned");
         let (path, c_path) = temp_file(b"cleanup");
         let baseline = super::super::reactor::interest_count();
         let file = sengoo_async_file_open_read(c_path.as_ptr() as i64);

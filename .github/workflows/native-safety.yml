@@ -43,11 +43,11 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address"
           ASAN_OPTIONS: "detect_leaks=1:halt_on_error=1"
         run: |
-          cargo test -p sengoo-runtime --target x86_64-unknown-linux-gnu reflect::runtime_ffi::tests -- --nocapture
-          cargo test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::executor::tests -- --nocapture
-          cargo test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::async_file::tests -- --nocapture
-          cargo test -p sengoo-runtime --target x86_64-unknown-linux-gnu net::tls -- --nocapture
-          cargo test -p sgpm --target x86_64-unknown-linux-gnu remote_registry_ -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --target x86_64-unknown-linux-gnu reflect::runtime_ffi::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::executor::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::async_file::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --target x86_64-unknown-linux-gnu net::tls -- --nocapture
+          cargo +nightly-2026-07-01 test -p sgpm --target x86_64-unknown-linux-gnu remote_registry_ -- --nocapture
 
   bounded-longevity:
     runs-on: ubuntu-latest
@@ -63,7 +63,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          transcript="$RUNNER_TEMP/native-longevity-transcript.txt"
           timeout 1800 bash -c '
             for iteration in $(seq 1 10); do
               echo "== longevity iteration ${iteration} =="
@@ -72,8 +71,7 @@ jobs:
               cargo test -p sengoo-runtime --features native-bridge async_rwlock_ -- --nocapture
               cargo test -p sengoo-runtime --features native-bridge reactor_ -- --nocapture
             done
-          ' 2>&1 | tee "$transcript"
-          cp "$transcript" native-longevity-transcript.txt
+          ' 2>&1 | tee native-longevity-transcript.txt
 
       - name: Preserve longevity transcript
         if: always()

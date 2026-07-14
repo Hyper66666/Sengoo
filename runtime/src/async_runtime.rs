@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
+#[cfg(all(test, feature = "native-bridge"))]
+static ASYNC_RUNTIME_TEST_GUARD: Mutex<()> = Mutex::new(());
+
 #[cfg(feature = "native-bridge")]
 mod async_file;
 #[cfg(feature = "native-bridge")]
@@ -511,7 +514,7 @@ mod tests {
     static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
     static CANCEL_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
     static DROP_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
-    static TEST_GUARD: Mutex<()> = Mutex::new(());
+    use super::ASYNC_RUNTIME_TEST_GUARD as TEST_GUARD;
 
     #[test]
     fn async_handle_helpers_reject_zero_handles() {
