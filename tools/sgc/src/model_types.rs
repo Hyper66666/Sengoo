@@ -255,6 +255,45 @@ struct ModuleGraphSnapshot {
     rebuilt_modules: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct NativeRuntimeProvenance {
+    runtime_mode: String,
+    artifact_provenance: String,
+    release_eligible: bool,
+    senline_pin_evidence: bool,
+    build_manifest_id: Option<String>,
+}
+
+impl Default for NativeRuntimeProvenance {
+    fn default() -> Self {
+        Self {
+            runtime_mode: "unknown".to_string(),
+            artifact_provenance: "unknown".to_string(),
+            release_eligible: false,
+            senline_pin_evidence: false,
+            build_manifest_id: None,
+        }
+    }
+}
+
+impl NativeRuntimeProvenance {
+    fn source_development() -> Self {
+        Self {
+            runtime_mode: "source-development".to_string(),
+            artifact_provenance: "source-cargo-development".to_string(),
+            ..Self::default()
+        }
+    }
+
+    fn not_linked() -> Self {
+        Self {
+            runtime_mode: "not-linked".to_string(),
+            artifact_provenance: "not-applicable".to_string(),
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RunCacheMetadata {
     source_hash: u64,
@@ -274,6 +313,8 @@ struct RunCacheMetadata {
     runtime_c: Option<String>,
     #[serde(default)]
     runtime_c_fingerprint: Option<u64>,
+    #[serde(default)]
+    runtime_provenance: NativeRuntimeProvenance,
     llvm_ir_path: String,
     executable_path: Option<String>,
     #[serde(default)]
@@ -288,11 +329,29 @@ struct RunCacheMetadata {
 struct RuntimeSourceIdentity {
     path: Option<String>,
     fingerprint: Option<u64>,
+    provenance: NativeRuntimeProvenance,
 }
 
 impl RuntimeSourceIdentity {
+    #[cfg(test)]
     fn new(path: Option<String>, fingerprint: Option<u64>) -> Self {
-        Self { path, fingerprint }
+        Self {
+            path,
+            fingerprint,
+            provenance: NativeRuntimeProvenance::default(),
+        }
+    }
+
+    fn with_provenance(
+        path: Option<String>,
+        fingerprint: Option<u64>,
+        provenance: NativeRuntimeProvenance,
+    ) -> Self {
+        Self {
+            path,
+            fingerprint,
+            provenance,
+        }
     }
 }
 
@@ -307,6 +366,7 @@ struct RunCacheKey {
     resolved_engine: RunEngine,
     runtime_c: Option<String>,
     runtime_c_fingerprint: Option<u64>,
+    runtime_provenance: NativeRuntimeProvenance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,6 +389,8 @@ struct BuildCacheMetadata {
     runtime_c: Option<String>,
     #[serde(default)]
     runtime_c_fingerprint: Option<u64>,
+    #[serde(default)]
+    runtime_provenance: NativeRuntimeProvenance,
     llvm_ir_path: String,
     output_path: String,
     #[serde(default)]
@@ -349,6 +411,7 @@ struct BuildCacheKey {
     emit_llvm: bool,
     runtime_c: Option<String>,
     runtime_c_fingerprint: Option<u64>,
+    runtime_provenance: NativeRuntimeProvenance,
     output_path: String,
 }
 

@@ -224,6 +224,7 @@ pub(crate) fn cache_key(
         resolved_engine,
         runtime_c: runtime_c.path,
         runtime_c_fingerprint: runtime_c.fingerprint,
+        runtime_provenance: runtime_c.provenance,
     }
 }
 
@@ -247,6 +248,7 @@ pub(crate) fn build_cache_key(
         emit_llvm,
         runtime_c: runtime_c.path,
         runtime_c_fingerprint: runtime_c.fingerprint,
+        runtime_provenance: runtime_c.provenance,
         output_path,
     }
 }
@@ -261,6 +263,7 @@ pub(crate) fn metadata_matches(metadata: &RunCacheMetadata, key: &RunCacheKey) -
         && metadata.resolved_engine == key.resolved_engine
         && metadata.runtime_c == key.runtime_c
         && metadata.runtime_c_fingerprint == key.runtime_c_fingerprint
+        && metadata.runtime_provenance == key.runtime_provenance
 }
 
 pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildCacheKey) -> bool {
@@ -273,6 +276,7 @@ pub(crate) fn build_metadata_matches(metadata: &BuildCacheMetadata, key: &BuildC
         && metadata.emit_llvm == key.emit_llvm
         && metadata.runtime_c == key.runtime_c
         && metadata.runtime_c_fingerprint == key.runtime_c_fingerprint
+        && metadata.runtime_provenance == key.runtime_provenance
         && metadata.output_path == key.output_path
 }
 
@@ -336,6 +340,9 @@ pub(crate) fn build_cache_mismatch_reasons(
     }
     if metadata.runtime_c_fingerprint != key.runtime_c_fingerprint {
         reasons.push("runtime source changed".to_string());
+    }
+    if metadata.runtime_provenance != key.runtime_provenance {
+        reasons.push("runtime provenance changed".to_string());
     }
     if metadata.output_path != key.output_path {
         reasons.push("output path changed".to_string());
@@ -714,6 +721,9 @@ pub(crate) fn cache_mismatch_reasons(
     }
     if metadata.runtime_c_fingerprint != key.runtime_c_fingerprint {
         reasons.push("runtime source changed".to_string());
+    }
+    if metadata.runtime_provenance != key.runtime_provenance {
+        reasons.push("runtime provenance changed".to_string());
     }
 
     if reasons.is_empty() {

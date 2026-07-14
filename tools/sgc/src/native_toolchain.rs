@@ -7,6 +7,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cross_compile::{linux_sysroot_from_env, windows_cross_sdk_include_paths};
+use crate::installed_runtime::resolve_installed_native_runtime;
 use crate::module_graph::collect_module_sources_with_edges;
 use crate::native_link::{
     append_native_library_link_args, format_native_link_failure_message,
@@ -429,7 +430,17 @@ fn find_async_runtime_staticlib(profile: &str) -> Option<PathBuf> {
         .or_else(|| find_async_runtime_staticlib_in_dir(&profile_dir.join("deps")))
 }
 
-pub(crate) fn ensure_async_runtime_staticlib(opt_level: u8) -> Result<PathBuf> {
+pub(crate) fn ensure_async_runtime_staticlib(
+    opt_level: u8,
+    target: Option<&NativeBuildTarget>,
+) -> Result<PathBuf> {
+    let target = effective_target(target);
+    if let Some(runtime) = resolve_installed_native_runtime(&target)? {
+        return Ok(runtime.library);
+    }
+    eprintln!(
+        "[toolchain::source_runtime_development] runtime_mode=source-development artifact_provenance=source-cargo-development release_eligible=false senline_pin_evidence=false"
+    );
     let profile = async_runtime_profile(opt_level);
     let workspace_root = workspace_root();
     let mut command = Command::new("cargo");
@@ -479,7 +490,7 @@ pub(crate) fn append_native_runtime_inputs(
             &[NATIVE_NET_RUNTIME_DEFINE],
         )?);
     }
-    object_paths.push(ensure_async_runtime_staticlib(opt_level)?);
+    object_paths.push(ensure_async_runtime_staticlib(opt_level, target)?);
     Ok(())
 }
 

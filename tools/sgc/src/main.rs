@@ -29,6 +29,7 @@ mod frontend_snapshot;
 mod generic_cache;
 mod graph_builder;
 mod impact;
+mod installed_runtime;
 mod interface;
 mod module_graph;
 mod native_link;
@@ -522,6 +523,7 @@ fn canonical_or_lossy(path: &Path) -> String {
 }
 
 async fn cmd_check(input: &str) -> Result<()> {
+    installed_runtime::validate_installed_native_runtime_for_host()?;
     println!("Checking: {}", input);
 
     let source = match fs::read_to_string(input).into_diagnostic() {

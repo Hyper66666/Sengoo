@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "strict_max_bytes": 1048576,
+  "mutation_max_bytes": 4096,
+  "mutation_count": 4096,
+  "seed": "0x6a09e667f3bcc909",
+  "encoding": "lowercase hexadecimal bytes",
+  "default_origin": "spec_seed",
+  "retention_policy": "Seeded mutations are discovery-only. Every fixed crash or panic must be minimized into exact bytes here with origin=fixed_crash and a non-empty regression id; fixed minimized bytes are never replaced by a PRNG seed.",
+  "cases": [
+    {
+      "name": "empty-document",
+      "hex": "",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "whitespace-only",
+      "hex": "20090a0d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "unexpected-utf8-continuation",
+      "hex": "80",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "overlong-utf8-slash",
+      "hex": "c0af",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "truncated-three-byte-utf8",
+      "hex": "e282",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "utf8-encoded-surrogate",
+      "hex": "eda080",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "utf8-above-unicode-range",
+      "hex": "f4908080",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "obsolete-five-byte-utf8",
+      "hex": "f888808080",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "raw-nul-in-string",
+      "hex": "220022",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "raw-newline-in-string",
+      "hex": "22610a6222",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "invalid-short-escape",
+      "hex": "225c7122",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "truncated-unicode-escape",
+      "hex": "225c75313222",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "non-hex-unicode-escape",
+      "hex": "225c753132787a22",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "lone-high-surrogate",
+      "hex": "225c756438303022",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "lone-low-surrogate",
+      "hex": "225c756463303022",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "reversed-surrogate-pair",
+      "hex": "225c75646330305c756438303022",
+      "error_kind": "invalid_unicode"
+    },
+    {
+      "name": "unterminated-string",
+      "hex": "22616263",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "truncated-object",
+      "hex": "7b",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "truncated-array",
+      "hex": "5b",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "unquoted-object-key",
+      "hex": "7b613a317d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "missing-object-colon",
+      "hex": "7b22612220317d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "missing-array-comma",
+      "hex": "5b3120325d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "trailing-array-comma",
+      "hex": "5b312c5d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "double-object-comma",
+      "hex": "7b2261223a312c2c2262223a327d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "trailing-token",
+      "hex": "7b7d78",
+      "error_kind": "trailing_bytes"
+    },
+    {
+      "name": "trailing-nul",
+      "hex": "7b7d00",
+      "error_kind": "trailing_bytes"
+    },
+    {
+      "name": "leading-zero",
+      "hex": "3031",
+      "error_kind": "trailing_bytes"
+    },
+    {
+      "name": "duplicate-literal-key",
+      "hex": "7b2261223a312c2261223a327d",
+      "error_kind": "duplicate_field"
+    },
+    {
+      "name": "duplicate-escaped-key",
+      "hex": "7b2261223a312c225c7530303631223a327d",
+      "error_kind": "duplicate_field"
+    },
+    {
+      "name": "nested-duplicate-key",
+      "hex": "7b2278223a7b2262223a312c2262223a327d7d",
+      "error_kind": "duplicate_field"
+    },
+    {
+      "name": "integer-overflow",
+      "hex": "39323233333732303336383534373735383038",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "integer-underflow",
+      "hex": "2d39323233333732303336383534373735383039",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "incomplete-fraction",
+      "hex": "312e",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "incomplete-exponent",
+      "hex": "3165",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "bare-minus",
+      "hex": "2d",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "invalid-literal",
+      "hex": "74727578",
+      "error_kind": "unclassified"
+    },
+    {
+      "name": "utf8-bom-prefix",
+      "hex": "efbbbf7b7d",
+      "error_kind": "unclassified"
+    }
+  ]
+}
