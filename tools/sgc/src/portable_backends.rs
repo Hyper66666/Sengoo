@@ -106,6 +106,8 @@ enum PortableInstruction {
         op: PortableBinary,
         left: u32,
         right: u32,
+        /// When true, div/rem/shift-right/comparisons use unsigned semantics.
+        unsigned: bool,
     },
     Move {
         destination: u32,
@@ -214,18 +216,17 @@ pub(crate) fn build_wasm(input: &str, output: Option<&str>, opt_level: u8) -> Re
 /// Build and execute a scalar WASM module via a pinned host runtime.
 ///
 /// Runtime selection order: `SENGOO_WASM_RUNTIME`, then `node`, then `wasmtime`.
-/// Resource limits: node heap is left default; wasmtime uses `--wasm-timeout`
-/// when available. Fuel/memory caps are documented in `docs/wasm-wasi-profile.md`.
+/// Enforced limits: max module size, ABI version check before run, and a wall-
+/// clock execution timeout (see `WASM_RUN_TIMEOUT`).
 pub(crate) fn run_wasm(input: &str, opt_level: u8) -> Result<i64> {
-    let program = if Path::new(input).extension().and_then(|ext| ext.to_str()) == Some("wasm") {
+    if Path::new(input).extension().and_then(|ext| ext.to_str()) == Some("wasm") {
         let bytes = fs::read(input)
             .into_diagnostic()
             .with_context(|| format!("failed to read WebAssembly artifact {input}"))?;
         validate_wasm_module(&bytes)?;
         return execute_wasm_bytes(&bytes);
-    } else {
-        compile_portable_input(input, opt_level, PortableBackendTarget::Wasm)?
-    };
+    }
+    let program = compile_portable_input(input, opt_level, PortableBackendTarget::Wasm)?;
     let bytes = encode_and_validate_wasm(&program)?;
     execute_wasm_bytes(&bytes)
 }
@@ -236,11 +237,25 @@ fn encode_and_validate_wasm(program: &PortableProgram) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Maximum accepted experimental WASM artifact size (4 MiB).
+pub(crate) const WASM_MAX_MODULE_BYTES: usize = 4 * 1024 * 1024;
+/// Wall-clock timeout for `sgc run --target wasm` host runtimes.
+pub(crate) const WASM_RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+const WASM_ABI_CUSTOM_SECTION: &str = "sengoo.portable_runtime_abi";
+
 /// Structural WebAssembly module validator for the scalar emitter.
 ///
-/// Validates magic/version, section id order, and that type/function/code
-/// counts agree. This is intentionally independent of an external wasm parser.
+/// Validates magic/version, section id order, type/function/code counts, exported
+/// `main`, and the embedded MIR/runtime ABI custom section versions.
 pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
+    if bytes.len() > WASM_MAX_MODULE_BYTES {
+        miette::bail!(
+            "WebAssembly module exceeds size limit ({} > {} bytes)",
+            bytes.len(),
+            WASM_MAX_MODULE_BYTES
+        );
+    }
     if bytes.len() < 8 || &bytes[0..4] != b"\0asm" || bytes[4..8] != [0x01, 0, 0, 0] {
         miette::bail!("invalid WebAssembly module header");
     }
@@ -251,6 +266,7 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
     let mut function_count = None;
     let mut code_count = None;
     let mut saw_export_main = false;
+    let mut saw_abi_section = false;
 
     while offset < bytes.len() {
         let id = bytes[offset];
@@ -271,6 +287,14 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
         }
         let payload = &bytes[offset..end];
         match id {
+            0 => {
+                if let Some((mir_version, runtime_version)) =
+                    parse_portable_abi_custom_section(payload)?
+                {
+                    validate_portable_abi_versions(mir_version, runtime_version)?;
+                    saw_abi_section = true;
+                }
+            }
             1 => {
                 let (count, _) = read_uleb_at(payload, 0)?;
                 type_count = Some(count);
@@ -288,7 +312,7 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
                 let (count, _) = read_uleb_at(payload, 0)?;
                 code_count = Some(count);
             }
-            0 | 2 | 4 | 5 | 6 | 8 | 9 | 11 | 12 => {}
+            2 | 4 | 5 | 6 | 8 | 9 | 11 | 12 => {}
             other => miette::bail!("unsupported WebAssembly section id {other}"),
         }
         offset = end;
@@ -308,7 +332,37 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
     if !saw_export_main {
         miette::bail!("WebAssembly module does not export `main`");
     }
+    if !saw_abi_section {
+        miette::bail!(
+            "WebAssembly module is missing required custom section `{WASM_ABI_CUSTOM_SECTION}`"
+        );
+    }
     Ok(())
+}
+
+fn parse_portable_abi_custom_section(payload: &[u8]) -> Result<Option<(u32, u32)>> {
+    let (name_len, mut offset) = read_uleb_at(payload, 0)?;
+    let name_end = offset
+        .checked_add(name_len as usize)
+        .ok_or_else(|| miette::miette!("truncated WebAssembly custom section name"))?;
+    if name_end > payload.len() {
+        miette::bail!("truncated WebAssembly custom section name");
+    }
+    let name = std::str::from_utf8(&payload[offset..name_end])
+        .into_diagnostic()
+        .context("WebAssembly custom section name is not UTF-8")?;
+    if name != WASM_ABI_CUSTOM_SECTION {
+        return Ok(None);
+    }
+    offset = name_end;
+    let (mir_version, next) = read_uleb_at(payload, offset)?;
+    offset = next;
+    let (runtime_version, _) = read_uleb_at(payload, offset)?;
+    let mir_version = u32::try_from(mir_version)
+        .map_err(|_| miette::miette!("MIR semantic ABI version does not fit u32"))?;
+    let runtime_version = u32::try_from(runtime_version)
+        .map_err(|_| miette::miette!("portable runtime ABI version does not fit u32"))?;
+    Ok(Some((mir_version, runtime_version)))
 }
 
 fn payload_contains_export_main(payload: &[u8]) -> bool {
@@ -428,12 +482,13 @@ WebAssembly.instantiate(bytes).then(({ instance }) => {
     .into_diagnostic()
     .context("failed to write Node WASM runner script")?;
 
-    let output = std::process::Command::new("node")
-        .arg(&script)
-        .arg(module_path)
-        .output()
-        .into_diagnostic()
-        .context("failed to invoke Node.js WebAssembly runtime")?;
+    let output = run_command_with_timeout(
+        std::process::Command::new("node")
+            .arg(&script)
+            .arg(module_path),
+        WASM_RUN_TIMEOUT,
+        "Node.js WebAssembly runtime",
+    )?;
     let _ = fs::remove_file(&script);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -450,27 +505,91 @@ WebAssembly.instantiate(bytes).then(({ instance }) => {
 }
 
 fn execute_wasm_with_wasmtime(module_path: &Path) -> Result<i64> {
+    // Prefer fuel when available; wall-clock timeout is always enforced below.
     let mut command = std::process::Command::new("wasmtime");
-    // Bound wall time when the installed wasmtime supports it.
-    command.args(["run", "--invoke", "main"]);
+    command.args(["run", "--fuel", "10000000", "--invoke", "main"]);
     command.arg(module_path);
-    let output = command
-        .output()
-        .into_diagnostic()
-        .context("failed to invoke wasmtime")?;
+    let output = run_command_with_timeout(&mut command, WASM_RUN_TIMEOUT, "wasmtime")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        // Older wasmtime builds may reject --fuel; retry once without it.
+        if stderr.contains("fuel") || stderr.contains("unexpected argument") {
+            let mut fallback = std::process::Command::new("wasmtime");
+            fallback.args(["run", "--invoke", "main"]);
+            fallback.arg(module_path);
+            let output =
+                run_command_with_timeout(&mut fallback, WASM_RUN_TIMEOUT, "wasmtime")?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                miette::bail!("wasmtime execution failed: {stderr}");
+            }
+            return parse_runtime_i64_stdout(&output.stdout, "wasmtime");
+        }
         miette::bail!("wasmtime execution failed: {stderr}");
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let value = stdout
+    parse_runtime_i64_stdout(&output.stdout, "wasmtime")
+}
+
+fn parse_runtime_i64_stdout(stdout: &[u8], runtime: &str) -> Result<i64> {
+    let stdout = String::from_utf8_lossy(stdout);
+    stdout
         .lines()
         .rev()
         .find_map(|line| line.trim().parse::<i64>().ok())
         .ok_or_else(|| {
-            miette::miette!("wasmtime did not print a parseable main result:\n{stdout}")
-        })?;
-    Ok(value)
+            miette::miette!("{runtime} did not print a parseable main result:\n{stdout}")
+        })
+}
+
+fn run_command_with_timeout(
+    command: &mut std::process::Command,
+    timeout: std::time::Duration,
+    label: &str,
+) -> Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .into_diagnostic()
+        .with_context(|| format!("failed to invoke {label}"))?;
+    let start = Instant::now();
+    loop {
+        match child
+            .try_wait()
+            .into_diagnostic()
+            .with_context(|| format!("failed to poll {label}"))?
+        {
+            Some(status) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_end(&mut stdout);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = err.read_to_end(&mut stderr);
+                }
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                miette::bail!(
+                    "{label} exceeded wall-clock timeout of {}s",
+                    timeout.as_secs()
+                );
+            }
+            None => thread::sleep(Duration::from_millis(10)),
+        }
+    }
 }
 
 fn compile_portable_input(
@@ -556,7 +675,7 @@ impl PortableFunction {
                     .map(|instruction| {
                         PortableInstruction::from_mir(
                             target,
-                            &function.name,
+                            function,
                             instruction,
                             function_indices,
                         )
@@ -601,14 +720,15 @@ impl PortableFunction {
 impl PortableInstruction {
     fn from_mir(
         target: PortableBackendTarget,
-        function: &str,
+        function: &MirFunction,
         instruction: &Instruction,
         function_indices: &BTreeMap<&str, u32>,
     ) -> Result<Self> {
+        let function_name = function.name.as_str();
         Ok(match instruction {
             Instruction::Assign { destination, value } => Self::Const {
                 destination: destination.id,
-                value: portable_constant(target, function, value)?,
+                value: portable_constant(target, function_name, value)?,
             },
             Instruction::Unary {
                 destination,
@@ -624,21 +744,40 @@ impl PortableInstruction {
                 op,
                 left,
                 right,
-            } => Self::Binary {
-                destination: destination.id,
-                op: (*op).into(),
-                left: left.id,
-                right: right.id,
-            },
-            Instruction::Load {
-                destination,
-                source,
+            } => {
+                let left_ty = mir_local_type(function, left.id)?;
+                let right_ty = mir_local_type(function, right.id)?;
+                let unsigned = portable_binary_is_unsigned(target, function_name, &left_ty, &right_ty)?;
+                Self::Binary {
+                    destination: destination.id,
+                    op: (*op).into(),
+                    left: left.id,
+                    right: right.id,
+                    unsigned,
+                }
             }
-            | Instruction::AddrOf {
-                destination,
-                source,
+            Instruction::Load { .. } => {
+                return Err(unsupported_target_capability(
+                    target,
+                    format!("MIR Load instruction in `{function_name}`"),
+                ));
             }
-            | Instruction::Cast {
+            Instruction::Store { .. } => {
+                return Err(unsupported_target_capability(
+                    target,
+                    format!("MIR Store instruction in `{function_name}`"),
+                ));
+            }
+            Instruction::AddrOf { .. } => {
+                return Err(unsupported_target_capability(
+                    target,
+                    format!("MIR AddrOf instruction in `{function_name}`"),
+                ));
+            }
+            // Scalar portable IR stores all values in i64 register slots. Value
+            // casts between Bool/Int/UInt are representation moves; memory-like
+            // Load/Store/AddrOf remain hard errors above.
+            Instruction::Cast {
                 destination,
                 value: source,
                 ..
@@ -647,21 +786,31 @@ impl PortableInstruction {
                 destination,
                 value: source,
                 ..
-            } => Self::Move {
-                destination: destination.id,
-                source: source.id,
-            },
-            Instruction::Store { destination, value } => Self::Move {
-                destination: destination.id,
-                source: value.id,
-            },
+            } => {
+                let dest_ty = mir_local_type(function, destination.id)?;
+                let src_ty = mir_local_type(function, source.id)?;
+                if !is_portable_scalar_value_type(dest_ty) || !is_portable_scalar_value_type(src_ty)
+                {
+                    return Err(unsupported_target_capability(
+                        target,
+                        format!(
+                            "non-scalar MIR cast/bitcast {:?} -> {:?} in `{function_name}`",
+                            src_ty, dest_ty
+                        ),
+                    ));
+                }
+                Self::Move {
+                    destination: destination.id,
+                    source: source.id,
+                }
+            }
             Instruction::Call {
                 destination,
                 func,
                 args,
             } => Self::Call {
                 destination: destination.id,
-                function: resolve_function(target, function, func, function_indices)?,
+                function: resolve_function(target, function_name, func, function_indices)?,
                 args: args.iter().map(|local| local.id).collect(),
             },
             Instruction::Phi {
@@ -678,7 +827,7 @@ impl PortableInstruction {
             other => {
                 return Err(unsupported_target_capability(
                     target,
-                    format!("MIR instruction {:?} in `{function}`", other),
+                    format!("MIR instruction {:?} in `{function_name}`", other),
                 ));
             }
         })
@@ -788,16 +937,11 @@ fn validate_portable_type(
     function: &str,
     ty: &MIRType,
 ) -> Result<()> {
+    // Experimental scalar surface only: no pointers/refs/futures (those would
+    // previously be accepted and then silently miscompiled as integer moves).
     if matches!(
         ty,
-        MIRType::Unit
-            | MIRType::Never
-            | MIRType::Bool
-            | MIRType::Int(_)
-            | MIRType::UInt(_)
-            | MIRType::Ref(_)
-            | MIRType::Ptr(_)
-            | MIRType::Future(_)
+        MIRType::Unit | MIRType::Never | MIRType::Bool | MIRType::Int(_) | MIRType::UInt(_)
     ) {
         return Ok(());
     }
@@ -805,6 +949,60 @@ fn validate_portable_type(
         target,
         format!("MIR type {:?} in `{function}`", ty),
     ))
+}
+
+fn mir_local_type(function: &MirFunction, local_id: u32) -> Result<&MIRType> {
+    function
+        .locals
+        .iter()
+        .find(|(local, _)| local.id == local_id)
+        .map(|(_, ty)| ty)
+        .ok_or_else(|| {
+            miette::miette!(
+                "portable target missing type for local {local_id} in `{}`",
+                function.name
+            )
+        })
+}
+
+fn mir_type_is_unsigned(ty: &MIRType) -> bool {
+    matches!(ty, MIRType::UInt(_))
+}
+
+fn is_portable_scalar_value_type(ty: &MIRType) -> bool {
+    matches!(
+        ty,
+        MIRType::Unit | MIRType::Never | MIRType::Bool | MIRType::Int(_) | MIRType::UInt(_)
+    )
+}
+
+fn portable_binary_is_unsigned(
+    target: PortableBackendTarget,
+    function: &str,
+    left_ty: &MIRType,
+    right_ty: &MIRType,
+) -> Result<bool> {
+    let left_unsigned = mir_type_is_unsigned(left_ty);
+    let right_unsigned = mir_type_is_unsigned(right_ty);
+    if left_unsigned != right_unsigned
+        && !matches!(left_ty, MIRType::Bool | MIRType::Unit | MIRType::Never)
+        && !matches!(right_ty, MIRType::Bool | MIRType::Unit | MIRType::Never)
+    {
+        // Mixed signedness integer ops are not part of the scalar portable
+        // surface; reject rather than guess.
+        if matches!(left_ty, MIRType::Int(_) | MIRType::UInt(_))
+            && matches!(right_ty, MIRType::Int(_) | MIRType::UInt(_))
+        {
+            return Err(unsupported_target_capability(
+                target,
+                format!(
+                    "mixed signed/unsigned binary operands {:?} and {:?} in `{function}`",
+                    left_ty, right_ty
+                ),
+            ));
+        }
+    }
+    Ok(left_unsigned || right_unsigned)
 }
 
 fn portable_constant(
@@ -1008,9 +1206,14 @@ impl PortableVm<'_> {
                 op,
                 left,
                 right,
+                unsigned,
             } => {
-                let result =
-                    eval_binary(*op, get_local(locals, *left)?, get_local(locals, *right)?)?;
+                let result = eval_binary(
+                    *op,
+                    *unsigned,
+                    get_local(locals, *left)?,
+                    get_local(locals, *right)?,
+                )?;
                 set_local(locals, *destination, result)
             }
             PortableInstruction::Move {
@@ -1064,14 +1267,26 @@ fn set_local(locals: &mut [i64], local: u32, value: i64) -> Result<()> {
     Ok(())
 }
 
-fn eval_binary(op: PortableBinary, left: i64, right: i64) -> Result<i64> {
+fn eval_binary(op: PortableBinary, unsigned: bool, left: i64, right: i64) -> Result<i64> {
     Ok(match op {
         PortableBinary::Add => left.wrapping_add(right),
         PortableBinary::Sub => left.wrapping_sub(right),
         PortableBinary::Mul => left.wrapping_mul(right),
+        PortableBinary::Div if unsigned => {
+            if right == 0 {
+                miette::bail!("bytecode integer division trap");
+            }
+            ((left as u64) / (right as u64)) as i64
+        }
         PortableBinary::Div => left
             .checked_div(right)
             .ok_or_else(|| miette::miette!("bytecode integer division trap"))?,
+        PortableBinary::Rem if unsigned => {
+            if right == 0 {
+                miette::bail!("bytecode integer remainder trap");
+            }
+            ((left as u64) % (right as u64)) as i64
+        }
         PortableBinary::Rem => left
             .checked_rem(right)
             .ok_or_else(|| miette::miette!("bytecode integer remainder trap"))?,
@@ -1079,14 +1294,19 @@ fn eval_binary(op: PortableBinary, left: i64, right: i64) -> Result<i64> {
         PortableBinary::BitOr => left | right,
         PortableBinary::BitXor => left ^ right,
         PortableBinary::Shl => left.wrapping_shl((right as u32) & 63),
+        PortableBinary::Shr if unsigned => ((left as u64).wrapping_shr((right as u32) & 63)) as i64,
         PortableBinary::Shr => left.wrapping_shr((right as u32) & 63),
         PortableBinary::LogAnd => i64::from(left != 0 && right != 0),
         PortableBinary::LogOr => i64::from(left != 0 || right != 0),
         PortableBinary::Eq => i64::from(left == right),
         PortableBinary::Ne => i64::from(left != right),
+        PortableBinary::Lt if unsigned => i64::from((left as u64) < (right as u64)),
         PortableBinary::Lt => i64::from(left < right),
+        PortableBinary::Gt if unsigned => i64::from((left as u64) > (right as u64)),
         PortableBinary::Gt => i64::from(left > right),
+        PortableBinary::Le if unsigned => i64::from((left as u64) <= (right as u64)),
         PortableBinary::Le => i64::from(left <= right),
+        PortableBinary::Ge if unsigned => i64::from((left as u64) >= (right as u64)),
         PortableBinary::Ge => i64::from(left >= right),
     })
 }
@@ -1190,12 +1410,14 @@ fn encode_instruction(output: &mut Vec<u8>, instruction: &PortableInstruction) {
             op,
             left,
             right,
+            unsigned,
         } => {
             output.push(2);
             write_u32(output, *destination);
             output.push(binary_code(*op));
             write_u32(output, *left);
             write_u32(output, *right);
+            output.push(u8::from(*unsigned));
         }
         PortableInstruction::Move {
             destination,
@@ -1250,6 +1472,7 @@ fn decode_instruction(reader: &mut BytecodeReader<'_>) -> Result<PortableInstruc
             op: decode_binary(reader.read_u8()?)?,
             left: reader.read_u32()?,
             right: reader.read_u32()?,
+            unsigned: reader.read_u8()? != 0,
         },
         3 => PortableInstruction::Move {
             destination: reader.read_u32()?,
@@ -1536,7 +1759,7 @@ fn encode_wasm(program: &PortableProgram) -> Result<Vec<u8>> {
 
     // Custom ABI metadata section (id 0) before standard sections.
     let mut custom = Vec::new();
-    write_wasm_name(&mut custom, "sengoo.portable_runtime_abi");
+    write_wasm_name(&mut custom, WASM_ABI_CUSTOM_SECTION);
     write_uleb(&mut custom, MIR_SEMANTIC_ABI_VERSION as u64);
     write_uleb(&mut custom, PORTABLE_RUNTIME_ABI_VERSION as u64);
     write_wasm_name(&mut custom, "wasm32");
@@ -1661,8 +1884,9 @@ fn encode_wasm_instruction(
             op,
             left,
             right,
+            unsigned,
         } => {
-            encode_wasm_binary(output, function, *op, *left, *right);
+            encode_wasm_binary(output, function, *op, *unsigned, *left, *right);
             wasm_local_set(output, wasm_local(function, *destination));
         }
         PortableInstruction::Move {
@@ -1814,6 +2038,7 @@ fn encode_wasm_binary(
     output: &mut Vec<u8>,
     function: &PortableFunction,
     op: PortableBinary,
+    unsigned: bool,
     left: u32,
     right: u32,
 ) {
@@ -1836,24 +2061,33 @@ fn encode_wasm_binary(
             wasm_local_get(output, wasm_local(function, right));
         }
     }
-    let opcode = match op {
-        PortableBinary::Add => 0x7c,
-        PortableBinary::Sub => 0x7d,
-        PortableBinary::Mul => 0x7e,
-        PortableBinary::Div => 0x7f,
-        PortableBinary::Rem => 0x81,
-        PortableBinary::BitAnd => 0x83,
-        PortableBinary::BitOr => 0x84,
-        PortableBinary::BitXor => 0x85,
-        PortableBinary::Shl => 0x86,
-        PortableBinary::Shr => 0x87,
-        PortableBinary::Eq => 0x51,
-        PortableBinary::Ne => 0x52,
-        PortableBinary::Lt => 0x53,
-        PortableBinary::Gt => 0x55,
-        PortableBinary::Le => 0x57,
-        PortableBinary::Ge => 0x59,
-        PortableBinary::LogAnd | PortableBinary::LogOr => unreachable!(),
+    // i64 opcodes: div_s=0x7f div_u=0x80 rem_s=0x81 rem_u=0x82 shr_s=0x87 shr_u=0x88
+    // comparisons: lt_s=0x53 lt_u=0x54 gt_s=0x55 gt_u=0x56 le_s=0x57 le_u=0x58 ge_s=0x59 ge_u=0x5a
+    let opcode = match (op, unsigned) {
+        (PortableBinary::Add, _) => 0x7c,
+        (PortableBinary::Sub, _) => 0x7d,
+        (PortableBinary::Mul, _) => 0x7e,
+        (PortableBinary::Div, false) => 0x7f,
+        (PortableBinary::Div, true) => 0x80,
+        (PortableBinary::Rem, false) => 0x81,
+        (PortableBinary::Rem, true) => 0x82,
+        (PortableBinary::BitAnd, _) => 0x83,
+        (PortableBinary::BitOr, _) => 0x84,
+        (PortableBinary::BitXor, _) => 0x85,
+        (PortableBinary::Shl, _) => 0x86,
+        (PortableBinary::Shr, false) => 0x87,
+        (PortableBinary::Shr, true) => 0x88,
+        (PortableBinary::Eq, _) => 0x51,
+        (PortableBinary::Ne, _) => 0x52,
+        (PortableBinary::Lt, false) => 0x53,
+        (PortableBinary::Lt, true) => 0x54,
+        (PortableBinary::Gt, false) => 0x55,
+        (PortableBinary::Gt, true) => 0x56,
+        (PortableBinary::Le, false) => 0x57,
+        (PortableBinary::Le, true) => 0x58,
+        (PortableBinary::Ge, false) => 0x59,
+        (PortableBinary::Ge, true) => 0x5a,
+        (PortableBinary::LogAnd | PortableBinary::LogOr, _) => unreachable!(),
     };
     output.push(opcode);
     if matches!(

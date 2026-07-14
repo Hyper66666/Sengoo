@@ -1,53 +1,77 @@
-﻿# wasm-backend Specification
+# wasm-backend Specification
 
 ## Purpose
-Define the scalar wasm32 direct-emitter backend, validation, fail-closed capability diagnostics, and documented WASI profile boundary for Sengoo portable deployment.
+
+Define the experimental scalar wasm32 backend for Sengoo: a direct MIR-to-WASM
+emitter with validated modules, versioned ABI metadata, and fail-closed
+capability diagnostics. Production ownership, Drop, and WASI host coverage are
+explicitly out of scope for this specification.
 
 ## Requirements
 
-### Requirement: The compiler SHALL produce validated WebAssembly modules
+### Requirement: Experimental scalar WASM SHALL produce validated modules
 
-After the backend entry gate passes, `sgc build --target wasm` SHALL produce a
-valid module using the selected, documented emitter and target ABI.
+The toolchain SHALL produce a core WebAssembly module for experimental scalar
+programs when building with target wasm, and SHALL reject aggregates, heap
+ownership, FFI, and unsupported host imports with unsupported-target-capability.
 
-#### Scenario: Core program is built for WASM
+#### Scenario: Scalar program is built for WASM
 
-- **WHEN** a representative scalar/control-flow/call/aggregate program is built
+- **WHEN** a scalar control-flow or call program is built with target wasm
 - **THEN** module validation succeeds
-- **AND** execution under the pinned runtime matches native expected output and
-  exit behavior
+- **AND** the module exports main
+- **AND** embedded MIR semantic ABI and portable runtime ABI versions are present
 
-### Requirement: WASM SHALL preserve ownership and Drop semantics
+#### Scenario: Aggregate or host-only program is built for WASM
 
-Owned values in linear memory SHALL follow the same move and exact-once Drop
-contract as native production semantics.
+- **WHEN** a program requires aggregates, heap ownership, FFI, or unsupported
+  stdlib or host imports
+- **THEN** build fails with unsupported-target-capability
+- **AND** no native fallback artifact is produced
 
-#### Scenario: Owned aggregate exits through multiple paths
+### Requirement: WASM integer operations SHALL preserve signedness
 
-- **WHEN** a program containing String, Vec, or user Drop values exits normally,
-  early, or through propagated error
-- **THEN** every still-owned value is released exactly once
-- **AND** no linear-memory access uses a moved or freed value
+Division, remainder, shift, and ordered comparison operations SHALL use
+unsigned WebAssembly opcodes when operands are unsigned integer types.
 
-### Requirement: WASI host capabilities SHALL be versioned and bounded
+#### Scenario: Unsigned compare of maximum u64 and zero
 
-The backend SHALL publish a pinned WASI profile and supported import subset with
-resource limits.
+- **WHEN** a program evaluates maximum u64 greater than zero on the WASM target
+- **THEN** the result matches native production semantics
 
-#### Scenario: Program uses a supported WASI capability
+### Requirement: WASM artifacts SHALL reject unknown ABI versions before run
 
-- **WHEN** a program uses documented args/env/output/time/file APIs
-- **THEN** imports use the versioned host ABI and execute within configured
-  memory/time/output limits
+Running a wasm artifact SHALL parse the portable ABI custom section and SHALL
+reject unsupported MIR or portable runtime ABI versions before invoking a host
+runtime.
 
-### Requirement: Unsupported WASM capabilities SHALL fail explicitly
+#### Scenario: Tampered ABI version is executed
 
-Host-only or unsupported stdlib capabilities SHALL fail before emission with a
-stable target diagnostic and SHALL NOT fall back to native execution.
+- **WHEN** an otherwise valid scalar module has its embedded ABI version changed
+  to an unsupported value
+- **THEN** run fails with unsupported-mir-semantic-abi or
+  unsupported-portable-runtime-abi
+- **AND** the host runtime is not used to execute the module body
 
-#### Scenario: WASM program imports dynamic FFI or process APIs
+### Requirement: Unsupported memory operations SHALL fail closed
 
-- **WHEN** the selected target does not support the import
-- **THEN** build fails with `unsupported-target-capability`
-- **AND** no native artifact or subprocess is produced
+Load, Store, and AddrOf operations SHALL fail with unsupported-target-capability
+and MUST NOT be rewritten to a plain Move. Ref, Ptr, and Future types are
+outside the experimental scalar surface.
 
+#### Scenario: Program uses AddrOf or Load
+
+- **WHEN** portable lowering encounters AddrOf, Load, or Store
+- **THEN** compilation fails with a stable capability diagnostic
+- **AND** the instruction is not rewritten to a plain Move
+
+### Requirement: Production ownership Drop and WASI MUST remain deferred
+
+The experimental scalar backend MUST NOT claim production ownership Drop or WASI
+host support until a follow-up change implements and archives those surfaces.
+
+#### Scenario: Documentation describes the experimental boundary
+
+- **WHEN** users read portable-targets or wasm-wasi-profile documentation
+- **THEN** the experimental scalar tier and deferred WASI ownership work are
+  stated explicitly

@@ -270,6 +270,101 @@ def main() -> i64 {
 }
 
 #[test]
+fn wasm_target_unsigned_compare_matches_native() {
+    let dir = temp_dir("wasm_unsigned_cmp");
+    let source = dir.join("main.sg");
+    fs::write(
+        &source,
+        r#"
+def main() -> i64 {
+    if 18446744073709551615u64 > 0u64 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let native = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--force-rebuild"])
+        .output()
+        .expect("run native unsigned compare");
+    let wasm = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run wasm unsigned compare");
+    assert_eq!(
+        wasm.status.code(),
+        native.status.code(),
+        "native stdout:\n{}\nnative stderr:\n{}\nwasm stdout:\n{}\nwasm stderr:\n{}",
+        String::from_utf8_lossy(&native.stdout),
+        String::from_utf8_lossy(&native.stderr),
+        String::from_utf8_lossy(&wasm.stdout),
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+    assert_eq!(wasm.status.code(), Some(42));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wasm_artifact_rejects_tampered_abi_version_before_run() {
+    let dir = temp_dir("wasm_abi_tamper");
+    let source = write_scalar_program(&dir);
+    let artifact = dir.join("app.wasm");
+    let build = Command::new(sgc())
+        .args([
+            "build",
+            source.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--output",
+            artifact.to_str().unwrap(),
+        ])
+        .output()
+        .expect("build wasm for ABI tamper");
+    assert!(
+        build.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let mut bytes = fs::read(&artifact).expect("read wasm artifact");
+    // Custom ABI section payload is near the start; flip MIR semantic ABI LEB
+    // from 1 -> 2 while keeping the module otherwise well-formed.
+    let name = b"sengoo.portable_runtime_abi";
+    let name_pos = bytes
+        .windows(name.len())
+        .position(|w| w == name)
+        .expect("failed to locate ABI custom section name");
+    let version_pos = name_pos + name.len();
+    assert_eq!(
+        bytes.get(version_pos).copied(),
+        Some(1),
+        "expected MIR ABI version byte 1 after custom section name"
+    );
+    bytes[version_pos] = 2;
+    fs::write(&artifact, &bytes).unwrap();
+
+    let run = Command::new(sgc())
+        .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run tampered wasm");
+    assert!(
+        !run.status.success(),
+        "tampered ABI must fail closed before execution"
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("unsupported-mir-semantic-abi")
+            || stderr.contains("unsupported-portable-runtime-abi"),
+        "stderr:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wasm_target_uses_wasm32_pointer_sized_literal_bounds() {
     let dir = temp_dir("wasm32_usize_bounds");
     let source = dir.join("main.sg");

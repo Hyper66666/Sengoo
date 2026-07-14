@@ -1,63 +1,63 @@
-# WASM / WASI Profile (v1)
+# WASM / WASI Profile (experimental scalar v1)
 
-Pinned profile name: **`sengoo-wasm32-scalar-v1`**
+Pinned profile name: **`sengoo-wasm32-scalar-experimental-v1`**
+
+> **Not production WASM.** This profile documents the experimental scalar
+> backend only. Owned String/Vec Drop and WASI host imports are deferred and
+> MUST NOT be claimed as Supported production capabilities.
 
 ## Target triple and ABI
 
 | Item | Value |
 | --- | --- |
 | Frontend triple | `wasm32-unknown-unknown` |
-| Pointer width | 32-bit (`isize`/`usize` are 32-bit) |
-| MIR semantic ABI | `1` (`MIR_SEMANTIC_ABI_VERSION`) |
+| Pointer width | 32-bit (`isize`/`usize`) |
+| MIR semantic ABI | `1` |
 | Portable runtime ABI | `1` (`runtime/abi/portable_runtime_abi_v1.json`) |
-| Module export | `main : () -> i64` (WebAssembly `i64`) |
+| Module export | `main : () -> i64` |
 | Emitter | Direct MIR→WASM (`docs/architecture/wasm-emitter-decision.md`) |
+| Support tier | **Experimental scalar** |
 
-## Supported program surface (v1)
+## Supported program surface
 
-- Scalar MIR: `i64`/`bool`/unit, internal calls, recursion, branches, loops,
-  switch, phi, integer/boolean arithmetic.
-- Compile-time rejection (stable `unsupported-target-capability`) for:
+- Scalar MIR: `i64`/`u*`/`bool`/unit value types, internal calls, recursion,
+  branches, loops, switch, phi, integer/boolean arithmetic with correct
+  signedness for div/rem/shr/compare.
+- Compile-time rejection (`unsupported-target-capability`) for:
+  - Load / Store / AddrOf
+  - Ref / Ptr / Future types
+  - aggregates and heap ownership
   - dynamic FFI and host stdlib externs
-  - owned `String`, generic collections, aggregates requiring heap layout
-  - async functions and reactor I/O
-  - process / network / reflection modules
+  - async / reactor I/O
 
 ## WASI host import subset
 
-v1 **does not emit WASI imports**. Scalar programs are pure core WebAssembly.
+**Not implemented.** Experimental modules are pure core WebAssembly (no imports).
 
-The forward WASI allowlist for a later revision is pinned conceptually to
-`wasi_snapshot_preview1` capabilities:
+Forward allowlist for a future production change (not a support claim):
 
-| Capability | Import candidates | v1 status |
+| Capability | Import candidates | Current status |
 | --- | --- | --- |
-| args | `args_sizes_get`, `args_get` | Unsupported (compile reject if used via stdlib) |
-| env | `environ_sizes_get`, `environ_get` | Unsupported |
-| stdout/stderr | `fd_write` (fd 1/2) | Unsupported |
-| time | `clock_time_get` | Unsupported |
-| sandboxed file IO | `path_open`, `fd_read`, `fd_close` | Unsupported |
-| process / dynamic FFI / net | — | Permanently out of scope for this profile |
+| args | `args_sizes_get`, `args_get` | Deferred |
+| env | `environ_sizes_get`, `environ_get` | Deferred |
+| stdout/stderr | `fd_write` | Deferred |
+| time | `clock_time_get` | Deferred |
+| sandboxed file IO | `path_open`, `fd_read`, `fd_close` | Deferred |
 
-When those imports are implemented, they must map through portable runtime ABI
-host-call IDs (`args_read`, `env_read`, `stdout_write`, …) rather than native C
-pointers from `runtime_shared.h`.
+## Resource limits (enforced vs documented)
 
-## Resource limits (test/runtime)
-
-| Limit | Value | Enforcement |
-| --- | --- | --- |
-| Module validation | structural section order + type/function/code agreement | `validate_wasm_module` before reporting build success |
-| Host runtime | Node.js or wasmtime (`SENGOO_WASM_RUNTIME`) | `sgc run --target wasm` |
-| Wall time (wasmtime) | host default; optional future `--wasm-timeout` | documented |
-| Output | integer `main` result printed/parsed | runner scripts |
-| Memory | core module has no linear memory in v1 scalar emitter | n/a |
+| Limit | Enforcement |
+| --- | --- |
+| Module size ≤ 4 MiB | Enforced in `validate_wasm_module` |
+| Embedded ABI versions | Enforced on build and `sgc run` of `.wasm` |
+| Wall-clock run timeout (10s) | Enforced around Node/wasmtime process |
+| wasmtime fuel | Best-effort (`--fuel` when CLI accepts it) |
+| Multi-OS CI matrix | **Not yet** — Ubuntu portable smoke only |
 
 ## CLI
 
 ```bash
 sgc build program.sg --target wasm -o app.wasm
 sgc run program.sg --target wasm
-# or
 SENGOO_WASM_RUNTIME=wasmtime sgc run program.sg --target wasm
 ```
