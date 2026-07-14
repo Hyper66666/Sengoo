@@ -20,15 +20,28 @@
 
 ## 2. Native safety and longevity
 
-- [ ] 2.1 Run ASan/UBSan (or platform-equivalent supported instrumentation) over
+- [x] 2.1 Run ASan/UBSan (or platform-equivalent supported instrumentation) over
   runtime C/Rust native integration tests.
-- [ ] 2.2 Add leak-count gates for owned String, generic collections, async
+  - Actions run `29321126548` passes the split C runtime under Clang ASan/UBSan
+    and the Rust runtime/FFI suites under Rust ASan with leak detection enabled.
+- [x] 2.2 Add leak-count gates for owned String, generic collections, async
   frames/tasks, registry archives, TLS/network handles, and FFI generation
   tables.
-- [ ] 2.3 Add long-running cancellation/channel/lock/reactor stress with bounded
+  - The sanitizer probe retains Buffer/String/opaque-handle baselines and exact
+    collection Drop checks; the Rust ASan suites cover async task/file, TLS,
+    registry archive, and FFI handle-table ownership. Run `29321126548` is the
+    first all-green blocking evidence after the JSON document leak fix.
+- [x] 2.3 Add long-running cancellation/channel/lock/reactor stress with bounded
   timeouts and deadlock diagnostics.
-- [ ] 2.4 Audit `unsafe`/C ABI boundaries and add negative pointer/length/handle/
+  - The bounded-longevity job in run `29321126548` completes ten repeated
+    task-scope, channel, RwLock, and reactor/AsyncFile cycles under a 30-minute
+    timeout and preserves its transcript artifact.
+- [x] 2.4 Audit `unsafe`/C ABI boundaries and add negative pointer/length/handle/
   unwind tests.
+  - `docs/native-safety-audit.md` maps each unsafe/native boundary to its
+    validation and negative evidence; the same run rejects null pointer,
+    invalid length, stale/double-close handle, and panic/unwind paths without a
+    sanitizer report.
 
 ## 3. Compatibility and ABI
 
