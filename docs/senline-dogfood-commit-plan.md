@@ -53,3 +53,60 @@ archive for 4.7 path, and leave 4.8/5.9/6.5 unchecked until Ubuntu evidence.
   `16aebd9ec476d602c9c0d0082ee9e25a87c520c333d6dd3afeb314f8c39ea128`.
 - Single-worker 100k hit a 3600s watchdog around case **44,086** with growing
   working set / declining throughput. **Do not treat shards as soak pass.**
+
+## Session 2026-07-15 handoff
+
+### Clean revision
+
+- Branch `codex/senline-service-dogfood` is clean after Lore commits.
+- HEAD (after compare fix): `ed280b9a3`
+- First stacked tip before compare fix: `a96518ddb`
+- Safety checkpoint:
+  `D:\Sengoo\.worktrees\_checkpoints\senline-service-dogfood-20260715-045753`
+- PR: https://github.com/Hyper66666/Sengoo/pull/44
+- CI dispatch: https://github.com/Hyper66666/Sengoo/actions/runs/29391088380
+
+### Lore commits (base `1de09ccaf` → `ed280b9a3`)
+
+1. `f3e2c538e` OpenSpec change
+2. `f2a55b16f` Binary Buffer/stdio
+3. `d7d53dc03` Compiler borrow/AddrOf (+ some sgc tests)
+4. `dbff39d2d` Installed runtime + strict JSON payload (merged slice)
+5. `bd6056d29` sgpm runtime-mode + transitive maps
+6. `1777562d3` HTTP drop/copy lengths
+7. `12965ef6d` senline-domain-worker packages
+8. `802c689c2` senline-http-dogfood
+9. `1577fd3c3` Differential/fault harness
+10. `a96518ddb` Defect ledger / support / incubation
+11. `ed280b9a3` Manifest compare null fix
+
+### Local Windows evidence (not dual-host; do not check 4.8/5.9/6.5)
+
+| Gate | Result |
+| --- | --- |
+| buffer/binary/handles tests | pass |
+| runtime_distribution | 15/15 |
+| stdlib_buffer_ / stdlib_json_ | pass |
+| sgpm transitive | 2/2 |
+| release tool build | pass |
+| package-toolchain NoBuild | zip produced |
+| install.ps1 smoke | sgc 0.1.0 (a96518ddb68f) |
+| dual NoBuild package compare | `status=reproducible` (only `generated_at_utc` excluded) |
+| installed worker `sgpm check/test/build --locked` with fake cargo first on PATH | pass (15 package tests + release exe) |
+
+### Still open (30 tasks)
+
+- **2.10** needs POSIX pipe + complete focused matrix, not Windows-only.
+- **4.7–4.9** need green Ubuntu package smoke / dual-build from CI, not only local Windows.
+- **4A.4 / 5.12–5.13** need full installed loops both hosts + packaging evidence.
+- **5.9** needs Linux determinism digest matching Windows.
+- **6.5–6.7** HTTP dual-host matrix + anti-deploy checks.
+- **7.x / 8.x / 9.x** pin chain, soak (incl. case 44086), handoff.
+
+### Next agent
+
+1. Wait for run `29391088380` (and re-run on `ed280b9a3` if needed).
+2. If Ubuntu package smoke green, extract Linux archive and record hashes; only then consider partial progress notes for 4.7.
+3. Do **not** check 4.8 until both-host dual independent builds compare clean.
+4. Run installed HTTP package loop and Linux determinism before 5.9/6.5.
+5. Investigate single-worker 100k memory under 8.3 with checked-in sampler.
