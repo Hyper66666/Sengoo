@@ -38,12 +38,13 @@
     diagnostic JSON 1, test/assertion JSON 1, package metadata 2, publish
     metadata 1, and reflection metadata 1 are documented and retain their
     existing unknown-version rejection tests where they are consumed.
-- [ ] 3.3 Add retained compatibility projects spanning the previous supported
+- [x] 3.3 Add retained compatibility projects spanning the previous supported
   prerelease and current toolchain.
-  - In progress: `examples/compat/v0.1.0-rc.1` and the fail-closed
+  - `examples/compat/v0.1.0-rc.1` and the fail-closed
     `compatibility-prerelease` workflow run the same copied, locked package
     outside the checkout with the installed previous release and current
-    binaries. Check this task only after the first Actions transcript passes.
+    binaries. Actions run `29307733159` preserves the transcript and proves
+    both toolchains pass locked check/test/fmt/doc/build.
 - [x] 3.4 Publish the supported host/architecture/toolchain matrix and release
   support policy.
   - The compatibility policy lists Windows x64, Linux x64, macOS x64, and
