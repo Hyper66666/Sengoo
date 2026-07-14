@@ -6,4 +6,5 @@ adapters and checked numeric conversion, and verifies that owned String fields
 return to their baseline without manual release calls.
 
 Run the locked package loop with `sgpm check --locked`, `sgpm test --locked`,
-`sgpm fmt --check --locked`, `sgpm doc --locked`, and `sgpm build --locked`.
+`sgpm fmt --check --locked`, `sgpm doc --locked`, `sgpm build --locked`, and
+`sgpm run --locked`.

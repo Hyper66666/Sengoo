@@ -7,18 +7,30 @@ on:
 
 jobs:
   realworld-e2e:
-    name: realworld locked loop (real binaries)
+    name: realworld locked loop (installed release toolchain)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.94.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
       - name: Install LLVM clang (Linux)
         if: runner.os == 'Linux'
@@ -29,7 +41,7 @@ jobs:
         run: choco install llvm -y
 
       - name: Build toolchain binaries
-        run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp
+        run: cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
 
       - name: Run realworld integration tests
         run: cargo test -p sgpm realworld -- --nocapture
@@ -49,6 +61,198 @@ jobs:
       - name: Validate OpenSpec child change
         run: npx --yes @fission-ai/openspec@1.4.1 validate package-release-defaults --strict
         continue-on-error: true
+
+      - name: Package toolchain
+        shell: pwsh
+        env:
+          SENGOO_BUILD_HASH: ${{ github.sha }}
+          SENGOO_DIST_TARGET: ${{ matrix.target }}
+        run: |
+          ./scripts/package-toolchain.ps1 -Version 0.1.0-ci -NoBuild -SmokeEvidence "realworld-e2e installed fixture loop ${{ matrix.os }} ${{ github.sha }}"
+
+      - name: Install package (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive=$(cat target/dist/latest-archive.txt)
+          install_root="$(pwd)/target/install-smoke"
+          sh scripts/install.sh "$archive" "$install_root"
+          {
+            printf 'SENGOO_INSTALL_ROOT=%s\n' "$install_root"
+            printf 'SENGOO_INSTALLED_BIN=%s\n' "$install_root/bin"
+          } >> "$GITHUB_ENV"
+
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Get-Content target/dist/latest-archive.txt
+          $installRoot = Join-Path (Resolve-Path .) "target/install-smoke"
+          ./scripts/install.ps1 -Archive $archive -InstallDir $installRoot
+          "SENGOO_INSTALL_ROOT=$installRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SENGOO_INSTALLED_BIN=$(Join-Path $installRoot 'bin')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run installed realworld fixture loop
+        shell: pwsh
+        run: |
+          function Copy-TreeFiltered([string]$Source, [string]$Destination) {
+            New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+            foreach ($entry in Get-ChildItem -LiteralPath $Source -Force) {
+              if ($entry.Name -in @("target", "build")) {
+                continue
+              }
+              $target = Join-Path $Destination $entry.Name
+              if ($entry.PSIsContainer) {
+                Copy-TreeFiltered $entry.FullName $target
+              } else {
+                Copy-Item -LiteralPath $entry.FullName -Destination $target
+              }
+            }
+          }
+
+          function Invoke-Sgpm([string]$Package, [string[]]$CommandArgs) {
+            Push-Location $Package
+            try {
+              & $script:sgpm @CommandArgs
+              if ($LASTEXITCODE -ne 0) {
+                throw "sgpm $($CommandArgs -join ' ') failed for $(Split-Path $Package -Leaf)"
+              }
+            } finally {
+              Pop-Location
+            }
+          }
+
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $bin = $env:SENGOO_INSTALLED_BIN
+          if (-not $bin) {
+            throw "SENGOO_INSTALLED_BIN is required"
+          }
+          $env:PATH = "$bin$([IO.Path]::PathSeparator)$env:PATH"
+          $script:sgpm = Join-Path $bin "sgpm$suffix"
+          $env:SGPM_SGC = Join-Path $bin "sgc$suffix"
+          $env:SGPM_SGFMT = Join-Path $bin "sgfmt$suffix"
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+
+          $workRoot = if ($env:RUNNER_TEMP) {
+            Join-Path $env:RUNNER_TEMP "realworld-installed-loop-outside-checkout"
+          } else {
+            Join-Path ([System.IO.Path]::GetTempPath()) "realworld-installed-loop-outside-checkout"
+          }
+          Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $workRoot | Out-Null
+          "SENGOO_REALWORLD_WORK_ROOT=$workRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $summary = @()
+          $fixtures = Get-ChildItem examples/realworld -Directory | Where-Object {
+            Test-Path (Join-Path $_.FullName "Sengoo.toml")
+          } | Sort-Object Name
+          foreach ($fixture in $fixtures) {
+            $package = Join-Path $workRoot $fixture.Name
+            Copy-TreeFiltered $fixture.FullName $package
+
+            # Commands: sgpm update; sgpm check --locked; sgpm test --locked;
+            # sgpm fmt --check --locked; sgpm doc --locked; sgpm build --locked;
+            # sgpm run --locked
+            Invoke-Sgpm $package @("update")
+            $lockPath = Join-Path $package "Sengoo.lock"
+            $before = Get-Content -LiteralPath $lockPath -Raw
+            foreach ($commandArgs in @(
+              @("check", "--locked"),
+              @("test", "--locked"),
+              @("fmt", "--check", "--locked"),
+              @("doc", "--locked"),
+              @("build", "--locked"),
+              @("run", "--locked")
+            )) {
+              Invoke-Sgpm $package $commandArgs
+              $after = Get-Content -LiteralPath $lockPath -Raw
+              if ($after -ne $before) {
+                throw "$($fixture.Name) sgpm $($commandArgs -join ' ') rewrote Sengoo.lock"
+              }
+            }
+
+            $summary += [pscustomobject]@{
+              name = $fixture.Name
+              commands = @("update", "check", "test", "fmt --check", "doc", "build", "run")
+            }
+          }
+
+          $summaryPath = Join-Path $workRoot "installed-realworld-summary.json"
+          $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+          "SENGOO_REALWORLD_SUMMARY=$summaryPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify reviewed official package set
+        shell: pwsh
+        run: |
+          function Invoke-Sgpm([string]$Package, [string[]]$CommandArgs) {
+            Push-Location $Package
+            try {
+              & $script:sgpm @CommandArgs
+              if ($LASTEXITCODE -ne 0) {
+                throw "sgpm $($CommandArgs -join ' ') failed for $(Split-Path $Package -Leaf)"
+              }
+            } finally {
+              Pop-Location
+            }
+          }
+
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $bin = $env:SENGOO_INSTALLED_BIN
+          $script:sgpm = Join-Path $bin "sgpm$suffix"
+          $env:PATH = "$bin$([IO.Path]::PathSeparator)$env:PATH"
+          $env:SGPM_SGC = Join-Path $bin "sgc$suffix"
+          $env:SGPM_SGFMT = Join-Path $bin "sgfmt$suffix"
+
+          $summary = Get-Content -LiteralPath $env:SENGOO_REALWORLD_SUMMARY -Raw | ConvertFrom-Json
+          $reviewedOfficialSet = @(
+            @{ name = "cli-json-audit"; workflow = "cli" }
+            @{ name = "workspace-audit"; workflow = "cli" }
+            @{ name = "http-client-status"; workflow = "light-service" }
+            @{ name = "http-echo-service"; workflow = "light-service" }
+            @{ name = "package-release-loop"; workflow = "release-publish-resolve" }
+            @{ name = "python-hot-path"; workflow = "python-interop" }
+          )
+
+          foreach ($entry in $reviewedOfficialSet) {
+            if (-not ($summary.name -contains $entry.name)) {
+              throw "reviewed official package $($entry.name) was not exercised by the installed realworld loop"
+            }
+            Write-Host "reviewed official package: $($entry.name) [$($entry.workflow)]"
+          }
+
+          $releaseFixture = Join-Path $env:SENGOO_REALWORLD_WORK_ROOT "package-release-loop"
+          # Commands: sgpm metadata --format json --locked;
+          # sgpm publish --dry-run --locked --format json --output target/package;
+          # sgpm publish --registry local --locked --format json
+          Invoke-Sgpm $releaseFixture @("metadata", "--format", "json", "--locked")
+          Invoke-Sgpm $releaseFixture @("publish", "--dry-run", "--locked", "--format", "json", "--output", "target/package")
+          if (-not (Test-Path -LiteralPath (Join-Path $releaseFixture "target/package"))) {
+            throw "package-release-loop dry-run output was not created"
+          }
+          Invoke-Sgpm $releaseFixture @("publish", "--registry", "local", "--locked", "--format", "json")
+
+          $pythonFixture = Join-Path $env:SENGOO_REALWORLD_WORK_ROOT "python-hot-path"
+          if (-not (Test-Path -LiteralPath $pythonFixture)) {
+            throw "python-hot-path fixture was not copied into the installed realworld loop"
+          }
+          $pythonSmoke = Join-Path $pythonFixture "python_smoke.py"
+          if (-not (Test-Path -LiteralPath $pythonSmoke)) {
+            throw "python smoke script missing from python-hot-path fixture"
+          }
+          $pythonSmokeWork = Join-Path $pythonFixture "target/python-smoke"
+          & python $pythonSmoke --sgc $env:SGPM_SGC --package-dir $pythonFixture --work-dir $pythonSmokeWork
+          if ($LASTEXITCODE -ne 0) {
+            throw "python smoke failed for python-hot-path ctypes/.sgreflect.json interop evidence"
+          }
+          Write-Host "reviewed official package: python-hot-path [python smoke, ctypes, .sgreflect.json]"
 
   graphics-package-smoke:
     name: graphics package smoke (stub mode)

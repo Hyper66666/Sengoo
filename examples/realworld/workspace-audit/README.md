@@ -18,6 +18,7 @@ cargo run -p sgpm -- test --locked --manifest-path examples/realworld/workspace-
 cargo run -p sgpm -- fmt --check --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 cargo run -p sgpm -- doc --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 cargo run -p sgpm -- build --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
+cargo run -p sgpm -- run --locked --manifest-path examples/realworld/workspace-audit/Sengoo.toml
 ```
 
 Directory walking remains cooperative, while four independent score dimensions

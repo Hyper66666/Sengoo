@@ -37,6 +37,14 @@ owned formatting for the text report, `JsonDoc` for structured output, and
 both the populated fixture and the missing-tests error path. Four joined
 shared-counter workers compute source/test/manifest/byte score components over
 `ArcMutex<i64>` and cross-check the trait-based serial score.
+The release lane now packages and installs the toolchain, copies
+`examples/realworld/workspace-audit` outside the checkout, and runs
+`sgpm update`, `check/test/fmt/doc/build/run --locked` through the installed
+`sgpm`/`sgc`/`sgfmt` binaries before counting the fixture as release-host
+evidence. The retained Windows/Linux install transcripts are
+`docs/toolchain-distribution-windows-smoke.transcript` and
+`docs/toolchain-distribution-linux-smoke.transcript`; the four-host archive and
+provenance publication baseline remains tag run `29259068988`.
 - Include unit tests using `test_*` discovery plus `setup`/`teardown`.
 - Run through `sgpm check`, `sgpm test`, `sgpm fmt --check`, `sgpm doc`,
   `sgpm build`, and `sgpm run`.
@@ -55,6 +63,14 @@ the transition `ArcMutex<i64>` shared-counter API. Replacing that compatibility
 surface with generic `Arc<Mutex<T>>`, structured task scopes, and an
 event-driven all-host reactor remains owned by
 `concurrency-safety-and-async-io`.
+
+The production-hardening reviewed release set keeps `workspace-audit` as the
+flagship CLI package. The neighboring release-smoke fixtures are
+`cli-json-audit`, `http-client-status`, `http-echo-service`, and
+`package-release-loop`, plus the manifest-backed `python-hot-path` interop
+fixture. The installed release gate runs that package's Python `ctypes` smoke
+with the installed `sgc` outside the checkout; fresh four-host workflow
+evidence is still pending after this change.
 
 - Async network or status checks.
 - A long-running watch mode.

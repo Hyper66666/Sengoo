@@ -13,6 +13,7 @@ sgpm test --locked
 sgpm fmt --check --locked
 sgpm doc --locked
 sgpm build --locked
+sgpm run --locked
 ```
 
 Repeat the same command sequence from:
@@ -42,6 +43,10 @@ cd examples/realworld/package-release-loop
 ```
 
 ```powershell
+cd examples/realworld/python-hot-path
+```
+
+```powershell
 cd examples/realworld/workspace-doc-loop
 ```
 
@@ -68,6 +73,9 @@ Packages:
 - `package-release-loop`: package release fixture covering dependency aliases,
   two selected local-registry versions of `shared_core`, deterministic publish
   metadata, local registry publish, and locked command stability.
+- `python-hot-path`: reviewed Python interop fixture with a scalar reflected hot
+  path, package-loop coverage, and a `ctypes` smoke that compiles emitted LLVM
+  IR into a shared library outside the checkout.
 - `workspace-doc-loop`: dual-target package with a library entry, package
   tests, docs, and process invocation.
 - `workspace-audit`: flagship maturity fixture with a library/bin package,
@@ -76,3 +84,24 @@ Packages:
 
 Use [SUPPORT_MATRIX.md](SUPPORT_MATRIX.md) as the support and gap reference for
 runtime, stdlib, package, doc, test, and LSP behavior.
+
+## Reviewed Release Set
+
+The production-hardening release loop treats these fixtures as the reviewed
+first-party package set for installed-toolchain smoke:
+
+- `cli-json-audit`: CLI workflow.
+- `workspace-audit`: flagship CLI workflow.
+- `http-client-status`: light-service client/status workflow.
+- `http-echo-service`: light-service request/response workflow.
+- `package-release-loop`: publish/resolve/dry-run package workflow.
+- `python-hot-path`: reviewed Python `ctypes` hot-path workflow.
+
+The installed release lane runs the full `sgpm update` +
+`check/test/fmt/doc/build/run --locked` sequence for every fixture, then reruns
+`package-release-loop` through `metadata --format json --locked`,
+`publish --dry-run --locked --format json --output target/package`, and
+`publish --registry local --locked --format json`, and executes
+`python-hot-path/python_smoke.py` with the installed `sgc` so the reviewed set
+includes executable `.sgreflect.json` plus `ctypes` evidence outside the
+checkout.
