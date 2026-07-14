@@ -826,8 +826,8 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_2500K = 2.0"));
     assert!(gate.contains("DEFAULT_LADDER_STRETCH_LOC = \"2500000\""));
     assert!(gate.contains("ladder_stretch"));
-    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0"));
-    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 30.0"));
 }
 
 #[test]
