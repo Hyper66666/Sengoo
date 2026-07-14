@@ -117,5 +117,8 @@
 
 ## 6. Validation
 
-- [ ] 6.1 Run `openspec validate production-hardening-v1 --strict`.
-- [ ] 6.2 Run `openspec validate --all --strict`.
+- [x] 6.1 Run `openspec validate production-hardening-v1 --strict`.
+  - Passed locally on commit `dcaa108b2` after the retained performance
+    baseline and cross-host runtime fixes were integrated.
+- [x] 6.2 Run `openspec validate --all --strict`.
+  - Passed `47/47` strict items on the same commit.
