@@ -57,6 +57,7 @@ int main(void) {
     long long json = sengoo_json_parse_text(
         (long long)(intptr_t)json_text, (long long)(sizeof(json_text) - 1));
     if (json <= 0 || sengoo_json_doc_close(json) != SENGOO_STATUS_OK) return 30;
+    if (sengoo_json_doc_close(json) != SENGOO_STATUS_OK) return 33;
     if (sengoo_json_parse_text(0, 1) != 0 || sengoo_json_last_error_code() == 0) return 31;
     if (sengoo_json_parse_text((long long)(intptr_t)json_text, -1) != 0 ||
         sengoo_json_last_error_code() == 0) return 32;

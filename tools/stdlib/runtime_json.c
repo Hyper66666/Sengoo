@@ -72,6 +72,7 @@ typedef struct {
 static int sengoo_json_last_error = SENGOO_STATUS_OK;
 static long long sengoo_json_last_offset = -1;
 static char sengoo_json_last_message[256] = {0};
+static void sengoo_json_doc_destroy(SengooJsonDoc* doc);
 
 static void sengoo_json_clear_error(void) {
     sengoo_json_last_error = SENGOO_STATUS_OK;
@@ -92,8 +93,20 @@ static long long sengoo_json_set_error(long long code, long long offset, const c
 }
 
 static SengooJsonDoc* sengoo_json_doc_from_handle(long long handle) {
-    SengooJsonDoc* doc = (SengooJsonDoc*)sengoo_handle_to_ptr(handle);
+    SengooJsonDoc* doc = (SengooJsonDoc*)sengoo_opaque_handle_get(handle);
     return doc && !doc->closed ? doc : NULL;
+}
+
+static long long sengoo_json_doc_into_handle(SengooJsonDoc* doc) {
+    if (!doc) {
+        return 0;
+    }
+    long long handle = sengoo_opaque_handle_new(doc);
+    if (handle == 0) {
+        sengoo_json_doc_destroy(doc);
+        sengoo_json_set_error(SENGOO_STATUS_OUT_OF_MEMORY, -1, "json handle allocation failed");
+    }
+    return handle;
 }
 
 static SengooJsonNode* sengoo_json_node_from_id(SengooJsonDoc* doc, long long node_id) {
@@ -722,7 +735,7 @@ static long long sengoo_json_parse_bytes(const char* data, size_t len) {
         return 0;
     }
     doc->root = root;
-    return sengoo_ptr_to_handle(doc);
+    return sengoo_json_doc_into_handle(doc);
 }
 
 long long sengoo_json_parse_text(long long data, long long len) {
@@ -754,20 +767,20 @@ long long sengoo_json_parse_buffer(long long buffer_handle, long long input_len)
 long long sengoo_json_doc_object_new(void) {
     sengoo_json_clear_error();
     SengooJsonDoc* doc = sengoo_json_doc_new_with_root(SENGOO_JSON_KIND_OBJECT);
-    return doc ? sengoo_ptr_to_handle(doc) : 0;
+    return sengoo_json_doc_into_handle(doc);
 }
 
 long long sengoo_json_doc_close(long long handle) {
     sengoo_json_clear_error();
-    SengooJsonDoc* doc = (SengooJsonDoc*)sengoo_handle_to_ptr(handle);
-    if (!doc) {
+    if (handle == 0) {
         sengoo_json_set_error(SENGOO_STATUS_INVALID_HANDLE, -1, "json document handle not found");
         return -SENGOO_STATUS_INVALID_HANDLE;
     }
-    if (doc->closed) {
+    SengooJsonDoc* doc = (SengooJsonDoc*)sengoo_opaque_handle_take(handle);
+    if (!doc) {
         return 0;
     }
-    sengoo_json_doc_free(doc);
+    sengoo_json_doc_destroy(doc);
     return 0;
 }
 
