@@ -81,7 +81,9 @@ jobs:
           }
           $env:CARGO_BIN_EXE_sgc = Join-Path $releaseBin "sgc$suffix"
           $env:CARGO_BIN_EXE_sgfmt = Join-Path $releaseBin "sgfmt$suffix"
-          & $env:CARGO_BIN_EXE_sgc run examples/01_hello.sg --force-rebuild
+          # Checkout smokes authorize Cargo-built native runtime explicitly.
+          # Installed-mode is proven later against the packaged archive only.
+          & $env:CARGO_BIN_EXE_sgc --runtime-mode source-development run examples/01_hello.sg --force-rebuild
           $helloExit = $LASTEXITCODE
           if ($helloExit -ne 42) {
             throw "sgc hello smoke expected exit 42 on ${{ matrix.os }}, got $helloExit"
