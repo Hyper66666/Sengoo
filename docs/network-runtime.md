@@ -143,6 +143,12 @@ Inside an async function, `await server.next_request_async(timeout_ms)` returns
 native `HttpServerNextRequestResult.value` field uses the same one-field
 `HttpServerRequest { handle }` wrapper shape as the source-level outcome. The
 native future registers listener readiness with the cooperative reactor. A
+pending future drop/cancel unregisters that interest. If polling has already
+accepted and fully parsed a request but the future is dropped or canceled
+before `result` transfers the request handle, the runtime removes the
+unpublished handle, sends the deterministic `504` fallback, and leaves the
+server reusable. This is scoped future-resource cleanup, not general task or
+handler cancellation.
 timeout returns `STATUS_TIMEOUT` without closing the server; dropping or
 canceling a pending future unregisters its listener interest. Accepted clients
 that do not finish a request within the short cooperative I/O slice receive a

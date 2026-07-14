@@ -1385,6 +1385,20 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__result(
     }
 }
 
+fn release_abandoned_async_next_request(state: &AsyncNextRequestState) {
+    if let Some(interest) = state.listener_interest {
+        crate::async_runtime::http_listener_unregister(interest);
+    }
+    if let AsyncNextRequestOutcome::Ready {
+        is_ok: true, value, ..
+    } = state.outcome
+    {
+        if let Ok(mut entry) = net_runtime().http_request_take(value) {
+            let _ = write_http_response(&mut entry.stream, &gateway_timeout_response());
+        }
+    }
+}
+
 #[no_mangle]
 /// # Safety
 ///
@@ -1394,9 +1408,7 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__cancel(handle: i
     let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
         return false;
     };
-    if let Some(interest) = state.listener_interest {
-        crate::async_runtime::http_listener_unregister(interest);
-    }
+    release_abandoned_async_next_request(&state);
     true
 }
 
@@ -1409,9 +1421,7 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__drop(handle: i64
     let Some(state) = (unsafe { async_handle_take_box::<AsyncNextRequestState>(handle) }) else {
         return;
     };
-    if let Some(interest) = state.listener_interest {
-        crate::async_runtime::http_listener_unregister(interest);
-    }
+    release_abandoned_async_next_request(&state);
 }
 
 fn request_text_len(handle: u64, read: fn(&HttpRequestEntry) -> &str) -> i64 {

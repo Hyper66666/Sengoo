@@ -1,5 +1,7 @@
 extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
+    fn sengoo_string_from_bytes_copy(bytes_ptr: i64, len: i64) -> i64;
+    fn sengoo_ffi_buffer_commit_used_len(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_net_last_error() -> i64;
     fn sengoo_net_clear_error();
     fn sengoo_net_error_name_copy(code: i64, buffer: i64, capacity: i64) -> i64;
@@ -414,13 +416,33 @@ def http_request_i64_result(value: i64) -> Result<i64, i64> {
     }
 }
 
+def http_request_buffer_copy_result(buffer: Buffer, copied: i64) -> Result<i64, i64> {
+    if copied < 0 { return Result { is_ok: false, value: 0, error: net_last_status() }; };
+    let committed = sengoo_ffi_buffer_commit_used_len(buffer.handle, copied);
+    if committed >= 0 {
+        Result { is_ok: true, value: copied, error: 0 }
+    } else {
+        Result { is_ok: false, value: 0, error: ffi_status_from_raw(committed) }
+    }
+}
+
+def http_request_owned_string_from_buffer(buffer: Buffer, len: i64) -> Result<String, i64> {
+    let raw = sengoo_string_from_bytes_copy(buffer.ptr(), len);
+    if raw >= 0 {
+        Result { is_ok: true, value: String { handle: raw }, error: 0 }
+    } else {
+        Result { is_ok: false, value: String { handle: 0 }, error: 0 - raw }
+    }
+}
+
 impl HttpServerRequest {
     def method_len(self) -> Result<i64, i64> {
         http_request_i64_result(sengoo_http_request_method_len(self.handle))
     }
 
     def method_copy(self, buffer: Buffer) -> Result<i64, i64> {
-        http_request_i64_result(sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len()))
+        let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
+        http_request_buffer_copy_result(buffer, copied)
     }
 
     def method_string(self) -> Result<String, i64> {
@@ -433,7 +455,7 @@ impl HttpServerRequest {
                 let buffer = buffer_result.value;
                 let copied = sengoo_http_request_method_copy(self.handle, buffer.ptr(), buffer.len());
                 if copied >= 0 {
-                    let owned = string_from_buffer(buffer, copied);
+                    let owned = http_request_owned_string_from_buffer(buffer, copied);
                     buffer.free();
                     owned
                 } else {
@@ -451,7 +473,8 @@ impl HttpServerRequest {
     }
 
     def path_copy(self, buffer: Buffer) -> Result<i64, i64> {
-        http_request_i64_result(sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len()))
+        let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
+        http_request_buffer_copy_result(buffer, copied)
     }
 
     def path_string(self) -> Result<String, i64> {
@@ -464,7 +487,7 @@ impl HttpServerRequest {
                 let buffer = buffer_result.value;
                 let copied = sengoo_http_request_path_copy(self.handle, buffer.ptr(), buffer.len());
                 if copied >= 0 {
-                    let owned = string_from_buffer(buffer, copied);
+                    let owned = http_request_owned_string_from_buffer(buffer, copied);
                     buffer.free();
                     owned
                 } else {
@@ -482,7 +505,8 @@ impl HttpServerRequest {
     }
 
     def query_copy(self, buffer: Buffer) -> Result<i64, i64> {
-        http_request_i64_result(sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len()))
+        let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
+        http_request_buffer_copy_result(buffer, copied)
     }
 
     def query_string(self) -> Result<String, i64> {
@@ -495,7 +519,7 @@ impl HttpServerRequest {
                 let buffer = buffer_result.value;
                 let copied = sengoo_http_request_query_copy(self.handle, buffer.ptr(), buffer.len());
                 if copied >= 0 {
-                    let owned = string_from_buffer(buffer, copied);
+                    let owned = http_request_owned_string_from_buffer(buffer, copied);
                     buffer.free();
                     owned
                 } else {
@@ -513,7 +537,8 @@ impl HttpServerRequest {
     }
 
     def version_copy(self, buffer: Buffer) -> Result<i64, i64> {
-        http_request_i64_result(sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len()))
+        let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
+        http_request_buffer_copy_result(buffer, copied)
     }
 
     def version_string(self) -> Result<String, i64> {
@@ -526,7 +551,7 @@ impl HttpServerRequest {
                 let buffer = buffer_result.value;
                 let copied = sengoo_http_request_version_copy(self.handle, buffer.ptr(), buffer.len());
                 if copied >= 0 {
-                    let owned = string_from_buffer(buffer, copied);
+                    let owned = http_request_owned_string_from_buffer(buffer, copied);
                     buffer.free();
                     owned
                 } else {
@@ -554,7 +579,7 @@ impl HttpServerRequest {
     def header_copy(self, name: &str, buffer: Buffer) -> Result<i64, i64> {
         let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
         if copied >= 0 {
-            Result { is_ok: true, value: copied, error: 0 }
+            http_request_buffer_copy_result(buffer, copied)
         } else if net_last_error() == 0 {
             Result { is_ok: false, value: 0, error: STATUS_NOT_FOUND() }
         } else {
@@ -576,7 +601,7 @@ impl HttpServerRequest {
                 let buffer = buffer_result.value;
                 let copied = sengoo_http_request_header_copy(self.handle, sengoo_stdlib_str_ptr(name), buffer.ptr(), buffer.len());
                 if copied >= 0 {
-                    let owned = string_from_buffer(buffer, copied);
+                    let owned = http_request_owned_string_from_buffer(buffer, copied);
                     buffer.free();
                     owned
                 } else {
@@ -594,7 +619,8 @@ impl HttpServerRequest {
     }
 
     def body_copy(self, buffer: Buffer) -> Result<i64, i64> {
-        http_request_i64_result(sengoo_http_request_body_copy(self.handle, buffer.ptr(), buffer.len()))
+        let copied = sengoo_http_request_body_copy(self.handle, buffer.ptr(), buffer.len());
+        http_request_buffer_copy_result(buffer, copied)
     }
 
     // Answers the request exactly once: writes the response, closes the
