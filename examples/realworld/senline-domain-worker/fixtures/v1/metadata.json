@@ -1,0 +1,73 @@
+{
+  "fixture_set_version": 1,
+  "linked_changes": {
+    "sengoo": "senline-service-dogfood",
+    "senline": "adopt-sengoo-backend-slice",
+    "sengoo_baseline_revision": "1de09ccafa7e8f182af68e82352e2d4be39496b0"
+  },
+  "protocol": {
+    "input_max_bytes": 32768,
+    "output_max_bytes": 8192,
+    "max_in_flight": 1,
+    "stdout": "protocol_only",
+    "frame_prefix": "u32_big_endian"
+  },
+  "bounds": {
+    "opaque_ascii_ref_bytes": {"min": 1, "max": 128},
+    "evaluation_id_lower_hex_bytes": 32,
+    "facts_binding_lower_hex_bytes": 64,
+    "sengoo_module_revision_lower_hex_bytes": 40,
+    "u32_field_max": 4294967295,
+    "json_safe_u64_field_max": 9007199254740991,
+    "source_device_capabilities_items": {"min": 0, "max": 1},
+    "feature_flags_items": {"min": 0, "max": 1}
+  },
+  "revision_semantics": {
+    "sengoo_module_revision": "planner_contract_fixture_revision",
+    "sengoo_source_revision": "immutable_bundle_source_revision"
+  },
+  "binding": {
+    "algorithm": "sha256",
+    "encoding": "senline.submit-envelope.binding.v1 typed-big-endian",
+    "context_fields": ["contract_version", "operation", "operation_version", "evaluation_id", "operation_epoch", "worker_generation", "execution_mode", "worker_bundle_id"],
+    "facts_fields": ["contract_version", "operation_version", "identifiers", "source_device_status", "source_device_capabilities", "envelope_protocol_version", "ciphertext_length_bytes", "idempotency_status", "recipient_pending_count", "recipient_pending_limit", "application_envelopes_used", "application_envelopes_limit", "ciphertext_limit_bytes", "feature_flags"],
+    "identifier_fields": ["correlation_ref", "source_account_ref", "source_device_ref", "recipient_account_ref", "recipient_device_ref", "conversation_ref", "envelope_ref"]
+  },
+  "enums": {
+    "execution_mode": ["fixture", "shadow", "guarded-development", "internal-alpha"],
+    "source_device_status": ["active"],
+    "source_device_capabilities": ["submit_envelope_v2"],
+    "idempotency_status": ["new", "exact_duplicate", "conflict"],
+    "feature_flags": ["enqueue_delivery"],
+    "decision": ["store_and_enqueue", "duplicate_noop", "reject"],
+    "reason": ["accepted_new", "exact_duplicate", "idempotency_conflict", "recipient_queue_full", "application_budget_exhausted", "delivery_disabled"],
+    "worker_error": ["malformed_json", "unknown_field", "duplicate_field", "invalid_unicode", "trailing_bytes", "unknown_enum", "unsupported_operation_version"]
+  },
+  "cases": [
+    {"name":"eligible_accept","request":"cases/eligible-accept.request.json","response":"cases/eligible-accept.plan.json","decision":"store_and_enqueue","reason":"accepted_new","request_sha256":"398159a680fec4f9724f5d4ed09a461da97a627146c4469fe936c5efc8c3f575","response_sha256":"df4c6f3612b9aaf1de046558f64bdf26b6720d82b0df6e0641231827761da763"},
+    {"name":"exact_duplicate","request":"cases/exact-duplicate.request.json","response":"cases/exact-duplicate.plan.json","decision":"duplicate_noop","reason":"exact_duplicate","request_sha256":"80633c373095d873fe3af53b6afbf27036445e5356a75e242a2e4f4c6c1fc1a7","response_sha256":"5246ded59b37eeabb6daa46dccd188dd286b63934ecb10a22101ed8a0b9cd448"},
+    {"name":"idempotency_conflict","request":"cases/idempotency-conflict.request.json","response":"cases/idempotency-conflict.plan.json","decision":"reject","reason":"idempotency_conflict","request_sha256":"c373b576139dbc29ee3119d81ce850d6141025f9d75d80cae11d2ab8f53c5bef","response_sha256":"d36a17362b415ff09bd9dccc638f623868472a3a34b2b0ca647aa38994803931"},
+    {"name":"application_budget_rejection","request":"cases/application-budget-rejection.request.json","response":"cases/application-budget-rejection.plan.json","decision":"reject","reason":"application_budget_exhausted","request_sha256":"b000a18cf56e09cb922e96d554846a96e578cf2bcfa0c128edc49d24fb4c2208","response_sha256":"35d96f0b519b62f6388199534b436b401020fe224315c0f810566a42447f9dd6"},
+    {"name":"unknown_operation_version","request":"cases/unknown-operation-version.request.json","response":"cases/unknown-operation-version.error.json","decision":"error","reason":"unsupported_operation_version","request_sha256":"7305c9fc1b7b2f8247f1304d6186805b25e818fcf6139d32c8cd7326521cbb18","response_sha256":"62f82b84054271178ff75130775ab9fc825d170ffcd2ab795410d464624ea145"}
+  ],
+  "handshake": {"path":"handshake/ready.json","sha256":"013585359995295b758efa367874943677e13a6eda6cd60762197dcbdf13d323"},
+  "protocol_errors": [
+    {"path":"errors/protocol-malformed-json.json","code":"malformed_json","sha256":"054f225427a1272d0371f255c38d6c4868ea5d911585392be5792fbb7514cac1"},
+    {"path":"errors/protocol-unknown-field.json","code":"unknown_field","sha256":"6efb6dfcf37f1f5321ba7127fadfe18fcc10d7317ddc201678ae9ab359e09e79"},
+    {"path":"errors/protocol-duplicate-field.json","code":"duplicate_field","sha256":"990c858b627d699ab80560b79dd9d06abc8e6d70ca1961e8f02b504411455e56"},
+    {"path":"errors/protocol-invalid-unicode.json","code":"invalid_unicode","sha256":"72e208c29f81b06960b297e79d733a1ac79b3b594c39c88c36d79efcc183f95b"},
+    {"path":"errors/protocol-trailing-bytes.json","code":"trailing_bytes","sha256":"aa06776b2b90d4753a6aecda24f0eb6cb4f0f7abc3a11345ac0f409950217082"},
+    {"path":"errors/protocol-unknown-enum.json","code":"unknown_enum","sha256":"81a2f5e02276c24a02b96a7cebfa211b2d5eadd48f6d4c6d0bdbc1ef940165ec"}
+  ],
+  "strict_parser_error_inputs": [
+    {"path":"errors/protocol-duplicate-field.request.raw","code":"duplicate_field","sha256":"cd97a1b386622f72f44c016703d39247556a1244c232cfd854d566e17bac8f0f"},
+    {"path":"errors/protocol-invalid-unicode.request.raw","code":"invalid_unicode","sha256":"905e89b5679fbaa026289994870f3975a04ab5014ccbc56d8947a5b3a65a57e8"},
+    {"path":"errors/protocol-trailing-bytes.request.raw","code":"trailing_bytes","sha256":"20a58aeddbc0f76bfe2af2874a08c63c2376808e419da9f603ac40aa852adf27"}
+  ],
+  "rust_only_no_worker": [
+    {"path":"rust-only-no-worker/forged-request.json","reason":"forged_request","sha256":"fde87ce9ef58b5c5bfccdebbd77e414cbf7e4a381364eeddd38921a6da97c39d"},
+    {"path":"rust-only-no-worker/revoked-device.json","reason":"revoked_device","sha256":"05f71182e0d39d2a040657e5850696f350128bbf3f20d729918c7293af7c4fd6"},
+    {"path":"rust-only-no-worker/stale-request.json","reason":"stale_request","sha256":"8d4abe7145781d5310282150b4f215ff48c84b632bbbb5c8884e455877ee1013"},
+    {"path":"rust-only-no-worker/rate-limited.json","reason":"rate_limited","sha256":"7aa216b1f179076e730daf0709c9bb1a273efec46aab66512f3a8c7df44a834e"}
+  ]
+}

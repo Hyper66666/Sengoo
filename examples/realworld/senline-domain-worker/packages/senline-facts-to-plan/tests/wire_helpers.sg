@@ -1,0 +1,21 @@
+import std::string;
+
+import senline_facts_to_plan;
+
+def main() -> i64 {
+    if not str_eq(senline_decision_name(SENLINE_DECISION_STORE_AND_ENQUEUE()), "store_and_enqueue") { return 10; };
+    if not str_eq(senline_decision_name(SENLINE_DECISION_DUPLICATE_NOOP()), "duplicate_noop") { return 11; };
+    if not str_eq(senline_decision_name(SENLINE_DECISION_REJECT()), "reject") { return 12; };
+    if not str_eq(senline_decision_name(99), "") { return 13; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_ACCEPTED_NEW()), "accepted_new") { return 20; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_EXACT_DUPLICATE()), "exact_duplicate") { return 21; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_IDEMPOTENCY_CONFLICT()), "idempotency_conflict") { return 22; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_RECIPIENT_QUEUE_FULL()), "recipient_queue_full") { return 23; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED()), "application_budget_exhausted") { return 24; };
+    if not str_eq(senline_reason_name(SENLINE_REASON_DELIVERY_DISABLED()), "delivery_disabled") { return 25; };
+    if not str_eq(senline_reason_name(99), "") { return 26; };
+    let empty = senline_empty_worker_request_v1();
+    if empty.schema_version != 0 or empty.context.contract_version != 0 or empty.facts.contract_version != 0 { return 30; };
+    if not empty.context.operation.is_empty() or not empty.context.evaluation_id.is_empty() or not empty.facts.identifiers.correlation_ref.is_empty() { return 31; };
+    0;
+}

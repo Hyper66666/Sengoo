@@ -1,0 +1,8 @@
+[package]
+name = "sgframing"
+version = "0.1.0"
+edition = "2026"
+description = "Bounded length-prefixed framing over exact Sengoo I/O primitives."
+
+[lib]
+path = "src/lib.sg"

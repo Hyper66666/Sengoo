@@ -1,0 +1,148 @@
+import std::string;
+
+struct EvaluationContextV1 {
+    contract_version: i64,
+    operation: String,
+    operation_version: i64,
+    evaluation_id: String,
+    operation_epoch: i64,
+    worker_generation: i64,
+    execution_mode: String,
+    worker_bundle_id: String,
+    facts_binding: String,
+}
+
+struct SubmitEnvelopeIdentifiersV1 {
+    correlation_ref: String,
+    source_account_ref: String,
+    source_device_ref: String,
+    recipient_account_ref: String,
+    recipient_device_ref: String,
+    conversation_ref: String,
+    envelope_ref: String,
+}
+
+struct SubmitEnvelopeFactsV1 {
+    contract_version: i64,
+    operation_version: i64,
+    identifiers: SubmitEnvelopeIdentifiersV1,
+    source_device_active: bool,
+    has_submit_envelope_v2: bool,
+    envelope_protocol_version: i64,
+    ciphertext_length_bytes: i64,
+    idempotency_status: i64,
+    recipient_pending_count: i64,
+    recipient_pending_limit: i64,
+    application_envelopes_used: i64,
+    application_envelopes_limit: i64,
+    ciphertext_limit_bytes: i64,
+    enqueue_delivery_enabled: bool,
+}
+
+struct WorkerRequestV1 {
+    schema_version: i64,
+    context: EvaluationContextV1,
+    facts: SubmitEnvelopeFactsV1,
+}
+
+struct SubmitEnvelopePlanV1 {
+    schema_version: i64,
+    context: EvaluationContextV1,
+    identifiers: SubmitEnvelopeIdentifiersV1,
+    decision: i64,
+    reason: i64,
+    sengoo_module_revision: String,
+}
+
+def senline_contract_version() -> i64 {
+    1;
+}
+
+def senline_operation_version_supported(version: i64) -> bool {
+    version == 1;
+}
+
+def SENLINE_IDEMPOTENCY_NEW() -> i64 {
+    0;
+}
+
+def SENLINE_IDEMPOTENCY_EXACT_DUPLICATE() -> i64 {
+    1;
+}
+
+def SENLINE_IDEMPOTENCY_CONFLICT() -> i64 {
+    2;
+}
+
+def SENLINE_DECISION_STORE_AND_ENQUEUE() -> i64 {
+    1;
+}
+
+def SENLINE_DECISION_DUPLICATE_NOOP() -> i64 {
+    2;
+}
+
+def SENLINE_DECISION_REJECT() -> i64 {
+    3;
+}
+
+def SENLINE_REASON_ACCEPTED_NEW() -> i64 {
+    1;
+}
+
+def SENLINE_REASON_EXACT_DUPLICATE() -> i64 {
+    2;
+}
+
+def SENLINE_REASON_IDEMPOTENCY_CONFLICT() -> i64 {
+    3;
+}
+
+def SENLINE_REASON_RECIPIENT_QUEUE_FULL() -> i64 {
+    4;
+}
+
+def SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED() -> i64 {
+    5;
+}
+
+def SENLINE_REASON_DELIVERY_DISABLED() -> i64 {
+    6;
+}
+
+def senline_decision_name(code: i64) -> &str {
+    if code == SENLINE_DECISION_STORE_AND_ENQUEUE() { "store_and_enqueue"; } else if code == SENLINE_DECISION_DUPLICATE_NOOP() { "duplicate_noop"; } else if code == SENLINE_DECISION_REJECT() { "reject"; } else { ""; };
+}
+
+def senline_reason_name(code: i64) -> &str {
+    if code == SENLINE_REASON_ACCEPTED_NEW() { "accepted_new"; } else if code == SENLINE_REASON_EXACT_DUPLICATE() { "exact_duplicate"; } else if code == SENLINE_REASON_IDEMPOTENCY_CONFLICT() { "idempotency_conflict"; } else if code == SENLINE_REASON_RECIPIENT_QUEUE_FULL() { "recipient_queue_full"; } else if code == SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED() { "application_budget_exhausted"; } else if code == SENLINE_REASON_DELIVERY_DISABLED() { "delivery_disabled"; } else { ""; };
+}
+
+def senline_empty_evaluation_context_v1() -> EvaluationContextV1 {
+    EvaluationContextV1 { contract_version: 0, operation: String { handle: 0 }, operation_version: 0, evaluation_id: String { handle: 0 }, operation_epoch: 0, worker_generation: 0, execution_mode: String { handle: 0 }, worker_bundle_id: String { handle: 0 }, facts_binding: String { handle: 0 } };
+}
+
+def senline_empty_submit_envelope_identifiers_v1() -> SubmitEnvelopeIdentifiersV1 {
+    SubmitEnvelopeIdentifiersV1 { correlation_ref: String { handle: 0 }, source_account_ref: String { handle: 0 }, source_device_ref: String { handle: 0 }, recipient_account_ref: String { handle: 0 }, recipient_device_ref: String { handle: 0 }, conversation_ref: String { handle: 0 }, envelope_ref: String { handle: 0 } };
+}
+
+def senline_empty_submit_envelope_facts_v1() -> SubmitEnvelopeFactsV1 {
+    SubmitEnvelopeFactsV1 { contract_version: 0, operation_version: 0, identifiers: senline_empty_submit_envelope_identifiers_v1(), source_device_active: false, has_submit_envelope_v2: false, envelope_protocol_version: 0, ciphertext_length_bytes: 0, idempotency_status: SENLINE_IDEMPOTENCY_NEW(), recipient_pending_count: 0, recipient_pending_limit: 0, application_envelopes_used: 0, application_envelopes_limit: 0, ciphertext_limit_bytes: 0, enqueue_delivery_enabled: false };
+}
+
+def senline_empty_worker_request_v1() -> WorkerRequestV1 {
+    WorkerRequestV1 { schema_version: 0, context: senline_empty_evaluation_context_v1(), facts: senline_empty_submit_envelope_facts_v1() };
+}
+
+def senline_reason_for_submit_envelope_v1(idempotency_status: i64, recipient_pending_count: i64, recipient_pending_limit: i64, application_envelopes_used: i64, application_envelopes_limit: i64, has_submit_envelope_v2: bool, enqueue_delivery_enabled: bool) -> i64 {
+    if idempotency_status == SENLINE_IDEMPOTENCY_EXACT_DUPLICATE() { SENLINE_REASON_EXACT_DUPLICATE(); } else if idempotency_status == SENLINE_IDEMPOTENCY_CONFLICT() { SENLINE_REASON_IDEMPOTENCY_CONFLICT(); } else if recipient_pending_count >= recipient_pending_limit { SENLINE_REASON_RECIPIENT_QUEUE_FULL(); } else if application_envelopes_used >= application_envelopes_limit { SENLINE_REASON_APPLICATION_BUDGET_EXHAUSTED(); } else if not has_submit_envelope_v2 or not enqueue_delivery_enabled { SENLINE_REASON_DELIVERY_DISABLED(); } else { SENLINE_REASON_ACCEPTED_NEW(); };
+}
+
+def senline_decision_for_reason(reason: i64) -> i64 {
+    if reason == SENLINE_REASON_ACCEPTED_NEW() { SENLINE_DECISION_STORE_AND_ENQUEUE(); } else if reason == SENLINE_REASON_EXACT_DUPLICATE() { SENLINE_DECISION_DUPLICATE_NOOP(); } else { SENLINE_DECISION_REJECT(); };
+}
+
+def plan_submit_envelope_v1(request: WorkerRequestV1, sengoo_module_revision: String) -> SubmitEnvelopePlanV1 {
+    let reason = senline_reason_for_submit_envelope_v1(request.facts.idempotency_status, request.facts.recipient_pending_count, request.facts.recipient_pending_limit, request.facts.application_envelopes_used, request.facts.application_envelopes_limit, request.facts.has_submit_envelope_v2, request.facts.enqueue_delivery_enabled);
+    SubmitEnvelopePlanV1 { schema_version: request.schema_version, context: request.context, identifiers: request.facts.identifiers, decision: senline_decision_for_reason(reason), reason: reason, sengoo_module_revision: sengoo_module_revision };
+}

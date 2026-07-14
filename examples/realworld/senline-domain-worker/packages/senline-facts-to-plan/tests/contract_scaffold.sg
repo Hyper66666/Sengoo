@@ -1,0 +1,5 @@
+import senline_facts_to_plan;
+
+def main() -> i64 {
+    if senline_contract_version() == 1 and senline_operation_version_supported(1) and not senline_operation_version_supported(99) { 0; } else { 1; };
+}

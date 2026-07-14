@@ -1,0 +1,21 @@
+import std::json;
+
+import senline_domain_worker;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let valid = json_parse_strict("{\"context\":{\"contract_version\":1,\"operation\":\"submit-envelope\",\"operation_version\":1,\"evaluation_id\":\"00000000000000000000000000000001\",\"operation_epoch\":0,\"worker_generation\":0,\"execution_mode\":\"fixture\",\"worker_bundle_id\":\"b\",\"facts_binding\":\"0000000000000000000000000000000000000000000000000000000000000000\"},\"facts\":{\"contract_version\":1,\"operation_version\":1,\"identifiers\":{\"correlation_ref\":\"c\",\"source_account_ref\":\"sa\",\"source_device_ref\":\"sd\",\"recipient_account_ref\":\"ra\",\"recipient_device_ref\":\"rd\",\"conversation_ref\":\"v\",\"envelope_ref\":\"e\"},\"source_device_status\":\"active\",\"source_device_capabilities\":[],\"envelope_protocol_version\":2,\"ciphertext_length_bytes\":0,\"idempotency_status\":\"new\",\"recipient_pending_count\":0,\"recipient_pending_limit\":1,\"application_envelopes_used\":0,\"application_envelopes_limit\":1,\"ciphertext_limit_bytes\":0,\"feature_flags\":[]},\"kind\":\"evaluation\",\"schema_version\":1}").unwrap_or(JsonDoc { handle: 0 });
+    let unknown = json_parse_strict("{\"context\":{},\"extra\":true,\"facts\":{},\"kind\":\"evaluation\",\"schema_version\":1}").unwrap_or(JsonDoc { handle: 0 });
+    let substituted = json_parse_strict("{\"extra\":{},\"facts\":{},\"kind\":\"evaluation\",\"schema_version\":1}").unwrap_or(JsonDoc { handle: 0 });
+    let missing = json_parse_strict("{\"facts\":{},\"kind\":\"evaluation\",\"schema_version\":1}").unwrap_or(JsonDoc { handle: 0 });
+    let wrong_kind = json_parse_strict("{\"context\":{},\"facts\":{},\"kind\":\"plan\",\"schema_version\":1}").unwrap_or(JsonDoc { handle: 0 });
+    let accepted = worker_validate_request_envelope_v1(valid.root());
+    let rejected_unknown = worker_validate_request_envelope_v1(unknown.root());
+    let rejected_substituted = worker_validate_request_envelope_v1(substituted.root());
+    let rejected_missing = worker_validate_request_envelope_v1(missing.root());
+    let rejected_kind = worker_validate_request_envelope_v1(wrong_kind.root());
+    let limits = worker_input_length_supported(1) and worker_input_length_supported(32768) and not worker_input_length_supported(0) and not worker_input_length_supported(32769) and worker_output_length_supported(1) and worker_output_length_supported(8192) and not worker_output_length_supported(0) and not worker_output_length_supported(8193);
+    let ok = accepted.is_ok() and rejected_unknown.is_err() and rejected_unknown.error == SGJSON_UNKNOWN_FIELD() and rejected_substituted.is_err() and rejected_substituted.error == SGJSON_UNKNOWN_FIELD() and rejected_missing.is_err() and rejected_missing.error == SGJSON_MISSING_FIELD() and rejected_kind.is_err() and rejected_kind.error == SGJSON_UNKNOWN_ENUM() and limits;
+    if ok { 0; } else { 1; };
+}

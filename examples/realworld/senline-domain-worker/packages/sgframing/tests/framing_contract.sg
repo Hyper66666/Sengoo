@@ -1,0 +1,19 @@
+import std::ffi;
+
+import sgframing;
+
+def main() -> i64 {
+    let prefix = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let short_prefix = ffi_buffer_new(3).unwrap_or(Buffer { handle: 0 });
+    let encoded = frame_prefix_encode(prefix, 32768, 32768).unwrap_or(false);
+    let decoded = frame_prefix_decode(prefix, 32768).unwrap_or(-1);
+    let zero = frame_prefix_encode(prefix, 0, 32768);
+    let oversized = frame_prefix_encode(prefix, 32769, 32768);
+    let short = frame_prefix_decode(short_prefix, 32768);
+    let eof = frame_read_stdin(32768).unwrap_or(FrameRead { eof: false, len: -1, payload: Buffer { handle: 0 } });
+    let ok = encoded and decoded == 32768 and zero.is_err() and zero.error == SGFRAMING_ZERO_LENGTH() and oversized.is_err() and oversized.error == SGFRAMING_LIMIT_EXCEEDED() and short.is_err() and short.error == SGFRAMING_INVALID_PREFIX() and eof.eof and eof.len == 0;
+    prefix.free();
+    short_prefix.free();
+    eof.payload.free();
+    if ok { 0; } else { 1; };
+}

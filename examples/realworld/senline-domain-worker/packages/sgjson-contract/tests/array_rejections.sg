@@ -1,0 +1,25 @@
+import std::json;
+
+import sgjson_contract;
+
+def main() -> i64 {
+    let doc = json_parse_strict("{\"duplicate\":[\"a\",\"a\"],\"empty\":[],\"prefix\":[\"a\",\"aa\"],\"too_many\":[\"a\",\"b\",\"c\"],\"unsorted\":[\"b\",\"a\"],\"wrong\":[1],\"wrong_container\":\"a\"}").unwrap_or(JsonDoc { handle: 0 });
+    let root = doc.root();
+    let empty = sgjson_required_sorted_unique_string_array(root, "empty", 0, 0);
+    let prefix = sgjson_required_sorted_unique_string_array(root, "prefix", 2, 2);
+    let too_many = sgjson_required_sorted_unique_string_array(root, "too_many", 0, 2);
+    let wrong = sgjson_required_sorted_unique_string_array(root, "wrong", 1, 1);
+    let wrong_container = sgjson_required_sorted_unique_string_array(root, "wrong_container", 1, 1);
+    let unsorted = sgjson_required_sorted_unique_string_array(root, "unsorted", 1, 2);
+    let duplicate = sgjson_required_sorted_unique_string_array(root, "duplicate", 1, 2);
+    let invalid_range = sgjson_required_sorted_unique_string_array(root, "empty", 2, 1);
+    if empty.is_err() { return 1; };
+    if prefix.is_err() { return 2; };
+    if not too_many.is_err() or too_many.error != SGJSON_OUT_OF_RANGE() { return 3; };
+    if not wrong.is_err() or wrong.error != SGJSON_WRONG_KIND() { return 4; };
+    if not wrong_container.is_err() or wrong_container.error != SGJSON_WRONG_KIND() { return 5; };
+    if not unsorted.is_err() or unsorted.error != SGJSON_UNSORTED_OR_DUPLICATE() { return 6; };
+    if not duplicate.is_err() or duplicate.error != SGJSON_UNSORTED_OR_DUPLICATE() { return 7; };
+    if not invalid_range.is_err() or invalid_range.error != SGJSON_OUT_OF_RANGE() { return 8; };
+    0;
+}

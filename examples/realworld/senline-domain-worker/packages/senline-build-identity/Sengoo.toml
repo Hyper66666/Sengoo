@@ -1,0 +1,8 @@
+[package]
+name = "senline_build_identity"
+version = "0.1.0"
+edition = "2026"
+description = "Generated build identity values for the Senline dogfood worker."
+
+[lib]
+path = "src/lib.sg"

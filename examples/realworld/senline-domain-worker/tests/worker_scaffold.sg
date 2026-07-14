@@ -1,0 +1,5 @@
+import senline_domain_worker;
+
+def main() -> i64 {
+    if worker_contract_version() == 1 and worker_operation_version_supported(1) and not worker_operation_version_supported(99) { 0; } else { 1; };
+}
