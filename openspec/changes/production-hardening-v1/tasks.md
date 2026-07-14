@@ -77,14 +77,29 @@
 
 ## 4. Performance and resource budgets
 
-- [ ] 4.1 Freeze committed small/medium/large/full-incremental compile scenarios
+- [x] 4.1 Freeze committed small/medium/large/full-incremental compile scenarios
   with wall-time and peak-RSS budgets.
-- [ ] 4.2 Add artifact-size, startup, and representative CLI/runtime throughput
+  - `bench/PRODUCTION_BUDGETS.md` freezes the 1k/10k/100k/1M scale tiers,
+    three real incremental edits, absolute wall/RSS ceilings, and reviewed
+    regression thresholds. Actions run `29327347740` passes the complete hard
+    gate against the retained raw report.
+- [x] 4.2 Add artifact-size, startup, and representative CLI/runtime throughput
   budgets without weakening correctness paths.
-- [ ] 4.3 Fail CI on regressions beyond documented thresholds; budget changes
+  - The same run passes the release-resource gate for packaged `sgc`, generated
+    artifact size, startup, locked check/build, and generated runtime throughput
+    while retaining all correctness steps.
+- [x] 4.3 Fail CI on regressions beyond documented thresholds; budget changes
   require evidence and review.
-- [ ] 4.4 Preserve raw benchmark metadata and distinguish trend evidence from
+  - `.github/workflows/perf-smoke.yml` blocks on both production gates and
+    uploads their decisions even on failure. Threshold changes require previous
+    and candidate raw reports plus `PRODUCTION_BUDGETS.md` review.
+- [x] 4.4 Preserve raw benchmark metadata and distinguish trend evidence from
   cross-language marketing claims.
+  - Artifact `production-performance-evidence` from run `29327347740`
+    (artifact ID `8309522200`) is retained byte-for-byte as
+    `bench/results/1784029453395-advanced-pipeline.json`; its SHA-256 is
+    `ce52f25330e860c65919bad4b3831017c629158f91a127b3686c794876a32d29`.
+    Cross-language ratios and absolute share targets remain report-only.
 
 ## 5. Released-toolchain ecosystem proof
 
