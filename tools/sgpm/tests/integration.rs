@@ -2111,6 +2111,122 @@ fn sgpm_check_exposes_dependency_library_module_map() {
 }
 
 #[test]
+fn sgpm_check_exposes_transitive_dependency_library_module_map() {
+    let dir = temp_dir("check_transitive_module_map");
+    let transitive = dir.join("transitive");
+    let direct = dir.join("direct");
+    let app = dir.join("app");
+    write_lib_pkg(&transitive, "transitive");
+    write_lib_pkg(&direct, "direct");
+    fs::write(
+        direct.join("src/lib.sg"),
+        "import transitive;\ndef imported_value() -> i64 { transitive::imported_value() }\n",
+    )
+    .unwrap();
+    fs::write(
+        direct.join("Sengoo.toml"),
+        "[package]\nname = 'direct'\nversion = '0.1.0'\nedition = '2026'\n\n[lib]\npath = 'src/lib.sg'\n\n[dependencies]\ntransitive = { path = '../transitive' }\n",
+    )
+    .unwrap();
+    write_pkg(&app, "app", &[("direct", "../direct")]);
+
+    let record = dir.join("record.txt");
+    let fake = fake_sgc(&dir);
+    let output = Command::new(sgpm())
+        .args([
+            "check",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm check");
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fs::read_to_string(record).unwrap().replace('\\', "/");
+    let app_check = log
+        .lines()
+        .find(|line| line.contains("/app :: check"))
+        .expect("app check log entry");
+    let direct_entry = direct
+        .join("src/lib.sg")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let transitive_entry = transitive
+        .join("src/lib.sg")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(
+        app_check.contains(&format!("direct={direct_entry}")),
+        "root package should receive its direct dependency module:\n{app_check}"
+    );
+    assert!(
+        app_check.contains(&format!("transitive={transitive_entry}")),
+        "root package should receive modules imported by dependency sources:\n{app_check}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn sgpm_check_rejects_conflicting_transitive_module_aliases() {
+    let dir = temp_dir("check_conflicting_transitive_aliases");
+    let left_leaf = dir.join("left_leaf");
+    let right_leaf = dir.join("right_leaf");
+    let left = dir.join("left");
+    let right = dir.join("right");
+    let app = dir.join("app");
+    write_lib_pkg(&left_leaf, "left_leaf");
+    write_lib_pkg(&right_leaf, "right_leaf");
+    write_lib_pkg(&left, "left");
+    write_lib_pkg(&right, "right");
+    fs::write(
+        left.join("Sengoo.toml"),
+        "[package]\nname = 'left'\nversion = '0.1.0'\nedition = '2026'\n\n[lib]\npath = 'src/lib.sg'\n\n[dependencies]\nshared = { package = 'left_leaf', path = '../left_leaf' }\n",
+    )
+    .unwrap();
+    fs::write(
+        right.join("Sengoo.toml"),
+        "[package]\nname = 'right'\nversion = '0.1.0'\nedition = '2026'\n\n[lib]\npath = 'src/lib.sg'\n\n[dependencies]\nshared = { package = 'right_leaf', path = '../right_leaf' }\n",
+    )
+    .unwrap();
+    write_pkg(&app, "app", &[("left", "../left"), ("right", "../right")]);
+
+    let record = dir.join("record.txt");
+    let fake = fake_sgc(&dir);
+    let output = Command::new(sgpm())
+        .args([
+            "check",
+            "--manifest-path",
+            app.join("Sengoo.toml").to_str().unwrap(),
+        ])
+        .current_dir(&dir)
+        .env("SGPM_SGC", fake)
+        .env("SGPM_RECORD", &record)
+        .output()
+        .expect("run sgpm check");
+
+    assert!(
+        !output.status.success(),
+        "conflicting aliases must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+    assert!(
+        stderr.contains("conflicting module alias 'shared'")
+            && stderr.contains("left_leaf/src/lib.sg")
+            && stderr.contains("right_leaf/src/lib.sg"),
+        "stderr should identify the alias and both conflicting sources:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn sgpm_check_maps_dual_target_dependency_to_library_entry() {
     let dir = temp_dir("check_dual_target_module_map");
     let dep = dir.join("dep");

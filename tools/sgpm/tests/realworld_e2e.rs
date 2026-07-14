@@ -1,7 +1,10 @@
+use flate2::read::GzDecoder;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tar::Archive;
 
 fn sgpm() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sgpm"))
@@ -76,6 +79,108 @@ fn native_toolchain_available() -> bool {
     which::which("clang").is_ok() || which::which("clang.exe").is_ok()
 }
 
+fn senline_protocol_canary_fragments() -> Vec<String> {
+    let mut state = 0x243f_6a88_85a3_08d3_u64;
+    (0..256)
+        .flat_map(|index| {
+            let mut bytes = [0_u8; 16];
+            for byte in &mut bytes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *byte = state as u8;
+            }
+            let hex = bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            [format!("rejected_canary_{index:03}_{hex}"), hex]
+        })
+        .collect()
+}
+
+#[test]
+fn senline_worker_publish_archive_contains_no_rejected_protocol_canaries() {
+    let dir = temp_dir("senline_worker_publish_archive");
+    let package = dir.join("senline-domain-worker");
+    copy_dir_filtered(&realworld_fixture("senline-domain-worker"), &package);
+
+    let output = Command::new(sgpm())
+        .args(["publish", "--dry-run", "--locked"])
+        .current_dir(&package)
+        .output()
+        .expect("run locked Senline worker publish dry-run");
+    assert!(
+        output.status.success(),
+        "Senline worker publish stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let archive = package.join("target/package/senline_domain_worker-0.1.0.tar.gz");
+    assert!(
+        archive.is_file(),
+        "worker package archive must exist for leakage scanning: {}",
+        archive.display()
+    );
+    assert!(
+        fs::metadata(&archive).unwrap().len() > 0,
+        "worker package archive must not be empty"
+    );
+
+    let archive_file = fs::File::open(&archive).expect("open Senline worker package archive");
+    let mut archive_reader = Archive::new(GzDecoder::new(archive_file));
+    let canaries = senline_protocol_canary_fragments();
+    let mut entry_count = 0_usize;
+    let mut content_bytes = 0_usize;
+    for entry in archive_reader
+        .entries()
+        .expect("read worker package entries")
+    {
+        let mut entry = entry.expect("decode worker package entry");
+        let path = entry
+            .path()
+            .expect("decode worker package entry path")
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert!(
+            !path.is_empty(),
+            "worker package entry path must not be empty"
+        );
+        let mut contents = Vec::new();
+        entry
+            .read_to_end(&mut contents)
+            .unwrap_or_else(|error| panic!("read worker package entry {path}: {error}"));
+        entry_count += 1;
+        content_bytes += contents.len();
+        for canary in &canaries {
+            assert!(
+                !path
+                    .as_bytes()
+                    .windows(canary.len())
+                    .any(|window| window == canary.as_bytes()),
+                "rejected protocol canary leaked into package path {path}"
+            );
+            assert!(
+                !contents
+                    .windows(canary.len())
+                    .any(|window| window == canary.as_bytes()),
+                "rejected protocol canary leaked into package entry {path}"
+            );
+        }
+    }
+    assert!(
+        entry_count > 0,
+        "worker package archive must contain entries"
+    );
+    assert!(
+        content_bytes > 0,
+        "worker package archive entries must contain bytes"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn realworld_locked_loop_uses_real_toolchain_binaries() {
     if !native_toolchain_available() {
@@ -110,6 +215,7 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         "http-client-status",
         "http-echo-service",
         "package-release-loop",
+        "senline-domain-worker",
         "workspace-doc-loop",
     ] {
         let package = dir.join(fixture);
@@ -134,11 +240,11 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         let before = fs::read_to_string(&lock_path).expect("lockfile should exist after update");
 
         for args in [
-            vec!["check", "--locked"],
-            vec!["test", "--locked"],
+            vec!["--runtime-mode", "source-development", "check", "--locked"],
+            vec!["--runtime-mode", "source-development", "test", "--locked"],
             vec!["fmt", "--check", "--locked"],
-            vec!["doc", "--locked"],
-            vec!["build", "--locked"],
+            vec!["--runtime-mode", "source-development", "doc", "--locked"],
+            vec!["--runtime-mode", "source-development", "build", "--locked"],
         ] {
             let output = Command::new(sgpm())
                 .args(&args)

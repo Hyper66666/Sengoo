@@ -1,5 +1,6 @@
 use crate::resolver::{render_tree, Graph, PackageNode};
 use miette::{Context, IntoDiagnostic, Result};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -35,25 +36,36 @@ impl BuildProfile {
 pub struct Toolchain {
     sgc: PathBuf,
     sgfmt: Option<PathBuf>,
+    runtime_mode: String,
 }
 
 impl Toolchain {
-    pub fn discover() -> Result<Self> {
+    pub fn discover(runtime_mode: &str) -> Result<Self> {
         Ok(Self {
             sgc: find_tool("SGPM_SGC", "sgc")?,
             sgfmt: find_optional_tool("SGPM_SGFMT", "sgfmt"),
+            runtime_mode: runtime_mode.to_string(),
         })
+    }
+
+    fn sgc_command(&self) -> Command {
+        Command::new(&self.sgc)
+    }
+
+    fn append_runtime_mode(&self, command: &mut Command) {
+        command.arg("--runtime-mode").arg(&self.runtime_mode);
     }
 
     pub fn build(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         for node in &graph.nodes {
             if node.manifest.lib.is_some() && node.manifest.bin.is_none() {
-                let mut command = Command::new(&self.sgc);
+                let mut command = self.sgc_command();
                 command
                     .current_dir(&node.root_dir)
                     .arg("check")
                     .arg(&node.entry_path);
                 configure_module_map(&mut command, graph, node, true)?;
+                self.append_runtime_mode(&mut command);
 
                 if verbose {
                     eprintln!("sgpm: {}", render_command(&command));
@@ -70,7 +82,7 @@ impl Toolchain {
             let output = package_output_path(node, profile)?;
             ensure_parent(&output)?;
 
-            let mut command = Command::new(&self.sgc);
+            let mut command = self.sgc_command();
             command
                 .current_dir(&node.root_dir)
                 .arg("build")
@@ -80,6 +92,7 @@ impl Toolchain {
                 .arg("-O")
                 .arg(profile.opt_level());
             configure_module_map(&mut command, graph, node, true)?;
+            self.append_runtime_mode(&mut command);
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -97,12 +110,13 @@ impl Toolchain {
 
     pub fn check(&self, graph: &Graph, verbose: bool) -> Result<()> {
         for node in &graph.nodes {
-            let mut command = Command::new(&self.sgc);
+            let mut command = self.sgc_command();
             command
                 .current_dir(&node.root_dir)
                 .arg("check")
                 .arg(&node.entry_path);
             configure_module_map(&mut command, graph, node, true)?;
+            self.append_runtime_mode(&mut command);
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -153,7 +167,7 @@ impl Toolchain {
     pub fn test(&self, graph: &Graph, profile: BuildProfile, verbose: bool) -> Result<()> {
         let mut ran = 0usize;
         for node in &graph.nodes {
-            let mut command = Command::new(&self.sgc);
+            let mut command = self.sgc_command();
             command
                 .current_dir(&node.root_dir)
                 .arg("test")
@@ -163,6 +177,7 @@ impl Toolchain {
                 command.arg("--release");
             }
             configure_module_map(&mut command, graph, node, true)?;
+            self.append_runtime_mode(&mut command);
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -228,7 +243,7 @@ impl Toolchain {
             } else {
                 base_output.clone()
             };
-            let mut command = Command::new(&self.sgc);
+            let mut command = self.sgc_command();
             command
                 .current_dir(&node.root_dir)
                 .arg("doc")
@@ -236,6 +251,7 @@ impl Toolchain {
                 .arg("--output")
                 .arg(&output_dir);
             configure_module_map(&mut command, graph, node, true)?;
+            self.append_runtime_mode(&mut command);
 
             if verbose {
                 eprintln!("sgpm: {}", render_command(&command));
@@ -321,9 +337,19 @@ fn module_map_value(
     node: &PackageNode,
     include_current: bool,
 ) -> Result<Option<OsString>> {
-    let mut entries = Vec::new();
+    let mut reachable = BTreeSet::from([node.id.clone()]);
+    let mut pending = vec![node.id.clone()];
+    while let Some(package_id) = pending.pop() {
+        for edge in graph.edges.iter().filter(|edge| edge.from == package_id) {
+            if reachable.insert(edge.to.clone()) {
+                pending.push(edge.to.clone());
+            }
+        }
+    }
+
+    let mut entries = BTreeMap::new();
     for edge in &graph.edges {
-        if edge.from != node.id {
+        if !reachable.contains(&edge.from) {
             continue;
         }
         let Some(dep) = graph.node_by_id(&edge.to) else {
@@ -332,28 +358,52 @@ fn module_map_value(
         let Some(lib) = dep.manifest.lib.as_ref() else {
             continue;
         };
-        entries.push(format!(
-            "{}={}",
-            edge.alias,
-            portable_path(&dep.root_dir.join(&lib.path))
-        ));
+        insert_module_map_entry(
+            &mut entries,
+            &edge.alias,
+            portable_path(&dep.root_dir.join(&lib.path)),
+        )?;
     }
     if include_current {
         if let Some(lib) = node.manifest.lib.as_ref() {
-            entries.push(format!(
-                "{}={}",
-                node.name,
-                portable_path(&node.root_dir.join(&lib.path))
-            ));
+            insert_module_map_entry(
+                &mut entries,
+                &node.name,
+                portable_path(&node.root_dir.join(&lib.path)),
+            )?;
         }
     }
     if entries.is_empty() {
         return Ok(None);
     }
-    env::join_paths(entries)
-        .map(Some)
-        .into_diagnostic()
-        .context("failed to encode dependency library module map")
+    env::join_paths(
+        entries
+            .into_iter()
+            .map(|(alias, path)| format!("{alias}={path}")),
+    )
+    .map(Some)
+    .into_diagnostic()
+    .context("failed to encode dependency library module map")
+}
+
+fn insert_module_map_entry(
+    entries: &mut BTreeMap<String, String>,
+    alias: &str,
+    path: String,
+) -> Result<()> {
+    if let Some(existing) = entries.get(alias) {
+        if existing != &path {
+            miette::bail!(
+                "conflicting module alias '{}' resolves to both '{}' and '{}'",
+                alias,
+                existing,
+                path
+            );
+        }
+        return Ok(());
+    }
+    entries.insert(alias.to_string(), path);
+    Ok(())
 }
 
 fn portable_path(path: &Path) -> String {

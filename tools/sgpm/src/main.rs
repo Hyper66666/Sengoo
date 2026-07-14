@@ -31,8 +31,32 @@ const SGPM_VERSION: &str = concat!(
 #[command(version = SGPM_VERSION)]
 #[command(about = "Sengoo package manager MVP", long_about = None)]
 struct Cli {
+    /// Native runtime source policy forwarded to every delegated sgc command.
+    #[arg(
+        long = "runtime-mode",
+        global = true,
+        value_enum,
+        default_value_t = SgcRuntimeMode::Installed
+    )]
+    runtime_mode: SgcRuntimeMode,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SgcRuntimeMode {
+    Installed,
+    SourceDevelopment,
+}
+
+impl SgcRuntimeMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Installed => "installed",
+            Self::SourceDevelopment => "source-development",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -400,6 +424,7 @@ struct UpdateArgs {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let runtime_mode = cli.runtime_mode.as_str();
 
     match cli.command {
         Commands::New { name, path, lib } => {
@@ -425,7 +450,7 @@ fn main() -> Result<()> {
                 args.package.as_deref(),
                 args.workspace,
             )?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
                 toolchain.build(graph, profile(args.release), args.verbose)?;
             }
@@ -438,7 +463,7 @@ fn main() -> Result<()> {
                 args.package.as_deref(),
                 args.workspace,
             )?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
                 toolchain.check(graph, args.verbose)?;
             }
@@ -446,7 +471,7 @@ fn main() -> Result<()> {
         }
         Commands::Run(args) => {
             let graph = load_graph(&args.manifest_path, args.locked, args.package.as_deref())?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             toolchain.run(&graph, profile(args.release), &args.args, args.verbose)
         }
         Commands::Test(args) => {
@@ -456,7 +481,7 @@ fn main() -> Result<()> {
                 args.package.as_deref(),
                 args.workspace,
             )?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
                 toolchain.test(graph, profile(args.release), args.verbose)?;
             }
@@ -469,7 +494,7 @@ fn main() -> Result<()> {
                 args.package.as_deref(),
                 args.workspace,
             )?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
                 toolchain.fmt(graph, args.check, args.verbose)?;
             }
@@ -485,7 +510,7 @@ fn main() -> Result<()> {
                 args.package.as_deref(),
                 args.workspace,
             )?;
-            let toolchain = Toolchain::discover()?;
+            let toolchain = Toolchain::discover(runtime_mode)?;
             for graph in &graphs {
                 toolchain.doc(graph, args.output.as_deref(), args.verbose)?;
             }
