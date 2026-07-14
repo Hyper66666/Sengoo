@@ -1,4 +1,5 @@
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -455,7 +456,7 @@ fn performance_workflow_blocks_project_budgets_and_preserves_raw_evidence() {
 }
 
 #[test]
-fn frontend_bootstrap_baseline_points_at_a_retained_local_raw_report() {
+fn frontend_baseline_points_at_an_exact_retained_ci_report() {
     let root = workspace_root();
     let baseline = fs::read_to_string(root.join("bench/frontend-memory-baseline.json"))
         .expect("read frontend baseline profile");
@@ -466,10 +467,10 @@ fn frontend_bootstrap_baseline_points_at_a_retained_local_raw_report() {
         .as_str()
         .expect("baseline should declare baseline_report_path");
     let retained_report = root.join(retained_report_path);
-    let retained_report_json = fs::read_to_string(&retained_report)
+    let retained_report_bytes = fs::read(&retained_report)
         .unwrap_or_else(|err| panic!("read retained report {}: {err}", retained_report.display()));
     let retained_report_json: Value =
-        serde_json::from_str(&retained_report_json).expect("parse retained raw report");
+        serde_json::from_slice(&retained_report_bytes).expect("parse retained raw report");
     let expected_report_id = format!(
         "{}-advanced-pipeline",
         retained_report_json["generated_at_unix_ms"]
@@ -490,14 +491,10 @@ fn frontend_bootstrap_baseline_points_at_a_retained_local_raw_report() {
         docs.contains(retained_report_path),
         "frontend baseline documentation should point at the retained local benchmark report"
     );
-    assert_eq!(
-        baseline["bootstrap_pending_raw_ci_report"].as_bool(),
-        Some(true),
-        "bootstrap baseline should stay explicitly marked until a raw CI artifact is retained"
-    );
     assert!(
-        docs.contains("pending the next perf-smoke artifact upload"),
-        "frontend baseline documentation should explain that the retained report is only a bootstrap"
+        baseline.get("bootstrap_pending_raw_ci_report").is_none()
+            && baseline.get("provenance_status").is_none(),
+        "final baseline should not retain bootstrap exceptions"
     );
     assert_eq!(
         baseline["baseline_report_id"].as_str(),
@@ -505,19 +502,36 @@ fn frontend_bootstrap_baseline_points_at_a_retained_local_raw_report() {
         "baseline report id should match the raw producer report id"
     );
     assert_eq!(
-        baseline["baseline_actions_run"].as_i64(),
-        retained_report_json["host"]["actions_run"].as_i64(),
-        "baseline provenance should match the retained raw report host metadata"
+        format!("{:x}", Sha256::digest(&retained_report_bytes)),
+        baseline["baseline_report_sha256"]
+            .as_str()
+            .expect("baseline should pin retained raw report SHA-256"),
+        "retained report bytes should match the pinned artifact hash"
     );
+    let actions_run = baseline["baseline_actions_run"]
+        .as_i64()
+        .expect("baseline should record the Actions run");
+    let artifact_id = baseline["baseline_artifact_id"]
+        .as_i64()
+        .expect("baseline should record the Actions artifact id");
+    let artifact_digest = baseline["baseline_artifact_digest"]
+        .as_str()
+        .expect("baseline should record the Actions artifact digest");
+    assert!(actions_run > 0 && artifact_id > 0);
+    assert!(artifact_digest.starts_with("sha256:"));
+    assert!(docs.contains(&actions_run.to_string()));
+    assert!(docs.contains(&artifact_id.to_string()));
+    assert!(docs.contains(artifact_digest));
+    assert!(!docs.contains("pending the next perf-smoke artifact upload"));
     let notes = retained_report_json["notes"]
         .as_array()
-        .expect("retained bootstrap report should preserve notes");
+        .expect("retained raw report should preserve notes");
     assert!(
-        notes.iter().any(|note| {
+        notes.iter().all(|note| {
             note.as_str()
-                .map(|note| note.contains("reconstructed"))
-                .unwrap_or(false)
+                .map(|note| !note.contains("reconstructed"))
+                .unwrap_or(true)
         }),
-        "bootstrap raw report should stay clearly marked as reconstructed until replacement"
+        "retained CI report should not contain bootstrap reconstruction notes"
     );
 }
