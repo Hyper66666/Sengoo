@@ -50,6 +50,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             throw "expected a budget violation from release_resource_gate smoke"
           }
+          $global:LASTEXITCODE = 0
 
       - name: Run advanced pipeline benchmark
         env:

@@ -445,6 +445,7 @@ fn performance_workflow_blocks_project_budgets_and_preserves_raw_evidence() {
         "--max-full-build-ms 0.01",
         "if ($LASTEXITCODE -eq 0)",
         "expected a budget violation",
+        "$global:LASTEXITCODE = 0",
     ] {
         assert!(
             smoke_release_gate.contains(needle),
