@@ -38,3 +38,110 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace --locked -- --test-threads=1
+
+  binary-io-native:
+    name: binary I/O native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Run compiler binary I/O signature surface
+        run: cargo test --locked -p sengoo-compiler io_module_preserves_binary_buffer_and_pipe_signatures -- --nocapture
+
+      - name: Run sgc binary I/O import surface
+        run: cargo test --locked -p sgc binary_io_import_expands_exact_buffer_and_pipe_surface -- --nocapture
+
+      - name: Run LSP binary I/O completion and signature surface
+        run: cargo test --locked -p sglsp binary_io_import_exposes_completion_and_exact_signatures -- --nocapture
+
+      - name: Run real-sgc stdlib binary I/O wrappers
+        run: cargo test --locked -p sgc stdlib_io_ -- --nocapture --test-threads=1
+
+      - name: Run Buffer byte integration tests
+        run: cargo test --locked -p sgc --test buffer_bytes -- --nocapture --test-threads=1
+
+      - name: Run exact-read native and pipe tests
+        run: cargo test --locked -p sgc --test binary_io_exact_read -- --nocapture --test-threads=1
+
+      - name: Run write-all native and pipe tests
+        run: cargo test --locked -p sgc --test binary_io_write_all -- --nocapture --test-threads=1
+
+  senline-worker-differential:
+    name: Senline worker differential (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify corpus metadata and fresh-process determinism
+        run: cargo test --locked -p sgc --test senline_worker_differential -- --nocapture --test-threads=1
+
+      - name: Run 10k reviewed and 100k seeded release corpora
+        run: cargo test --release --locked -p sgc --test senline_worker_differential -- --ignored --nocapture --test-threads=1
+
+      - name: Upload platform transcript evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: senline-worker-differential-${{ runner.os }}-${{ runner.arch }}
+          path: target/senline-differential/*.json
+          if-no-files-found: warn

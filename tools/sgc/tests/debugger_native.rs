@@ -1,3 +1,6 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -67,10 +70,6 @@ impl Drop for TempProject {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
-}
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
 }
 
 fn host_debugger() -> Option<(DebuggerFlavor, &'static str)> {
@@ -420,7 +419,7 @@ fn native_debugger_breaks_steps_and_reads_local() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger probe source");
 
-    let build = Command::new(sgc())
+    let build = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -482,7 +481,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     let source = project.source_path();
     fs::write(&source, PROBE_SOURCE).expect("write debugger cache-recovery probe source");
 
-    let initial = Command::new(sgc())
+    let initial = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info", "--force-rebuild"])
@@ -500,7 +499,7 @@ fn debug_build_cache_recovery_recreates_the_pdb() {
     fs::remove_file(&executable).expect("remove cached debug executable");
     fs::remove_file(&pdb).expect("remove cached debug PDB");
 
-    let recovered = Command::new(sgc())
+    let recovered = source_sgc_command()
         .arg("build")
         .arg(&source)
         .args(["-O", "0", "--debug-info"])

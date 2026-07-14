@@ -1,6 +1,8 @@
+mod common;
+
+use common::source_sgc_command;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const OPT_LEVEL: &str = "0";
@@ -55,10 +57,6 @@ impl Drop for TempProject {
     }
 }
 
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
-
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -100,7 +98,7 @@ fn copy_fixture_source(project: &TempProject, fixture: &str) -> PathBuf {
 }
 
 fn run_sgc_build(source_path: &Path, debug_info: bool) -> String {
-    let mut command = Command::new(sgc());
+    let mut command = source_sgc_command();
     command
         .arg("build")
         .arg(source_path)
@@ -168,7 +166,9 @@ fn assert_fixture_behavior(spec: &FixtureSpec) {
         expected_hash_path.display()
     );
 
-    let expected_ir = fs::read_to_string(&expected_ir_path).expect("read baseline LLVM IR");
+    let expected_ir = fs::read_to_string(&expected_ir_path)
+        .expect("read baseline LLVM IR")
+        .replace("\r\n", "\n");
     let expected_hash = fs::read_to_string(&expected_hash_path)
         .expect("read baseline hash")
         .trim()

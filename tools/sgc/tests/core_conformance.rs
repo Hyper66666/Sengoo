@@ -1,11 +1,9 @@
+mod common;
+
+use common::source_sgc_command;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const CONFORMANCE_RUN_MODES: &[&[&str]] = &[&[], &["--debug-info"]];
-
-fn sgc() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sgc"))
-}
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -39,7 +37,7 @@ fn run_core_case(tag: &str, relative_path: &str, expected_exit: i32, expected_st
     let outputs = CONFORMANCE_RUN_MODES
         .iter()
         .map(|mode_args| {
-            Command::new(sgc())
+            source_sgc_command()
                 .arg("run")
                 .arg(&path)
                 .arg("--force-rebuild")
