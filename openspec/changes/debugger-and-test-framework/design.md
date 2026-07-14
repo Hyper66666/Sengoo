@@ -29,6 +29,15 @@ The native transcript suite reads parameters and locals for scalar, struct,
 enum, owned String, and `Vec<i64>`/generic Vec once available. It also steps
 across calls and closures and checks the backtrace source names.
 
+### Decision 5: Release-host debugger evidence is fail closed
+
+Local development keeps an explicit skip when LLDB/CDB or clang is absent.
+Release-host CI sets `SENGOO_REQUIRE_NATIVE_DEBUGGER=1`, so a missing tool,
+failed debug build, unresolved breakpoint, incorrect live value, or absent
+transcript fails the gate. The same run persists scalar and composite LLDB
+transcripts as a retained Actions artifact; object metadata tests cannot
+substitute for that artifact.
+
 ## Archive gate
 
 - statement line tables rather than entry-only rows;

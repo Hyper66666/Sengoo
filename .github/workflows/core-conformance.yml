@@ -23,9 +23,11 @@ jobs:
       - name: Install pinned LLVM toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION} lldb-${LLVM_VERSION}
           sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+          sudo update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-${LLVM_VERSION} 100
           clang --version
+          lldb --version
 
       - name: Validate OpenSpec
         run: npx --yes @fission-ai/openspec@1.4.1 validate codegen-ir-correctness-and-gate --strict
@@ -38,3 +40,17 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Capture required LLDB debugger evidence
+        env:
+          SENGOO_REQUIRE_NATIVE_DEBUGGER: "1"
+          SENGOO_DEBUGGER_TRANSCRIPT_DIR: debugger-transcripts
+        run: cargo test --locked -p sgc --test debugger_native -- --nocapture --test-threads=1
+
+      - name: Upload LLDB debugger transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debugger-native-lldb-transcripts
+          path: debugger-transcripts/
+          if-no-files-found: error

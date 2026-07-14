@@ -105,6 +105,12 @@ Native debugger integration is covered by
 with `sgc build -O 0 --debug-info --force-rebuild`, sets a breakpoint in
 `debug_probe`, steps over the local initialization, and checks that the
 debugger reports parameter `value` as `21` and local `doubled` as `42`.
+The Unix LLDB lane also builds a composite probe, reads a struct, enum, owned
+`String`, and `Vec<i64>` with their live members, steps into an ordinary
+function call, steps over a closure invocation, and verifies the source
+backtrace. Core-conformance CI runs this lane in fail-closed mode and uploads
+the raw scalar and composite transcripts as
+`debugger-native-lldb-transcripts`.
 
 The driver uses LLDB in batch mode on Linux/macOS and a generated CDB command
 file on Windows. Run it directly with:
@@ -118,6 +124,9 @@ native debugger session prints an explicit `SKIP debugger_native::...` reason
 when the platform debugger or clang is absent; it never substitutes a metadata
 inspection for the missing debugger. If the tools are present, build,
 breakpoint, stepping, or value-inspection failures fail the test. The existing
+`SENGOO_REQUIRE_NATIVE_DEBUGGER=1` is reserved for release-host automation and
+turns every missing-tool skip into a failure. `SENGOO_DEBUGGER_TRANSCRIPT_DIR`
+selects the directory for raw batch transcripts. The existing
 `llvm-dwarfdump` tests in `tools/sgc/src/tests.rs` remain the broader portable
 coverage for source files, entry lines, parameter/local DIEs, and core-language
 surfaces. Object-level regressions cover named struct members, tuple index
