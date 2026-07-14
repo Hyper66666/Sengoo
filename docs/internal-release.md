@@ -2,6 +2,10 @@
 
 Process for tagging and distributing versioned `sgc`, `sgpm`, `sgfmt`, and `sglsp` binaries to internal teams.
 
+Source compatibility, deprecation, schema, host, and support-window promises
+are defined in [compatibility-policy.md](compatibility-policy.md). This document
+describes the release procedure and does not broaden that policy.
+
 ## Supported host policy
 
 Internal release candidates are supported on the same hosts exercised by the

@@ -437,6 +437,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsupported_source_edition_with_stable_diagnostic() {
+        let source = "[package]\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2027\"\n";
+        let err = Manifest::parse(source).expect_err("unsupported edition should fail");
+        assert_eq!(
+            err.to_string(),
+            "unsupported Sengoo edition '2027'; expected '2026'"
+        );
+    }
+
+    #[test]
     fn parses_minimal_manifest() {
         let manifest = Manifest::parse(
             r#"

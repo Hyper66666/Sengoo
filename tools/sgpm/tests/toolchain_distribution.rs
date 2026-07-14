@@ -285,3 +285,44 @@ fn installers_support_local_release_feeds_for_deterministic_upgrade_smoke() {
         "install.ps1 should copy versioned archives from a local release feed during dry-run smoke"
     );
 }
+
+#[test]
+fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
+    let root = workspace_root();
+    let policy = fs::read_to_string(root.join("docs/compatibility-policy.md"))
+        .expect("read compatibility policy");
+
+    for heading in [
+        "## Source and edition policy",
+        "## Deprecation window",
+        "## Runtime and data schemas",
+        "## Supported release hosts",
+        "## Release support window",
+    ] {
+        assert!(
+            policy.contains(heading),
+            "compatibility policy should contain `{heading}`"
+        );
+    }
+    assert!(
+        policy.contains("edition = \"2026\"")
+            && policy.contains("unsupported Sengoo edition")
+            && policy.contains("at least one minor release"),
+        "policy should freeze the 2026 edition rejection and deprecation window"
+    );
+    for target in [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ] {
+        assert!(
+            policy.contains(target),
+            "compatibility policy should list supported target `{target}`"
+        );
+    }
+    assert!(
+        policy.contains("latest prerelease line") && policy.contains("security or soundness"),
+        "pre-1.0 support and emergency compatibility exceptions must be explicit"
+    );
+}

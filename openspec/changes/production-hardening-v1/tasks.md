@@ -22,13 +22,22 @@
 
 ## 3. Compatibility and ABI
 
-- [ ] 3.1 Specify language edition/source compatibility and deprecation windows.
+- [x] 3.1 Specify language edition/source compatibility and deprecation windows.
+  - `docs/compatibility-policy.md` freezes the `2026` source edition,
+    pre-1.0 patch/minor compatibility boundary, at-least-one-minor deprecation
+    window, migration requirements, and the narrow security/soundness
+    exception. Manifest and distribution tests lock the edition rejection and
+    published policy.
 - [ ] 3.2 Version runtime ABI, manifest, lockfile, diagnostic JSON, and test-report
   schemas; reject incompatible combinations with stable diagnostics.
 - [ ] 3.3 Add retained compatibility projects spanning the previous supported
   prerelease and current toolchain.
-- [ ] 3.4 Publish the supported host/architecture/toolchain matrix and release
+- [x] 3.4 Publish the supported host/architecture/toolchain matrix and release
   support policy.
+  - The compatibility policy lists Windows x64, Linux x64, macOS x64, and
+    macOS arm64 target triples, LLVM 15+ / pinned LLVM 19 reference behavior,
+    latest-prerelease support, retained previous-candidate compatibility input,
+    and fail-closed release jobs. `docs/internal-release.md` links the policy.
 
 ## 4. Performance and resource budgets
 
@@ -43,8 +52,12 @@
 
 ## 5. Released-toolchain ecosystem proof
 
-- [ ] 5.1 Install release archives into clean prefixes on every supported host
+- [x] 5.1 Install release archives into clean prefixes on every supported host
   and run hello plus stdlib import smoke outside the checkout.
+  - Tag run `29259068988` installs `v0.1.0-rc.1` archives into clean
+    prefixes on Windows x64, Linux x64, macOS x64, and macOS arm64, verifies
+    coherent tool versions/checksums/provenance, and runs installed hello plus
+    stdlib build/run smoke without checkout environment overrides.
 - [ ] 5.2 Run all realworld fixtures through locked check/test/fmt/doc/build/run
   using installed binaries and stdlib.
 - [ ] 5.3 Select a reviewed official package set for CLI, Python interop, and
