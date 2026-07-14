@@ -40,6 +40,10 @@
     existing unknown-version rejection tests where they are consumed.
 - [ ] 3.3 Add retained compatibility projects spanning the previous supported
   prerelease and current toolchain.
+  - In progress: `examples/compat/v0.1.0-rc.1` and the fail-closed
+    `compatibility-prerelease` workflow run the same copied, locked package
+    outside the checkout with the installed previous release and current
+    binaries. Check this task only after the first Actions transcript passes.
 - [x] 3.4 Publish the supported host/architecture/toolchain matrix and release
   support policy.
   - The compatibility policy lists Windows x64, Linux x64, macOS x64, and

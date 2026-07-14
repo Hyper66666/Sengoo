@@ -83,3 +83,7 @@ Every candidate must publish checksums and provenance, install into a clean
 prefix, report one coherent tool version/hash, and pass the release smoke
 matrix. Unsupported or unavailable host jobs are release blockers rather than
 successful skips.
+
+The retained project under `examples/compat/v0.1.0-rc.1` is run outside the
+checkout by `.github/workflows/compatibility.yml` with both that published
+toolchain and the current toolchain. Its transcript is retained on every run.

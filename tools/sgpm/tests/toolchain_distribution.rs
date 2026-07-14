@@ -326,3 +326,35 @@ fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
         "pre-1.0 support and emergency compatibility exceptions must be explicit"
     );
 }
+
+#[test]
+fn compatibility_workflow_runs_retained_project_with_previous_and_current_toolchains() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/compatibility.yml"))
+        .expect("read compatibility workflow");
+    let fixture = root.join("examples/compat/v0.1.0-rc.1");
+
+    for relative in ["Sengoo.toml", "Sengoo.lock", "src/lib.sg", "tests/smoke.sg"] {
+        assert!(
+            fixture.join(relative).is_file(),
+            "retained compatibility fixture should contain {relative}"
+        );
+    }
+    for needle in [
+        "v0.1.0-rc.1",
+        "scripts/install.sh",
+        "outside-checkout",
+        "SGPM_SGC",
+        "check --locked",
+        "test --locked",
+        "fmt --check --locked",
+        "doc --locked",
+        "build --locked",
+        "compatibility-transcript",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "compatibility workflow should contain `{needle}`"
+        );
+    }
+}
