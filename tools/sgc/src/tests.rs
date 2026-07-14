@@ -9490,6 +9490,56 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_file_len_rejects_directories_instead_of_returning_host_lengths() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "file-len-directory-rejects",
+        r#"
+import std::dir;
+import std::file;
+import std::status;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_file_len_dir";
+    let child = "sengoo_tmp_file_len_dir/child.txt";
+
+    file_remove(child);
+    dir_remove(root);
+
+    let created = dir_create_all(root).unwrap_or(false);
+    let wrote = file_write_str(child, "hello").unwrap_or(0);
+    let child_len = file_len(child);
+    let dir_len = file_len(root);
+
+    file_remove(child);
+    let removed = dir_remove(root).unwrap_or(false);
+
+    if created
+        && wrote == 5
+        && child_len.is_ok
+        && child_len.value == 5
+        && dir_len.is_err()
+        && dir_len.error == STATUS_UNSUPPORTED()
+        && removed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn examples_smoke_reflection_net_tcp_echo() {
     let ir = compile_reflection_example_via_std_imports("examples/reflection/net_tcp_echo.sg");
     assert!(ir.contains("sengoo_tcp_connect"));
