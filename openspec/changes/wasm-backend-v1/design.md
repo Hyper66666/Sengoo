@@ -1,13 +1,15 @@
 ## Context
 
 Sengoo MIR and runtime currently assume native pointers, C/native runtime
-objects, and platform handles in several stdlib areas. WASM requires a bounded
-linear-memory ABI and a documented host capability subset.
+objects, and platform handles in several stdlib areas. The implemented WASM
+path is narrower: it emits pure core WebAssembly for a scalar MIR subset, keeps
+the ABI boundary explicit, and rejects unsupported ownership and host features
+instead of emulating them.
 
-The repository already contains a scalar direct emitter. It is a disposable
-prototype: this change must promote, replace, or discard it after comparing it
-with the LLVM-target path. Existing `.wasm` bytes are not a compatibility
-contract.
+The repository already contains a scalar direct emitter. The comparison against
+the LLVM-target path is complete, and this change now records the experimental
+scalar contract that matches the shipped implementation. Existing `.wasm` bytes
+are not a broader compatibility contract.
 
 ## Entry gate
 
@@ -17,7 +19,7 @@ ABI; it does not consume native C pointers from `runtime_shared.h`.
 
 ## Decisions
 
-### Decision 1: Select emitter through an evidence spike
+### Decision 1: Keep the direct emitter as the experimental scalar path
 
 Prototype representative scalar, control-flow, aggregate, call, Drop, and
 stdlib-import programs through:
@@ -26,42 +28,53 @@ stdlib-import programs through:
 - a minimal direct MIR-to-WASM emitter if LLVM integration cannot preserve the
   required ABI or packaging path.
 
-Record compile time, artifact validity, diagnostics, runtime integration, and
-maintenance cost. Choose one production path; do not maintain two.
+The evidence spike is complete. The direct MIR-to-WASM emitter remains the v1
+path because it ships inside `sgc`, produces validated core modules, and avoids
+host `clang` / WASI SDK packaging requirements. LLVM-to-WASM is not part of
+this experimental scalar change.
 
-### Decision 2: Target WASI first
+### Decision 2: Keep v1 as pure core WebAssembly and defer WASI
 
-The first target is a pinned WASI runtime/profile recorded at implementation
-time. Supported imports begin with args/env, stdout/stderr, monotonic time, and
-sandbox-permitted file IO. Network/process/dynamic FFI support is absent unless
-separately specified and tested.
+The first supported surface is `wasm32-unknown-unknown` with no required host
+imports. `docs/wasm-wasi-profile.md` may record a future WASI allowlist, but
+documenting candidate imports is not evidence that args/env/stdout/stderr/time
+or file IO are implemented. Any WASI host profile remains follow-up work.
 
-### Decision 3: Preserve ownership and Drop in linear memory
+### Decision 3: Fail closed at the ownership and memory boundary
 
-MIR allocation, aggregate layout, String/Vec descriptors, trait-object
-vtables, and drop glue use 32-bit linear-memory offsets under the target ABI.
-Each owned value drops exactly once. Traps and early returns run required cleanup
-unless the runtime terminates the whole instance.
+Experimental v1 supports scalar values, control flow, and internal calls only.
+Aggregates, heap ownership/Drop, String/Vec descriptors, trait-object vtables,
+`Load`, `Store`, `AddrOf`, and Ref/Ptr/Future surfaces remain compile-time
+`unsupported-target-capability` diagnostics. The backend must fail closed and
+must not rewrite unsupported memory instructions into plain `Move`s or fall
+back to native execution.
 
 WASM v1 always requests `TargetPointerWidth::Bits32`. A host-width MIR bundle is
 an input error, not something the emitter truncates during code generation.
 
-### Decision 4: Validate modules and bound resources
+### Decision 4: Preserve wasm32 ABI metadata and unsigned semantics
+
+Generated modules export `main`, embed MIR semantic ABI v1 plus portable
+runtime ABI v1 metadata, and use unsigned WebAssembly opcodes for unsigned
+division, remainder, shifts, and ordered comparisons. `sgc run --target wasm`
+must reject unsupported embedded ABI versions before invoking a host runtime.
+
+### Decision 5: Keep hardening claims limited to implemented guardrails
 
 Generated modules pass a standard validator before being reported successful.
-Runtime invocation has documented memory/fuel/time limits for tests. Host import
-names and ABI version are explicit.
+Current enforced guardrails are limited to module-size validation, embedded ABI
+validation, and wall-clock timeout around Node or wasmtime execution. Runtime
+memory ceilings, output limits, and completed Windows plus Unix CI execution
+coverage remain follow-up work and must not be claimed complete from
+documentation alone.
 
-### Decision 5: Unsupported capabilities are compile errors
+## Reopened follow-up gate
 
-Target capability analysis happens before emission and reports stable
-`unsupported-target-capability` diagnostics. No native subprocess or hidden
-fallback is used.
+The following items are intentionally reopened outside the experimental scalar
+contract recorded by this change:
 
-## Archive gate
-
-- chosen emitter decision recorded;
-- representative core conformance passes under the pinned WASM runtime;
-- ownership/Drop and trap/error scenarios pass;
-- supported WASI stdlib subset and negative diagnostics documented;
-- CI produces and runs `.wasm` artifacts on at least two host OS families.
+- implement and test a real WASI host import subset;
+- lower ownership/Drop and aggregate or heap-backed values instead of rejecting
+  them;
+- enforce runtime memory and output limits as code, not documentation; and
+- run `.wasm` artifacts in CI on both Windows and Unix hosts.

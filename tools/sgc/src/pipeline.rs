@@ -370,9 +370,7 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
             32 => TargetPointerWidth::Bits32,
             64 => TargetPointerWidth::Bits64,
             other => {
-                return Err(miette::miette!(
-                    "unsupported target pointer width: {other}"
-                ));
+                return Err(miette::miette!("unsupported target pointer width: {other}"));
             }
         };
         let ffi_codegen = collect_ffi_codegen_config_for_pointer_width(&hir_module, pointer_width);

@@ -4,8 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn abi_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../runtime/abi/portable_runtime_abi_v1.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/abi/portable_runtime_abi_v1.json")
 }
 
 fn abi_text() -> String {
@@ -106,8 +105,7 @@ fn canonical_portable_runtime_abi_uses_v1_schema_and_version_surface() {
         Some(1)
     );
     assert_eq!(
-        abi.get("mir_semantic_abi_version")
-            .and_then(Value::as_u64),
+        abi.get("mir_semantic_abi_version").and_then(Value::as_u64),
         Some(1)
     );
 }
@@ -119,7 +117,12 @@ fn canonical_portable_runtime_abi_contains_required_layouts_and_ids() {
     require_named_entries(
         &abi,
         "layouts",
-        &["owned_string", "generic_vec", "dyn_trait_fat_ref", "async_frame"],
+        &[
+            "owned_string",
+            "generic_vec",
+            "dyn_trait_fat_ref",
+            "async_frame",
+        ],
     );
     require_named_entries(
         &abi,
@@ -159,7 +162,9 @@ fn canonical_portable_runtime_abi_contains_required_layouts_and_ids() {
     );
 
     let dyn_dispatch = object_field(&abi, "dyn_dispatch");
-    let dyn_drop_slot_ordinal = dyn_dispatch.get("drop_slot_ordinal").and_then(Value::as_u64);
+    let dyn_drop_slot_ordinal = dyn_dispatch
+        .get("drop_slot_ordinal")
+        .and_then(Value::as_u64);
     assert_eq!(dyn_drop_slot_ordinal, Some(0));
     require_named_entries(
         dyn_dispatch.get("method_slots").unwrap_or(&Value::Null),
@@ -201,7 +206,9 @@ fn canonical_portable_runtime_abi_uses_unique_numeric_ids_and_ordinals() {
 
     let dyn_dispatch = object_field(&abi, "dyn_dispatch");
     assert_eq!(
-        dyn_dispatch.get("drop_slot_ordinal").and_then(Value::as_u64),
+        dyn_dispatch
+            .get("drop_slot_ordinal")
+            .and_then(Value::as_u64),
         Some(0),
         "dyn drop slot ordinal must remain stable at 0"
     );

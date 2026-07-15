@@ -2,52 +2,59 @@
 
 - [x] 1.1 Confirm coordinator entry gate, MIR semantic ABI version, portable
   runtime ABI version, and explicit wasm32 pointer width.
-  - Entry tasks 1.2–1.6 closed; wasm frontend uses `wasm32-unknown-unknown`.
+  - Entry tasks 1.2-1.6 closed; wasm frontend uses `wasm32-unknown-unknown`.
 - [x] 1.2 Promote, replace, or discard the existing direct-emitter prototype
   after an LLVM-target comparison over the representative corpus; record
   artifacts, diagnostics, compile time, and maintenance cost.
   - Decision recorded in `docs/architecture/wasm-emitter-decision.md`.
-- [x] 1.3 Choose one emitter and update this design before production code.
-  - Direct MIR→WASM emitter promoted for v1.
+- [x] 1.3 Choose one emitter and update this design to match the experimental
+  scalar contract.
+  - Direct MIR-to-WASM emitter remains the only recorded path for v1.
 
-## 2. Target ABI and code generation
+## 2. Implemented experimental scalar backend
 
-- [x] 2.1 Define wasm32 layout, function ABI, imports, globals, memory,
-  vtables, panic/trap, and runtime ABI version sections.
-  - Documented in `docs/wasm-wasi-profile.md`; modules embed MIR/runtime ABI
-    versions in a custom section.
-- [x] 2.2 Lower scalar/control-flow/call/aggregate/string/generic/drop MIR needed
-  by the conformance corpus.
-  - Scalar/control-flow/call lowered; aggregate/string/generic/drop rejected
-    with `unsupported-target-capability` (fail-closed ownership boundary).
-- [x] 2.3 Validate every produced module and reject unsupported MIR with stable
-  diagnostics.
-  - `validate_wasm_module` runs on every build; portable MIR rejects use stable
-    capability diagnostics.
+- [x] 2.1 Define the experimental wasm32 scalar ABI, export shape, and runtime
+  ABI metadata boundary.
+  - Experimental profile documented in `docs/wasm-wasi-profile.md`; modules
+    export `main`, embed MIR/runtime ABI versions in a custom section, and
+    require no host imports.
+- [x] 2.2 Lower scalar/control-flow/call MIR and fail closed for unsupported
+  ownership or memory features.
+  - Scalar/control-flow/call lowered; aggregates, String/Vec/Drop,
+    `Load`/`Store`/`AddrOf`, and host-only features reject with
+    `unsupported-target-capability`.
+- [x] 2.3 Validate every produced module, preserve unsigned semantics, and
+  reject unsupported ABI versions before run.
+  - `validate_wasm_module` runs on every build; unsigned div/rem/shr/compare
+    use the correct WASM opcodes; `sgc run --target wasm` rejects unknown ABI
+    versions before execution.
+- [x] 2.4 Keep the implemented runtime guardrails honest.
+  - Module-size validation and wall-clock timeout are enforced; no hidden
+    native fallback is used.
 
-## 3. WASI stdlib subset
+## 3. CLI, tests, and docs aligned to the experimental scope
 
-- [x] 3.1 Implement and document args/env/stdout/stderr/time plus sandboxed file
-  IO for the pinned WASI profile.
-  - Pinned profile documents pure-core v1 (no WASI imports yet) and the
-    forward allowlist in `docs/wasm-wasi-profile.md`.
-- [x] 3.2 Add compile-time negatives for process, dynamic FFI, unsupported net,
-  and other host-only modules.
-  - Covered by portable capability diagnostics and portable_targets tests.
-- [x] 3.3 Enforce test/runtime memory, time/fuel, and output limits.
-  - Structural validation plus documented host-runtime limits.
-
-## 4. CLI, tests, and docs
-
-- [x] 4.1 Promote or replace the experimental `sgc build --target wasm` path and
-  add explicit `sgc run --target wasm` runtime selection.
+- [x] 3.1 Keep the experimental `sgc build --target wasm` path and explicit
+  `sgc run --target wasm` runtime selection.
   - `run_wasm` selects Node or wasmtime (`SENGOO_WASM_RUNTIME`).
-- [x] 4.2 Run core differential conformance plus String/Vec/Drop and error/trap
-  cases under the pinned runtime.
-  - Scalar differential via portable_targets; owned/aggregate cases fail closed.
-- [x] 4.3 Add CI module validation and execution on Windows plus one Unix host.
-  - `.github/workflows/core-conformance.yml` runs portable + ABI + MIR contract
-    tests on Ubuntu; Windows covered by local reference-host suites.
-- [x] 4.4 Update target capability matrix and user documentation.
-  - `docs/portable-targets.md`, `docs/wasm-wasi-profile.md`.
-- [x] 4.5 Run `openspec validate wasm-backend-v1 --strict` and all strict.
+- [x] 3.2 Reuse core scalar conformance and negative tests for the implemented
+  boundary.
+  - Scalar differential runs in `portable_targets`; owned/aggregate and
+    host-only cases fail closed instead of executing.
+- [x] 3.3 Update target capability matrix and user documentation without
+  claiming production WASI or ownership support.
+  - `docs/portable-targets.md` and `docs/wasm-wasi-profile.md` stay aligned
+    with the canonical `openspec/specs/wasm-backend/spec.md` boundary.
+- [x] 3.4 Run `openspec validate wasm-backend-v1 --strict` and all strict.
+  - 2026-07-15: `npx @fission-ai/openspec validate --all --strict` passed
+    48/48 specs and changes.
+
+## 4. Reopened follow-up work (not complete in this change)
+
+- [ ] 4.1 Implement WASI host imports for args/env/stdout/stderr/time/file IO
+  and cover them with runtime-backed tests.
+- [ ] 4.2 Lower ownership/Drop, aggregates, and other heap-backed values instead
+  of rejecting them with `unsupported-target-capability`.
+- [ ] 4.3 Enforce runtime memory and output limits in code and tests.
+  - Documenting future limits is not evidence that the implementation exists.
+- [ ] 4.4 Run `.wasm` artifacts in CI on both Windows and Unix hosts.

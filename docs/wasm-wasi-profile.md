@@ -1,10 +1,10 @@
-# WASM / WASI Profile (experimental scalar v1)
+# WASM Profile (experimental scalar v1)
 
 Pinned profile name: **`sengoo-wasm32-scalar-experimental-v1`**
 
 > **Not production WASM.** This profile documents the experimental scalar
-> backend only. Owned String/Vec Drop and WASI host imports are deferred and
-> MUST NOT be claimed as Supported production capabilities.
+> backend only. Owned String/Vec/Drop and WASI host imports are deferred and
+> MUST NOT be claimed as supported production capabilities.
 
 ## Target triple and ABI
 
@@ -15,7 +15,7 @@ Pinned profile name: **`sengoo-wasm32-scalar-experimental-v1`**
 | MIR semantic ABI | `1` |
 | Portable runtime ABI | `1` (`runtime/abi/portable_runtime_abi_v1.json`) |
 | Module export | `main : () -> i64` |
-| Emitter | Direct MIR→WASM (`docs/architecture/wasm-emitter-decision.md`) |
+| Emitter | Direct MIR-to-WASM (`docs/architecture/wasm-emitter-decision.md`) |
 | Support tier | **Experimental scalar** |
 
 ## Supported program surface
@@ -33,6 +33,7 @@ Pinned profile name: **`sengoo-wasm32-scalar-experimental-v1`**
 ## WASI host import subset
 
 **Not implemented.** Experimental modules are pure core WebAssembly (no imports).
+Listing future imports here is not an implementation claim.
 
 Forward allowlist for a future production change (not a support claim):
 
@@ -44,15 +45,17 @@ Forward allowlist for a future production change (not a support claim):
 | time | `clock_time_get` | Deferred |
 | sandboxed file IO | `path_open`, `fd_read`, `fd_close` | Deferred |
 
-## Resource limits (enforced vs documented)
+## Resource limits (enforced vs not yet enforced)
 
 | Limit | Enforcement |
 | --- | --- |
-| Module size ≤ 4 MiB | Enforced in `validate_wasm_module` |
+| Module size <= 4 MiB | Enforced in `validate_wasm_module` |
 | Embedded ABI versions | Enforced on build and `sgc run` of `.wasm` |
 | Wall-clock run timeout (10s) | Enforced around Node/wasmtime process |
-| wasmtime fuel | Best-effort (`--fuel` when CLI accepts it) |
-| Multi-OS CI matrix | **Not yet** — Ubuntu portable smoke only |
+| Runtime memory ceiling | Not yet enforced as a backend/runtime contract |
+| Output byte ceiling | Not yet enforced |
+| wasmtime fuel | Best-effort only (`--fuel` when the CLI accepts it); not part of the support contract |
+| Multi-OS CI matrix | **Not yet** - Ubuntu portable smoke only |
 
 ## CLI
 

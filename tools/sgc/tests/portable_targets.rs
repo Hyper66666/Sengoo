@@ -309,6 +309,88 @@ def main() -> i64 {
 }
 
 #[test]
+fn wasm_target_narrowing_cast_matches_native() {
+    let dir = temp_dir("wasm_narrowing_cast");
+    let source = dir.join("main.sg");
+    fs::write(
+        &source,
+        r#"
+def main() -> i64 {
+    if ((4294967296u64 as u32) as u64) == 0u64 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let native = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--force-rebuild"])
+        .output()
+        .expect("run native narrowing cast");
+    let wasm = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run wasm narrowing cast");
+    assert_eq!(
+        wasm.status.code(),
+        native.status.code(),
+        "native stdout:\n{}\nnative stderr:\n{}\nwasm stdout:\n{}\nwasm stderr:\n{}",
+        String::from_utf8_lossy(&native.stdout),
+        String::from_utf8_lossy(&native.stderr),
+        String::from_utf8_lossy(&wasm.stdout),
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+    assert_eq!(wasm.status.code(), Some(42));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wasm_target_signed_and_unsigned_extensions_match_native() {
+    let dir = temp_dir("wasm_cast_extensions");
+    let source = dir.join("main.sg");
+    fs::write(
+        &source,
+        r#"
+def main() -> i64 {
+    if ((4294967295u32 as i32) as i64) == -1i64 {
+        if ((-1i32 as u32) as u64) == 4294967295u64 {
+            42
+        } else {
+            2
+        }
+    } else {
+        1
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let native = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--force-rebuild"])
+        .output()
+        .expect("run native cast extensions");
+    let wasm = Command::new(sgc())
+        .args(["run", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run wasm cast extensions");
+    assert_eq!(
+        wasm.status.code(),
+        native.status.code(),
+        "native stdout:\n{}\nnative stderr:\n{}\nwasm stdout:\n{}\nwasm stderr:\n{}",
+        String::from_utf8_lossy(&native.stdout),
+        String::from_utf8_lossy(&native.stderr),
+        String::from_utf8_lossy(&wasm.stdout),
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+    assert_eq!(wasm.status.code(), Some(42));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wasm_artifact_rejects_tampered_abi_version_before_run() {
     let dir = temp_dir("wasm_abi_tamper");
     let source = write_scalar_program(&dir);
@@ -368,11 +450,7 @@ fn wasm_artifact_rejects_tampered_abi_version_before_run() {
 fn wasm_target_uses_wasm32_pointer_sized_literal_bounds() {
     let dir = temp_dir("wasm32_usize_bounds");
     let source = dir.join("main.sg");
-    fs::write(
-        &source,
-        "def main() -> usize { 4294967296usize }\n",
-    )
-    .unwrap();
+    fs::write(&source, "def main() -> usize { 4294967296usize }\n").unwrap();
 
     let build = Command::new(sgc())
         .args(["build", source.to_str().unwrap(), "--target", "wasm"])

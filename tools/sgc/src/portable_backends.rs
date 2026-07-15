@@ -90,6 +90,12 @@ struct PortableBlock {
     terminator: PortableTerminator,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PortableScalarType {
+    bits: u8,
+    signed: bool,
+}
+
 #[derive(Debug, Clone)]
 enum PortableInstruction {
     Const {
@@ -112,6 +118,12 @@ enum PortableInstruction {
     Move {
         destination: u32,
         source: u32,
+    },
+    Cast {
+        destination: u32,
+        source: u32,
+        from: PortableScalarType,
+        to: PortableScalarType,
     },
     Call {
         destination: u32,
@@ -299,12 +311,15 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
                 let (count, _) = read_uleb_at(payload, 0)?;
                 type_count = Some(count);
             }
+            2 => {
+                miette::bail!("WebAssembly imports are outside the experimental pure-core profile");
+            }
             3 => {
                 let (count, _) = read_uleb_at(payload, 0)?;
                 function_count = Some(count);
             }
             7 => {
-                if payload_contains_export_main(payload) {
+                if payload_contains_exported_main_function(payload, function_count.unwrap_or(0))? {
                     saw_export_main = true;
                 }
             }
@@ -312,7 +327,7 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
                 let (count, _) = read_uleb_at(payload, 0)?;
                 code_count = Some(count);
             }
-            2 | 4 | 5 | 6 | 8 | 9 | 11 | 12 => {}
+            4 | 5 | 6 | 8 | 9 | 11 | 12 => {}
             other => miette::bail!("unsupported WebAssembly section id {other}"),
         }
         offset = end;
@@ -365,35 +380,41 @@ fn parse_portable_abi_custom_section(payload: &[u8]) -> Result<Option<(u32, u32)
     Ok(Some((mir_version, runtime_version)))
 }
 
-fn payload_contains_export_main(payload: &[u8]) -> bool {
+fn payload_contains_exported_main_function(payload: &[u8], function_count: u64) -> Result<bool> {
     // Export section: count, then (name_len, name_bytes, kind, index)*
-    let Ok((count, mut offset)) = read_uleb_at(payload, 0) else {
-        return false;
-    };
+    let (count, mut offset) = read_uleb_at(payload, 0)?;
+    let mut saw_main = false;
     for _ in 0..count {
-        let Ok((name_len, next)) = read_uleb_at(payload, offset) else {
-            return false;
-        };
+        let (name_len, next) = read_uleb_at(payload, offset)?;
         offset = next;
-        let end = offset.saturating_add(name_len as usize);
+        let end = offset
+            .checked_add(name_len as usize)
+            .ok_or_else(|| miette::miette!("WebAssembly export name length overflow"))?;
         if end > payload.len() {
-            return false;
+            miette::bail!("truncated WebAssembly export name");
         }
-        if &payload[offset..end] == b"main" {
-            return true;
-        }
+        let is_main = &payload[offset..end] == b"main";
         offset = end;
-        // kind + index
-        if offset >= payload.len() {
-            return false;
-        }
+        let kind = *payload
+            .get(offset)
+            .ok_or_else(|| miette::miette!("truncated WebAssembly export kind"))?;
         offset += 1;
-        let Ok((_, next)) = read_uleb_at(payload, offset) else {
-            return false;
-        };
+        let (index, next) = read_uleb_at(payload, offset)?;
         offset = next;
+        if is_main {
+            if kind != 0 {
+                miette::bail!("WebAssembly export `main` must be a function");
+            }
+            if index >= function_count {
+                miette::bail!("WebAssembly export `main` function index {index} is out of range");
+            }
+            saw_main = true;
+        }
     }
-    false
+    if offset != payload.len() {
+        miette::bail!("WebAssembly export section has trailing data");
+    }
+    Ok(saw_main)
 }
 
 fn read_uleb_at(bytes: &[u8], mut offset: usize) -> Result<(u64, usize)> {
@@ -517,8 +538,7 @@ fn execute_wasm_with_wasmtime(module_path: &Path) -> Result<i64> {
             let mut fallback = std::process::Command::new("wasmtime");
             fallback.args(["run", "--invoke", "main"]);
             fallback.arg(module_path);
-            let output =
-                run_command_with_timeout(&mut fallback, WASM_RUN_TIMEOUT, "wasmtime")?;
+            let output = run_command_with_timeout(&mut fallback, WASM_RUN_TIMEOUT, "wasmtime")?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 miette::bail!("wasmtime execution failed: {stderr}");
@@ -601,12 +621,9 @@ fn compile_portable_input(
         .into_diagnostic()
         .with_context(|| format!("failed to read source {input}"))?;
     let source = crate::expand_imports_for_source(Path::new(input), &source)?;
-    let bundle = crate::pipeline::compile_source_to_mir_bundle(
-        &source,
-        opt_level,
-        target.target_triple(),
-    )
-    .map_err(|err| miette::miette!("portable target frontend failed: {err}"))?;
+    let bundle =
+        crate::pipeline::compile_source_to_mir_bundle(&source, opt_level, target.target_triple())
+            .map_err(|err| miette::miette!("portable target frontend failed: {err}"))?;
 
     validate_portable_abi_versions(bundle.semantic_abi_version, PORTABLE_RUNTIME_ABI_VERSION)?;
     if matches!(target, PortableBackendTarget::Wasm)
@@ -614,10 +631,7 @@ fn compile_portable_input(
     {
         return Err(unsupported_target_capability(
             target,
-            format!(
-                "non-wasm32 pointer width {:?}",
-                bundle.target_pointer_width
-            ),
+            format!("non-wasm32 pointer width {:?}", bundle.target_pointer_width),
         ));
     }
 
@@ -687,10 +701,7 @@ impl PortableFunction {
                     .ok_or_else(|| {
                         unsupported_target_capability(
                             target,
-                            format!(
-                                "unterminated MIR block {} in `{}`",
-                                block.id, function.name
-                            ),
+                            format!("unterminated MIR block {} in `{}`", block.id, function.name),
                         )
                     })
                     .and_then(|terminator| {
@@ -747,7 +758,8 @@ impl PortableInstruction {
             } => {
                 let left_ty = mir_local_type(function, left.id)?;
                 let right_ty = mir_local_type(function, right.id)?;
-                let unsigned = portable_binary_is_unsigned(target, function_name, &left_ty, &right_ty)?;
+                let unsigned =
+                    portable_binary_is_unsigned(target, function_name, left_ty, right_ty)?;
                 Self::Binary {
                     destination: destination.id,
                     op: (*op).into(),
@@ -774,9 +786,8 @@ impl PortableInstruction {
                     format!("MIR AddrOf instruction in `{function_name}`"),
                 ));
             }
-            // Scalar portable IR stores all values in i64 register slots. Value
-            // casts between Bool/Int/UInt are representation moves; memory-like
-            // Load/Store/AddrOf remain hard errors above.
+            // Scalar portable IR stores all values in i64 register slots, but
+            // width-changing casts still require truncate/extend semantics.
             Instruction::Cast {
                 destination,
                 value: source,
@@ -799,9 +810,11 @@ impl PortableInstruction {
                         ),
                     ));
                 }
-                Self::Move {
+                Self::Cast {
                     destination: destination.id,
                     source: source.id,
+                    from: portable_scalar_type(target, function_name, src_ty)?,
+                    to: portable_scalar_type(target, function_name, dest_ty)?,
                 }
             }
             Instruction::Call {
@@ -939,16 +952,39 @@ fn validate_portable_type(
 ) -> Result<()> {
     // Experimental scalar surface only: no pointers/refs/futures (those would
     // previously be accepted and then silently miscompiled as integer moves).
-    if matches!(
-        ty,
-        MIRType::Unit | MIRType::Never | MIRType::Bool | MIRType::Int(_) | MIRType::UInt(_)
-    ) {
-        return Ok(());
-    }
-    Err(unsupported_target_capability(
-        target,
-        format!("MIR type {:?} in `{function}`", ty),
-    ))
+    portable_scalar_type(target, function, ty).map(|_| ())
+}
+
+fn portable_scalar_type(
+    target: PortableBackendTarget,
+    function: &str,
+    ty: &MIRType,
+) -> Result<PortableScalarType> {
+    let scalar = match ty {
+        MIRType::Unit | MIRType::Never => PortableScalarType {
+            bits: 0,
+            signed: false,
+        },
+        MIRType::Bool => PortableScalarType {
+            bits: 1,
+            signed: false,
+        },
+        MIRType::Int(bits @ (8 | 16 | 32 | 64)) => PortableScalarType {
+            bits: *bits,
+            signed: true,
+        },
+        MIRType::UInt(bits @ (8 | 16 | 32 | 64)) => PortableScalarType {
+            bits: *bits,
+            signed: false,
+        },
+        _ => {
+            return Err(unsupported_target_capability(
+                target,
+                format!("MIR type {:?} in `{function}`", ty),
+            ));
+        }
+    };
+    Ok(scalar)
 }
 
 fn mir_local_type(function: &MirFunction, local_id: u32) -> Result<&MIRType> {
@@ -1016,7 +1052,10 @@ fn portable_constant(
         MirConstant::Int(value) => Ok(*value),
         MirConstant::Uint(value) => Ok(*value as i64),
         MirConstant::Char(value) => Ok(*value as i64),
-        MirConstant::GlobalRef(_) => Ok(0),
+        MirConstant::GlobalRef(_) => Err(unsupported_target_capability(
+            target,
+            format!("constant {:?} in `{function}`", value),
+        )),
         other => Err(unsupported_target_capability(
             target,
             format!("constant {:?} in `{function}`", other),
@@ -1220,6 +1259,15 @@ impl PortableVm<'_> {
                 destination,
                 source,
             } => set_local(locals, *destination, get_local(locals, *source)?),
+            PortableInstruction::Cast {
+                destination,
+                source,
+                from,
+                to,
+            } => {
+                let value = normalize_portable_scalar(get_local(locals, *source)?, *from);
+                set_local(locals, *destination, normalize_portable_scalar(value, *to))
+            }
             PortableInstruction::Call {
                 destination,
                 function,
@@ -1309,6 +1357,22 @@ fn eval_binary(op: PortableBinary, unsigned: bool, left: i64, right: i64) -> Res
         PortableBinary::Ge if unsigned => i64::from((left as u64) >= (right as u64)),
         PortableBinary::Ge => i64::from(left >= right),
     })
+}
+
+fn normalize_portable_scalar(value: i64, ty: PortableScalarType) -> i64 {
+    match ty.bits {
+        0 => 0,
+        64 => value,
+        bits => {
+            let mask = (1u64 << bits) - 1;
+            let raw = (value as u64) & mask;
+            if ty.signed && raw & (1u64 << (bits - 1)) != 0 {
+                (raw | !mask) as i64
+            } else {
+                raw as i64
+            }
+        }
+    }
 }
 
 fn encode_bytecode(program: &PortableProgram) -> Result<Vec<u8>> {
@@ -1427,6 +1491,18 @@ fn encode_instruction(output: &mut Vec<u8>, instruction: &PortableInstruction) {
             write_u32(output, *destination);
             write_u32(output, *source);
         }
+        PortableInstruction::Cast {
+            destination,
+            source,
+            from,
+            to,
+        } => {
+            output.push(7);
+            write_u32(output, *destination);
+            write_u32(output, *source);
+            encode_scalar_type(output, *from);
+            encode_scalar_type(output, *to);
+        }
         PortableInstruction::Call {
             destination,
             function,
@@ -1505,7 +1581,29 @@ fn decode_instruction(reader: &mut BytecodeReader<'_>) -> Result<PortableInstruc
             }
         }
         6 => PortableInstruction::Nop,
+        7 => PortableInstruction::Cast {
+            destination: reader.read_u32()?,
+            source: reader.read_u32()?,
+            from: decode_scalar_type(reader)?,
+            to: decode_scalar_type(reader)?,
+        },
         opcode => miette::bail!("unknown Sengoo bytecode instruction opcode {opcode}"),
+    })
+}
+
+fn encode_scalar_type(output: &mut Vec<u8>, ty: PortableScalarType) {
+    output.push(ty.bits);
+    output.push(u8::from(ty.signed));
+}
+
+fn decode_scalar_type(reader: &mut BytecodeReader<'_>) -> Result<PortableScalarType> {
+    let bits = reader.read_u8()?;
+    if !matches!(bits, 0 | 1 | 8 | 16 | 32 | 64) {
+        miette::bail!("invalid portable scalar width {bits}");
+    }
+    Ok(PortableScalarType {
+        bits,
+        signed: reader.read_u8()? != 0,
     })
 }
 
@@ -1896,6 +1994,17 @@ fn encode_wasm_instruction(
             wasm_local_get(output, wasm_local(function, *source));
             wasm_local_set(output, wasm_local(function, *destination));
         }
+        PortableInstruction::Cast {
+            destination,
+            source,
+            from,
+            to,
+        } => {
+            wasm_local_get(output, wasm_local(function, *source));
+            encode_wasm_scalar_normalize(output, *from);
+            encode_wasm_scalar_normalize(output, *to);
+            wasm_local_set(output, wasm_local(function, *destination));
+        }
         PortableInstruction::Call {
             destination,
             function: callee,
@@ -1927,6 +2036,28 @@ fn encode_wasm_instruction(
         PortableInstruction::Nop => {}
     }
     Ok(())
+}
+
+fn encode_wasm_scalar_normalize(output: &mut Vec<u8>, ty: PortableScalarType) {
+    match ty.bits {
+        0 => {
+            output.push(0x1a);
+            wasm_i64_const(output, 0);
+        }
+        64 => {}
+        bits if ty.signed => {
+            let shift = i64::from(64 - bits);
+            wasm_i64_const(output, shift);
+            output.push(0x86);
+            wasm_i64_const(output, shift);
+            output.push(0x87);
+        }
+        bits => {
+            let mask = ((1u64 << bits) - 1) as i64;
+            wasm_i64_const(output, mask);
+            output.push(0x83);
+        }
+    }
 }
 
 fn encode_wasm_terminator(
@@ -2162,13 +2293,14 @@ fn write_sleb(output: &mut Vec<u8>, mut value: i64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_bytecode, encode_bytecode, execute_bytecode, validate_portable_abi_versions,
-        PortableProgram, PORTABLE_RUNTIME_ABI_VERSION,
+        decode_bytecode, encode_bytecode, encode_wasm, execute_bytecode, normalize_portable_scalar,
+        portable_constant, read_uleb_at, validate_portable_abi_versions, validate_wasm_module,
+        PortableBackendTarget, PortableProgram, PortableScalarType, PORTABLE_RUNTIME_ABI_VERSION,
     };
-    use sengoo_compiler::MIR_SEMANTIC_ABI_VERSION;
     use sengoo_compiler::mir::{
         Instruction, LocalKind, MIRType, MirConstant, MirFunction, Terminator,
     };
+    use sengoo_compiler::MIR_SEMANTIC_ABI_VERSION;
 
     #[test]
     fn bytecode_roundtrip_executes_stable_binary_format() {
@@ -2209,5 +2341,103 @@ mod tests {
         .expect_err("unknown portable runtime ABI must fail")
         .to_string();
         assert!(runtime_error.contains("unsupported-portable-runtime-abi"));
+    }
+
+    #[test]
+    fn portable_constants_reject_global_references() {
+        let error = portable_constant(
+            PortableBackendTarget::Wasm,
+            "main",
+            &MirConstant::GlobalRef("callback".to_string()),
+        )
+        .expect_err("scalar portable targets must reject global references")
+        .to_string();
+
+        assert!(error.contains("unsupported-target-capability"));
+        assert!(error.contains("GlobalRef"));
+    }
+
+    #[test]
+    fn portable_scalar_normalization_preserves_signed_and_unsigned_extensions() {
+        let signed_i32 = PortableScalarType {
+            bits: 32,
+            signed: true,
+        };
+        let unsigned_u32 = PortableScalarType {
+            bits: 32,
+            signed: false,
+        };
+
+        assert_eq!(normalize_portable_scalar(0xffff_ffff, signed_i32), -1);
+        assert_eq!(normalize_portable_scalar(-1, unsigned_u32), u32::MAX as i64);
+    }
+
+    #[test]
+    fn wasm_validator_rejects_non_function_main_export() {
+        let mut main = MirFunction::new("main".to_string(), Vec::new(), MIRType::Int(64));
+        let value = main.add_local(LocalKind::Temp, MIRType::Int(64));
+        main.push_inst_to_block(
+            0,
+            Instruction::Assign {
+                destination: value,
+                value: MirConstant::Int(42),
+            },
+        );
+        main.block_mut(0)
+            .unwrap()
+            .set_terminator(Terminator::Return(Some(value)));
+        let program = PortableProgram::from_mir(PortableBackendTarget::Wasm, &[main]).unwrap();
+        let mut bytes = encode_wasm(&program).unwrap();
+        let name = b"main";
+        let name_pos = bytes
+            .windows(name.len())
+            .position(|window| window == name)
+            .expect("main export name");
+        let kind_pos = name_pos + name.len();
+        assert_eq!(
+            bytes[kind_pos], 0,
+            "generated main must be a function export"
+        );
+        bytes[kind_pos] = 2;
+
+        let error = validate_wasm_module(&bytes)
+            .expect_err("non-function main export must fail validation")
+            .to_string();
+        assert!(error.contains("function"));
+    }
+
+    #[test]
+    fn wasm_validator_rejects_import_sections_for_the_pure_core_profile() {
+        let mut main = MirFunction::new("main".to_string(), Vec::new(), MIRType::Int(64));
+        let value = main.add_local(LocalKind::Temp, MIRType::Int(64));
+        main.push_inst_to_block(
+            0,
+            Instruction::Assign {
+                destination: value,
+                value: MirConstant::Int(42),
+            },
+        );
+        main.block_mut(0)
+            .unwrap()
+            .set_terminator(Terminator::Return(Some(value)));
+        let program = PortableProgram::from_mir(PortableBackendTarget::Wasm, &[main]).unwrap();
+        let mut bytes = encode_wasm(&program).unwrap();
+
+        let mut offset = 8;
+        loop {
+            let section_id = bytes[offset];
+            let (payload_len, payload_start) = read_uleb_at(&bytes, offset + 1).unwrap();
+            let section_end = payload_start + payload_len as usize;
+            if section_id == 1 {
+                bytes.splice(section_end..section_end, [2, 1, 0]);
+                break;
+            }
+            offset = section_end;
+        }
+
+        let error = validate_wasm_module(&bytes)
+            .expect_err("experimental pure-core modules must reject imports")
+            .to_string();
+        assert!(error.contains("imports"));
     }
 }
