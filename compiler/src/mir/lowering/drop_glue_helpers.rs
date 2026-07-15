@@ -294,6 +294,37 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// Register drop glue for a by-value parameter even when the type is a
+    /// legacy idempotent handle (`String`/`Buffer`/`JsonDoc`).
+    ///
+    /// Ordinary function params skip those types for historical ABI reasons,
+    /// but lambdas that take `String` by value (e.g. field-allowlist callbacks)
+    /// must free the owned handle on every return path.
+    pub(super) fn force_record_owned_param_drop(&mut self, local: Local) {
+        if local.kind != LocalKind::Param {
+            self.record_drop_binding_if_needed(local);
+            return;
+        }
+        let mut bindings = Vec::new();
+        if let Some(drop_func) = self.drop_func_for_local(local) {
+            bindings.push(DropBinding {
+                local,
+                field_path: Vec::new(),
+                drop_func,
+            });
+        } else {
+            let ty = self.get_local_type(local).clone();
+            self.collect_field_drop_bindings(local, &ty, &mut Vec::new(), &mut bindings);
+        }
+        for binding in bindings {
+            if !self.drop_bindings.iter().any(|existing| {
+                existing.local == binding.local && existing.field_path == binding.field_path
+            }) {
+                self.drop_bindings.push(binding);
+            }
+        }
+    }
+
     fn drop_func_for_local(&mut self, local: Local) -> Option<String> {
         let local_ty = self.get_local_type(local).clone();
         if Self::option_payload_type(&local_ty).is_some() {

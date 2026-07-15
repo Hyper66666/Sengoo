@@ -860,33 +860,24 @@ fn resource_sampler_smoke_single_worker_with_latency_percentiles() {
 fn resource_single_worker_investigation_50k() {
     let root = WorkerTempDir::new("investigate-45k");
     let executable = build_worker(&root);
-    // Soft timeout: historical observation stalled near case 44086 within 3600s.
-    // Keep room for progress logs but fail closed if the single worker spins.
+    // Historical pre-fix observation stalled near case 44086 / multi-minute
+    // growth. After lambda String Drop glue, this window must complete cleanly.
     let outcome = run_resource_corpus(
         &executable,
         INVESTIGATION_COUNT,
         Duration::from_secs(900),
     );
-    // Investigation may record a hang/spin; always write evidence.
-    let path = write_evidence("investigate-45k", &outcome);
-    println!(
-        "senline-resource investigate evidence={} failures={:?}",
-        path.display(),
-        outcome.failures
-    );
-    if let Some(growth) = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES) {
-        println!("senline-resource post-warmup growth_bytes_per_case={growth}");
-    }
-    // Do not hard-assert green: task 8.3 remains open until 1M stable soak.
-    // Still require that we either complete or leave a deterministic failure record.
+    assert_resource_outcome(&outcome, "investigate-45k");
+    let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
+        .expect("post-warm-up memory samples");
+    println!("senline-resource post-warmup growth_bytes_per_case={growth}");
     assert!(
-        outcome.failures.is_empty()
-            || outcome
-                .failures
-                .iter()
-                .any(|f| f.contains("watchdog") || f.contains("read failed")),
-        "unexpected investigation failure mode: {:?}",
-        outcome.failures
+        growth < 1024.0,
+        "post-warm-up private-working-set growth {growth} B/case exceeds 1 KiB/case bound"
+    );
+    assert_eq!(
+        outcome.plan_ok, INVESTIGATION_COUNT,
+        "investigation must complete every reviewed-boundary case"
     );
 }
 

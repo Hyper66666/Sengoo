@@ -1273,6 +1273,32 @@ def main() -> i64 {
 }
 
 #[test]
+fn lambda_by_value_string_param_is_dropped_on_return() {
+    // Regression for senline worker long-session growth: field-allowlist
+    // callbacks take `String` by value and previously never ran Drop glue.
+    let mir = compile_with_owned_string(
+        r#"
+def main() -> i64 {
+    let allowed: fn(String) -> bool = |key| true;
+    let owned = string_from_str("contract_version").value;
+    if allowed(owned) { 1 } else { 0 }
+}
+"#,
+    );
+    let lambda = mir
+        .iter()
+        .find(|f| f.name.contains("lambda") || f.name.starts_with("$__"))
+        .or_else(|| mir.iter().find(|f| f.name != "main" && f.name != "string_from_str"))
+        .expect("expected a lowered lambda function");
+    assert!(
+        !string_drop_calls(lambda).is_empty()
+            || named_drop_calls(lambda, "String_Drop_drop").len() >= 1,
+        "lambda taking String by value must drop its parameter; lambda IR name={}",
+        lambda.name
+    );
+}
+
+#[test]
 fn concrete_generic_method_return_moves_owned_aggregate_without_early_drop() {
     let mir = compile_to_mir(
         r#"

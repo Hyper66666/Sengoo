@@ -32,8 +32,10 @@ Harness: `tools/sgc/tests/senline_worker_resource.rs`
 
 | Host | Label | Post-warm-up samples | p50 µs | p95 µs | p99 µs | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| Local Windows x64 | smoke-1k (1024 cases, warm-up 256) | 768 | 415 | 595 | 671 | Short stable window; concurrency=1 |
-| Local Windows x64 | investigate-45k (stopped ~29k @900s) | 28,758 | 20,417 | 124,655 | 179,286 | Dominated by single-worker degradation; **not** a pin latency claim |
+| Local Windows x64 | smoke-1k pre-fix | 768 | 415 | 595 | 671 | Pre lambda-Drop fix |
+| Local Windows x64 | smoke-1k post-fix | 768 | 108 | 212 | 757 | After lambda `String` Drop glue |
+| Local Windows x64 | investigate-45k pre-fix (~29k @900s) | 28,758 | 20,417 | 124,655 | 179,286 | Dominated by leak slowdown |
+| Local Windows x64 | investigate-45k post-fix (45k complete) | 44,744 | 1,288 | 2,631 | 3,155 | Full window under growth bound |
 
 Metric: request-write-complete → response-frame-complete wall time inside the
 harness. **Not** Senline admission or sandbox timing.
