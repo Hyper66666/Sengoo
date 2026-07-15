@@ -33,9 +33,9 @@ $env:PATH = "$binDir;" + $env:PATH
 
 Push-Location $HttpRoot
 try {
-    & $SgpmPath build --locked --release
+    & $SgpmPath --runtime-mode installed build --locked --release
     if ($LASTEXITCODE -ne 0) {
-        throw "sgpm build --locked --release failed for senline-http-dogfood"
+        throw "sgpm --runtime-mode installed build --locked --release failed for senline-http-dogfood"
     }
 } finally {
     Pop-Location

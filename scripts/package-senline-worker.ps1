@@ -34,9 +34,11 @@ $env:PATH = "$binDir;" + $env:PATH
 Push-Location $WorkerRoot
 try {
     # sgpm resolves locked path deps and module maps; use installed tools only.
-    & $SgpmPath build --locked --release
+    # Force installed runtime mode so packaging never falls back to checkout
+    # source-development runtime or cargo.
+    & $SgpmPath --runtime-mode installed build --locked --release
     if ($LASTEXITCODE -ne 0) {
-        throw "sgpm build --locked --release failed for senline-domain-worker"
+        throw "sgpm --runtime-mode installed build --locked --release failed for senline-domain-worker"
     }
 } finally {
     Pop-Location

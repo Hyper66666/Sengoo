@@ -145,24 +145,24 @@ jobs:
 
           Push-Location examples/realworld/senline-domain-worker
           try {
-            & $sgpm check --locked
-            if ($LASTEXITCODE -ne 0) { throw "worker sgpm check --locked failed" }
-            & $sgpm test --locked
-            if ($LASTEXITCODE -ne 0) { throw "worker sgpm test --locked failed" }
-            & $sgpm build --locked --release
-            if ($LASTEXITCODE -ne 0) { throw "worker sgpm build --locked --release failed" }
+            & $sgpm --runtime-mode installed check --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed check --locked failed" }
+            & $sgpm --runtime-mode installed test --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed test --locked failed" }
+            & $sgpm --runtime-mode installed build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed build --locked --release failed" }
           } finally {
             Pop-Location
           }
 
           Push-Location examples/realworld/senline-http-dogfood
           try {
-            & $sgpm check --locked
-            if ($LASTEXITCODE -ne 0) { throw "http sgpm check --locked failed" }
-            & $sgpm test --locked
-            if ($LASTEXITCODE -ne 0) { throw "http sgpm test --locked failed" }
-            & $sgpm build --locked --release
-            if ($LASTEXITCODE -ne 0) { throw "http sgpm build --locked --release failed" }
+            & $sgpm --runtime-mode installed check --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed check --locked failed" }
+            & $sgpm --runtime-mode installed test --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed test --locked failed" }
+            & $sgpm --runtime-mode installed build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm installed build --locked --release failed" }
           } finally {
             Pop-Location
           }
