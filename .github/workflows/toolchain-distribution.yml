@@ -133,7 +133,11 @@ jobs:
           $cargoTargetA = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-a-$artifact"
           Remove-Item -LiteralPath $primaryOutput -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $cargoTargetA -Recurse -Force -ErrorAction SilentlyContinue
-          $env:CARGO_ENCODED_RUSTFLAGS = "--remap-path-prefix=$cargoTargetA=/sengoo-build/target"
+          # package-toolchain.ps1 owns deterministic RUSTFLAGS (source+target
+          # remap, Windows /Brepro). Do not set a partial CARGO_ENCODED_RUSTFLAGS
+          # here or it will be overwritten by the packaging script.
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
           ./scripts/package-toolchain.ps1 `
             -Version $version `
             -OutputDir $primaryOutput `
@@ -151,7 +155,8 @@ jobs:
             $cargoTargetB = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-b-$artifact"
             Remove-Item -LiteralPath $secondaryOutput -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $cargoTargetB -Recurse -Force -ErrorAction SilentlyContinue
-            $env:CARGO_ENCODED_RUSTFLAGS = "--remap-path-prefix=$cargoTargetB=/sengoo-build/target"
+            Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+            Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
             ./scripts/package-toolchain.ps1 `
               -Version $version `
               -OutputDir $secondaryOutput `
@@ -209,7 +214,8 @@ jobs:
           $upgradeCargoTargetDir = Join-Path $env:RUNNER_TEMP "sengoo-cargo-upgrade-${{ matrix.artifact }}"
           Remove-Item -LiteralPath $upgradeOutputDir -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $upgradeCargoTargetDir -Recurse -Force -ErrorAction SilentlyContinue
-          $env:CARGO_ENCODED_RUSTFLAGS = "--remap-path-prefix=$upgradeCargoTargetDir=/sengoo-build/target"
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
           ./scripts/package-toolchain.ps1 `
             -Version $upgradeVersion `
             -OutputDir $upgradeOutputDir `

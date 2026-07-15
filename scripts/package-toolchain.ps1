@@ -85,7 +85,35 @@ $CargoTargetDir = [IO.Path]::GetFullPath($CargoTargetDir)
 $manifestPath = Join-Path $RepoRoot "Cargo.toml"
 $sourceStatusBefore = @(Git-Status)
 
+function Set-DeterministicCargoRustflags([string]$SourceRoot, [string]$TargetDir) {
+    # Unit-separator encoding required by CARGO_ENCODED_RUSTFLAGS.
+    $sep = [char]0x1f
+    $flags = [System.Collections.Generic.List[string]]::new()
+    $sourceRoot = [IO.Path]::GetFullPath($SourceRoot).TrimEnd([char[]]@('\', '/'))
+    $targetDir = [IO.Path]::GetFullPath($TargetDir).TrimEnd([char[]]@('\', '/'))
+    # Remap both source checkout and cargo target so two independent package
+    # builds do not bake different absolute paths into payloads.
+    $flags.Add("--remap-path-prefix=$sourceRoot=/sengoo-build/src")
+    $flags.Add("--remap-path-prefix=$targetDir=/sengoo-build/target")
+    if (Is-WindowsHost) {
+        # MSVC PE/COFF timestamps and incremental leftovers are otherwise
+        # non-deterministic across independent target directories.
+        $flags.Add("-C")
+        $flags.Add("debuginfo=0")
+        $flags.Add("-C")
+        $flags.Add("link-arg=/Brepro")
+        $flags.Add("-C")
+        $flags.Add("link-arg=/INCREMENTAL:NO")
+        $flags.Add("-C")
+        $flags.Add("link-arg=/DEBUG:NONE")
+    }
+    $env:CARGO_ENCODED_RUSTFLAGS = ($flags -join $sep)
+    Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+    Write-Host "deterministic cargo rustflags: source->$sourceRoot target->$targetDir windows=$(Is-WindowsHost)"
+}
+
 if (-not $NoBuild) {
+    Set-DeterministicCargoRustflags -SourceRoot $RepoRoot -TargetDir $CargoTargetDir
     & cargo build --manifest-path $manifestPath --target-dir $CargoTargetDir --locked `
         -p sgc -p sgpm -p sgfmt -p sglsp --release
     if ($LASTEXITCODE -ne 0) {
