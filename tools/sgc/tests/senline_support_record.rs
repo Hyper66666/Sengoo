@@ -46,10 +46,21 @@ fn sengoo_support_record_keeps_local_package_evidence_separate_from_senline_auth
         record.contains("| source-development-local | proven |"),
         "the current local source worker evidence must be explicit"
     );
+    // Installed hosts may be `pending` or intermediate `package-smoke-proven`
+    // after distribution packaging, but must not claim full product-loop proven
+    // until worker/HTTP installed gates and pin verification land.
+    let windows_status_ok = record.contains("| installed-windows-x64 | pending |")
+        || record.contains("| installed-windows-x64 | package-smoke-proven |");
+    let linux_status_ok = record.contains("| installed-linux-x64 | pending |")
+        || record.contains("| installed-linux-x64 | package-smoke-proven |");
     assert!(
-        record.contains("| installed-windows-x64 | pending |")
-            && record.contains("| installed-linux-x64 | pending |"),
-        "installed platform claims must remain pending until immutable gates pass"
+        windows_status_ok && linux_status_ok,
+        "installed platform rows must stay pending or package-smoke-proven only"
+    );
+    assert!(
+        record.contains("Installed `senline-domain-worker` / HTTP product loops")
+            || record.contains("Installed worker/HTTP product loops"),
+        "installed package-smoke rows must still call out pending product loops"
     );
     assert!(
         record.contains("| sandbox and supervisor | Senline-owned |")
@@ -58,11 +69,11 @@ fn sengoo_support_record_keeps_local_package_evidence_separate_from_senline_auth
     );
 
     for forbidden in [
-        "installed-windows-x64 | proven",
-        "installed-linux-x64 | proven",
-        "sandbox and supervisor | proven",
-        "internal-alpha | proven",
-        "production ingress | proven",
+        "| installed-windows-x64 | proven |",
+        "| installed-linux-x64 | proven |",
+        "| sandbox and supervisor | proven |",
+        "| internal-alpha | proven |",
+        "| production ingress | proven |",
     ] {
         assert!(
             !record.contains(forbidden),
