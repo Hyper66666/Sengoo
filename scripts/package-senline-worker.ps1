@@ -50,8 +50,9 @@ try {
     Pop-Location
 }
 
-$isWindows = ($env:OS -eq "Windows_NT") -or $IsWindows
-$exeName = if ($isWindows) { "senline_domain_worker.exe" } else { "senline_domain_worker" }
+# Avoid $isWindows: PowerShell is case-insensitive and $IsWindows is read-only.
+$hostIsWindows = ($env:OS -eq "Windows_NT") -or ((Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) -and $IsWindows)
+$exeName = if ($hostIsWindows) { "senline_domain_worker.exe" } else { "senline_domain_worker" }
 $built = Join-Path $WorkerRoot (Join-Path "target" (Join-Path "release" $exeName))
 if (-not (Test-Path -LiteralPath $built)) {
     throw "missing built worker executable: $built"

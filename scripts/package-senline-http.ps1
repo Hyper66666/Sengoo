@@ -47,8 +47,9 @@ try {
     Pop-Location
 }
 
-$isWindows = ($env:OS -eq "Windows_NT") -or $IsWindows
-$exeName = if ($isWindows) { "senline_http_dogfood.exe" } else { "senline_http_dogfood" }
+# Avoid $isWindows: PowerShell is case-insensitive and $IsWindows is read-only.
+$hostIsWindows = ($env:OS -eq "Windows_NT") -or ((Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) -and $IsWindows)
+$exeName = if ($hostIsWindows) { "senline_http_dogfood.exe" } else { "senline_http_dogfood" }
 $built = Join-Path $HttpRoot "target\release\$exeName"
 if (-not (Test-Path -LiteralPath $built)) {
     # Linux/mac path separator fallback
