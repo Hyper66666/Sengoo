@@ -59,8 +59,9 @@ fn sengoo_support_record_keeps_local_package_evidence_separate_from_senline_auth
     );
     assert!(
         record.contains("Installed `senline-domain-worker` / HTTP product loops")
-            || record.contains("Installed worker/HTTP product loops"),
-        "installed package-smoke rows must still call out pending product loops"
+            || record.contains("Installed worker/HTTP product loops")
+            || record.contains("reviewed Senline pin"),
+        "installed package-smoke rows must still call out remaining pin/soak limits"
     );
     assert!(
         record.contains("| sandbox and supervisor | Senline-owned |")
