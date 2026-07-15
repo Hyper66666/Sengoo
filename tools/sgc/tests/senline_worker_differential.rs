@@ -42,12 +42,28 @@ fn sha256(bytes: impl AsRef<[u8]>) -> String {
     format!("{:x}", Sha256::digest(bytes.as_ref()))
 }
 
+fn normalize_fixture_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
+    // Windows checkouts without forced LF can rewrite fixture JSON/raw files with
+    // CRLF, which would otherwise invalidate frozen SHA-256 digests and handshake
+    // byte equality. Canonicalize to LF before hashing or comparing fixtures.
+    bytes
+        .as_ref()
+        .iter()
+        .copied()
+        .filter(|byte| *byte != b'\r')
+        .collect()
+}
+
 #[test]
 fn differential_corpus_metadata_is_frozen_and_linked_to_rust_fixtures() {
     let root = fixture_root();
-    let fixture_metadata = fs::read(root.join("metadata.json")).expect("read fixture metadata");
-    let corpus_metadata = fs::read(root.join("differential-corpus-v1.json"))
-        .expect("read reviewed differential corpus metadata");
+    let fixture_metadata = normalize_fixture_bytes(
+        fs::read(root.join("metadata.json")).expect("read fixture metadata"),
+    );
+    let corpus_metadata = normalize_fixture_bytes(
+        fs::read(root.join("differential-corpus-v1.json"))
+            .expect("read reviewed differential corpus metadata"),
+    );
     let metadata: Value = serde_json::from_slice(&corpus_metadata).expect("parse corpus metadata");
 
     assert_eq!(metadata["schema_version"], 1);
@@ -58,7 +74,7 @@ fn differential_corpus_metadata_is_frozen_and_linked_to_rust_fixtures() {
     );
     assert_eq!(
         metadata["frozen_fixture_metadata_sha256"],
-        sha256(fixture_metadata)
+        sha256(&fixture_metadata)
     );
     assert_eq!(
         metadata["planner_contract_fixture_revision"],
@@ -934,10 +950,11 @@ fn run_corpus(executable: &Path, spec: CorpusSpec) -> CorpusOutcome {
     });
     let watchdog = thread::spawn(move || wait_with_watchdog(child, spec.timeout));
 
-    let fixture_handshake =
-        fs::read(fixture_root().join("handshake/ready.json")).expect("read frozen handshake");
+    let fixture_handshake = normalize_fixture_bytes(
+        fs::read(fixture_root().join("handshake/ready.json")).expect("read frozen handshake"),
+    );
     let mut failure = match read_frame(&mut stdout, OUTPUT_MAX_BYTES) {
-        Ok(handshake) if handshake == fixture_handshake => None,
+        Ok(handshake) if normalize_fixture_bytes(&handshake) == fixture_handshake => None,
         Ok(_) => Some("worker handshake differs from frozen fixture".to_owned()),
         Err(error) => Some(format!("worker handshake failed: {error}")),
     };

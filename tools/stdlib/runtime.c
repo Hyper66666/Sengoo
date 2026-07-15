@@ -1,5 +1,17 @@
 #define _CRT_SECURE_NO_WARNINGS
 
+/* When compiling as ISO C11 (e.g. clang -std=c11), glibc hides POSIX APIs such
+ * as lstat unless a feature-test macro is set. Keep this before any system
+ * headers so native runtime probes and sgc-linked programs both see lstat. */
+#if !defined(_WIN32)
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
