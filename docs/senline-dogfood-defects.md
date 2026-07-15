@@ -379,3 +379,14 @@ bundle hashes. There are no active Senline workarounds for these defects.
   satisfy task 8.3 soak or stable post-warm-up memory requirements.
 - Directive: investigate under task 8.3 with checked-in sampler methodology;
   do not re-label shard success as resource green.
+- **2026-07-15 re-measurement (Windows x64, checked-in sampler)**  
+  `tools/sgc/tests/senline_worker_resource.rs` `resource_single_worker_investigation_50k`
+  (label `investigate-45k`, release harness):
+  - Stopped at case **29,014 / 45,000** on a 900 s watchdog (`900.12s`).
+  - Private working set rose ~5.2 MiB @1k → ~96 MiB @29k (~**3.27 KiB/case**
+    post-warm-up growth; default bound 1 KiB/case **failed**).
+  - Throughput window fell ~1740 cps @1k → ~7.3 cps @29k.
+  - Handle count stayed flat at **66** (no FD/handle leak signal).
+  - All completed cases returned well-formed plans (`plan_ok=29014`).
+  - Evidence artifact (local, gitignored):  
+    `target/senline-resource/soak-investigate-45k-windows-x86_64-1784109344.summary.json`

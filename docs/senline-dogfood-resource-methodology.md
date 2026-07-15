@@ -16,9 +16,9 @@ Senline host admission, sandbox, or production timing.
 
 ## Sampler (checked-in)
 
-Primary harness: `tools/sgc/tests/senline_worker_differential.rs` (and any
-future `senline_worker_resource` extension that reuses the same corpus
-generators).
+Primary harness: `tools/sgc/tests/senline_worker_resource.rs`  
+(reviewed-boundary requests + process sampler; companion semantic corpora stay
+in `senline_worker_differential.rs`).
 
 Sampling rules:
 
@@ -88,12 +88,14 @@ After the same warm-up:
 ## How to run (operator notes)
 
 ```powershell
-# Determinism / differential (existing dual-host CI job)
-cargo test --locked -p sgc --test senline_worker_differential -- --nocapture --test-threads=1
-cargo test --release --locked -p sgc --test senline_worker_differential -- --ignored --nocapture --test-threads=1
+# Sampler smoke (always-on CI / local; ~1k cases + p50/p95/p99)
+cargo test --release --locked -p sgc --test senline_worker_resource -- --nocapture
 
-# Future resource soak (when senline_worker_resource is wired):
-# cargo test --release --locked -p sgc --test senline_worker_resource -- --ignored --nocapture
+# Single-worker investigation near historical case 44086 (~45k, soft watchdog)
+cargo test --release --locked -p sgc --test senline_worker_resource resource_single_worker_investigation_50k -- --ignored --nocapture
+
+# Full 1M soak (only after growth is fixed)
+cargo test --release --locked -p sgc --test senline_worker_resource resource_single_worker_soak_1m -- --ignored --nocapture
 ```
 
 External memory sampler example (Windows, attach to worker PID printed by harness):

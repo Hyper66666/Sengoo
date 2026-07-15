@@ -66,8 +66,8 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 ## Known open Sengoo-side items
 
-1. **Task 8.3** — single-worker 100k watchdog near case 44086 / memory growth; 1M soak not claimed (methodology published).
-2. **Task 8.4** — p50/p95/p99 request instrumentation still open (bulk means only).
+1. **Task 8.3** — single-worker leak confirmed on Windows investigate-45k (case **29014** / 900s; ~3.27 KiB/case PWS growth; cps ~1740→7.3; handles=66). 1M stable soak not claimed.
+2. **Task 8.4** — Windows short-window p50/p95/p99 published; need Linux + stable-window dual-host table after 8.3 fix.
 3. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
 
 ## Unsupported authority transfers

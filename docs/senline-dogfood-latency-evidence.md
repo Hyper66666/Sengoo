@@ -25,9 +25,22 @@ Notes:
 - Concurrency for V1 worker evaluation remains **one in-flight request** per
   worker process.
 
+## Checked-in sampler (task 8.4 progress)
+
+Harness: `tools/sgc/tests/senline_worker_resource.rs`  
+(`resource_sampler_smoke_single_worker_with_latency_percentiles`, release).
+
+| Host | Label | Post-warm-up samples | p50 µs | p95 µs | p99 µs | Notes |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Local Windows x64 | smoke-1k (1024 cases, warm-up 256) | 768 | 415 | 595 | 671 | Short stable window; concurrency=1 |
+| Local Windows x64 | investigate-45k (stopped ~29k @900s) | 28,758 | 20,417 | 124,655 | 179,286 | Dominated by single-worker degradation; **not** a pin latency claim |
+
+Metric: request-write-complete → response-frame-complete wall time inside the
+harness. **Not** Senline admission or sandbox timing.
+
 ## Still required to close 8.4
 
-1. Post-warm-up p50/p95/p99 from a harness that timestamps each framed
-   request/response pair.
+1. Dual-host (Windows + Linux) short-window p50/p95/p99 on a **stable**
+   post-warm-up segment (or after the 8.3 leak is fixed).
 2. Recorded host labels (GHA image / local SKU) attached to the percentile table.
-3. Explicit non-claim statement retained in the published summary.
+3. Keep the non-claim statement in any published summary.
