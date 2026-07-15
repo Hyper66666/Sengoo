@@ -495,7 +495,7 @@ pub(crate) fn append_native_runtime_inputs(
 }
 
 fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
-    if target.triple.ends_with("-apple-macosx") {
+    if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx") {
         vec!["-framework", "Security", "-framework", "CoreFoundation"]
     } else if target.is_linux_gnu() {
         vec!["-lm"]
@@ -1498,13 +1498,15 @@ mod tests {
 
     #[test]
     fn native_link_adds_macos_security_and_corefoundation_frameworks() {
-        let target = NativeBuildTarget {
-            triple: "aarch64-apple-macosx".to_string(),
-        };
-        assert_eq!(
-            platform_linker_args(&target),
-            vec!["-framework", "Security", "-framework", "CoreFoundation"]
-        );
+        for triple in ["aarch64-apple-darwin", "aarch64-apple-macosx"] {
+            let target = NativeBuildTarget {
+                triple: triple.to_string(),
+            };
+            assert_eq!(
+                platform_linker_args(&target),
+                vec!["-framework", "Security", "-framework", "CoreFoundation"]
+            );
+        }
     }
 
     #[test]

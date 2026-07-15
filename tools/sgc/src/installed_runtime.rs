@@ -124,6 +124,20 @@ fn validate_relative_payload_path(path: &str) -> Result<PathBuf> {
     Ok(relative)
 }
 
+fn canonicalize_installed_target(triple: &str) -> String {
+    // Distribution packages use `*-apple-darwin`; older host triples used
+    // `*-apple-macosx`. Treat them as the same installed runtime family.
+    if let Some(prefix) = triple.strip_suffix("-apple-macosx") {
+        return format!("{prefix}-apple-darwin");
+    }
+    triple.to_string()
+}
+
+fn installed_targets_compatible(manifest_target: &str, requested_target: &str) -> bool {
+    canonicalize_installed_target(manifest_target)
+        == canonicalize_installed_target(requested_target)
+}
+
 fn expected_link_args(target: &NativeBuildTarget) -> Vec<String> {
     if target.is_windows_msvc() {
         [
@@ -145,7 +159,8 @@ fn expected_link_args(target: &NativeBuildTarget) -> Vec<String> {
         .into_iter()
         .map(str::to_string)
         .collect()
-    } else if target.triple.ends_with("-apple-darwin") {
+    } else if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx")
+    {
         ["-framework", "Security", "-framework", "CoreFoundation"]
             .into_iter()
             .map(str::to_string)
@@ -336,7 +351,7 @@ pub(crate) fn resolve_installed_native_runtime(
             manifest.schema_version
         ));
     }
-    if manifest.target != target.triple {
+    if !installed_targets_compatible(&manifest.target, &target.triple) {
         return Err(miette::miette!(
             "installed toolchain target mismatch: manifest={}, requested={}",
             manifest.target,
@@ -356,7 +371,7 @@ pub(crate) fn resolve_installed_native_runtime(
     let runtime = manifest.native_runtime.ok_or_else(|| {
         miette::miette!("installed toolchain manifest is missing native_runtime metadata")
     })?;
-    if runtime.target != target.triple {
+    if !installed_targets_compatible(&runtime.target, &target.triple) {
         return Err(miette::miette!(
             "installed native runtime target mismatch: manifest={}, requested={}",
             runtime.target,

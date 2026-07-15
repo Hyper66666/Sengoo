@@ -50,18 +50,40 @@ function Assert-ExactFields($Value, [string[]]$Expected, [string]$Label) {
     }
 }
 
-function Require-String($Value, [string]$Label, [switch]$AllowEmpty) {
-    if ($Value -isnot [string] -or (-not $AllowEmpty -and $Value.Length -eq 0)) {
-        throw "$Label must be a non-empty string"
+function Coerce-JsonString($Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [string]) {
+        return [string]$Value
+    }
+    # ConvertFrom-Json may revive ISO-8601 timestamps as DateTime on some hosts.
+    if ($Value -is [datetime]) {
+        return ([datetime]$Value).ToUniversalTime().ToString("o")
+    }
+    if ($Value -is [datetimeoffset]) {
+        return ([datetimeoffset]$Value).ToUniversalTime().ToString("o")
     }
     return [string]$Value
 }
 
+function Require-String($Value, [string]$Label, [switch]$AllowEmpty) {
+    $text = Coerce-JsonString $Value
+    if ($null -eq $text -or $text -isnot [string] -or (-not $AllowEmpty -and $text.Length -eq 0)) {
+        throw "$Label must be a non-empty string"
+    }
+    return [string]$text
+}
+
 function Require-NullableString($Value, [string]$Label) {
-    if ($null -ne $Value -and $Value -isnot [string]) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    $text = Coerce-JsonString $Value
+    if ($null -eq $text -or $text -isnot [string]) {
         throw "$Label must be a string or null"
     }
-    return $Value
+    return [string]$text
 }
 
 function Require-Bool($Value, [string]$Label) {
@@ -84,10 +106,19 @@ function Require-Integer($Value, [string]$Label, [long]$Minimum = [long]::MinVal
 }
 
 function Require-Array($Value, [string]$Label) {
-    if ($Value -isnot [System.Array]) {
-        throw "$Label must be an array"
+    # ConvertTo-Json/ConvertFrom-Json round-trips often collapse single-element
+    # arrays to scalars and empty arrays to $null. Accept those shapes and
+    # rehydrate a true array for normalized comparison.
+    if ($null -eq $Value) {
+        return ,@()
     }
-    return ,$Value
+    if ($Value -is [System.Array]) {
+        return ,$Value
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return ,@($Value)
+    }
+    return ,@($Value)
 }
 
 function Normalize-Hex($Value, [int]$Length, [string]$Label) {

@@ -12,10 +12,13 @@ fn host_triple_for(target_os: &str, target_arch: &str) -> &'static str {
     if target_os == "windows" {
         REFERENCE_TARGET_WINDOWS_MSVC
     } else if target_os == "macos" {
+        // Keep the host triple aligned with packaged/installed distribution
+        // targets (`*-apple-darwin`) so installed sgc resolves the native
+        // runtime without alias mismatches against `*-apple-macosx`.
         if target_arch == "aarch64" {
-            "aarch64-apple-macosx"
+            "aarch64-apple-darwin"
         } else {
-            "x86_64-apple-macosx"
+            "x86_64-apple-darwin"
         }
     } else {
         REFERENCE_TARGET_LINUX_GNU
@@ -126,12 +129,12 @@ mod tests {
 
     #[test]
     fn cross_compile_host_triple_uses_macos_x86_64_when_requested() {
-        assert_eq!(host_triple_for("macos", "x86_64"), "x86_64-apple-macosx");
+        assert_eq!(host_triple_for("macos", "x86_64"), "x86_64-apple-darwin");
     }
 
     #[test]
     fn cross_compile_host_triple_uses_macos_aarch64_when_requested() {
-        assert_eq!(host_triple_for("macos", "aarch64"), "aarch64-apple-macosx");
+        assert_eq!(host_triple_for("macos", "aarch64"), "aarch64-apple-darwin");
     }
 
     #[test]

@@ -265,7 +265,50 @@ $manifest = [ordered]@{
     license_included = [bool]$license
     generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
 }
-$manifestJson = $manifest | ConvertTo-Json -Depth 5
+function Format-JsonString([string]$Value) {
+    $escaped = $Value.
+        Replace('\', '\\').
+        Replace('"', '\"').
+        Replace("`r", '\r').
+        Replace("`n", '\n').
+        Replace("`t", '\t')
+    return '"' + $escaped + '"'
+}
+
+function Format-JsonStringArray([string[]]$Values) {
+    $parts = @(@($Values) | ForEach-Object { Format-JsonString ([string]$_) })
+    return '[' + ($parts -join ', ') + ']'
+}
+
+function Set-JsonArrayProperty([string]$Json, [string]$Property, [string[]]$Values) {
+    $arrayJson = Format-JsonStringArray $Values
+    $name = [regex]::Escape($Property)
+    $replacementText = '"' + $Property + '": ' + $arrayJson
+    $patterns = @(
+        "`"$name`"\s*:\s*`"(?:\\.|[^`"])*`"",
+        "`"$name`"\s*:\s*\[[^\]]*\]",
+        "`"$name`"\s*:\s*null"
+    )
+    $replaced = $false
+    foreach ($pattern in $patterns) {
+        $regex = [regex]::new($pattern)
+        if ($regex.IsMatch($Json)) {
+            $Json = $regex.Replace($Json, { param($m) $replacementText }, 1)
+            $replaced = $true
+            break
+        }
+    }
+    if (-not $replaced) {
+        throw "failed to force JSON array property: $Property"
+    }
+    return $Json
+}
+
+# ConvertTo-Json collapses single-element and empty arrays; force the
+# contract-critical arrays back to true JSON arrays before writing.
+$manifestJson = $manifest | ConvertTo-Json -Depth 8
+$manifestJson = Set-JsonArrayProperty $manifestJson "link_args" ([string[]]@($runtimeLinkArgs))
+$manifestJson = Set-JsonArrayProperty $manifestJson "dynamic_dependencies" @()
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText((Join-Path $stage "manifest.json"), $manifestJson, $utf8NoBom)
 
