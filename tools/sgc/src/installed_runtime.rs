@@ -159,8 +159,7 @@ fn expected_link_args(target: &NativeBuildTarget) -> Vec<String> {
         .into_iter()
         .map(str::to_string)
         .collect()
-    } else if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx")
-    {
+    } else if target.triple.ends_with("-apple-darwin") || target.triple.ends_with("-apple-macosx") {
         ["-framework", "Security", "-framework", "CoreFoundation"]
             .into_iter()
             .map(str::to_string)

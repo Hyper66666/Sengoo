@@ -406,7 +406,7 @@ fn evaluation_id(high: u64, low: u64) -> String {
 fn reviewed_boundary_case(index: u64) -> OracleCase {
     const MODES: [&str; 4] = ["fixture", "shadow", "guarded-development", "internal-alpha"];
     let variant = index / 6;
-    let reference_len = if index % 2 == 0 { 1 } else { 128 };
+    let reference_len = if index.is_multiple_of(2) { 1 } else { 128 };
     let (ciphertext_length_bytes, ciphertext_limit_bytes) = match variant % 4 {
         0 => (0, 0),
         1 => (1, 1),
@@ -427,7 +427,7 @@ fn reviewed_boundary_case(index: u64) -> OracleCase {
         execution_mode: MODES[(index % MODES.len() as u64) as usize],
         worker_bundle_id: ascii_ref(8, index, reference_len),
         identifiers: identifiers(index, reference_len),
-        has_submit_envelope_v2: variant % 2 == 0,
+        has_submit_envelope_v2: variant.is_multiple_of(2),
         ciphertext_length_bytes,
         idempotency_status: IdempotencyStatus::New,
         recipient_pending_count: relation_values.0,
@@ -449,13 +449,13 @@ fn reviewed_boundary_case(index: u64) -> OracleCase {
         1 => case.idempotency_status = IdempotencyStatus::ExactDuplicate,
         2 => case.idempotency_status = IdempotencyStatus::Conflict,
         3 => {
-            case.recipient_pending_count = if variant % 2 == 0 { 1 } else { 2 };
+            case.recipient_pending_count = if variant.is_multiple_of(2) { 1 } else { 2 };
             case.recipient_pending_limit = 1;
         }
         4 => {
             case.recipient_pending_count = 0;
             case.recipient_pending_limit = 1;
-            case.application_envelopes_used = if variant % 2 == 0 { 1 } else { 2 };
+            case.application_envelopes_used = if variant.is_multiple_of(2) { 1 } else { 2 };
             case.application_envelopes_limit = 1;
         }
         _ => {
@@ -463,7 +463,7 @@ fn reviewed_boundary_case(index: u64) -> OracleCase {
             case.recipient_pending_limit = 1;
             case.application_envelopes_used = 0;
             case.application_envelopes_limit = 1;
-            if variant % 2 == 0 {
+            if variant.is_multiple_of(2) {
                 case.has_submit_envelope_v2 = false;
                 case.enqueue_delivery_enabled = true;
             } else {

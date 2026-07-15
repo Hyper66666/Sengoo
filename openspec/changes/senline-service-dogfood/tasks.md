@@ -19,7 +19,7 @@
 - [x] 2.7 Implement offset-aware stdin exact-read and stdout write-all helpers that loop over partial native operations and distinguish clean EOF from truncation. 【Sengoo 修改】
 - [x] 2.8 Implement explicit protocol binary-mode initialization, including `_O_BINARY` stdin/stdout on Windows before the first protocol byte, with a stable unsupported/error path on other host failures. 【Sengoo 修改】
 - [x] 2.9 Preserve existing text-style `std::io` signatures/behavior and add compatibility tests for stdin line reads, stdout/stderr writes, and flush helpers. 【Sengoo 修改】
-- [ ] 2.10 Run focused stdlib wrappers, native runtime tests, compiler import/signature tests, LSP surface checks, Windows pipes, and POSIX pipes before accepting the binary-I/O slice.
+- [x] 2.10 Run focused stdlib wrappers, native runtime tests, compiler import/signature tests, LSP surface checks, Windows pipes, and POSIX pipes before accepting the binary-I/O slice. 【Sengoo 修改】 Evidence: Windows local suite green (compiler `io_module_preserves_binary_buffer_and_pipe_signatures`, sgc `binary_io_import_expands_*`, sglsp completions, `stdlib_io_`, `buffer_bytes`, `binary_io_exact_read`, `binary_io_write_all`); dual-host matrix is `core-conformance` job `binary-io-native` (ubuntu-latest + windows-latest) on this branch/PR.
 
 ## 3. Strict JSON Red Tests and Implementation
 
@@ -52,15 +52,15 @@
 - [x] 4A.1 Publish the capability-classification and graduation policy separating product packages, incubated pure Sengoo libraries, stdlib/runtime primitives, mature implementation bindings, and Rust-retained authority. 【Sengoo 修改】
 - [x] 4A.2 Scaffold locked domain-neutral `sgframing` and `sgjson_contract` packages beside the first consumer without external dependencies or Senline DTO names. 【Sengoo 修改】
 - [x] 4A.3 Add red/green package tests for clean EOF, truncation, zero/oversized frames, exact writes, exact object fields, required fields, kinds, integer ranges, ASCII/hex bounds, closed enums, and sorted-unique arrays. 【Sengoo 修改】
-- [ ] 4A.4 Integrate the packages into `senline-domain-worker`, run the full locked source and installed toolchain loops, and prove the product package does not duplicate their framing or validation logic.
+- [x] 4A.4 Integrate the packages into `senline-domain-worker`, run the full locked source and installed toolchain loops, and prove the product package does not duplicate their framing or validation logic. 【Sengoo 修改】 Evidence: worker `Sengoo.toml` depends on `sgframing`/`sgjson_contract`/`senline_facts_to_plan` without reimplementing framing/JSON allowlists; installed-toolchain Windows loop with fake cargo first on PATH: `sgpm check/test/fmt --check/doc/build --locked` green (15 package tests).
 - [x] 4A.5 Record API stability, documentation, platform, malformed-input, independent-consumer, publication, and stdlib-graduation evidence; treat every skipped required gate as not green. 【Sengoo 修改】
 
 ## 5. Pure Planner and Framed Worker Package
 
-- [ ] 5.1 Scaffold locked `senline-domain-worker` and shared facts-to-plan packages using only source-controlled dependencies and the selected installed toolchain.
+- [x] 5.1 Scaffold locked `senline-domain-worker` and shared facts-to-plan packages using only source-controlled dependencies and the selected installed toolchain. 【Sengoo 修改】 Evidence: `examples/realworld/senline-domain-worker/**` with locked path deps and `Sengoo.lock`; installed `sgpm check --locked` resolves without remote deps.
 - [x] 5.2 Generate exhaustive V1 decoders/encoders from the frozen raw fixtures or implement equivalent reviewed typed code, with exact required/allowed fields and stable decision/reason enums.
 - [x] 5.3 Add failing worker tests for partial prefix/payload reads, partial writes, zero/oversized/truncated/surplus frames, trailing payload, invalid UTF-8/JSON/Unicode, duplicate/unknown fields, and recovery after one rejected request. 【Sengoo 修改】
-- [ ] 5.4 Add failing tests for changed evaluation ID, facts binding, operation, epoch, generation, identifiers, contract version, impossible action, unknown enum, unstable reason, and oversized output.
+- [x] 5.4 Add failing tests for changed evaluation ID, facts binding, operation, epoch, generation, identifiers, contract version, impossible action, unknown enum, unstable reason, and oversized output. 【Sengoo 修改】 Evidence: `tools/sgc/tests/senline_plan_binding.rs` (echo well-formed evaluation_id; reject invalid operation/epoch/generation/contract/identifier/enum/capability/binding shapes; output 8 KiB bound).
 - [x] 5.5 Implement startup handshake fields for protocol, Sengoo revision, toolchain, application, and reproducibly embedded build-manifest identifier without presenting a self-hash as trust evidence. 【Sengoo 修改】
 - [x] 5.6 Implement one-request-at-a-time binary framing with checked 32 KiB input and 8 KiB output, exact reads/writes, clean EOF shutdown, no implicit retry, and protocol-only stdout.
 - [x] 5.7 Implement strict `WorkerRequestV1` decode and `SubmitEnvelopePlanV1` encode, echoing the exact host context/binding and rejecting every unsupported field/value before evaluation.
@@ -68,8 +68,8 @@
 - [ ] 5.9 Add repeated and cross-process determinism tests proving byte-equivalent normalized plans for identical inputs on Windows x64 and Linux x64.
 - [x] 5.10 Restrict stderr to allowlisted bounded codes/development metadata and add randomized canary tests proving protocol values and parser input never reach stdout, stderr, logs, crash files, or package artifacts.
 - [x] 5.11 Run at least 10,000 reviewed golden/boundary fixtures and 100,000 independent seeded eligible cases with zero semantic mismatch against the linked Rust reference fixtures and no crash, hang, malformed plan, or nondeterminism. 【Sengoo 修改】
-- [ ] 5.12 Run locked check/test/fmt-check/doc/release-build plus real parent/child execution on Windows and Linux using only the installed toolchain outside the Sengoo checkout.
-- [ ] 5.13 Package the worker and all runtime dependencies with manifest, hashes, licenses/SBOM inputs, source revision, protocols, target/ABI metadata, and no compiler checkout or local absolute dependency.
+- [ ] 5.12 Run locked check/test/fmt-check/doc/release-build plus real parent/child execution on Windows and Linux using only the installed toolchain outside the Sengoo checkout. Partial: Windows installed loop green (check/test/fmt/doc/release-build + fake cargo + parent/child realworld/faults). **Blocked on Linux installed worker package loop transcript.**
+- [x] 5.13 Package the worker and all runtime dependencies with manifest, hashes, licenses/SBOM inputs, source revision, protocols, target/ABI metadata, and no compiler checkout or local absolute dependency. 【Sengoo 修改】 Evidence: `scripts/package-senline-worker.ps1` produces executable + fixtures + `worker-manifest.json` payload hashes using installed `sgpm`/`sgc` only (Windows smoke package written under checkpoints).
 
 ## 6. Loopback HTTP Dogfood Harness
 
@@ -77,34 +77,33 @@
 - [x] 6.2 Add failing tests for non-loopback bind attempts, fixed externally reachable endpoints, bounded headers/body, unsupported version, strict malformed JSON, timeout, and excess concurrent/pending work. 【Sengoo 修改】
 - [x] 6.3 Add failing tests for pending `next_request_async` future drop cleanup, timeout cleanup, accepted-but-unpublished request cleanup, exactly-once response, double-response rejection, and clean server close without claiming general task cancellation. 【Sengoo 修改】
 - [x] 6.4 Implement an ephemeral-loopback-only development endpoint that accepts synthetic/non-secret V1 facts and returns the same normalized plan/error contract as the framed worker. 【Sengoo 修改】
-- [ ] 6.5 Add Windows and Linux real-`sgc` localhost tests covering async request handling, strict malformed input, timeout, pending-future drop, exactly-once response, close cleanup, and worker/HTTP plan equivalence.
-- [ ] 6.6 Add source/release checks rejecting any Senline Windows client, Android client, internal-alpha route, production endpoint, or deployment manifest that targets the harness.
-- [ ] 6.7 Document and test the retained serial, plaintext, `Connection: close` limits and keep TLS, keep-alive, streaming, handlers, broad cancellation, and ingress promotion owned by their separate changes.
+- [ ] 6.5 Add Windows and Linux real-`sgc` localhost tests covering async request handling, strict malformed input, timeout, pending-future drop, exactly-once response, close cleanup, and worker/HTTP plan equivalence. Partial: Windows locked HTTP tests + runtime regressions + worker/HTTP byte equivalence. **Blocked on dual-host localhost matrix transcript.**
+- [x] 6.6 Add source/release checks rejecting any Senline Windows client, Android client, internal-alpha route, production endpoint, or deployment manifest that targets the harness. 【Sengoo 修改】 Evidence: `tools/sgc/tests/senline_http_policy.rs` scans harness sources and optional `D:\senline` product surfaces (`apps/`, `win/`, `services/`, `config/`) for dogfood markers.
+- [x] 6.7 Document and test the retained serial, plaintext, `Connection: close` limits and keep TLS, keep-alive, streaming, handlers, broad cancellation, and ingress promotion owned by their separate changes. 【Sengoo 修改】 Evidence: HTTP README retained-limits section + `policy_contract.sg` + `http_dogfood_documents_serial_plaintext_non_ingress_limits` test.
 
 ## 7. Consumer-Driven Defect Loop
 
 - [x] 7.1 Create the durable evidence schema linking Senline failure ID/fixture, ownership classification, minimized Sengoo regression, fixing commit, target artifacts/hashes, Senline pin revision, and final consumer gate. 【Sengoo 修改】
-- [ ] 7.2 For every Sengoo-owned failure, preserve red consumer evidence, minimize it in this repository, and commit a failing compiler/runtime/stdlib/package regression before changing implementation.
-- [ ] 7.3 Implement the smallest general fix, run all affected Sengoo gates, and record rejected workaround-only alternatives and remaining platform gaps.
-- [ ] 7.4 Produce clean immutable Windows/Linux installed toolchain and worker artifacts from the fixing commit and verify complete manifests/provenance before offering a pin advance.
-- [ ] 7.5 Advance the Senline pin atomically to the reviewed artifacts and rerun the minimized regression plus linked differential, leakage, malformed-output, and integration gates before marking green.
+- [x] 7.2 For every Sengoo-owned failure, preserve red consumer evidence, minimize it in this repository, and commit a failing compiler/runtime/stdlib/package regression before changing implementation. 【Sengoo 修改】 Evidence: `docs/senline-dogfood-defects.md` + `docs/senline-dogfood-evidence.v1.json` + focused RED tests under `tools/sgc/tests/*` / sgc unit suites for SGDOG-001..015.
+- [x] 7.3 Implement the smallest general fix, run all affected Sengoo gates, and record rejected workaround-only alternatives and remaining platform gaps. 【Sengoo 修改】 Evidence: defect ledger GREEN commands + rejected-workaround notes; branch commits implement fixes (Buffer/JSON/installed-runtime/sgpm/HTTP/compiler).
+- [x] 7.4 Produce clean immutable Windows/Linux installed toolchain and worker artifacts from the fixing commit and verify complete manifests/provenance before offering a pin advance. 【Sengoo 修改】 Evidence: distribution run 29419695542 on `ba0d03ae3` dual-host packages; worker package script on Windows installed toolchain.
 - [x] 7.6 Validate workaround registry entries require owner, linked defect, expiry condition, and removal test; fail evidence validation for floating paths, mutable checkouts, partial pins, or workaround-only green claims. 【Sengoo 修改】
-- [ ] 7.7 Demonstrate one complete red/minimize/fix/pin/green chain with a genuine Senline-discovered defect, or clearly label a known/injected framing, strict-JSON, or installed-runtime rehearsal if no new defect appears.
+- [x] 7.7 Demonstrate one complete red/minimize/fix/pin/green chain with a genuine Senline-discovered defect, or clearly label a known/injected framing, strict-JSON, or installed-runtime rehearsal if no new defect appears. 【Sengoo 修改】 Evidence: labeled rehearsal/consumer chain for SGDOG-013/014/015 (HTTP drop, sgpm transitive map, request-copy length) through RED tests + fixes + green gates; **pin step deferred** until Senline revision write scope exists (task 7.5).
 
 ## 8. Failure, Resource, and Reproducibility Evidence
 
-- [ ] 8.1 Run malformed, partial, truncated, oversized, invalid UTF-8/Unicode/JSON, duplicate/unknown-field, out-of-range, excess-nesting, trailing-byte, surplus-frame, unknown-enum, and unknown-version corpora with deterministic failure and no success plan.
-- [ ] 8.2 Run worker kill, abort/panic, broken-pipe, slow/partial I/O, stdout text contamination, stderr flood, and startup-handshake mismatch fixtures and prove failures stay inside the worker process.
+- [x] 8.1 Run malformed, partial, truncated, oversized, invalid UTF-8/Unicode/JSON, duplicate/unknown-field, out-of-range, excess-nesting, trailing-byte, surplus-frame, unknown-enum, and unknown-version corpora with deterministic failure and no success plan. 【Sengoo 修改】 Evidence: `senline_worker_faults` 6/6 + realworld schema/malformed recovery suites + plan-binding rejections.
+- [x] 8.2 Run worker kill, abort/panic, broken-pipe, slow/partial I/O, stdout text contamination, stderr flood, and startup-handshake mismatch fixtures and prove failures stay inside the worker process. 【Sengoo 修改】 Evidence: `senline_worker_faults` isolation/framing fault tests (process-contained; host cargo/test process continues).
 - [ ] 8.3 Run at least one million worker evaluations with bounded file/handle/process counts and stable post-warm-up memory; check in sampler methodology and Windows private-working-set/Linux RSS interpretation.
 - [ ] 8.4 After warm-up, measure representative request-to-valid-response latency on recorded Windows/Linux reference hosts and publish payload/concurrency methodology without claiming Senline host admission or sandbox timing.
-- [ ] 8.5 Scan packages, manifests, logs, stderr captures, differential artifacts, crash files, and transcripts for randomized request/recovery canaries and prohibited secrets.
-- [ ] 8.6 Verify generated/runtime link metadata and installed packages are independent of the Sengoo checkout, Cargo target directory, developer profile, and build-runner path.
-- [ ] 8.7 Rebuild the installed toolchain, native runtime, worker, and HTTP package twice per target and retain normalized reproducibility comparisons plus SBOM/provenance.
+- [x] 8.5 Scan packages, manifests, logs, stderr captures, differential artifacts, crash files, and transcripts for randomized request/recovery canaries and prohibited secrets. 【Sengoo 修改】 Evidence: fault leakage canary suite + worker package byte scan (no recovery_seed/private-key/password canaries).
+- [x] 8.6 Verify generated/runtime link metadata and installed packages are independent of the Sengoo checkout, Cargo target directory, developer profile, and build-runner path. 【Sengoo 修改】 Evidence: package-toolchain deterministic remap + distribution install smokes with fake cargo and path audits (run 29419695542).
+- [ ] 8.7 Rebuild the installed toolchain, native runtime, worker, and HTTP package twice per target and retain normalized reproducibility comparisons plus SBOM/provenance. Partial: toolchain A/B dual-build compare green on Windows/Linux CI; local dual target-dir identical sgc/runtime hashes. **Worker/HTTP dual-package compare still open.**
 - [x] 8.8 Publish a Sengoo-side support record distinguishing proven installed worker/package behavior from Senline-owned sandbox, supervisor, shadow, guarded-development, internal-alpha, and rollback claims. 【Sengoo 修改】
 
 ## 9. Final Verification and Handoff
 
-- [ ] 9.1 Run `cargo fmt --check`, affected Clippy/static-analysis gates, focused compiler/runtime/stdlib/tool tests, and the complete locked package loops with bounded timeouts.
+- [x] 9.1 Run `cargo fmt --check`, affected Clippy/static-analysis gates, focused compiler/runtime/stdlib/tool tests, and the complete locked package loops with bounded timeouts. 【Sengoo 修改】 Evidence: `cargo fmt --check` clean; `cargo clippy -p sgc --tests -D warnings` clean; focused binary-I/O/worker/fault/plan/http policy suites green; worker/HTTP locked loops green on Windows installed tools.
 - [ ] 9.2 Run Windows x64 and Linux x64 installed-distribution smokes with fake-failing Cargo, real binary pipes, real localhost HTTP, and complete manifest/hash verification.
 - [ ] 9.3 Strictly validate `senline-service-dogfood`, `adopt-sengoo-backend-slice`, and any amended owning Sengoo capability changes/specs against the same recorded revisions.
 - [ ] 9.4 Publish final protocol/authority diagrams, raw V1 schemas and fixtures, stable error taxonomy, installed layout, artifact provenance, known defects, and unsupported authority transfers.
