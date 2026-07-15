@@ -35,6 +35,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Sengoo language version.
 pub const LANGUAGE_VERSION: &str = "0.1.0";
 
+/// MIR semantic ABI version used by compiler-produced MIR bundles.
+pub const MIR_SEMANTIC_ABI_VERSION: u32 = 1;
+
 /// Shared compile options for source->IR compilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompileOptions {
@@ -101,6 +104,15 @@ impl TargetPointerWidth {
     }
 }
 
+/// Target-aware MIR bundle produced by the compiler frontend.
+#[derive(Debug, Clone)]
+pub struct MirBundle {
+    pub semantic_abi_version: u32,
+    pub target_pointer_width: TargetPointerWidth,
+    pub functions: Vec<mir::MirFunction>,
+    pub ffi_codegen: FfiCodegenConfig,
+}
+
 pub fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodegenConfig {
     let mut config = codegen::FfiCodegenConfig::default();
 
@@ -146,6 +158,16 @@ pub fn collect_ffi_codegen_config(hir_module: &hir::Module) -> codegen::FfiCodeg
     config
 }
 
+/// Collect FFI codegen metadata using target pointer-width type mapping.
+pub fn collect_ffi_codegen_config_for_pointer_width(
+    hir_module: &hir::Module,
+    pointer_width: TargetPointerWidth,
+) -> codegen::FfiCodegenConfig {
+    crate::mir::type_mapping_helpers::with_target_pointer_width(pointer_width.bits(), || {
+        collect_ffi_codegen_config(hir_module)
+    })
+}
+
 /// Collect unique native library names from `#[link(name = "...")]` extern blocks.
 pub fn collect_native_link_libraries(hir_module: &hir::Module) -> Vec<String> {
     let mut libraries = Vec::new();
@@ -164,6 +186,14 @@ pub fn collect_native_link_libraries(hir_module: &hir::Module) -> Vec<String> {
     libraries
 }
 
+fn target_pointer_width_for_triple(target_triple: &str) -> Result<TargetPointerWidth> {
+    TargetPointerWidth::from_target_triple(target_triple).ok_or_else(|| {
+        CompileError::Codegen(format!(
+            "unsupported target architecture in triple `{target_triple}`"
+        ))
+    })
+}
+
 /// Compile Sengoo source to LLVM IR using explicit options.
 pub fn compile_to_ir_with_options(source: &str, options: CompileOptions) -> Result<String> {
     compile_to_ir_inner(source, options, None, TargetPointerWidth::host())
@@ -178,11 +208,7 @@ pub fn compile_to_ir_for_target(
     options: CompileOptions,
     target_triple: &str,
 ) -> Result<String> {
-    let pointer_width = TargetPointerWidth::from_target_triple(target_triple).ok_or_else(|| {
-        CompileError::Codegen(format!(
-            "unsupported target architecture in triple `{target_triple}`"
-        ))
-    })?;
+    let pointer_width = target_pointer_width_for_triple(target_triple)?;
     compile_to_ir_inner(
         source,
         options,
@@ -197,39 +223,9 @@ fn compile_to_ir_inner(
     target_triple: Option<String>,
     pointer_width: TargetPointerWidth,
 ) -> Result<String> {
-    // 1. Parse source code.
-    let program = Parser::parse_with_pointer_width(source, pointer_width.bits())?;
-
-    // 2. Type checking.
-    let mut checker = TypeChecker::new();
-    checker.check_program(&program)?;
-    let async_functions = checker.async_function_names().clone();
-    let type_env = checker.into_env();
-
-    // 3. HIR lowering.
-    let hir_module = lower_ast(&program, &type_env);
-    let ffi_codegen = collect_ffi_codegen_config(&hir_module);
-
-    // 4. MIR lowering.
-    let mut mir_fns = lower_hir_with_options(
-        &hir_module.items,
-        MirLowerOptions::new(
-            options.runtime_contract_checks,
-            true,
-            async_functions.clone(),
-        )
-        .with_target_pointer_width(pointer_width.bits()),
-    )
-    .map_err(CompileError::MirLower)?;
-    drop(hir_module);
-    drop(type_env);
-    drop(program);
-
-    // 4b. Expand async functions into frame-backed helpers.
-    if !async_functions.is_empty() {
-        let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns)?;
-        mir_fns.extend(async_helpers);
-    }
+    let bundle = compile_to_mir_bundle_inner(source, options, pointer_width)?;
+    let ffi_codegen = bundle.ffi_codegen;
+    let mut mir_fns = bundle.functions;
 
     // 5. MIR optimization pipeline for the selected level.
     let pipeline = mir::opt::pipeline_for_level(options.mir_opt_level);
@@ -264,7 +260,7 @@ pub fn collect_compile_warnings(source: &str) -> Result<Vec<CompileWarning>> {
 
 /// Compile Sengoo source to MIR functions (without code generation).
 pub fn compile_to_mir(source: &str) -> Result<Vec<mir::MirFunction>> {
-    compile_to_mir_with_options(source, CompileOptions::default())
+    Ok(compile_to_mir_bundle(source)?.functions)
 }
 
 /// Compile Sengoo source to MIR functions (without code generation) using explicit options.
@@ -272,8 +268,39 @@ pub fn compile_to_mir_with_options(
     source: &str,
     options: CompileOptions,
 ) -> Result<Vec<mir::MirFunction>> {
+    Ok(compile_to_mir_bundle_with_options(source, options)?.functions)
+}
+
+/// Compile Sengoo source to a target-aware MIR bundle using default options.
+pub fn compile_to_mir_bundle(source: &str) -> Result<MirBundle> {
+    compile_to_mir_bundle_with_options(source, CompileOptions::default())
+}
+
+/// Compile Sengoo source to a target-aware MIR bundle using explicit options.
+pub fn compile_to_mir_bundle_with_options(
+    source: &str,
+    options: CompileOptions,
+) -> Result<MirBundle> {
+    compile_to_mir_bundle_inner(source, options, TargetPointerWidth::host())
+}
+
+/// Compile Sengoo source to a target-aware MIR bundle for an explicit target triple.
+pub fn compile_to_mir_bundle_for_target(
+    source: &str,
+    options: CompileOptions,
+    target_triple: &str,
+) -> Result<MirBundle> {
+    let pointer_width = target_pointer_width_for_triple(target_triple)?;
+    compile_to_mir_bundle_inner(source, options, pointer_width)
+}
+
+fn compile_to_mir_bundle_inner(
+    source: &str,
+    options: CompileOptions,
+    pointer_width: TargetPointerWidth,
+) -> Result<MirBundle> {
     // 1. Parse source code.
-    let program = Parser::parse(source)?;
+    let program = Parser::parse_with_pointer_width(source, pointer_width.bits())?;
 
     // 2. Type checking.
     let mut checker = TypeChecker::new();
@@ -283,6 +310,7 @@ pub fn compile_to_mir_with_options(
 
     // 3. HIR lowering.
     let hir_module = lower_ast(&program, &type_env);
+    let ffi_codegen = collect_ffi_codegen_config_for_pointer_width(&hir_module, pointer_width);
 
     // 4. MIR lowering.
     let mut mir_fns = lower_hir_with_options(
@@ -291,7 +319,8 @@ pub fn compile_to_mir_with_options(
             options.runtime_contract_checks,
             true,
             async_functions.clone(),
-        ),
+        )
+        .with_target_pointer_width(pointer_width.bits()),
     )
     .map_err(CompileError::MirLower)?;
     drop(hir_module);
@@ -302,7 +331,12 @@ pub fn compile_to_mir_with_options(
         let async_helpers = mir::async_lowering::expand_async_functions(&mut mir_fns)?;
         mir_fns.extend(async_helpers);
     }
-    Ok(mir_fns)
+    Ok(MirBundle {
+        semantic_abi_version: MIR_SEMANTIC_ABI_VERSION,
+        target_pointer_width: pointer_width,
+        functions: mir_fns,
+        ffi_codegen,
+    })
 }
 
 #[cfg(test)]

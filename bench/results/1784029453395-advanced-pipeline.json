@@ -1,0 +1,887 @@
+{
+  "schema_version": 2,
+  "generated_at_unix_ms": 1784029453392,
+  "config": {
+    "incremental_iterations": 3,
+    "p0_evidence_only": false,
+    "scale_loc_buckets": [
+      1000,
+      10000,
+      100000,
+      1000000
+    ],
+    "scale_iterations_by_loc": {
+      "1000": 3,
+      "10000": 2,
+      "100000": 3,
+      "1000000": 1
+    },
+    "memory_loc_buckets": [
+      10000,
+      100000,
+      1000000
+    ],
+    "memory_iters_by_loc": {
+      "10000": 3,
+      "100000": 2,
+      "1000000": 1
+    },
+    "memory_command_timeout_s": null,
+    "scale_command_timeout_s": null,
+    "ladder_stretch_enabled": false,
+    "ladder_stretch_loc": 2500000,
+    "reachability_loc": 100000,
+    "reachability_iters": 2,
+    "reachability_profiles": [
+      "all_reachable",
+      "half_reachable",
+      "library_entryless"
+    ]
+  },
+  "fairness": {
+    "cpp": "precompiled header (PCH) enabled",
+    "rust": "cargo incremental enabled (CARGO_INCREMENTAL=1)",
+    "memory_compare_rust": "direct rustc compile-to-object when rustup toolchain path is available"
+  },
+  "real_incremental": {
+    "loop_body_change": {
+      "sengoo": {
+        "before_samples_ms": [
+          13.345099999980903,
+          14.058399999953508,
+          13.711499999999432
+        ],
+        "after_samples_ms": [
+          14.04850000000124,
+          14.747599999964223,
+          14.275199999985944
+        ],
+        "before_avg_ms": 13.704999999977948,
+        "after_avg_ms": 14.357099999983802,
+        "reduction_pct": -4.758117475424321
+      },
+      "cpp": {
+        "before_samples_ms": [
+          5150.234799999964,
+          661.3241999999673,
+          644.7714999999903
+        ],
+        "after_samples_ms": [
+          513.057300000014,
+          524.2893000000208,
+          514.7547999999915
+        ],
+        "before_avg_ms": 2152.1101666666405,
+        "after_avg_ms": 517.3671333333422,
+        "reduction_pct": 75.9600070039778,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "before_samples_ms": [
+          309.07710000002453,
+          324.4950000000131,
+          304.33890000000474
+        ],
+        "after_samples_ms": [
+          242.79549999999972,
+          240.82700000002433,
+          234.60949999997638
+        ],
+        "before_avg_ms": 312.6370000000141,
+        "after_avg_ms": 239.4106666666668,
+        "reduction_pct": 23.422158392430838,
+        "fairness": {
+          "cargo_incremental": true
+        }
+      },
+      "python": {
+        "before_samples_ms": [
+          121.98610000001509,
+          58.809499999995296,
+          57.66039999997474
+        ],
+        "after_samples_ms": [
+          59.085499999980584,
+          59.309899999959725,
+          55.57440000001179
+        ],
+        "before_avg_ms": 79.48533333332837,
+        "after_avg_ms": 57.98993333331737,
+        "reduction_pct": 27.04322810079723
+      }
+    },
+    "function_signature_change": {
+      "sengoo": {
+        "before_samples_ms": [
+          14.136000000007698,
+          13.65690000000086,
+          13.032599999974082
+        ],
+        "after_samples_ms": [
+          15.549099999986993,
+          14.038300000038362,
+          13.835500000027423
+        ],
+        "before_avg_ms": 13.608499999994214,
+        "after_avg_ms": 14.474300000017593,
+        "reduction_pct": -6.36220009570303
+      },
+      "cpp": {
+        "before_samples_ms": [
+          652.5293999999917,
+          782.2932000000264,
+          684.1301000000044
+        ],
+        "after_samples_ms": [
+          631.0990000000061,
+          747.679699999992,
+          644.4097000000397
+        ],
+        "before_avg_ms": 706.3175666666742,
+        "after_avg_ms": 674.3961333333459,
+        "reduction_pct": 4.519416596698166,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "before_samples_ms": [
+          307.97860000001265,
+          348.37329999999156,
+          364.48500000000195
+        ],
+        "after_samples_ms": [
+          236.8056999999908,
+          304.34259999998403,
+          263.67709999999533
+        ],
+        "before_avg_ms": 340.27896666666874,
+        "after_avg_ms": 268.27513333332337,
+        "reduction_pct": 21.160236272810554,
+        "fairness": {
+          "cargo_incremental": true
+        }
+      },
+      "python": {
+        "before_samples_ms": [
+          67.49350000001186,
+          62.209199999983866,
+          64.04009999999971
+        ],
+        "after_samples_ms": [
+          58.65959999999859,
+          60.49089999999069,
+          63.636499999972784
+        ],
+        "before_avg_ms": 64.58093333333181,
+        "after_avg_ms": 60.928999999987354,
+        "reduction_pct": 5.654816591911357
+      }
+    },
+    "add_new_function": {
+      "sengoo": {
+        "before_samples_ms": [
+          15.564700000027187,
+          15.463500000009844,
+          15.485300000023017
+        ],
+        "after_samples_ms": [
+          16.326400000025387,
+          16.952199999991535,
+          17.231600000002345
+        ],
+        "before_avg_ms": 15.504500000020016,
+        "after_avg_ms": 16.836733333339755,
+        "reduction_pct": -8.592559149395457
+      },
+      "cpp": {
+        "before_samples_ms": [
+          717.1909000000483,
+          699.3919000000233,
+          682.4334000000363
+        ],
+        "after_samples_ms": [
+          577.0617000000016,
+          566.7392999999947,
+          541.0483999999656
+        ],
+        "before_avg_ms": 699.6720666667026,
+        "after_avg_ms": 561.616466666654,
+        "reduction_pct": 19.731472296408405,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "before_samples_ms": [
+          336.46859999998924,
+          310.0183000000243,
+          308.7610999999697
+        ],
+        "after_samples_ms": [
+          253.03919999998925,
+          252.7885000000083,
+          242.12570000003097
+        ],
+        "before_avg_ms": 318.4159999999944,
+        "after_avg_ms": 249.3178000000095,
+        "reduction_pct": 21.700605497206844,
+        "fairness": {
+          "cargo_incremental": true
+        }
+      },
+      "python": {
+        "before_samples_ms": [
+          60.08980000001429,
+          59.04449999997041,
+          58.265099999971426
+        ],
+        "after_samples_ms": [
+          55.90630000000374,
+          55.994300000008934,
+          55.69839999998294
+        ],
+        "before_avg_ms": 59.13313333331871,
+        "after_avg_ms": 55.86633333333187,
+        "reduction_pct": 5.524483171850037
+      }
+    }
+  },
+  "scale_curve": {
+    "1000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 16.66116666670329,
+        "codegen_obj_avg_ms": 43.94493333330729,
+        "link_avg_ms": 383.48230000000666,
+        "e2e_avg_ms": 444.0884000000172,
+        "e2e_p50_ms": 216.0245999999688,
+        "timed_out": false,
+        "timeouts": 0
+      },
+      "cpp": {
+        "compile_obj_avg_ms": 447.8906666666565,
+        "link_avg_ms": 127.37306666664001,
+        "e2e_avg_ms": 575.2637333332965,
+        "e2e_p50_ms": 577.9323999998951,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "e2e_avg_ms": 510.4798333333065,
+        "e2e_p50_ms": 500.1837999999452,
+        "fairness": {
+          "cargo_incremental": true
+        },
+        "note": "cargo build includes compile+link; split link-only timing is not isolated"
+      },
+      "python": {
+        "compile_avg_ms": 73.75853333337545,
+        "e2e_avg_ms": 73.75853333337545,
+        "e2e_p50_ms": 73.89720000003308,
+        "note": "python has no native link stage in this benchmark"
+      }
+    },
+    "10000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 50.79774999995834,
+        "codegen_obj_avg_ms": 43.720449999966604,
+        "link_avg_ms": 115.29585000005227,
+        "e2e_avg_ms": 209.81404999997721,
+        "e2e_p50_ms": 210.73690000002898,
+        "timed_out": false,
+        "timeouts": 0
+      },
+      "cpp": {
+        "compile_obj_avg_ms": 456.27629999995634,
+        "link_avg_ms": 122.439399999962,
+        "e2e_avg_ms": 578.7156999999183,
+        "e2e_p50_ms": 579.6009999999114,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "e2e_avg_ms": 1027.0361999999977,
+        "e2e_p50_ms": 1038.4765999999672,
+        "fairness": {
+          "cargo_incremental": true
+        },
+        "note": "cargo build includes compile+link; split link-only timing is not isolated"
+      },
+      "python": {
+        "compile_avg_ms": 123.21435000001202,
+        "e2e_avg_ms": 123.21435000001202,
+        "e2e_p50_ms": 124.5237000000543,
+        "note": "python has no native link stage in this benchmark"
+      }
+    },
+    "100000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 379.45510000001076,
+        "codegen_obj_avg_ms": 42.26886666659387,
+        "link_avg_ms": 109.2025333333595,
+        "e2e_avg_ms": 530.9264999999641,
+        "e2e_p50_ms": 525.9743999999955,
+        "timed_out": false,
+        "timeouts": 0
+      },
+      "cpp": {
+        "compile_obj_avg_ms": 872.7566000000024,
+        "link_avg_ms": 118.02093333331716,
+        "e2e_avg_ms": 990.7775333333196,
+        "e2e_p50_ms": 977.6802999999745,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "e2e_avg_ms": 7519.349499999976,
+        "e2e_p50_ms": 7498.197600000026,
+        "fairness": {
+          "cargo_incremental": true
+        },
+        "note": "cargo build includes compile+link; split link-only timing is not isolated"
+      },
+      "python": {
+        "compile_avg_ms": 837.8027666666412,
+        "e2e_avg_ms": 837.8027666666412,
+        "e2e_p50_ms": 836.8624999999383,
+        "note": "python has no native link stage in this benchmark"
+      }
+    },
+    "1000000": {
+      "sengoo": {
+        "compile_frontend_llvm_avg_ms": 1373.469699999987,
+        "codegen_obj_avg_ms": 40.992599999981394,
+        "link_avg_ms": 115.61410000001615,
+        "e2e_avg_ms": 1530.0763999999845,
+        "e2e_p50_ms": 1530.0763999999845,
+        "timed_out": false,
+        "timeouts": 0
+      },
+      "cpp": {
+        "compile_obj_avg_ms": 4990.043600000035,
+        "link_avg_ms": 118.39710000003834,
+        "e2e_avg_ms": 5108.440700000074,
+        "e2e_p50_ms": 5108.440700000074,
+        "fairness": {
+          "pch_enabled": true
+        }
+      },
+      "rust": {
+        "e2e_avg_ms": 86421.6596,
+        "e2e_p50_ms": 86421.6596,
+        "fairness": {
+          "cargo_incremental": true
+        },
+        "note": "cargo build includes compile+link; split link-only timing is not isolated"
+      },
+      "python": {
+        "compile_avg_ms": 9359.839999999964,
+        "e2e_avg_ms": 9359.839999999964,
+        "e2e_p50_ms": 9359.839999999964,
+        "note": "python has no native link stage in this benchmark"
+      }
+    }
+  },
+  "reachability_matrix": {
+    "all_reachable": {
+      "compile_frontend_llvm_avg_ms": 536.2676500000134,
+      "codegen_obj_avg_ms": 6207.833850000043,
+      "link_avg_ms": 111.94250000005468,
+      "e2e_avg_ms": 6856.044000000111,
+      "e2e_p50_ms": 6969.118600000229,
+      "iters": 2,
+      "loc_target": 100000
+    },
+    "half_reachable": {
+      "compile_frontend_llvm_avg_ms": 462.0831500000122,
+      "codegen_obj_avg_ms": 3010.238450000088,
+      "link_avg_ms": 113.65254999998342,
+      "e2e_avg_ms": 3585.9741500000837,
+      "e2e_p50_ms": 3603.538999999955,
+      "iters": 2,
+      "loc_target": 100000
+    },
+    "library_entryless": {
+      "compile_frontend_llvm_avg_ms": 523.9655500001845,
+      "codegen_obj_avg_ms": 5996.729599999981,
+      "link_avg_ms": null,
+      "e2e_avg_ms": 6520.695150000165,
+      "e2e_p50_ms": 6522.473399999853,
+      "iters": 2,
+      "loc_target": 100000
+    },
+    "delta_vs_all_reachable_ms": {
+      "half_reachable_e2e_delta_ms": -3270.069850000027,
+      "library_entryless_e2e_delta_ms": -335.34884999994574
+    }
+  },
+  "phase_deltas": {
+    "incremental_vs_target_ms": {
+      "loop_body_change": {
+        "before_minus_after_ms": -0.6521000000058539,
+        "after_minus_target_ms": -185.6429000000162
+      },
+      "function_signature_change": {
+        "before_minus_after_ms": -0.8658000000233788,
+        "after_minus_target_ms": -185.5256999999824
+      },
+      "add_new_function": {
+        "before_minus_after_ms": -1.3322333333197385,
+        "after_minus_target_ms": -183.16326666666023
+      }
+    },
+    "scale_phase_share_pct": {
+      "1000": {
+        "frontend_share_pct": 3.75176804138605,
+        "codegen_share_pct": 9.895537314936753,
+        "link_share_pct": 86.35269464367721
+      },
+      "10000": {
+        "frontend_share_pct": 24.210842886815186,
+        "codegen_share_pct": 20.837713203654072,
+        "link_share_pct": 54.95144390953074
+      },
+      "100000": {
+        "frontend_share_pct": 71.47036360024154,
+        "codegen_share_pct": 7.9613405370793755,
+        "link_share_pct": 20.568295862679086
+      },
+      "1000000": {
+        "frontend_share_pct": 89.76477906593429,
+        "codegen_share_pct": 2.6791211210095005,
+        "link_share_pct": 7.556099813056219
+      }
+    },
+    "frontend_share_trend_100k_to_1000k": {
+      "share_100k_pct": 71.47036360024154,
+      "share_1000k_pct": 89.76477906593429,
+      "delta_pp": 18.29441546569275,
+      "trend": "increasing"
+    },
+    "scale_100k_vs_target_ms": {
+      "frontend_minus_target_ms": 79.45510000001076,
+      "codegen_minus_target_ms": -1457.7311333334062,
+      "link_minus_target_ms": -390.7974666666405,
+      "e2e_minus_target_ms": -1469.073500000036
+    },
+    "delta_vs_previous": {
+      "compile_memory_compare/10000/sengoo/peak_rss_mb_avg": {
+        "previous": 27.33,
+        "current": 27.01432228088379,
+        "delta_ms": -0.31567771911620923,
+        "delta_pct": -1.155059345467286
+      },
+      "compile_memory_compare/100000/sengoo/peak_rss_mb_avg": {
+        "previous": 82.34,
+        "current": 82.943359375,
+        "delta_ms": 0.6033593749999966,
+        "delta_pct": 0.7327658185571977
+      },
+      "compile_memory_compare/1000000/sengoo/peak_rss_mb_avg": {
+        "previous": 613.84,
+        "current": 614.05859375,
+        "delta_ms": 0.21859374999996817,
+        "delta_pct": 0.035610867652803364
+      },
+      "reachability_matrix/all_reachable/codegen_obj_avg_ms": {
+        "previous": 6024.49,
+        "current": 6207.833850000043,
+        "delta_ms": 183.34385000004295,
+        "delta_pct": 3.0433090601867203
+      },
+      "reachability_matrix/all_reachable/compile_frontend_llvm_avg_ms": {
+        "previous": 530.2,
+        "current": 536.2676500000134,
+        "delta_ms": 6.067650000013373,
+        "delta_pct": 1.1444077706551061
+      },
+      "reachability_matrix/all_reachable/e2e_avg_ms": {
+        "previous": 6670.35,
+        "current": 6856.044000000111,
+        "delta_ms": 185.69400000011046,
+        "delta_pct": 2.783871910770956
+      },
+      "reachability_matrix/half_reachable/codegen_obj_avg_ms": {
+        "previous": 2938.07,
+        "current": 3010.238450000088,
+        "delta_ms": 72.16845000008789,
+        "delta_pct": 2.456321666947618
+      },
+      "reachability_matrix/half_reachable/compile_frontend_llvm_avg_ms": {
+        "previous": 453.0,
+        "current": 462.0831500000122,
+        "delta_ms": 9.08315000001221,
+        "delta_pct": 2.0051103752786337
+      },
+      "reachability_matrix/half_reachable/e2e_avg_ms": {
+        "previous": 3508.73,
+        "current": 3585.9741500000837,
+        "delta_ms": 77.24415000008366,
+        "delta_pct": 2.201484582743148
+      },
+      "reachability_matrix/library_entryless/codegen_obj_avg_ms": {
+        "previous": 6080.89,
+        "current": 5996.729599999981,
+        "delta_ms": -84.16040000001976,
+        "delta_pct": -1.3840145110340716
+      },
+      "reachability_matrix/library_entryless/compile_frontend_llvm_avg_ms": {
+        "previous": 538.39,
+        "current": 523.9655500001845,
+        "delta_ms": -14.424449999815465,
+        "delta_pct": -2.6791823770529666
+      },
+      "reachability_matrix/library_entryless/e2e_avg_ms": {
+        "previous": 6619.28,
+        "current": 6520.695150000165,
+        "delta_ms": -98.58484999983466,
+        "delta_pct": -1.4893591145839828
+      },
+      "real_incremental/add_new_function/sengoo/after_avg_ms": {
+        "previous": 14.12,
+        "current": 16.836733333339755,
+        "delta_ms": 2.7167333333397554,
+        "delta_pct": 19.240321057646995
+      },
+      "real_incremental/function_signature_change/sengoo/after_avg_ms": {
+        "previous": 14.21,
+        "current": 14.474300000017593,
+        "delta_ms": 0.2643000000175917,
+        "delta_pct": 1.8599577763377315
+      },
+      "real_incremental/loop_body_change/sengoo/after_avg_ms": {
+        "previous": 13.93,
+        "current": 14.357099999983802,
+        "delta_ms": 0.42709999998380255,
+        "delta_pct": 3.0660445081392864
+      },
+      "scale_curve/100000/sengoo/codegen_obj_avg_ms": {
+        "previous": 41.85,
+        "current": 42.26886666659387,
+        "delta_ms": 0.4188666665938712,
+        "delta_pct": 1.0008761447882226
+      },
+      "scale_curve/100000/sengoo/compile_frontend_llvm_avg_ms": {
+        "previous": 394.76,
+        "current": 379.45510000001076,
+        "delta_ms": -15.304899999989232,
+        "delta_pct": -3.877013881849537
+      },
+      "scale_curve/100000/sengoo/e2e_avg_ms": {
+        "previous": 546.38,
+        "current": 530.9264999999641,
+        "delta_ms": -15.453500000035888,
+        "delta_pct": -2.8283429115333445
+      },
+      "scale_curve/100000/sengoo/link_avg_ms": {
+        "previous": 109.77,
+        "current": 109.2025333333595,
+        "delta_ms": -0.5674666666404988,
+        "delta_pct": -0.5169597035988875
+      },
+      "scale_curve/1000000/sengoo/codegen_obj_avg_ms": {
+        "previous": 39.94,
+        "current": 40.992599999981394,
+        "delta_ms": 1.0525999999813962,
+        "delta_pct": 2.6354531797230756
+      },
+      "scale_curve/1000000/sengoo/compile_frontend_llvm_avg_ms": {
+        "previous": 1347.34,
+        "current": 1373.469699999987,
+        "delta_ms": 26.129699999986997,
+        "delta_pct": 1.9393545801347098
+      },
+      "scale_curve/1000000/sengoo/e2e_avg_ms": {
+        "previous": 1493.49,
+        "current": 1530.0763999999845,
+        "delta_ms": 36.58639999998445,
+        "delta_pct": 2.449725140441814
+      },
+      "scale_curve/1000000/sengoo/link_avg_ms": {
+        "previous": 106.2,
+        "current": 115.61410000001615,
+        "delta_ms": 9.414100000016148,
+        "delta_pct": 8.864500941634791
+      }
+    },
+    "previous_report": "D:\\a\\Sengoo\\Sengoo\\bench\\results\\1784010348707-advanced-pipeline.json"
+  },
+  "notes": [
+    "Scale curve e2e includes link time for compiled languages.",
+    "Sengoo uses split timing: front-end LLVM emit + clang IR codegen + clang link.",
+    "Rust uses cargo build e2e timing; split link-only timing is not isolated.",
+    "Compile-memory comparison tracks peak process RSS per compiler command.",
+    "Reachability matrix validates optimization generality across all/half/entryless profiles."
+  ],
+  "compile_memory_compare": {
+    "_meta": {
+      "loc_buckets": [
+        10000,
+        100000,
+        1000000
+      ],
+      "iters_by_loc": {
+        "10000": 3,
+        "100000": 2,
+        "1000000": 1
+      },
+      "sample_interval_ms": 10,
+      "command_timeout_s": null,
+      "note": "peak_rss_mb_* is available on all platforms; peak_private_mb_* depends on OS support."
+    },
+    "10000": {
+      "sengoo": {
+        "compile_avg_ms": 4403.591800000034,
+        "peak_rss_mb_avg": 27.01432228088379,
+        "peak_rss_mb_p50": 27.2578125,
+        "peak_private_mb_avg": 23.255208015441895,
+        "peak_private_mb_p50": 23.59375,
+        "iters": 3,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "frontend_llvm_emit"
+      },
+      "cpp": {
+        "compile_avg_ms": 482.23926666666256,
+        "peak_rss_mb_avg": 75.01432228088379,
+        "peak_rss_mb_p50": 74.77734375,
+        "peak_private_mb_avg": 41.505208015441895,
+        "peak_private_mb_p50": 41.5078125,
+        "iters": 3,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "pch_enabled": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "rust": {
+        "compile_avg_ms": 385.7531666667455,
+        "peak_rss_mb_avg": 70.453125,
+        "peak_rss_mb_p50": 70.66015625,
+        "peak_private_mb_avg": 123.8606767654419,
+        "peak_private_mb_p50": 124.28515625,
+        "iters": 3,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "rustc_direct": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "python": {
+        "compile_avg_ms": 142.09583333331466,
+        "peak_rss_mb_avg": 39.352864265441895,
+        "peak_rss_mb_p50": 39.79296875,
+        "peak_private_mb_avg": 35.020833015441895,
+        "peak_private_mb_p50": 35.01953125,
+        "iters": 3,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "py_compile",
+        "note": "python benchmark has no native link stage"
+      }
+    },
+    "100000": {
+      "sengoo": {
+        "compile_avg_ms": 687.2910499999989,
+        "peak_rss_mb_avg": 82.943359375,
+        "peak_rss_mb_p50": 86.53125,
+        "peak_private_mb_avg": 84.181640625,
+        "peak_private_mb_p50": 87.10546875,
+        "iters": 2,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "frontend_llvm_emit"
+      },
+      "cpp": {
+        "compile_avg_ms": 924.3809999999826,
+        "peak_rss_mb_avg": 118.251953125,
+        "peak_rss_mb_p50": 118.34765625,
+        "peak_private_mb_avg": 85.65625,
+        "peak_private_mb_p50": 85.71484375,
+        "iters": 2,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "pch_enabled": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "rust": {
+        "compile_avg_ms": 3846.721699999989,
+        "peak_rss_mb_avg": 333.890625,
+        "peak_rss_mb_p50": 336.26953125,
+        "peak_private_mb_avg": 405.15625,
+        "peak_private_mb_p50": 406.75390625,
+        "iters": 2,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "rustc_direct": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "python": {
+        "compile_avg_ms": 929.6258999999623,
+        "peak_rss_mb_avg": 281.115234375,
+        "peak_rss_mb_p50": 281.12109375,
+        "peak_private_mb_avg": 284.853515625,
+        "peak_private_mb_p50": 284.859375,
+        "iters": 2,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "py_compile",
+        "note": "python benchmark has no native link stage"
+      }
+    },
+    "1000000": {
+      "sengoo": {
+        "compile_avg_ms": 3300.579500000026,
+        "peak_rss_mb_avg": 614.05859375,
+        "peak_rss_mb_p50": 614.05859375,
+        "peak_private_mb_avg": 625.6484375,
+        "peak_private_mb_p50": 625.6484375,
+        "iters": 1,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "frontend_llvm_emit"
+      },
+      "cpp": {
+        "compile_avg_ms": 4860.997399999974,
+        "peak_rss_mb_avg": 432.7265625,
+        "peak_rss_mb_p50": 432.7265625,
+        "peak_private_mb_avg": 430.3203125,
+        "peak_private_mb_p50": 430.3203125,
+        "iters": 1,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "pch_enabled": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "rust": {
+        "compile_avg_ms": 34563.52600000003,
+        "peak_rss_mb_avg": 2688.44140625,
+        "peak_rss_mb_p50": 2688.44140625,
+        "peak_private_mb_avg": 3008.08984375,
+        "peak_private_mb_p50": 3008.08984375,
+        "iters": 1,
+        "timeouts": 0,
+        "timed_out": false,
+        "fairness": {
+          "rustc_direct": true
+        },
+        "compile_mode": "compile_obj_only"
+      },
+      "python": {
+        "compile_avg_ms": 8548.758499999964,
+        "peak_rss_mb_avg": 2557.0078125,
+        "peak_rss_mb_p50": 2557.0078125,
+        "peak_private_mb_avg": 2645.71875,
+        "peak_private_mb_p50": 2645.71875,
+        "iters": 1,
+        "timeouts": 0,
+        "timed_out": false,
+        "compile_mode": "py_compile",
+        "note": "python benchmark has no native link stage"
+      }
+    }
+  },
+  "rollback_evidence": {
+    "schema_version": 1,
+    "baseline_report_id": "1784010348707-advanced-pipeline",
+    "baseline_report_path": "bench/results/1784010348707-advanced-pipeline.json",
+    "thresholds": {
+      "frontend_regression_pct": {
+        "100000": 10.0,
+        "1000000": 10.0
+      },
+      "rss_regression_pct": {
+        "100000": 10.0,
+        "1000000": 10.0
+      },
+      "e2e_regression_pct": {
+        "100000": 10.0,
+        "1000000": 10.0
+      },
+      "frontend_share_regression_pp": {
+        "1000000": 5.0
+      }
+    },
+    "comparisons": [
+      {
+        "bucket": "100000",
+        "metric": "compile_frontend_llvm_avg_ms",
+        "measured": 379.45510000001076,
+        "baseline": 394.76,
+        "delta_pct": -3.877013881849537,
+        "max_regression_pct": 10.0,
+        "pass": true
+      },
+      {
+        "bucket": "100000",
+        "metric": "e2e_avg_ms",
+        "measured": 530.9264999999641,
+        "baseline": 546.38,
+        "delta_pct": -2.8283429115333445,
+        "max_regression_pct": 10.0,
+        "pass": true
+      },
+      {
+        "bucket": "100000",
+        "metric": "peak_rss_mb_avg",
+        "measured": 82.943359375,
+        "baseline": 82.34,
+        "delta_pct": 0.7327658185571977,
+        "max_regression_pct": 10.0,
+        "pass": true
+      },
+      {
+        "bucket": "1000000",
+        "metric": "compile_frontend_llvm_avg_ms",
+        "measured": 1373.469699999987,
+        "baseline": 1347.34,
+        "delta_pct": 1.9393545801347098,
+        "max_regression_pct": 10.0,
+        "pass": true
+      },
+      {
+        "bucket": "1000000",
+        "metric": "e2e_avg_ms",
+        "measured": 1530.0763999999845,
+        "baseline": 1493.49,
+        "delta_pct": 2.449725140441814,
+        "max_regression_pct": 10.0,
+        "pass": true
+      },
+      {
+        "bucket": "1000000",
+        "metric": "frontend_share_pct",
+        "measured": 89.76477906593429,
+        "baseline": 90.21,
+        "delta_pp": -0.44522093406570207,
+        "max_regression_pp": 5.0,
+        "pass": true
+      },
+      {
+        "bucket": "1000000",
+        "metric": "peak_rss_mb_avg",
+        "measured": 614.05859375,
+        "baseline": 613.84,
+        "delta_pct": 0.035610867652803364,
+        "max_regression_pct": 10.0,
+        "pass": true
+      }
+    ],
+    "gate_decision": "pass",
+    "reasons": [],
+    "baseline_profile_path": "D:\\a\\Sengoo\\Sengoo\\bench\\frontend-memory-baseline.json"
+  }
+}

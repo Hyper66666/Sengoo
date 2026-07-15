@@ -1,0 +1,9 @@
+import std::reflect;
+
+def hot_path_mix(lhs: i64, rhs: i64) -> i64 {
+    lhs * 7 + rhs * 11 + 5;
+}
+
+def hot_path_oracle(lhs: i64, rhs: i64) -> i64 {
+    lhs * 7 + rhs * 11 + 5;
+}

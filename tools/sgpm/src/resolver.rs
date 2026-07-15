@@ -2295,4 +2295,95 @@ mod tests {
         assert!(!metadata.yanked);
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn bounded_fuzz_registry_metadata_and_archive_decoders_never_panic() {
+        let cases = std::env::var("SENGOO_FUZZ_CASES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(256)
+            .clamp(1, 10_000);
+        let dir = temp_dir("bounded_decoder_fuzz");
+        let cache = dir.join("cache");
+        let version = Version::parse("1.0.0").unwrap();
+        let mut state = 0x1319_8a2e_0370_7344_u64;
+
+        for case in 0..cases {
+            let len = case % 4096;
+            let mut bytes = Vec::with_capacity(len);
+            for _ in 0..len {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                bytes.push((state >> 32) as u8);
+            }
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = serde_json::from_slice::<RegistryPackageMetadata>(&bytes);
+                let _ = unpack_remote_registry_archive(
+                    &cache, "default", "fuzz_pkg", &version, &bytes, None,
+                );
+            }));
+            assert!(
+                result.is_ok(),
+                "registry decoder panicked on bounded case {case}"
+            );
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn retained_sgpm_fuzz_corpus_never_panics() {
+        let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus/sgpm");
+        let mut entries = fs::read_dir(&corpus)
+            .unwrap_or_else(|err| panic!("read retained sgpm corpus {}: {err}", corpus.display()))
+            .map(|entry| entry.expect("read retained sgpm corpus entry").path())
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        entries.sort();
+        assert!(!entries.is_empty(), "sgpm fuzz corpus must not be empty");
+
+        let dir = temp_dir("retained_corpus");
+        let lockfile = dir.join("Sengoo.lock");
+        let version = Version::parse("1.0.0").unwrap();
+        for path in entries {
+            let bytes = fs::read(&path)
+                .unwrap_or_else(|err| panic!("read retained input {}: {err}", path.display()));
+            assert!(
+                bytes.len() <= 64 * 1024,
+                "retained sgpm input {} exceeds the 64 KiB smoke limit",
+                path.display()
+            );
+            let name = path.file_name().unwrap().to_string_lossy();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if name.starts_with("manifest-") {
+                    if let Ok(source) = std::str::from_utf8(&bytes) {
+                        let _ = Manifest::parse(source);
+                    }
+                } else if name.starts_with("lockfile-") {
+                    fs::write(&lockfile, &bytes).unwrap();
+                    let _ = crate::lockfile::read_locked_registry_graph(&lockfile);
+                } else if name.starts_with("metadata-") {
+                    let _ = serde_json::from_slice::<RegistryPackageMetadata>(&bytes);
+                } else if name.starts_with("archive-") {
+                    let _ = unpack_remote_registry_archive(
+                        &dir,
+                        "default",
+                        "retained_pkg",
+                        &version,
+                        &bytes,
+                        None,
+                    );
+                } else {
+                    panic!("unknown retained corpus category: {name}");
+                }
+            }));
+            assert!(
+                result.is_ok(),
+                "sgpm panicked on retained input {}",
+                path.display()
+            );
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
 }

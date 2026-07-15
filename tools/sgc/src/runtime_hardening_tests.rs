@@ -466,3 +466,102 @@ async def main() -> i64 {
     .expect("async main should expand");
     compile_source(&source, 0).expect("sgc check path should accept async main");
 }
+
+#[test]
+fn runtime_hardening_parser_decoder_bounded_fuzz_smoke() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+
+    let source_path = temp_artifact("runtime-parser-bounded-fuzz", "c");
+    fs::write(
+        &source_path,
+        r#"
+#include <stdint.h>
+
+#ifdef _WIN32
+void __main(void) {}
+#endif
+
+long long sengoo_json_parse_text(long long data, long long len);
+long long sengoo_json_doc_close(long long handle);
+long long sengoo_json_last_error_code(void);
+long long sengoo_config_ini_parse(long long data, long long len);
+long long sengoo_config_ini_free(long long handle);
+long long sengoo_config_toml_parse(long long data, long long len);
+long long sengoo_config_toml_free(long long handle);
+
+int main(void) {
+    unsigned char bytes[256];
+    uint64_t state = UINT64_C(0x243f6a8885a308d3);
+    for (int case_id = 0; case_id < 512; case_id++) {
+        long long len = case_id % 256;
+        for (long long index = 0; index < len; index++) {
+            state = state * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+            bytes[index] = (unsigned char)(state >> 32);
+        }
+
+        long long json = sengoo_json_parse_text((long long)(intptr_t)bytes, len);
+        if (json > 0 && sengoo_json_doc_close(json) != 0) {
+            return 10;
+        }
+        long long ini = sengoo_config_ini_parse((long long)(intptr_t)bytes, len);
+        if (ini > 0 && sengoo_config_ini_free(ini) < 0) {
+            return 11;
+        }
+        long long toml = sengoo_config_toml_parse((long long)(intptr_t)bytes, len);
+        if (toml > 0 && sengoo_config_toml_free(toml) < 0) {
+            return 12;
+        }
+    }
+
+    if (sengoo_json_parse_text(0, 1) != 0 || sengoo_json_last_error_code() == 0) return 20;
+    if (sengoo_json_parse_text((long long)(intptr_t)bytes, -1) != 0 || sengoo_json_last_error_code() == 0) return 21;
+    if (sengoo_config_ini_parse(0, 1) >= 0) return 22;
+    if (sengoo_config_toml_parse((long long)(intptr_t)bytes, -1) >= 0) return 23;
+    return 0;
+}
+"#,
+    )
+    .expect("bounded runtime parser probe should be writable");
+
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let probe_obj = temp_artifact("runtime-parser-bounded-fuzz", obj_ext);
+    let status = Command::new(&clang)
+        .arg("-c")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&probe_obj)
+        .status()
+        .expect("clang should compile bounded runtime parser probe");
+    assert!(
+        status.success(),
+        "bounded runtime parser probe should compile"
+    );
+
+    let exe_path = temp_artifact(
+        "runtime-parser-bounded-fuzz",
+        if cfg!(windows) { "exe" } else { "" },
+    );
+    let mut object_paths = vec![probe_obj.clone()];
+    object_paths.extend(ensure_runtime_objects(&clang, &runtime_c, 1, None).unwrap());
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("bounded runtime parser probe should run");
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = fs::remove_file(&source_path);
+    let _ = fs::remove_file(&probe_obj);
+    let _ = fs::remove_file(&exe_path);
+}

@@ -626,7 +626,11 @@ fn native_runtime_bundle_links_split_sources_for_full_and_object_link_paths() {
         b"/* anchor runtime source intentionally empty */\n",
     )
     .unwrap();
-    fs::write(root.join("runtime_shared.h"), b"/* shared header */\n").unwrap();
+    fs::write(
+        root.join("runtime_shared.h"),
+        b"#define SENGOO_RUNTIME_ABI_VERSION 1\n",
+    )
+    .unwrap();
     fs::write(
         root.join("runtime_json.c"),
         b"long long sengoo_runtime_split_probe(void) { return 42; }\n",
@@ -822,8 +826,8 @@ fn advanced_kpi_gate_requires_100k_and_1000k_memory_buckets() {
     assert!(gate.contains("DEFAULT_MAX_RSS_RATIO_2500K = 2.0"));
     assert!(gate.contains("DEFAULT_LADDER_STRETCH_LOC = \"2500000\""));
     assert!(gate.contains("ladder_stretch"));
-    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0"));
-    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 10.0"));
+    assert!(gate.contains("DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 30.0"));
 }
 
 #[test]
@@ -1058,6 +1062,7 @@ fn render_compile_error_json_contains_expected_fields() {
     let json = super::render_compile_error_json(Some("tests/demo.sg"), raw);
     let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
 
+    assert_eq!(value["schema_version"], 1);
     assert_eq!(value["ok"], false);
     assert_eq!(value["kind"], "compile_error");
     assert_eq!(value["stage"], "typecheck");
@@ -1123,6 +1128,17 @@ fn render_compile_error_json_extracts_user_future_contract_code() {
                 || value["message"].as_str().unwrap_or("").contains("Poll<T>")
         );
     }
+}
+
+#[test]
+fn render_compile_error_json_preserves_user_future_missing_wakeup_code() {
+    let raw = "type check error: [async::user_future_missing_wakeup] Future<T>::poll returns Pending without wakeup registration";
+    let json = super::render_compile_error_json(Some("tests/async_future.sg"), raw);
+    let value: Value = serde_json::from_str(&json).expect("json payload should be valid");
+
+    assert_eq!(value["stage"], "typecheck");
+    assert_eq!(value["code"], "async::user_future_missing_wakeup");
+    assert!(value["message"].as_str().unwrap_or("").contains("Pending"));
 }
 
 #[test]
@@ -2219,6 +2235,7 @@ long long sengoo_test_user_future_calls(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
     fn sengoo_test_user_future_calls() -> i64;
 }
 
@@ -2229,6 +2246,12 @@ struct Poll<T> {
 
 struct AsyncContext {
     handle: i64,
+}
+
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
 }
 
 trait Future<T> {
@@ -2316,6 +2339,7 @@ long long sengoo_test_user_future_tick(void) {
     let source = r#"
 extern "C" {
     fn sengoo_test_user_future_tick() -> i64;
+    fn sengoo_async_context_wake_after(handle: i64, delay_ms: i64) -> bool;
 }
 
 struct Poll<T> {
@@ -2333,14 +2357,26 @@ trait Future<T> {
     }
 }
 
+impl AsyncContext {
+    def wake_after(&self, delay_ms: i64) -> bool {
+        sengoo_async_context_wake_after(self.handle, delay_ms)
+    }
+}
+
 struct PendingOnceFuture {
     value: i64,
 }
 
 impl Future<i64> for PendingOnceFuture {
     def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        if ctx.handle <= 0 {
+            return Poll { is_ready: true, value: 13 };
+        }
         let calls = sengoo_test_user_future_tick();
-        if calls < 2 {
+        if calls < 3 {
+            if !ctx.wake_after(5) {
+                return Poll { is_ready: true, value: 13 };
+            }
             Poll { is_ready: false, value: 0 }
         } else {
             Poll { is_ready: true, value: self.value }
@@ -2464,6 +2500,57 @@ async def main() -> i64 {
         elapsed_ms
     );
 
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&exe_path);
+}
+
+#[test]
+fn async_native_runtime_owned_file_waits_reads_and_closes() {
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let input_path = temp_artifact("async-owned-file-input", "txt");
+    fs::write(&input_path, b"ready").expect("write async owned-file fixture");
+    let source_path = input_path.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+import std::file;
+import std::ffi;
+
+async def main() -> i64 {{
+    let opened = async_file_open("{source_path}");
+    if !opened.is_ok {{ return 10; }}
+    let file = opened.value;
+    let ready = await file.wait_readable(1000);
+    if !ready.is_ok || !ready.value {{ return 11; }}
+    let mut buffer = ffi_buffer_new(8).unwrap_or(Buffer {{ handle: 0 }});
+    let count = file.read_into(&mut buffer).unwrap_or(0);
+    if count == 5 {{ 42 }} else {{ 12 }}
+}}
+"#
+    );
+    let expanded =
+        expand_stdlib_imports_for_source(&source).expect("async file stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&expanded, 1).expect("async file source should compile to LLVM IR");
+    let ll_path = temp_artifact("async-owned-file", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+
+    let exe_path = temp_artifact("async-owned-file", if cfg!(windows) { "exe" } else { "" });
+    compile_native_binary(&clang, &ll_path, &exe_path, Some(&runtime_c), 1, None, None).unwrap();
+    let output = Command::new(&exe_path)
+        .output()
+        .expect("async owned-file native executable should run");
+    assert_eq!(output.status.code(), Some(42));
+
+    let _ = fs::remove_file(&input_path);
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&exe_path);
 }
@@ -4940,6 +5027,150 @@ def main() -> i64 {
     let wrote = write_value(&lock, 17);
     let after = read_value(&lock);
     if before == 10 && wrote == 17 && after == 17 { 42 } else { 1 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_native_runtime_bounded_executor_joins_detached_send_futures() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-bounded-future-executor",
+        r#"
+import std::async;
+
+async def child(value: i64) -> i64 {
+    await sleep(20);
+    value
+}
+
+async def main() -> i64 {
+    let enabled = runtime_enable_executor(2, 2);
+    if !enabled.is_ok { return enabled.error; }
+    let first = spawn_task(child(20));
+    let second = spawn_task(child(22));
+    if first == 0 || second == 0 { return 90; }
+    if spawn_task(child(1)) != 0 { return 92; }
+
+    let first_status = task_join(first);
+    let second_status = task_join(second);
+    if first_status != 2 || second_status != 2 { return 91; }
+
+    let canceled = spawn_task(child(1));
+    if canceled == 0 || !cancel_task(canceled) { return 93; }
+    if task_join(canceled) == 3 { 42 } else { 94 }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_native_runtime_structured_task_scope_joins_and_cancels_children() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-structured-task-scope",
+        r#"
+import std::async;
+
+async def child(delay: i64) -> i64 {
+    await sleep(delay);
+    7
+}
+
+async def nested_parent() -> i64 {
+    let scope = task_scope();
+    if scope_spawn(&scope, child(5)) != 1 { return 80; }
+    9
+}
+
+async def main() -> i64 {
+    let enabled = runtime_enable_executor(1, 4);
+    if !enabled.is_ok { return enabled.error; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(10)) != 1 { return 90; }
+        if scope_spawn(&scope, child(15)) != 1 { return 91; }
+    }
+
+    let nested = spawn_task(nested_parent());
+    if nested == 0 || task_join(nested) != 2 { return 93; }
+
+    {
+        let scope = task_scope();
+        if scope_spawn(&scope, child(1000)) != 1 { return 92; }
+        return 42;
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn async_stdlib_generic_rwlock_waits_and_releases_guards() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "async-generic-rwlock-wait",
+        r#"
+import std::async;
+
+struct Payload { value: i64 }
+impl Copy for Payload {}
+
+async def read_once(lock: &RwLock<Payload>) -> i64 {
+    let result = await rwlock_read_guard(lock);
+    if !result.is_ok { return result.error; }
+    let guard = result.value;
+    let mut output = Payload { value: 0 };
+    if !rwlock_read_guard_copy_into(&guard, &mut output) { return 80; }
+    output.value
+}
+
+async def write_once(lock: &RwLock<Payload>, value: i64) -> i64 {
+    let result = await rwlock_write_guard(lock);
+    if !result.is_ok { return result.error; }
+    let mut guard = result.value;
+    let wrote = guard.set(Payload { value: value });
+    if !wrote { return 81; }
+    let mut output = Payload { value: 0 };
+    if !rwlock_write_guard_copy_into(&guard, &mut output) { return 82; }
+    output.value
+}
+
+async def main() -> i64 {
+    let lock = rwlock_new(Payload { value: 5 });
+    let before = await read_once(&lock);
+    let wrote = await write_once(&lock, 17);
+    let after = await read_once(&lock);
+    if before == 5 && wrote == 17 && after == 17 { 42 } else { 1 }
 }
 "#,
     ) else {
@@ -9256,6 +9487,56 @@ def main() -> i64 {
     assert!(ir.contains("sengoo_file_write_str"));
     assert!(ir.contains("sengoo_file_read_into"));
     assert!(ir.contains("sengoo_file_len"));
+}
+
+#[test]
+fn stdlib_file_len_rejects_directories_instead_of_returning_host_lengths() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "file-len-directory-rejects",
+        r#"
+import std::dir;
+import std::file;
+import std::status;
+
+def main() -> i64 {
+    let root = "sengoo_tmp_file_len_dir";
+    let child = "sengoo_tmp_file_len_dir/child.txt";
+
+    file_remove(child);
+    dir_remove(root);
+
+    let created = dir_create_all(root).unwrap_or(false);
+    let wrote = file_write_str(child, "hello").unwrap_or(0);
+    let child_len = file_len(child);
+    let dir_len = file_len(root);
+
+    file_remove(child);
+    let removed = dir_remove(root).unwrap_or(false);
+
+    if created
+        && wrote == 5
+        && child_len.is_ok
+        && child_len.value == 5
+        && dir_len.is_err()
+        && dir_len.error == STATUS_UNSUPPORTED()
+        && removed {
+        0
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

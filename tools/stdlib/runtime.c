@@ -15,6 +15,10 @@
 
 #include "runtime_shared.h"
 
+long long sengoo_runtime_abi_version(void) {
+    return SENGOO_RUNTIME_ABI_VERSION;
+}
+
 extern long long sengoo_string_from_bytes_copy(long long bytes_ptr, long long len);
 extern long long sengoo_string_as_str_ptr(long long handle);
 
@@ -1544,27 +1548,40 @@ long long sengoo_file_exists(long long path_ptr) {
     return 1;
 }
 
-long long sengoo_file_len(long long path_ptr) {
-    const char* path = (const char*)(intptr_t)path_ptr;
+static long long sengoo_regular_file_size_cstr(const char* path) {
     if (!path || path[0] == '\0') {
         return -SENGOO_STATUS_INVALID_ARGUMENT;
     }
 
-    FILE* file = fopen(path, "rb");
-    if (!file) {
+#ifdef _WIN32
+    struct _stat64 info;
+    if (_stat64(path, &info) != 0) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
-    if (fseek(file, 0, SEEK_END) != 0) {
-        int err = errno;
-        fclose(file);
-        return sengoo_negative_status_from_errno(err, SENGOO_STATUS_IO);
+    if ((info.st_mode & _S_IFREG) == 0) {
+        return -SENGOO_STATUS_UNSUPPORTED;
     }
-    long size = ftell(file);
-    fclose(file);
-    if (size < 0) {
+    if (info.st_size < 0) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)info.st_size;
+#else
+    struct stat info;
+    if (stat(path, &info) != 0) {
         return sengoo_negative_status_from_errno(errno, SENGOO_STATUS_IO);
     }
-    return (long long)size;
+    if (!S_ISREG(info.st_mode)) {
+        return -SENGOO_STATUS_UNSUPPORTED;
+    }
+    if (info.st_size < 0 || (uintmax_t)info.st_size > (uintmax_t)LLONG_MAX) {
+        return -SENGOO_STATUS_OVERFLOW;
+    }
+    return (long long)info.st_size;
+#endif
+}
+
+long long sengoo_file_len(long long path_ptr) {
+    return sengoo_regular_file_size_cstr((const char*)(intptr_t)path_ptr);
 }
 
 long long sengoo_file_read_into(long long path_ptr, long long out_buffer, long long out_capacity) {
@@ -1841,37 +1858,7 @@ long long sengoo_file_kind(long long path_ptr) {
 }
 
 long long sengoo_file_size(long long path_ptr) {
-    const char* path = (const char*)(intptr_t)path_ptr;
-    if (!path || path[0] == '\0') {
-        return -SENGOO_STATUS_INVALID_ARGUMENT;
-    }
-
-#ifdef _WIN32
-    WIN32_FILE_ATTRIBUTE_DATA info;
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
-        return -SENGOO_STATUS_NOT_FOUND;
-    }
-    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-        return -SENGOO_STATUS_UNSUPPORTED;
-    }
-    unsigned long long size = ((unsigned long long)info.nFileSizeHigh << 32) | info.nFileSizeLow;
-    if (size > (unsigned long long)LLONG_MAX) {
-        return -SENGOO_STATUS_OVERFLOW;
-    }
-    return (long long)size;
-#else
-    struct stat info;
-    if (stat(path, &info) != 0) {
-        return -SENGOO_STATUS_NOT_FOUND;
-    }
-    if (!S_ISREG(info.st_mode)) {
-        return -SENGOO_STATUS_UNSUPPORTED;
-    }
-    if (info.st_size < 0) {
-        return -SENGOO_STATUS_OVERFLOW;
-    }
-    return (long long)info.st_size;
-#endif
+    return sengoo_regular_file_size_cstr((const char*)(intptr_t)path_ptr);
 }
 
 long long sengoo_file_modified_unix_ms(long long path_ptr) {

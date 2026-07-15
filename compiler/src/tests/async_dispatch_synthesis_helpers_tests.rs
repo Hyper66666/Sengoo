@@ -55,10 +55,13 @@ fn async_dispatch_synthesis_helpers_use_registry_ordinals_for_switch_targets() {
         seen.contains(&2),
         "timeout builtin ordinal should be reserved"
     );
-    assert!(
-        seen.contains(&4),
-        "worker_b should receive stable sorted ordinal"
-    );
+    let worker_kind = u32::try_from(
+        registry
+            .kind_id("worker_b")
+            .expect("worker_b should have a collision-free stable id"),
+    )
+    .expect("worker_b kind should fit the MIR switch width");
+    assert!(seen.contains(&worker_kind));
 }
 
 #[test]

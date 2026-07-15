@@ -1,0 +1,81 @@
+name: compatibility-prerelease
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/compatibility.yml"
+      - "examples/compat/**"
+      - "scripts/install.sh"
+      - "tools/sgc/**"
+      - "tools/sgpm/**"
+      - "tools/sgfmt/**"
+      - "tools/stdlib/**"
+      - "compiler/**"
+      - "runtime/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "19 3 * * 3"
+
+jobs:
+  previous-and-current:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install native compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 lld-19
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100
+
+      - name: Build current toolchain
+        run: cargo build --locked --release -p sgc -p sgpm -p sgfmt
+
+      - name: Install previous supported prerelease
+        run: |
+          sh scripts/install.sh --version 0.1.0-rc.1 --install-dir "$RUNNER_TEMP/sengoo-v0.1.0-rc.1"
+
+      - name: Run retained project with previous and current toolchains outside-checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/compat-v0.1.0-rc.1-outside-checkout"
+          cp -R examples/compat/v0.1.0-rc.1 "$project"
+          transcript="$RUNNER_TEMP/compatibility-transcript.txt"
+
+          run_loop() {
+            label="$1"
+            bin="$2"
+            echo "== $label ==" | tee -a "$transcript"
+            (
+              cd "$project"
+              export SGPM_SGC="$bin/sgc"
+              export SGPM_SGFMT="$bin/sgfmt"
+              "$bin/sgpm" check --locked
+              "$bin/sgpm" test --locked
+              "$bin/sgpm" fmt --check --locked
+              "$bin/sgpm" doc --locked
+              "$bin/sgpm" build --locked
+            ) 2>&1 | tee -a "$transcript"
+          }
+
+          run_loop "v0.1.0-rc.1" "$RUNNER_TEMP/sengoo-v0.1.0-rc.1/bin"
+          run_loop "current" "$GITHUB_WORKSPACE/target/release"
+          cp "$transcript" compatibility-transcript.txt
+
+      - name: Upload compatibility transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-transcript
+          path: compatibility-transcript.txt
+          if-no-files-found: error

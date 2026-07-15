@@ -1,0 +1,13 @@
+import python_hot_path;
+
+def test_hot_path_scalar_matches_oracle() -> i64 {
+    let actual = hot_path_mix(6, 7);
+    let expected = hot_path_oracle(6, 7);
+    if actual == expected and actual == 124 { 0; } else { 11; };
+}
+
+def test_hot_path_scalar_handles_negative_inputs() -> i64 {
+    let actual = hot_path_mix(-3, 9);
+    let expected = hot_path_oracle(-3, 9);
+    if actual == expected and actual == 83 { 0; } else { 12; };
+}

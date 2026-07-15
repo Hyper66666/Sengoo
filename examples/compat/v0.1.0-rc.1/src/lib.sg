@@ -1,0 +1,4 @@
+def compatibility_answer() -> i64 {
+    let base = 40;
+    base + 2;
+}

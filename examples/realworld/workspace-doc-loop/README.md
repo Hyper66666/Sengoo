@@ -13,6 +13,7 @@ sgpm test --locked
 sgpm fmt --check --locked
 sgpm doc --locked
 sgpm build --locked
+sgpm run --locked
 ```
 
 The source uses `std::process` to run a foreground command with captured output.

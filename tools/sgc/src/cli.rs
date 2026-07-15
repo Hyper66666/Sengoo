@@ -7,7 +7,7 @@ use crate::{
     cmd_check, cmd_daemon, cmd_doc, cmd_dump_ast, cmd_repl, cmd_run, cmd_test,
     current_error_format, dispatch_build_via_daemon, dispatch_run_via_daemon,
     frontend_trace_enabled, parse_frontend_jobs_arg,
-    portable_backends::{build_bytecode, build_wasm, run_bytecode},
+    portable_backends::{build_bytecode, build_wasm, run_bytecode, run_wasm},
     propagate_run_exit_code, reflection_options_from_cli, resolve_daemon_addr, resolve_test_root,
     set_error_format, ContractChecksMode, DaemonDispatchOutcome, ErrorFormat, FrontendJobs,
     ReflectionMode, RunEngine, TestOptions, TestOutputFormat, DEFAULT_DAEMON_ADDR,
@@ -468,13 +468,22 @@ async fn dispatch(command: Commands) -> Result<()> {
                     }
                     "native" => {}
                     "wasm" => {
-                        miette::bail!(
-                            "`sgc run --target wasm` is not available; build a .wasm artifact and run it with a WebAssembly runtime"
-                        );
+                        if daemon {
+                            miette::bail!("wasm execution does not support daemon dispatch");
+                        }
+                        if !args.is_empty() {
+                            miette::bail!("wasm execution does not support program arguments yet");
+                        }
+                        if debug_info {
+                            miette::bail!("wasm execution does not support native debug metadata");
+                        }
+                        let exit_code = i32::try_from(run_wasm(&input, opt_level)?)
+                            .map_err(|_| miette::miette!("wasm main result is not an i32"))?;
+                        return propagate_run_exit_code(exit_code);
                     }
                     other => {
                         miette::bail!(
-                            "unsupported run target `{other}`; expected `native` or `bytecode`"
+                            "unsupported run target `{other}`; expected `native`, `bytecode`, or `wasm`"
                         );
                     }
                 }

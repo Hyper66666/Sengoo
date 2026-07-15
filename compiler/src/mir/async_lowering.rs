@@ -363,14 +363,16 @@ mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     #[test]
-    fn async_dispatch_registry_assigns_reserved_builtin_ordinals_then_sorted_async_functions() {
-        let registry =
-            build_async_dispatch_registry(["worker_b".to_string(), "worker_a".to_string()]);
+    fn async_dispatch_registry_assigns_reserved_builtins_and_order_independent_stable_ids() {
+        let first = build_async_dispatch_registry(["worker_b".to_string(), "worker_a".to_string()]);
+        let second =
+            build_async_dispatch_registry(["worker_a".to_string(), "worker_b".to_string()]);
 
-        assert_eq!(registry.kind_id("sengoo_async_sleep"), Some(1));
-        assert_eq!(registry.kind_id("sengoo_async_timeout_bool"), Some(2));
-        assert_eq!(registry.kind_id("worker_a"), Some(3));
-        assert_eq!(registry.kind_id("worker_b"), Some(4));
+        assert_eq!(first.kind_id("sengoo_async_sleep"), Some(1));
+        assert_eq!(first.kind_id("sengoo_async_timeout_bool"), Some(2));
+        assert_eq!(first.kind_id("worker_a"), second.kind_id("worker_a"));
+        assert_eq!(first.kind_id("worker_b"), second.kind_id("worker_b"));
+        assert_ne!(first.kind_id("worker_a"), first.kind_id("worker_b"));
     }
 
     #[test]
@@ -399,10 +401,13 @@ mod tests {
             seen.contains(&2),
             "timeout builtin ordinal should be reserved"
         );
-        assert!(
-            seen.contains(&4),
-            "worker_b should receive stable sorted ordinal"
-        );
+        let worker_kind = u32::try_from(
+            registry
+                .kind_id("worker_b")
+                .expect("worker_b should have a collision-free stable id"),
+        )
+        .expect("worker_b kind should fit the MIR switch width");
+        assert!(seen.contains(&worker_kind));
     }
 
     #[test]

@@ -580,6 +580,8 @@ Fairness profile used in advanced pipeline comparison:
 - Tutorial: `docs/sengoo-tutorial.html`
 - Language features: `docs/language-features.md`
 - Development guide: `docs/DEVELOPMENT_GUIDE.md`
+- Compatibility and supported hosts: `docs/compatibility-policy.md`
+- Internal release process: `docs/internal-release.md`
 
 ## Repository Layout
 

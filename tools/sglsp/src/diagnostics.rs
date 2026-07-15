@@ -1016,6 +1016,37 @@ async def main() -> i64 {
     }
 
     #[test]
+    fn embedded_compiler_reports_user_future_missing_wakeup_code() {
+        let src = r#"
+struct Poll<T> { is_ready: bool, value: T }
+struct AsyncContext { handle: i64 }
+trait Future<T> {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<T> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+struct NeverWakes {}
+impl Future<i64> for NeverWakes {
+    def poll(&mut self, ctx: AsyncContext) -> Poll<i64> {
+        Poll { is_ready: false, value: 0 }
+    }
+}
+async def main() -> i64 { await NeverWakes {} }
+"#;
+
+        let diagnostics = embedded_compiler_diagnostics(src);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].source.as_deref(), Some("sengoo-compiler"));
+        assert_eq!(
+            diagnostics[0].code,
+            Some(NumberOrString::String(
+                "async::user_future_missing_wakeup".to_string()
+            ))
+        );
+        assert!(diagnostics[0].message.contains("Pending"));
+    }
+
+    #[test]
     fn source_span_to_range_maps_offsets() {
         let src = "def main() -> i64 {\n    let x = 1;\n}\n";
         let span: miette::SourceSpan = (src.find('x').expect("x should exist"), 1).into();

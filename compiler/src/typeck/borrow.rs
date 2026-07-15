@@ -479,6 +479,10 @@ impl BorrowChecker {
         if ty.is_copy_value() {
             return false;
         }
+        if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Mutex" | "RwLock"))
+        {
+            return true;
+        }
         if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if name == "Rc") {
             return true;
         }
@@ -616,9 +620,16 @@ impl BorrowChecker {
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
         if let Some(path) = Self::expr_move_path(expr) {
+            let span = (expr.span.lo as usize, expr.span.hi as usize);
+            if self.borrows.get(&path).is_some_and(|borrows| {
+                borrows
+                    .iter()
+                    .any(|borrow| borrow.kind == kind && borrow.span == span)
+            }) {
+                return;
+            }
             let lifetime = self.lifetime_counter;
             self.lifetime_counter += 1;
-            let span = (expr.span.lo as usize, expr.span.hi as usize);
 
             for (borrowed, existing) in &self.borrows {
                 if !borrowed.is_prefix_of(&path) && !path.is_prefix_of(borrowed) {

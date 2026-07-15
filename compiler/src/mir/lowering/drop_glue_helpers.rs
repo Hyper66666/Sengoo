@@ -25,8 +25,52 @@ impl<'a> LoweringContext<'a> {
             if self.drop_binding_is_moved(binding) {
                 continue;
             }
+            self.push_task_scope_normal_join(self.current_block(), binding);
             self.push_drop_call(self.current_block(), binding);
         }
+    }
+
+    pub(super) fn emit_normal_task_scope_joins(&mut self) {
+        let bindings = self
+            .drop_bindings
+            .iter()
+            .filter(|binding| !self.drop_binding_is_moved(binding))
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings.iter().rev() {
+            self.push_task_scope_normal_join(self.current_block(), binding);
+        }
+    }
+
+    fn push_task_scope_normal_join(&mut self, block: usize, binding: &DropBinding) {
+        if !binding.field_path.is_empty()
+            || !matches!(
+                self.get_local_type(binding.local),
+                MIRType::Struct { name, .. } if name == "TaskScope"
+            )
+        {
+            return;
+        }
+        let handle = self.mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        self.mir_fn.push_inst_to_block_at(
+            block,
+            Instruction::Extract {
+                destination: handle,
+                value: binding.local,
+                index: 0,
+            },
+            self.current_source_site,
+        );
+        let status = self.mir_fn.add_local(LocalKind::Temp, MIR_I64);
+        self.mir_fn.push_inst_to_block_at(
+            block,
+            Instruction::Call {
+                destination: status,
+                func: "sengoo_async_task_scope_join".to_string(),
+                args: vec![handle],
+            },
+            self.current_source_site,
+        );
     }
 
     pub(super) fn emit_active_drop_scopes_before_exit(&mut self) {

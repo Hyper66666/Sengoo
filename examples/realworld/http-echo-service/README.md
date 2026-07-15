@@ -26,6 +26,7 @@ sgpm test --locked
 sgpm fmt --check --locked
 sgpm doc --locked
 sgpm build --locked
+sgpm run --locked
 ```
 
 Dynamic serving limits (one request future per serial server loop, plaintext only,

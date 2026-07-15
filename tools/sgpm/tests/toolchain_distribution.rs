@@ -1,3 +1,5 @@
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -283,5 +285,253 @@ fn installers_support_local_release_feeds_for_deterministic_upgrade_smoke() {
     assert!(
         powershell.contains("Copy-Item -LiteralPath $Source -Destination $Destination"),
         "install.ps1 should copy versioned archives from a local release feed during dry-run smoke"
+    );
+}
+
+#[test]
+fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
+    let root = workspace_root();
+    let policy = fs::read_to_string(root.join("docs/compatibility-policy.md"))
+        .expect("read compatibility policy");
+
+    for heading in [
+        "## Source and edition policy",
+        "## Deprecation window",
+        "## Runtime and data schemas",
+        "## Supported release hosts",
+        "## Release support window",
+    ] {
+        assert!(
+            policy.contains(heading),
+            "compatibility policy should contain `{heading}`"
+        );
+    }
+    assert!(
+        policy.contains("edition = \"2026\"")
+            && policy.contains("unsupported Sengoo edition")
+            && policy.contains("at least one minor release"),
+        "policy should freeze the 2026 edition rejection and deprecation window"
+    );
+    for target in [
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ] {
+        assert!(
+            policy.contains(target),
+            "compatibility policy should list supported target `{target}`"
+        );
+    }
+    assert!(
+        policy.contains("latest prerelease line") && policy.contains("security or soundness"),
+        "pre-1.0 support and emergency compatibility exceptions must be explicit"
+    );
+}
+
+#[test]
+fn compatibility_workflow_runs_retained_project_with_previous_and_current_toolchains() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/compatibility.yml"))
+        .expect("read compatibility workflow");
+    let fixture = root.join("examples/compat/v0.1.0-rc.1");
+
+    for relative in ["Sengoo.toml", "Sengoo.lock", "src/lib.sg", "tests/smoke.sg"] {
+        assert!(
+            fixture.join(relative).is_file(),
+            "retained compatibility fixture should contain {relative}"
+        );
+    }
+    for needle in [
+        "v0.1.0-rc.1",
+        "scripts/install.sh",
+        "outside-checkout",
+        "SGPM_SGC",
+        "check --locked",
+        "test --locked",
+        "fmt --check --locked",
+        "doc --locked",
+        "build --locked",
+        "compatibility-transcript",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "compatibility workflow should contain `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn native_safety_workflow_is_fail_closed_and_preserves_longevity_evidence() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/native-safety.yml"))
+        .expect("read native safety workflow");
+    let script = fs::read_to_string(root.join("scripts/runtime-sanitizer-gate.sh"))
+        .expect("read runtime sanitizer gate");
+    let probe = root.join("tools/stdlib/tests/runtime_sanitizer_probe.c");
+
+    assert!(probe.is_file(), "native sanitizer probe should be retained");
+    for needle in [
+        "bash scripts/runtime-sanitizer-gate.sh",
+        "nightly-2026-07-01",
+        "-Zsanitizer=address",
+        "detect_leaks=1:halt_on_error=1",
+        "--features native-bridge",
+        "timeout 1800",
+        "seq 1 10",
+        "native-longevity-transcript",
+        "if-no-files-found: error",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "native safety workflow should contain `{needle}`"
+        );
+    }
+    for needle in [
+        "set -euo pipefail",
+        "-fsanitize=address,undefined",
+        "detect_leaks=1:halt_on_error=1",
+        "runtime_sanitizer_probe.c",
+    ] {
+        assert!(
+            script.contains(needle),
+            "runtime sanitizer gate should contain `{needle}`"
+        );
+    }
+    assert!(
+        !workflow.contains("continue-on-error"),
+        "native safety jobs must fail closed"
+    );
+}
+
+#[test]
+fn performance_workflow_blocks_project_budgets_and_preserves_raw_evidence() {
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/perf-smoke.yml"))
+        .expect("read performance workflow")
+        .replace("\r\n", "\n");
+    let blocking_compile = "- name: Enforce compile wall-time, RSS, and regression budgets\n        shell: pwsh\n        run:";
+    let blocking_resources =
+        "- name: Enforce artifact, startup, CLI, and runtime budgets\n        shell: pwsh\n        run:";
+
+    assert!(
+        workflow.contains(blocking_compile),
+        "compile and RSS budget step must not use continue-on-error"
+    );
+    assert!(
+        workflow.contains(blocking_resources),
+        "release resource budget step must not use continue-on-error"
+    );
+    for needle in [
+        "-Mode hard -SkipAbsoluteTargets",
+        "release_resource_gate.py",
+        "runtime_loop.sg",
+        "production-performance-evidence",
+        "bench/results/*.json",
+        "if-no-files-found: error",
+        "Report cross-language absolute target status (informational)",
+    ] {
+        assert!(
+            workflow.contains(needle),
+            "performance workflow should contain `{needle}`"
+        );
+    }
+    let smoke_release_gate = workflow_step_block(
+        &workflow,
+        "Smoke release_resource_gate against the real sgc",
+    );
+    for needle in [
+        "--iterations 3",
+        "runtime_loop.sg",
+        "--max-full-build-ms 0.01",
+        "if ($LASTEXITCODE -eq 0)",
+        "expected a budget violation",
+        "$global:LASTEXITCODE = 0",
+    ] {
+        assert!(
+            smoke_release_gate.contains(needle),
+            "release resource smoke should contain `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn frontend_baseline_points_at_an_exact_retained_ci_report() {
+    let root = workspace_root();
+    let baseline = fs::read_to_string(root.join("bench/frontend-memory-baseline.json"))
+        .expect("read frontend baseline profile");
+    let baseline: Value = serde_json::from_str(&baseline).expect("parse frontend baseline profile");
+    let docs = fs::read_to_string(root.join("bench/FRONTEND_BASELINE.md"))
+        .expect("read frontend baseline documentation");
+    let retained_report_path = baseline["baseline_report_path"]
+        .as_str()
+        .expect("baseline should declare baseline_report_path");
+    let retained_report = root.join(retained_report_path);
+    let retained_report_bytes = fs::read(&retained_report)
+        .unwrap_or_else(|err| panic!("read retained report {}: {err}", retained_report.display()));
+    let retained_report_json: Value =
+        serde_json::from_slice(&retained_report_bytes).expect("parse retained raw report");
+    let expected_report_id = format!(
+        "{}-advanced-pipeline",
+        retained_report_json["generated_at_unix_ms"]
+            .as_i64()
+            .expect("retained report should expose generated_at_unix_ms")
+    );
+
+    assert!(
+        retained_report.is_file(),
+        "frontend baseline should retain the pinned advanced benchmark report in-repo"
+    );
+    assert!(
+        retained_report_path.starts_with("bench/results/")
+            && retained_report_path.ends_with("-advanced-pipeline.json"),
+        "baseline profile should reference a retained local advanced benchmark report"
+    );
+    assert!(
+        docs.contains(retained_report_path),
+        "frontend baseline documentation should point at the retained local benchmark report"
+    );
+    assert!(
+        baseline.get("bootstrap_pending_raw_ci_report").is_none()
+            && baseline.get("provenance_status").is_none(),
+        "final baseline should not retain bootstrap exceptions"
+    );
+    assert_eq!(
+        baseline["baseline_report_id"].as_str(),
+        Some(expected_report_id.as_str()),
+        "baseline report id should match the raw producer report id"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&retained_report_bytes)),
+        baseline["baseline_report_sha256"]
+            .as_str()
+            .expect("baseline should pin retained raw report SHA-256"),
+        "retained report bytes should match the pinned artifact hash"
+    );
+    let actions_run = baseline["baseline_actions_run"]
+        .as_i64()
+        .expect("baseline should record the Actions run");
+    let artifact_id = baseline["baseline_artifact_id"]
+        .as_i64()
+        .expect("baseline should record the Actions artifact id");
+    let artifact_digest = baseline["baseline_artifact_digest"]
+        .as_str()
+        .expect("baseline should record the Actions artifact digest");
+    assert!(actions_run > 0 && artifact_id > 0);
+    assert!(artifact_digest.starts_with("sha256:"));
+    assert!(docs.contains(&actions_run.to_string()));
+    assert!(docs.contains(&artifact_id.to_string()));
+    assert!(docs.contains(artifact_digest));
+    assert!(!docs.contains("pending the next perf-smoke artifact upload"));
+    let notes = retained_report_json["notes"]
+        .as_array()
+        .expect("retained raw report should preserve notes");
+    assert!(
+        notes.iter().all(|note| {
+            note.as_str()
+                .map(|note| !note.contains("reconstructed"))
+                .unwrap_or(true)
+        }),
+        "retained CI report should not contain bootstrap reconstruction notes"
     );
 }

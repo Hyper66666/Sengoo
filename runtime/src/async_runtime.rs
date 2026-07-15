@@ -10,25 +10,46 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
+#[cfg(all(test, feature = "native-bridge"))]
+static ASYNC_RUNTIME_TEST_GUARD: Mutex<()> = Mutex::new(());
+
+#[cfg(feature = "native-bridge")]
+mod async_file;
 #[cfg(feature = "native-bridge")]
 mod bridge;
 #[cfg(feature = "native-bridge")]
 mod concurrent;
+#[cfg(feature = "native-bridge")]
+mod executor;
 #[cfg(feature = "native-bridge")]
 mod futures;
 mod reactor;
 #[cfg(feature = "native-bridge")]
 mod select;
 #[cfg(feature = "native-bridge")]
+mod task_scope;
+#[cfg(feature = "native-bridge")]
 mod thread_pool;
+#[cfg(feature = "native-bridge")]
+mod user_context;
 
+#[cfg(feature = "native-bridge")]
+pub use async_file::{
+    sengoo_async_file_close, sengoo_async_file_open_read, sengoo_async_file_read_into,
+    sengoo_async_file_wait_readable__cancel, sengoo_async_file_wait_readable__drop,
+    sengoo_async_file_wait_readable__poll, sengoo_async_file_wait_readable__result,
+    sengoo_async_file_wait_readable__start, AsyncFileReadinessOutcome,
+};
 #[cfg(all(test, feature = "native-bridge"))]
 use bridge::{scheduler_mut, ForeignAsyncTask, CURRENT_SCHEDULER};
 #[cfg(feature = "native-bridge")]
 pub use bridge::{
-    sengoo_async_cancel_task, sengoo_async_run_main_i64, sengoo_async_scheduler_cancel,
+    sengoo_async_cancel_task, sengoo_async_join_task, sengoo_async_run_main_i64,
+    sengoo_async_runtime_enable_executor, sengoo_async_runtime_executor_enabled,
+    sengoo_async_runtime_shutdown_executor, sengoo_async_scheduler_cancel,
     sengoo_async_scheduler_free, sengoo_async_scheduler_new, sengoo_async_scheduler_run_until_idle,
-    sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_task_status,
+    sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_spawn_task_raw,
+    sengoo_async_task_status,
 };
 #[cfg(feature = "native-bridge")]
 pub use concurrent::{
@@ -100,6 +121,16 @@ pub use select::{
     sengoo_async_select_i16, sengoo_async_select_i32, sengoo_async_select_i64,
     sengoo_async_select_i8, sengoo_async_select_n_winner, sengoo_async_select_winner,
 };
+#[cfg(feature = "native-bridge")]
+pub use task_scope::{
+    sengoo_async_task_scope_cancel_join, sengoo_async_task_scope_join, sengoo_async_task_scope_new,
+    sengoo_async_task_scope_spawn_raw,
+};
+#[cfg(feature = "native-bridge")]
+pub use user_context::{
+    sengoo_async_context_begin, sengoo_async_context_drop, sengoo_async_context_finish_delay,
+    sengoo_async_context_wake, sengoo_async_context_wake_after,
+};
 
 pub type TaskId = u64;
 
@@ -116,6 +147,7 @@ pub enum TaskLifecycleStatus {
     Pending = 1,
     Completed = 2,
     Canceled = 3,
+    Failed = 4,
 }
 
 pub trait CoroutineTask {
@@ -467,6 +499,7 @@ unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
 #[cfg(all(test, feature = "native-bridge"))]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 
     unsafe extern "C" {
@@ -481,7 +514,7 @@ mod tests {
     static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
     static CANCEL_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
     static DROP_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
-    static TEST_GUARD: Mutex<()> = Mutex::new(());
+    use super::ASYNC_RUNTIME_TEST_GUARD as TEST_GUARD;
 
     #[test]
     fn async_handle_helpers_reject_zero_handles() {
@@ -797,6 +830,23 @@ mod tests {
     }
 
     #[test]
+    fn current_scheduler_join_drives_cooperative_task_to_completion() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(3)) as i64;
+
+        CURRENT_SCHEDULER.with(|cell| {
+            let previous = cell.replace(&mut scheduler);
+            assert_eq!(
+                sengoo_async_join_task(task),
+                TaskLifecycleStatus::Completed as i64
+            );
+            assert_eq!(sengoo_async_task_status(task), 2);
+            cell.set(previous);
+        });
+    }
+
+    #[test]
     fn current_scheduler_task_wrappers_return_defaults_without_scheduler() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         CURRENT_SCHEDULER.with(|cell| {
@@ -944,8 +994,58 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
+    }
+
+    #[test]
+    fn reactor_wait_cancel_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_wait_drop_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(1_000);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        unsafe { sengoo_async_reactor_wait__drop(handle) };
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_pending_wait_records_a_bounded_wakeup_hint() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        clear_poll_wakeup_hint();
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 0);
+        let hint =
+            take_poll_wakeup_hint().expect("pending reactor wait must allow scheduler sleep");
+        let now = Instant::now();
+        assert!(hint > now + Duration::from_millis(50));
+        assert!(hint <= now + Duration::from_millis(200));
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
     }
 
     #[cfg(unix)]
@@ -989,7 +1089,6 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
 
         #[cfg(unix)]
@@ -1002,6 +1101,67 @@ mod tests {
             _close(fds[0]);
             _close(fds[1]);
         }
+    }
+
+    #[test]
+    fn reactor_tcp_registration_observes_socket_readiness() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test client");
+            std::thread::sleep(Duration::from_millis(20));
+            stream.write_all(b"x").expect("write readiness byte");
+        });
+
+        let tcp_handle = crate::net::sengoo_tcp_connect(c"127.0.0.1".as_ptr().cast(), port, 1_000);
+        assert_ne!(tcp_handle, 0);
+        let interest = sengoo_async_reactor_tcp_readable_register(tcp_handle);
+        let child = sengoo_async_sleep__start(1_000);
+        let wait =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(wait) }, 0);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while unsafe { sengoo_async_reactor_wait__poll(wait) } == 0 {
+            assert!(Instant::now() < deadline, "TCP reactor readiness timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        unsafe { sengoo_async_reactor_wait__result(wait) };
+        assert_eq!(crate::net::sengoo_tcp_close(tcp_handle), 1);
+        server.join().expect("test server should finish");
+    }
+
+    #[test]
+    fn reactor_owned_fd_close_wakes_without_stale_interest() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let baseline = reactor::interest_count();
+        let mut fds = [-1i32; 2];
+        #[cfg(unix)]
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        #[cfg(windows)]
+        assert_eq!(unsafe { _pipe(fds.as_mut_ptr(), 4096, 0x8000) }, 0);
+
+        let interest = sengoo_async_reactor_fd_readable_register(i64::from(fds[0]));
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(reactor::interest_count(), baseline + 1);
+
+        #[cfg(unix)]
+        unsafe {
+            close(fds[0]);
+            close(fds[1]);
+        }
+        #[cfg(windows)]
+        unsafe {
+            _close(fds[0]);
+            _close(fds[1]);
+        }
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
+        unsafe { sengoo_async_reactor_wait__result(handle) };
+        assert_eq!(reactor::interest_count(), baseline);
     }
 
     #[test]
@@ -1192,7 +1352,10 @@ mod tests {
         });
 
         let start = Instant::now();
-        let finished = scheduler.run_until_idle(2);
+        let mut finished = Vec::new();
+        while !scheduler.is_empty() && start.elapsed() < Duration::from_millis(100) {
+            finished.extend(scheduler.run_until_idle(1));
+        }
         let elapsed = start.elapsed();
 
         assert_eq!(finished.len(), 1);
@@ -1271,6 +1434,164 @@ mod tests {
             sengoo_async_runtime_enable_thread_pool(0),
             -thread_pool::STATUS_INVALID_ARGUMENT
         );
+    }
+
+    #[test]
+    fn concurrent_detached_spawn_drops_completed_future_frame_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let future = sengoo_async_sleep__start(0);
+        let task = sengoo_async_spawn_task_raw(async_spawn_kind_id_for_tests(), future);
+        assert!(task > 0);
+        assert_eq!(
+            sengoo_async_join_task(task),
+            TaskLifecycleStatus::Completed as i64
+        );
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn concurrent_rejected_detached_spawn_releases_future_frame_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(1, 1), 1);
+
+        let accepted = sengoo_async_spawn_task_raw(
+            async_spawn_kind_id_for_tests(),
+            sengoo_async_sleep__start(1_000),
+        );
+        assert!(accepted > 0);
+        let rejected = sengoo_async_spawn_task_raw(
+            async_spawn_kind_id_for_tests(),
+            sengoo_async_sleep__start(1_000),
+        );
+        assert_eq!(rejected, 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(true), 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_normal_join_releases_all_children_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let scope = sengoo_async_task_scope_new();
+        assert!(scope > 0);
+        for _ in 0..2 {
+            assert_eq!(
+                sengoo_async_task_scope_spawn_raw(
+                    scope,
+                    async_spawn_kind_id_for_tests(),
+                    sengoo_async_sleep__start(5),
+                ),
+                1
+            );
+        }
+        assert_eq!(sengoo_async_task_scope_join(scope), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(task_scope::active_scope_count(), 0);
+        assert_eq!(sengoo_async_task_scope_join(scope), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_early_exit_cancels_then_joins_children() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let scope = sengoo_async_task_scope_new();
+        for _ in 0..2 {
+            assert_eq!(
+                sengoo_async_task_scope_spawn_raw(
+                    scope,
+                    async_spawn_kind_id_for_tests(),
+                    sengoo_async_sleep__start(1_000),
+                ),
+                1
+            );
+        }
+        assert_eq!(sengoo_async_task_scope_cancel_join(scope), 3);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(task_scope::active_scope_count(), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_rejected_submission_releases_future_frame() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        assert_eq!(
+            sengoo_async_task_scope_spawn_raw(
+                i64::MAX,
+                async_spawn_kind_id_for_tests(),
+                sengoo_async_sleep__start(1_000),
+            ),
+            0
+        );
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_stress_leaves_no_scope_or_executor_tasks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        assert_eq!(sengoo_async_runtime_enable_executor(4, 8), 1);
+
+        for _ in 0..100 {
+            let scope = sengoo_async_task_scope_new();
+            for _ in 0..4 {
+                assert_eq!(
+                    sengoo_async_task_scope_spawn_raw(
+                        scope,
+                        async_spawn_kind_id_for_tests(),
+                        sengoo_async_sleep__start(0),
+                    ),
+                    1
+                );
+            }
+            assert_eq!(sengoo_async_task_scope_join(scope), 2);
+        }
+        assert_eq!(task_scope::active_scope_count(), 0);
+        assert_eq!(executor::active_task_count(), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
     }
 
     #[test]

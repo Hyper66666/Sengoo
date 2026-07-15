@@ -1887,12 +1887,28 @@ struct AsyncRwLockInner {
     writer: bool,
     closed: bool,
     next_guard_id: i64,
+    next_waiter_id: i64,
     guards: HashMap<i64, RwLockGuardKind>,
+    waiters: HashMap<i64, RwLockWaiter>,
+    waiter_queue: VecDeque<i64>,
     payload: OwnedDescriptorValue,
 }
 
 struct AsyncRwLockState {
     inner: Arc<Mutex<AsyncRwLockInner>>,
+}
+
+#[derive(Clone, Copy)]
+struct RwLockWaiter {
+    kind: RwLockGuardKind,
+}
+
+struct RwLockAcquireState {
+    lock: Arc<Mutex<AsyncRwLockInner>>,
+    kind: RwLockGuardKind,
+    lifecycle: PollLifecycle,
+    outcome: Option<i64>,
+    waiter_id: Option<i64>,
 }
 
 fn allocate_rwlock_guard_id(inner: &mut AsyncRwLockInner) -> i64 {
@@ -1906,6 +1922,79 @@ fn allocate_rwlock_guard_id(inner: &mut AsyncRwLockInner) -> i64 {
         if !inner.guards.contains_key(&candidate) {
             return candidate;
         }
+    }
+}
+
+fn allocate_rwlock_waiter_id(inner: &mut AsyncRwLockInner) -> i64 {
+    loop {
+        let candidate = inner.next_waiter_id.max(1);
+        inner.next_waiter_id = if candidate == i64::MAX {
+            1
+        } else {
+            candidate + 1
+        };
+        if !inner.waiters.contains_key(&candidate) {
+            return candidate;
+        }
+    }
+}
+
+fn rwlock_has_waiting_writer(inner: &AsyncRwLockInner) -> bool {
+    inner
+        .waiters
+        .values()
+        .any(|waiter| waiter.kind == RwLockGuardKind::Write)
+}
+
+fn rwlock_first_waiter_id(inner: &AsyncRwLockInner) -> Option<i64> {
+    inner
+        .waiter_queue
+        .iter()
+        .copied()
+        .find(|waiter_id| inner.waiters.contains_key(waiter_id))
+}
+
+fn rwlock_register_waiter(inner: &mut AsyncRwLockInner, kind: RwLockGuardKind) -> i64 {
+    let waiter_id = allocate_rwlock_waiter_id(inner);
+    inner.waiters.insert(waiter_id, RwLockWaiter { kind });
+    inner.waiter_queue.push_back(waiter_id);
+    waiter_id
+}
+
+fn rwlock_unregister_waiter(inner: &mut AsyncRwLockInner, waiter_id: i64) -> bool {
+    let removed = inner.waiters.remove(&waiter_id).is_some();
+    if removed {
+        if let Some(index) = inner
+            .waiter_queue
+            .iter()
+            .position(|queued_waiter| *queued_waiter == waiter_id)
+        {
+            inner.waiter_queue.remove(index);
+        }
+    }
+    removed
+}
+
+fn rwlock_acquire_guard(inner: &mut AsyncRwLockInner, kind: RwLockGuardKind) -> i64 {
+    let guard_id = allocate_rwlock_guard_id(inner);
+    match kind {
+        RwLockGuardKind::Read => inner.readers += 1,
+        RwLockGuardKind::Write => inner.writer = true,
+    }
+    inner.guards.insert(guard_id, kind);
+    guard_id
+}
+
+fn rwlock_waiter_can_acquire(inner: &AsyncRwLockInner, waiter_id: i64) -> bool {
+    let Some(waiter) = inner.waiters.get(&waiter_id) else {
+        return false;
+    };
+    if rwlock_first_waiter_id(inner) != Some(waiter_id) {
+        return false;
+    }
+    match waiter.kind {
+        RwLockGuardKind::Read => !inner.writer,
+        RwLockGuardKind::Write => !inner.writer && inner.readers == 0,
     }
 }
 
@@ -1929,7 +2018,10 @@ pub unsafe extern "C" fn sengoo_async_rwlock_new(
             writer: false,
             closed: false,
             next_guard_id: 1,
+            next_waiter_id: 1,
             guards: HashMap::new(),
+            waiters: HashMap::new(),
+            waiter_queue: VecDeque::new(),
             payload,
         })),
     };
@@ -2008,13 +2100,10 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_read(lock_handle: i64) -> i64 {
     if inner.closed {
         return -STATUS_INVALID_HANDLE;
     }
-    if inner.writer {
+    if inner.writer || rwlock_has_waiting_writer(&inner) {
         return -STATUS_LOCK_UNAVAILABLE;
     }
-    let guard_id = allocate_rwlock_guard_id(&mut inner);
-    inner.readers += 1;
-    inner.guards.insert(guard_id, RwLockGuardKind::Read);
-    guard_id
+    rwlock_acquire_guard(&mut inner, RwLockGuardKind::Read)
 }
 
 #[no_mangle]
@@ -2038,13 +2127,217 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_write(lock_handle: i64) -> i64 
     if inner.closed {
         return -STATUS_INVALID_HANDLE;
     }
-    if inner.writer || inner.readers != 0 {
+    if inner.writer || inner.readers != 0 || !inner.waiters.is_empty() {
         return -STATUS_LOCK_UNAVAILABLE;
     }
-    let guard_id = allocate_rwlock_guard_id(&mut inner);
-    inner.writer = true;
-    inner.guards.insert(guard_id, RwLockGuardKind::Write);
-    guard_id
+    rwlock_acquire_guard(&mut inner, RwLockGuardKind::Write)
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_rwlock_read__start(lock_handle: i64) -> i64 {
+    let Some(lock_state) = (unsafe { handle_ref::<AsyncRwLockState>(lock_handle) }) else {
+        return 0;
+    };
+    let state = RwLockAcquireState {
+        lock: lock_state.inner.clone(),
+        kind: RwLockGuardKind::Read,
+        lifecycle: PollLifecycle::default(),
+        outcome: None,
+        waiter_id: None,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_rwlock_write__start(lock_handle: i64) -> i64 {
+    let Some(lock_state) = (unsafe { handle_ref::<AsyncRwLockState>(lock_handle) }) else {
+        return 0;
+    };
+    let state = RwLockAcquireState {
+        lock: lock_state.inner.clone(),
+        kind: RwLockGuardKind::Write,
+        lifecycle: PollLifecycle::default(),
+        outcome: None,
+        waiter_id: None,
+    };
+    Box::into_raw(Box::new(state)) as i64
+}
+
+fn rwlock_acquire_poll(state: &mut RwLockAcquireState) -> i64 {
+    let guard = match state.lifecycle.enter() {
+        Ok(guard) => guard,
+        Err(error) => return error,
+    };
+    if state.outcome.is_some() {
+        guard.mark_ready();
+        return 1;
+    }
+
+    let mut inner = state.lock.lock().expect("async rwlock inner poisoned");
+    if inner.closed {
+        if let Some(waiter_id) = state.waiter_id.take() {
+            rwlock_unregister_waiter(&mut inner, waiter_id);
+        }
+        state.outcome = Some(-STATUS_INVALID_HANDLE);
+        guard.mark_ready();
+        return 1;
+    }
+
+    if let Some(waiter_id) = state.waiter_id {
+        if rwlock_waiter_can_acquire(&inner, waiter_id) {
+            rwlock_unregister_waiter(&mut inner, waiter_id);
+            state.waiter_id = None;
+            state.outcome = Some(rwlock_acquire_guard(&mut inner, state.kind));
+            guard.mark_ready();
+            return 1;
+        }
+    } else {
+        let can_acquire = match state.kind {
+            RwLockGuardKind::Read => !inner.writer && !rwlock_has_waiting_writer(&inner),
+            RwLockGuardKind::Write => {
+                !inner.writer && inner.readers == 0 && rwlock_first_waiter_id(&inner).is_none()
+            }
+        };
+        if can_acquire {
+            state.outcome = Some(rwlock_acquire_guard(&mut inner, state.kind));
+            guard.mark_ready();
+            return 1;
+        }
+        state.waiter_id = Some(rwlock_register_waiter(&mut inner, state.kind));
+    }
+
+    record_poll_wakeup_hint(std::time::Instant::now());
+    0
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or a live handle returned by
+/// [`sengoo_async_rwlock_read__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read__poll(handle: i64) -> i64 {
+    let Some(state) = handle_mut::<RwLockAcquireState>(handle) else {
+        return 1;
+    };
+    if state.kind != RwLockGuardKind::Read {
+        return -STATUS_INVALID_HANDLE;
+    }
+    rwlock_acquire_poll(state)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or a live handle returned by
+/// [`sengoo_async_rwlock_write__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write__poll(handle: i64) -> i64 {
+    let Some(state) = handle_mut::<RwLockAcquireState>(handle) else {
+        return 1;
+    };
+    if state.kind != RwLockGuardKind::Write {
+        return -STATUS_INVALID_HANDLE;
+    }
+    rwlock_acquire_poll(state)
+}
+
+fn rwlock_acquire_result(handle: i64, expected: RwLockGuardKind) -> i64 {
+    let Some(mut state) = (unsafe { handle_take_box::<RwLockAcquireState>(handle) }) else {
+        return -STATUS_INVALID_HANDLE;
+    };
+    if state.kind != expected {
+        return -STATUS_INVALID_HANDLE;
+    }
+    if let Some(waiter_id) = state.waiter_id.take() {
+        if let Ok(mut inner) = state.lock.lock() {
+            rwlock_unregister_waiter(&mut inner, waiter_id);
+        }
+    }
+    state.outcome.unwrap_or(-STATUS_INVALID_HANDLE)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read__result(handle: i64) -> i64 {
+    rwlock_acquire_result(handle, RwLockGuardKind::Read)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write__result(handle: i64) -> i64 {
+    rwlock_acquire_result(handle, RwLockGuardKind::Write)
+}
+
+fn rwlock_acquire_cancel(handle: i64, expected: RwLockGuardKind) -> bool {
+    let Some(mut state) = (unsafe { handle_take_box::<RwLockAcquireState>(handle) }) else {
+        return false;
+    };
+    if state.kind != expected {
+        return false;
+    }
+    if let Some(waiter_id) = state.waiter_id.take() {
+        if let Ok(mut inner) = state.lock.lock() {
+            rwlock_unregister_waiter(&mut inner, waiter_id);
+        }
+    }
+    drop(state);
+    true
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read__cancel(handle: i64) -> bool {
+    rwlock_acquire_cancel(handle, RwLockGuardKind::Read)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write__cancel(handle: i64) -> bool {
+    rwlock_acquire_cancel(handle, RwLockGuardKind::Write)
+}
+
+fn rwlock_acquire_drop(handle: i64, expected: RwLockGuardKind) {
+    let Some(mut state) = (unsafe { handle_take_box::<RwLockAcquireState>(handle) }) else {
+        return;
+    };
+    if state.kind != expected {
+        return;
+    }
+    if let Some(waiter_id) = state.waiter_id.take() {
+        if let Ok(mut inner) = state.lock.lock() {
+            rwlock_unregister_waiter(&mut inner, waiter_id);
+        }
+    }
+    drop(state);
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read__drop(handle: i64) {
+    rwlock_acquire_drop(handle, RwLockGuardKind::Read);
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write__drop(handle: i64) {
+    rwlock_acquire_drop(handle, RwLockGuardKind::Write);
 }
 
 fn rwlock_guard_copy_into(
@@ -2279,6 +2572,88 @@ pub unsafe extern "C" fn sengoo_async_rwlock_try_read_i64(lock_handle: i64) -> i
 }
 
 #[no_mangle]
+pub extern "C" fn sengoo_async_rwlock_read_i64__start(lock_handle: i64) -> i64 {
+    sengoo_async_rwlock_read__start(lock_handle)
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_async_rwlock_write_i64__start(lock_handle: i64) -> i64 {
+    sengoo_async_rwlock_write__start(lock_handle)
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or a live handle returned by
+/// [`sengoo_async_rwlock_read_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read_i64__poll(handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_read__poll(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or a live handle returned by
+/// [`sengoo_async_rwlock_write_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write_i64__poll(handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_write__poll(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read_i64__result(handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_read__result(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write_i64__result(handle: i64) -> i64 {
+    unsafe { sengoo_async_rwlock_write__result(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read_i64__cancel(handle: i64) -> bool {
+    unsafe { sengoo_async_rwlock_read__cancel(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write_i64__cancel(handle: i64) -> bool {
+    unsafe { sengoo_async_rwlock_write__cancel(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_read_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_read_i64__drop(handle: i64) {
+    unsafe { sengoo_async_rwlock_read__drop(handle) };
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// `handle` must be zero or an unconsumed handle returned by
+/// [`sengoo_async_rwlock_write_i64__start`].
+pub unsafe extern "C" fn sengoo_async_rwlock_write_i64__drop(handle: i64) {
+    unsafe { sengoo_async_rwlock_write__drop(handle) };
+}
+
+#[no_mangle]
 /// # Safety
 ///
 /// `lock_handle` must be a live handle returned by [`sengoo_async_rwlock_new`].
@@ -2357,6 +2732,343 @@ mod tests {
             sengoo_async_channel_receiver_drop(receiver);
             drop(handle_take_box::<ChannelPair>(pair));
         }
+    }
+
+    fn rwlock_waiter_counts(lock_handle: i64) -> (usize, usize) {
+        let state = unsafe { handle_ref::<AsyncRwLockState>(lock_handle) }
+            .expect("rwlock test handle should stay live");
+        let inner = state
+            .inner
+            .lock()
+            .expect("rwlock test inner mutex should stay live");
+        let mut read_waiters = 0;
+        let mut write_waiters = 0;
+        for waiter in inner.waiters.values() {
+            match waiter.kind {
+                RwLockGuardKind::Read => read_waiters += 1,
+                RwLockGuardKind::Write => write_waiters += 1,
+            }
+        }
+        (read_waiters, write_waiters)
+    }
+
+    #[test]
+    fn async_rwlock_pending_read_waits_behind_writer_and_completes_after_unlock() {
+        let lock = sengoo_async_rwlock_new_i64(17);
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let pending_read = sengoo_async_rwlock_read_i64__start(lock);
+        assert!(pending_read > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(pending_read) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (1, 0));
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__result(0) },
+            -STATUS_INVALID_HANDLE
+        );
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(pending_read) },
+            1
+        );
+
+        let read = unsafe { sengoo_async_rwlock_read_i64__result(pending_read) };
+        assert!(read > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, read) },
+            17
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, read) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_premature_result_unregisters_pending_waiter() {
+        let lock = sengoo_async_rwlock_new_i64(19);
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let pending_read = sengoo_async_rwlock_read_i64__start(lock);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(pending_read) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (1, 0));
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__result(pending_read) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(
+            rwlock_waiter_counts(lock),
+            (0, 0),
+            "consuming a pending acquire result must not strand its waiter"
+        );
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+        let next = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
+        assert!(next > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, next) },
+            0
+        );
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_pending_write_waits_behind_readers_and_completes_after_last_reader_unlocks() {
+        let lock = sengoo_async_rwlock_new_i64(23);
+        let first_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        let second_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        assert!(first_reader > 0);
+        assert!(second_reader > 0);
+
+        let pending_write = sengoo_async_rwlock_write_i64__start(lock);
+        assert!(pending_write > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (0, 1));
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, first_reader) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, second_reader) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            1
+        );
+
+        let writer = unsafe { sengoo_async_rwlock_write_i64__result(pending_write) };
+        assert!(writer > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_get_i64(lock, writer) },
+            23
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_set_i64(lock, writer, 29) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+
+        let read_back = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        assert!(read_back > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, read_back) },
+            29
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, read_back) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_writer_queue_blocks_late_readers_until_writer_runs() {
+        let lock = sengoo_async_rwlock_new_i64(31);
+        let initial_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        assert!(initial_reader > 0);
+
+        let pending_write = sengoo_async_rwlock_write_i64__start(lock);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (0, 1));
+
+        let late_read = sengoo_async_rwlock_read_i64__start(lock);
+        assert_eq!(unsafe { sengoo_async_rwlock_read_i64__poll(late_read) }, 0);
+        assert_eq!(rwlock_waiter_counts(lock), (1, 1));
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, initial_reader) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            1
+        );
+        assert_eq!(unsafe { sengoo_async_rwlock_read_i64__poll(late_read) }, 0);
+
+        let writer = unsafe { sengoo_async_rwlock_write_i64__result(pending_write) };
+        assert!(writer > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+
+        assert_eq!(unsafe { sengoo_async_rwlock_read_i64__poll(late_read) }, 1);
+        let final_reader = unsafe { sengoo_async_rwlock_read_i64__result(late_read) };
+        assert!(final_reader > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, final_reader) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_cancel_and_drop_unregister_waiters_exactly_once() {
+        let lock = sengoo_async_rwlock_new_i64(37);
+        let writer = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
+        assert!(writer > 0);
+
+        let canceled_read = sengoo_async_rwlock_read_i64__start(lock);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(canceled_read) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (1, 0));
+        assert!(unsafe { sengoo_async_rwlock_read_i64__cancel(canceled_read) });
+        assert_eq!(rwlock_waiter_counts(lock), (0, 0));
+        assert!(!unsafe { sengoo_async_rwlock_read_i64__cancel(0) });
+
+        let dropped_write = sengoo_async_rwlock_write_i64__start(lock);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(dropped_write) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (0, 1));
+        unsafe { sengoo_async_rwlock_write_i64__drop(dropped_write) };
+        assert_eq!(rwlock_waiter_counts(lock), (0, 0));
+        unsafe { sengoo_async_rwlock_write_i64__drop(0) };
+        assert_eq!(rwlock_waiter_counts(lock), (0, 0));
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_close_wakes_pending_acquisitions_with_invalid_handle() {
+        let lock = sengoo_async_rwlock_new_i64(41);
+        let writer = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
+        assert!(writer > 0);
+
+        let pending_read = sengoo_async_rwlock_read_i64__start(lock);
+        let pending_write = sengoo_async_rwlock_write_i64__start(lock);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(pending_read) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            0
+        );
+        assert_eq!(rwlock_waiter_counts(lock), (1, 1));
+
+        unsafe { sengoo_async_rwlock_close(lock) };
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(pending_read) },
+            1
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__poll(pending_write) },
+            1
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__result(pending_read) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__result(pending_write) },
+            -STATUS_INVALID_HANDLE
+        );
+
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            0
+        );
+        unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn async_rwlock_i64_wrappers_and_invalid_poll_result_paths_stay_safe() {
+        let lock = sengoo_async_rwlock_new_i64(53);
+
+        let read = sengoo_async_rwlock_read_i64__start(lock);
+        assert_eq!(unsafe { sengoo_async_rwlock_read_i64__poll(read) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__poll(read) },
+            super::super::futures::POLL_ERROR_COMPLETED
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_i64__result(0) },
+            -STATUS_INVALID_HANDLE
+        );
+        let read_guard = unsafe { sengoo_async_rwlock_read_i64__result(read) };
+        assert!(read_guard > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, read_guard) },
+            53
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, read_guard) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, read_guard) },
+            -STATUS_INVALID_HANDLE
+        );
+
+        let write = sengoo_async_rwlock_write_i64__start(lock);
+        assert_eq!(unsafe { sengoo_async_rwlock_write_i64__poll(write) }, 1);
+        let write_guard = unsafe { sengoo_async_rwlock_write_i64__result(write) };
+        assert!(write_guard > 0);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_set_i64(lock, write_guard, 59) },
+            0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_get_i64(lock, write_guard) },
+            59
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, write_guard) },
+            0
+        );
+
+        assert_eq!(unsafe { sengoo_async_rwlock_read_i64__poll(0) }, 1);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_i64__result(0) },
+            -STATUS_INVALID_HANDLE
+        );
+        assert!(!unsafe { sengoo_async_rwlock_write_i64__cancel(0) });
+        unsafe { sengoo_async_rwlock_read_i64__drop(0) };
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
     }
 
     #[test]
@@ -2887,6 +3599,7 @@ mod tests {
     }
 }
 
+#[allow(clippy::items_after_test_module)]
 pub(crate) fn retain_native_bridge_exports_for_linker() {
     macro_rules! export_addr {
         ($symbol:path) => {
@@ -2974,8 +3687,28 @@ pub(crate) fn retain_native_bridge_exports_for_linker() {
         export_addr!(sengoo_async_rwlock_new_i64),
         export_addr!(sengoo_async_rwlock_close),
         export_addr!(sengoo_async_rwlock_drop),
+        export_addr!(sengoo_async_rwlock_read__start),
+        export_addr!(sengoo_async_rwlock_read__poll),
+        export_addr!(sengoo_async_rwlock_read__result),
+        export_addr!(sengoo_async_rwlock_read__cancel),
+        export_addr!(sengoo_async_rwlock_read__drop),
+        export_addr!(sengoo_async_rwlock_write__start),
+        export_addr!(sengoo_async_rwlock_write__poll),
+        export_addr!(sengoo_async_rwlock_write__result),
+        export_addr!(sengoo_async_rwlock_write__cancel),
+        export_addr!(sengoo_async_rwlock_write__drop),
         export_addr!(sengoo_async_rwlock_try_read),
         export_addr!(sengoo_async_rwlock_try_write),
+        export_addr!(sengoo_async_rwlock_read_i64__start),
+        export_addr!(sengoo_async_rwlock_read_i64__poll),
+        export_addr!(sengoo_async_rwlock_read_i64__result),
+        export_addr!(sengoo_async_rwlock_read_i64__cancel),
+        export_addr!(sengoo_async_rwlock_read_i64__drop),
+        export_addr!(sengoo_async_rwlock_write_i64__start),
+        export_addr!(sengoo_async_rwlock_write_i64__poll),
+        export_addr!(sengoo_async_rwlock_write_i64__result),
+        export_addr!(sengoo_async_rwlock_write_i64__cancel),
+        export_addr!(sengoo_async_rwlock_write_i64__drop),
         export_addr!(sengoo_async_rwlock_try_read_i64),
         export_addr!(sengoo_async_rwlock_try_write_i64),
         export_addr!(sengoo_async_rwlock_read_guard_copy_into),

@@ -8,6 +8,28 @@ use crate::mir::async_dispatch_synthesis_helpers::{
 };
 
 impl Codegen {
+    pub(super) fn maybe_declare_user_context_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
+        let uses_context = mir_fns.iter().any(|mir_fn| {
+            mir_fn.instructions.iter().any(|instruction| {
+                matches!(instruction, mir::Instruction::Call { func, .. } if func.starts_with("sengoo_async_context_"))
+            })
+        });
+        if !uses_context {
+            return;
+        }
+        for declaration in [
+            "declare i64 @sengoo_async_context_begin()\n",
+            "declare i1 @sengoo_async_context_wake(i64)\n",
+            "declare i1 @sengoo_async_context_wake_after(i64, i64)\n",
+            "declare i64 @sengoo_async_context_finish_delay(i64)\n",
+            "declare i1 @sengoo_async_context_drop(i64)\n",
+        ] {
+            if !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
+            }
+        }
+    }
+
     /// Declare external runtime functions used by generated LLVM IR.
     pub(super) fn declare_runtime_functions(&mut self) {
         self.declarations
@@ -179,22 +201,38 @@ impl Codegen {
 
     /// Declare the async spawn runtime hook only when the module actually uses it.
     pub(super) fn maybe_declare_spawn_runtime_function(&mut self, mir_fns: &[MirFunction]) {
-        let needs_spawn = mir_fns.iter().any(|mir_fn| {
-            mir_fn.instructions.iter().any(|inst| match inst {
-                mir::Instruction::Call { func, .. } => func == "sengoo_async_spawn_raw",
-                _ => false,
-            })
-        });
-        if !needs_spawn
-            || self
-                .declarations
-                .contains("declare i64 @sengoo_async_spawn_raw(i64, i64)\n")
-        {
-            return;
+        for (runtime_name, declaration) in [
+            (
+                "sengoo_async_spawn_raw",
+                "declare i64 @sengoo_async_spawn_raw(i64, i64)\n",
+            ),
+            (
+                "sengoo_async_spawn_task_raw",
+                "declare i64 @sengoo_async_spawn_task_raw(i64, i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_spawn_raw",
+                "declare i64 @sengoo_async_task_scope_spawn_raw(i64, i64, i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_join",
+                "declare i64 @sengoo_async_task_scope_join(i64)\n",
+            ),
+            (
+                "sengoo_async_task_scope_new",
+                "declare i64 @sengoo_async_task_scope_new()\n",
+            ),
+        ] {
+            let needed = mir_fns.iter().any(|mir_fn| {
+                mir_fn.instructions.iter().any(|inst| match inst {
+                    mir::Instruction::Call { func, .. } => func == runtime_name,
+                    _ => false,
+                })
+            });
+            if needed && !self.declarations.contains(declaration) {
+                self.declarations.push_str(declaration);
+            }
         }
-
-        self.declarations
-            .push_str("declare i64 @sengoo_async_spawn_raw(i64, i64)\n");
     }
 
     pub(super) fn maybe_declare_eprint_runtime_functions(&mut self, mir_fns: &[MirFunction]) {
@@ -508,6 +546,8 @@ impl Codegen {
             "sengoo_async_channel_send__start",
             "sengoo_async_channel_recv__start",
             "sengoo_async_channel_value_move_into",
+            "sengoo_async_rwlock_read__start",
+            "sengoo_async_rwlock_write__start",
             "sengoo_async_channel_send_i64",
             "sengoo_async_channel_recv_i64",
             "sengoo_async_mutex_lock_i64",
@@ -533,7 +573,10 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_send")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_channel_recv")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_mutex_lock_i64")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_read")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_write")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_file_wait_readable")
         {
             return;
         }
@@ -699,6 +742,49 @@ impl Codegen {
                 ),
             ],
         );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_rwlock_read",
+            &[
+                ("poll", "declare i64 @sengoo_async_rwlock_read__poll(i64)\n"),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_rwlock_read__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_rwlock_read__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_rwlock_read__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_rwlock_write",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_rwlock_write__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    "declare i64 @sengoo_async_rwlock_write__result(i64)\n",
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_rwlock_write__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_rwlock_write__drop(i64)\n",
+                ),
+            ],
+        );
         Self::maybe_declare_optional_async_runtime_lifecycle(
             &mut self.declarations,
             mir_fns,
@@ -726,6 +812,36 @@ impl Codegen {
                 (
                     "drop",
                     "declare void @sengoo_http_server_next_request_async__drop(i64)\n",
+                ),
+            ],
+        );
+        Self::maybe_declare_optional_async_runtime_lifecycle(
+            &mut self.declarations,
+            mir_fns,
+            "sengoo_async_file_wait_readable",
+            &[
+                (
+                    "poll",
+                    "declare i64 @sengoo_async_file_wait_readable__poll(i64)\n",
+                ),
+                (
+                    "result",
+                    Self::sret_or_direct_decl(
+                        Self::async_result_uses_sret(
+                            targets_windows_msvc,
+                            "sengoo_async_file_wait_readable__result",
+                        ),
+                        "sengoo_async_file_wait_readable__result",
+                        "%FileReadinessOutcome",
+                    ),
+                ),
+                (
+                    "cancel",
+                    "declare i1 @sengoo_async_file_wait_readable__cancel(i64)\n",
+                ),
+                (
+                    "drop",
+                    "declare void @sengoo_async_file_wait_readable__drop(i64)\n",
                 ),
             ],
         );
@@ -766,6 +882,9 @@ impl Codegen {
     }
 
     pub(super) fn async_result_uses_sret(targets_windows_msvc: bool, func: &str) -> bool {
+        if func == "sengoo_async_file_wait_readable__result" {
+            return true;
+        }
         if targets_windows_msvc {
             return matches!(
                 func,
@@ -806,6 +925,9 @@ impl Codegen {
                 "sengoo_http_server_next_request_async__result" => {
                     "declare %HttpServerNextRequestOutcome @sengoo_http_server_next_request_async__result(i64)\n"
                 }
+                "sengoo_async_file_wait_readable__result" => {
+                    "declare %FileReadinessOutcome @sengoo_async_file_wait_readable__result(i64)\n"
+                }
                 _ => unreachable!("unsupported async result declaration"),
             };
         }
@@ -828,6 +950,12 @@ impl Codegen {
                 "%HttpServerNextRequestOutcome",
             ) => {
                 "declare void @sengoo_http_server_next_request_async__result(%HttpServerNextRequestOutcome* sret(%HttpServerNextRequestOutcome) align 8, i64)\n"
+            }
+            (
+                "sengoo_async_file_wait_readable__result",
+                "%FileReadinessOutcome",
+            ) => {
+                "declare void @sengoo_async_file_wait_readable__result(%FileReadinessOutcome* sret(%FileReadinessOutcome) align 8, i64)\n"
             }
             _ => unreachable!("unsupported async result declaration"),
         }
@@ -1267,6 +1395,14 @@ mod tests {
         assert!(Codegen::async_result_uses_sret(
             true,
             "sengoo_http_server_next_request_async__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            false,
+            "sengoo_async_file_wait_readable__result"
+        ));
+        assert!(Codegen::async_result_uses_sret(
+            true,
+            "sengoo_async_file_wait_readable__result"
         ));
     }
 

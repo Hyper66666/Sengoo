@@ -65,6 +65,10 @@ jobs:
         shell: pwsh
         run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
 
+      - name: Verify timer socket and owned-handle reactor paths
+        shell: pwsh
+        run: cargo test -p sengoo-runtime --lib --features native-bridge reactor_ -- --nocapture --test-threads=1
+
       - name: Run release smoke matrix
         shell: pwsh
         run: |

@@ -272,8 +272,16 @@ already refer to the destination file. Metadata helpers expose
 `PATH_KIND_FILE()`, `PATH_KIND_DIR()`, and `PATH_KIND_SYMLINK()` are stable
 path-kind values; unsupported fields return `STATUS_UNSUPPORTED()`. Recursive
 directory transfer, cross-filesystem move fallback, metadata-preservation
-guarantees, atomic-copy claims, progress callbacks, and async file I/O remain
-deferred.
+guarantees, atomic-copy claims, and progress callbacks remain deferred.
+
+`async_file_open(path)` returns an owned read-only `AsyncFile`.
+`await file.wait_readable(timeout_ms)` uses the shared reactor and returns a
+`FileReadinessOutcome`; timeout is `STATUS_TIMEOUT()`. A pending wait owns a
+duplicated descriptor/handle, so closing the source file cannot retarget the
+registration. `file.read_into(&mut buffer)` performs one capacity-bounded read,
+and explicit `close()` or scope-exit `Drop` releases the runtime file entry.
+This is readiness plus bounded read support, not a claim of background disk
+I/O, async writes, or support for file kinds outside the release-host matrix.
 
 ## Standard I/O Helpers
 

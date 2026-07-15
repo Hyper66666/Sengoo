@@ -220,6 +220,7 @@ struct CompilerErrorLocationJson {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CompilerErrorJson {
+    schema_version: u32,
     ok: bool,
     kind: &'static str,
     stage: &'static str,

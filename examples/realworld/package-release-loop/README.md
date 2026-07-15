@@ -21,4 +21,5 @@ sgpm test --locked
 sgpm fmt --check --locked
 sgpm doc --locked
 sgpm build --locked
+sgpm run --locked
 ```

@@ -1,6 +1,202 @@
 use super::*;
 use crate::typeck::r#trait::{type_key, FunctionTy, ImplInfo, MethodSig, TraitInfo};
 
+#[derive(Default)]
+struct FuturePollBodyFacts {
+    has_evident_pending: bool,
+    missing_wakeup: bool,
+    context_param: Option<String>,
+}
+
+fn is_context_param_receiver(expr: &Expr, context_param: Option<&str>) -> bool {
+    match &expr.kind {
+        ExprKind::Ident(ident) => context_param == Some(ident.name.as_str()),
+        ExprKind::Path(path) if path.segments.len() == 1 => {
+            context_param == path.segments.first().map(|segment| segment.name.as_str())
+        }
+        _ => false,
+    }
+}
+
+fn scan_future_poll_block(
+    block: &Block,
+    facts: &mut FuturePollBodyFacts,
+    mut wake_registered: bool,
+) -> bool {
+    for statement in &block.stmts {
+        wake_registered = match &statement.kind {
+            StmtKind::Let { value, .. } => {
+                if let Some(value) = value {
+                    scan_future_poll_expr(value, facts, wake_registered)
+                } else {
+                    wake_registered
+                }
+            }
+            StmtKind::Const { value, .. } | StmtKind::Expr(value) => {
+                scan_future_poll_expr(value, facts, wake_registered)
+            }
+            StmtKind::Item(_) => wake_registered,
+        };
+    }
+    wake_registered
+}
+
+fn scan_future_poll_expr(
+    expr: &Expr,
+    facts: &mut FuturePollBodyFacts,
+    wake_registered: bool,
+) -> bool {
+    match &expr.kind {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let registers_wakeup = matches!(method.name.as_str(), "wake" | "wake_after")
+                && is_context_param_receiver(receiver, facts.context_param.as_deref());
+            let mut wake_registered = scan_future_poll_expr(receiver, facts, wake_registered);
+            for arg in args {
+                wake_registered = scan_future_poll_expr(arg, facts, wake_registered);
+            }
+            wake_registered || registers_wakeup
+        }
+        ExprKind::Call { func, args } => {
+            let mut wake_registered = scan_future_poll_expr(func, facts, wake_registered);
+            for arg in args {
+                wake_registered = scan_future_poll_expr(arg, facts, wake_registered);
+            }
+            wake_registered
+        }
+        ExprKind::Struct { path, fields, base } => {
+            let mut wake_registered = wake_registered;
+            for field in fields {
+                wake_registered = scan_future_poll_expr(&field.value, facts, wake_registered);
+            }
+            if let Some(base) = base {
+                wake_registered = scan_future_poll_expr(base, facts, wake_registered);
+            }
+            let is_poll = path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.name == "Poll");
+            if is_poll && fields.iter().any(|field| {
+                matches!(&field.name, crate::ast::FieldName::Ident(name) if name.name == "is_ready")
+                    && matches!(field.value.kind, ExprKind::Literal(Literal::Bool(false)))
+            }) {
+                facts.has_evident_pending = true;
+                if !wake_registered {
+                    facts.missing_wakeup = true;
+                }
+            }
+            wake_registered
+        }
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Index {
+            base: left,
+            index: right,
+        }
+        | ExprKind::Assign {
+            target: left,
+            value: right,
+        }
+        | ExprKind::AssignOp {
+            target: left,
+            value: right,
+            ..
+        } => {
+            let wake_registered = scan_future_poll_expr(left, facts, wake_registered);
+            scan_future_poll_expr(right, facts, wake_registered)
+        }
+        ExprKind::Unary { operand, .. }
+        | ExprKind::Await(operand)
+        | ExprKind::Try(operand)
+        | ExprKind::Cast { expr: operand, .. }
+        | ExprKind::Is { expr: operand, .. }
+        | ExprKind::Paren(operand)
+        | ExprKind::Field { base: operand, .. } => {
+            scan_future_poll_expr(operand, facts, wake_registered)
+        }
+        ExprKind::Block(block) | ExprKind::TryBlock(block) => {
+            scan_future_poll_block(block, facts, wake_registered)
+        }
+        ExprKind::AsyncBlock(_) | ExprKind::ParallelBlock(_) => wake_registered,
+        ExprKind::Loop(block) => {
+            scan_future_poll_block(block, facts, wake_registered);
+            wake_registered
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            let wake_registered = scan_future_poll_expr(cond, facts, wake_registered);
+            let then_wake = scan_future_poll_block(then_branch, facts, wake_registered);
+            let else_wake = else_branch.as_ref().map_or(wake_registered, |else_branch| {
+                scan_future_poll_expr(else_branch, facts, wake_registered)
+            });
+            then_wake && else_wake
+        }
+        ExprKind::While { cond, body } => {
+            let wake_registered = scan_future_poll_expr(cond, facts, wake_registered);
+            scan_future_poll_block(body, facts, wake_registered);
+            wake_registered
+        }
+        ExprKind::For { iter, body, .. } => {
+            let wake_registered = scan_future_poll_expr(iter, facts, wake_registered);
+            scan_future_poll_block(body, facts, wake_registered);
+            wake_registered
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            let wake_registered = scan_future_poll_expr(scrutinee, facts, wake_registered);
+            let mut all_arms_wake = !arms.is_empty();
+            for arm in arms {
+                let mut arm_wake = wake_registered;
+                if let Some(guard) = &arm.guard {
+                    arm_wake = scan_future_poll_expr(guard, facts, arm_wake);
+                }
+                arm_wake = scan_future_poll_expr(&arm.body, facts, arm_wake);
+                all_arms_wake &= arm_wake;
+            }
+            wake_registered || all_arms_wake
+        }
+        ExprKind::Return(value)
+        | ExprKind::Break(value)
+        | ExprKind::Yield(value)
+        | ExprKind::Range {
+            start: value,
+            end: None,
+            ..
+        } => {
+            if let Some(value) = value {
+                scan_future_poll_expr(value, facts, wake_registered)
+            } else {
+                wake_registered
+            }
+        }
+        ExprKind::Range { start, end, .. } => {
+            let mut wake_registered = wake_registered;
+            if let Some(start) = start {
+                wake_registered = scan_future_poll_expr(start, facts, wake_registered);
+            }
+            if let Some(end) = end {
+                wake_registered = scan_future_poll_expr(end, facts, wake_registered);
+            }
+            wake_registered
+        }
+        ExprKind::Lambda { .. } => wake_registered,
+        ExprKind::Array(elements) | ExprKind::Tuple(elements) => {
+            let mut wake_registered = wake_registered;
+            for element in elements {
+                wake_registered = scan_future_poll_expr(element, facts, wake_registered);
+            }
+            wake_registered
+        }
+        ExprKind::Literal(_) | ExprKind::Ident(_) | ExprKind::Path(_) | ExprKind::Continue => {
+            wake_registered
+        }
+    }
+}
+
 impl TypeChecker {
     fn validate_future_poll_contract(method: &Function) -> Result<()> {
         if method.name.name != "poll" {
@@ -13,6 +209,26 @@ impl TypeChecker {
             )));
         }
 
+        Ok(())
+    }
+
+    fn validate_future_poll_wakeup_contract(method: &Function) -> Result<()> {
+        if method.name.name != "poll" {
+            return Ok(());
+        }
+        let mut facts = FuturePollBodyFacts {
+            context_param: method.params.last().map(|param| param.name.name.clone()),
+            ..FuturePollBodyFacts::default()
+        };
+        scan_future_poll_block(&method.body, &mut facts, false);
+        if facts.has_evident_pending && facts.missing_wakeup {
+            return Err(CompileError::from(TypeckError::diagnostic(
+                "async::user_future_missing_wakeup",
+                "Future<T>::poll returns Pending without calling AsyncContext.wake() or wake_after()",
+                method.name.span.lo,
+                method.name.span.hi,
+            )));
+        }
         Ok(())
     }
 
@@ -668,6 +884,7 @@ impl TypeChecker {
         for item in &impl_decl.items {
             if is_future_impl {
                 Self::validate_future_poll_contract(item)?;
+                Self::validate_future_poll_wakeup_contract(item)?;
             }
             if is_drop_impl {
                 Self::validate_drop_contract(item)?;
