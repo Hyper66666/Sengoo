@@ -43,9 +43,9 @@
 - [x] 4.4 Make installed `sgc` select the manifest-matched native runtime for check/build/run/test and emit stable diagnostics for missing, tampered, wrong-target, wrong-ABI, or incomplete installations. 【Sengoo 修改】
 - [x] 4.5 Retain Cargo runtime construction only behind an explicit Sengoo-source development mode whose diagnostics and metadata make it ineligible for distribution/Senline pin evidence. 【Sengoo 修改】
 - [x] 4.6 Add fresh-directory installed smokes with checkout variables cleared, a deliberately failing fake `cargo` first on PATH, and auditing that rejects checkout/Cargo/user-profile absolute paths in resolution or link metadata. 【Sengoo 修改】
-- [ ] 4.7 Build release-shaped Windows x64 and Linux x64 archives containing the complete native runtime and verify install scripts/checksums against both.
-- [ ] 4.8 Build each target twice independently and compare normalized manifests, requiring identical payload hashes, runtime ABI, link arguments, and dynamic dependency identities while documenting the only allowed provenance differences.
-- [ ] 4.9 Run the existing distribution smoke matrix and block Sengoo publication and Senline pinning on any native runtime/package failure.
+- [x] 4.7 Build release-shaped Windows x64 and Linux x64 archives containing the complete native runtime and verify install scripts/checksums against both. 【Sengoo 修改】 Evidence: GitHub Actions run 29419695542 on `ba0d03ae3` (toolchain-distribution package smoke windows-latest + ubuntu-latest success: package, install, checksums, installed stdlib/run).
+- [x] 4.8 Build each target twice independently and compare normalized manifests, requiring identical payload hashes, runtime ABI, link arguments, and dynamic dependency identities while documenting the only allowed provenance differences. 【Sengoo 修改】 Evidence: same run dual A/B package + `compare-distribution-manifests.ps1` green on Windows and Linux; allowed excluded diffs only (e.g. `generated_at_utc`); local dual target-dir builds produced identical `sgc.exe` and `sengoo_runtime.lib` SHA-256 under package-toolchain deterministic RUSTFLAGS.
+- [x] 4.9 Run the existing distribution smoke matrix and block Sengoo publication and Senline pinning on any native runtime/package failure. 【Sengoo 修改】 Evidence: run 29419695542 all package-smoke jobs green (windows, ubuntu, macos-15, macos-15-intel); publish job remains tag-gated and skipped on non-tag dispatch.
 
 ## 4A. Project-Driven Library Incubation
 

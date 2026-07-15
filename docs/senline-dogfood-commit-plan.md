@@ -110,3 +110,12 @@ archive for 4.7 path, and leave 4.8/5.9/6.5 unchecked until Ubuntu evidence.
 3. Do **not** check 4.8 until both-host dual independent builds compare clean.
 4. Run installed HTTP package loop and Linux determinism before 5.9/6.5.
 5. Investigate single-worker 100k memory under 8.3 with checked-in sampler.
+
+## Session closeout 2026-07-15 (tasks 4.7–4.9)
+
+- HEAD: `ba0d03ae3`
+- CI: https://github.com/Hyper66666/Sengoo/actions/runs/29419695542 **success**
+  (windows / ubuntu / macos-15 / macos-15-intel package smoke)
+- OpenSpec tasks **4.7, 4.8, 4.9** checked with that evidence.
+- Still open for later: 2.10, 4A.4, 5.1/5.4/5.9/5.12–5.13, 6.5–6.7, 7.x, 8.x, 9.x.
+- Resource note for 8.3 unchanged: single-worker 100k case 44086.
