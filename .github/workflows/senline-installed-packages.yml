@@ -1,0 +1,200 @@
+name: senline-installed-packages
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/senline-installed-packages.yml"
+      - "scripts/package-toolchain.ps1"
+      - "scripts/package-senline-worker.ps1"
+      - "scripts/package-senline-http.ps1"
+      - "scripts/compare-senline-package-manifests.ps1"
+      - "scripts/install.ps1"
+      - "scripts/install.sh"
+      - "examples/realworld/senline-domain-worker/**"
+      - "examples/realworld/senline-http-dogfood/**"
+
+jobs:
+  installed-worker-http:
+    name: installed worker/HTTP (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+    env:
+      LLVM_VERSION: "19"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Install pinned LLVM toolchain (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-${LLVM_VERSION} lld-${LLVM_VERSION}
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100
+
+      - name: Require clang
+        shell: pwsh
+        run: |
+          $clang = Get-Command clang -ErrorAction Stop
+          & $clang.Source --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "clang probe failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Build release tools
+        shell: pwsh
+        run: cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
+
+      - name: Package installed toolchain
+        shell: pwsh
+        env:
+          SENGOO_DIST_TARGET: ${{ matrix.target }}
+        run: |
+          $version = "0.1.0-ci"
+          $cargoTarget = Join-Path $env:RUNNER_TEMP "sengoo-cargo-package-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath "target/dist" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $cargoTarget -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+          ./scripts/package-toolchain.ps1 `
+            -Version $version `
+            -OutputDir "target/dist" `
+            -CargoTargetDir $cargoTarget `
+            -SmokeEvidence "senline-installed-packages ${{ matrix.os }} ${{ github.sha }}"
+
+      - name: Install toolchain outside product workspace
+        shell: pwsh
+        run: |
+          $version = "0.1.0-ci"
+          $archiveDir = "target/dist"
+          $latest = Get-Content (Join-Path $archiveDir "latest-archive.txt") -ErrorAction SilentlyContinue
+          if (-not $latest) {
+            $zip = Get-ChildItem $archiveDir -Filter "*.zip" | Select-Object -First 1
+            if (-not $zip) { throw "missing packaged archive under $archiveDir" }
+            $latest = $zip.FullName
+          } else {
+            if (-not [IO.Path]::IsPathRooted($latest)) {
+              $latest = Join-Path $archiveDir $latest
+            }
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP "sengoo-install-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            ./scripts/install.ps1 -Archive $latest -InstallDir $installDir
+          } else {
+            sh scripts/install.sh "$latest" "$installDir"
+          }
+          Write-Host "install_dir=$installDir"
+
+      - name: Fake cargo + installed worker/HTTP dual package loop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "0.1.0-ci"
+          $installDir = Join-Path $env:RUNNER_TEMP "sengoo-install-${{ matrix.artifact }}"
+          $bin = Join-Path $installDir "bin"
+          $suffix = ""
+          if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+            $suffix = ".exe"
+          }
+          $sgc = Join-Path $bin "sgc$suffix"
+          $sgpm = Join-Path $bin "sgpm$suffix"
+          if (-not (Test-Path -LiteralPath $sgc)) { throw "missing installed sgc: $sgc" }
+          if (-not (Test-Path -LiteralPath $sgpm)) { throw "missing installed sgpm: $sgpm" }
+
+          # Fail if any real cargo would be required by the package loop.
+          $fakeCargoDir = Join-Path $env:RUNNER_TEMP "fake-cargo-fail"
+          Remove-Item -LiteralPath $fakeCargoDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $fakeCargoDir | Out-Null
+          $fakeCargo = Join-Path $fakeCargoDir "cargo$suffix"
+          if ($suffix -eq ".exe") {
+            @'
+          @echo off
+          echo fake-cargo: cargo must not be invoked by installed senline package loops 1>&2
+          exit /b 97
+          '@ | Set-Content -LiteralPath $fakeCargo -Encoding ASCII
+          } else {
+            @'
+          #!/bin/sh
+          echo "fake-cargo: cargo must not be invoked by installed senline package loops" >&2
+          exit 97
+          '@ | Set-Content -LiteralPath $fakeCargo -Encoding UTF8
+            & chmod +x $fakeCargo
+          }
+          $env:PATH = "$fakeCargoDir;$bin;" + $env:PATH
+          Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
+          Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
+
+          Write-Host "sgc: $(& $sgc --version)"
+          Write-Host "sgpm: $(& $sgpm --version)"
+
+          Push-Location examples/realworld/senline-domain-worker
+          try {
+            & $sgpm check --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm check --locked failed" }
+            & $sgpm test --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm test --locked failed" }
+            & $sgpm build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm build --locked --release failed" }
+          } finally {
+            Pop-Location
+          }
+
+          Push-Location examples/realworld/senline-http-dogfood
+          try {
+            & $sgpm check --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm check --locked failed" }
+            & $sgpm test --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm test --locked failed" }
+            & $sgpm build --locked --release
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm build --locked --release failed" }
+          } finally {
+            Pop-Location
+          }
+
+          $pkgRoot = Join-Path $env:RUNNER_TEMP "senline-pkg-${{ matrix.artifact }}"
+          Remove-Item -LiteralPath $pkgRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $pkgRoot | Out-Null
+
+          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-a")
+          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-b")
+          ./scripts/compare-senline-package-manifests.ps1 `
+            -LeftManifest (Join-Path $pkgRoot "worker-a/worker-manifest.json") `
+            -RightManifest (Join-Path $pkgRoot "worker-b/worker-manifest.json") `
+            -OutputDir (Join-Path $pkgRoot "worker-compare") `
+            -AllowExecutableHashDrift
+
+          ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-a")
+          ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-b")
+          ./scripts/compare-senline-package-manifests.ps1 `
+            -LeftManifest (Join-Path $pkgRoot "http-a/http-manifest.json") `
+            -RightManifest (Join-Path $pkgRoot "http-b/http-manifest.json") `
+            -OutputDir (Join-Path $pkgRoot "http-compare") `
+            -AllowExecutableHashDrift
+
+          Write-Host "senline installed worker/HTTP dual package loop green on ${{ matrix.os }}"
+
+      - name: Upload package compare evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: senline-installed-packages-${{ matrix.artifact }}
+          path: |
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/comparison.json
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/*-manifest.json
+          if-no-files-found: warn

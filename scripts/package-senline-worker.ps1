@@ -44,7 +44,7 @@ try {
 
 $isWindows = ($env:OS -eq "Windows_NT") -or $IsWindows
 $exeName = if ($isWindows) { "senline_domain_worker.exe" } else { "senline_domain_worker" }
-$built = Join-Path $WorkerRoot "target\release\$exeName"
+$built = Join-Path $WorkerRoot (Join-Path "target" (Join-Path "release" $exeName))
 if (-not (Test-Path -LiteralPath $built)) {
     throw "missing built worker executable: $built"
 }

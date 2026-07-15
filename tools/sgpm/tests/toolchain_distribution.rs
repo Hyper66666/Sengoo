@@ -416,16 +416,24 @@ fn distribution_packages_and_verifies_the_target_native_runtime_payload() {
 
 #[test]
 fn distribution_workflow_compares_independent_windows_and_linux_builds() {
-    let workflow =
-        fs::read_to_string(workspace_root().join(".github/workflows/toolchain-distribution.yml"))
-            .expect("read toolchain-distribution.yml");
+    let root = workspace_root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/toolchain-distribution.yml"))
+        .expect("read toolchain-distribution.yml");
+    let package_script = fs::read_to_string(root.join("scripts/package-toolchain.ps1"))
+        .expect("read package-toolchain.ps1");
 
     assert!(
         workflow.contains("reproducible: true")
             && workflow.contains("sengoo-cargo-package-a-")
-            && workflow.contains("sengoo-cargo-package-b-")
-            && workflow.contains("--remap-path-prefix="),
-        "Windows and Linux packaging must use independent, path-remapped Cargo target directories"
+            && workflow.contains("sengoo-cargo-package-b-"),
+        "Windows and Linux packaging must use independent Cargo target directories for A/B builds"
+    );
+    // Path remapping lives in package-toolchain.ps1 (via CARGO_ENCODED_RUSTFLAGS)
+    // so workflow YAML no longer inlines --remap-path-prefix= flags.
+    assert!(
+        package_script.contains("--remap-path-prefix=")
+            && package_script.contains("CARGO_ENCODED_RUSTFLAGS"),
+        "package-toolchain must remap source and target paths for reproducible artifacts"
     );
     assert!(
         workflow.contains("compare-distribution-manifests.ps1")
