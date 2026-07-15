@@ -68,13 +68,20 @@ memory ceilings, output limits, and completed Windows plus Unix CI execution
 coverage remain follow-up work and must not be claimed complete from
 documentation alone.
 
-## Reopened follow-up gate
+## Archive gate (experimental scalar)
 
-The following items are intentionally reopened outside the experimental scalar
-contract recorded by this change:
+This change archives when:
 
-- implement and test a real WASI host import subset;
-- lower ownership/Drop and aggregate or heap-backed values instead of rejecting
-  them;
-- enforce runtime memory and output limits as code, not documentation; and
-- run `.wasm` artifacts in CI on both Windows and Unix hosts.
+- experimental scalar emitter, validation, `main: () -> i64`, signedness, and
+  fail-closed unsupported surfaces are implemented and tested;
+- docs and SUPPORT_MATRIX state Experimental / deferred (not production
+  Supported for portable targets); and
+- deferred WASI / ownership-Drop / multi-OS CI items are recorded as successor
+  work rather than silently claimed complete.
+
+## Successor work (not this archive)
+
+- WASI host import subset with runtime tests;
+- ownership/Drop and aggregate/heap lowering;
+- runtime memory/output ceilings beyond module size + wall-clock timeout;
+- Windows + Unix CI execution of `.wasm` artifacts.

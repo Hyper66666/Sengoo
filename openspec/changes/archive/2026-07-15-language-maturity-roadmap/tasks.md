@@ -175,23 +175,22 @@ Native mainstream product readiness is already evidenced by Phases 0–4.
     `2026-07-15-wasm-and-bytecode-backends`.
 - [x] 6.2 Split WASM and bytecode into independently archivable
   `wasm-backend-v1` and `bytecode-vm-v1` owner changes before implementation.
-- [ ] 6.3 Complete and archive `wasm-backend-v1` for the **agreed experimental
+- [x] 6.3 Complete and archive `wasm-backend-v1` for the **agreed experimental
   scalar** scope (not full WASI/Drop production).
-  - Active owner: `wasm-backend-v1`. Required before umbrella archive:
-    `main: () -> i64` ABI enforcement (MIR + artifact validator), signedness,
-    ABI version checks, fail-closed memory ops, docs/SUPPORT_MATRIX honesty.
-  - Deferred outside this task: WASI, ownership/Drop, Windows+Unix WASM CI matrix.
+  - Archived as `2026-07-15-wasm-backend-v1` (experimental scalar). Includes
+    `main: () -> i64`, signedness, ABI checks, fail-closed memory ops, honest
+    matrix/docs. Successor work: WASI, ownership/Drop, multi-OS WASM CI.
 - [x] 6.4 Complete and archive `bytecode-vm-v1` … or cancel with evidence.
   - Archived as `2026-07-15-bytecode-vm-v1` (NO-GO).
 
 ## 7. Umbrella closure (post-v1 honesty only)
 
-- [ ] 7.1 Required **post-v1** children pass strict validation and archive in
-  dependency order (`wasm-backend-v1` experimental scalar archive still open;
-  bytecode already cancelled/archived).
-- [ ] 7.2 SUPPORT_MATRIX has no false production `Supported` claim for portable
-  targets (row must remain Experimental/deferred until 6.3 archives).
+- [x] 7.1 Required **post-v1** children pass strict validation and archive in
+  dependency order (`wasm-backend-v1` experimental scalar + bytecode NO-GO +
+  coordinator entry contract).
+- [x] 7.2 SUPPORT_MATRIX has no false production `Supported` claim for portable
+  targets (Experimental / deferred row with evidence links).
 - [x] 7.3 Native clean-clone install/build/resolve/test/debug/flagship on
   supported hosts (Phase 2–4 evidence; **not** blocked by WASM).
-- [ ] 7.4 `openspec validate language-maturity-roadmap --strict` and
-  `openspec validate --all --strict` after 6.3 re-closes.
+- [x] 7.4 `openspec validate language-maturity-roadmap --strict` and
+  `openspec validate --all --strict` after 6.3 closes.
