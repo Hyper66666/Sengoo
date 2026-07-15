@@ -58,13 +58,17 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 | `docs/senline-dogfood-support.md` | Authority / promotion boundary |
 | `docs/senline-dogfood-evidence.v1.json` | Durable evidence records |
 
+## Latest dual-host CI
+
+- **ALL_GREEN** core-conformance run
+  [`29430796769`](https://github.com/Hyper66666/Sengoo/actions/runs/29430796769)
+  on tip including installed worker/HTTP matrix (Windows + Ubuntu).
+
 ## Known open Sengoo-side items
 
 1. **Task 8.3** — single-worker 100k watchdog near case 44086 / memory growth; 1M soak not claimed (methodology published).
 2. **Task 8.4** — p50/p95/p99 request instrumentation still open (bulk means only).
-3. **Task 8.7** — Linux worker/HTTP dual-package compare still open (Windows local dual package green).
-4. **Task 5.12 / 6.5 / 9.2** — Linux installed worker/HTTP product loops and full installed-distribution smokes.
-5. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
+3. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
 
 ## Unsupported authority transfers
 

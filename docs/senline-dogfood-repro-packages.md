@@ -38,12 +38,14 @@ compare     -> target/senline-pkg/http-compare/comparison.json
 result      -> ok=true identical_payload_count=4 executable_drift=0
 ```
 
-## Remaining for full 8.7
+## Dual-host CI (closes task 8.7 worker/HTTP gap)
 
-1. Repeat worker + HTTP dual package compare on Linux x64 with the installed
-   archive from distribution packaging (not only Windows).
-2. Prefer two independent clean target directories / cold builds when claiming
-   PE/ELF bit-identity; Windows PE may still require `-AllowExecutableHashDrift`
-   if linker non-determinism reappears.
-3. Attach SBOM/provenance fields already produced by toolchain manifests to the
-   consumer pin package set.
+GitHub Actions core-conformance run
+[`29430796769`](https://github.com/Hyper66666/Sengoo/actions/runs/29430796769):
+
+- `installed worker/HTTP (windows-latest)` green
+- `installed worker/HTTP (ubuntu-latest)` green
+- Artifacts: `senline-installed-packages-windows-x86_64`,
+  `senline-installed-packages-linux-x86_64` (comparison + manifests)
+
+Toolchain dual-build remains covered by run `29419695542`.
