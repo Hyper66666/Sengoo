@@ -161,42 +161,37 @@
   - The reviewed CLI, flagship, light-service, publish/resolve, and Python
     `ctypes` set passes in run `29333253316`.
 
-## 6. Post-v1 alternative targets
+## 6. Post-v1 alternative targets (does **not** reopen Phases 0–4)
+
+Per design/spec: alternative backends **must not block** the earlier
+mainstream-default **native** release. Phases 0–5 above remain closed.
+
+This section only gates **full umbrella archive** of `language-maturity-roadmap`.
+Native mainstream product readiness is already evidenced by Phases 0–4.
 
 - [x] 6.1 Pass the stable-MIR/runtime-ABI entry review for
   `wasm-and-bytecode-backends`.
-  - Entry-contract tasks 1.2-1.6 are closed: target-aware `MirBundle`, portable
-    runtime ABI JSON, wasm32 frontend routing, ABI version rejection, stable
-    `unsupported-target-capability` diagnostics, and regression tests pass.
+  - Entry-contract tasks 1.2-1.6 closed; coordinator archived as
+    `2026-07-15-wasm-and-bytecode-backends`.
 - [x] 6.2 Split WASM and bytecode into independently archivable
   `wasm-backend-v1` and `bytecode-vm-v1` owner changes before implementation.
-- [ ] 6.3 Complete and archive `wasm-backend-v1` for the agreed scope.
-  - **Reopened after review (REQUEST CHANGES).** Experimental scalar WASM is
-    in progress under active `wasm-backend-v1` with narrowed specs. Full
-    production Drop/WASI is deferred and must not be claimed complete.
-  - Fixed since reopening: unsigned integer semantics, `.wasm` ABI version
-    checks before run, reject Load/Store/AddrOf (no silent memory Move).
-- [x] 6.4 Complete and archive `bytecode-vm-v1` with ownership/Drop semantics
-  and native differential conformance, or archive a replacement OpenSpec
-  decision cancelling the VM with evidence.
-  - Archived as `2026-07-15-bytecode-vm-v1` with NO-GO value review
-    (`docs/bytecode-vm-value-review.md`); production VM cancelled.
+- [ ] 6.3 Complete and archive `wasm-backend-v1` for the **agreed experimental
+  scalar** scope (not full WASI/Drop production).
+  - Active owner: `wasm-backend-v1`. Required before umbrella archive:
+    `main: () -> i64` ABI enforcement (MIR + artifact validator), signedness,
+    ABI version checks, fail-closed memory ops, docs/SUPPORT_MATRIX honesty.
+  - Deferred outside this task: WASI, ownership/Drop, Windows+Unix WASM CI matrix.
+- [x] 6.4 Complete and archive `bytecode-vm-v1` … or cancel with evidence.
+  - Archived as `2026-07-15-bytecode-vm-v1` (NO-GO).
 
-## 7. Program closure
+## 7. Umbrella closure (post-v1 honesty only)
 
-- [ ] 7.1 All required child changes pass strict validation and archive in
-  dependency order.
-  - Blocked on honest completion/archive of reopened `wasm-backend-v1`
-    (experimental scalar gate or full Drop/WASI follow-up).
-- [ ] 7.2 `examples/realworld/SUPPORT_MATRIX.md` contains no unsupported
-  `Supported` claim and links
-  unit, integration, realworld, and host evidence at the appropriate level.
-  - Portable targets row is **Experimental / deferred** (not production
-    Supported). Re-check before final roadmap archive.
-- [x] 7.3 A clean clone can install or build the released toolchain, resolve a
-  package, test it, debug it, and run the flagship on each supported host.
-  - Evidence retained from Phase 2–4 release/install/debug/flagship gates
-    (`v0.1.0-rc.1`, Actions `29259068988` / `29333253316` / `29305786087`).
-  - Note: this is the native release path; experimental WASM is separate.
-- [ ] 7.4 Run `openspec validate language-maturity-roadmap --strict` and
+- [ ] 7.1 Required **post-v1** children pass strict validation and archive in
+  dependency order (`wasm-backend-v1` experimental scalar archive still open;
+  bytecode already cancelled/archived).
+- [ ] 7.2 SUPPORT_MATRIX has no false production `Supported` claim for portable
+  targets (row must remain Experimental/deferred until 6.3 archives).
+- [x] 7.3 Native clean-clone install/build/resolve/test/debug/flagship on
+  supported hosts (Phase 2–4 evidence; **not** blocked by WASM).
+- [ ] 7.4 `openspec validate language-maturity-roadmap --strict` and
   `openspec validate --all --strict` after 6.3 re-closes.

@@ -19,8 +19,15 @@ ownership, FFI, and unsupported host imports with unsupported-target-capability.
 
 - **WHEN** a scalar control-flow or call program is built with target wasm
 - **THEN** module validation succeeds
-- **AND** the module exports main
+- **AND** the module exports main with type () -> i64
 - **AND** embedded MIR semantic ABI and portable runtime ABI versions are present
+
+#### Scenario: Parameterized main is rejected
+
+- **WHEN** a program defines main with one or more parameters
+- **THEN** build fails with unsupported-target-capability
+- **AND** external wasm artifacts whose exported main is not () -> i64 fail
+  validation before host execution
 
 #### Scenario: Aggregate or host-only program is built for WASM
 

@@ -14,7 +14,7 @@ Pinned profile name: **`sengoo-wasm32-scalar-experimental-v1`**
 | Pointer width | 32-bit (`isize`/`usize`) |
 | MIR semantic ABI | `1` |
 | Portable runtime ABI | `1` (`runtime/abi/portable_runtime_abi_v1.json`) |
-| Module export | `main : () -> i64` |
+| Module export | `main : () -> i64` only (zero parameters; non-zero-arg `main` is rejected at MIR conversion and artifact validation) |
 | Emitter | Direct MIR-to-WASM (`docs/architecture/wasm-emitter-decision.md`) |
 | Support tier | **Experimental scalar** |
 

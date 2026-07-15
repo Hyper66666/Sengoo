@@ -259,7 +259,7 @@ const WASM_ABI_CUSTOM_SECTION: &str = "sengoo.portable_runtime_abi";
 /// Structural WebAssembly module validator for the scalar emitter.
 ///
 /// Validates magic/version, section id order, type/function/code counts, exported
-/// `main`, and the embedded MIR/runtime ABI custom section versions.
+/// `main : () -> i64`, and the embedded MIR/runtime ABI custom section versions.
 pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
     if bytes.len() > WASM_MAX_MODULE_BYTES {
         miette::bail!(
@@ -274,10 +274,10 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
 
     let mut offset = 8usize;
     let mut last_id = 0u8;
-    let mut type_count = None;
-    let mut function_count = None;
+    let mut function_types: Option<Vec<WasmFuncType>> = None;
+    let mut function_type_indices: Option<Vec<u32>> = None;
     let mut code_count = None;
-    let mut saw_export_main = false;
+    let mut main_function_index: Option<u32> = None;
     let mut saw_abi_section = false;
 
     while offset < bytes.len() {
@@ -308,20 +308,21 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
                 }
             }
             1 => {
-                let (count, _) = read_uleb_at(payload, 0)?;
-                type_count = Some(count);
+                function_types = Some(parse_wasm_type_section(payload)?);
             }
             2 => {
                 miette::bail!("WebAssembly imports are outside the experimental pure-core profile");
             }
             3 => {
-                let (count, _) = read_uleb_at(payload, 0)?;
-                function_count = Some(count);
+                function_type_indices = Some(parse_wasm_function_section(payload)?);
             }
             7 => {
-                if payload_contains_exported_main_function(payload, function_count.unwrap_or(0))? {
-                    saw_export_main = true;
-                }
+                let function_count = function_type_indices
+                    .as_ref()
+                    .map(|indices| indices.len() as u64)
+                    .unwrap_or(0);
+                main_function_index =
+                    find_exported_main_function_index(payload, function_count)?;
             }
             10 => {
                 let (count, _) = read_uleb_at(payload, 0)?;
@@ -333,19 +334,39 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
         offset = end;
     }
 
-    let types = type_count.unwrap_or(0);
-    let functions = function_count.unwrap_or(0);
+    let types = function_types
+        .as_ref()
+        .ok_or_else(|| miette::miette!("WebAssembly module is missing type section"))?;
+    let function_indices = function_type_indices
+        .as_ref()
+        .ok_or_else(|| miette::miette!("WebAssembly module is missing function section"))?;
     let codes = code_count.unwrap_or(0);
-    if types == 0 || functions == 0 || codes == 0 {
+    if types.is_empty() || function_indices.is_empty() || codes == 0 {
         miette::bail!("WebAssembly module is missing required type/function/code sections");
     }
-    if types != functions || functions != codes {
+    if types.len() as u64 != function_indices.len() as u64 || function_indices.len() as u64 != codes
+    {
         miette::bail!(
-            "WebAssembly type/function/code counts disagree ({types}/{functions}/{codes})"
+            "WebAssembly type/function/code counts disagree ({}/{}/{})",
+            types.len(),
+            function_indices.len(),
+            codes
         );
     }
-    if !saw_export_main {
-        miette::bail!("WebAssembly module does not export `main`");
+    let main_index = main_function_index
+        .ok_or_else(|| miette::miette!("WebAssembly module does not export `main`"))?;
+    let type_index = *function_indices
+        .get(main_index as usize)
+        .ok_or_else(|| miette::miette!("WebAssembly export `main` function index is out of range"))?;
+    let main_ty = types.get(type_index as usize).ok_or_else(|| {
+        miette::miette!("WebAssembly export `main` type index {type_index} is out of range")
+    })?;
+    if main_ty.param_count != 0 || !main_ty.returns_i64 {
+        miette::bail!(
+            "WebAssembly export `main` must have type () -> i64 (found {} param(s), returns_i64={})",
+            main_ty.param_count,
+            main_ty.returns_i64
+        );
     }
     if !saw_abi_section {
         miette::bail!(
@@ -353,6 +374,72 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WasmFuncType {
+    param_count: u32,
+    returns_i64: bool,
+}
+
+fn parse_wasm_type_section(payload: &[u8]) -> Result<Vec<WasmFuncType>> {
+    let (count, mut offset) = read_uleb_at(payload, 0)?;
+    let mut types = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let form = *payload
+            .get(offset)
+            .ok_or_else(|| miette::miette!("truncated WebAssembly function type form"))?;
+        offset += 1;
+        if form != 0x60 {
+            miette::bail!("unsupported WebAssembly type form {form:#x} (expected functype 0x60)");
+        }
+        let (param_count, next) = read_uleb_at(payload, offset)?;
+        offset = next;
+        for _ in 0..param_count {
+            let _ = *payload
+                .get(offset)
+                .ok_or_else(|| miette::miette!("truncated WebAssembly parameter type"))?;
+            offset += 1;
+        }
+        let (result_count, next) = read_uleb_at(payload, offset)?;
+        offset = next;
+        let mut returns_i64 = false;
+        for result_index in 0..result_count {
+            let valtype = *payload
+                .get(offset)
+                .ok_or_else(|| miette::miette!("truncated WebAssembly result type"))?;
+            offset += 1;
+            if result_count == 1 && result_index == 0 && valtype == 0x7e {
+                returns_i64 = true;
+            }
+        }
+        let param_count = u32::try_from(param_count)
+            .map_err(|_| miette::miette!("WebAssembly parameter count does not fit u32"))?;
+        types.push(WasmFuncType {
+            param_count,
+            returns_i64,
+        });
+    }
+    if offset != payload.len() {
+        miette::bail!("WebAssembly type section has trailing data");
+    }
+    Ok(types)
+}
+
+fn parse_wasm_function_section(payload: &[u8]) -> Result<Vec<u32>> {
+    let (count, mut offset) = read_uleb_at(payload, 0)?;
+    let mut indices = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let (type_index, next) = read_uleb_at(payload, offset)?;
+        offset = next;
+        let type_index = u32::try_from(type_index)
+            .map_err(|_| miette::miette!("WebAssembly type index does not fit u32"))?;
+        indices.push(type_index);
+    }
+    if offset != payload.len() {
+        miette::bail!("WebAssembly function section has trailing data");
+    }
+    Ok(indices)
 }
 
 fn parse_portable_abi_custom_section(payload: &[u8]) -> Result<Option<(u32, u32)>> {
@@ -380,10 +467,10 @@ fn parse_portable_abi_custom_section(payload: &[u8]) -> Result<Option<(u32, u32)
     Ok(Some((mir_version, runtime_version)))
 }
 
-fn payload_contains_exported_main_function(payload: &[u8], function_count: u64) -> Result<bool> {
+fn find_exported_main_function_index(payload: &[u8], function_count: u64) -> Result<Option<u32>> {
     // Export section: count, then (name_len, name_bytes, kind, index)*
     let (count, mut offset) = read_uleb_at(payload, 0)?;
-    let mut saw_main = false;
+    let mut main_index = None;
     for _ in 0..count {
         let (name_len, next) = read_uleb_at(payload, offset)?;
         offset = next;
@@ -408,13 +495,18 @@ fn payload_contains_exported_main_function(payload: &[u8], function_count: u64) 
             if index >= function_count {
                 miette::bail!("WebAssembly export `main` function index {index} is out of range");
             }
-            saw_main = true;
+            if main_index.is_some() {
+                miette::bail!("WebAssembly module exports `main` more than once");
+            }
+            main_index = Some(u32::try_from(index).map_err(|_| {
+                miette::miette!("WebAssembly export `main` function index does not fit u32")
+            })?);
         }
     }
     if offset != payload.len() {
         miette::bail!("WebAssembly export section has trailing data");
     }
-    Ok(saw_main)
+    Ok(main_index)
 }
 
 fn read_uleb_at(bytes: &[u8], mut offset: usize) -> Result<(u64, usize)> {
@@ -654,6 +746,10 @@ impl PortableProgram {
         let main_index = *function_indices.get("main").ok_or_else(|| {
             unsupported_target_capability(target, "programs without a `main` entry point")
         })?;
+        let main = functions
+            .get(main_index as usize)
+            .ok_or_else(|| miette::miette!("portable target missing `main` function body"))?;
+        validate_portable_main_signature(target, main)?;
         let functions = functions
             .iter()
             .map(|function| PortableFunction::from_mir(target, function, &function_indices))
@@ -662,6 +758,30 @@ impl PortableProgram {
             functions,
             main_index,
         })
+    }
+}
+
+/// Experimental portable runners always invoke `main` with zero arguments and
+/// treat the result as a host i64 exit value (`main : () -> i64`).
+fn validate_portable_main_signature(
+    target: PortableBackendTarget,
+    main: &MirFunction,
+) -> Result<()> {
+    if !main.params.is_empty() {
+        return Err(unsupported_target_capability(
+            target,
+            format!(
+                "`main` with {} parameter(s); expected `main() -> i64`",
+                main.params.len()
+            ),
+        ));
+    }
+    match &main.return_type {
+        MIRType::Int(64) => Ok(()),
+        other => Err(unsupported_target_capability(
+            target,
+            format!("`main` return type {:?}; expected `i64`", other),
+        )),
     }
 }
 

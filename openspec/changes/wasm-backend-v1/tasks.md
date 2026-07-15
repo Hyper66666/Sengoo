@@ -16,8 +16,9 @@
 - [x] 2.1 Define the experimental wasm32 scalar ABI, export shape, and runtime
   ABI metadata boundary.
   - Experimental profile documented in `docs/wasm-wasi-profile.md`; modules
-    export `main`, embed MIR/runtime ABI versions in a custom section, and
-    require no host imports.
+    export **`main : () -> i64`** only (MIR conversion + artifact type/export
+    validation), embed MIR/runtime ABI versions in a custom section, and
+    require no host imports. Parameterized `main` is a hard diagnostic.
 - [x] 2.2 Lower scalar/control-flow/call MIR and fail closed for unsupported
   ownership or memory features.
   - Scalar/control-flow/call lowered; aggregates, String/Vec/Drop,

@@ -81,3 +81,18 @@ hardening entry gates pass.
 - **THEN** the stable-ABI entry review is recorded
 - **AND** WASM and bytecode have separate owner changes and conformance gates
 - **AND** neither backend blocks the earlier mainstream-default release
+
+### Requirement: Roadmap archive gates SHALL distinguish native mainstream from post-v1 portable work
+
+The language-maturity roadmap SHALL treat Phases 0-4 native mainstream completion
+as independent from Phase 6+ portable backend completion. Full umbrella archive
+MAY remain open while experimental WASM work continues, and MUST NOT re-open
+archived native phase claims solely because post-v1 tasks are incomplete.
+
+#### Scenario: Native mainstream is complete but WASM is still experimental
+
+- **WHEN** Phases 0-4 are archived with release-host evidence and experimental
+  WASM remains an open child change
+- **THEN** native mainstream-default support claims may stay closed
+- **AND** the umbrella change remains unarchived until post-v1 tasks close or
+  are explicitly split to a successor program change

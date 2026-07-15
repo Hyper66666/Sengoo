@@ -215,6 +215,98 @@ def main() -> i64 {
 }
 
 #[test]
+fn wasm_target_rejects_main_with_parameters() {
+    let dir = temp_dir("wasm_main_params");
+    let source = dir.join("main.sg");
+    fs::write(
+        &source,
+        r#"
+def main(value: i64) -> i64 {
+    value
+}
+"#,
+    )
+    .unwrap();
+
+    let build = Command::new(sgc())
+        .args(["build", source.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("build wasm main-with-params");
+    assert!(
+        !build.status.success(),
+        "parameterized main must fail closed for wasm ABI"
+    );
+    let stderr = String::from_utf8_lossy(&build.stderr);
+    assert!(
+        stderr.contains("unsupported-target-capability")
+            && stderr.contains("target `wasm`")
+            && (stderr.contains("parameter") || stderr.contains("main() -> i64")),
+        "stderr:\n{stderr}"
+    );
+
+    // External artifacts that export a non-() main must also fail validation
+    // before the Node runner calls main().
+    // type: (func (param i64) (result i64))
+    let types = [0x01u8, 0x60, 0x01, 0x7e, 0x01, 0x7e];
+    let mut exports = vec![0x01];
+    exports.push(4); // name len
+    exports.extend_from_slice(b"main");
+    exports.push(0x00); // func
+    exports.push(0x00); // index
+    // code: one function, 0 locals, i64.const 0, end
+    let body = [0x00u8, 0x42, 0x00, 0x0b];
+    let mut code = vec![0x01, body.len() as u8];
+    code.extend_from_slice(&body);
+    let mut custom = Vec::new();
+    let name = b"sengoo.portable_runtime_abi";
+    custom.push(name.len() as u8);
+    custom.extend_from_slice(name);
+    custom.push(1); // mir
+    custom.push(1); // runtime
+    let target_name = b"wasm32";
+    custom.push(target_name.len() as u8);
+    custom.extend_from_slice(target_name);
+
+    let mut ordered = b"\0asm\x01\0\0\0".to_vec();
+    write_raw_wasm_section(&mut ordered, 0, &custom);
+    write_raw_wasm_section(&mut ordered, 1, &types);
+    write_raw_wasm_section(&mut ordered, 3, &[0x01, 0x00]);
+    write_raw_wasm_section(&mut ordered, 7, &exports);
+    write_raw_wasm_section(&mut ordered, 10, &code);
+
+    let artifact = dir.join("bad-main.wasm");
+    fs::write(&artifact, &ordered).unwrap();
+    let run = Command::new(sgc())
+        .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run wasm bad-main artifact");
+    assert!(!run.status.success(), "non-() main artifact must fail validation");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("() -> i64") || stderr.contains("param"),
+        "stderr:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn write_raw_wasm_section(module: &mut Vec<u8>, id: u8, payload: &[u8]) {
+    module.push(id);
+    let mut len = payload.len();
+    loop {
+        let mut byte = (len & 0x7f) as u8;
+        len >>= 7;
+        if len != 0 {
+            byte |= 0x80;
+        }
+        module.push(byte);
+        if len == 0 {
+            break;
+        }
+    }
+    module.extend_from_slice(payload);
+}
+
+#[test]
 fn wasm_target_runs_scalar_main_with_host_runtime() {
     let dir = temp_dir("wasm_run");
     let source = write_scalar_program(&dir);
