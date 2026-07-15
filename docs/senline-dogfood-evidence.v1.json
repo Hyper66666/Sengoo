@@ -1,4 +1,4 @@
-{
+﻿{
   "schema_version": 1,
   "change": "senline-service-dogfood",
   "linked_senline_change": "adopt-sengoo-backend-slice",
@@ -13,7 +13,7 @@
         "fixture_sha256": "398159a680fec4f9724f5d4ed09a461da97a627146c4469fe936c5efc8c3f575",
         "evidence_kind": "known-baseline-rehearsal",
         "consumer_record": "docs/senline-dogfood-defects.md",
-        "consumer_record_sha256": "1f1a2c300c13ff7f4f99d3553179f4137672050ae9b417256e22e92d7b2294e0"
+        "consumer_record_sha256": "f3d19f73130428b9c6a49e31efb6da433266895a8095a9fcb05caef0579bb3e6"
       },
       "ownership": {
         "authority": "sengoo-owned",
@@ -101,7 +101,7 @@
         "fixture_sha256": "398159a680fec4f9724f5d4ed09a461da97a627146c4469fe936c5efc8c3f575",
         "evidence_kind": "consumer-failure",
         "consumer_record": "docs/senline-dogfood-defects.md",
-        "consumer_record_sha256": "1f1a2c300c13ff7f4f99d3553179f4137672050ae9b417256e22e92d7b2294e0"
+        "consumer_record_sha256": "f3d19f73130428b9c6a49e31efb6da433266895a8095a9fcb05caef0579bb3e6"
       },
       "ownership": {
         "authority": "sengoo-owned",
@@ -190,7 +190,7 @@
         "fixture_sha256": "398159a680fec4f9724f5d4ed09a461da97a627146c4469fe936c5efc8c3f575",
         "evidence_kind": "consumer-failure",
         "consumer_record": "docs/senline-dogfood-defects.md",
-        "consumer_record_sha256": "1f1a2c300c13ff7f4f99d3553179f4137672050ae9b417256e22e92d7b2294e0"
+        "consumer_record_sha256": "f3d19f73130428b9c6a49e31efb6da433266895a8095a9fcb05caef0579bb3e6"
       },
       "ownership": {
         "authority": "sengoo-owned",
