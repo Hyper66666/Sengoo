@@ -256,13 +256,19 @@ jobs:
             "#!/bin/sh`necho `"fake-cargo: cargo must not be invoked by installed senline package loops`" >&2`nexit 97`n" | Set-Content -LiteralPath $fakeCargo -Encoding UTF8
             & chmod +x $fakeCargo
           }
-          $env:PATH = "$fakeCargoDir;$bin;" + $env:PATH
+          # Use the OS path separator; ';' breaks Linux PATH and makes which(sgc)
+          # fall back to checkout target/release/sgc (source-local).
+          $pathSep = [IO.Path]::PathSeparator
+          $env:PATH = "$fakeCargoDir$pathSep$bin$pathSep" + $env:PATH
+          $env:SGPM_SGC = $sgc
+          $env:SGPM_SGFMT = Join-Path $bin "sgfmt$suffix"
           Remove-Item Env:SENGOO_ROOT -ErrorAction SilentlyContinue
           Remove-Item Env:SENGOO_STDLIB -ErrorAction SilentlyContinue
           Remove-Item Env:SENGOO_RUNTIME -ErrorAction SilentlyContinue
 
-          Write-Host "sgc: $(& $sgc --version)"
-          Write-Host "sgpm: $(& $sgpm --version)"
+          Write-Host "sgc: $(& $sgc --version) path=$sgc"
+          Write-Host "sgpm: $(& $sgpm --version) path=$sgpm"
+          Write-Host "SGPM_SGC=$env:SGPM_SGC"
 
           Push-Location examples/realworld/senline-domain-worker
           try {

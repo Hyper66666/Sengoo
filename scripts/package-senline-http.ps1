@@ -29,7 +29,13 @@ Remove-Item -LiteralPath $OutputDir -Recurse -Force -ErrorAction SilentlyContinu
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 $binDir = Split-Path -Parent $SgcPath
-$env:PATH = "$binDir;" + $env:PATH
+$pathSep = [IO.Path]::PathSeparator
+$env:PATH = "$binDir$pathSep" + $env:PATH
+$env:SGPM_SGC = $SgcPath
+$sgfmtCandidate = Join-Path $binDir $(if ($env:OS -eq "Windows_NT" -or $IsWindows) { "sgfmt.exe" } else { "sgfmt" })
+if (Test-Path -LiteralPath $sgfmtCandidate) {
+    $env:SGPM_SGFMT = $sgfmtCandidate
+}
 
 Push-Location $HttpRoot
 try {
