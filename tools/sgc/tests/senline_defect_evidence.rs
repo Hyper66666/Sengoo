@@ -35,6 +35,22 @@ fn read_json(path: &Path) -> Value {
     .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }
 
+fn normalize_text_bytes(bytes: impl AsRef<[u8]>) -> Vec<u8> {
+    // Evidence digests are frozen against Git's LF-normalized blob bytes. Windows
+    // checkouts may inject CRLF into markdown or JSON fixtures; strip CR so local
+    // and Linux CI validate the same consumer/fixture hashes.
+    bytes
+        .as_ref()
+        .iter()
+        .copied()
+        .filter(|byte| *byte != b'\r')
+        .collect()
+}
+
+fn sha256_normalized(bytes: impl AsRef<[u8]>) -> String {
+    format!("{:x}", Sha256::digest(normalize_text_bytes(bytes)))
+}
+
 fn object<'a>(value: &'a Value, label: &str) -> &'a Map<String, Value> {
     value
         .as_object()
@@ -543,7 +559,7 @@ fn durable_senline_defect_evidence_validates_against_the_versioned_schema() {
         let consumer_bytes = fs::read(repo_root().join(consumer_path))
             .unwrap_or_else(|error| panic!("read linked consumer record: {error}"));
         assert_eq!(
-            format!("{:x}", Sha256::digest(&consumer_bytes)),
+            sha256_normalized(&consumer_bytes),
             failure["consumer_record_sha256"],
             "records[{index}] consumer record hash changed"
         );
@@ -572,12 +588,9 @@ fn durable_senline_defect_evidence_validates_against_the_versioned_schema() {
             "records[{index}] fixture paths must identify the same relative file"
         );
         assert_eq!(
-            format!(
-                "{:x}",
-                Sha256::digest(
-                    fs::read(repo_root().join(mirror_fixture))
-                        .expect("read exact mirrored fixture path")
-                )
+            sha256_normalized(
+                fs::read(repo_root().join(mirror_fixture))
+                    .expect("read exact mirrored fixture path")
             ),
             failure["fixture_sha256"],
             "records[{index}] fixture hash changed"
