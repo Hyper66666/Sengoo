@@ -46,11 +46,25 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 - Records: `docs/senline-dogfood-evidence.v1.json`
 - Support boundary: `docs/senline-dogfood-support.md`
 
+## Evidence index
+
+| Doc | Covers |
+| --- | --- |
+| `docs/senline-dogfood-determinism-evidence.md` | Task 5.9 dual-host digests |
+| `docs/senline-dogfood-resource-methodology.md` | Tasks 8.3 / 8.4 sampler policy |
+| `docs/senline-dogfood-latency-evidence.md` | Task 8.4 bulk means (partial) |
+| `docs/senline-dogfood-repro-packages.md` | Task 8.7 worker/HTTP dual package (Windows) |
+| `docs/senline-dogfood-defects.md` | SGDOG ledger + resource observation |
+| `docs/senline-dogfood-support.md` | Authority / promotion boundary |
+| `docs/senline-dogfood-evidence.v1.json` | Durable evidence records |
+
 ## Known open Sengoo-side items
 
-1. **Task 8.3** — single-worker 100k watchdog near case 44086 / memory growth; 1M soak not claimed.
-2. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
-3. **Task 5.12 / 6.5 Linux loops** — complete when dual-host installed worker/HTTP CI transcripts land.
+1. **Task 8.3** — single-worker 100k watchdog near case 44086 / memory growth; 1M soak not claimed (methodology published).
+2. **Task 8.4** — p50/p95/p99 request instrumentation still open (bulk means only).
+3. **Task 8.7** — Linux worker/HTTP dual-package compare still open (Windows local dual package green).
+4. **Task 5.12 / 6.5 / 9.2** — Linux installed worker/HTTP product loops and full installed-distribution smokes.
+5. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
 
 ## Unsupported authority transfers
 
