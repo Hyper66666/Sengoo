@@ -6,3 +6,8 @@ sgpm-index.toml text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 *.md text eol=lf
+
+# Performance evidence: pin byte-identical SHA-256 across hosts
+bench/results/**/*.json -text
+bench/frontend-memory-baseline.json text eol=lf
+

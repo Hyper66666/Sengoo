@@ -257,7 +257,7 @@ pub(crate) fn http_listener_interest_count() -> usize {
         .count()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native-bridge"))]
 pub(crate) fn interest_count() -> usize {
     reactor()
         .lock()

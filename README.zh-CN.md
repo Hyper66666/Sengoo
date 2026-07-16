@@ -26,6 +26,19 @@ $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
+已发布预发布安装 / 升级（当前公开 tag）：
+
+```powershell
+.\scripts\install.ps1 -Version 0.1.0-rc.1
+```
+
+```sh
+sh scripts/install.sh --version 0.1.0-rc.1
+```
+
+公开预发布：[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1)。
+v0.2 主线见 `sengoo-v0-2-mainstream-core`，此处不宣称已发布 v0.2.0。
+
 原生 debug-info 构建使用 `-g` / `--debug-info`：
 
 ```powershell
