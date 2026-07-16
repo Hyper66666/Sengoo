@@ -26,6 +26,7 @@ def STATUS_TLS_HOSTNAME_MISMATCH() -> i64 { 16 }
 def STATUS_TLS_HANDSHAKE() -> i64 { 17 }
 def STATUS_TLS_UNAVAILABLE() -> i64 { 18 }
 def STATUS_CANCELED() -> i64 { 19 }
+def STATUS_INVALID_UTF8() -> i64 { 20 }
 
 def status_from_raw_ffi(code: i64) -> i64 {
     sengoo_status_from_raw_ffi(code)

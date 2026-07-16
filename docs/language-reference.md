@@ -142,7 +142,7 @@ def main() -> i64 {
 | `String` | Supported | Owned UTF-8 handle with move/drop, formatting, comparison, slicing, and push helpers. |
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
-| Arrays | Subset | Fixed array syntax is covered in examples; collection work focuses on `Vec<T>`. |
+| Arrays | Supported | Fixed-array index bounds diagnostics (`array-index-out-of-bounds`), assignment, and `for` iteration lower to MIR; see `compiler/src/tests/m1_language_coherence_tests.rs` and `array_assign_tests`. |
 | Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
 | References | Subset | Borrowing and move blocking are lexical and conservative. |
 | `dyn Trait` | Experimental | Single-trait `&self`/`&mut self` dispatch and owned vtable-drop glue exist; `Box<dyn>`, multi-trait objects, value receivers, and Cranelift dispatch remain open. |
@@ -160,7 +160,7 @@ def main() -> i64 {
 | Operators | Supported | Primitive intrinsics and user-defined `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg` dispatch are covered by `numeric_operator_traits`. |
 | `as` casts | Subset | Integer/float/bool cast matrix exists; unsupported pairs report diagnostics. |
 | `?` | Supported | Result propagation is implemented with drop on early-return paths. |
-| `match` | Subset | Payload matches are supported; exhaustiveness and guard polish remain active language work. |
+| `match` | Supported | Exhaustive enum/`bool` coverage, wildcard, payload bindings, and guards; non-exhaustive/unreachable report stable diagnostics (`non-exhaustive-match`); see `match_typeck_tests` and `m1_language_coherence_tests`. |
 
 ## Ownership, Borrowing, And Drop
 
@@ -188,7 +188,7 @@ Known open work:
 | --- | --- | --- |
 | Generic functions/structs/enums/impls | Supported | Monomorphized instances in compiler tests. |
 | Trait bounds and `where` clauses | Supported | `unsatisfied-trait-bound` tests. |
-| Associated types | Subset | Type-parameter projections such as `T::Item` work; `Self::Output` operator-trait style remains open. |
+| Associated types | Supported | Trait/impl associated types and `Self::Item` projections typecheck when uniquely bound; unbounded projections fail closed; see `generic_typeck_tests` and `m1_language_coherence_tests`. Operator-style `Self::Output` polish remains incremental. |
 | Supertraits | Supported | Enforced by typechecking. |
 | Conflicting impl diagnostics | Supported | Duplicate trait impl tests. |
 | `dyn Trait` | Experimental | See Types section. |

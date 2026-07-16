@@ -295,11 +295,13 @@ fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
         .expect("read compatibility policy");
 
     for heading in [
+        "## Surface stability classes",
         "## Source and edition policy",
         "## Deprecation window",
         "## Runtime and data schemas",
         "## Supported release hosts",
         "## Release support window",
+        "## Public-input panic policy",
     ] {
         assert!(
             policy.contains(heading),
@@ -309,8 +311,11 @@ fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
     assert!(
         policy.contains("edition = \"2026\"")
             && policy.contains("unsupported Sengoo edition")
-            && policy.contains("at least one minor release"),
-        "policy should freeze the 2026 edition rejection and deprecation window"
+            && policy.contains("at least one minor release")
+            && policy.contains("v0.2.x")
+            && root.join("docs/migration-v0-1-to-v0-2.md").is_file()
+            && root.join("examples/compat/v0.2.0-rc.1/Sengoo.toml").is_file(),
+        "policy should freeze the 2026 edition rejection, deprecation window, and v0.2 fixtures"
     );
     for target in [
         "x86_64-pc-windows-msvc",

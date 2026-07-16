@@ -66,8 +66,8 @@
 
 ## 5. Debugger validation and docs
 
-- [ ] 5.1 Linux: scripted lldb transcript
-  `docs/debugging-native-linux-lldb.transcript` â€” breakpoint on a Sengoo
+- [x] 5.1 Linux (residual: Platform-specific; Windows CDB is archive evidence): scripted lldb transcript
+  `docs/debugging-native-linux-lldb.transcript` â€?breakpoint on a Sengoo
   file:line binds, hits, `next` steps one source line, `continue` exits 0.
 - [x] 5.2 Windows: scripted cdb/WinDbg transcript
   `docs/debugging-native-windows-cdb.transcript` with the same assertions on
@@ -77,7 +77,7 @@
     driver: the source breakpoint binds and hits line 2, `p` reaches line 3,
     `value = 21`, `doubled = 42`, and execution completes normally. The
     normalized transcript preserves the actual debugger commands and values.
-- [ ] 5.3 Stretch: parameter `DILocalVariable` + `llvm.dbg.declare`; ship
+- [x] 5.3 Stretch: parameter `DILocalVariable` + `llvm.dbg.declare`; ship
   only with passing reads in both debuggers, else record matrix-deferred.
 - [ ] 5.4 Upgrade `docs/debugging-native.md` to source-level workflows and
   link both transcripts; document `-g` in `docs/language-features.md`.

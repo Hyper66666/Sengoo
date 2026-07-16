@@ -28,6 +28,7 @@ extern "C" {
     fn sengoo_ffi_buffer_clear(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_copy_range(buffer_handle: i64, start: i64, len: i64, out_buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_append(buffer_handle: i64, src_ptr: i64, src_len: i64) -> i64;
+    fn sengoo_ffi_buffer_push_u8(buffer_handle: i64, byte: i64) -> i64;
     fn sengoo_ffi_buffer_is_utf8(buffer_handle: i64) -> i64;
     fn sengoo_ffi_buffer_free(buffer_handle: i64) -> i64;
 }
@@ -354,6 +355,20 @@ impl Buffer {
 
     def append_str(self, value: &str) -> Result<i64, i64> {
         ffi_byte_count_result(sengoo_ffi_buffer_append(self.handle, sengoo_stdlib_str_ptr(value), value.len()))
+    }
+
+    def append_from(self, src: Buffer, start: i64, len: i64) -> Result<i64, i64> {
+        if start < 0 || len < 0 {
+            Result { is_ok: false, value: 0, error: 2 }
+        } else {
+            let base = sengoo_ffi_buffer_ptr(src.handle);
+            ffi_byte_count_result(sengoo_ffi_buffer_append(self.handle, base + start, len))
+        }
+    }
+
+    /// Append one raw byte (0..=255). Does not validate UTF-8 (binary I/O path).
+    def push_u8(self, byte: i64) -> Result<i64, i64> {
+        ffi_byte_count_result(sengoo_ffi_buffer_push_u8(self.handle, byte))
     }
 
     def is_utf8(self) -> bool {

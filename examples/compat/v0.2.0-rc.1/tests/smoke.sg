@@ -1,0 +1,5 @@
+import compat_v0_1_0_rc_1;
+
+def main() -> i64 {
+    if compatibility_answer() == 42 { 0; } else { 1; };
+}

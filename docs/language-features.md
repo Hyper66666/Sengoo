@@ -411,7 +411,8 @@ Sengoo has two practical text surfaces today:
 
 Current stdlib helpers include `str_trim`, `str_to_ascii_upper`, and
 `str_to_ascii_lower`, each returning an owned `String`. The case conversion is
-deliberately ASCII-only for now; Unicode-aware case folding, normalization, and
+deliberately ASCII-only for full Unicode case mapping; see `docs/unicode-v0-2.md`
+for the v0.2 UTF-8/`char` baseline. Unicode-aware case folding, normalization, and
 locale collation remain future work.
 
 `format` builds an owned `String` from a literal template. The supported subset

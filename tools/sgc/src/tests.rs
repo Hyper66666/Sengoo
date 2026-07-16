@@ -6931,6 +6931,121 @@ def main() -> i64 {
 }
 
 #[test]
+fn stdlib_m3_invalid_utf8_status_and_string_from_utf8() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-invalid-utf8",
+        r#"
+import std::ffi;
+import std::status;
+import std::string;
+
+def main() -> i64 {
+    let ok_status = STATUS_OK() == 0;
+    let canceled = STATUS_CANCELED() == 19;
+    let invalid_utf8 = STATUS_INVALID_UTF8() == 20;
+    let name_buf = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let name_len = status_name_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+    let msg_len = status_message_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+
+    let good = ffi_buffer_from_bytes("hi").unwrap_or(Buffer { handle: 0 });
+    let good_s = string_from_utf8(good, 2);
+    let good_ok = good_s.is_ok;
+    let count = if good_ok { good_s.value.char_count().unwrap_or(-1) } else { -1 };
+    let cp = char_codepoint('A').unwrap_or(-1);
+
+    let bad = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let pushed = bad.push_u8(255).unwrap_or(-1);
+    let bad_s = string_from_utf8(bad, 1);
+    let bad_err = if bad_s.is_ok { -1 } else { bad_s.error };
+    let mapped = status_from_raw_ffi(0 - STATUS_INVALID_UTF8());
+
+    let version_buf = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let version_len = unicode_version_copy(version_buf).unwrap_or(-1);
+
+    good.free();
+    bad.free();
+    name_buf.free();
+    version_buf.free();
+
+    if ok_status and canceled and invalid_utf8 and name_len > 0 and msg_len > 0
+        and good_ok and count == 2 and cp == 65 and pushed == 1 and bad_err == 20
+        and mapped == 20 and version_len >= 5
+    {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_m3_stream_cursor_read_write_copy() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-stream-cursor",
+        r#"
+import std::ffi;
+import std::stream;
+import std::status;
+
+def main() -> i64 {
+    let reader = cursor_from_bytes("hello-stream").unwrap_or(Cursor {
+        buffer_handle: 0,
+        pos: 0,
+    });
+    let out = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let total = read_to_end(reader, out).unwrap_or(-1);
+
+    let sink_buf = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let writer = cursor_new(sink_buf);
+    let wrote = write_all(writer, out, total).unwrap_or(-1);
+
+    let reader2 = cursor_from_bytes("abc").unwrap_or(Cursor {
+        buffer_handle: 0,
+        pos: 0,
+    });
+    let sink2 = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let writer2 = cursor_new(sink2);
+    let scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let copied = copy_stream(reader2, writer2, scratch).unwrap_or(-1);
+
+    out.free();
+    scratch.free();
+
+    if total == 12 and wrote == 12 and copied == 3 {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn stdlib_http_import_links_native_runtime_and_maps_errors() {
     let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
         "http-status",

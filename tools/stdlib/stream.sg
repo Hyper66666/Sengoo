@@ -1,0 +1,300 @@
+/// Synchronous byte stream traits and bounded helpers for the v0.2 production profile.
+///
+/// Semantics (pinned):
+/// - `read_into`: `Ok(0)` is EOF; `Ok(n>0)` writes exactly `n` bytes at the start of `out`.
+/// - `write_buffer`: `Ok(n)` may be partial (`0 <= n <= used_len`); `write_all` rejects
+///   repeated zero progress.
+/// - `read_to_end` never grows `out` past capacity; insufficient space -> STATUS_BUFFER_TOO_SMALL.
+/// - Helpers use only caller-provided Buffer capacity (no unbounded allocation).
+///
+/// Note: Cursor stores Buffer as a handle (`buffer_handle`) rather than nesting the Buffer
+/// struct, to avoid a known LLVM-text store path issue with nested aggregate mut locals.
+
+trait Reader {
+    def read_into(&mut self, out: Buffer) -> Result<i64, i64> {}
+}
+
+trait Writer {
+    def write_buffer(&mut self, data: Buffer, used_len: i64) -> Result<i64, i64> {}
+    def flush(&mut self) -> Result<bool, i64> {}
+}
+
+/// In-memory cursor over a managed Buffer handle. Position is a byte offset.
+struct Cursor {
+    buffer_handle: i64,
+    pos: i64,
+}
+
+def cursor_new(buffer: Buffer) -> Cursor {
+    Cursor { buffer_handle: buffer.handle, pos: 0 }
+}
+
+def cursor_from_bytes(data: &str) -> Result<Cursor, i64> {
+    let buffer_result = ffi_buffer_from_bytes(data);
+    if buffer_result.is_ok {
+        Result {
+            is_ok: true,
+            value: Cursor { buffer_handle: buffer_result.value.handle, pos: 0 },
+            error: 0,
+        }
+    } else {
+        Result {
+            is_ok: false,
+            value: Cursor { buffer_handle: 0, pos: 0 },
+            error: buffer_result.error,
+        }
+    }
+}
+
+def cursor_buffer(cursor: Cursor) -> Buffer {
+    Buffer { handle: cursor.buffer_handle }
+}
+
+def cursor_read_into(cursor: Cursor, out: Buffer) -> Result<i64, i64> {
+    if cursor.pos < 0 {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        let buffer = Buffer { handle: cursor.buffer_handle };
+        let used = buffer.used_len();
+        if cursor.pos >= used {
+            Result { is_ok: true, value: 0, error: 0 }
+        } else {
+            let remaining = used - cursor.pos;
+            let cap = out.capacity();
+            if cap <= 0 {
+                Result { is_ok: true, value: 0, error: 0 }
+            } else {
+                let n = if remaining < cap { remaining } else { cap };
+                let copied = buffer.copy_range(cursor.pos, n, out);
+                if copied.is_ok {
+                    Result { is_ok: true, value: n, error: 0 }
+                } else {
+                    Result { is_ok: false, value: 0, error: copied.error }
+                }
+            }
+        }
+    }
+}
+
+def cursor_advance(cursor: Cursor, n: i64) -> Cursor {
+    Cursor { buffer_handle: cursor.buffer_handle, pos: cursor.pos + n }
+}
+
+def cursor_write_buffer(cursor: Cursor, data: Buffer, used_len: i64) -> Result<i64, i64> {
+    if used_len < 0 || cursor.pos < 0 {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        let buffer = Buffer { handle: cursor.buffer_handle };
+        let data_used = data.used_len();
+        let take = if used_len < data_used { used_len } else { data_used };
+        if take == 0 {
+            Result { is_ok: true, value: 0, error: 0 }
+        } else {
+            let buf_used = buffer.used_len();
+            if cursor.pos != buf_used {
+                Result { is_ok: false, value: 0, error: STATUS_UNSUPPORTED() }
+            } else {
+                let available = buffer.capacity() - buf_used;
+                if available <= 0 {
+                    Result { is_ok: true, value: 0, error: 0 }
+                } else {
+                    let n = if take < available { take } else { available };
+                    let appended = buffer.append_from(data, 0, n);
+                    if appended.is_ok {
+                        Result { is_ok: true, value: n, error: 0 }
+                    } else {
+                        Result { is_ok: false, value: 0, error: appended.error }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Owned fd adapter retaining `io_fd_read`/`io_fd_write` as the concrete path.
+struct FdStream {
+    fd: i64,
+}
+
+def fd_stream_new(fd: i64) -> FdStream {
+    FdStream { fd: fd }
+}
+
+def fd_read_into(stream: FdStream, out: Buffer) -> Result<i64, i64> {
+    io_fd_read(stream.fd, out)
+}
+
+def fd_write_buffer(stream: FdStream, data: Buffer, used_len: i64) -> Result<i64, i64> {
+    if used_len < 0 {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        let take = if used_len < data.used_len() { used_len } else { data.used_len() };
+        io_i64_result(sengoo_io_fd_write(stream.fd, sengoo_ffi_buffer_ptr(data.handle), take))
+    }
+}
+
+def read_to_end(reader: Cursor, out: Buffer) -> Result<i64, i64> {
+    let mut total: i64 = 0;
+    let mut pos = reader.pos;
+    let mut done = false;
+    let mut failed = false;
+    let mut err_code: i64 = 0;
+    while !done && !failed {
+        let remaining = out.capacity() - out.used_len();
+        let cur = Cursor { buffer_handle: reader.buffer_handle, pos: pos };
+        if remaining <= 0 {
+            let probe_result = ffi_buffer_new(1);
+            if !probe_result.is_ok {
+                failed = true;
+                err_code = probe_result.error;
+            } else {
+                let probe = probe_result.value;
+                let peeked = cursor_read_into(cur, probe);
+                probe.free();
+                if !peeked.is_ok {
+                    failed = true;
+                    err_code = peeked.error;
+                } else if peeked.value == 0 {
+                    done = true;
+                } else {
+                    failed = true;
+                    err_code = STATUS_BUFFER_TOO_SMALL();
+                }
+            }
+        } else {
+            let chunk_result = ffi_buffer_new(remaining);
+            if !chunk_result.is_ok {
+                failed = true;
+                err_code = chunk_result.error;
+            } else {
+                let chunk = chunk_result.value;
+                let read_result = cursor_read_into(cur, chunk);
+                if !read_result.is_ok {
+                    chunk.free();
+                    failed = true;
+                    err_code = read_result.error;
+                } else if read_result.value == 0 {
+                    chunk.free();
+                    done = true;
+                } else {
+                    let n = read_result.value;
+                    let next_total = total + n;
+                    if next_total < total {
+                        chunk.free();
+                        failed = true;
+                        err_code = STATUS_OVERFLOW();
+                    } else {
+                        let appended = out.append_from(chunk, 0, n);
+                        chunk.free();
+                        if !appended.is_ok {
+                            failed = true;
+                            err_code = appended.error;
+                        } else {
+                            total = next_total;
+                            pos = pos + n;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if failed {
+        Result { is_ok: false, value: 0, error: err_code }
+    } else {
+        Result { is_ok: true, value: total, error: 0 }
+    }
+}
+
+def write_all(writer: Cursor, data: Buffer, used_len: i64) -> Result<i64, i64> {
+    if used_len < 0 {
+        Result { is_ok: false, value: 0, error: STATUS_INVALID_ARGUMENT() }
+    } else {
+        let mut offset: i64 = 0;
+        let mut pos = writer.pos;
+        let mut zero_streak: i64 = 0;
+        let mut failed = false;
+        let mut err_code: i64 = 0;
+        while offset < used_len && !failed {
+            let remaining = used_len - offset;
+            let slice_result = ffi_buffer_new(remaining);
+            if !slice_result.is_ok {
+                failed = true;
+                err_code = slice_result.error;
+            } else {
+                let slice = slice_result.value;
+                let ranged = data.copy_range(offset, remaining, slice);
+                if !ranged.is_ok {
+                    slice.free();
+                    failed = true;
+                    err_code = ranged.error;
+                } else {
+                    let cur = Cursor { buffer_handle: writer.buffer_handle, pos: pos };
+                    let wrote = cursor_write_buffer(cur, slice, remaining);
+                    slice.free();
+                    if !wrote.is_ok {
+                        failed = true;
+                        err_code = wrote.error;
+                    } else if wrote.value == 0 {
+                        zero_streak = zero_streak + 1;
+                        if zero_streak >= 2 {
+                            failed = true;
+                            err_code = STATUS_IO();
+                        }
+                    } else {
+                        zero_streak = 0;
+                        offset = offset + wrote.value;
+                        pos = pos + wrote.value;
+                    }
+                }
+            }
+        }
+        if failed {
+            Result { is_ok: false, value: 0, error: err_code }
+        } else {
+            Result { is_ok: true, value: offset, error: 0 }
+        }
+    }
+}
+
+def copy_stream(reader: Cursor, writer: Cursor, scratch: Buffer) -> Result<i64, i64> {
+    let mut total: i64 = 0;
+    let mut rpos = reader.pos;
+    let mut wpos = writer.pos;
+    let mut done = false;
+    let mut failed = false;
+    let mut err_code: i64 = 0;
+    while !done && !failed {
+        scratch.clear();
+        let rcur = Cursor { buffer_handle: reader.buffer_handle, pos: rpos };
+        let read_result = cursor_read_into(rcur, scratch);
+        if !read_result.is_ok {
+            failed = true;
+            err_code = read_result.error;
+        } else if read_result.value == 0 {
+            done = true;
+        } else {
+            let n = read_result.value;
+            rpos = rpos + n;
+            let wcur = Cursor { buffer_handle: writer.buffer_handle, pos: wpos };
+            let wrote = write_all(wcur, scratch, n);
+            if !wrote.is_ok {
+                failed = true;
+                err_code = wrote.error;
+            } else {
+                wpos = wpos + n;
+                let next = total + n;
+                if next < total {
+                    failed = true;
+                    err_code = STATUS_OVERFLOW();
+                } else {
+                    total = next;
+                }
+            }
+        }
+    }
+    if failed {
+        Result { is_ok: false, value: 0, error: err_code }
+    } else {
+        Result { is_ok: true, value: total, error: 0 }
+    }
+}
