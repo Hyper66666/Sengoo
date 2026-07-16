@@ -66,9 +66,10 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 ## Known open Sengoo-side items
 
-1. **Task 8.3** — lambda Drop + worker by-value `execution_mode` leak **fixed**; investigate-45k green (~3.4 B/case, PWS flat). Still need 1M soak + Linux RSS.
-2. **Task 8.4** — residual-fix Windows p50/p95/p99 improved (~154/332/500 µs on 45k); need Linux dual-host table.
+1. **Task 8.3** — ownership/Drop leaks reduced (lambda + execution_mode + unsupported-version path); watchdog kill-before-join; still need 1M soak + Linux RSS.
+2. **Task 8.4** — residual-fix Windows latency improved; need Linux dual-host table.
 3. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
+4. **Review reopen (2026-07-17):** 5.12/5.13, 6.5/6.6, 7.2–7.4/7.7, 8.2/8.7, 9.1–9.3 reopened for evidence gaps (installed product flow, fault injection, pin-grade package, fmt/CI on HEAD, cross-repo OpenSpec).
 
 ## Unsupported authority transfers
 

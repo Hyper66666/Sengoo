@@ -407,5 +407,19 @@ bundle hashes. There are no active Senline workarounds for these defects.
   45,000/45,000 in ~9 s; PWS ~1.0→1.14 MiB (~**3.4 B/case** post-warm-up, noise
   floor); handles 67; `plan_ok=45000`; p50/p95/p99 ≈ 154/332/500 µs. Evidence:
   `target/senline-resource/soak-investigate-45k-windows-x86_64-1784198111.summary.json`.
+- **2026-07-17 ownership hardening:**
+  1. Worker unsupported-version path: both branches move `WorkerRequestV1` into
+     owning helpers so path-insensitive moved tracking cannot skip nested
+     String Drop (`worker_reject_unsupported_operation_v1` /
+     `worker_accept_decoded_request_v1`). Nested String fields Drop via
+     aggregate param field bindings (not bare `String` params).
+  2. Resource harness kills the worker before joining stdout/stderr readers so
+     a hung worker cannot freeze the watchdog.
+  3. Always-on regression:
+     `resource_unsupported_operation_version_path_does_not_grow_memory`.
+  4. **Not** auto-Dropping ordinary by-value `String` params: method receivers
+     are still lowered as handle copies (`len`/`as_str`); enabling param Drop
+     free'd live objects under the caller's handle. Full language ownership
+     remains an open compiler task (review P1).
 - Remaining gate for task 8.3: full **1,000,000** single-worker soak + Linux
   RSS confirmation.

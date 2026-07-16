@@ -327,8 +327,25 @@ def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFra
     Result { is_ok: true, value: WorkerEncodedFrameV1 { payload: output, len: serialized + 1 }, error: 0 };
 }
 
+// Owns `request` end-to-end on the unsupported path so nested Strings Drop.
+// Avoid if/else where only one branch moves `request`: path-insensitive moved
+// tracking would skip Drop on the borrow-only branch and leak every evaluation.
+def worker_reject_unsupported_operation_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
+    worker_encode_unsupported_operation_error_v1(&request.context.evaluation_id);
+}
+
+def worker_accept_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
+    let revision = string_from_str(worker_module_revision_v1());
+    if revision.is_err() { return worker_encoded_error(revision.error); };
+    worker_encode_plan_v1(plan_submit_envelope_v1(request, revision.value));
+}
+
 def worker_process_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
-    if not worker_operation_version_supported(request.context.operation_version) { worker_encode_unsupported_operation_error_v1(&request.context.evaluation_id); } else { let revision = string_from_str(worker_module_revision_v1()); if revision.is_err() { return worker_encoded_error(revision.error); }; worker_encode_plan_v1(plan_submit_envelope_v1(request, revision.value)); };
+    if not worker_operation_version_supported(request.context.operation_version) {
+        worker_reject_unsupported_operation_v1(request);
+    } else {
+        worker_accept_decoded_request_v1(request);
+    };
 }
 
 def worker_process_payload_v1(payload: Buffer, len: i64) -> Result<WorkerEncodedFrameV1, i64> {

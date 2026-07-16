@@ -48,6 +48,15 @@ impl<'a> LoweringContext<'a> {
     }
 
     pub(super) fn record_drop_binding_if_needed(&mut self, local: Local) {
+        // Legacy handle params are skipped here: by-value `self`/`String` args
+        // are still lowered as handle *copies* for many stdlib methods (`len`,
+        // `as_str`, …). Auto-Drop on those params would free the live object
+        // while the caller's local still holds the same handle.
+        //
+        // True ownership transfer into lambdas uses
+        // [`Self::force_record_owned_param_drop`] instead. Free-standing workers
+        // should take `&str`/`&String` (or move into an owning helper that only
+        // borrows fields) rather than relying on this skip being removed.
         if local.kind == LocalKind::Param
             && Self::is_legacy_idempotent_handle_mir_type(self.get_local_type(local))
         {
@@ -297,8 +306,9 @@ impl<'a> LoweringContext<'a> {
     /// Register drop glue for a by-value parameter even when the type is a
     /// legacy idempotent handle (`String`/`Buffer`/`JsonDoc`).
     ///
-    /// Ordinary function params skip those types for historical ABI reasons,
-    /// but lambdas that take `String` by value (e.g. field-allowlist callbacks)
+    /// Ordinary function params skip those types because method receivers are
+    /// still lowered as handle copies (see `record_drop_binding_if_needed`).
+    /// Lambdas that take `String` by value (e.g. field-allowlist callbacks)
     /// must free the owned handle on every return path.
     pub(super) fn force_record_owned_param_drop(&mut self, local: Local) {
         if local.kind != LocalKind::Param {

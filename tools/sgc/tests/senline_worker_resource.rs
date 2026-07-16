@@ -395,6 +395,198 @@ fn reviewed_boundary_request(index: u64) -> Vec<u8> {
     bytes
 }
 
+/// Same reviewed-boundary shape with an explicit operation_version (both context
+/// and facts). Used to exercise the unsupported-version error path that previously
+/// leaked owned request Strings under path-insensitive move tracking.
+fn reviewed_boundary_request_with_operation_version(index: u64, operation_version: u32) -> Vec<u8> {
+    let mut request: serde_json::Value = serde_json::from_slice(&reviewed_boundary_request(index))
+        .expect("reparse boundary request");
+    request["context"]["operation_version"] = serde_json::json!(operation_version);
+    request["facts"]["operation_version"] = serde_json::json!(operation_version);
+    let bytes = serde_json::to_vec(&request).expect("serialize unsupported-version request");
+    assert!(
+        bytes.len() <= INPUT_MAX_BYTES,
+        "unsupported-version request oversized"
+    );
+    bytes
+}
+
+fn run_resource_corpus_with_requests<F>(
+    executable: &Path,
+    count: u64,
+    timeout: Duration,
+    mut request_for_index: F,
+) -> ResourceOutcome
+where
+    F: FnMut(u64) -> Vec<u8>,
+{
+    let per_request_timeout = Duration::from_secs(5);
+    let mut child = Command::new(executable)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn resource worker");
+    let pid = child.id();
+    let mut stdin = child.stdin.take().expect("worker stdin");
+    let stdout = child.stdout.take().expect("worker stdout");
+    let mut stderr = child.stderr.take().expect("worker stderr");
+    let stderr_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        bytes
+    });
+    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(0);
+    let reader = std::thread::spawn(move || {
+        let mut stdout = stdout;
+        loop {
+            match read_frame(&mut stdout, OUTPUT_MAX_BYTES) {
+                Ok(frame) => {
+                    if response_tx.send(Ok(frame)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = response_tx.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
+
+    let fixture_handshake = normalize_fixture_bytes(
+        fs::read(fixture_root().join("handshake/ready.json")).expect("read frozen handshake"),
+    );
+    let mut failures = Vec::new();
+    match response_rx.recv_timeout(per_request_timeout) {
+        Ok(Ok(handshake)) if normalize_fixture_bytes(&handshake) == fixture_handshake => {}
+        Ok(Ok(_)) => failures.push("worker handshake differs from frozen fixture".to_owned()),
+        Ok(Err(error)) => failures.push(format!("worker handshake failed: {error}")),
+        Err(_) => failures.push("worker handshake timed out".to_owned()),
+    }
+
+    let started = Instant::now();
+    let mut samples = Vec::new();
+    let mut latency_us = Vec::with_capacity(count.saturating_sub(WARMUP_CASES) as usize);
+    let mut plan_ok = 0_u64;
+    let mut plan_reject_or_error = 0_u64;
+    let mut window_start = Instant::now();
+    let mut window_cases = 0_u64;
+    let mut completed = 0_u64;
+
+    if failures.is_empty() {
+        for index in 0..count {
+            if started.elapsed() > timeout {
+                failures.push(format!(
+                    "watchdog exceeded after case {index}/{} ({:?})",
+                    count,
+                    started.elapsed()
+                ));
+                break;
+            }
+            let request = request_for_index(index);
+            let req_started = Instant::now();
+            if let Err(error) = write_frame(&mut stdin, &request) {
+                failures.push(format!("case {index} write failed: {error}"));
+                break;
+            }
+            let response = match response_rx.recv_timeout(per_request_timeout) {
+                Ok(Ok(response)) => response,
+                Ok(Err(error)) => {
+                    failures.push(format!("case {index} read failed: {error}"));
+                    break;
+                }
+                Err(_) => {
+                    failures.push(format!(
+                        "case {index} response timed out after {per_request_timeout:?} (possible single-worker spin/hang)"
+                    ));
+                    break;
+                }
+            };
+            let latency = req_started.elapsed();
+            completed = index + 1;
+            if index >= WARMUP_CASES {
+                latency_us.push(latency.as_micros() as u64);
+            }
+            // Accept any well-formed plan/error JSON response; reject hang/malformed.
+            match serde_json::from_slice::<Value>(&response) {
+                Ok(value) => {
+                    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
+                    if kind == "plan" {
+                        plan_ok += 1;
+                    } else {
+                        plan_reject_or_error += 1;
+                    }
+                }
+                Err(error) => {
+                    failures.push(format!("case {index} malformed JSON response: {error}"));
+                    break;
+                }
+            }
+
+            window_cases += 1;
+            if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
+                let window_secs = window_start.elapsed().as_secs_f64().max(1e-9);
+                let cps = window_cases as f64 / window_secs;
+                samples.push(SamplePoint {
+                    case_index: index + 1,
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    memory_bytes: sample_worker_memory_bytes(pid),
+                    handle_count: sample_worker_handle_count(pid),
+                    cases_per_second_window: cps,
+                });
+                if (index + 1) % 1_000 == 0 {
+                    println!(
+                        "senline-resource progress case={} elapsed_ms={} cps_window={:.1} mem={:?} handles={:?}",
+                        index + 1,
+                        started.elapsed().as_millis(),
+                        cps,
+                        samples.last().and_then(|s| s.memory_bytes),
+                        samples.last().and_then(|s| s.handle_count)
+                    );
+                }
+                window_start = Instant::now();
+                window_cases = 0;
+            }
+        }
+    }
+
+    // Kill the worker *before* joining stdout/stderr readers. Joining first
+    // deadlocks the soak watchdog when the worker hangs with pipes still open.
+    drop(stdin);
+    drop(response_rx);
+    let _ = finish_child(&mut child, Duration::from_secs(2));
+    // After kill/exit, OS closes pipes so readers observe EOF and return.
+    // Bound the joins so a stuck pipe still cannot hang the harness forever.
+    let join_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if reader.is_finished() && stderr_reader.is_finished() {
+            break;
+        }
+        if Instant::now() >= join_deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if reader.is_finished() {
+        let _ = reader.join();
+    } // else: drop detaches; prefer hang-free soak over perfect cleanup
+    if stderr_reader.is_finished() {
+        let _ = stderr_reader.join();
+    }
+
+    ResourceOutcome {
+        cases: if completed == 0 { count } else { completed },
+        warm_up: WARMUP_CASES,
+        elapsed: started.elapsed(),
+        samples,
+        latency_us,
+        plan_ok,
+        plan_reject_or_error,
+        failures,
+    }
+}
+
 fn percentile_us(sorted_us: &[u64], pct: f64) -> u64 {
     if sorted_us.is_empty() {
         return 0;
@@ -408,11 +600,7 @@ fn sample_worker_memory_bytes(pid: u32) -> Option<u64> {
     let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix("VmRSS:") {
-            let kb: u64 = rest
-                .split_whitespace()
-                .next()?
-                .parse()
-                .ok()?;
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
             return Some(kb.saturating_mul(1024));
         }
     }
@@ -549,155 +737,7 @@ struct ResourceOutcome {
 }
 
 fn run_resource_corpus(executable: &Path, count: u64, timeout: Duration) -> ResourceOutcome {
-    // Per-request response bound so a spinning worker cannot hang the harness forever.
-    let per_request_timeout = Duration::from_secs(5);
-    let mut child = Command::new(executable)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn resource worker");
-    let pid = child.id();
-    let mut stdin = child.stdin.take().expect("worker stdin");
-    let stdout = child.stdout.take().expect("worker stdout");
-    let mut stderr = child.stderr.take().expect("worker stderr");
-    let stderr_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stderr.read_to_end(&mut bytes);
-        bytes
-    });
-    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<Result<Vec<u8>, String>>(0);
-    let reader = std::thread::spawn(move || {
-        let mut stdout = stdout;
-        loop {
-            match read_frame(&mut stdout, OUTPUT_MAX_BYTES) {
-                Ok(frame) => {
-                    if response_tx.send(Ok(frame)).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    let _ = response_tx.send(Err(error));
-                    break;
-                }
-            }
-        }
-    });
-
-    let fixture_handshake = normalize_fixture_bytes(
-        fs::read(fixture_root().join("handshake/ready.json")).expect("read frozen handshake"),
-    );
-    let mut failures = Vec::new();
-    match response_rx.recv_timeout(per_request_timeout) {
-        Ok(Ok(handshake)) if normalize_fixture_bytes(&handshake) == fixture_handshake => {}
-        Ok(Ok(_)) => failures.push("worker handshake differs from frozen fixture".to_owned()),
-        Ok(Err(error)) => failures.push(format!("worker handshake failed: {error}")),
-        Err(_) => failures.push("worker handshake timed out".to_owned()),
-    }
-
-    let started = Instant::now();
-    let mut samples = Vec::new();
-    let mut latency_us = Vec::with_capacity(count.saturating_sub(WARMUP_CASES) as usize);
-    let mut plan_ok = 0_u64;
-    let mut plan_reject_or_error = 0_u64;
-    let mut window_start = Instant::now();
-    let mut window_cases = 0_u64;
-    let mut completed = 0_u64;
-
-    if failures.is_empty() {
-        for index in 0..count {
-            if started.elapsed() > timeout {
-                failures.push(format!(
-                    "watchdog exceeded after case {index}/{} ({:?})",
-                    count,
-                    started.elapsed()
-                ));
-                break;
-            }
-            let request = reviewed_boundary_request(index);
-            let req_started = Instant::now();
-            if let Err(error) = write_frame(&mut stdin, &request) {
-                failures.push(format!("case {index} write failed: {error}"));
-                break;
-            }
-            let response = match response_rx.recv_timeout(per_request_timeout) {
-                Ok(Ok(response)) => response,
-                Ok(Err(error)) => {
-                    failures.push(format!("case {index} read failed: {error}"));
-                    break;
-                }
-                Err(_) => {
-                    failures.push(format!(
-                        "case {index} response timed out after {per_request_timeout:?} (possible single-worker spin/hang)"
-                    ));
-                    break;
-                }
-            };
-            let latency = req_started.elapsed();
-            completed = index + 1;
-            if index >= WARMUP_CASES {
-                latency_us.push(latency.as_micros() as u64);
-            }
-
-            // Accept any well-formed plan/error JSON response; reject hang/malformed.
-            match serde_json::from_slice::<Value>(&response) {
-                Ok(value) => {
-                    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
-                    if kind == "plan" {
-                        plan_ok += 1;
-                    } else {
-                        plan_reject_or_error += 1;
-                    }
-                }
-                Err(error) => {
-                    failures.push(format!("case {index} malformed JSON response: {error}"));
-                    break;
-                }
-            }
-
-            window_cases += 1;
-            if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
-                let window_secs = window_start.elapsed().as_secs_f64().max(1e-9);
-                let cps = window_cases as f64 / window_secs;
-                samples.push(SamplePoint {
-                    case_index: index + 1,
-                    elapsed_ms: started.elapsed().as_millis() as u64,
-                    memory_bytes: sample_worker_memory_bytes(pid),
-                    handle_count: sample_worker_handle_count(pid),
-                    cases_per_second_window: cps,
-                });
-                if (index + 1) % 1_000 == 0 {
-                    println!(
-                        "senline-resource progress case={} elapsed_ms={} cps_window={:.1} mem={:?} handles={:?}",
-                        index + 1,
-                        started.elapsed().as_millis(),
-                        cps,
-                        samples.last().and_then(|s| s.memory_bytes),
-                        samples.last().and_then(|s| s.handle_count)
-                    );
-                }
-                window_start = Instant::now();
-                window_cases = 0;
-            }
-        }
-    }
-
-    drop(stdin);
-    drop(response_rx);
-    let _ = reader.join();
-    let _stderr = stderr_reader.join().unwrap_or_default();
-    let _ = finish_child(&mut child, Duration::from_secs(5));
-
-    ResourceOutcome {
-        cases: if completed == 0 { count } else { completed },
-        warm_up: WARMUP_CASES,
-        elapsed: started.elapsed(),
-        samples,
-        latency_us,
-        plan_ok,
-        plan_reject_or_error,
-        failures,
-    }
+    run_resource_corpus_with_requests(executable, count, timeout, reviewed_boundary_request)
 }
 
 fn finish_child(child: &mut Child, grace: Duration) -> std::io::Result<std::process::ExitStatus> {
@@ -728,8 +768,7 @@ fn memory_growth_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option
     if cases <= 0.0 {
         return None;
     }
-    let delta =
-        last.memory_bytes.unwrap() as i64 - first.memory_bytes.unwrap() as i64;
+    let delta = last.memory_bytes.unwrap() as i64 - first.memory_bytes.unwrap() as i64;
     Some(delta as f64 / cases)
 }
 
@@ -830,7 +869,9 @@ fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
     );
     assert_eq!(
         outcome.plan_ok + outcome.plan_reject_or_error,
-        outcome.cases.min(outcome.plan_ok + outcome.plan_reject_or_error),
+        outcome
+            .cases
+            .min(outcome.plan_ok + outcome.plan_reject_or_error),
         "{label} response accounting"
     );
 }
@@ -839,11 +880,7 @@ fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
 fn resource_sampler_smoke_single_worker_with_latency_percentiles() {
     let root = WorkerTempDir::new("smoke");
     let executable = build_worker(&root);
-    let outcome = run_resource_corpus(
-        &executable,
-        SMOKE_COUNT,
-        Duration::from_secs(180),
-    );
+    let outcome = run_resource_corpus(&executable, SMOKE_COUNT, Duration::from_secs(180));
     assert_resource_outcome(&outcome, "smoke-1k");
     assert!(
         outcome.latency_us.len() as u64 >= SMOKE_COUNT.saturating_sub(WARMUP_CASES),
@@ -855,6 +892,33 @@ fn resource_sampler_smoke_single_worker_with_latency_percentiles() {
     );
 }
 
+/// Regression: operation_version=99 previously leaked owned request Strings
+/// because the unsupported branch borrowed evaluation_id while the accept
+/// branch moved the whole request (path-insensitive moved set).
+#[test]
+fn resource_unsupported_operation_version_path_does_not_grow_memory() {
+    let root = WorkerTempDir::new("unsupported-opver");
+    let executable = build_worker(&root);
+    const COUNT: u64 = 2_048;
+    let outcome =
+        run_resource_corpus_with_requests(&executable, COUNT, Duration::from_secs(180), |index| {
+            reviewed_boundary_request_with_operation_version(index, 99)
+        });
+    assert_resource_outcome(&outcome, "unsupported-opver-2k");
+    assert_eq!(
+        outcome.plan_reject_or_error, COUNT,
+        "every case must take the unsupported-operation-version error path"
+    );
+    assert_eq!(outcome.plan_ok, 0, "unsupported path must not emit plan");
+    let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
+        .expect("post-warm-up memory samples");
+    println!("senline-resource unsupported-opver growth_bytes_per_case={growth}");
+    assert!(
+        growth < 1024.0,
+        "unsupported-version path growth {growth} B/case exceeds 1 KiB/case bound"
+    );
+}
+
 #[test]
 #[ignore = "single-worker investigation covering historical case ~44086; run with --ignored"]
 fn resource_single_worker_investigation_50k() {
@@ -862,11 +926,7 @@ fn resource_single_worker_investigation_50k() {
     let executable = build_worker(&root);
     // Historical pre-fix observation stalled near case 44086 / multi-minute
     // growth. After lambda String Drop glue, this window must complete cleanly.
-    let outcome = run_resource_corpus(
-        &executable,
-        INVESTIGATION_COUNT,
-        Duration::from_secs(900),
-    );
+    let outcome = run_resource_corpus(&executable, INVESTIGATION_COUNT, Duration::from_secs(900));
     assert_resource_outcome(&outcome, "investigate-45k");
     let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
         .expect("post-warm-up memory samples");
@@ -886,11 +946,7 @@ fn resource_single_worker_investigation_50k() {
 fn resource_single_worker_soak_1m() {
     let root = WorkerTempDir::new("soak-1m");
     let executable = build_worker(&root);
-    let outcome = run_resource_corpus(
-        &executable,
-        SOAK_COUNT,
-        Duration::from_secs(6 * 3600),
-    );
+    let outcome = run_resource_corpus(&executable, SOAK_COUNT, Duration::from_secs(6 * 3600));
     assert_resource_outcome(&outcome, "soak-1m");
     let growth = memory_growth_bytes_per_case(&outcome.samples, WARMUP_CASES)
         .expect("need post-warm-up memory samples for soak gate");
