@@ -1,19 +1,25 @@
 use std::collections::HashMap;
+#[cfg(test)]
 use std::fs;
-use std::path::{Path, PathBuf};
-use tower_lsp::lsp_types::{
-    GotoDefinitionResponse, InitializeParams, Location, Position, SymbolInformation, TextEdit, Url,
-    WorkspaceEdit,
-};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(test)]
+use tower_lsp::lsp_types::{GotoDefinitionResponse, SymbolInformation};
+use tower_lsp::lsp_types::{InitializeParams, Location, Position, TextEdit, Url, WorkspaceEdit};
 
+#[cfg(test)]
 use super::dependency_sources::dependency_roots_for_workspace_roots;
+#[cfg(test)]
 use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
+#[cfg(test)]
 use super::symbols::{
-    collect_ast_symbols, completion_kind_to_symbol_kind, extract_identifier_at,
-    find_declaration_in_text, find_definition_in_text, find_symbol_occurrences,
-    valid_identifier_name, AstSymbol,
+    collect_ast_symbols, completion_kind_to_symbol_kind, find_declaration_in_text,
+    find_definition_in_text, AstSymbol,
 };
+use super::symbols::{extract_identifier_at, find_symbol_occurrences, valid_identifier_name};
 
+#[cfg(test)]
 pub(crate) fn workspace_symbols_for_documents(
     query: &str,
     documents: &HashMap<Url, String>,
@@ -43,6 +49,7 @@ pub(crate) fn workspace_symbols_for_documents(
     items
 }
 
+#[cfg(test)]
 fn sorted_workspace_documents<'a>(
     current_uri: &Url,
     documents: &'a HashMap<Url, String>,
@@ -61,6 +68,7 @@ fn sorted_workspace_documents<'a>(
     sorted_docs
 }
 
+#[cfg(test)]
 pub(crate) fn find_symbol_detail_in_documents(
     current_uri: &Url,
     symbol: &str,
@@ -78,6 +86,7 @@ pub(crate) fn find_symbol_detail_in_documents(
     None
 }
 
+#[cfg(test)]
 pub(crate) fn completion_symbols_for_documents(
     current_uri: &Url,
     documents: &HashMap<Url, String>,
@@ -87,6 +96,13 @@ pub(crate) fn completion_symbols_for_documents(
 
     for (_, content) in sorted_workspace_documents(current_uri, documents) {
         for symbol in collect_ast_symbols(content) {
+            if matches!(
+                symbol.kind,
+                tower_lsp::lsp_types::CompletionItemKind::FIELD
+                    | tower_lsp::lsp_types::CompletionItemKind::METHOD
+            ) {
+                continue;
+            }
             if seen.insert(symbol.name.clone()) {
                 symbols.push(symbol);
             }
@@ -96,6 +112,7 @@ pub(crate) fn completion_symbols_for_documents(
     symbols
 }
 
+#[cfg(test)]
 pub(crate) fn function_signatures_for_documents(
     current_uri: &Url,
     documents: &HashMap<Url, String>,
@@ -111,6 +128,7 @@ pub(crate) fn function_signatures_for_documents(
     signatures
 }
 
+#[cfg(test)]
 fn should_skip_workspace_dir(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
@@ -121,6 +139,7 @@ fn should_skip_workspace_dir(path: &Path) -> bool {
     )
 }
 
+#[cfg(test)]
 fn collect_sengoo_files(path: &Path, out: &mut Vec<PathBuf>) {
     if path.is_file() {
         if path.extension().is_some_and(|extension| extension == "sg") {
@@ -146,6 +165,7 @@ fn collect_sengoo_files(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn workspace_documents_for_roots_and_open_documents(
     roots: &[PathBuf],
     open_documents: &HashMap<Url, String>,
@@ -214,6 +234,7 @@ pub(crate) fn workspace_roots_from_initialize(params: &InitializeParams) -> Vec<
     roots
 }
 
+#[cfg(test)]
 pub(crate) fn goto_definition_in_documents(
     uri: &Url,
     position: Position,
