@@ -215,6 +215,41 @@ def main() -> i64 {
 }
 
 #[test]
+fn wasm_run_rejects_hostile_type_count_without_panic() {
+    let dir = temp_dir("wasm_hostile_count");
+    let artifact = dir.join("hostile.wasm");
+    // Minimal malformed module: type section claims an enormous vector count.
+    let mut bytes = b"\0asm\x01\0\0\0".to_vec();
+    bytes.push(1); // type section
+    bytes.push(5); // payload length
+    bytes.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]); // huge ULEB count
+    fs::write(&artifact, &bytes).unwrap();
+
+    let run = Command::new(sgc())
+        .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
+        .output()
+        .expect("run hostile wasm");
+    assert_ne!(
+        run.status.code(),
+        Some(101),
+        "hostile count must not abort as capacity overflow panic\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        !run.status.success(),
+        "hostile module must fail closed with a diagnostic"
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("invalid WebAssembly")
+            || stderr.contains("truncated")
+            || stderr.contains("missing"),
+        "stderr:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn wasm_target_rejects_main_with_parameters() {
     let dir = temp_dir("wasm_main_params");
     let source = dir.join("main.sg");
@@ -253,7 +288,7 @@ def main(value: i64) -> i64 {
     exports.extend_from_slice(b"main");
     exports.push(0x00); // func
     exports.push(0x00); // index
-    // code: one function, 0 locals, i64.const 0, end
+                        // code: one function, 0 locals, i64.const 0, end
     let body = [0x00u8, 0x42, 0x00, 0x0b];
     let mut code = vec![0x01, body.len() as u8];
     code.extend_from_slice(&body);
@@ -280,7 +315,10 @@ def main(value: i64) -> i64 {
         .args(["run", artifact.to_str().unwrap(), "--target", "wasm"])
         .output()
         .expect("run wasm bad-main artifact");
-    assert!(!run.status.success(), "non-() main artifact must fail validation");
+    assert!(
+        !run.status.success(),
+        "non-() main artifact must fail validation"
+    );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains("() -> i64") || stderr.contains("param"),

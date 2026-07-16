@@ -321,8 +321,7 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
                     .as_ref()
                     .map(|indices| indices.len() as u64)
                     .unwrap_or(0);
-                main_function_index =
-                    find_exported_main_function_index(payload, function_count)?;
+                main_function_index = find_exported_main_function_index(payload, function_count)?;
             }
             10 => {
                 let (count, _) = read_uleb_at(payload, 0)?;
@@ -355,9 +354,9 @@ pub(crate) fn validate_wasm_module(bytes: &[u8]) -> Result<()> {
     }
     let main_index = main_function_index
         .ok_or_else(|| miette::miette!("WebAssembly module does not export `main`"))?;
-    let type_index = *function_indices
-        .get(main_index as usize)
-        .ok_or_else(|| miette::miette!("WebAssembly export `main` function index is out of range"))?;
+    let type_index = *function_indices.get(main_index as usize).ok_or_else(|| {
+        miette::miette!("WebAssembly export `main` function index is out of range")
+    })?;
     let main_ty = types.get(type_index as usize).ok_or_else(|| {
         miette::miette!("WebAssembly export `main` type index {type_index} is out of range")
     })?;
@@ -384,7 +383,10 @@ struct WasmFuncType {
 
 fn parse_wasm_type_section(payload: &[u8]) -> Result<Vec<WasmFuncType>> {
     let (count, mut offset) = read_uleb_at(payload, 0)?;
-    let mut types = Vec::with_capacity(count as usize);
+    // Empty functype is at least `0x60 0x00 0x00` (3 bytes).
+    let count = wasm_bounded_count(count, payload.len().saturating_sub(offset), 3, "type")?;
+    let mut types = Vec::new();
+    wasm_try_reserve_exact(&mut types, count, "type")?;
     for _ in 0..count {
         let form = *payload
             .get(offset)
@@ -393,16 +395,28 @@ fn parse_wasm_type_section(payload: &[u8]) -> Result<Vec<WasmFuncType>> {
         if form != 0x60 {
             miette::bail!("unsupported WebAssembly type form {form:#x} (expected functype 0x60)");
         }
-        let (param_count, next) = read_uleb_at(payload, offset)?;
+        let (param_count_raw, next) = read_uleb_at(payload, offset)?;
         offset = next;
+        let param_count = wasm_bounded_count(
+            param_count_raw,
+            payload.len().saturating_sub(offset),
+            1,
+            "parameter",
+        )?;
         for _ in 0..param_count {
             let _ = *payload
                 .get(offset)
                 .ok_or_else(|| miette::miette!("truncated WebAssembly parameter type"))?;
             offset += 1;
         }
-        let (result_count, next) = read_uleb_at(payload, offset)?;
+        let (result_count_raw, next) = read_uleb_at(payload, offset)?;
         offset = next;
+        let result_count = wasm_bounded_count(
+            result_count_raw,
+            payload.len().saturating_sub(offset),
+            1,
+            "result",
+        )?;
         let mut returns_i64 = false;
         for result_index in 0..result_count {
             let valtype = *payload
@@ -428,7 +442,10 @@ fn parse_wasm_type_section(payload: &[u8]) -> Result<Vec<WasmFuncType>> {
 
 fn parse_wasm_function_section(payload: &[u8]) -> Result<Vec<u32>> {
     let (count, mut offset) = read_uleb_at(payload, 0)?;
-    let mut indices = Vec::with_capacity(count as usize);
+    // Each function entry is at least one type-index byte.
+    let count = wasm_bounded_count(count, payload.len().saturating_sub(offset), 1, "function")?;
+    let mut indices = Vec::new();
+    wasm_try_reserve_exact(&mut indices, count, "function")?;
     for _ in 0..count {
         let (type_index, next) = read_uleb_at(payload, offset)?;
         offset = next;
@@ -469,13 +486,19 @@ fn parse_portable_abi_custom_section(payload: &[u8]) -> Result<Option<(u32, u32)
 
 fn find_exported_main_function_index(payload: &[u8], function_count: u64) -> Result<Option<u32>> {
     // Export section: count, then (name_len, name_bytes, kind, index)*
+    // Minimal export entry is name_len(1) + kind(1) + index(1) = 3 bytes.
     let (count, mut offset) = read_uleb_at(payload, 0)?;
+    let count = wasm_bounded_count(count, payload.len().saturating_sub(offset), 3, "export")?;
     let mut main_index = None;
     for _ in 0..count {
-        let (name_len, next) = read_uleb_at(payload, offset)?;
+        let (name_len_raw, next) = read_uleb_at(payload, offset)?;
         offset = next;
+        let remaining = payload.len().saturating_sub(offset);
+        // name bytes + kind + index(>=1)
+        let name_len =
+            wasm_bounded_count(name_len_raw, remaining.saturating_sub(2), 1, "export name")?;
         let end = offset
-            .checked_add(name_len as usize)
+            .checked_add(name_len)
             .ok_or_else(|| miette::miette!("WebAssembly export name length overflow"))?;
         if end > payload.len() {
             miette::bail!("truncated WebAssembly export name");
@@ -507,6 +530,40 @@ fn find_exported_main_function_index(payload: &[u8], function_count: u64) -> Res
         miette::bail!("WebAssembly export section has trailing data");
     }
     Ok(main_index)
+}
+
+/// Convert a WASM vector count into a `usize` bounded by remaining payload size.
+///
+/// Hostile modules can claim enormous ULEB counts; callers must not feed those
+/// raw values into `Vec::with_capacity` or unbounded `for` loops.
+fn wasm_bounded_count(
+    count: u64,
+    remaining_payload: usize,
+    min_bytes_per_item: usize,
+    kind: &str,
+) -> Result<usize> {
+    let count = usize::try_from(count).map_err(|_| {
+        miette::miette!("invalid WebAssembly {kind} count {count}: does not fit usize")
+    })?;
+    let max_items = if min_bytes_per_item == 0 {
+        remaining_payload
+    } else if remaining_payload == 0 {
+        0
+    } else {
+        remaining_payload / min_bytes_per_item
+    };
+    if count > max_items {
+        miette::bail!(
+            "invalid WebAssembly {kind} count {count}: exceeds remaining payload bound {max_items} ({remaining_payload} byte(s) left, min {min_bytes_per_item} byte(s)/item)"
+        );
+    }
+    Ok(count)
+}
+
+fn wasm_try_reserve_exact<T>(vec: &mut Vec<T>, count: usize, kind: &str) -> Result<()> {
+    vec.try_reserve_exact(count).map_err(|err| {
+        miette::miette!("invalid WebAssembly {kind} count {count}: allocation failed ({err})")
+    })
 }
 
 fn read_uleb_at(bytes: &[u8], mut offset: usize) -> Result<(u64, usize)> {
@@ -2414,7 +2471,8 @@ fn write_sleb(output: &mut Vec<u8>, mut value: i64) {
 mod tests {
     use super::{
         decode_bytecode, encode_bytecode, encode_wasm, execute_bytecode, normalize_portable_scalar,
-        portable_constant, read_uleb_at, validate_portable_abi_versions, validate_wasm_module,
+        parse_wasm_function_section, parse_wasm_type_section, portable_constant, read_uleb_at,
+        validate_portable_abi_versions, validate_wasm_module, wasm_bounded_count,
         PortableBackendTarget, PortableProgram, PortableScalarType, PORTABLE_RUNTIME_ABI_VERSION,
     };
     use sengoo_compiler::mir::{
@@ -2442,6 +2500,63 @@ mod tests {
         assert!(encoded.starts_with(b"SGB1"));
         let decoded = decode_bytecode(&encoded).unwrap();
         assert_eq!(execute_bytecode(&decoded).unwrap(), 42);
+    }
+
+    #[test]
+    fn wasm_bounded_count_rejects_payload_exceeding_counts() {
+        let error = wasm_bounded_count(1_000_000, 8, 3, "type")
+            .expect_err("oversized type count must fail")
+            .to_string();
+        assert!(error.contains("invalid WebAssembly type count"));
+        assert!(error.contains("exceeds remaining payload bound"));
+
+        let ok = wasm_bounded_count(2, 8, 3, "type").expect("count within bound");
+        assert_eq!(ok, 2);
+    }
+
+    #[test]
+    fn wasm_type_and_function_sections_reject_hostile_counts_without_panic() {
+        // LEB128 for a huge count that would overflow naive Vec::with_capacity.
+        // 0xFF 0xFF 0xFF 0xFF 0x0F => u32::MAX-ish / large value.
+        let hostile_type = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 0x60, 0x00, 0x00];
+        let type_error = parse_wasm_type_section(&hostile_type)
+            .expect_err("hostile type count must not panic")
+            .to_string();
+        assert!(
+            type_error.contains("invalid WebAssembly type count")
+                || type_error.contains("allocation failed"),
+            "{type_error}"
+        );
+
+        let hostile_function = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 0x00];
+        let function_error = parse_wasm_function_section(&hostile_function)
+            .expect_err("hostile function count must not panic")
+            .to_string();
+        assert!(
+            function_error.contains("invalid WebAssembly function count")
+                || function_error.contains("allocation failed"),
+            "{function_error}"
+        );
+
+        // Tiny module claiming a huge type-section count via section payload.
+        let mut module = b"\0asm\x01\0\0\0".to_vec();
+        // custom empty skip: type section id=1, payload = huge count only
+        module.push(1); // section id
+        module.push(5); // payload len
+        module.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]);
+        let module_error = validate_wasm_module(&module)
+            .expect_err("malformed module must return diagnostic")
+            .to_string();
+        assert!(
+            !module_error.to_ascii_lowercase().contains("panic"),
+            "{module_error}"
+        );
+        assert!(
+            module_error.contains("invalid WebAssembly")
+                || module_error.contains("truncated")
+                || module_error.contains("missing"),
+            "{module_error}"
+        );
     }
 
     #[test]
