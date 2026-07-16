@@ -17,4 +17,10 @@ Honest residual items that are **not** claimed complete by this archive:
 4. **Full sanitizer/fuzz/performance matrix on one SHA**  
    Focused M1–M4 gates were run locally; full remote matrix is Actions residual.
 
+5. **Post-archive corrective owners remain active**
+   `v0-2-language-coherence`, `v0-2-production-stdlib`, and
+   `v0-2-stability-contract` were reopened after review. Their original
+   2026-07-16 archives remain historical evidence, but the corrective active
+   changes must pass current-SHA and applicable remote gates before re-archive.
+
 Do not cite these residuals as Supported without new evidence.

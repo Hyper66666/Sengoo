@@ -46,10 +46,11 @@ Reader/Writer contracts without removing existing one-shot and concrete methods.
 
 ### Requirement: Sengoo text SHALL use a pinned Unicode 17.0.0 foundation
 
-The stdlib SHALL declare Unicode version 17.0.0 for scalar properties and case
-data, preserve UTF-8 byte-length/index semantics, and expose strict UTF-8
-construction, char iteration/count, locale-independent simple case mapping, and
-default case folding.
+The stdlib SHALL declare Unicode version 17.0.0 provenance for the v0.2 text
+foundation, preserve UTF-8 byte-length/index semantics, and expose strict UTF-8
+construction, `char` iteration, and scalar count. Full Unicode 17 property
+tables, simple upper/lower mapping, and casefold are follow-up surfaces and
+SHALL NOT be claimed Supported until implemented with pinned tables.
 
 #### Scenario: String length and scalar count differ
 
@@ -65,12 +66,13 @@ default case folding.
 - **AND** does not create a partially valid String
 - **AND** existing `string_from_buffer` follows the same strict validation
 
-#### Scenario: Locale-independent case operation runs
+#### Scenario: Deferred casefold and property queries are documented
 
-- **WHEN** simple lower/upper mapping or `casefold` is requested
-- **THEN** the result follows pinned Unicode 17.0.0 data
-- **AND** output expansion uses checked bounded allocation
-- **AND** no locale-specific behavior is implied
+- **WHEN** simple lower/upper mapping or `casefold` is not yet table-backed
+- **THEN** documentation marks those APIs unsupported/follow-up for the
+  integrating release
+- **AND** ASCII-only helpers remain available without claiming full Unicode case
+  behavior
 
 #### Scenario: Normalization or grapheme behavior is requested
 

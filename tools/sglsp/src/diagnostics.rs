@@ -322,6 +322,8 @@ struct SgcWarningPayload {
     severity: Option<String>,
     code: Option<String>,
     message: Option<String>,
+    replacement: Option<String>,
+    removal: Option<String>,
     #[serde(default)]
     location: Option<SgcErrorLocationPayload>,
 }
@@ -799,6 +801,7 @@ fn warning_subject_range(content: &str, message: &str) -> Option<Range> {
 
 fn diagnostic_from_compile_warning(content: &str, warning: CompileWarning) -> Diagnostic {
     let message = warning.to_string();
+    let data = deprecation_data(warning.replacement(), warning.removal());
     let range = warning
         .span()
         .filter(|(lo, hi)| hi > lo)
@@ -811,8 +814,19 @@ fn diagnostic_from_compile_warning(content: &str, warning: CompileWarning) -> Di
         code: Some(NumberOrString::String(warning.code().to_string())),
         source: Some("sengoo-compiler".to_string()),
         message,
+        data,
         ..Default::default()
     }
+}
+
+fn deprecation_data(replacement: Option<&str>, removal: Option<&str>) -> Option<serde_json::Value> {
+    if replacement.is_none() && removal.is_none() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "replacement": replacement,
+        "removal": removal,
+    }))
 }
 
 fn temporary_source_path(uri: &Url) -> PathBuf {
@@ -985,12 +999,14 @@ fn diagnostics_from_successful_sgc_output(content: &str, stderr: &str) -> Vec<Di
                 .and_then(|location| diagnostic_range_from_location(content, location))
                 .or_else(|| warning_subject_range(content, &message))
                 .unwrap_or_else(|| full_document_range(content));
+            let data = deprecation_data(payload.replacement.as_deref(), payload.removal.as_deref());
             Diagnostic {
                 range,
                 severity: Some(DiagnosticSeverity::WARNING),
                 code: payload.code.map(NumberOrString::String),
                 source: Some("sgc".to_string()),
                 message,
+                data,
                 ..Default::default()
             }
         })
@@ -2649,7 +2665,7 @@ def main() -> i64 {
         let lo = src.rfind("old_main").expect("call site should exist") as u32;
         let hi = lo + "old_main".len() as u32;
         let stderr = format!(
-            r#"{{"ok":true,"kind":"compile_warning","severity":"warning","code":"attributes::deprecated_use","message":"use of deprecated fn `old_main`: use new_main instead","location":{{"span":{{"lo":{lo},"hi":{hi}}}}}}}"#
+            r#"{{"ok":true,"kind":"compile_warning","severity":"warning","code":"attributes::deprecated_use","message":"use of deprecated fn `old_main`: use new_main instead","replacement":"new_main","removal":"v0.3.0","location":{{"span":{{"lo":{lo},"hi":{hi}}}}}}}"#
         );
 
         let diagnostics = diagnostics_from_successful_sgc_output(src, &stderr);
@@ -2663,6 +2679,13 @@ def main() -> i64 {
             ))
         );
         assert!(diagnostics[0].message.contains("old_main"));
+        assert_eq!(
+            diagnostics[0].data,
+            Some(serde_json::json!({
+                "replacement": "new_main",
+                "removal": "v0.3.0"
+            }))
+        );
         assert_eq!(diagnostics[0].range.start.line, 5);
         assert_eq!(diagnostics[0].range.start.character, 4);
     }

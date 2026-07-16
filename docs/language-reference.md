@@ -268,7 +268,8 @@ supported LLVM-text language contract.
 | `#[test]` / `#[case]` | Supported | `sgc test` generated harness tests. |
 | `#[export_name]` / `#[no_mangle]` | Supported | FFI/export tests. |
 | `#[link(name = "...")]` | Supported | Stdlib math/runtime bridges. |
-| `#[cfg]` / deprecation diagnostics | Subset | LSP parity work remains open in active specs. |
+| `#[cfg(...)]` | Subset | Target/feature predicates are supported; broader attribute placement remains limited. |
+| `#[deprecated(replacement = "...", removal = "...", note = "...")]` | Supported | Compiler text, sgc JSON, and LSP data preserve the stable code and migration metadata. Legacy message-only syntax remains compatible. |
 
 ## FFI
 

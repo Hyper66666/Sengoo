@@ -453,7 +453,7 @@ surface area: `option.sg`, `result.sg`, `collections.sg`, `string.sg`,
 `path.sg`, `process.sg`, `args.sg`, `env.sg`, `math.sg`, `error.sg`, and
 reflection wrappers such as `ffi.sg`, `db.sg`, `lua54.sg`, `net.sg`, and
 `proto.sg`. Runtime bridges are split across `runtime.c`, `runtime_collections.c`,
-`runtime_json.c`, `runtime_process.c`, and `runtime_string.c`. See
+`runtime_json.c`, `runtime_process.c`, `runtime_stream.c`, and `runtime_string.c`. See
 `tools/stdlib/README.md` for module summaries and current deferrals.
 
 Use source modules directly from Sengoo code:

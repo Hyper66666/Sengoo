@@ -89,7 +89,7 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "math" => &["option", "status"],
         "string" => &["ffi"],
         "file" | "io" | "env" | "process" | "args" | "strconv" | "time" => &["status"],
-        "stream" => &["status", "ffi", "io"],
+        "stream" => &["status", "ffi", "io", "file", "net"],
         "path" | "dir" => &["status", "string"],
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],

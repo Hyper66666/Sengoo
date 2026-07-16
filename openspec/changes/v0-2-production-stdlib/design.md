@@ -75,7 +75,7 @@ parsing continues to use `STATUS_PARSE` (`10`). `status_name_copy` and
 
 ### D6: Bound generated tables and operations
 
-Unicode tables are generated deterministically from checked-in version metadata
-or pinned source data with provenance. Case expansion and output growth use
-checked lengths and managed Buffers; no operation allocates from untrusted size
-without a documented ceiling.
+Any follow-up Unicode table implementation must be generated deterministically
+from pinned source data with provenance. Until that change is accepted, v0.2
+does not ship or claim full property/casefold tables. Existing UTF-8 operations
+use managed Buffers and documented ceilings.

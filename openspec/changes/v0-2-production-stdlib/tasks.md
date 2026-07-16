@@ -9,13 +9,13 @@
 ## 2. Reader/Writer core
 
 - [x] 2.1 Add `Reader`/`Writer` traits and `read_to_end`, `write_all`,
-  and `copy_stream` helpers (`tools/stdlib/stream.sg`; Cursor-concrete helpers).
+  and `copy_stream` helpers (`tools/stdlib/stream.sg`; runtime-owned Cursor).
 - [x] 2.2 Implement EOF, partial read/write, zero-progress, capacity,
   checked-total, and error-path tests
-  (`stdlib_m3_stream_cursor_read_write_copy`).
+  (`stdlib_m3_stream_cursor_read_write_copy`, including zero leaked Cursor handles).
 - [x] 2.3 Add file, stdio/owned-fd, and TCP adapters while retaining old methods.
-  - FdStream adapter shipped; TCP remains existing concrete `TcpStream` methods
-    as compatibility path (no nested-struct Cursor for Tcp in this slice).
+  - `AsyncFile`, `FdStream`, and `TcpStream` implement the supported trait side;
+    existing concrete methods remain source-compatible.
 - [x] 2.4 Prove bounded capacity behavior in stream helpers (no unbounded growth).
 
 ## 3. Unicode foundation
@@ -44,5 +44,7 @@
 - [x] 5.2 `sgc` stdlib M3 tests green.
 - [x] 5.3 Existing String iterator / status surfaces retained.
 - [x] 5.4 Stdlib docs, language features, support matrix updated.
-- [x] 5.5 OpenSpec archive of this change after residual HTTP note recorded.
-- [x] 5.6 Archived as `2026-07-16-v0-2-production-stdlib` with honest HTTP residual.
+- [ ] 5.5 Archive this corrective active change after residual HTTP note and
+  current-SHA verification are recorded.
+- [~] 5.6 The original change is archived as
+  `2026-07-16-v0-2-production-stdlib`; this post-archive remediation remains active.

@@ -72,6 +72,51 @@ fn m1_last_use_borrow_allows_owner_move() {
 }
 
 #[test]
+fn m1_last_use_borrow_tracks_nested_control_flow_and_expression_order() {
+    let stdlib = load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]);
+
+    let after_if = format!(
+        "{stdlib}\n\ndef test(flag: bool) -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    if flag {{ 1; }} else {{ 0; }};\n    let moved = owner;\n    view.len() + moved.len()\n}}\ndef main() -> i64 {{ test(true) }}\n"
+    );
+    assert_eq!(typeck_err_code(&after_if), "cannot-move-borrowed");
+
+    let after_loop = format!(
+        "{stdlib}\n\ndef test(flag: bool) -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    while flag {{ break; }};\n    let moved = owner;\n    view.len() + moved.len()\n}}\ndef main() -> i64 {{ test(false) }}\n"
+    );
+    assert_eq!(typeck_err_code(&after_loop), "cannot-move-borrowed");
+
+    let same_expr = format!(
+        "{stdlib}\n\ndef consume(value: String) -> i64 {{ value.len() }}\ndef main() -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    consume(owner) + view.len()\n}}\n"
+    );
+    assert_eq!(typeck_err_code(&same_expr), "cannot-move-borrowed");
+}
+
+#[test]
+fn m1_last_use_borrow_allows_move_after_branch_join() {
+    let stdlib = load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]);
+    let source = format!(
+        "{stdlib}\n\ndef consume(value: String) -> i64 {{ value.len() }}\ndef test(flag: bool) -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    let observed = if flag {{ view.len() }} else {{ 0 }};\n    consume(owner) + observed\n}}\ndef main() -> i64 {{ test(true) }}\n"
+    );
+    typeck_ok(&source);
+}
+
+#[test]
+fn m1_call_argument_borrow_ends_after_the_statement() {
+    typeck_ok(
+        r#"
+def observe(value: &mut i64) -> i64 { *value }
+
+def main() -> i64 {
+    let mut value = 20;
+    let observed = observe(&mut value);
+    let shared = &value;
+    observed + *shared
+}
+"#,
+    );
+}
+
+#[test]
 fn m1_use_after_move_and_partial_move_drop_paths() {
     let stdlib = load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]);
     let use_after = format!(
@@ -198,6 +243,33 @@ def main() -> i64 {
 }
 "#,
     );
+}
+
+#[test]
+fn m1_trait_associated_function_uses_expected_result_type() {
+    let source = r#"
+trait Factory {
+    def make(value: i64) -> Self {}
+}
+
+struct ProductA { value: i64 }
+struct ProductB { value: i64 }
+
+impl Factory for ProductA {
+    def make(value: i64) -> ProductA { ProductA { value: value } }
+}
+
+impl Factory for ProductB {
+    def make(value: i64) -> ProductB { ProductB { value: value } }
+}
+
+def main() -> i64 {
+    let product: ProductA = Factory::make(42);
+    product.value
+}
+"#;
+
+    compile_to_mir(source).expect("expected result type should select ProductA::make");
 }
 
 #[test]

@@ -44,7 +44,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `runtime.c`: anchor/core C runtime support used by stdlib/runtime smoke
   paths. Large domain bridges live in sibling sources:
   `runtime_breadth.c`, `runtime_collections.c`, `runtime_json.c`,
-  `runtime_process.c`, and `runtime_string.c`, with shared declarations in
+  `runtime_process.c`, `runtime_stream.c`, and `runtime_string.c`, with shared declarations in
   `runtime_shared.h`.
 
 ## Source Imports

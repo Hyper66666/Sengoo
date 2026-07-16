@@ -56,6 +56,17 @@ Deprecation metadata (when emitted) includes: stable warning code, replacement
 text, earliest removal version, and documented suppression policy for tools that
 support it.
 
+Stable source deprecations use structured metadata:
+
+```sg
+#[deprecated(replacement = "new_api", removal = "v0.3.0", note = "use the fallible API")]
+```
+
+The compiler retains the legacy `#[deprecated("message")]` form for source
+compatibility, but that form does not satisfy the metadata requirement for a
+new Stable-surface deprecation. `sgc` JSON emits `replacement` and `removal` as
+top-level warning fields; sglsp carries the same values in Diagnostic `data`.
+
 An immediate change is allowed only to correct a security or soundness defect,
 prevent data loss, or reject behavior that was never in the documented support
 surface. The release notes must identify the exception and its migration path.

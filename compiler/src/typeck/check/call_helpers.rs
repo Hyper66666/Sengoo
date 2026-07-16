@@ -1089,7 +1089,9 @@ impl TypeChecker {
         }
 
         if let ExprKind::Path(path) = &func.kind {
-            if let Some(result) = self.check_associated_function(path, args, call_span.lo)? {
+            if let Some(result) =
+                self.check_associated_function(path, args, call_span.lo, expected_return)?
+            {
                 return Ok(result);
             }
         }
@@ -1209,12 +1211,22 @@ impl TypeChecker {
         path: &crate::ast::Path,
         args: &[Expr],
         call_site: u32,
+        expected_return: Option<&Ty>,
     ) -> TyResult<Option<Ty>> {
         if path.segments.len() != 2 {
             return Ok(None);
         }
         let head_name = &path.segments[0].name;
         let method_name = &path.segments[1].name;
+        let expected_key = expected_return
+            .map(|ty| self.infer.apply_subst(ty))
+            .filter(|ty| {
+                !matches!(
+                    ty.kind,
+                    TyKind::Var(_) | TyKind::Inferred | TyKind::Error | TyKind::SelfType
+                )
+            })
+            .map(|ty| type_key(&ty));
 
         // D5: `Trait::method(args)` — head names a trait, select unique matching impl.
         if self.trait_registry.contains(head_name) {
@@ -1236,7 +1248,15 @@ impl TypeChecker {
                             type_key(&self.infer.apply_subst(expected))
                                 == type_key(&self.infer.apply_subst(actual))
                         },
-                    ) {
+                    ) && expected_key.as_ref().is_none_or(|expected| {
+                        let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+                        let return_key = if matches!(resolved_return.kind, TyKind::SelfType) {
+                            type_key_name.clone()
+                        } else {
+                            type_key(&resolved_return)
+                        };
+                        &return_key == expected
+                    }) {
                         candidates.push((
                             type_key_name.clone(),
                             impl_info.clone(),
@@ -1294,7 +1314,11 @@ impl TypeChecker {
                 call_site,
                 format!("{target_key}_{head_name}{suffix}_{method_name}"),
             );
-            return Ok(Some(self.infer.apply_subst(&method_ty.return_type)));
+            let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+            if let Some(expected) = expected_return {
+                self.infer.unify(&resolved_return, expected)?;
+            }
+            return Ok(Some(self.infer.apply_subst(&resolved_return)));
         }
 
         // `Type::method(args)` — head names a type (or ADT path segment).
@@ -1330,7 +1354,11 @@ impl TypeChecker {
                 let actual = self.check_expr_with_expected(arg, expected)?;
                 self.infer.unify(expected, &actual)?;
             }
-            return Ok(Some(self.infer.apply_subst(&method_ty.return_type)));
+            let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+            if let Some(expected) = expected_return {
+                self.infer.unify(&resolved_return, expected)?;
+            }
+            return Ok(Some(self.infer.apply_subst(&resolved_return)));
         }
 
         let actual_types = args
@@ -1351,7 +1379,9 @@ impl TypeChecker {
                         type_key(&self.infer.apply_subst(expected))
                             == type_key(&self.infer.apply_subst(actual))
                     },
-                ) {
+                ) && expected_key.as_ref().is_none_or(|expected| {
+                    type_key(&self.infer.apply_subst(&method_ty.return_type)) == *expected
+                }) {
                     candidates.push((trait_name.clone(), impl_info.clone(), method_ty.clone()));
                 }
             }
@@ -1392,7 +1422,11 @@ impl TypeChecker {
             call_site,
             format!("{target_key}_{trait_name}{suffix}_{method_name}"),
         );
-        Ok(Some(self.infer.apply_subst(&method_ty.return_type)))
+        let resolved_return = self.infer.apply_subst(&method_ty.return_type);
+        if let Some(expected) = expected_return {
+            self.infer.unify(&resolved_return, expected)?;
+        }
+        Ok(Some(self.infer.apply_subst(&resolved_return)))
     }
 
     fn enforce_generic_function_constraints(

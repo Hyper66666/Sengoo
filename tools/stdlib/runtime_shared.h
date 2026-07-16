@@ -135,6 +135,17 @@ SengooFfiBuffer* sengoo_ffi_buffer_from_handle(long long handle);
 long long sengoo_copy_bytes_to_managed_buffer(long long buffer_handle, const char* bytes, size_t len);
 long long sengoo_buffer_live_handle_count(void);
 long long sengoo_string_live_handle_count(void);
+long long sengoo_stream_cursor_from_buffer(long long buffer_handle);
+long long sengoo_stream_cursor_with_capacity(long long capacity);
+long long sengoo_stream_cursor_position(long long cursor_handle);
+long long sengoo_stream_cursor_read(long long cursor_handle, long long out_buffer_handle);
+long long sengoo_stream_cursor_write(
+    long long cursor_handle,
+    long long data_buffer_handle,
+    long long used_len
+);
+long long sengoo_stream_cursor_free(long long cursor_handle);
+long long sengoo_stream_cursor_live_handle_count(void);
 char* sengoo_copy_cstr_from_handle(long long value_ptr);
 char* sengoo_strdup_bytes(const char* value);
 long long sengoo_time_unix_ms(void);

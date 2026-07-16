@@ -543,6 +543,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_stream.c",
         "runtime_shared.h",
     ] {
         fs::write(root.join(file), b"/* test runtime bundle input */\n").unwrap();
@@ -564,6 +565,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
             "runtime_collections.c",
             "runtime_json.c",
             "runtime_process.c",
+            "runtime_stream.c",
         ]
     );
 
@@ -1180,13 +1182,22 @@ fn render_compile_error_json_with_location_serializes_structured_fields() {
 
 #[test]
 fn render_compile_warning_json_with_span_serializes_structured_location() {
-    let warning = CompileWarning::deprecated_use("fn", "old_main", None, Some((42, 50)));
+    let warning = CompileWarning::deprecated_use_with_metadata(
+        "fn",
+        "old_main",
+        Some("use the fallible entry point".to_string()),
+        Some("new_main".to_string()),
+        Some("v0.3.0".to_string()),
+        Some((42, 50)),
+    );
     let json = super::render_compile_warning_json(&warning);
     let value: Value = serde_json::from_str(&json).expect("warning json should be valid");
 
     assert_eq!(value["kind"], "compile_warning");
     assert_eq!(value["severity"], "warning");
     assert_eq!(value["code"], "attributes::deprecated_use");
+    assert_eq!(value["replacement"], "new_main");
+    assert_eq!(value["removal"], "v0.3.0");
     assert_eq!(value["location"]["span"]["lo"], 42);
     assert_eq!(value["location"]["span"]["hi"], 50);
 }
@@ -7000,48 +7011,37 @@ import std::ffi;
 import std::stream;
 import std::status;
 
-def main() -> i64 {
-    let reader = cursor_from_bytes("hello-stream").unwrap_or(Cursor {
-        buffer_handle: 0,
-        pos: 0,
-    });
-    let out = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
-    let total = read_to_end(reader, out).unwrap_or(-1);
+def exercise_streams() -> i64 {
+    let mut reader = cursor_from_bytes("hello-stream").unwrap_or(Cursor { handle: 0 });
+    let mut out = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let total = read_to_end(&mut reader, &mut out).unwrap_or(-1);
 
-    let sink_buf = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
-    let writer = cursor_new(sink_buf);
-    let wrote = write_all(writer, out, total).unwrap_or(-1);
+    let mut writer = cursor_with_capacity(64).unwrap_or(Cursor { handle: 0 });
+    let wrote = write_all(&mut writer, &out, total).unwrap_or(-1);
 
-    let reader2 = cursor_from_bytes("abc").unwrap_or(Cursor {
-        buffer_handle: 0,
-        pos: 0,
-    });
-    let sink2 = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
-    let writer2 = cursor_new(sink2);
-    let scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
-    let copied = copy_stream(reader2, writer2, scratch).unwrap_or(-1);
+    let mut reader2 = cursor_from_bytes("abc").unwrap_or(Cursor { handle: 0 });
+    let mut writer2 = cursor_with_capacity(16).unwrap_or(Cursor { handle: 0 });
+    let mut scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let copied = copy_stream(&mut reader2, &mut writer2, &mut scratch).unwrap_or(-1);
 
-    let zero_cap = ffi_buffer_new(0).unwrap_or(Buffer { handle: 0 });
-    let leftover = cursor_from_bytes("z").unwrap_or(Cursor {
-        buffer_handle: 0,
-        pos: 0,
-    });
-    let zero_read = cursor_read_into(leftover, zero_cap);
+    let mut zero_cap = ffi_buffer_new(0).unwrap_or(Buffer { handle: 0 });
+    let mut leftover = cursor_from_bytes("z").unwrap_or(Cursor { handle: 0 });
+    let zero_read = cursor_read_into(&mut leftover, &mut zero_cap);
     let zero_is_buffer = if zero_read.is_ok { false } else { zero_read.error == STATUS_BUFFER_TOO_SMALL() };
-
-    out.free();
-    scratch.free();
-    zero_cap.free();
-    cursor_free(reader);
-    cursor_free(writer);
-    cursor_free(reader2);
-    cursor_free(writer2);
-    cursor_free(leftover);
 
     if total == 12 and wrote == 12 and copied == 3 and zero_is_buffer {
         42
     } else {
         1
+    }
+}
+
+def main() -> i64 {
+    let result = exercise_streams();
+    if result == 42 && sengoo_stream_cursor_live_handle_count() == 0 {
+        42
+    } else {
+        2
     }
 }
 "#,

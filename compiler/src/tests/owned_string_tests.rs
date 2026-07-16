@@ -566,7 +566,7 @@ def main() -> i64 {
     };
     let view = &pair.left;
     let moved = pair.left;
-    0
+    view.len() + moved.len()
 }
 "#,
     );
@@ -592,7 +592,7 @@ def main() -> i64 {
     };
     let view = &pair.left;
     let moved = pair;
-    0
+    view.len() + moved.right.len()
 }
 "#,
     );

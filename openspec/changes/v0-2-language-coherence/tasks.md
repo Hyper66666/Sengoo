@@ -53,9 +53,9 @@
 - [x] 6.1 Add a package conformance fixture combining every M1 surface without
   manual release calls.
   - Compiler gate suite `m1_language_coherence_tests` + existing drop/match suites.
-- [x] 6.2 Run compiler lib/integration tests, `sgc` conformance, `sglsp`
+- [~] 6.2 Run compiler lib/integration tests, `sgc` conformance, `sglsp`
   diagnostic parity, sanitizer/leak gates, and warnings-denied Clippy.
 - [x] 6.3 Update `docs/language-reference.md` statuses and proof links.
 - [x] 6.4 Run `openspec validate v0-2-language-coherence --strict` and
   `openspec validate --all --strict`.
-- [x] 6.5 Archive this change and unblock M2/M3 public API archive work.
+- [ ] 6.5 Archive this corrective active change after current-SHA gates pass.

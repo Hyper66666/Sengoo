@@ -8,7 +8,8 @@
 
 ## 2. Deprecation and migration
 
-- [x] 2.1 Deprecation metadata fields documented in compatibility policy.
+- [x] 2.1 Structured `replacement` and `removal` metadata is accepted by
+  `#[deprecated(...)]` and preserved in compiler text, sgc JSON, and LSP data.
 - [x] 2.2 Existing edition/schema rejection tests retained (`sgpm` manifest).
 - [x] 2.3 Migration guide `docs/migration-v0-1-to-v0-2.md` including `chars()`.
 - [x] 2.4 Deprecated v0.2 transitional surfaces remain functional through v0.2.x
@@ -40,6 +41,7 @@
 
 - [x] 6.1 Compatibility policy + fixture + migration tests (`toolchain_distribution`).
 - [x] 6.2 Workspace gates run on integrating branch (umbrella §6).
-- [x] 6.3 OpenSpec archive of this change.
-- [x] 6.4 Language reference / matrix stability classes updated; archived as
-  `2026-07-16-v0-2-stability-contract`.
+- [ ] 6.3 Archive this corrective active change after local and required remote
+  residual gates are recorded.
+- [~] 6.4 The original change is archived as
+  `2026-07-16-v0-2-stability-contract`; this remediation remains active.

@@ -440,7 +440,7 @@ alias。
 `args.sg`、`env.sg`、`math.sg`、`error.sg`，以及 `ffi.sg`、`db.sg`、
 `lua54.sg`、`net.sg`、`proto.sg` 等反射 wrapper。运行时桥接分布在
 `runtime.c`、`runtime_collections.c`、`runtime_json.c`、
-`runtime_process.c`、`runtime_string.c`。模块说明和当前延期项见
+`runtime_process.c`、`runtime_stream.c`、`runtime_string.c`。模块说明和当前延期项见
 `tools/stdlib/README.md`。
 
 可以直接在 Sengoo 源码里导入标准库模块：

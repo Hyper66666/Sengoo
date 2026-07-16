@@ -315,6 +315,10 @@ impl Buffer {
         sengoo_ffi_buffer_ptr(self.handle)
     }
 
+    def raw_handle(self) -> i64 {
+        self.handle
+    }
+
     def copy_out_raw(self, out_buffer_ptr: i64, out_capacity: i64) -> i64 {
         sengoo_ffi_buffer_copy_out(self.handle, out_buffer_ptr, out_capacity)
     }

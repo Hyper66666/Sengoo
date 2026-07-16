@@ -21,8 +21,9 @@
 
 ## 2. M1 - Language coherence
 
-- [x] 2.1 Complete and archive `v0-2-language-coherence`.
-  - Archived as `2026-07-16-v0-2-language-coherence`.
+- [~] 2.1 Complete and archive the reopened `v0-2-language-coherence` remediation.
+  - Original archive: `2026-07-16-v0-2-language-coherence`; current corrective
+    owner remains active until current-SHA gates pass.
 - [x] 2.2 Prove ownership/borrow, match/trait, array, and control-flow contracts
   through compiler positive/negative tests and native runtime evidence.
   - Gate: `m1_language_coherence_tests` + drop_flag/match_typeck suites.
@@ -46,16 +47,18 @@
 - [~] 4.1 Complete and archive `http-production-serving`.
   - Residual open owner: handlers/keep-alive/streaming/TLS server not claimed.
   - Matrix row updated honestly; not archived as complete.
-- [x] 4.2 Complete and archive `v0-2-production-stdlib`.
-  - Archived `2026-07-16-v0-2-production-stdlib`.
+- [~] 4.2 Complete and archive the reopened `v0-2-production-stdlib` remediation.
+  - Original archive: `2026-07-16-v0-2-production-stdlib`; runtime-owned Cursor
+    and corrected Unicode scope are under current verification.
 - [x] 4.3 Prove bounded stream and Unicode baseline behavior through tests
   without weakening existing Buffer/String compatibility.
   - `stdlib_m3_stream_cursor_read_write_copy`, `stdlib_m3_invalid_utf8_*`.
 
 ## 5. M4 - Stability contract
 
-- [x] 5.1 Complete and archive `v0-2-stability-contract`.
-  - Archived `2026-07-16-v0-2-stability-contract`.
+- [~] 5.1 Complete and archive the reopened `v0-2-stability-contract` remediation.
+  - Original archive: `2026-07-16-v0-2-stability-contract`; structured
+    deprecation transport is under current verification.
 - [~] 5.2 Retain previous-release fixtures and pass two consecutive v0.2 release
   candidate compatibility matrices.
   - Fixtures: `examples/compat/v0.1.0-rc.1`, `v0.2.0-rc.1`; multi-host RC residual.
@@ -79,7 +82,7 @@
   supported hosts (Actions residual).
 - [x] 6.5 Run `openspec validate --all --strict` on the integrating commit SHA.
   - 46 passed, 0 failed (`openspec-validate.log`).
-- [x] 6.6 Reconcile README, language reference, compatibility policy, and
+- [~] 6.6 Reconcile README, language reference, compatibility policy, and
   `SUPPORT_MATRIX.md`, then archive this umbrella when remote residuals close
   or record residuals in archive verification.
   - See `RESIDUAL.md` for honest multi-host / HTTP residuals.
