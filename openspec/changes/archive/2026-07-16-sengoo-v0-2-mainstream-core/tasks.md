@@ -7,7 +7,8 @@
   active owners, archived dependencies, and support-matrix baseline.
   - See `v0-2-baseline-reconciliation/INVENTORY.md` (sglsp checkpoint + owners).
 - [x] 0.4 Validate this umbrella and every child with strict OpenSpec validation.
-  - `openspec validate --all --strict` on integrating SHA.
+  - `openspec validate --all --strict` → 46 passed, 0 failed on SHA
+    `ff96bb626e8091fd1033d084f83e24ad3858dd61` (scratch `openspec-validate.log`).
 
 ## 1. M0 - Baseline reconciliation
 
@@ -65,13 +66,20 @@
 
 - [x] 6.1 Run formatting and warnings-denied lint for affected workspace crates
   (integrating commit).
+  - SHA `ff96bb626…`: `cargo fmt --all -- --check` EXIT=0;
+    `cargo clippy -p sengoo-compiler -p sengoo-runtime -p sgc -p sgpm -p sgfmt -p sglsp -- -D warnings` EXIT=0
+    (scratch `umbrella-gates.log`).
 - [x] 6.2 Run compiler, runtime, `sgc`, `sgpm`, `sgfmt`, and `sglsp` focused gates
   used by M1–M4 evidence.
+  - m1: 6 passed; m3 stdlib_m3_: 2 passed; m4 compatibility: 3 passed;
+    sgfmt 12; sglsp 168 (scratch `umbrella-tool-wave.log`, `m3-tests.log`, `m4-tests.log`).
 - [~] 6.3 Run native sanitizer/leak, compatibility, performance, and fuzz gates
   (full remote matrix residual on Actions).
 - [~] 6.4 Run installed release and every reviewed realworld package loop on all
   supported hosts (Actions residual).
 - [x] 6.5 Run `openspec validate --all --strict` on the integrating commit SHA.
+  - 46 passed, 0 failed (`openspec-validate.log`).
 - [x] 6.6 Reconcile README, language reference, compatibility policy, and
   `SUPPORT_MATRIX.md`, then archive this umbrella when remote residuals close
   or record residuals in archive verification.
+  - See `RESIDUAL.md` for honest multi-host / HTTP residuals.

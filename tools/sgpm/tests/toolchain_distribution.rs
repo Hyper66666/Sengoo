@@ -314,7 +314,9 @@ fn compatibility_policy_freezes_edition_deprecation_and_supported_hosts() {
             && policy.contains("at least one minor release")
             && policy.contains("v0.2.x")
             && root.join("docs/migration-v0-1-to-v0-2.md").is_file()
-            && root.join("examples/compat/v0.2.0-rc.1/Sengoo.toml").is_file(),
+            && root
+                .join("examples/compat/v0.2.0-rc.1/Sengoo.toml")
+                .is_file(),
         "policy should freeze the 2026 edition rejection, deprecation window, and v0.2 fixtures"
     );
     for target in [
