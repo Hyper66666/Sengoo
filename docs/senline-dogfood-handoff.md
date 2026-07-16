@@ -66,8 +66,8 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 ## Known open Sengoo-side items
 
-1. **Task 8.3** — lambda `String` Drop leak **fixed**; investigate-45k green (~92 B/case). Still need 1M soak + Linux RSS.
-2. **Task 8.4** — post-fix Windows p50/p95/p99 improved; need Linux dual-host table.
+1. **Task 8.3** — lambda Drop + worker by-value `execution_mode` leak **fixed**; investigate-45k green (~3.4 B/case, PWS flat). Still need 1M soak + Linux RSS.
+2. **Task 8.4** — residual-fix Windows p50/p95/p99 improved (~154/332/500 µs on 45k); need Linux dual-host table.
 3. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
 
 ## Unsupported authority transfers

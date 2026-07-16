@@ -91,7 +91,8 @@ def worker_required_literal(root: JsonValue, key: &str, expected: &str) -> Resul
     let checked = worker_required_ascii(root, key);
     if checked.is_err() { return worker_string_error(checked.error); };
     if not str_eq(checked.value.as_str(), expected) { return worker_string_error(SGJSON_UNKNOWN_ENUM()); };
-    worker_required_ascii(root, key);
+    // Reuse the validated string; a second extract would allocate another owned handle.
+    checked;
 }
 
 def worker_required_lower_hex_string(root: JsonValue, key: &str, exact_len: i64) -> Result<String, i64> {
@@ -123,8 +124,10 @@ def worker_required_idempotency(root: JsonValue) -> Result<i64, i64> {
     if str_eq(value.value.as_str(), "new") { worker_i64_ok(SENLINE_IDEMPOTENCY_NEW()); } else if str_eq(value.value.as_str(), "exact_duplicate") { worker_i64_ok(SENLINE_IDEMPOTENCY_EXACT_DUPLICATE()); } else if str_eq(value.value.as_str(), "conflict") { worker_i64_ok(SENLINE_IDEMPOTENCY_CONFLICT()); } else { worker_i64_error(SGJSON_UNKNOWN_ENUM()); };
 }
 
-def worker_validate_execution_mode(value: String) -> bool {
-    str_eq(value.as_str(), "fixture") or str_eq(value.as_str(), "shadow") or str_eq(value.as_str(), "guarded-development") or str_eq(value.as_str(), "internal-alpha");
+// Borrowed: by-value String params skip auto-Drop for legacy handle ABI, so a
+// by-value mode check would leak one owned string per successful evaluation.
+def worker_validate_execution_mode(value: &str) -> bool {
+    str_eq(value, "fixture") or str_eq(value, "shadow") or str_eq(value, "guarded-development") or str_eq(value, "internal-alpha");
 }
 
 def worker_decode_context_v1(root: JsonValue) -> Result<EvaluationContextV1, i64> {
@@ -143,11 +146,9 @@ def worker_decode_context_v1(root: JsonValue) -> Result<EvaluationContextV1, i64
     if operation_epoch.is_err() { return worker_context_error(operation_epoch.error); };
     let worker_generation = sgjson_required_i64(root, "worker_generation", 0, 9007199254740991);
     if worker_generation.is_err() { return worker_context_error(worker_generation.error); };
-    let execution_mode_check = worker_required_ascii(root, "execution_mode");
-    if execution_mode_check.is_err() { return worker_context_error(execution_mode_check.error); };
-    if not worker_validate_execution_mode(execution_mode_check.value) { return worker_context_error(SGJSON_UNKNOWN_ENUM()); };
     let execution_mode = worker_required_ascii(root, "execution_mode");
     if execution_mode.is_err() { return worker_context_error(execution_mode.error); };
+    if not worker_validate_execution_mode(execution_mode.value.as_str()) { return worker_context_error(SGJSON_UNKNOWN_ENUM()); };
     let worker_bundle_id = worker_required_ascii(root, "worker_bundle_id");
     if worker_bundle_id.is_err() { return worker_context_error(worker_bundle_id.error); };
     let facts_binding = worker_required_lower_hex_string(root, "facts_binding", 64);
@@ -270,7 +271,7 @@ def worker_encode_parser_error_v1(kind: i64) -> Result<WorkerEncodedFrameV1, i64
     if kind == JSON_ERROR_KIND_DUPLICATE_FIELD() { worker_encode_protocol_error_v1("duplicate_field"); } else if kind == JSON_ERROR_KIND_INVALID_UNICODE() { worker_encode_protocol_error_v1("invalid_unicode"); } else if kind == JSON_ERROR_KIND_TRAILING_BYTES() { worker_encode_protocol_error_v1("trailing_bytes"); } else { worker_encode_malformed_json_error_v1(); };
 }
 
-def worker_encode_unsupported_operation_error_v1(evaluation_id: String) -> Result<WorkerEncodedFrameV1, i64> {
+def worker_encode_unsupported_operation_error_v1(evaluation_id: &String) -> Result<WorkerEncodedFrameV1, i64> {
     let doc_result = json_doc_object();
     if doc_result.is_err() { return worker_encoded_error(doc_result.error); };
     let doc = doc_result.value;
@@ -279,7 +280,7 @@ def worker_encode_unsupported_operation_error_v1(evaluation_id: String) -> Resul
     root.object_set("schema_version", doc.new_number(1.0)?)?;
     root.object_set("scope", doc.new_string("evaluation")?)?;
     root.object_set("code", doc.new_string("unsupported_operation_version")?)?;
-    root.object_set("evaluation_id", doc.new_string_from_string(&evaluation_id)?)?;
+    root.object_set("evaluation_id", doc.new_string_from_string(evaluation_id)?)?;
     let output = ffi_buffer_new(8192)?;
     let serialized = doc.serialize(output)?;
     if serialized <= 0 or serialized >= 8192 { return worker_encoded_error(SGFRAMING_LIMIT_EXCEEDED()); };
@@ -327,7 +328,7 @@ def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFra
 }
 
 def worker_process_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
-    if not worker_operation_version_supported(request.context.operation_version) { worker_encode_unsupported_operation_error_v1(request.context.evaluation_id); } else { let revision = string_from_str(worker_module_revision_v1()); if revision.is_err() { return worker_encoded_error(revision.error); }; worker_encode_plan_v1(plan_submit_envelope_v1(request, revision.value)); };
+    if not worker_operation_version_supported(request.context.operation_version) { worker_encode_unsupported_operation_error_v1(&request.context.evaluation_id); } else { let revision = string_from_str(worker_module_revision_v1()); if revision.is_err() { return worker_encoded_error(revision.error); }; worker_encode_plan_v1(plan_submit_envelope_v1(request, revision.value)); };
 }
 
 def worker_process_payload_v1(payload: Buffer, len: i64) -> Result<WorkerEncodedFrameV1, i64> {

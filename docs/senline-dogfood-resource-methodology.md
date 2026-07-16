@@ -72,6 +72,16 @@ semantic equivalence only, **not** resource stability.
 Until a million-evaluation single-worker series (or an explicit, fixed root
 cause with regression) is recorded, task 8.3 stays open.
 
+### 2026-07 residual growth fix (Windows investigation)
+
+After the lambda Drop fix, investigate-45k still showed ~**92 B/case** growth.
+Root cause was application-level: `worker_validate_execution_mode(String)`
+consumed a by-value legacy handle without Drop (function params skip auto-Drop
+for `String`/`Buffer`/`JsonDoc`). Fixed by validating `&str` and reusing the
+single extracted mode string. Post-fix investigate-45k: ~**3.4 B/case**,
+PWS flat near 1.1 MiB, handles flat, 45k in ~9 s. Full 1M soak remains the
+close gate for task 8.3.
+
 ## Task 8.4 latency methodology
 
 After the same warm-up:

@@ -395,5 +395,17 @@ bundle hashes. There are no active Senline workarounds for these defects.
   45,000/45,000 in ~56 s; PWS ~1.1→5.1 MiB (~**92 B/case** post-warm-up, under
   1 KiB/case); handles 66; `plan_ok=45000`. Evidence:
   `target/senline-resource/soak-investigate-45k-windows-x86_64-1784124464.summary.json`.
+- **Residual root cause (fixed 2026-07-16):** worker helper
+  `worker_validate_execution_mode(value: String)` took a by-value legacy handle
+  and returned without Drop (ordinary function params skip auto-Drop for
+  `String`). Combined with a second extract of `execution_mode`, each request
+  leaked one owned mode string (~90 B/case). Fix: validate via `&str`, reuse the
+  single extracted string; also return the validated literal from
+  `worker_required_literal` instead of re-extracting; borrow
+  `evaluation_id` for the unsupported-version encoder.
+- **2026-07-16 residual post-fix (Windows x64):** investigate-45k **completes**
+  45,000/45,000 in ~9 s; PWS ~1.0→1.14 MiB (~**3.4 B/case** post-warm-up, noise
+  floor); handles 67; `plan_ok=45000`; p50/p95/p99 ≈ 154/332/500 µs. Evidence:
+  `target/senline-resource/soak-investigate-45k-windows-x86_64-1784198111.summary.json`.
 - Remaining gate for task 8.3: full **1,000,000** single-worker soak + Linux
   RSS confirmation.
