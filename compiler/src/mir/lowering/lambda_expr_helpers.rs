@@ -83,7 +83,9 @@ pub(super) fn lower_lambda_expr_with_expected(
 
         for (i, param_name) in params.iter().enumerate() {
             let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
-            lambda_ctx.mir_fn.set_local_debug_name(local, param_name.clone());
+            lambda_ctx
+                .mir_fn
+                .set_local_debug_name(local, param_name.clone());
             lambda_ctx.local_names.insert(param_name.clone(), local);
             // Owned by-value lambda params (e.g. `String`) must be dropped when
             // the lambda returns; otherwise callers that move into the lambda leak
@@ -93,7 +95,9 @@ pub(super) fn lower_lambda_expr_with_expected(
     } else {
         for (i, param_name) in params.iter().enumerate() {
             let local = Local::new(i + 1 + env_param_offset, LocalKind::Param);
-            lambda_ctx.mir_fn.set_local_debug_name(local, param_name.clone());
+            lambda_ctx
+                .mir_fn
+                .set_local_debug_name(local, param_name.clone());
             lambda_ctx.local_names.insert(param_name.clone(), local);
             lambda_ctx.force_record_owned_param_drop(local);
         }
