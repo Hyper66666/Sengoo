@@ -3,16 +3,20 @@
 - [x] 0.1 Freeze the product direction: Go-like default workflow, Rust-like
   resource safety, and Python interoperability on the production native path.
 - [x] 0.2 Split M0-M4 into five independently archivable child changes.
-- [ ] 0.3 Add `INVENTORY.md` after M0 records the integrated mainline SHA,
+- [x] 0.3 Add `INVENTORY.md` after M0 records the integrated mainline SHA,
   active owners, archived dependencies, and support-matrix baseline.
-- [ ] 0.4 Validate this umbrella and every child with strict OpenSpec validation.
+  - See `v0-2-baseline-reconciliation/INVENTORY.md` (sglsp checkpoint + owners).
+- [x] 0.4 Validate this umbrella and every child with strict OpenSpec validation.
+  - `openspec validate --all --strict` → 52 passed (after delta-spec body fixes).
 
 ## 1. M0 - Baseline reconciliation
 
-- [ ] 1.1 Complete and archive `v0-2-baseline-reconciliation`.
-- [ ] 1.2 Reconcile unmerged valuable work, active changes, documentation, and
+- [~] 1.1 Complete and archive `v0-2-baseline-reconciliation`.
+  - Local gates green; archive after remote multi-host Actions on baseline SHA.
+- [x] 1.2 Reconcile unmerged valuable work, active changes, documentation, and
   support claims without destructive history rewriting.
-- [ ] 1.3 Record one green baseline SHA and remote location.
+- [~] 1.3 Record one green baseline SHA and remote location.
+  - Filled when this branch is pushed and Actions attach to the SHA.
 
 ## 2. M1 - Language coherence
 

@@ -1,3 +1,7 @@
+
+> **Historical (v0.2 M0):** This umbrella no longer owns new capability work.
+> New native v0.2 implementation is coordinated by `sengoo-v0-2-mainstream-core`
+> and its M0¨CM4 children. Remaining open tasks here are evidence debt only.
 ## 0. Program setup
 
 - [x] 0.1 Add `INVENTORY.md` baseline for all four pillars with current evidence.
@@ -19,7 +23,7 @@
 - [x] 0.8 Record `codegen-ir-correctness-and-gate` as an explicit blocker
   before `native-debug-info` merges codegen edits.
 
-## 1. Pillar A â€” Source-level debugging (`native-debug-info`)
+## 1. Pillar A â€?Source-level debugging (`native-debug-info`)
 
 - [x] 1.1 Child change validated strictly with DI-emission requirements,
   `-g` policy (D1), and v1 surface table (D2).
@@ -31,7 +35,7 @@
   and Linux (DWARF) and committed with `docs/debugging-native.md` upgrade.
 - [ ] 1.5 Conformance examples pass under `-g` with unchanged results.
 
-## 2. Pillar B â€” Cancellation semantics (`async-cancellation-semantics`)
+## 2. Pillar B â€?Cancellation semantics (`async-cancellation-semantics`)
 
 - [x] 2.1 Child change validated strictly with the cooperative cancellation
   contract (D3) pinned before implementation.
@@ -44,7 +48,7 @@
 - [x] 2.5 Move the three Deferred matrix rows to supported subsets with
   proof links.
 
-## 3. Pillar C â€” Production HTTP serving (`http-production-serving`)
+## 3. Pillar C â€?Production HTTP serving (`http-production-serving`)
 
 - [x] 3.1 Child change validated strictly with feature order and bounds
   pinned (D4).
@@ -56,7 +60,7 @@
 - [ ] 3.5 TLS server subset on existing stacks with real-handshake tests on
   at least one host per stack; no plaintext-fallback success.
 
-## 4. Pillar D â€” Toolchain distribution (`toolchain-distribution`)
+## 4. Pillar D â€?Toolchain distribution (`toolchain-distribution`)
 
 - [x] 4.1 Child change validated strictly with artifact layout and channel
   policy pinned (D5).

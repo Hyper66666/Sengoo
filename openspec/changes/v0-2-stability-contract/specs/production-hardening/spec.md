@@ -2,10 +2,10 @@
 
 ### Requirement: Stable v0.2.x surfaces SHALL preserve patch compatibility
 
+Stable surfaces SHALL remain compatible throughout v0.2.x after v0.2.0.
 Source language, stdlib, CLI, manifest, lockfile, diagnostic/protocol, and ABI
-surfaces classified Stable at v0.2.0 SHALL remain compatible throughout v0.2.x,
-except for documented security or unsoundness corrections with diagnostics and
-migration guidance.
+surfaces classified Stable at v0.2.0 stay compatible except for documented
+security or unsoundness corrections with diagnostics and migration guidance.
 
 #### Scenario: Stable package upgrades to a later patch
 
@@ -36,10 +36,10 @@ removal version. Removal requires a later accepted minor/edition change.
 
 ### Requirement: Public input SHALL not cause unclassified tool panics
 
-Malformed or hostile source, manifests, lockfiles, package archives, protocol
-payloads, runtime handles, and portable artifacts SHALL return bounded stable
-diagnostics/statuses and SHALL NOT expose an uncaught implementation panic as
-normal failure behavior.
+Public tooling SHALL return bounded stable diagnostics for malformed or hostile
+input and SHALL NOT expose an uncaught implementation panic as normal failure
+behavior. Covered inputs include source, manifests, lockfiles, package archives,
+protocol payloads, runtime handles, and portable artifacts.
 
 #### Scenario: Fuzzing finds a public-input panic
 
@@ -57,9 +57,10 @@ normal failure behavior.
 
 ### Requirement: Versioned boundaries SHALL reject unknown versions before interpretation
 
-Edition, manifest, lockfile, registry, diagnostic/test JSON, editor protocol,
-MIR semantic ABI, runtime ABI, and portable ABI versions SHALL be checked before
-version-dependent fields are consumed or code is executed.
+Versioned consumers SHALL check edition, manifest, lockfile, registry,
+diagnostic/test JSON, editor protocol, MIR semantic ABI, runtime ABI, and
+portable ABI versions before version-dependent fields are consumed or code is
+executed.
 
 #### Scenario: Explicit version is newer than supported
 

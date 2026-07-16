@@ -2,9 +2,10 @@
 
 ### Requirement: Editor language operations SHALL share one versioned workspace snapshot
 
+Language-server responses SHALL consume one immutable indexed workspace
+snapshot and the exact open-document revision used to answer the request.
 Completion, hover, definition, references, rename, signature help, diagnostics,
-and code actions SHALL consume one immutable indexed workspace snapshot and the
-exact open-document revision used to answer the request.
+and code actions share that snapshot.
 
 #### Scenario: Document changes before an edit is applied
 
