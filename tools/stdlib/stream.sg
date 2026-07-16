@@ -2,13 +2,10 @@
 ///
 /// Semantics (pinned):
 /// - `read_into`: `Ok(0)` is EOF; `Ok(n>0)` writes exactly `n` bytes at the start of `out`.
-/// - `write_buffer`: `Ok(n)` may be partial (`0 <= n <= used_len`); `write_all` rejects
-///   repeated zero progress.
-/// - `read_to_end` never grows `out` past capacity; insufficient space -> STATUS_BUFFER_TOO_SMALL.
-/// - Helpers use only caller-provided Buffer capacity (no unbounded allocation).
-///
-/// Note: Cursor stores Buffer as a handle (`buffer_handle`) rather than nesting the Buffer
-/// struct, to avoid a known LLVM-text store path issue with nested aggregate mut locals.
+/// - Zero capacity while unread data remains is `STATUS_BUFFER_TOO_SMALL`, never `Ok(0)`.
+/// - `write_buffer`: `Ok(n)` may be partial; `write_all` rejects repeated zero progress.
+/// - `read_to_end` never grows `out` past capacity.
+/// - Cursor owns a Buffer handle and frees it via `cursor_free` / Drop.
 
 trait Reader {
     def read_into(&mut self, out: Buffer) -> Result<i64, i64> {}
@@ -19,7 +16,7 @@ trait Writer {
     def flush(&mut self) -> Result<bool, i64> {}
 }
 
-/// In-memory cursor over a managed Buffer handle. Position is a byte offset.
+/// In-memory cursor over an owned managed Buffer handle.
 struct Cursor {
     buffer_handle: i64,
     pos: i64,
@@ -46,9 +43,16 @@ def cursor_from_bytes(data: &str) -> Result<Cursor, i64> {
     }
 }
 
-def cursor_buffer(cursor: Cursor) -> Buffer {
-    Buffer { handle: cursor.buffer_handle }
+def cursor_free(cursor: Cursor) -> bool {
+    if cursor.buffer_handle == 0 {
+        true
+    } else {
+        sengoo_ffi_buffer_free(cursor.buffer_handle) == 0
+    }
 }
+
+// Cursor ownership: call `cursor_free` exactly once. Automatic Drop for nested
+// aggregate mut locals currently hits an LLVM-text store bug; free is explicit.
 
 def cursor_read_into(cursor: Cursor, out: Buffer) -> Result<i64, i64> {
     if cursor.pos < 0 {
@@ -62,7 +66,7 @@ def cursor_read_into(cursor: Cursor, out: Buffer) -> Result<i64, i64> {
             let remaining = used - cursor.pos;
             let cap = out.capacity();
             if cap <= 0 {
-                Result { is_ok: true, value: 0, error: 0 }
+                Result { is_ok: false, value: 0, error: STATUS_BUFFER_TOO_SMALL() }
             } else {
                 let n = if remaining < cap { remaining } else { cap };
                 let copied = buffer.copy_range(cursor.pos, n, out);
@@ -74,10 +78,6 @@ def cursor_read_into(cursor: Cursor, out: Buffer) -> Result<i64, i64> {
             }
         }
     }
-}
-
-def cursor_advance(cursor: Cursor, n: i64) -> Cursor {
-    Cursor { buffer_handle: cursor.buffer_handle, pos: cursor.pos + n }
 }
 
 def cursor_write_buffer(cursor: Cursor, data: Buffer, used_len: i64) -> Result<i64, i64> {
@@ -111,7 +111,7 @@ def cursor_write_buffer(cursor: Cursor, data: Buffer, used_len: i64) -> Result<i
     }
 }
 
-/// Owned fd adapter retaining `io_fd_read`/`io_fd_write` as the concrete path.
+/// Owned fd adapter retaining `io_fd_read`/`io_fd_write`.
 struct FdStream {
     fd: i64,
 }

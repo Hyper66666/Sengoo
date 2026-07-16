@@ -342,13 +342,24 @@ fn compatibility_workflow_runs_retained_project_with_previous_and_current_toolch
     let workflow = fs::read_to_string(root.join(".github/workflows/compatibility.yml"))
         .expect("read compatibility workflow");
     let fixture = root.join("examples/compat/v0.1.0-rc.1");
+    let fixture_v02 = root.join("examples/compat/v0.2.0-rc.1");
 
     for relative in ["Sengoo.toml", "Sengoo.lock", "src/lib.sg", "tests/smoke.sg"] {
         assert!(
             fixture.join(relative).is_file(),
             "retained compatibility fixture should contain {relative}"
         );
+        assert!(
+            fixture_v02.join(relative).is_file(),
+            "v0.2 compatibility fixture should contain {relative}"
+        );
     }
+    let smoke_v02 =
+        fs::read_to_string(fixture_v02.join("tests/smoke.sg")).expect("read v0.2 smoke fixture");
+    assert!(
+        smoke_v02.contains("import compat_v0_2_0_rc_1"),
+        "v0.2 smoke must import compat_v0_2_0_rc_1, got:\n{smoke_v02}"
+    );
     for needle in [
         "v0.1.0-rc.1",
         "scripts/install.sh",

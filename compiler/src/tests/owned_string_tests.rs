@@ -1,4 +1,4 @@
-use crate::compile_to_ir;
+﻿use crate::compile_to_ir;
 use crate::{Parser, TypeChecker};
 use std::fs;
 use std::path::Path;
@@ -170,7 +170,7 @@ def leak() -> &str {
     let crate::error::CompileError::TypeckError(typeck) = &err else {
         panic!("expected typeck error, got {err:?}");
     };
-    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-owner"));
     let err = format!("{err:?}");
     assert!(
         err.contains("borrowed view `view` escapes its owner scope"),
@@ -200,7 +200,7 @@ def leak() -> &str {
     let crate::error::CompileError::TypeckError(typeck) = &err else {
         panic!("expected typeck error, got {err:?}");
     };
-    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-owner"));
 }
 
 #[test]
@@ -251,7 +251,7 @@ def leak() -> &str {
     let crate::error::CompileError::TypeckError(typeck) = &err else {
         panic!("expected typeck error, got {err:?}");
     };
-    assert_eq!(typeck.stable_code(), Some("borrow-escapes-scope"));
+    assert_eq!(typeck.stable_code(), Some("borrow-escapes-owner"));
 }
 
 #[test]
@@ -503,13 +503,14 @@ def return_then_reuse(value: String) -> String {
 
 #[test]
 fn stdlib_owned_string_cannot_move_while_borrowed() {
+    // Live use of the borrow after the move site keeps the owner borrowed (D1 last-use).
     let err = typecheck_fails_with_stdlib(
         r#"
 def main() -> i64 {
     let owner: String = string_from_str("borrowed").value;
     let view = &owner;
     let moved = owner;
-    0
+    view.len()
 }
 "#,
     );
@@ -529,7 +530,7 @@ def main() -> i64 {
     let owner: String = string_from_str("borrowed").value;
     let view = &owner;
     let moved = owner;
-    0
+    view.len()
 }
 "#
     );

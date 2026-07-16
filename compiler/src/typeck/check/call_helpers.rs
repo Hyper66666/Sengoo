@@ -1213,8 +1213,92 @@ impl TypeChecker {
         if path.segments.len() != 2 {
             return Ok(None);
         }
-        let type_name = &path.segments[0].name;
+        let head_name = &path.segments[0].name;
         let method_name = &path.segments[1].name;
+
+        // D5: `Trait::method(args)` — head names a trait, select unique matching impl.
+        if self.trait_registry.contains(head_name) {
+            let actual_types = args
+                .iter()
+                .map(|arg| self.check_expr(arg))
+                .collect::<TyResult<Vec<_>>>()?;
+            let mut candidates = Vec::new();
+            for type_key_name in self.impl_registry.trait_impl_type_keys(head_name) {
+                for (impl_info, method_ty) in
+                    self.impl_registry
+                        .lookup_trait_methods(head_name, &type_key_name, method_name)
+                {
+                    if method_ty.has_self || method_ty.param_types.len() != actual_types.len() {
+                        continue;
+                    }
+                    if method_ty.param_types.iter().zip(actual_types.iter()).all(
+                        |(expected, actual)| {
+                            type_key(&self.infer.apply_subst(expected))
+                                == type_key(&self.infer.apply_subst(actual))
+                        },
+                    ) {
+                        candidates.push((
+                            type_key_name.clone(),
+                            impl_info.clone(),
+                            method_ty.clone(),
+                        ));
+                    }
+                }
+            }
+            let (target_key, impl_info, method_ty) = match candidates.as_slice() {
+                [] => {
+                    return Err(TypeckError::Other(format!(
+                        "no matching associated function `{head_name}::{method_name}` for the given arguments"
+                    )));
+                }
+                [candidate] => candidate.clone(),
+                many => {
+                    let labels = many
+                        .iter()
+                        .map(|(type_key, impl_info, _)| {
+                            format!(
+                                "{} as {}",
+                                type_key,
+                                crate::typeck::r#trait::trait_impl_label(
+                                    head_name,
+                                    &impl_info.trait_args
+                                )
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    return Err(TypeckError::diagnostic(
+                        "ambiguous-trait-associated-function",
+                        format!(
+                            "ambiguous associated function `{head_name}::{method_name}`: {}",
+                            labels.join(", ")
+                        ),
+                        call_site,
+                        call_site,
+                    ));
+                }
+            };
+            for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {
+                self.infer.unify(expected, actual)?;
+            }
+            let trait_args = impl_info
+                .trait_args
+                .iter()
+                .map(type_key)
+                .collect::<Vec<_>>();
+            let suffix = if trait_args.is_empty() {
+                String::new()
+            } else {
+                format!("_{}", trait_args.join("_"))
+            };
+            self.env.record_associated_function(
+                call_site,
+                format!("{target_key}_{head_name}{suffix}_{method_name}"),
+            );
+            return Ok(Some(self.infer.apply_subst(&method_ty.return_type)));
+        }
+
+        // `Type::method(args)` — head names a type (or ADT path segment).
+        let type_name = head_name;
         let target_ty = self
             .env
             .lookup(type_name)
@@ -1283,11 +1367,12 @@ impl TypeChecker {
                         crate::typeck::r#trait::trait_impl_label(trait_name, &impl_info.trait_args)
                     })
                     .collect::<Vec<_>>();
-                return Err(TypeckError::Other(ambiguous_method_error(
-                    method_name,
-                    &target_key,
-                    &labels,
-                )));
+                return Err(TypeckError::diagnostic(
+                    "ambiguous-trait-associated-function",
+                    ambiguous_method_error(method_name, &target_key, &labels),
+                    call_site,
+                    call_site,
+                ));
             }
         };
         for (expected, actual) in method_ty.param_types.iter().zip(actual_types.iter()) {

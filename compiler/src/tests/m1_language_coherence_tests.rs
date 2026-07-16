@@ -53,12 +53,22 @@ fn m1_borrow_escape_and_move_while_borrowed_use_stable_codes() {
     let escape = format!(
         "{stdlib}\n\ndef leak() -> &str {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    return view;\n}}\n"
     );
-    assert_eq!(typeck_err_code(&escape), "borrow-escapes-scope");
+    assert_eq!(typeck_err_code(&escape), "borrow-escapes-owner");
 
     let move_while = format!(
         "{stdlib}\n\ndef main() -> i64 {{\n    let owner: String = string_from_str(\"x\").value;\n    let view = owner.as_str();\n    let moved = owner;\n    view.len()\n}}\n"
     );
     assert_eq!(typeck_err_code(&move_while), "cannot-move-borrowed");
+}
+
+#[test]
+fn m1_last_use_borrow_allows_owner_move() {
+    // D1: after last reachable use of the borrow alias, owner may move.
+    let stdlib = load_stdlib(&["option.sg", "result.sg", "ffi.sg", "string.sg"]);
+    let source = format!(
+        "{stdlib}\n\ndef main() -> i64 {{\n    let owner: String = string_from_str(\"hi\").value;\n    let view = owner.as_str();\n    let n = view.len();\n    let moved = owner;\n    n + moved.len()\n}}\n"
+    );
+    typeck_ok(&source);
 }
 
 #[test]
@@ -69,22 +79,29 @@ fn m1_use_after_move_and_partial_move_drop_paths() {
     );
     assert_eq!(typeck_err_code(&use_after), "use-after-move");
 
-    // Partial-move Drop: remaining field still gets drop glue in MIR.
-    let mir = compile_to_mir(
-        r#"
-struct Pair { a: i64, b: i64 }
-def take(x: i64) -> i64 { x }
-def main() -> i64 {
-    let p = Pair { a: 1, b: 2 };
-    let moved = p.a;
-    take(p.b) + moved
-}
-"#,
-    )
-    .expect("partial field move program should compile to MIR");
+    // Non-Copy partial move: whole-value use after field move is use-after-partial-move.
+    let partial = format!(
+        "{stdlib}\n\nstruct Pair {{\n    a: String,\n    b: String,\n}}\n\ndef main() -> i64 {{\n    let p = Pair {{\n        a: string_from_str(\"a\").value,\n        b: string_from_str(\"b\").value,\n    }};\n    let moved = p.a;\n    let whole = p;\n    whole.b.len() + moved.len()\n}}\n"
+    );
+    assert_eq!(typeck_err_code(&partial), "use-after-partial-move");
+
+    // Independent non-Copy field remains usable and Drop still lowers for remaining path.
+    let mir = compile_to_mir(&format!(
+        "{stdlib}\n\nstruct Pair {{\n    a: String,\n    b: String,\n}}\n\ndef main() -> i64 {{\n    let p = Pair {{\n        a: string_from_str(\"a\").value,\n        b: string_from_str(\"b\").value,\n    }};\n    let moved = p.a;\n    moved.len() + p.b.len()\n}}\n"
+    ))
+    .expect("partial field move of independent non-Copy field should compile to MIR");
+    let main = mir
+        .iter()
+        .find(|f| f.name == "main")
+        .expect("main function");
+    let drop_calls = main
+        .instructions
+        .iter()
+        .filter(|inst| matches!(inst, crate::mir::Instruction::Call { func, .. } if func.contains("Drop")))
+        .count();
     assert!(
-        mir.iter().any(|f| f.name == "main"),
-        "main should lower after partial move of independent field"
+        drop_calls >= 1,
+        "remaining owning field should still receive Drop glue after partial move, got {drop_calls}"
     );
 }
 
@@ -110,7 +127,6 @@ def main() -> i64 {
     }
 }
 "#;
-    // Unreachable after wildcard is a typeck hard error (not always stable-coded).
     let parsed = Parser::parse(unreachable).expect("parse");
     let mut checker = TypeChecker::new();
     assert!(
@@ -134,7 +150,6 @@ def main() -> i64 { 0 }
 
 #[test]
 fn m1_associated_type_projection_and_impl_binding() {
-    // Proven declaration/definition surface (generic_typeck_tests).
     typeck_ok(
         r#"
 trait Iterator {
@@ -162,6 +177,26 @@ def main() -> i64 { 0 }
     assert!(
         checker.check_program(&parsed).is_err(),
         "unbounded associated type projection must fail"
+    );
+}
+
+#[test]
+fn m1_trait_associated_function_trait_and_type_paths() {
+    // D5: Trait::method and Type::method both resolve for receiver-less methods.
+    typeck_ok(
+        r#"
+trait Math {
+    def add(a: i64, b: i64) -> i64 {}
+}
+
+impl Math for i64 {
+    def add(a: i64, b: i64) -> i64 { a + b }
+}
+
+def main() -> i64 {
+    Math::add(1, 2) + i64::add(3, 4)
+}
+"#,
     );
 }
 

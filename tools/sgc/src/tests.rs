@@ -7021,10 +7021,24 @@ def main() -> i64 {
     let scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
     let copied = copy_stream(reader2, writer2, scratch).unwrap_or(-1);
 
+    let zero_cap = ffi_buffer_new(0).unwrap_or(Buffer { handle: 0 });
+    let leftover = cursor_from_bytes("z").unwrap_or(Cursor {
+        buffer_handle: 0,
+        pos: 0,
+    });
+    let zero_read = cursor_read_into(leftover, zero_cap);
+    let zero_is_buffer = if zero_read.is_ok { false } else { zero_read.error == STATUS_BUFFER_TOO_SMALL() };
+
     out.free();
     scratch.free();
+    zero_cap.free();
+    cursor_free(reader);
+    cursor_free(writer);
+    cursor_free(reader2);
+    cursor_free(writer2);
+    cursor_free(leftover);
 
-    if total == 12 and wrote == 12 and copied == 3 {
+    if total == 12 and wrote == 12 and copied == 3 and zero_is_buffer {
         42
     } else {
         1

@@ -6,8 +6,14 @@
 - **Provenance string** (runtime): `unicode_version_copy` / `unicode_provenance_copy`
   report `17.0.0` and a short provenance note.
 
-v0.2 implements a **strict UTF-8 + scalar** foundation, not a full Unicode
-property database:
+## Honesty note (post-review)
+
+The original `v0-2-production-stdlib` delta described full Unicode 17.0.0 simple
+upper/lower mapping, casefold, and scalar property helpers. **Those table-backed
+APIs are not shipped in this commit.** The archived change was over-claimed;
+this document is the authoritative Supported subset for the integrating SHA.
+
+## Supported subset (this SHA)
 
 | Surface | Status |
 | --- | --- |
@@ -18,7 +24,7 @@ property database:
 | `char_codepoint(char) -> Result<i64, i64>` migration helper | Supported |
 | `String.char_count()` scalar count | Supported |
 | Simple ASCII upper/lower (`str_to_ascii_*`) | Supported |
-| Full property tables, simple upper/lower, casefold | Deferred |
+| Full property tables, simple upper/lower, casefold | **Deferred** (not Supported) |
 | Normalization, graphemes, collation, locales | Deferred (explicit) |
 
 ## Constructors
