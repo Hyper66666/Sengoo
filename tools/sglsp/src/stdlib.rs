@@ -1,6 +1,8 @@
-use super::signatures::{collect_function_signatures, FunctionSignatureInfo};
+use super::signatures::{
+    collect_function_signatures, qualify_function_signatures, FunctionSignatureInfo,
+};
 use super::symbols::{collect_ast_symbols, AstSymbol};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{Location, Url};
 
 const STDLIB_SOURCES: &[(&str, &str)] = &[
@@ -38,6 +40,16 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     ("status", include_str!("../../stdlib/status.sg")),
     ("time", include_str!("../../stdlib/time.sg")),
 ];
+
+pub(super) fn stdlib_module_names() -> impl Iterator<Item = &'static str> {
+    STDLIB_SOURCES.iter().map(|(name, _)| *name)
+}
+
+pub(super) fn stdlib_symbols_for_module(module: &str) -> Vec<AstSymbol> {
+    stdlib_source(module)
+        .map(collect_ast_symbols)
+        .unwrap_or_default()
+}
 
 fn stdlib_source(module: &str) -> Option<&'static str> {
     STDLIB_SOURCES
@@ -120,7 +132,9 @@ fn add_stdlib_module_signatures(
     }
 
     if let Some(source) = stdlib_source(module) {
-        out.extend(collect_function_signatures(source));
+        let mut signatures = collect_function_signatures(source);
+        qualify_function_signatures(&mut signatures, &format!("std::{module}"));
+        out.extend(signatures);
     }
 
     for dependency in stdlib_dependencies(module) {
@@ -132,31 +146,23 @@ fn stdlib_module_uri(module: &str) -> Option<Url> {
     Url::parse(&format!("sengoo-stdlib:/{module}.sg")).ok()
 }
 
-fn stdlib_definition_in_module(
+fn add_stdlib_module_definitions(
     module: &str,
-    symbol: &str,
     seen_modules: &mut HashSet<String>,
-) -> Option<Location> {
+    out: &mut HashMap<String, Location>,
+) {
     if !seen_modules.insert(module.to_string()) {
-        return None;
+        return;
     }
-
-    if let Some(source) = stdlib_source(module) {
-        if let Some(found) = collect_ast_symbols(source)
-            .into_iter()
-            .find(|item| item.name == symbol)
-        {
-            return Some(Location::new(stdlib_module_uri(module)?, found.range));
+    if let (Some(source), Some(uri)) = (stdlib_source(module), stdlib_module_uri(module)) {
+        for symbol in collect_ast_symbols(source) {
+            out.entry(symbol.name)
+                .or_insert_with(|| Location::new(uri.clone(), symbol.range));
         }
     }
-
     for dependency in stdlib_dependencies(module) {
-        if let Some(location) = stdlib_definition_in_module(dependency, symbol, seen_modules) {
-            return Some(location);
-        }
+        add_stdlib_module_definitions(dependency, seen_modules, out);
     }
-
-    None
 }
 
 pub(super) fn stdlib_symbols_for_content(content: &str) -> Vec<AstSymbol> {
@@ -171,22 +177,25 @@ pub(super) fn stdlib_symbols_for_content(content: &str) -> Vec<AstSymbol> {
     symbols
 }
 
+#[cfg(test)]
 pub(super) fn stdlib_symbol_detail_for_content(content: &str, symbol: &str) -> Option<AstSymbol> {
     stdlib_symbols_for_content(content)
         .into_iter()
         .find(|item| item.name == symbol)
 }
 
+#[cfg(test)]
 pub(super) fn stdlib_definition_for_content(content: &str, symbol: &str) -> Option<Location> {
+    stdlib_definitions_for_content(content).remove(symbol)
+}
+
+pub(super) fn stdlib_definitions_for_content(content: &str) -> HashMap<String, Location> {
     let mut seen_modules = HashSet::new();
-
+    let mut definitions = HashMap::new();
     for module in imported_stdlib_modules(content) {
-        if let Some(location) = stdlib_definition_in_module(&module, symbol, &mut seen_modules) {
-            return Some(location);
-        }
+        add_stdlib_module_definitions(&module, &mut seen_modules, &mut definitions);
     }
-
-    None
+    definitions
 }
 
 pub(super) fn stdlib_signatures_for_content(content: &str) -> Vec<FunctionSignatureInfo> {

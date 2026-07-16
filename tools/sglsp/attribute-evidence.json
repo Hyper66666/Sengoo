@@ -1,0 +1,12 @@
+[
+  {"id":"compiler::tests::generic_typeck_tests::builtin_derives_register_core_trait_impls_for_bounds","package":"sengoo-compiler","filter":"builtin_derives_register_core_trait_impls_for_bounds","expected":"tests::generic_typeck_tests::builtin_derives_register_core_trait_impls_for_bounds"},
+  {"id":"compiler::tests::attribute_tests::cfg_target_os_filters_false_declarations","package":"sengoo-compiler","filter":"cfg_target_os_filters_false_declarations","expected":"tests::attribute_tests::cfg_target_os_filters_false_declarations"},
+  {"id":"compiler::tests::attribute_tests::cfg_target_family_keeps_current_family","package":"sengoo-compiler","filter":"cfg_target_family_keeps_current_family","expected":"tests::attribute_tests::cfg_target_family_keeps_current_family"},
+  {"id":"compiler::tests::attribute_tests::cfg_feature_can_be_enabled_by_package_feature_context","package":"sengoo-compiler","filter":"cfg_feature_can_be_enabled_by_package_feature_context","expected":"tests::attribute_tests::cfg_feature_can_be_enabled_by_package_feature_context"},
+  {"id":"compiler::tests::attribute_tests::cfg_all_any_not_composes_predicates","package":"sengoo-compiler","filter":"cfg_all_any_not_composes_predicates","expected":"tests::attribute_tests::cfg_all_any_not_composes_predicates"},
+  {"id":"compiler::tests::attribute_tests::deprecated_use_emits_warning","package":"sengoo-compiler","filter":"deprecated_use_emits_warning","expected":"tests::attribute_tests::deprecated_use_emits_warning"},
+  {"id":"compiler::tests::ffi_tests::export_name_attribute_changes_emitted_symbol","package":"sengoo-compiler","filter":"export_name_attribute_changes_emitted_symbol","expected":"tests::ffi_tests::export_name_attribute_changes_emitted_symbol"},
+  {"id":"compiler::native_link_tests::collect_native_link_libraries_dedupes_extern_blocks","package":"sengoo-compiler","filter":"collect_native_link_libraries_dedupes_extern_blocks","expected":"native_link_tests::collect_native_link_libraries_dedupes_extern_blocks"},
+  {"id":"sgc::commands::test::discover_tests_expands_test_attributes_into_harnesses","package":"sgc","filter":"discover_tests_expands_test_attributes_into_harnesses","expected":"commands::test::tests::discover_tests_expands_test_attributes_into_harnesses"},
+  {"id":"sgc::commands::test::discover_tests_expands_parameterized_cases_into_harnesses","package":"sgc","filter":"discover_tests_expands_parameterized_cases_into_harnesses","expected":"commands::test::tests::discover_tests_expands_parameterized_cases_into_harnesses"}
+]
