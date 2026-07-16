@@ -4,6 +4,14 @@ This policy describes the supported pre-1.0 toolchain line. It is a contract
 for release decisions, not a claim that every operating-system or dependency
 version works.
 
+**v0.2 mainstream-core policy + fixture evidence SHA:**
+`084b623037f007344d76ce50f2e0d01fac57b565` ([PR #47](https://github.com/Hyper66666/Sengoo/pull/47)).
+Surface classes, edition `2026` rejection, migration notes, public-input panic
+policy, and retained fixtures (`examples/compat/v0.1.0-rc.1`,
+`examples/compat/v0.2.0-rc.1`) are documented against that local gate commit.
+Two consecutive four-host release-candidate matrices remain Actions residual
+and are not asserted green by this SHA citation.
+
 ## Surface stability classes
 
 | Class | Meaning |

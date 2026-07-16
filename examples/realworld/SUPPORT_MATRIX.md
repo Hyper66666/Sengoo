@@ -3,6 +3,16 @@
 This matrix is the user-facing fact source for support and known gaps covered by
 the realworld package loop.
 
+**v0.2 mainstream-core local gate evidence SHA:**
+`084b623037f007344d76ce50f2e0d01fac57b565` (branch `codex/sengoo-v0-2-openspec`,
+[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)). That commit records green
+local `cargo fmt --check`, Clippy `-D warnings` on production crates, focused
+compiler/`sgc`/`sgpm`/`sgfmt`/`sglsp` gates, and `openspec validate --all --strict`
+(46 pass). It does **not** invent multi-host Actions green; four-host RC and
+full sanitizer/fuzz matrices remain Actions residual. HTTP handlers / keep-alive /
+response streaming / TLS server remain residual under open owner
+`http-production-serving` (not Supported here).
+
 | Capability | Status | Host scope | Proof example/test | Stable diagnostic/status | Upstream spec/change |
 | --- | --- | --- | --- | --- | --- |
 | Portable targets (`--target wasm` / `--target bytecode`) | Experimental / deferred | Experimental scalar WASM on hosts with Node or wasmtime (Ubuntu CI smoke today); bytecode prototype only | `cargo test -p sgc --test portable_targets` (unsigned compare, ABI tamper reject, capacity-harden, capability diagnostics); `portable_abi_contract`; `mir_target_contract`; `docs/portable-targets.md`; `docs/wasm-wasi-profile.md`; `docs/bytecode-vm-value-review.md` | **Not production Supported.** WASM is experimental scalar only (no Drop/WASI claim). Production bytecode VM is NO-GO. Windows portable CI job still open. | Archived `2026-07-15-wasm-backend-v1`, `2026-07-15-bytecode-vm-v1` (NO-GO), `2026-07-15-language-maturity-roadmap`; v0.2 native program does not own portable expansion |
