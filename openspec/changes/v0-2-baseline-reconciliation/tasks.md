@@ -45,5 +45,6 @@
 - [ ] 4.5 Native safety, compatibility, and compile/resource performance gates
   (Actions on the baseline SHA after push; local pin hash restored).
 - [x] 4.6 `openspec validate --all --strict` (52/52).
-- [ ] 4.7 Record one common remote commit SHA and archive this change
-  (after push + Actions green).
+- [~] 4.7 Record one common remote commit SHA and archive this change
+  (SHA `219a80b82` on `origin/codex/sengoo-v0-2-openspec` / PR #46;
+  archive after multi-host Actions green).

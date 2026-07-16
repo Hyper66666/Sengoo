@@ -88,7 +88,7 @@ Local Windows reference workspace (2026-07-16), to be re-run on the pushed SHA:
 | `cargo test -p sglsp` | **green** | 81 passed on mainline (checkpoint branch separate) |
 | `openspec validate --all --strict` | **green** | 52/52 after delta-spec body SHALL fixes |
 | Realworld / multi-host safety/perf | **Actions** | Attach to pushed remote SHA |
-| **Baseline SHA** | _fill after push_ | Same commit for local + Actions |
+| **Baseline SHA** | `219a80b822afbf4c2eb24953aab6efbb11e5fb34` | `origin/codex/sengoo-v0-2-openspec` / PR #46 |
 
 ## 6. Non-destructive policy
 
