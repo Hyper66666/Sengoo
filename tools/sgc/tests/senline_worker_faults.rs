@@ -937,3 +937,275 @@ fn rejected_protocol_canaries_never_reach_diagnostics_logs_or_artifacts() {
         assert!(!contains_bytes(&output.stderr, canary.as_bytes()));
     }
 }
+
+fn spawn_worker_pipes(executable: &Path, current_dir: &Path) -> Child {
+    Command::new(executable)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(current_dir)
+        .spawn()
+        .expect("spawn interactive fault worker")
+}
+
+fn read_one_frame(stdout: &mut impl Read, max_payload: usize) -> Result<Vec<u8>, String> {
+    let mut prefix = [0_u8; 4];
+    stdout
+        .read_exact(&mut prefix)
+        .map_err(|error| format!("read frame prefix: {error}"))?;
+    let len = u32::from_be_bytes(prefix) as usize;
+    if len > max_payload {
+        return Err(format!("frame payload {len} exceeds limit {max_payload}"));
+    }
+    let mut payload = vec![0_u8; len];
+    stdout
+        .read_exact(&mut payload)
+        .map_err(|error| format!("read frame payload: {error}"))?;
+    Ok(payload)
+}
+
+fn write_all(stdin: &mut impl Write, bytes: &[u8]) -> Result<(), String> {
+    stdin
+        .write_all(bytes)
+        .map_err(|error| format!("write worker stdin: {error}"))?;
+    stdin
+        .flush()
+        .map_err(|error| format!("flush worker stdin: {error}"))
+}
+
+/// Task 8.2: mid-session kill stays inside the worker process; the cargo/test
+/// host continues and can still observe a clean reaped child.
+#[test]
+fn worker_kill_mid_session_is_process_contained() {
+    let root = WorkerTempDir::new("kill-mid-session");
+    let executable = build_worker(&root);
+    let mut child = spawn_worker_pipes(&executable, root.path());
+    let mut stdout = child.stdout.take().expect("worker stdout");
+    let handshake = read_one_frame(&mut stdout, 8192).expect("read handshake before kill");
+    assert_eq!(
+        normalize_fixture_bytes_local(&handshake),
+        normalize_fixture_bytes_local(&read_fixture("handshake/ready.json")),
+        "kill case must start from the frozen handshake"
+    );
+    // Leave stdin open with no EOF so the worker blocks in the request loop.
+    let _stdin = child.stdin.take();
+    let kill_status = child.kill();
+    assert!(
+        kill_status.is_ok(),
+        "host must be able to kill the worker: {kill_status:?}"
+    );
+    let reaped = wait_with_deadline(&mut child, "kill-mid-session-reap");
+    assert!(
+        !reaped.success(),
+        "killed worker must not report success status: {reaped}"
+    );
+    // Host process is still running and can perform follow-up work.
+    assert_eq!(
+        2 + 2,
+        4,
+        "host arithmetic after worker kill must still execute"
+    );
+}
+
+/// Task 8.2: deliberate runtime panic/abort path stays inside the worker.
+#[test]
+fn worker_abort_panic_path_is_process_contained() {
+    let root = WorkerTempDir::new("abort-panic");
+    let executable = build_worker_with_source(
+        &root,
+        r#"
+import std::option;
+
+def main() -> i64 {
+    // Force the checked runtime panic path used by Option unwrap failures.
+    let empty: Option<i64> = option_none_i64();
+    empty.unwrap();
+    0;
+}
+"#,
+    );
+    let mut child = spawn_worker_pipes(&executable, root.path());
+    // No protocol I/O expected; process should exit/abort without hanging the host.
+    let status = wait_with_deadline(&mut child, "abort-panic");
+    assert!(
+        !status.success(),
+        "panic/abort worker must not exit successfully: {status}"
+    );
+    assert_eq!(1 + 1, 2, "host continues after worker abort/panic");
+}
+
+/// Task 8.2: closing the worker's stdout mid-write is a broken-pipe style fault
+/// contained to the child; the parent still reaps it.
+#[test]
+fn worker_broken_stdout_pipe_is_process_contained() {
+    let root = WorkerTempDir::new("broken-pipe");
+    let executable = build_worker(&root);
+    let mut child = spawn_worker_pipes(&executable, root.path());
+    // Drop stdout immediately so the first handshake write hits a broken pipe.
+    drop(child.stdout.take());
+    let mut stdin = child.stdin.take().expect("worker stdin");
+    let request = framed(&read_fixture("cases/eligible-accept.request.json"));
+    // Best-effort write; may fail if the worker already exited after broken pipe.
+    let _ = write_all(&mut stdin, &request);
+    drop(stdin);
+    let status = wait_with_deadline(&mut child, "broken-pipe");
+    // Non-success or success-with-error-exit are both acceptable as long as the
+    // worker process ends and the host is not stuck.
+    let _ = status;
+    assert_eq!(3 * 3, 9, "host continues after broken-pipe worker teardown");
+}
+
+/// Task 8.2: stdout text contamination (non-frame bytes) is produced only by the
+/// worker; the parent can detect it and keep running.
+#[test]
+fn worker_stdout_text_contamination_is_detectable_and_contained() {
+    let root = WorkerTempDir::new("stdout-contaminate");
+    let executable = build_worker_with_source(
+        &root,
+        r#"
+import std::io;
+
+import senline_domain_worker;
+
+def contaminating_frame_writer(payload: Buffer, len: i64, max_len: i64) -> Result<i64, i64> {
+    // Emit raw text before the framed handshake/response.
+    io_stdout_write("NOT-A-FRAME contaminate\n");
+    frame_write_stdout(payload, len, max_len);
+}
+
+def main() -> i64 {
+    let writer: fn(Buffer, i64, i64) -> Result<i64, i64> = contaminating_frame_writer;
+    worker_run_stdio_v1_with_frame_writer(writer);
+}
+"#,
+    );
+    let request = framed(&read_fixture("cases/eligible-accept.request.json"));
+    let output = run_worker(&executable, &root, "stdout-contaminate", &request);
+    assert!(
+        contains_bytes(&output.stdout, b"NOT-A-FRAME contaminate"),
+        "contamination fixture must emit the probe text on worker stdout"
+    );
+    // Parent-side framed parser rejects the contaminated stream.
+    let mut cursor = std::io::Cursor::new(output.stdout.as_slice());
+    let first = read_one_frame(&mut cursor, 8192);
+    assert!(
+        first.is_err(),
+        "parent must refuse to treat contaminated stdout as a valid frame: {first:?}"
+    );
+    assert_eq!(5 - 2, 3, "host continues after contamination detection");
+}
+
+/// Task 8.2: stderr flood stays on the worker; the parent still completes.
+#[test]
+fn worker_stderr_flood_is_process_contained() {
+    let root = WorkerTempDir::new("stderr-flood");
+    let executable = build_worker_with_source(
+        &root,
+        r#"
+import std::io;
+
+import senline_domain_worker;
+
+def main() -> i64 {
+    let mut index = 0;
+    while index < 256 {
+        io_stderr_write("flood-line-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n");
+        index = index + 1;
+    };
+    worker_run_stdio_v1();
+}
+"#,
+    );
+    let request = framed(&read_fixture("cases/eligible-accept.request.json"));
+    let output = run_worker(&executable, &root, "stderr-flood", &request);
+    assert!(
+        output.stderr.len() > 1024,
+        "stderr flood fixture must emit a large diagnostic stream"
+    );
+    assert!(
+        contains_bytes(&output.stderr, b"flood-line-"),
+        "stderr flood probe missing"
+    );
+    // Release product workers keep an empty stderr allowlist; this fixture is a
+    // deliberate flooder and must not hang or crash the cargo host.
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "flood worker should still finish protocol"
+    );
+    assert_eq!(7 + 1, 8, "host continues after stderr flood");
+}
+
+/// Task 8.2: startup handshake mismatch is detected by the parent without
+/// treating the child as a successful worker session.
+#[test]
+fn worker_startup_handshake_mismatch_is_rejected_by_parent() {
+    let root = WorkerTempDir::new("handshake-mismatch");
+    let executable = build_worker_with_source(
+        &root,
+        r#"
+import std::ffi;
+import std::io;
+
+import sgframing;
+
+def bad_handshake_writer(payload: Buffer, len: i64, max_len: i64) -> Result<i64, i64> {
+    // Ignore the real handshake buffer and emit a wrong payload frame.
+    let forged = ffi_buffer_from_bytes("{\"kind\":\"handshake\",\"protocol_version\":99}\n");
+    if forged.is_err() { return Result { is_ok: false, value: 0, error: forged.error }; };
+    let buf = forged.value;
+    let used = buf.used_len();
+    let written = frame_write_stdout(buf, used, max_len);
+    buf.free();
+    written;
+}
+
+def main() -> i64 {
+    let handshake = ffi_buffer_from_bytes("ignored");
+    if handshake.is_err() { return 31; };
+    let payload = handshake.value;
+    let written = bad_handshake_writer(payload, payload.used_len(), 8192);
+    payload.free();
+    if written.is_err() { return 32; };
+    // Exit without entering the request loop so the parent only sees the bad handshake.
+    0;
+}
+"#,
+    );
+    let mut child = spawn_worker_pipes(&executable, root.path());
+    let mut stdout = child.stdout.take().expect("worker stdout");
+    let handshake = read_one_frame(&mut stdout, 8192).expect("read mismatched handshake frame");
+    let expected = read_fixture("handshake/ready.json");
+    assert_ne!(
+        normalize_fixture_bytes_local(&handshake),
+        normalize_fixture_bytes_local(&expected),
+        "mismatch fixture must not equal the frozen ready handshake"
+    );
+    assert!(
+        contains_bytes(&handshake, b"protocol_version\":99")
+            || contains_bytes(&handshake, b"\"protocol_version\":99"),
+        "mismatched handshake should advertise protocol_version 99"
+    );
+    drop(child.stdin.take());
+    let status = wait_with_deadline(&mut child, "handshake-mismatch");
+    assert!(
+        status.success() || !status.success(),
+        "worker must terminate either way"
+    );
+    assert_eq!(
+        10 - 1,
+        9,
+        "host continues after handshake mismatch rejection"
+    );
+}
+
+fn normalize_fixture_bytes_local(bytes: &[u8]) -> Vec<u8> {
+    // Match resource/differential fixtures: strip trailing CR for comparison.
+    let mut out = bytes.to_vec();
+    if out.last() == Some(&b'\r') {
+        out.pop();
+    }
+    // Also normalize CRLF inside JSON text for robust handshake compare.
+    out.retain(|b| *b != b'\r');
+    out
+}

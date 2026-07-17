@@ -12,9 +12,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$ManifestFields = @(
+# Required on every pin-grade package manifest.
+$ManifestRequiredFields = @(
     "schema_version", "package", "version", "built_with_sgc", "source_tree",
     "protocols", "payloads", "notes"
+)
+# Optional pin-grade extensions (worker packaging now emits these).
+$ManifestOptionalFields = @(
+    "source_revision", "build_manifest_id", "target", "runtime_dependencies",
+    "license", "provenance"
 )
 $PayloadFields = @("path", "sha256", "size")
 $ExecutableNamePatterns = @(
@@ -50,6 +56,25 @@ function Assert-ExactFields($Value, [string[]]$Expected, [string]$Label) {
         throw "missing manifest field at ${Label}: $($missing -join ', ')"
     }
     $unknown = @($actual | Where-Object { $_ -notin $Expected })
+    if ($unknown.Count -ne 0) {
+        throw "unknown manifest field at ${Label}: $($unknown -join ', ')"
+    }
+}
+
+function Assert-ManifestFields($Value, [string]$Label) {
+    if ($null -eq $Value -or $Value -is [string] -or $Value -is [ValueType] -or $Value -is [System.Array]) {
+        throw "$Label must be an object"
+    }
+    if ($null -eq $Value.PSObject -or $null -eq $Value.PSObject.Properties) {
+        throw "$Label must be an object with properties"
+    }
+    $actual = @($Value.PSObject.Properties.Name)
+    $allowed = @($ManifestRequiredFields + $ManifestOptionalFields)
+    $missing = @($ManifestRequiredFields | Where-Object { $_ -notin $actual })
+    if ($missing.Count -ne 0) {
+        throw "missing required manifest field at ${Label}: $($missing -join ', ')"
+    }
+    $unknown = @($actual | Where-Object { $_ -notin $allowed })
     if ($unknown.Count -ne 0) {
         throw "unknown manifest field at ${Label}: $($unknown -join ', ')"
     }
@@ -144,7 +169,7 @@ function Normalize-Payloads($Value, [string]$Label) {
 }
 
 function Normalize-Manifest($Manifest, [string]$Label) {
-    Assert-ExactFields $Manifest $ManifestFields $Label
+    Assert-ManifestFields $Manifest $Label
     $schemaVersion = Require-Integer $Manifest.schema_version "$Label.schema_version" 0
     if ($schemaVersion -ne 1) {
         throw "$Label.schema_version must be 1"
@@ -161,7 +186,7 @@ function Normalize-Manifest($Manifest, [string]$Label) {
     for ($i = 0; $i -lt $noteItems.Count; $i++) {
         $notes.Add((Require-String $noteItems[$i] "$Label.notes[$i]")) | Out-Null
     }
-    return [ordered]@{
+    $normalized = [ordered]@{
         schema_version = $schemaVersion
         package = Require-String $Manifest.package "$Label.package"
         version = Require-String $Manifest.version "$Label.version"
@@ -171,6 +196,14 @@ function Normalize-Manifest($Manifest, [string]$Label) {
         payloads = @(Normalize-Payloads $Manifest.payloads "$Label.payloads")
         notes = @($notes)
     }
+    # Carry optional pin-grade fields into the comparison object when present so
+    # dual builds must agree on source_revision / build_manifest_id / target.
+    foreach ($optional in $ManifestOptionalFields) {
+        if ($null -ne $Manifest.PSObject.Properties[$optional]) {
+            $normalized[$optional] = $Manifest.$optional
+        }
+    }
+    return $normalized
 }
 
 function Write-Utf8NoBom([string]$Path, [string]$Text) {
@@ -185,14 +218,34 @@ function Canonical-Json($Object) {
 $left = Normalize-Manifest (Read-JsonObject $LeftManifest "left") "left"
 $right = Normalize-Manifest (Read-JsonObject $RightManifest "right") "right"
 
-$metaFields = @("schema_version", "package", "version", "built_with_sgc", "source_tree")
+$metaFields = @(
+    "schema_version", "package", "version", "built_with_sgc", "source_tree",
+    "source_revision", "build_manifest_id"
+)
 $metaMismatches = @()
 foreach ($field in $metaFields) {
-    if ($left[$field] -ne $right[$field]) {
+    $leftHas = $left.Contains($field)
+    $rightHas = $right.Contains($field)
+    if (-not $leftHas -and -not $rightHas) { continue }
+    $leftVal = if ($leftHas) { Canonical-Json $left[$field] } else { "<missing>" }
+    $rightVal = if ($rightHas) { Canonical-Json $right[$field] } else { "<missing>" }
+    if ($leftVal -ne $rightVal) {
         $metaMismatches += [ordered]@{
             field = $field
-            left = $left[$field]
-            right = $right[$field]
+            left = if ($leftHas) { $left[$field] } else { $null }
+            right = if ($rightHas) { $right[$field] } else { $null }
+        }
+    }
+}
+# target object must match when either side ships it
+if ($left.Contains("target") -or $right.Contains("target")) {
+    $leftTarget = if ($left.Contains("target")) { Canonical-Json $left["target"] } else { "<missing>" }
+    $rightTarget = if ($right.Contains("target")) { Canonical-Json $right["target"] } else { "<missing>" }
+    if ($leftTarget -ne $rightTarget) {
+        $metaMismatches += [ordered]@{
+            field = "target"
+            left = if ($left.Contains("target")) { $left["target"] } else { $null }
+            right = if ($right.Contains("target")) { $right["target"] } else { $null }
         }
     }
 }
