@@ -86,6 +86,21 @@ try {
     } finally {
         Pop-Location
     }
+
+    # Copy the release binary and *regenerated* fixtures into the package BEFORE
+    # restoring fixture-mode identity sources. Otherwise package handshake JSON
+    # would be the all-1s fixture while the binary embeds the release identity.
+    $hostIsWindowsInner = ($env:OS -eq "Windows_NT") -or ((Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) -and $IsWindows)
+    $exeNameInner = if ($hostIsWindowsInner) { "senline_domain_worker.exe" } else { "senline_domain_worker" }
+    $builtInner = Join-Path $WorkerRoot (Join-Path "target" (Join-Path "release" $exeNameInner))
+    if (-not (Test-Path -LiteralPath $builtInner)) {
+        throw "missing built worker executable: $builtInner"
+    }
+    Copy-Item -LiteralPath $builtInner -Destination (Join-Path $OutputDir $exeNameInner) -Force
+    Copy-Item -LiteralPath (Join-Path $WorkerRoot "fixtures") -Destination (Join-Path $OutputDir "fixtures") -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $WorkerRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
+    Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force
+    Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.lock") -Destination (Join-Path $OutputDir "Sengoo.lock") -Force
 } finally {
     Copy-Item -LiteralPath $identityBackup -Destination $identityOut -Force
     Copy-Item -LiteralPath $handshakeBackup -Destination $handshakeOut -Force
@@ -95,17 +110,9 @@ try {
 # Avoid $isWindows: PowerShell is case-insensitive and $IsWindows is read-only.
 $hostIsWindows = ($env:OS -eq "Windows_NT") -or ((Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) -and $IsWindows)
 $exeName = if ($hostIsWindows) { "senline_domain_worker.exe" } else { "senline_domain_worker" }
-$built = Join-Path $WorkerRoot (Join-Path "target" (Join-Path "release" $exeName))
-if (-not (Test-Path -LiteralPath $built)) {
-    throw "missing built worker executable: $built"
+if (-not (Test-Path -LiteralPath (Join-Path $OutputDir $exeName))) {
+    throw "package missing worker executable after identity-aware copy: $(Join-Path $OutputDir $exeName)"
 }
-Copy-Item -LiteralPath $built -Destination (Join-Path $OutputDir $exeName) -Force
-
-# Ship fixtures and protocol docs needed by supervisors/tests.
-Copy-Item -LiteralPath (Join-Path $WorkerRoot "fixtures") -Destination (Join-Path $OutputDir "fixtures") -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $WorkerRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
-Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force
-Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.lock") -Destination (Join-Path $OutputDir "Sengoo.lock") -Force
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
