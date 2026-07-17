@@ -4,8 +4,18 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU8, Ordering};
+#[cfg(not(windows))]
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+use native_tls::{Identity, TlsAcceptor};
+
+#[cfg(not(windows))]
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+#[cfg(not(windows))]
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use super::websocket::{
     run_ws_echo_session, websocket_accept_value, write_websocket_upgrade_response,
@@ -14,6 +24,276 @@ use super::{
     classify_io_error, connect_timeout, decode_chunked_body, fail_bool, fail_handle, fail_i64,
     net_runtime, parse_host, reset_last_error, set_last_error, NetErrorCode, NetRuntime,
 };
+
+/// Accepted server-side connection: plaintext TCP or TLS over TCP.
+#[derive(Debug)]
+pub(super) enum HttpServerConn {
+    Plain(TcpStream),
+    #[cfg(windows)]
+    Tls(Box<native_tls::TlsStream<TcpStream>>),
+    #[cfg(not(windows))]
+    Tls(Box<StreamOwned<ServerConnection, TcpStream>>),
+}
+
+impl Read for HttpServerConn {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            HttpServerConn::Plain(s) => s.read(buf),
+            #[cfg(windows)]
+            HttpServerConn::Tls(s) => s.read(buf),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for HttpServerConn {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            HttpServerConn::Plain(s) => s.write(buf),
+            #[cfg(windows)]
+            HttpServerConn::Tls(s) => s.write(buf),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            HttpServerConn::Plain(s) => s.flush(),
+            #[cfg(windows)]
+            HttpServerConn::Tls(s) => s.flush(),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(s) => s.flush(),
+        }
+    }
+}
+
+impl HttpServerConn {
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        match self {
+            HttpServerConn::Plain(s) => s.set_read_timeout(timeout),
+            #[cfg(windows)]
+            HttpServerConn::Tls(s) => s.get_ref().set_read_timeout(timeout),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(s) => s.sock.set_read_timeout(timeout),
+        }
+    }
+
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        match self {
+            HttpServerConn::Plain(s) => s.set_write_timeout(timeout),
+            #[cfg(windows)]
+            HttpServerConn::Tls(s) => s.get_ref().set_write_timeout(timeout),
+            #[cfg(not(windows))]
+            HttpServerConn::Tls(s) => s.sock.set_write_timeout(timeout),
+        }
+    }
+}
+
+/// Platform TLS acceptor built from PEM cert chain + PKCS#8 PEM key.
+#[derive(Clone)]
+pub(super) enum HttpTlsAcceptor {
+    #[cfg(windows)]
+    Native(TlsAcceptor),
+    #[cfg(not(windows))]
+    Rustls(Arc<ServerConfig>),
+}
+
+impl std::fmt::Debug for HttpTlsAcceptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            #[cfg(windows)]
+            HttpTlsAcceptor::Native(_) => f.write_str("HttpTlsAcceptor::Native"),
+            #[cfg(not(windows))]
+            HttpTlsAcceptor::Rustls(_) => f.write_str("HttpTlsAcceptor::Rustls"),
+        }
+    }
+}
+
+impl HttpTlsAcceptor {
+    fn accept(&self, stream: TcpStream) -> Result<HttpServerConn, NetErrorCode> {
+        match self {
+            #[cfg(windows)]
+            HttpTlsAcceptor::Native(acc) => {
+                let tls = acc
+                    .accept(stream)
+                    .map_err(|err| classify_server_tls_error(&err.to_string()))?;
+                Ok(HttpServerConn::Tls(Box::new(tls)))
+            }
+            #[cfg(not(windows))]
+            HttpTlsAcceptor::Rustls(config) => {
+                let conn = ServerConnection::new(Arc::clone(config))
+                    .map_err(|_| NetErrorCode::TlsUnavailable)?;
+                let mut tls = StreamOwned::new(conn, stream);
+                while tls.conn.is_handshaking() {
+                    tls.conn
+                        .complete_io(&mut tls.sock)
+                        .map_err(|err| classify_server_tls_io(&err))?;
+                }
+                Ok(HttpServerConn::Tls(Box::new(tls)))
+            }
+        }
+    }
+}
+
+fn classify_server_tls_error(message: &str) -> NetErrorCode {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("cert")
+        || lower.contains("certificate")
+        || lower.contains("pkcs")
+        || lower.contains("key")
+        || lower.contains("pem")
+        || lower.contains("identity")
+        || lower.contains("import")
+        || lower.contains("invalid")
+        || lower.contains("empty chain")
+        || lower.contains("not a pkcs")
+    {
+        NetErrorCode::TlsCertInvalid
+    } else if lower.contains("unavail") || lower.contains("not support") {
+        NetErrorCode::TlsUnavailable
+    } else {
+        NetErrorCode::TlsHandshake
+    }
+}
+
+#[cfg(not(windows))]
+fn classify_server_tls_io(err: &std::io::Error) -> NetErrorCode {
+    if let Some(src) = err
+        .get_ref()
+        .and_then(|s| s.downcast_ref::<rustls::Error>())
+    {
+        return match src {
+            rustls::Error::InvalidCertificate(_) => NetErrorCode::TlsCertInvalid,
+            _ => NetErrorCode::TlsHandshake,
+        };
+    }
+    classify_io_error(err)
+}
+
+/// Decode PEM blocks into raw DER payloads (no new dependencies).
+#[cfg(not(windows))]
+fn decode_pem_blocks(pem: &[u8]) -> Result<Vec<(String, Vec<u8>)>, NetErrorCode> {
+    let text = std::str::from_utf8(pem).map_err(|_| NetErrorCode::TlsCertInvalid)?;
+    let mut out = Vec::new();
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("-----BEGIN ") {
+            let label = rest
+                .strip_suffix("-----")
+                .ok_or(NetErrorCode::TlsCertInvalid)?
+                .to_string();
+            let mut b64 = String::new();
+            for body in lines.by_ref() {
+                let body = body.trim();
+                if body.starts_with("-----END ") {
+                    break;
+                }
+                b64.push_str(body);
+            }
+            let der = base64_decode(b64.as_bytes()).map_err(|_| NetErrorCode::TlsCertInvalid)?;
+            out.push((label, der));
+        }
+    }
+    if out.is_empty() {
+        return Err(NetErrorCode::TlsCertInvalid);
+    }
+    Ok(out)
+}
+
+#[cfg(not(windows))]
+fn base64_decode(input: &[u8]) -> Result<Vec<u8>, ()> {
+    const TABLE: &[u8; 128] = &{
+        let mut t = [0xffu8; 128];
+        let mut i = 0u8;
+        while i < 26 {
+            t[(b'A' + i) as usize] = i;
+            t[(b'a' + i) as usize] = 26 + i;
+            i += 1;
+        }
+        i = 0;
+        while i < 10 {
+            t[(b'0' + i) as usize] = 52 + i;
+            i += 1;
+        }
+        t[b'+' as usize] = 62;
+        t[b'/' as usize] = 63;
+        t
+    };
+    let filtered: Vec<u8> = input
+        .iter()
+        .copied()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
+    if filtered.len() % 4 != 0 {
+        return Err(());
+    }
+    let mut out = Vec::with_capacity(filtered.len() / 4 * 3);
+    for chunk in filtered.chunks(4) {
+        let mut vals = [0u8; 4];
+        let mut pad = 0;
+        for (i, &c) in chunk.iter().enumerate() {
+            if c == b'=' {
+                vals[i] = 0;
+                pad += 1;
+            } else if (c as usize) < 128 && TABLE[c as usize] != 0xff {
+                vals[i] = TABLE[c as usize];
+            } else {
+                return Err(());
+            }
+        }
+        out.push((vals[0] << 2) | (vals[1] >> 4));
+        if pad < 2 {
+            out.push((vals[1] << 4) | (vals[2] >> 2));
+        }
+        if pad < 1 {
+            out.push((vals[2] << 6) | vals[3]);
+        }
+    }
+    Ok(out)
+}
+
+fn build_tls_acceptor(cert_pem: &[u8], key_pem: &[u8]) -> Result<HttpTlsAcceptor, NetErrorCode> {
+    if cert_pem.is_empty() || key_pem.is_empty() {
+        return Err(NetErrorCode::InvalidArgument);
+    }
+
+    #[cfg(windows)]
+    {
+        let identity = Identity::from_pkcs8(cert_pem, key_pem)
+            .map_err(|err| classify_server_tls_error(&err.to_string()))?;
+        let acceptor = TlsAcceptor::new(identity)
+            .map_err(|err| classify_server_tls_error(&err.to_string()))?;
+        Ok(HttpTlsAcceptor::Native(acceptor))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let cert_blocks = decode_pem_blocks(cert_pem)?;
+        let key_blocks = decode_pem_blocks(key_pem)?;
+        let certs: Vec<CertificateDer<'static>> = cert_blocks
+            .into_iter()
+            .filter(|(label, _)| label.contains("CERTIFICATE"))
+            .map(|(_, der)| CertificateDer::from(der))
+            .collect();
+        if certs.is_empty() {
+            return Err(NetErrorCode::TlsCertInvalid);
+        }
+        let key_der = key_blocks
+            .into_iter()
+            .find(|(label, _)| label.contains("PRIVATE KEY") && !label.contains("ENCRYPTED"))
+            .map(|(_, der)| der)
+            .ok_or(NetErrorCode::TlsCertInvalid)?;
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|_| NetErrorCode::TlsCertInvalid)?;
+        Ok(HttpTlsAcceptor::Rustls(Arc::new(config)))
+    }
+}
 
 #[derive(Debug, Clone)]
 struct HttpServerRequest {
@@ -72,7 +352,7 @@ pub(super) const HTTP_KEEP_ALIVE_IDLE_TIMEOUT_MS: u32 = 30_000;
 /// response. Not tied to any request handle.
 #[derive(Debug)]
 pub(super) struct LiveHttpConnection {
-    stream: TcpStream,
+    stream: HttpServerConn,
     /// Number of fully answered requests already completed on this connection.
     answered_count: u32,
 }
@@ -86,11 +366,13 @@ pub(super) struct HttpServerState {
     pub(super) max_body_bytes: usize,
     /// 0 = unset, 1 = pull, 2 = Sengoo-side router (`serve_http`).
     pub(super) serve_mode: u8,
-    /// Opt-in HTTP/1.1 connection reuse. Default false ⇒ Connection: close.
+    /// Opt-in HTTP/1.1 connection reuse. Default false 鈬?Connection: close.
     pub(super) keep_alive_enabled: bool,
     /// Server-owned idle connection eligible for the next pull (at most one
     /// serial live connection in v1).
     pub(super) live_connection: Option<LiveHttpConnection>,
+    /// When set, accepted TCP connections are TLS-wrapped before HTTP.
+    pub(super) tls: Option<HttpTlsAcceptor>,
 }
 
 /// Pulled-but-unanswered dynamic request. Owns the connection until answer or
@@ -105,7 +387,7 @@ pub(super) struct HttpRequestEntry {
     version: String,
     headers: HashMap<String, String>,
     body: Vec<u8>,
-    stream: TcpStream,
+    stream: HttpServerConn,
     max_body_bytes: usize,
     /// Completed answers on this connection before the current request.
     answered_before: u32,
@@ -131,7 +413,7 @@ enum HttpStreamBodyMode {
 #[derive(Debug)]
 pub(super) struct HttpResponseStreamEntry {
     server_handle: u64,
-    stream: TcpStream,
+    stream: HttpServerConn,
     mode: HttpStreamBodyMode,
     finished: bool,
     answered_before: u32,
@@ -322,6 +604,19 @@ impl NetRuntime {
 
     fn http_server_keep_alive_enabled(&self, handle: u64) -> Result<bool, NetErrorCode> {
         self.http_server_with_state(handle, |state| state.keep_alive_enabled)
+    }
+
+    /// Wrap an accepted TCP socket: plain when no TLS acceptor, else handshake.
+    fn http_server_wrap_conn(
+        &self,
+        handle: u64,
+        stream: TcpStream,
+    ) -> Result<HttpServerConn, NetErrorCode> {
+        let tls = self.http_server_with_state(handle, |state| state.tls.clone())?;
+        match tls {
+            None => Ok(HttpServerConn::Plain(stream)),
+            Some(acc) => acc.accept(stream),
+        }
     }
 
     pub(crate) fn http_server_add_route(
@@ -616,7 +911,7 @@ fn parse_http_request_head(
 }
 
 fn read_http_request(
-    stream: &mut TcpStream,
+    stream: &mut HttpServerConn,
     max_header_bytes: usize,
     max_body_bytes: usize,
 ) -> Result<HttpServerRequest, NetErrorCode> {
@@ -709,7 +1004,7 @@ fn read_http_request(
 }
 
 fn write_http_response(
-    stream: &mut TcpStream,
+    stream: &mut HttpServerConn,
     response: &HttpServerResponse,
     keep_alive: bool,
 ) -> Result<(), NetErrorCode> {
@@ -851,7 +1146,7 @@ fn find_route(
 }
 
 fn process_http_server_connection(
-    stream: &mut TcpStream,
+    stream: &mut HttpServerConn,
     routes: &[HttpServerRoute],
     middlewares: &[HttpServerMiddleware],
     max_header_bytes: usize,
@@ -912,7 +1207,7 @@ fn process_http_server_connection(
 }
 
 fn answer_ws_echo_route(
-    stream: &mut TcpStream,
+    stream: &mut HttpServerConn,
     request: &HttpServerRequest,
 ) -> Result<(), NetErrorCode> {
     let is_upgrade = request.method.eq_ignore_ascii_case("GET")
@@ -956,8 +1251,17 @@ fn answer_ws_echo_route(
         return Ok(());
     }
     let accept = websocket_accept_value(client_key);
-    write_websocket_upgrade_response(stream, &accept)?;
-    run_ws_echo_session(stream)
+    // WebSocket productization is plain-TCP only for v0.2 (TLS WS is residual).
+    match stream {
+        HttpServerConn::Plain(tcp) => {
+            write_websocket_upgrade_response(tcp, &accept)?;
+            run_ws_echo_session(tcp)
+        }
+        #[cfg(windows)]
+        HttpServerConn::Tls(_) => Err(NetErrorCode::UnsupportedScheme),
+        #[cfg(not(windows))]
+        HttpServerConn::Tls(_) => Err(NetErrorCode::UnsupportedScheme),
+    }
 }
 
 fn accept_with_timeout(
@@ -1051,9 +1355,10 @@ fn poll_next_dynamic_request_once(
         }
     }
 
-    let Some(stream) = try_accept_nonblocking(listener)? else {
+    let Some(tcp) = try_accept_nonblocking(listener)? else {
         return Ok(DynamicRequestPoll::NotReady);
     };
+    let stream = net_runtime().http_server_wrap_conn(server_handle, tcp)?;
 
     process_dynamic_request_stream(
         server_handle,
@@ -1070,7 +1375,7 @@ fn poll_next_dynamic_request_once(
 #[allow(clippy::too_many_arguments)]
 fn process_dynamic_request_stream(
     server_handle: u64,
-    mut stream: TcpStream,
+    mut stream: HttpServerConn,
     routes: &[HttpServerRoute],
     middlewares: &[HttpServerMiddleware],
     max_header_bytes: usize,
@@ -1198,6 +1503,64 @@ pub extern "C" fn sengoo_http_server_bind(host: *const u8, port: u16) -> u64 {
         serve_mode: HTTP_SERVER_MODE_UNSET,
         keep_alive_enabled: false,
         live_connection: None,
+        tls: None,
+    };
+    net_runtime()
+        .http_server_store(state)
+        .unwrap_or_else(fail_handle)
+}
+
+/// Bind an HTTPS listener with PEM certificate chain + PKCS#8 PEM private key.
+/// Uses native-tls/Schannel on Windows and rustls on POSIX. Empty/invalid PEM
+/// maps to `STATUS_TLS_*` / `STATUS_INVALID_ARGUMENT` (never silent plaintext).
+#[no_mangle]
+pub extern "C" fn sengoo_http_server_bind_tls(
+    host: *const u8,
+    port: u16,
+    cert_pem: *const u8,
+    cert_len: usize,
+    key_pem: *const u8,
+    key_len: usize,
+) -> u64 {
+    reset_last_error();
+    let host = if host.is_null() {
+        "127.0.0.1".to_string()
+    } else {
+        match parse_host(host) {
+            Ok(host) => host,
+            Err(code) => return fail_handle(code),
+        }
+    };
+    let cert = match read_c_buffer(cert_pem, cert_len) {
+        Ok(v) => v,
+        Err(code) => return fail_handle(code),
+    };
+    let key = match read_c_buffer(key_pem, key_len) {
+        Ok(v) => v,
+        Err(code) => return fail_handle(code),
+    };
+    let acceptor = match build_tls_acceptor(&cert, &key) {
+        Ok(a) => a,
+        Err(code) => return fail_handle(code),
+    };
+    let addr = format!("{}:{}", host, port);
+    let listener = match TcpListener::bind(addr) {
+        Ok(listener) => listener,
+        Err(err) => return fail_handle(classify_io_error(&err)),
+    };
+    if let Err(err) = listener.set_nonblocking(true) {
+        return fail_handle(classify_io_error(&err));
+    }
+    let state = HttpServerState {
+        listener,
+        routes: Vec::new(),
+        middlewares: Vec::new(),
+        max_header_bytes: 16 * 1024,
+        max_body_bytes: 1024 * 1024,
+        serve_mode: HTTP_SERVER_MODE_UNSET,
+        keep_alive_enabled: false,
+        live_connection: None,
+        tls: Some(acceptor),
     };
     net_runtime()
         .http_server_store(state)
@@ -1344,12 +1707,16 @@ pub extern "C" fn sengoo_http_server_serve_once(handle: u64, timeout_ms: u32) ->
             Err(code) => return fail_i64(code),
         };
 
-    let Some(mut stream) = (match accept_with_timeout(&listener, timeout_ms) {
+    let Some(tcp) = (match accept_with_timeout(&listener, timeout_ms) {
         Ok(stream) => stream,
         Err(code) => return fail_i64(code),
     }) else {
         set_last_error(NetErrorCode::Timeout);
         return 0;
+    };
+    let mut stream = match net_runtime().http_server_wrap_conn(handle, tcp) {
+        Ok(s) => s,
+        Err(code) => return fail_i64(code),
     };
 
     if let Err(err) = stream.set_read_timeout(Some(connect_timeout(timeout_ms))) {
@@ -1649,6 +2016,21 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__poll(handle: i64
         }
     };
 
+    let stream = match net_runtime().http_server_wrap_conn(state.server_handle, stream) {
+        Ok(s) => s,
+        Err(code) => {
+            if let Some(interest) = state.listener_interest.take() {
+                crate::async_runtime::http_listener_unregister(interest);
+            }
+            state.outcome = AsyncNextRequestOutcome::Ready {
+                is_ok: false,
+                value: 0,
+                error: super::status_from_net_error_code(code),
+            };
+            guard.mark_ready();
+            return 1;
+        }
+    };
     match process_dynamic_request_stream(
         state.server_handle,
         stream,
@@ -1961,7 +2343,7 @@ fn should_keep_alive(
 }
 
 fn write_stream_headers(
-    stream: &mut TcpStream,
+    stream: &mut HttpServerConn,
     status: i32,
     content_length: Option<usize>,
     keep_alive: bool,
@@ -1982,7 +2364,7 @@ fn write_stream_headers(
     stream.flush().map_err(|err| classify_io_error(&err))
 }
 
-fn write_chunked_body_chunk(stream: &mut TcpStream, chunk: &[u8]) -> Result<(), NetErrorCode> {
+fn write_chunked_body_chunk(stream: &mut HttpServerConn, chunk: &[u8]) -> Result<(), NetErrorCode> {
     let header = format!("{:x}\r\n", chunk.len());
     stream
         .write_all(header.as_bytes())
@@ -1996,7 +2378,7 @@ fn write_chunked_body_chunk(stream: &mut TcpStream, chunk: &[u8]) -> Result<(), 
     stream.flush().map_err(|err| classify_io_error(&err))
 }
 
-fn write_chunked_terminator(stream: &mut TcpStream) -> Result<(), NetErrorCode> {
+fn write_chunked_terminator(stream: &mut HttpServerConn) -> Result<(), NetErrorCode> {
     stream
         .write_all(b"0\r\n\r\n")
         .map_err(|err| classify_io_error(&err))?;
@@ -2186,7 +2568,7 @@ pub extern "C" fn sengoo_http_request_begin_stream_with_length(
     begin_stream_impl(request_handle, status, Some(len))
 }
 
-/// Write one body chunk (≤ 65536 bytes). Disconnect → STATUS_IO; timeout → STATUS_TIMEOUT.
+/// Write one body chunk (鈮?65536 bytes). Disconnect 鈫?STATUS_IO; timeout 鈫?STATUS_TIMEOUT.
 #[no_mangle]
 pub extern "C" fn sengoo_http_response_stream_write(
     stream_handle: u64,
@@ -2285,7 +2667,7 @@ pub extern "C" fn sengoo_http_response_stream_close(stream_handle: u64) -> i64 {
     reset_last_error();
     match net_runtime().http_response_stream_take(stream_handle) {
         Ok(_entry) => {
-            // Drop closes the TcpStream → connection abort for unfinished streams.
+            // Drop closes the TcpStream 鈫?connection abort for unfinished streams.
             1
         }
         Err(NetErrorCode::HandleNotFound) => 1,
@@ -2307,7 +2689,7 @@ mod tests {
 
         let result = process_dynamic_request_stream(
             0,
-            server,
+            HttpServerConn::Plain(server),
             &[],
             &[],
             16 * 1024,
@@ -2348,8 +2730,7 @@ mod tests {
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 
-    fn read_http_response_message(stream: &mut TcpStream) -> String {
-        use std::io::Read;
+    fn read_http_response_message(stream: &mut impl Read) -> String {
         let mut raw = Vec::new();
         let mut buf = [0u8; 256];
         let header_end = loop {
@@ -2628,5 +3009,231 @@ mod tests {
             "router claim after pull should be rejected"
         );
         assert_eq!(sengoo_http_server_close(server2), 1);
+    }
+
+    /// RSA PKCS#8 fixtures: Windows Schannel `Identity::from_pkcs8` uses
+    /// `ProviderType::rsa_full()` and rejects ECDSA keys from rcgen defaults.
+    fn test_server_pem_bundle() -> (Vec<u8>, Vec<u8>) {
+        (
+            include_bytes!("testdata/http_server_tls_cert.pem").to_vec(),
+            include_bytes!("testdata/http_server_tls_key.pem").to_vec(),
+        )
+    }
+
+    #[test]
+    fn http_server_bind_tls_rejects_empty_and_garbage_pem() {
+        let _guard = super::super::net_test_lock();
+
+        let empty = sengoo_http_server_bind_tls(
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+        );
+        assert_eq!(empty, 0, "empty PEM must not bind as TLS");
+        let empty_err = super::super::sengoo_net_last_error();
+        assert!(
+            empty_err == i64::from(super::super::SENGOO_NET_ERR_INVALID_ARGUMENT)
+                || empty_err == i64::from(super::super::SENGOO_NET_ERR_TLS_CERT_INVALID),
+            "empty PEM maps to invalid arg or cert invalid, got {empty_err}"
+        );
+
+        let garbage = b"not-a-pem";
+        let bad = sengoo_http_server_bind_tls(
+            std::ptr::null(),
+            0,
+            garbage.as_ptr(),
+            garbage.len(),
+            garbage.as_ptr(),
+            garbage.len(),
+        );
+        assert_eq!(bad, 0, "garbage PEM must not bind as TLS");
+        let bad_err = super::super::sengoo_net_last_error();
+        assert!(
+            bad_err == i64::from(super::super::SENGOO_NET_ERR_TLS_CERT_INVALID)
+                || bad_err == i64::from(super::super::SENGOO_NET_ERR_TLS_HANDSHAKE)
+                || bad_err == i64::from(super::super::SENGOO_NET_ERR_TLS_UNAVAILABLE)
+                || bad_err == i64::from(super::super::SENGOO_NET_ERR_INVALID_ARGUMENT),
+            "garbage PEM maps to STATUS_TLS_*, got {bad_err}"
+        );
+    }
+
+    #[test]
+    fn http_server_tls_handshake_and_pull_response() {
+        use std::io::{Read, Write};
+        use std::thread;
+
+        trait ReadWrite: Read + Write {}
+        impl<T: Read + Write> ReadWrite for T {}
+
+        let _guard = super::super::net_test_lock();
+        let (cert_pem, key_pem) = test_server_pem_bundle();
+
+        let server = sengoo_http_server_bind_tls(
+            std::ptr::null(),
+            0,
+            cert_pem.as_ptr(),
+            cert_pem.len(),
+            key_pem.as_ptr(),
+            key_pem.len(),
+        );
+        assert_ne!(
+            server,
+            0,
+            "TLS server should bind with RSA PKCS#8 test PEM; last_error={}",
+            super::super::sengoo_net_last_error()
+        );
+        let port = sengoo_http_server_local_port(server);
+        assert!(port > 0);
+
+        let worker = thread::spawn(move || {
+            let tcp = TcpStream::connect(("127.0.0.1", port as u16)).expect("tcp connect");
+            tcp.set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read timeout");
+            tcp.set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("write timeout");
+
+            // Self-signed fixture is not in the system trust store. Prove the
+            // *server* handshake with a test client that accepts the presented
+            // cert (not a production trust configuration).
+            // Windows product stack uses native-tls; POSIX uses rustls — match
+            // the client backend so `native_tls` is not required off-Windows.
+            #[cfg(windows)]
+            let mut tls: Box<dyn ReadWrite> = {
+                let connector = native_tls::TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .danger_accept_invalid_hostnames(true)
+                    .build()
+                    .expect("test connector");
+                Box::new(
+                    connector
+                        .connect("localhost", tcp)
+                        .expect("windows native-tls client handshake"),
+                )
+            };
+            #[cfg(not(windows))]
+            let mut tls: Box<dyn ReadWrite> = {
+                use rustls::client::danger::{
+                    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+                };
+                use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+                use rustls::{
+                    ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError,
+                    SignatureScheme, StreamOwned,
+                };
+                use std::sync::Arc;
+
+                #[derive(Debug)]
+                struct AcceptAnyCert;
+                impl ServerCertVerifier for AcceptAnyCert {
+                    fn verify_server_cert(
+                        &self,
+                        _end_entity: &CertificateDer<'_>,
+                        _intermediates: &[CertificateDer<'_>],
+                        _server_name: &ServerName<'_>,
+                        _ocsp_response: &[u8],
+                        _now: UnixTime,
+                    ) -> Result<ServerCertVerified, TlsError> {
+                        Ok(ServerCertVerified::assertion())
+                    }
+
+                    fn verify_tls12_signature(
+                        &self,
+                        _message: &[u8],
+                        _cert: &CertificateDer<'_>,
+                        _dss: &DigitallySignedStruct,
+                    ) -> Result<HandshakeSignatureValid, TlsError> {
+                        Ok(HandshakeSignatureValid::assertion())
+                    }
+
+                    fn verify_tls13_signature(
+                        &self,
+                        _message: &[u8],
+                        _cert: &CertificateDer<'_>,
+                        _dss: &DigitallySignedStruct,
+                    ) -> Result<HandshakeSignatureValid, TlsError> {
+                        Ok(HandshakeSignatureValid::assertion())
+                    }
+
+                    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                        rustls::crypto::ring::default_provider()
+                            .signature_verification_algorithms
+                            .supported_schemes()
+                    }
+                }
+
+                let _ = rustls::crypto::ring::default_provider().install_default();
+                let config = ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+                    .with_no_client_auth();
+                let name = ServerName::try_from("localhost").expect("server name");
+                let conn = ClientConnection::new(Arc::new(config), name).expect("client conn");
+                let mut stream = StreamOwned::new(conn, tcp);
+                while stream.conn.is_handshaking() {
+                    stream
+                        .conn
+                        .complete_io(&mut stream.sock)
+                        .expect("posix rustls handshake");
+                }
+                Box::new(stream)
+            };
+
+            tls.write_all(b"GET /tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write request over TLS");
+            tls.flush().expect("flush");
+            let mut out = Vec::new();
+            let mut buf = [0u8; 512];
+            let header_end = loop {
+                match tls.read(&mut buf) {
+                    Ok(0) => panic!("EOF before HTTP headers over TLS"),
+                    Ok(n) => out.extend_from_slice(&buf[..n]),
+                    Err(err) => panic!("read tls headers: {err}"),
+                }
+                if let Some(pos) = out.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos;
+                }
+                assert!(out.len() < 8192, "headers too large");
+            };
+            let headers = String::from_utf8_lossy(&out[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        value.trim().parse::<usize>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            let mut body = out[header_end + 4..].to_vec();
+            while body.len() < content_length {
+                match tls.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => body.extend_from_slice(&buf[..n]),
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+                    Err(err) if err.kind() == ErrorKind::TimedOut => break,
+                    Err(err) => panic!("read tls body: {err}"),
+                }
+            }
+            body.truncate(content_length);
+            let text = format!("{}\r\n\r\n{}", headers, String::from_utf8_lossy(&body));
+            assert!(
+                text.contains("HTTP/1.1 200") && text.contains("tls-ok"),
+                "TLS HTTP response: {text}"
+            );
+        });
+
+        let req = sengoo_http_server_next_request(server, 10_000);
+        assert_ne!(req, 0, "TLS pull should deliver request after handshake");
+        assert_eq!(
+            sengoo_http_request_respond(req, 200, b"tls-ok".as_ptr(), 6),
+            1
+        );
+        worker.join().expect("tls client join");
+        assert_eq!(sengoo_http_server_close(server), 1);
     }
 }

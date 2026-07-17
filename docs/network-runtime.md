@@ -47,12 +47,14 @@ This document defines the current runtime network baseline APIs.
 
 ### HTTP Server
 
-- `u64 sengoo_http_server_bind(const u8* host, u16 port)`
+- `u64 sengoo_http_server_bind(const u8* host, u16 port)` — plaintext HTTP
+- `u64 sengoo_http_server_bind_tls(const u8* host, u16 port, const u8* cert_pem, usize cert_len, const u8* key_pem, usize key_len)` — HTTPS with PEM certificate chain + PKCS#8 PEM private key (Windows: native-tls/Schannel; POSIX: rustls). Empty/invalid PEM maps to `STATUS_TLS_*` / `STATUS_INVALID_ARGUMENT`; never silent plaintext success.
 - `i64 sengoo_http_server_local_port(u64 server_handle)`
 - `i64 sengoo_http_server_set_limits(u64 server_handle, u32 max_header_bytes, u32 max_body_bytes)`
+- `i64 sengoo_http_server_set_keep_alive(u64 server_handle, i64 enabled)` — opt-in HTTP/1.1 keep-alive (max 100 requests / 30s idle; default `Connection: close`)
 - `i64 sengoo_http_server_add_route(u64 server_handle, const u8* method, const u8* path_pattern, i32 status, const u8* body, usize body_len)`
 - `i64 sengoo_http_server_add_middleware_require_header(u64 server_handle, const u8* name, const u8* expected_value, i32 reject_status, const u8* reject_body, usize reject_body_len)`
-- `i64 sengoo_http_server_add_ws_echo_route(u64 server_handle, const u8* path_pattern)`
+- `i64 sengoo_http_server_add_ws_echo_route(u64 server_handle, const u8* path_pattern)` — plain TCP only (TLS WebSocket not productized)
 - `i64 sengoo_http_server_serve_once(u64 server_handle, u32 timeout_ms)`
 - `i64 sengoo_http_server_close(u64 server_handle)`
 
@@ -72,7 +74,11 @@ This document defines the current runtime network baseline APIs.
 - `i64 sengoo_http_request_body_len(u64 request_handle)` / `i64 sengoo_http_request_body_copy(u64 request_handle, u8* buffer, usize capacity)`
 - `i64 sengoo_http_request_respond(u64 request_handle, i32 status, const u8* body, usize body_len)`
 - `i64 sengoo_http_request_respond_with_content_type(u64 request_handle, i32 status, const u8* content_type, const u8* body, usize body_len)`
+- `i64 sengoo_http_request_begin_stream(u64 request_handle, i32 status)` / `i64 sengoo_http_request_begin_stream_with_length(u64 request_handle, i32 status, i64 content_length)` — bounded response streaming (chunked or fixed; max chunk 65536)
+- `i64 sengoo_http_response_stream_write(u64 stream_handle, const u8* data, usize len)` / `i64 sengoo_http_response_stream_finish(u64 stream_handle)` / `i64 sengoo_http_response_stream_close(u64 stream_handle)`
 - `i64 sengoo_http_request_close(u64 request_handle)`
+
+Sengoo-side routing uses `HttpRouter` + `serve_http` / `serve_http_once` in `std::net` (exact method+path; pull and router modes are exclusive per listener).
 
 ### Error Mapping
 
@@ -95,6 +101,10 @@ Selected error codes:
 - `11`: `websocket_protocol_error`
 - `12`: `handle_not_found`
 - `14`: `remote_closed`
+- `15`: `tls_cert_invalid`
+- `16`: `tls_hostname_mismatch`
+- `17`: `tls_handshake`
+- `18`: `tls_unavailable`
 
 ## Sengoo stdlib wrapper
 

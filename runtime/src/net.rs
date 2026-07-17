@@ -37,11 +37,12 @@ pub use http_server::{
     sengoo_http_response_stream_close, sengoo_http_response_stream_finish,
     sengoo_http_response_stream_write, sengoo_http_server_add_middleware_require_header,
     sengoo_http_server_add_route, sengoo_http_server_add_ws_echo_route, sengoo_http_server_bind,
-    sengoo_http_server_close, sengoo_http_server_local_port, sengoo_http_server_next_request,
+    sengoo_http_server_bind_tls, sengoo_http_server_claim_serve_mode, sengoo_http_server_close,
+    sengoo_http_server_local_port, sengoo_http_server_next_request,
     sengoo_http_server_next_request_async__cancel, sengoo_http_server_next_request_async__drop,
     sengoo_http_server_next_request_async__poll, sengoo_http_server_next_request_async__result,
     sengoo_http_server_next_request_async__start, sengoo_http_server_serve_once,
-    sengoo_http_server_set_limits, HttpServerNextRequestResult,
+    sengoo_http_server_set_keep_alive, sengoo_http_server_set_limits, HttpServerNextRequestResult,
 };
 use http_server::{HttpRequestEntry, HttpServerState};
 #[cfg(test)]
@@ -728,6 +729,7 @@ mod tests {
                 serve_mode: 0,
                 keep_alive_enabled: false,
                 live_connection: None,
+                tls: None,
             })
             .expect("server should store");
 
