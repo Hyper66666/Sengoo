@@ -3065,6 +3065,9 @@ mod tests {
         use std::io::{Read, Write};
         use std::thread;
 
+        trait ReadWrite: Read + Write {}
+        impl<T: Read + Write> ReadWrite for T {}
+
         let _guard = super::super::net_test_lock();
         let (cert_pem, key_pem) = test_server_pem_bundle();
 
@@ -3093,16 +3096,90 @@ mod tests {
                 .expect("write timeout");
 
             // Self-signed fixture is not in the system trust store. Prove the
-            // *server* handshake path with a test client that accepts the
-            // presented cert (not a production trust configuration).
-            let connector = native_tls::TlsConnector::builder()
-                .danger_accept_invalid_certs(true)
-                .danger_accept_invalid_hostnames(true)
-                .build()
-                .expect("test connector");
-            let mut tls = connector
-                .connect("localhost", tcp)
-                .expect("TLS client handshake with server acceptor");
+            // *server* handshake with a test client that accepts the presented
+            // cert (not a production trust configuration).
+            // Windows product stack uses native-tls; POSIX uses rustls — match
+            // the client backend so `native_tls` is not required off-Windows.
+            #[cfg(windows)]
+            let mut tls: Box<dyn ReadWrite> = {
+                let connector = native_tls::TlsConnector::builder()
+                    .danger_accept_invalid_certs(true)
+                    .danger_accept_invalid_hostnames(true)
+                    .build()
+                    .expect("test connector");
+                Box::new(
+                    connector
+                        .connect("localhost", tcp)
+                        .expect("windows native-tls client handshake"),
+                )
+            };
+            #[cfg(not(windows))]
+            let mut tls: Box<dyn ReadWrite> = {
+                use rustls::client::danger::{
+                    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+                };
+                use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+                use rustls::{
+                    ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError,
+                    SignatureScheme, StreamOwned,
+                };
+                use std::sync::Arc;
+
+                #[derive(Debug)]
+                struct AcceptAnyCert;
+                impl ServerCertVerifier for AcceptAnyCert {
+                    fn verify_server_cert(
+                        &self,
+                        _end_entity: &CertificateDer<'_>,
+                        _intermediates: &[CertificateDer<'_>],
+                        _server_name: &ServerName<'_>,
+                        _ocsp_response: &[u8],
+                        _now: UnixTime,
+                    ) -> Result<ServerCertVerified, TlsError> {
+                        Ok(ServerCertVerified::assertion())
+                    }
+
+                    fn verify_tls12_signature(
+                        &self,
+                        _message: &[u8],
+                        _cert: &CertificateDer<'_>,
+                        _dss: &DigitallySignedStruct,
+                    ) -> Result<HandshakeSignatureValid, TlsError> {
+                        Ok(HandshakeSignatureValid::assertion())
+                    }
+
+                    fn verify_tls13_signature(
+                        &self,
+                        _message: &[u8],
+                        _cert: &CertificateDer<'_>,
+                        _dss: &DigitallySignedStruct,
+                    ) -> Result<HandshakeSignatureValid, TlsError> {
+                        Ok(HandshakeSignatureValid::assertion())
+                    }
+
+                    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                        rustls::crypto::ring::default_provider()
+                            .signature_verification_algorithms
+                            .supported_schemes()
+                    }
+                }
+
+                let _ = rustls::crypto::ring::default_provider().install_default();
+                let config = ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+                    .with_no_client_auth();
+                let name = ServerName::try_from("localhost").expect("server name");
+                let conn = ClientConnection::new(Arc::new(config), name).expect("client conn");
+                let mut stream = StreamOwned::new(conn, tcp);
+                while stream.conn.is_handshaking() {
+                    stream
+                        .conn
+                        .complete_io(&mut stream.sock)
+                        .expect("posix rustls handshake");
+                }
+                Box::new(stream)
+            };
 
             tls.write_all(b"GET /tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
                 .expect("write request over TLS");
