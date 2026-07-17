@@ -104,7 +104,7 @@ try {
     # Normalize residual non-content identity (PE timestamp / ELF build-id) so dual
     # packages can share bit-identical payload hashes after independent rebuilds.
     . (Join-Path $PSScriptRoot "normalize-pin-executable.ps1")
-    Normalize-PinExecutable -Path $packagedExe
+    $script:NormalizePinProvenance = Normalize-PinExecutable -Path $packagedExe
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "fixtures") -Destination (Join-Path $OutputDir "fixtures") -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force
@@ -203,6 +203,8 @@ $manifest = [ordered]@{
         generate_build_identity = $true
         cargo_forbidden_at_package_time = $true
         sbom_inputs = "sbom-inputs.json"
+        sengoo_deterministic_link = $true
+        normalize_pin_executable = $(if ($script:NormalizePinProvenance) { $script:NormalizePinProvenance } else { $null })
     }
     payloads = $payloads
     notes = @(

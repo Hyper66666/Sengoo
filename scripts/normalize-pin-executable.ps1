@@ -4,6 +4,19 @@
 #
 # - PE (Windows): zero COFF TimeDateStamp and optional-header CheckSum.
 # - ELF (Linux): strip .note.gnu.build-id and .comment when objcopy is available.
+#
+# Returns a hashtable describing tools used (path, version string, exit codes)
+# so package provenance can record pin-normalization inputs.
+
+function Get-ToolVersion([string]$ToolPath) {
+    if (-not $ToolPath) { return $null }
+    try {
+        $out = & $ToolPath --version 2>&1 | Out-String
+        return ($out -replace '\s+', ' ').Trim()
+    } catch {
+        return $null
+    }
+}
 
 function Normalize-PinExecutable {
     param(
@@ -13,19 +26,25 @@ function Normalize-PinExecutable {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw "Normalize-PinExecutable: missing file $Path"
     }
+    $provenance = [ordered]@{
+        path = $Path
+        pe_timestamp_zeroed = $false
+        elf_objcopy = $null
+        elf_strip = $null
+    }
     $bytes = [IO.File]::ReadAllBytes($Path)
     if ($bytes.Length -lt 64) {
-        return
+        return $provenance
     }
 
     # PE: MZ ... PE\0\0
     if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
         $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
         if ($peOff -le 0 -or ($peOff + 24) -ge $bytes.Length) {
-            return
+            return $provenance
         }
         if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45) {
-            return
+            return $provenance
         }
         # COFF TimeDateStamp at PE+8
         $bytes[$peOff + 8] = 0
@@ -45,7 +64,8 @@ function Normalize-PinExecutable {
             }
         }
         [IO.File]::WriteAllBytes($Path, $bytes)
-        return
+        $provenance.pe_timestamp_zeroed = $true
+        return $provenance
     }
 
     # ELF: \x7fELF — strip non-content note/comment sections and optional
@@ -58,6 +78,16 @@ function Normalize-PinExecutable {
         }
         if ($objcopy) {
             & $objcopy --remove-section=.note.gnu.build-id --remove-section=.comment $Path 2>$null
+            $code = $LASTEXITCODE
+            # Missing sections may yield non-zero; only fail hard on tool not found (already resolved).
+            $provenance.elf_objcopy = [ordered]@{
+                path = $objcopy
+                version = Get-ToolVersion $objcopy
+                exit_code = $code
+            }
+            if ($code -gt 1) {
+                throw "Normalize-PinExecutable: objcopy failed exit=$code path=$objcopy"
+            }
         }
         $strip = $null
         foreach ($name in @("llvm-strip", "llvm-strip-19", "llvm-strip-18", "strip")) {
@@ -66,6 +96,16 @@ function Normalize-PinExecutable {
         }
         if ($strip) {
             & $strip -s $Path 2>$null
+            $code = $LASTEXITCODE
+            $provenance.elf_strip = [ordered]@{
+                path = $strip
+                version = Get-ToolVersion $strip
+                exit_code = $code
+            }
+            if ($code -ne 0) {
+                throw "Normalize-PinExecutable: strip failed exit=$code path=$strip"
+            }
         }
     }
+    return $provenance
 }

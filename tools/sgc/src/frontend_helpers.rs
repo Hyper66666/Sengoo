@@ -120,7 +120,11 @@ pub(crate) fn resolve_frontend_job_count(requested: FrontendJobs, task_count: us
         Err(_) => false,
     };
     if force_serial {
-        return 1.min(task_count.max(1));
+        // Serial pin-grade builds always schedule one frontend worker. Do not
+        // write `1.min(task_count.max(1))` — clippy::min_max treats that as a
+        // constant 1 and fails `-D warnings`.
+        let _ = task_count;
+        return 1;
     }
     let requested = match requested {
         FrontendJobs::Auto => std::thread::available_parallelism()

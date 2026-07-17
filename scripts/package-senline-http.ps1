@@ -71,7 +71,7 @@ if (-not (Test-Path -LiteralPath $built)) {
 $packagedExe = Join-Path $OutputDir $exeName
 Copy-Item -LiteralPath $built -Destination $packagedExe -Force
 . (Join-Path $PSScriptRoot "normalize-pin-executable.ps1")
-Normalize-PinExecutable -Path $packagedExe
+$script:NormalizePinProvenance = Normalize-PinExecutable -Path $packagedExe
 Copy-Item -LiteralPath (Join-Path $HttpRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
 Copy-Item -LiteralPath (Join-Path $HttpRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force
 Copy-Item -LiteralPath (Join-Path $HttpRoot "Sengoo.lock") -Destination (Join-Path $OutputDir "Sengoo.lock") -Force
@@ -155,6 +155,8 @@ $manifest = [ordered]@{
         built_with_installed_toolchain_only = $true
         cargo_forbidden_at_package_time = $true
         sbom_inputs = "sbom-inputs.json"
+        sengoo_deterministic_link = $true
+        normalize_pin_executable = $(if ($script:NormalizePinProvenance) { $script:NormalizePinProvenance } else { $null })
     }
     payloads = $payloads
     notes = @(

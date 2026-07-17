@@ -74,8 +74,10 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (**Blocked** outside this worktree).
 2. **Task 7.2 / 7.4 / 7.7** — true red-first defect history + complete pin/green chain not reconstructed; evidence keeps `red_status=pending-commit` and `fixing_commit=null`.
-3. **Task 8.7** — HTTP dual-package executable hash still diverges under fail-closed compare (worker dual-package is bit-identical on both hosts).
-4. **P2 compiler debt:** ordinary by-value legacy-handle Drop still skipped (language ABI); worker uses product-level owning helpers.
+3. **Task 6.5 / 6.6 / 8.3 / 9.1 / 9.2** — reopened after review (product matrix, client-surface scan, process-count/durable soak publication, clippy, installed hash). See `tasks.md`.
+4. **Task 8.7** — HTTP dual-package executable hash still diverges under fail-closed compare (worker dual-package is bit-identical on both hosts).
+5. **sgfmt comment preservation** — lexer skip + AST rebuild previously dropped comments; RED test + reinject path added (verify before re-closing 9.1).
+6. **P2 compiler debt:** ordinary by-value legacy-handle Drop still skipped (language ABI); worker uses product-level owning helpers.
 
 ## Unsupported authority transfers
 

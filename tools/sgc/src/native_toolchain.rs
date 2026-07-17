@@ -504,18 +504,16 @@ fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
     }
 }
 
-/// Pin-grade dual-build identity: when set (or when value is not "0"), linkers
-/// omit build-ids / PE timestamps that otherwise make equal-size dual packages
-/// diverge under hash compare.
+/// Pin-grade dual-build identity: enabled only when package scripts (or tests)
+/// explicitly set `SENGOO_DETERMINISTIC_LINK` to a truthy value. Default off so
+/// ordinary developer builds are unaffected.
 fn deterministic_link_requested() -> bool {
     match std::env::var("SENGOO_DETERMINISTIC_LINK") {
         Ok(value) => {
             let trimmed = value.trim();
             !(trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("false"))
         }
-        // Default on: package dual-builds and CI pin-grade compares require it.
-        // Opt out with SENGOO_DETERMINISTIC_LINK=0 for debug link experiments.
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 

@@ -665,6 +665,10 @@ where
     let mut window_cases = 0_u64;
     let mut completed = 0_u64;
     let mut worker_exited_early = false;
+    let mut process_count_samples: Vec<u32> = Vec::new();
+    if let Some(n) = sample_worker_process_tree_count(pid) {
+        process_count_samples.push(n);
+    }
 
     if failures.is_empty() {
         for index in 0..count {
@@ -680,6 +684,25 @@ where
                 Ok(None) => {}
                 Err(error) => {
                     failures.push(format!("worker process poll failed: {error}"));
+                    break;
+                }
+            }
+            // Sample process tree periodically (and on the last case).
+            if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
+                if let Some(n) = sample_worker_process_tree_count(pid) {
+                    process_count_samples.push(n);
+                    if n > 1 {
+                        failures.push(format!(
+                            "case {}: worker process tree count {n} exceeds single-worker bound (worker + unexpected children)",
+                            index + 1
+                        ));
+                        break;
+                    }
+                } else if !worker_exited_early {
+                    failures.push(format!(
+                        "case {}: failed to sample worker process tree count for pid {pid}",
+                        index + 1
+                    ));
                     break;
                 }
             }
@@ -762,15 +785,12 @@ where
         }
     }
 
-    // process_count is 1 only while the single child remained alive through the
-    // full requested corpus (not exited early, not multi-worker).
-    let process_count = if worker_exited_early || completed != count {
-        // Still one intended child, but gate must fail via failures/cases.
-        1_u32
-    } else {
-        1_u32
-    };
-    let process_count_ok = !worker_exited_early && completed == count;
+    // Measured max of (worker + children) across samples — never hardcode 1.
+    let process_count = process_count_samples.iter().copied().max().unwrap_or(0);
+    let process_count_ok = !worker_exited_early
+        && completed == count
+        && process_count == 1
+        && !process_count_samples.is_empty();
 
     // Kill the worker *before* joining stdout/stderr readers. Joining first
     // deadlocks the soak watchdog when the worker hangs with pipes still open.
@@ -906,6 +926,58 @@ mod win_sample {
         }
     }
 
+    pub(super) fn process_tree_count(root_pid: u32) -> Option<u32> {
+        // Toolhelp snapshot of all processes; count root + children with PPID==root.
+        #[repr(C)]
+        struct ProcessEntry32W {
+            dw_size: DWORD,
+            cnt_usage: DWORD,
+            th32_process_id: DWORD,
+            th32_default_heap_id: usize,
+            th32_module_id: DWORD,
+            cnt_threads: DWORD,
+            th32_parent_process_id: DWORD,
+            pc_pri_class_base: i32,
+            dw_flags: DWORD,
+            sz_exe_file: [u16; 260],
+        }
+        const TH32CS_SNAPPROCESS: DWORD = 0x0000_0002;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateToolhelp32Snapshot(flags: DWORD, process_id: DWORD) -> HANDLE;
+            fn Process32FirstW(snapshot: HANDLE, entry: *mut ProcessEntry32W) -> BOOL;
+            fn Process32NextW(snapshot: HANDLE, entry: *mut ProcessEntry32W) -> BOOL;
+        }
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap.is_null() || snap == (-1isize as HANDLE) {
+                return None;
+            }
+            let mut entry = std::mem::zeroed::<ProcessEntry32W>();
+            entry.dw_size = size_of::<ProcessEntry32W>() as DWORD;
+            let mut count = 0u32;
+            let mut root_seen = false;
+            if Process32FirstW(snap, &mut entry) != 0 {
+                loop {
+                    if entry.th32_process_id == root_pid {
+                        root_seen = true;
+                        count = count.saturating_add(1);
+                    } else if entry.th32_parent_process_id == root_pid {
+                        count = count.saturating_add(1);
+                    }
+                    if Process32NextW(snap, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snap);
+            if !root_seen {
+                return None;
+            }
+            Some(count.max(1))
+        }
+    }
+
     pub(super) fn handle_count(pid: u32) -> Option<u64> {
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
@@ -933,6 +1005,55 @@ fn sample_worker_memory_bytes(pid: u32) -> Option<u64> {
 #[cfg(windows)]
 fn sample_worker_handle_count(pid: u32) -> Option<u64> {
     win_sample::handle_count(pid)
+}
+
+/// Count the worker process plus any live child processes (PPID == worker).
+/// Used so process_count is measured, not hardcoded.
+#[cfg(windows)]
+fn sample_worker_process_tree_count(pid: u32) -> Option<u32> {
+    win_sample::process_tree_count(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn sample_worker_process_tree_count(pid: u32) -> Option<u32> {
+    // Confirm the worker pid is still alive.
+    fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    let mut count = 1u32;
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Some(count);
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let child_pid: u32 = match name.parse() {
+            Ok(v) if v != pid => v,
+            _ => continue,
+        };
+        let Ok(stat) = fs::read_to_string(format!("/proc/{child_pid}/stat")) else {
+            continue;
+        };
+        // /proc/pid/stat: pid (comm) state ppid ... — comm may contain ')'.
+        let Some(rparen) = stat.rfind(')') else {
+            continue;
+        };
+        let after = stat[rparen + 1..].trim_start();
+        let mut parts = after.split_whitespace();
+        let _state = parts.next();
+        if let Some(ppid) = parts.next().and_then(|s| s.parse::<u32>().ok()) {
+            if ppid == pid {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    Some(count)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn sample_worker_process_tree_count(_pid: u32) -> Option<u32> {
+    None
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
