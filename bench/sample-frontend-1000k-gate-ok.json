@@ -30,18 +30,18 @@
     },
     "100000": {
       "sengoo": {
-        "compile_frontend_llvm_avg_ms": 153.87,
+        "compile_frontend_llvm_avg_ms": 394.76,
         "codegen_obj_avg_ms": 90.61,
         "link_avg_ms": 173.05,
-        "e2e_avg_ms": 417.53
+        "e2e_avg_ms": 546.38
       }
     },
     "1000000": {
       "sengoo": {
-        "compile_frontend_llvm_avg_ms": 1589.02,
+        "compile_frontend_llvm_avg_ms": 1347.34,
         "codegen_obj_avg_ms": 76.77,
         "link_avg_ms": 162.04,
-        "e2e_avg_ms": 1827.84
+        "e2e_avg_ms": 1493.49
       }
     }
   },
@@ -53,14 +53,14 @@
       "python": { "peak_rss_mb_avg": 15.0 }
     },
     "100000": {
-      "sengoo": { "peak_rss_mb_avg": 140.18 },
-      "cpp": { "peak_rss_mb_avg": 118.5 },
+      "sengoo": { "peak_rss_mb_avg": 82.34 },
+      "cpp": { "peak_rss_mb_avg": 118.29 },
       "rust": { "peak_rss_mb_avg": 200.0 },
       "python": { "peak_rss_mb_avg": 180.0 }
     },
     "1000000": {
-      "sengoo": { "peak_rss_mb_avg": 1367.99 },
-      "cpp": { "peak_rss_mb_avg": 435.22 },
+      "sengoo": { "peak_rss_mb_avg": 613.84 },
+      "cpp": { "peak_rss_mb_avg": 432.23 },
       "rust": { "peak_rss_mb_avg": 2600.0 },
       "python": { "peak_rss_mb_avg": 2500.0 }
     }

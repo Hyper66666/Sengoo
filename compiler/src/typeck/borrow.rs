@@ -5,7 +5,7 @@
 
 use crate::ast::{Block, DeclKind, Expr, ExprKind, Program, Stmt, StmtKind, UnOp};
 use crate::lexer::Span;
-use crate::typeck::ty::Ty;
+use crate::typeck::ty::{Ty, TyKind};
 use crate::typeck::TypeEnv;
 use std::collections::{HashMap, HashSet};
 
@@ -130,6 +130,18 @@ pub struct BorrowChecker {
     moved_stack: Vec<HashSet<MovePath>>,
     /// Last move site per variable (for diagnostics).
     move_spans: HashMap<MovePath, (usize, usize)>,
+    /// Remaining syntactic identifier uses in the function being checked.
+    /// Counts are consumed in evaluation order, so nested blocks cannot erase
+    /// an outer block's liveness context.
+    remaining_ident_uses: HashMap<String, usize>,
+    /// Identifiers used by active loop conditions/bodies. A borrow used by an
+    /// enclosing loop remains live for the next iteration even after its one
+    /// static AST visit has been consumed.
+    active_loop_uses: Vec<HashSet<String>>,
+    /// Binding name -> owner path for borrow aliases (`let view = owner.as_str()`).
+    borrow_aliases: HashMap<String, MovePath>,
+    /// Nested scope snapshots for alias tracking.
+    borrow_alias_stack: Vec<HashMap<String, MovePath>>,
 }
 
 impl BorrowChecker {
@@ -144,6 +156,10 @@ impl BorrowChecker {
             moved: HashSet::new(),
             moved_stack: Vec::new(),
             move_spans: HashMap::new(),
+            remaining_ident_uses: HashMap::new(),
+            active_loop_uses: Vec::new(),
+            borrow_aliases: HashMap::new(),
+            borrow_alias_stack: Vec::new(),
         }
     }
 
@@ -154,6 +170,7 @@ impl BorrowChecker {
     ) -> std::result::Result<(), Vec<BorrowError>> {
         for decl in &program.decls {
             if let DeclKind::Function(func) = &decl.kind {
+                self.prepare_remaining_uses(&func.body);
                 self.check_block(&func.body);
             }
         }
@@ -161,7 +178,8 @@ impl BorrowChecker {
     }
 
     pub(crate) fn check_function_block(&mut self, block: &Block) {
-        self.check_block_inner(block, true, true);
+        self.prepare_remaining_uses(block);
+        self.check_block_inner(block, true);
     }
 
     /// Check one statement.
@@ -198,41 +216,38 @@ impl BorrowChecker {
     }
 
     fn push_scope(&mut self) {
-        let current = std::mem::take(&mut self.borrows);
-        self.borrow_stack.push(current);
-        self.borrows = HashMap::new();
-        let moved = std::mem::take(&mut self.moved);
-        self.moved_stack.push(moved);
-        self.moved = HashSet::new();
+        self.borrow_stack.push(self.borrows.clone());
+        self.moved_stack.push(self.moved.clone());
+        self.borrow_alias_stack.push(self.borrow_aliases.clone());
     }
 
-    fn pop_scope(&mut self, merge_moves: bool) {
+    fn pop_scope(&mut self) {
         if let Some(prev) = self.borrow_stack.pop() {
             self.borrows = prev;
         }
         if let Some(mut prev_moved) = self.moved_stack.pop() {
             for path in std::mem::take(&mut self.moved) {
-                if merge_moves {
-                    if let Some(span) = self.move_spans.remove(&path) {
-                        prev_moved.insert(path.clone());
-                        self.move_spans.insert(path, span);
-                    }
-                } else if !prev_moved.contains(&path) {
-                    self.move_spans.remove(&path);
+                if let Some(span) = self.move_spans.remove(&path) {
+                    prev_moved.insert(path.clone());
+                    self.move_spans.insert(path, span);
                 }
             }
             self.moved = prev_moved;
         }
+        if let Some(prev_aliases) = self.borrow_alias_stack.pop() {
+            self.borrow_aliases = prev_aliases;
+        }
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) {
-        self.check_block_inner(block, false, true);
+        self.check_block_inner(block, false);
     }
 
-    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool, merge_moves: bool) {
+    fn check_block_inner(&mut self, block: &Block, reject_tail_escape: bool) {
         self.push_scope();
         for (index, stmt) in block.stmts.iter().enumerate() {
             let _ = self.check_stmt(stmt);
+            // Escape checks must run before last-use pruning clears live tail borrows.
             if reject_tail_escape && index + 1 == block.stmts.len() {
                 if let StmtKind::Expr(expr) = &stmt.kind {
                     if !matches!(expr.kind, ExprKind::Return(_)) {
@@ -240,17 +255,72 @@ impl BorrowChecker {
                     }
                 }
             }
+            // D1: after each statement, end borrows whose aliases have no later use.
+            self.end_borrows_with_no_remaining_uses();
         }
-        self.pop_scope(merge_moves);
+        self.pop_scope();
     }
 
-    fn block_has_unconditional_return_stmt(block: &Block) -> bool {
-        block.stmts.iter().any(
-            |stmt| matches!(&stmt.kind, StmtKind::Expr(expr) if matches!(expr.kind, ExprKind::Return(_))),
-        )
+    fn end_borrows_with_no_remaining_uses(&mut self) {
+        let aliases: Vec<(String, MovePath)> = self
+            .borrow_aliases
+            .iter()
+            .map(|(name, owner)| (name.clone(), owner.clone()))
+            .collect();
+        for (name, owner) in aliases {
+            if self.remaining_uses_ident(&name)
+                || self.loop_keeps_ident_live(&name)
+                || self.alias_requires_scope_end(&name)
+            {
+                continue;
+            }
+            self.borrows.remove(&MovePath::root(name.clone()));
+            self.borrow_aliases.remove(&name);
+            let still_aliased = self
+                .borrow_aliases
+                .values()
+                .any(|path| path.is_prefix_of(&owner) || owner.is_prefix_of(path));
+            if !still_aliased {
+                let owner_keys: Vec<MovePath> = self
+                    .borrows
+                    .keys()
+                    .filter(|borrowed| {
+                        borrowed.is_prefix_of(&owner) || owner.is_prefix_of(borrowed)
+                    })
+                    .cloned()
+                    .collect();
+                for key in owner_keys {
+                    self.borrows.remove(&key);
+                }
+            }
+        }
+
+        // A borrow created only to evaluate a call argument ends with the
+        // statement. Borrows that flow into a named reference, iterator, or
+        // guard remain protected by the alias and its owner path.
+        let protected_aliases = self
+            .borrow_aliases
+            .keys()
+            .map(|name| MovePath::root(name.clone()))
+            .collect::<Vec<_>>();
+        let protected_owners = self.borrow_aliases.values().cloned().collect::<Vec<_>>();
+        self.borrows.retain(|path, _| {
+            protected_aliases.iter().any(|alias| alias == path)
+                || protected_owners
+                    .iter()
+                    .any(|owner| owner.is_prefix_of(path) || path.is_prefix_of(owner))
+        });
     }
 
     fn check_expr(&mut self, expr: &Expr) {
+        if matches!(
+            expr.kind,
+            ExprKind::Ident(_) | ExprKind::Path(_) | ExprKind::Field { .. }
+        ) {
+            if let Some(path) = Self::expr_move_path(expr) {
+                self.consume_ident_use(&path.root);
+            }
+        }
         match &expr.kind {
             ExprKind::Unary { op, operand } => {
                 match op {
@@ -304,24 +374,28 @@ impl BorrowChecker {
                 else_branch,
             } => {
                 self.check_expr(cond);
-                self.check_block_inner(
-                    then_branch,
-                    false,
-                    !Self::block_has_unconditional_return_stmt(then_branch),
-                );
+                self.check_block(then_branch);
                 if let Some(else_expr) = else_branch {
                     self.check_expr(else_expr);
                 }
             }
             ExprKind::While { cond, body } => {
+                self.push_active_loop_uses(Some(cond), body);
                 self.check_expr(cond);
                 self.check_block(body);
+                self.active_loop_uses.pop();
             }
             ExprKind::For { iter, body, .. } => {
+                self.push_active_loop_uses(Some(iter), body);
                 self.check_expr(iter);
                 self.check_block(body);
+                self.active_loop_uses.pop();
             }
-            ExprKind::Loop(body) => self.check_block(body),
+            ExprKind::Loop(body) => {
+                self.push_active_loop_uses(None, body);
+                self.check_block(body);
+                self.active_loop_uses.pop();
+            }
             ExprKind::Match { scrutinee, arms } => {
                 self.check_expr(scrutinee);
                 for arm in arms {
@@ -458,10 +532,16 @@ impl BorrowChecker {
                 });
             }
             _ => {
-                let Some(path) = Self::expr_move_path(expr) else {
+                let Some(full_path) = Self::expr_move_path(expr) else {
                     return;
                 };
-                let path = MovePath::root(path.root.clone());
+                if self
+                    .move_path_ty(&full_path)
+                    .is_some_and(|ty| !Self::type_can_escape_borrow(&ty))
+                {
+                    return;
+                }
+                let path = MovePath::root(full_path.root.clone());
                 if let Some(active_borrow) = self.borrows.get(&path).and_then(|borrows| {
                     borrows
                         .iter()
@@ -492,6 +572,10 @@ impl BorrowChecker {
     fn ty_is_movable_owning_value(&self, ty: &Ty) -> bool {
         if ty.is_copy_value() {
             return false;
+        }
+        if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if matches!(name.as_str(), "Mutex" | "RwLock"))
+        {
+            return true;
         }
         if matches!(&ty.kind, crate::typeck::ty::TyKind::Adt { name, .. } if name == "Rc") {
             return true;
@@ -524,6 +608,38 @@ impl BorrowChecker {
         Some(ty)
     }
 
+    fn alias_requires_scope_end(&self, name: &str) -> bool {
+        self.var_ty(name)
+            .is_some_and(|ty| Self::type_has_scope_bound_borrow(&ty))
+    }
+
+    fn type_has_scope_bound_borrow(ty: &Ty) -> bool {
+        match &ty.kind {
+            TyKind::Adt { name, args } => {
+                matches!(
+                    name.as_str(),
+                    "MutexGuard"
+                        | "MutexGuardI64"
+                        | "RwLockReadGuard"
+                        | "RwLockReadGuardI64"
+                        | "RwLockWriteGuard"
+                        | "RwLockWriteGuardI64"
+                        | "RawVecIter"
+                        | "RawMapKeyIter"
+                ) || args.iter().any(Self::type_has_scope_bound_borrow)
+            }
+            TyKind::Tuple(items) => items.iter().any(Self::type_has_scope_bound_borrow),
+            TyKind::Array(item, _) | TyKind::Slice(item) | TyKind::Future(item) => {
+                Self::type_has_scope_bound_borrow(item)
+            }
+            _ => false,
+        }
+    }
+
+    fn type_can_escape_borrow(ty: &Ty) -> bool {
+        matches!(ty.kind, TyKind::Ref(..)) || Self::type_has_scope_bound_borrow(ty)
+    }
+
     fn move_path_is_movable_owning_value(&self, path: &MovePath) -> bool {
         self.move_path_ty(path)
             .is_some_and(|ty| self.ty_is_movable_owning_value(&ty))
@@ -540,6 +656,8 @@ impl BorrowChecker {
 
     fn mark_moved(&mut self, path: &MovePath, span: Span) {
         let move_span = (span.lo as usize, span.hi as usize);
+        // D1: end borrows whose last reachable use is already past (no remaining use).
+        self.end_last_use_borrows_for_path(path);
         if let Some(active_borrow) = self
             .borrows
             .iter()
@@ -555,6 +673,219 @@ impl BorrowChecker {
         }
         self.moved.insert(path.clone());
         self.move_spans.insert(path.clone(), move_span);
+    }
+
+    /// End owner/alias borrows that have no remaining use in the current block.
+    fn end_last_use_borrows_for_path(&mut self, owner: &MovePath) {
+        let has_owner_borrow = self
+            .borrows
+            .keys()
+            .any(|borrowed| borrowed.is_prefix_of(owner) || owner.is_prefix_of(borrowed));
+        if !has_owner_borrow {
+            return;
+        }
+        let alias_names: Vec<String> = self
+            .borrow_aliases
+            .iter()
+            .filter(|(_, source)| source.is_prefix_of(owner) || owner.is_prefix_of(source))
+            .map(|(name, _)| name.clone())
+            .collect();
+        // Borrows without an explicit alias may back owning guard values whose
+        // Drop still needs the owner. Keep them live conservatively.
+        if alias_names.is_empty() {
+            return;
+        }
+        if alias_names.iter().any(|name| {
+            self.remaining_uses_ident(name)
+                || self.loop_keeps_ident_live(name)
+                || self.alias_requires_scope_end(name)
+        }) {
+            return;
+        }
+        // Drop owner path borrows and every dead alias binding for that owner.
+        let owner_keys: Vec<MovePath> = self
+            .borrows
+            .keys()
+            .filter(|borrowed| borrowed.is_prefix_of(owner) || owner.is_prefix_of(borrowed))
+            .cloned()
+            .collect();
+        for key in owner_keys {
+            self.borrows.remove(&key);
+        }
+        for name in alias_names {
+            self.borrows.remove(&MovePath::root(name.clone()));
+            self.borrow_aliases.remove(&name);
+        }
+    }
+
+    fn record_borrow_alias(&mut self, alias: &str, owner: &MovePath) {
+        self.borrow_aliases.insert(alias.to_string(), owner.clone());
+    }
+
+    fn remaining_uses_ident(&self, name: &str) -> bool {
+        self.remaining_ident_uses.get(name).copied().unwrap_or(0) > 0
+    }
+
+    fn loop_keeps_ident_live(&self, name: &str) -> bool {
+        self.active_loop_uses
+            .iter()
+            .any(|loop_uses| loop_uses.contains(name))
+    }
+
+    fn prepare_remaining_uses(&mut self, block: &Block) {
+        self.remaining_ident_uses.clear();
+        Self::collect_block_ident_uses(block, &mut self.remaining_ident_uses);
+        self.active_loop_uses.clear();
+    }
+
+    fn push_active_loop_uses(&mut self, condition: Option<&Expr>, body: &Block) {
+        let mut counts = HashMap::new();
+        if let Some(condition) = condition {
+            Self::collect_expr_ident_uses(condition, &mut counts);
+        }
+        Self::collect_block_ident_uses(body, &mut counts);
+        self.active_loop_uses
+            .push(counts.into_keys().collect::<HashSet<_>>());
+    }
+
+    fn consume_ident_use(&mut self, name: &str) {
+        let Some(remaining) = self.remaining_ident_uses.get_mut(name) else {
+            return;
+        };
+        *remaining = remaining.saturating_sub(1);
+        if *remaining == 0 {
+            self.remaining_ident_uses.remove(name);
+        }
+    }
+
+    fn collect_block_ident_uses(block: &Block, uses: &mut HashMap<String, usize>) {
+        for stmt in &block.stmts {
+            Self::collect_stmt_ident_uses(stmt, uses);
+        }
+    }
+
+    fn collect_stmt_ident_uses(stmt: &Stmt, uses: &mut HashMap<String, usize>) {
+        match &stmt.kind {
+            StmtKind::Let { value, .. } => {
+                if let Some(value) = value {
+                    Self::collect_expr_ident_uses(value, uses);
+                }
+            }
+            StmtKind::Const { value, .. } | StmtKind::Expr(value) => {
+                Self::collect_expr_ident_uses(value, uses);
+            }
+            StmtKind::Item(_) => {}
+        }
+    }
+
+    fn record_ident_use(uses: &mut HashMap<String, usize>, name: &str) {
+        *uses.entry(name.to_string()).or_default() += 1;
+    }
+
+    fn collect_expr_ident_uses(expr: &Expr, uses: &mut HashMap<String, usize>) {
+        match &expr.kind {
+            ExprKind::Ident(ident) => Self::record_ident_use(uses, &ident.name),
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_simple() {
+                    Self::record_ident_use(uses, &ident.name);
+                }
+            }
+            ExprKind::Unary { operand, .. }
+            | ExprKind::Cast { expr: operand, .. }
+            | ExprKind::Is { expr: operand, .. }
+            | ExprKind::Try(operand)
+            | ExprKind::Await(operand)
+            | ExprKind::Paren(operand)
+            | ExprKind::Lambda { body: operand, .. } => {
+                Self::collect_expr_ident_uses(operand, uses);
+            }
+            ExprKind::Binary { left, right, .. }
+            | ExprKind::AssignOp {
+                target: left,
+                value: right,
+                ..
+            }
+            | ExprKind::Index {
+                base: left,
+                index: right,
+            } => {
+                Self::collect_expr_ident_uses(left, uses);
+                Self::collect_expr_ident_uses(right, uses);
+            }
+            ExprKind::Assign { value, .. } => Self::collect_expr_ident_uses(value, uses),
+            ExprKind::Call { func, args } => {
+                Self::collect_expr_ident_uses(func, uses);
+                for arg in args {
+                    Self::collect_expr_ident_uses(arg, uses);
+                }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                Self::collect_expr_ident_uses(receiver, uses);
+                for arg in args {
+                    Self::collect_expr_ident_uses(arg, uses);
+                }
+            }
+            ExprKind::Field { base, .. } => Self::collect_expr_ident_uses(base, uses),
+            ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
+                for elem in elems {
+                    Self::collect_expr_ident_uses(elem, uses);
+                }
+            }
+            ExprKind::Struct { fields, base, .. } => {
+                for field in fields {
+                    Self::collect_expr_ident_uses(&field.value, uses);
+                }
+                if let Some(base) = base {
+                    Self::collect_expr_ident_uses(base, uses);
+                }
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::collect_expr_ident_uses(cond, uses);
+                Self::collect_block_ident_uses(then_branch, uses);
+                if let Some(else_expr) = else_branch {
+                    Self::collect_expr_ident_uses(else_expr, uses);
+                }
+            }
+            ExprKind::Block(block)
+            | ExprKind::TryBlock(block)
+            | ExprKind::AsyncBlock(block)
+            | ExprKind::ParallelBlock(block) => Self::collect_block_ident_uses(block, uses),
+            ExprKind::While { cond, body }
+            | ExprKind::For {
+                iter: cond, body, ..
+            } => {
+                Self::collect_expr_ident_uses(cond, uses);
+                Self::collect_block_ident_uses(body, uses);
+            }
+            ExprKind::Loop(body) => Self::collect_block_ident_uses(body, uses),
+            ExprKind::Match { scrutinee, arms } => {
+                Self::collect_expr_ident_uses(scrutinee, uses);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        Self::collect_expr_ident_uses(guard, uses);
+                    }
+                    Self::collect_expr_ident_uses(&arm.body, uses);
+                }
+            }
+            ExprKind::Range { start, end, .. } => {
+                if let Some(start) = start {
+                    Self::collect_expr_ident_uses(start, uses);
+                }
+                if let Some(end) = end {
+                    Self::collect_expr_ident_uses(end, uses);
+                }
+            }
+            ExprKind::Return(value) | ExprKind::Break(value) | ExprKind::Yield(value) => {
+                if let Some(value) = value {
+                    Self::collect_expr_ident_uses(value, uses);
+                }
+            }
+            ExprKind::Continue | ExprKind::Literal(_) => {}
+        }
     }
 
     fn check_move_path_use(&mut self, path: &MovePath, span: Span) {
@@ -630,9 +961,16 @@ impl BorrowChecker {
 
     fn add_borrow(&mut self, expr: &Expr, kind: BorrowKind) {
         if let Some(path) = Self::expr_move_path(expr) {
+            let span = (expr.span.lo as usize, expr.span.hi as usize);
+            if self.borrows.get(&path).is_some_and(|borrows| {
+                borrows
+                    .iter()
+                    .any(|borrow| borrow.kind == kind && borrow.span == span)
+            }) {
+                return;
+            }
             let lifetime = self.lifetime_counter;
             self.lifetime_counter += 1;
-            let span = (expr.span.lo as usize, expr.span.hi as usize);
 
             for (borrowed, existing) in &self.borrows {
                 if !borrowed.is_prefix_of(&path) && !path.is_prefix_of(borrowed) {
@@ -683,6 +1021,7 @@ impl BorrowChecker {
                         if let Some(existing) = self.borrows.get(&source).cloned() {
                             self.borrows
                                 .insert(MovePath::root(name.to_string()), existing);
+                            self.record_borrow_alias(name, &source);
                         }
                     }
                 }
@@ -692,23 +1031,41 @@ impl BorrowChecker {
                 self.track_borrows_in_expr(name, right);
             }
             ExprKind::Call { func, args } => {
-                self.track_borrows_in_expr(name, func);
-                for arg in args {
-                    self.track_borrows_in_expr(name, arg);
+                let result_can_carry_borrow = self
+                    ._env
+                    .resolved_call_return_type(expr.span.lo)
+                    .is_some_and(Self::type_can_escape_borrow);
+                if result_can_carry_borrow {
+                    self.track_borrows_in_expr(name, func);
+                    for arg in args {
+                        self.track_borrows_in_expr(name, arg);
+                    }
                 }
             }
-            ExprKind::MethodCall { receiver, args, .. } => {
-                if matches!(&expr.kind, ExprKind::MethodCall { method, .. } if matches!(method.name.as_str(), "borrow" | "as_str") || (method.name == "get" && self.receiver_is_vec(receiver) && self.method_call_returns_ref(expr)) || (matches!(method.name.as_str(), "iter" | "iter_keys") && self.method_call_returns_borrowing_iter(expr)))
-                {
+            ExprKind::MethodCall {
+                receiver,
+                args,
+                method,
+                ..
+            } => {
+                let borrows_receiver = matches!(method.name.as_str(), "borrow" | "as_str")
+                    || (method.name == "get"
+                        && self.receiver_is_vec(receiver)
+                        && self.method_call_returns_ref(expr))
+                    || (matches!(method.name.as_str(), "iter" | "iter_keys")
+                        && self.method_call_returns_borrowing_iter(expr));
+                if borrows_receiver {
                     self.add_borrow(receiver, BorrowKind::Immutable);
                     if let Some(source) = Self::expr_move_path(receiver) {
                         if let Some(existing) = self.borrows.get(&source).cloned() {
                             self.borrows
                                 .insert(MovePath::root(name.to_string()), existing);
+                            self.record_borrow_alias(name, &source);
                         }
                     }
                 }
-                self.track_borrows_in_expr(name, receiver);
+                // Do not treat non-borrowing method results (for example
+                // `view.len() -> i64`) as aliases of the receiver.
                 for arg in args {
                     self.track_borrows_in_expr(name, arg);
                 }
@@ -727,7 +1084,9 @@ impl BorrowChecker {
                     self.track_borrows_in_expr(name, &field.value);
                 }
             }
-            ExprKind::Paren(inner) => self.track_borrows_in_expr(name, inner),
+            ExprKind::Paren(inner) | ExprKind::Try(inner) | ExprKind::Await(inner) => {
+                self.track_borrows_in_expr(name, inner)
+            }
             ExprKind::Ident(_) | ExprKind::Path(_) | ExprKind::Field { .. } => {
                 self.track_borrow_alias(name, expr);
             }
@@ -814,6 +1173,7 @@ impl BorrowChecker {
                     if let Some(source) = Self::expr_move_path(operand) {
                         if let Some(existing) = self.borrows.get(&source).cloned() {
                             self.borrows.insert(target.clone(), existing);
+                            self.record_borrow_alias(&target.root, &source);
                             return;
                         }
                     }
@@ -826,11 +1186,12 @@ impl BorrowChecker {
                 if let Some(source) = Self::expr_move_path(receiver) {
                     if let Some(existing) = self.borrows.get(&source).cloned() {
                         self.borrows.insert(target.clone(), existing);
+                        self.record_borrow_alias(&target.root, &source);
                         return;
                     }
                 }
             }
-            ExprKind::Paren(inner) => {
+            ExprKind::Paren(inner) | ExprKind::Try(inner) | ExprKind::Await(inner) => {
                 self.track_borrow_alias_for_path(target, inner);
                 return;
             }
@@ -842,6 +1203,13 @@ impl BorrowChecker {
         };
         if let Some(existing) = self.borrows.get(&source).cloned() {
             self.borrows.insert(target.clone(), existing);
+            // Rebind of an existing borrow alias (`let rebound = view`).
+            if let Some(owner) = self.borrow_aliases.get(&source.root).cloned() {
+                self.record_borrow_alias(&target.root, &owner);
+            } else if !source.fields.is_empty() || self.borrows.contains_key(&source) {
+                // Direct alias of a borrowed owner path.
+                self.record_borrow_alias(&target.root, &source);
+            }
         } else {
             self.borrows.remove(target);
         }

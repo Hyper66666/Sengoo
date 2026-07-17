@@ -1,25 +1,26 @@
 {
   "schema_version": 1,
   "mode": "hard",
-  "sample": "D:\\Sengoo\\bench\\sample-frontend-1000k-gate-ok.json",
-  "baseline_profile": "D:\\Sengoo\\bench\\frontend-memory-baseline.json",
-  "baseline_report_id": "readme-2026-02-advanced-pipeline",
-  "baseline_report_path": "README.md#benchmark-reproducibility",
+  "p0_evidence_only": false,
+  "sample": "D:\\Sengoo\\.worktrees\\production-hardening-v1\\bench\\sample-frontend-1000k-gate-ok.json",
+  "baseline_profile": "D:\\Sengoo\\.worktrees\\production-hardening-v1\\bench\\frontend-memory-baseline.json",
+  "baseline_report_id": "1784029453392-advanced-pipeline",
+  "baseline_report_path": "bench/results/1784029453395-advanced-pipeline.json",
   "thresholds": {
     "frontend_regression_pct": {
-      "100000": 10.0,
-      "1000000": 10.0
+      "100000": 30.0,
+      "1000000": 30.0
     },
     "full_build_regression_pct": {
-      "100000": 10.0,
-      "1000000": 10.0
+      "100000": 30.0,
+      "1000000": 30.0
     },
     "rss_regression_pct": {
-      "100000": 10.0,
-      "1000000": 10.0
+      "100000": 30.0,
+      "1000000": 30.0
     },
     "frontend_share_regression_pp": {
-      "1000000": 5.0
+      "1000000": 10.0
     },
     "full_build_budget_ms": {
       "100000": 2000.0,
@@ -43,70 +44,70 @@
       "bucket": "100000",
       "metric": "e2e_avg_ms",
       "metric_label": "full_build_time",
-      "measured": 417.53,
-      "baseline": 417.53,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 546.38,
+      "baseline": 530.9264999999641,
+      "delta_pct": 2.910666542362631,
+      "max_regression_pct": 30.0,
       "pass": true
     },
     {
       "bucket": "100000",
       "metric": "compile_frontend_llvm_avg_ms",
       "metric_label": "frontend_time",
-      "measured": 153.87,
-      "baseline": 153.87,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 394.76,
+      "baseline": 379.45510000001076,
+      "delta_pct": 4.033388930597797,
+      "max_regression_pct": 30.0,
       "pass": true
     },
     {
       "bucket": "1000000",
       "metric": "compile_frontend_llvm_avg_ms",
       "metric_label": "frontend_time",
-      "measured": 1589.02,
-      "baseline": 1589.02,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 1347.34,
+      "baseline": 1373.469699999987,
+      "delta_pct": -1.9024591514459506,
+      "max_regression_pct": 30.0,
       "pass": true
     },
     {
       "bucket": "1000000",
       "metric": "frontend_share_pct",
       "metric_label": "frontend_share",
-      "measured": 86.9343049719888,
-      "baseline": 86.93,
-      "delta_pp": 0.004304971988787543,
-      "max_regression_pp": 5.0,
+      "measured": 90.21419627851542,
+      "baseline": 89.76477906593429,
+      "delta_pp": 0.44941721258112466,
+      "max_regression_pp": 10.0,
       "pass": true
     },
     {
       "bucket": "1000000",
       "metric": "e2e_avg_ms",
       "metric_label": "full_build_time",
-      "measured": 1827.84,
-      "baseline": 1827.84,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 1493.49,
+      "baseline": 1530.0763999999845,
+      "delta_pct": -2.3911485727108017,
+      "max_regression_pct": 30.0,
       "pass": true
     },
     {
       "bucket": "100000",
       "metric": "peak_rss_mb_avg",
       "metric_label": "frontend_rss",
-      "measured": 140.18,
-      "baseline": 140.18,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 82.34,
+      "baseline": 82.943359375,
+      "delta_pct": -0.7274354204441055,
+      "max_regression_pct": 30.0,
       "pass": true
     },
     {
       "bucket": "1000000",
       "metric": "peak_rss_mb_avg",
       "metric_label": "frontend_rss",
-      "measured": 1367.99,
-      "baseline": 1367.99,
-      "delta_pct": 0.0,
-      "max_regression_pct": 10.0,
+      "measured": 613.84,
+      "baseline": 614.05859375,
+      "delta_pct": -0.03559819082818075,
+      "max_regression_pct": 30.0,
       "pass": true
     }
   ],

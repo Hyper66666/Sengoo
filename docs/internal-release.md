@@ -2,6 +2,10 @@
 
 Process for tagging and distributing versioned `sgc`, `sgpm`, `sgfmt`, and `sglsp` binaries to internal teams.
 
+Source compatibility, deprecation, schema, host, and support-window promises
+are defined in [compatibility-policy.md](compatibility-policy.md). This document
+describes the release procedure and does not broaden that policy.
+
 ## Supported host policy
 
 Internal release candidates are supported on the same hosts exercised by the
@@ -31,7 +35,7 @@ Build release artifacts:
 
 ```powershell
 cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
-.\scripts\package-toolchain.ps1 -Version 0.1.0-smoke -NoBuild
+.\scripts\package-toolchain.ps1 -Version 0.1.0-rc.1 -NoBuild
 ```
 
 The packaging script writes a release-shaped archive, `manifest.json`, and a
@@ -39,8 +43,8 @@ The packaging script writes a release-shaped archive, `manifest.json`, and a
 `share/sengoo/stdlib` and `share/sengoo/runtime`, so installed `sgc` can resolve
 stdlib imports without `SENGOO_ROOT` or a source checkout.
 
-Name archives with the toolchain tag and host triple, for example
-`sengoo-toolchain-2026.06.08-x86_64-pc-windows-msvc.zip`.
+The packaging script names archives from the workspace version and target
+triple, for example `sengoo-0.1.0-rc.1-x86_64-pc-windows-msvc.zip`.
 
 Each archive must include a plain-text or JSON manifest recording:
 
@@ -55,35 +59,74 @@ Each archive must include a plain-text or JSON manifest recording:
 Verify the archive before tagging:
 
 ```powershell
-Get-FileHash .\sengoo-toolchain-<tag>-<host>.zip -Algorithm SHA256
+Get-FileHash .\target\dist\sengoo-<version>-<target>.zip -Algorithm SHA256
 ```
 
 On POSIX hosts:
 
 ```bash
-sha256sum sengoo-toolchain-<tag>-<host>.tar.gz
+sha256sum target/dist/sengoo-<version>-<target>.tar.gz
 ```
 
 ## Smoke tests before tagging
 
 Run on the candidate host before tagging:
 
-```powershell
-cargo build -p sgc -p sgpm -p sgfmt -p sglsp
+```text
+cargo build --release -p sgc -p sgpm -p sgfmt -p sglsp
 cargo test -p sgpm realworld -- --nocapture
 cargo test -p sglsp realworld -- --nocapture
 npx --yes @fission-ai/openspec validate toolchain-distribution --strict
 npx --yes @fission-ai/openspec validate --all --strict
 ```
 
+Run the Python hot-path smoke with the host's executable form:
+
+```powershell
+# Windows
+python examples/realworld/python-hot-path/python_smoke.py --sgc target/release/sgc.exe
+```
+
+```bash
+# Linux and macOS
+python3 examples/realworld/python-hot-path/python_smoke.py --sgc target/release/sgc
+```
+
 The `realworld-e2e` CI workflow builds real `sgc`, `sgpm`, `sgfmt`, and
-`sglsp` binaries on Windows and Ubuntu, runs
+`sglsp` binaries on Windows x64, Linux x64, macOS arm64, and macOS x64, runs
 `cargo test -p sgpm realworld -- --nocapture`, runs
 `cargo test -p sglsp realworld -- --nocapture`, and verifies package smoke loops
-for `sgplatform`, `sggame`, and `sggui` in stub graphics mode. The sgpm
-realworld suite includes `examples/realworld/package-release-loop`, which covers
-locked metadata, deterministic publish dry-run JSON, local registry publish,
-and the locked package loop.
+for `sgplatform`, `sggame`, and `sggui` in stub graphics mode. The workflow now
+also packages the release toolchain, installs it into a clean prefix, copies
+every `examples/realworld/*` fixture outside the checkout, and runs
+`sgpm update`, `check/test/fmt/doc/build/run --locked` through the installed
+toolchain. The sgpm realworld suite includes
+`examples/realworld/package-release-loop`, which covers locked metadata,
+deterministic publish dry-run JSON, local registry publish, and the locked
+package loop, while the installed release gate reruns its `metadata` and
+`publish` commands from the packaged archive. The reviewed-set gate also runs
+`examples/realworld/python-hot-path/python_smoke.py`, which uses the installed
+`sgc` to emit LLVM IR plus `.sgreflect.json`, compiles the emitted `.ll` into a
+shared library with `clang`, and invokes the reflected scalar symbol from
+Python `ctypes` outside the checkout.
+
+## Reviewed official release set
+
+The current reviewed first-party release set is:
+
+| Workflow target | Fixture/package | Installed release proof |
+| --- | --- | --- |
+| CLI | `examples/realworld/cli-json-audit` | Included in the installed realworld loop and `run --locked` smoke. |
+| Flagship CLI | `examples/realworld/workspace-audit` | Included in the installed realworld loop and the flagship docs. |
+| Light-service client | `examples/realworld/http-client-status` | Included in the installed realworld loop and `run --locked` smoke. |
+| Light-service request/response | `examples/realworld/http-echo-service` | Included in the installed realworld loop and `run --locked` smoke. |
+| Publish/resolve package workflow | `examples/realworld/package-release-loop` | Installed release lane reruns `metadata --format json --locked`, `publish --dry-run --locked --format json --output target/package`, and `publish --registry local --locked --format json`. |
+| Python hot-path interop | `examples/realworld/python-hot-path` | Installed release lane runs `python_smoke.py` with the installed `sgc`, parses `.sgreflect.json`, compiles emitted `.ll` with `clang`, and invokes the reflected symbol through Python `ctypes`. |
+
+Actions run `29333253316` passes this reviewed set with installed archives on
+Windows x64, Linux x64, macOS arm64, and macOS x64. Toolchain distribution run
+`29333253290` independently passes package/install/upgrade and installed stdlib
+smoke on the same four host targets.
 
 ## Tagging
 
@@ -96,6 +139,12 @@ and the locked package loop.
    creates GitHub build-provenance attestations, then publishes the complete
    archive/checksum set. Record the Git SHA and host triple in the internal
    change log.
+4. Let `.github/workflows/realworld-e2e.yml` rerun the installed realworld loop
+   against the same candidate so the retained Windows/Linux transcripts
+   (`docs/toolchain-distribution-windows-smoke.transcript`,
+   `docs/toolchain-distribution-linux-smoke.transcript`) are supplemented by a
+   fresh release-host run of every fixture plus the reviewed official release
+   set, including the Python `ctypes` hot-path smoke.
 
 ## Install and explicit upgrade
 
@@ -103,11 +152,11 @@ The install scripts choose the current host channel, download the pinned tag,
 verify its SHA-256, and replace the selected install directory:
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0 -AddToPath
+.\scripts\install.ps1 -Version 0.1.0-rc.1 -AddToPath
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0 --add-to-path
+sh scripts/install.sh --version 0.1.0-rc.1 --add-to-path
 ```
 
 Run the same command with a newer explicit version to upgrade. There is no
@@ -128,7 +177,7 @@ gh attestation verify <archive> --repo Hyper66666/Sengoo
 3. Run the locked project loop from `docs/sgpm-quickstart.md`: `sgpm metadata
    --format json --locked`, `sgpm publish --dry-run --locked --format json`,
    `sgpm check --locked`, `sgpm test --locked`, `sgpm fmt --check --locked`,
-   `sgpm doc --locked`, and `sgpm build --locked`.
+   `sgpm doc --locked`, `sgpm build --locked`, and `sgpm run --locked`.
 4. If a regression is limited to assertions or test reporting, bisect between
    `sgc` and `tools/stdlib/runtime.c` changes.
 

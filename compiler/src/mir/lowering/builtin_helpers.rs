@@ -11,6 +11,8 @@ impl<'a> LoweringContext<'a> {
             "eprintln" => Some(self.lower_builtin_eprint(arg_locals)),
             "spawn" => Some(self.lower_builtin_spawn(arg_locals)),
             "spawn_task" => Some(self.lower_builtin_spawn_task(arg_locals)),
+            "scope_spawn" => Some(self.lower_builtin_scope_spawn(arg_locals)),
+            "task_scope" => Some(self.lower_builtin_task_scope(arg_locals)),
             "sleep" => Some(self.lower_builtin_sleep(arg_locals)),
             "timeout" => Some(self.lower_builtin_timeout(arg_locals)),
             "timeout_cancel" => Some(self.lower_builtin_timeout_cancel(arg_locals)),
@@ -121,11 +123,105 @@ impl<'a> LoweringContext<'a> {
         let task_id = self.add_local(None, LocalKind::Temp, MIR_I64);
         self.push_inst(Instruction::Call {
             destination: task_id,
-            func: "sengoo_async_spawn_raw".to_string(),
+            func: "sengoo_async_spawn_task_raw".to_string(),
             args: vec![kind_local, future_handle],
         });
 
         task_id
+    }
+
+    pub(super) fn lower_builtin_scope_spawn(&mut self, arg_locals: &[Local]) -> Local {
+        if arg_locals.len() != 2 {
+            self.errors.push(format!(
+                "scope_spawn expects exactly two arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_I64);
+        }
+
+        let scope_ptr = arg_locals[0];
+        let scope_ty = match self.get_local_type(scope_ptr) {
+            MIRType::Ptr(inner) | MIRType::Ref(inner) => (**inner).clone(),
+            _ => {
+                self.errors
+                    .push("scope_spawn requires a borrowed TaskScope".to_string());
+                return self.add_local(None, LocalKind::Temp, MIR_I64);
+            }
+        };
+        let MIRType::Struct { name, fields } = &scope_ty else {
+            self.errors
+                .push("scope_spawn requires a borrowed TaskScope".to_string());
+            return self.add_local(None, LocalKind::Temp, MIR_I64);
+        };
+        if name != "TaskScope" || fields.first().map(|(name, _)| name.as_str()) != Some("handle") {
+            self.errors
+                .push("scope_spawn requires a borrowed TaskScope".to_string());
+            return self.add_local(None, LocalKind::Temp, MIR_I64);
+        }
+        let scope_value = self.add_local(None, LocalKind::Temp, scope_ty);
+        self.push_inst(Instruction::Load {
+            destination: scope_value,
+            source: scope_ptr,
+        });
+        let scope_handle = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Extract {
+            destination: scope_handle,
+            value: scope_value,
+            index: 0,
+        });
+
+        let future_handle = arg_locals[1];
+        let base_name = self.resolve_async_base_name(future_handle);
+        if base_name == "unknown" {
+            self.errors.push(
+                "scope_spawn requires a future produced by an async function or async block"
+                    .to_string(),
+            );
+            return self.add_local(None, LocalKind::Temp, MIR_I64);
+        }
+        let Some(kind_id) = self.async_dispatch_kind_id(&base_name) else {
+            return self.add_local(None, LocalKind::Temp, MIR_I64);
+        };
+        let kind_local = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Assign {
+            destination: kind_local,
+            value: MirConstant::Int(kind_id),
+        });
+
+        let accepted = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: accepted,
+            func: "sengoo_async_task_scope_spawn_raw".to_string(),
+            args: vec![scope_handle, kind_local, future_handle],
+        });
+        accepted
+    }
+
+    pub(super) fn lower_builtin_task_scope(&mut self, arg_locals: &[Local]) -> Local {
+        if !arg_locals.is_empty() {
+            self.errors.push(format!(
+                "task_scope expects no arguments, got {}",
+                arg_locals.len()
+            ));
+            return self.add_local(None, LocalKind::Temp, MIR_UNIT);
+        }
+        let handle = self.add_local(None, LocalKind::Temp, MIR_I64);
+        self.push_inst(Instruction::Call {
+            destination: handle,
+            func: "sengoo_async_task_scope_new".to_string(),
+            args: Vec::new(),
+        });
+        let scope_ty = MIRType::Struct {
+            name: "TaskScope".to_string(),
+            fields: vec![("handle".to_string(), MIR_I64)],
+        };
+        let scope = self.add_local(None, LocalKind::Temp, scope_ty.clone());
+        self.push_inst(Instruction::Aggregate {
+            destination: scope,
+            fields: vec![handle],
+            ty: scope_ty,
+        });
+        scope
     }
 
     pub(super) fn lower_builtin_sleep(&mut self, arg_locals: &[Local]) -> Local {

@@ -33,3 +33,9 @@ def test_missing_tests_returns_not_found() -> i64 {
     let _removed = dir_remove_tree("empty", 8, 100);
     if result.is_err() and result.error == STATUS_NOT_FOUND() { 0; } else if result.is_err() { result.error; } else { 20; };
 }
+
+def test_parallel_score_matches_serial_oracle() -> i64 {
+    let summary = WorkspaceSummary { source_files: 3, test_files: 2, manifests: 1, bytes: 64 };
+    let concurrent = parallel_score(summary);
+    if concurrent.is_err() { concurrent.error; } else if concurrent.value != summary.score() { 30; } else if concurrent.value != 52 { 31; } else { 0; };
+}

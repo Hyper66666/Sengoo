@@ -25,6 +25,8 @@ enum {
 
 extern long long sengoo_string_clone_status(long long handle);
 extern long long sengoo_string_free_status(long long handle);
+static void* sengoo_aligned_alloc_bytes(size_t align, size_t bytes);
+static void sengoo_aligned_free_bytes(void* value);
 
 static SengooRcBox* sengoo_rc_from_handle(long long handle) {
     return (SengooRcBox*)sengoo_handle_to_ptr(handle);
@@ -145,31 +147,93 @@ long long sengoo_rc_drop(long long handle) {
     return 1;
 }
 
+#ifndef SENGOO_NATIVE_ASYNC_RUNTIME
+
 typedef struct {
     atomic_size_t strong;
-    long long value;
+    SengooTypeDescriptor payload;
+    void* value;
 } SengooArcBox;
 
 static SengooArcBox* sengoo_arc_from_handle(long long handle) {
     return (SengooArcBox*)sengoo_handle_to_ptr(handle);
 }
 
-static long long sengoo_arc_new_with_value(long long value) {
+static void sengoo_arc_scalar_move_i64(void* destination, void* source) {
+    if (!destination || !source) {
+        return;
+    }
+    memcpy(destination, source, sizeof(long long));
+    memset(source, 0, sizeof(long long));
+}
+
+static void sengoo_arc_scalar_drop_noop(void* value) {
+    (void)value;
+}
+
+long long sengoo_arc_new(const SengooTypeDescriptor* descriptor, void* value) {
+    if (!value || sengoo_type_descriptor_validate(descriptor) != SENGOO_STATUS_OK) {
+        return 0;
+    }
     SengooArcBox* box = (SengooArcBox*)calloc(1, sizeof(SengooArcBox));
     if (!box) {
         return 0;
     }
+    box->payload = *descriptor;
+    box->value = sengoo_aligned_alloc_bytes(descriptor->align, descriptor->size);
+    if (!box->value) {
+        free(box);
+        return 0;
+    }
     atomic_init(&box->strong, 1);
-    box->value = value;
+    descriptor->move_value(box->value, value);
     return sengoo_ptr_to_handle(box);
 }
 
+long long sengoo_arc_new_parts(
+    void* value,
+    long long size,
+    long long align,
+    SengooMoveFn move_value,
+    SengooDropFn drop_value
+) {
+    if (!value || size <= 0 || align <= 0 || !move_value || !drop_value) {
+        return 0;
+    }
+    SengooTypeDescriptor descriptor = {
+        SENGOO_COLLECTIONS_ABI_VERSION,
+        0,
+        (size_t)size,
+        (size_t)align,
+        move_value,
+        drop_value,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    };
+    return sengoo_arc_new(&descriptor, value);
+}
+
 long long sengoo_arc_new_i64(long long value) {
-    return sengoo_arc_new_with_value(value);
+    SengooTypeDescriptor descriptor = {
+        SENGOO_COLLECTIONS_ABI_VERSION,
+        0,
+        sizeof(long long),
+        _Alignof(long long),
+        sengoo_arc_scalar_move_i64,
+        sengoo_arc_scalar_drop_noop,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    };
+    long long slot = value;
+    return sengoo_arc_new(&descriptor, &slot);
 }
 
 long long sengoo_arc_new_bool(long long value) {
-    return sengoo_arc_new_with_value(value != 0 ? 1 : 0);
+    return sengoo_arc_new_i64(value != 0 ? 1 : 0);
 }
 
 long long sengoo_arc_clone(long long handle) {
@@ -196,9 +260,14 @@ long long sengoo_arc_strong_count(long long handle) {
     return box ? (long long)atomic_load_explicit(&box->strong, memory_order_acquire) : 0;
 }
 
-long long sengoo_arc_get_i64(long long handle) {
+void* sengoo_arc_borrow_ptr(long long handle) {
     SengooArcBox* box = sengoo_arc_from_handle(handle);
-    return box ? box->value : 0;
+    return box ? box->value : NULL;
+}
+
+long long sengoo_arc_get_i64(long long handle) {
+    void* borrowed = sengoo_arc_borrow_ptr(handle);
+    return borrowed ? *(long long*)borrowed : 0;
 }
 
 long long sengoo_arc_get_bool(long long handle) {
@@ -219,6 +288,10 @@ long long sengoo_arc_drop(long long handle) {
                 memory_order_acq_rel,
                 memory_order_acquire)) {
             if (old == 1) {
+                if (box->payload.drop_value && box->value) {
+                    box->payload.drop_value(box->value);
+                }
+                sengoo_aligned_free_bytes(box->value);
                 free(box);
             }
             return 1;
@@ -226,6 +299,8 @@ long long sengoo_arc_drop(long long handle) {
     }
     return 1;
 }
+
+#endif /* SENGOO_NATIVE_ASYNC_RUNTIME */
 
 typedef struct {
     char** items;

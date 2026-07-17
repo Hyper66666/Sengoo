@@ -39,8 +39,10 @@ HTTP / WebSocket:
 HTTP server:
 
 - `sengoo_http_server_bind(host: *const u8, port: u16) -> u64`
+- `sengoo_http_server_bind_tls(host: *const u8, port: u16, cert_pem: *const u8, cert_len: usize, key_pem: *const u8, key_len: usize) -> u64`
 - `sengoo_http_server_local_port(handle: u64) -> i64`
 - `sengoo_http_server_set_limits(handle: u64, max_header_bytes: u32, max_body_bytes: u32) -> i64`
+- `sengoo_http_server_set_keep_alive(handle: u64, enabled: i64) -> i64`
 - `sengoo_http_server_add_route(handle: u64, method: *const u8, path_pattern: *const u8, status: i32, body: *const u8, body_len: usize) -> i64`
 - `sengoo_http_server_add_middleware_require_header(handle: u64, name: *const u8, expected_value: *const u8, reject_status: i32, reject_body: *const u8, reject_body_len: usize) -> i64`
 - `sengoo_http_server_add_ws_echo_route(handle: u64, path_pattern: *const u8) -> i64`

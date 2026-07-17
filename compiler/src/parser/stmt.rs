@@ -123,12 +123,12 @@ impl<'source> Parser<'source> {
         loop {
             args.push(self.parse_type()?);
 
-            if self.consume(TokenKind::Comma).is_some() {
-                continue;
-            }
-
             if self.consume_type_arg_end() {
                 break;
+            }
+
+            if self.consume(TokenKind::Comma).is_some() {
+                continue;
             }
 
             return Err(crate::error::CompileError::ParseError(

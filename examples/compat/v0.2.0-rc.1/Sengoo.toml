@@ -1,0 +1,10 @@
+sengoo-schema = 1
+
+[package]
+name = "compat_v0_2_0_rc_1"
+version = "0.2.0"
+edition = "2026"
+description = "Retained source-compatibility fixture for v0.2.0-rc.1 baseline."
+
+[lib]
+path = "src/lib.sg"

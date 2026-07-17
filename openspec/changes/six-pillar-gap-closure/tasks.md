@@ -1,3 +1,7 @@
+
+> **Historical (v0.2 M0):** This umbrella no longer owns new capability work.
+> New native v0.2 implementation is coordinated by `sengoo-v0-2-mainstream-core`
+> and its M0¨CM4 children. Remaining open tasks here are evidence debt only.
 ## 0. Program setup
 
 - [x] 0.1 Add `INVENTORY.md` baseline for all six pillars with current evidence links.
@@ -19,7 +23,7 @@
     superseded by archived `compile-scale-production-gate` and archived with
     `--skip-specs` to avoid re-applying overlapping canonical deltas.
 
-## 1. Pillar 6 â€” Toolchain quick wins (unblock other lanes)
+## 1. Pillar 6 â€?Toolchain quick wins (unblock other lanes)
 
 ### Assertions and test output
 
@@ -43,7 +47,7 @@
 - [x] 1.9 Add `docs/editor-setup.md` linking `sglsp` launch, fmt-on-save, JSON diagnostics.
 - [x] 1.10 Add `docs/internal-release.md` with versioned binary smoke matrix.
 
-## 2. Pillar 1 â€” Stdlib production surface
+## 2. Pillar 1 â€?Stdlib production surface
 
 ### Owned string return ABI
 
@@ -88,7 +92,7 @@
   - Sync fd helpers are recorded as `Accepted risk` until a realworld fixture
     needs the surface.
 
-## 3. Pillar 4 â€” Language surface expansion
+## 3. Pillar 4 â€?Language surface expansion
 
 ### Attributes
 
@@ -112,7 +116,7 @@
 - [x] 3.9 Audit "phase-1" async diagnostics and remove those superseded by Pillar 2.
 - [x] 3.10 Add one regression test per removed restriction.
 
-## 4. Pillar 3 â€” Package graph maturity
+## 4. Pillar 3 â€?Package graph maturity
 
 ### Renamed dependencies
 
@@ -133,7 +137,7 @@
 - [x] 4.9 Document internal monorepo + registry workflow in `docs/sgpm-quickstart.md`.
 - [x] 4.10 Add workspace example using alias + multi-version if feasible.
 
-## 5. Pillar 2 â€” Mainstream async runtime
+## 5. Pillar 2 â€?Mainstream async runtime
 
 ### Reactor
 
@@ -161,7 +165,7 @@
 - [x] 5.11 Fix/prevent `LNK2019` async dispatch failures on Windows CI.
 - [x] 5.12 Update `docs/runtime-async-semantics.md` for reactor and N-select.
 
-## 6. Pillar 5 â€” Large-scale compile performance
+## 6. Pillar 5 â€?Large-scale compile performance
 
 - [x] 6.1 Record the reference CI host profile, compiler revisions, generator seed, C++ command, and three-run median baselines in `INVENTORY.md`.
   - Superseded by archived `compile-scale-production-gate` evidence copied from

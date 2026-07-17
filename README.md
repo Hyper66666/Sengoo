@@ -27,21 +27,32 @@ $archive = Get-Content target/dist/latest-archive.txt
 .\scripts\install.ps1 -Archive $archive -InstallDir target/install-smoke
 ```
 
-Pinned release install or upgrade:
+Pinned release install or upgrade (current published prerelease):
 
 ```powershell
-.\scripts\install.ps1 -Version 0.1.0
+.\scripts\install.ps1 -Version 0.1.0-rc.1
 ```
 
 ```sh
-sh scripts/install.sh --version 0.1.0
+sh scripts/install.sh --version 0.1.0-rc.1
 ```
 
-The release workflow is configured to build native Windows x64, Linux x64,
-macOS arm64, and macOS x64 archives, verify SHA-256 during installation, and
-publish signed GitHub build provenance only after every platform smoke passes.
-No public release tag has been cut yet; current cross-host failures remain
-tracked by `package-registry-and-distribution`.
+The release workflow builds native Windows x64, Linux x64, macOS arm64, and
+macOS x64 archives, verifies SHA-256 during installation, and publishes signed
+GitHub build provenance after platform smoke. The published prerelease tag is
+[`v0.1.0-rc.1`](https://github.com/Hyper66666/Sengoo/releases/tag/v0.1.0-rc.1).
+A later v0.2.0 channel is the target of the `sengoo-v0-2-mainstream-core`
+program and is not claimed installed here.
+
+**v0.2 mainstream-core local gate evidence SHA:**
+`084b623037f007344d76ce50f2e0d01fac57b565` (branch `codex/sengoo-v0-2-openspec`,
+[PR #47](https://github.com/Hyper66666/Sengoo/pull/47)). That commit carries the
+archived M1–M4 OpenSpec children and green local fmt / Clippy `-D warnings` /
+focused tool tests / `openspec validate --all --strict` evidence. It does not
+claim multi-host Actions success or production HTTP handlers/keep-alive/
+streaming/TLS server support; those remain residual (see
+`examples/realworld/SUPPORT_MATRIX.md` and
+`openspec/changes/archive/2026-07-16-sengoo-v0-2-mainstream-core/RESIDUAL.md`).
 
 Native debug-info builds use `-g` / `--debug-info`:
 
@@ -442,7 +453,7 @@ surface area: `option.sg`, `result.sg`, `collections.sg`, `string.sg`,
 `path.sg`, `process.sg`, `args.sg`, `env.sg`, `math.sg`, `error.sg`, and
 reflection wrappers such as `ffi.sg`, `db.sg`, `lua54.sg`, `net.sg`, and
 `proto.sg`. Runtime bridges are split across `runtime.c`, `runtime_collections.c`,
-`runtime_json.c`, `runtime_process.c`, and `runtime_string.c`. See
+`runtime_json.c`, `runtime_process.c`, `runtime_stream.c`, and `runtime_string.c`. See
 `tools/stdlib/README.md` for module summaries and current deferrals.
 
 Use source modules directly from Sengoo code:
@@ -580,6 +591,8 @@ Fairness profile used in advanced pipeline comparison:
 - Tutorial: `docs/sengoo-tutorial.html`
 - Language features: `docs/language-features.md`
 - Development guide: `docs/DEVELOPMENT_GUIDE.md`
+- Compatibility and supported hosts: `docs/compatibility-policy.md`
+- Internal release process: `docs/internal-release.md`
 
 ## Repository Layout
 

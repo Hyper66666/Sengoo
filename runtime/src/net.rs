@@ -27,19 +27,22 @@ pub use http_client::{
     sengoo_http_post, sengoo_http_status,
 };
 pub use http_server::{
+    sengoo_http_request_begin_stream, sengoo_http_request_begin_stream_with_length,
     sengoo_http_request_body_copy, sengoo_http_request_body_len, sengoo_http_request_close,
     sengoo_http_request_header_copy, sengoo_http_request_header_len,
     sengoo_http_request_method_copy, sengoo_http_request_method_len, sengoo_http_request_path_copy,
     sengoo_http_request_path_len, sengoo_http_request_query_copy, sengoo_http_request_query_len,
     sengoo_http_request_respond, sengoo_http_request_respond_with_content_type,
     sengoo_http_request_version_copy, sengoo_http_request_version_len,
-    sengoo_http_server_add_middleware_require_header, sengoo_http_server_add_route,
-    sengoo_http_server_add_ws_echo_route, sengoo_http_server_bind, sengoo_http_server_close,
+    sengoo_http_response_stream_close, sengoo_http_response_stream_finish,
+    sengoo_http_response_stream_write, sengoo_http_server_add_middleware_require_header,
+    sengoo_http_server_add_route, sengoo_http_server_add_ws_echo_route, sengoo_http_server_bind,
+    sengoo_http_server_bind_tls, sengoo_http_server_claim_serve_mode, sengoo_http_server_close,
     sengoo_http_server_local_port, sengoo_http_server_next_request,
     sengoo_http_server_next_request_async__cancel, sengoo_http_server_next_request_async__drop,
     sengoo_http_server_next_request_async__poll, sengoo_http_server_next_request_async__result,
     sengoo_http_server_next_request_async__start, sengoo_http_server_serve_once,
-    sengoo_http_server_set_limits, HttpServerNextRequestResult,
+    sengoo_http_server_set_keep_alive, sengoo_http_server_set_limits, HttpServerNextRequestResult,
 };
 use http_server::{HttpRequestEntry, HttpServerState};
 #[cfg(test)]
@@ -178,6 +181,7 @@ struct NetRuntime {
     ws_streams: Mutex<HashMap<u64, TcpStream>>,
     http_servers: Mutex<HashMap<u64, HttpServerState>>,
     http_requests: Mutex<HashMap<u64, HttpRequestEntry>>,
+    http_response_streams: Mutex<HashMap<u64, http_server::HttpResponseStreamEntry>>,
 }
 
 enum RecvOutcome {
@@ -195,6 +199,7 @@ impl NetRuntime {
             ws_streams: Mutex::new(HashMap::new()),
             http_servers: Mutex::new(HashMap::new()),
             http_requests: Mutex::new(HashMap::new()),
+            http_response_streams: Mutex::new(HashMap::new()),
         }
     }
 
@@ -218,6 +223,9 @@ impl NetRuntime {
             table.clear();
         }
         if let Ok(mut table) = self.http_requests.lock() {
+            table.clear();
+        }
+        if let Ok(mut table) = self.http_response_streams.lock() {
             table.clear();
         }
         reset_last_error();
@@ -718,6 +726,10 @@ mod tests {
                 middlewares: Vec::new(),
                 max_header_bytes: 16 * 1024,
                 max_body_bytes: 1024 * 1024,
+                serve_mode: 0,
+                keep_alive_enabled: false,
+                live_connection: None,
+                tls: None,
             })
             .expect("server should store");
 
@@ -758,11 +770,12 @@ mod tests {
             1
         );
 
-        let (_listener, routes, middlewares, max_header_bytes, max_body_bytes) = rt
+        let (_listener, routes, middlewares, max_header_bytes, max_body_bytes, keep_alive) = rt
             .http_server_snapshot(handle)
             .expect("snapshot should exist");
         assert_eq!(max_header_bytes, 128);
         assert_eq!(max_body_bytes, 256);
+        assert!(!keep_alive);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, "GET");
         assert_eq!(routes[0].path_pattern, "/hello/:name");

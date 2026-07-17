@@ -1,11 +1,17 @@
-.gitattributes text eol=lf
-*.sg text eol=lf
-Sengoo.toml text eol=lf
-Sengoo.lock text eol=lf
-sgpm-index.toml text eol=lf
-*.yaml text eol=lf
-*.yml text eol=lf
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source and docs
 *.md text eol=lf
+*.sg text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 *.json text eol=lf
 *.raw text eol=lf
 *.ps1 text eol=lf
+
+# Performance evidence: pin byte-identical SHA-256 across hosts
+bench/results/**/*.json -text
+bench/frontend-memory-baseline.json text eol=lf

@@ -33,6 +33,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `file.sg`: runtime-backed file helpers for existence checks, byte length, metadata, string write/append, removal, copy/move with explicit overwrite selection, and reading into managed `Buffer` handles.
 - `dir.sg`: runtime-backed directory helpers for existence checks, idempotent single-directory creation, recursive creation, deterministic listing, bounded recursive walking, and empty-directory removal.
 - `io.sg`: runtime-backed synchronous standard I/O helpers for Buffer-backed stdin reads, exact stdout/stderr writes, and stream flushing.
+- `stream.sg`: synchronous `Reader`/`Writer` traits, in-memory `Cursor`, fd adapters, and bounded `read_to_end` / `write_all` / `copy_stream` helpers (v0.2 production profile).
 - `env.sg`: runtime-backed environment helpers for variable presence, variable length/copy into managed `Buffer` handles, platform checks, and conventional exit-code selection.
 - `time.sg`: runtime-backed clock and sleep helpers plus UTC `YYYY-MM-DDTHH:MM:SSZ` format/parse helpers.
 - `random.sg`: runtime-backed deterministic pseudo-random helpers for seeding, non-negative i64 values, half-open i64 ranges, and booleans.
@@ -43,7 +44,7 @@ runtime wrappers, and examples can depend on only the surfaces they need.
 - `runtime.c`: anchor/core C runtime support used by stdlib/runtime smoke
   paths. Large domain bridges live in sibling sources:
   `runtime_breadth.c`, `runtime_collections.c`, `runtime_json.c`,
-  `runtime_process.c`, and `runtime_string.c`, with shared declarations in
+  `runtime_process.c`, `runtime_stream.c`, and `runtime_string.c`, with shared declarations in
   `runtime_shared.h`.
 
 ## Source Imports
@@ -71,7 +72,7 @@ std::args`, `import std::collections`, `import std::compress`,
 `import std::http`, `import std::io`, `import std::json`,
 `import std::log`, `import std::lua54`, `import std::net`,
 `import std::path`, `import std::process`, `import std::proto`,
-`import std::regex`, `import std::status`, `import std::strconv`, and
+`import std::regex`, `import std::status`, `import std::stream`, `import std::strconv`, and
 `import std::time` preload the needed source dependencies so managed `Buffer`
 helpers and stable status categories are available for output payloads and
 error-shaped results.
@@ -285,8 +286,16 @@ already refer to the destination file. Metadata helpers expose
 `PATH_KIND_FILE()`, `PATH_KIND_DIR()`, and `PATH_KIND_SYMLINK()` are stable
 path-kind values; unsupported fields return `STATUS_UNSUPPORTED()`. Recursive
 directory transfer, cross-filesystem move fallback, metadata-preservation
-guarantees, atomic-copy claims, progress callbacks, and async file I/O remain
-deferred.
+guarantees, atomic-copy claims, and progress callbacks remain deferred.
+
+`async_file_open(path)` returns an owned read-only `AsyncFile`.
+`await file.wait_readable(timeout_ms)` uses the shared reactor and returns a
+`FileReadinessOutcome`; timeout is `STATUS_TIMEOUT()`. A pending wait owns a
+duplicated descriptor/handle, so closing the source file cannot retarget the
+registration. `file.read_into(&mut buffer)` performs one capacity-bounded read,
+and explicit `close()` or scope-exit `Drop` releases the runtime file entry.
+This is readiness plus bounded read support, not a claim of background disk
+I/O, async writes, or support for file kinds outside the release-host matrix.
 
 ## Standard I/O Helpers
 

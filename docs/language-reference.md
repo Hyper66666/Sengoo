@@ -1,11 +1,19 @@
 # Sengoo Language Reference
 
-Reference version: draft for toolchain `0.1.x`.
+Reference version: draft for toolchain `0.1.x` with v0.2 mainstream-core
+program evidence on SHA `084b623037f007344d76ce50f2e0d01fac57b565`
+([PR #47](https://github.com/Hyper66666/Sengoo/pull/47)).
 
 This is the authoritative entry point for Sengoo language behavior. It records
 implemented status first, and links each major surface to a proof example,
 test, or deeper document. Historical design notes may describe features that do
 not exist yet; this reference wins when they disagree.
+
+Local gate evidence for the v0.2 M1–M4 archive set (language coherence, developer
+loop, production stdlib streams/Unicode baseline, stability contract) is pinned
+to that SHA. Multi-host installed-release matrices and HTTP production serving
+(handlers / keep-alive / streaming / TLS server) are residual and are not
+claimed Supported by this citation alone.
 
 Status labels:
 
@@ -142,9 +150,9 @@ def main() -> i64 {
 | `String` | Supported | Owned UTF-8 handle with move/drop, formatting, comparison, slicing, and push helpers. |
 | Structs | Supported | Named fields, literals, methods, derives. |
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
-| Arrays | Subset | Fixed array syntax is covered in examples; collection work focuses on `Vec<T>`. |
+| Arrays | Supported | Fixed-array index bounds diagnostics (`array-index-out-of-bounds`), assignment, and `for` iteration lower to MIR; see `compiler/src/tests/m1_language_coherence_tests.rs` and `array_assign_tests`. |
 | Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
-| References | Subset | Borrowing and move blocking are lexical and conservative. |
+| References | Subset | Intraprocedural last-use borrow ending is implemented for straight-line and remaining-use look-ahead; live borrows still block owner moves; escaping locals report `borrow-escapes-owner`. Full temporary/NLL precision remains open. |
 | `dyn Trait` | Experimental | Single-trait `&self`/`&mut self` dispatch and owned vtable-drop glue exist; `Box<dyn>`, multi-trait objects, value receivers, and Cranelift dispatch remain open. |
 
 ## Expressions And Statements
@@ -160,13 +168,18 @@ def main() -> i64 {
 | Operators | Supported | Primitive intrinsics and user-defined `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Neg` dispatch are covered by `numeric_operator_traits`. |
 | `as` casts | Subset | Integer/float/bool cast matrix exists; unsupported pairs report diagnostics. |
 | `?` | Supported | Result propagation is implemented with drop on early-return paths. |
-| `match` | Subset | Payload matches are supported; exhaustiveness and guard polish remain active language work. |
+| `match` | Supported | Exhaustive enum/`bool` coverage, wildcard, payload bindings, and guards; non-exhaustive/unreachable report stable diagnostics (`non-exhaustive-match`); see `match_typeck_tests` and `m1_language_coherence_tests`. |
 
 ## Ownership, Borrowing, And Drop
 
 Sengoo uses move-based ownership plus compiler-inserted cleanup for `Drop`
 types. Drop order is reverse declaration order. Moving an owned value invalidates
-the source; moving while a lexical borrow is live is rejected.
+the source. A local borrow is live through its last reachable use in the current
+block (last-use termination); the owner may move only after that point. Moving
+while a borrow alias still has a later use is rejected with
+`cannot-move-borrowed`. Returning a reference into a local/temporary reports
+`borrow-escapes-owner`. Named non-Copy field partial moves report
+`use-after-partial-move` when the whole aggregate is used again.
 
 Status: **Subset**.
 
@@ -174,11 +187,13 @@ Proof:
 
 - `docs/language-features.md#29-ownership-moves-and-automatic-drop`
 - AMM compiler tests under `compiler/src/tests/`
+- `compiler/src/tests/m1_language_coherence_tests.rs` (last-use, escape, partial move)
+- `compiler/src/tests/owned_string_tests.rs`
 
 Known open work:
 
 - Leak-check harnesses for more runtime domains.
-- Richer temporary/borrow lifetime precision.
+- Full temporary/expression NLL precision beyond remaining-statement look-ahead.
 - Some owned aggregate values inside generic wrappers still need move/drop
   polish.
 
@@ -188,12 +203,12 @@ Known open work:
 | --- | --- | --- |
 | Generic functions/structs/enums/impls | Supported | Monomorphized instances in compiler tests. |
 | Trait bounds and `where` clauses | Supported | `unsatisfied-trait-bound` tests. |
-| Associated types | Subset | Type-parameter projections such as `T::Item` work; `Self::Output` operator-trait style remains open. |
+| Associated types | Supported | Trait/impl associated types and `Self::Item` projections typecheck when uniquely bound; unbounded projections fail closed; see `generic_typeck_tests` and `m1_language_coherence_tests`. Operator-style `Self::Output` polish remains incremental. |
 | Supertraits | Supported | Enforced by typechecking. |
 | Conflicting impl diagnostics | Supported | Duplicate trait impl tests. |
 | `dyn Trait` | Experimental | See Types section. |
 | `#[derive]` | Subset | Clone/Copy/Eq/Ord/Hash/Default/Debug surfaces exist for current named shapes. |
-| Static trait functions | Unsupported | Blocks Rust-style `From<T>::from` today. |
+| Static trait functions | Subset | Receiver-less methods resolve via `Trait::method(args)` and `Type::method(args)` when args uniquely select one impl; ambiguity reports `ambiguous-trait-associated-function`. Full Rust-style associated-function ergonomics (e.g. blanket `From` inference) remain open. Proof: `m1_trait_associated_function_trait_and_type_paths`. |
 
 ## Generic Collections And Iterators
 
@@ -260,7 +275,8 @@ supported LLVM-text language contract.
 | `#[test]` / `#[case]` | Supported | `sgc test` generated harness tests. |
 | `#[export_name]` / `#[no_mangle]` | Supported | FFI/export tests. |
 | `#[link(name = "...")]` | Supported | Stdlib math/runtime bridges. |
-| `#[cfg]` / deprecation diagnostics | Subset | LSP parity work remains open in active specs. |
+| `#[cfg(...)]` | Subset | Target/feature predicates are supported; broader attribute placement remains limited. |
+| `#[deprecated(replacement = "...", removal = "...", note = "...")]` | Supported | Compiler text, sgc JSON, and LSP data preserve the stable code and migration metadata. Legacy message-only syntax remains compatible. |
 
 ## FFI
 
@@ -295,12 +311,20 @@ Supported:
 Proof: `docs/runtime-async-semantics.md`, `compiler/src/tests/async_tests.rs`,
 `tools/sgc/src/tests.rs`.
 
+Supported (concurrency subset, also under `std::async`):
+
+- Generic `channel<T: Send>` with async send/recv, owned endpoints, and Drop
+  cleanup; smoke fixture `examples/realworld/async-channel-smoke`.
+- Structured concurrency via `TaskScope` / `scope_spawn` (scoped children join
+  on normal exit and cancel-then-join on early exit).
+- Structural `Send`/`Sync` bounds on spawn/channel/shared-state paths.
+
 Open:
 
 - Generic bounds across every thread-spawn API and an explicit owned-handle
   policy beyond the current structural `Send`/`Sync` model.
-- Generic channels and structured concurrency.
 - Work-stealing executor and all-host reactor completion.
+- Inline user futures across every select/cross-thread spawn boundary.
 
 ## Formatting
 

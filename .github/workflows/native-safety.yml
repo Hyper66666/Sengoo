@@ -1,0 +1,82 @@
+name: native-safety
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/native-safety.yml"
+      - "scripts/runtime-sanitizer-gate.sh"
+      - "docs/native-safety-audit.md"
+      - "runtime/**"
+      - "tools/sgc/**"
+      - "tools/stdlib/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "13 4 * * 1,4"
+
+jobs:
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang sanitizer toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 lld-19
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100
+          clang --version
+
+      - name: Run split C runtime under ASan and UBSan
+        run: bash scripts/runtime-sanitizer-gate.sh
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-01
+
+      - name: Run Rust runtime and FFI tests under ASan
+        env:
+          RUSTFLAGS: "-Zsanitizer=address"
+          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=1"
+        run: |
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --target x86_64-unknown-linux-gnu reflect::runtime_ffi::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::executor::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --features native-bridge --target x86_64-unknown-linux-gnu async_runtime::async_file::tests -- --nocapture
+          cargo +nightly-2026-07-01 test -p sengoo-runtime --target x86_64-unknown-linux-gnu net::tls -- --nocapture
+          cargo +nightly-2026-07-01 test -p sgpm --target x86_64-unknown-linux-gnu remote_registry_ -- --nocapture
+
+  bounded-longevity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.0
+
+      - name: Repeat cancellation, channel, lock, and reactor stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 1800 bash -c '
+            for iteration in $(seq 1 10); do
+              echo "== longevity iteration ${iteration} =="
+              cargo test -p sengoo-runtime --features native-bridge structured_task_scope_stress_leaves_no_scope_or_executor_tasks -- --nocapture
+              cargo test -p sengoo-runtime --features native-bridge generic_channel_ -- --nocapture
+              cargo test -p sengoo-runtime --features native-bridge async_rwlock_ -- --nocapture
+              cargo test -p sengoo-runtime --features native-bridge reactor_ -- --nocapture
+            done
+          ' 2>&1 | tee native-longevity-transcript.txt
+
+      - name: Preserve longevity transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-longevity-transcript
+          path: native-longevity-transcript.txt
+          if-no-files-found: error

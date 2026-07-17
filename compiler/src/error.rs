@@ -158,6 +158,8 @@ pub enum CompileWarning {
         kind: String,
         name: String,
         detail: String,
+        replacement: Option<String>,
+        removal: Option<String>,
         span: Option<(u32, u32)>,
     },
 }
@@ -169,14 +171,38 @@ impl CompileWarning {
         message: Option<String>,
         span: Option<(u32, u32)>,
     ) -> Self {
-        let detail = message
-            .as_ref()
-            .map(|msg| format!(": {msg}"))
-            .unwrap_or_default();
+        Self::deprecated_use_with_metadata(kind, name, message, None, None, span)
+    }
+
+    pub fn deprecated_use_with_metadata(
+        kind: impl Into<String>,
+        name: impl Into<String>,
+        message: Option<String>,
+        replacement: Option<String>,
+        removal: Option<String>,
+        span: Option<(u32, u32)>,
+    ) -> Self {
+        let mut parts = Vec::new();
+        if let Some(message) = message.as_deref() {
+            parts.push(message.to_string());
+        }
+        if let Some(replacement) = replacement.as_deref() {
+            parts.push(format!("replacement: {replacement}"));
+        }
+        if let Some(removal) = removal.as_deref() {
+            parts.push(format!("earliest removal: {removal}"));
+        }
+        let detail = if parts.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", parts.join("; "))
+        };
         Self::DeprecatedUse {
             kind: kind.into(),
             name: name.into(),
             detail,
+            replacement,
+            removal,
             span,
         }
     }
@@ -190,6 +216,18 @@ impl CompileWarning {
     pub fn span(&self) -> Option<(u32, u32)> {
         match self {
             Self::DeprecatedUse { span, .. } => *span,
+        }
+    }
+
+    pub fn replacement(&self) -> Option<&str> {
+        match self {
+            Self::DeprecatedUse { replacement, .. } => replacement.as_deref(),
+        }
+    }
+
+    pub fn removal(&self) -> Option<&str> {
+        match self {
+            Self::DeprecatedUse { removal, .. } => removal.as_deref(),
         }
     }
 }

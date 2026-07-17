@@ -1,0 +1,2 @@
+async def child() -> i64 { await sleep(1); 1 }
+async def main() -> i64 { if true { return await child(); } await child() }

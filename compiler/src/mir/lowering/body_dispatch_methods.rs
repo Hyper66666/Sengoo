@@ -66,10 +66,12 @@ impl<'a> LoweringContext<'a> {
                         && matches!(*self.get_local_type(result_local), MIRType::Unit);
 
                     if is_main_with_unit_body {
+                        self.emit_normal_task_scope_joins();
                         self.set_terminator(Terminator::Return(None));
                     } else {
                         self.mark_drop_expr_moved(expr);
                         self.mark_drop_local_moved(result_local);
+                        self.emit_normal_task_scope_joins();
                         self.set_terminator(Terminator::Return(Some(result_local)));
                     }
                 }
@@ -85,6 +87,7 @@ impl<'a> LoweringContext<'a> {
                 .block_mut(cur)
                 .is_some_and(|b| b.terminator.is_some());
             if !already_terminated {
+                self.emit_normal_task_scope_joins();
                 self.set_terminator(Terminator::Return(None));
             }
         }

@@ -120,16 +120,27 @@ pub(crate) fn format_borrow_errors(errors: &[BorrowError]) -> TypeckError {
         BorrowError::BorrowEscapesScope { escape_span, .. } => Some(*escape_span),
         _ => None,
     }) {
+        // Canonical M1 name is borrow-escapes-owner; keep legacy alias text in message.
         return TypeckError::diagnostic(
-            "borrow-escapes-scope",
+            "borrow-escapes-owner",
             message,
             escape_span.0 as u32,
             escape_span.1 as u32,
         );
     }
     if let Some(use_span) = errors.iter().find_map(|err| match err {
-        BorrowError::UseAfterMove { use_span, .. }
-        | BorrowError::UseAfterPartialMove { use_span, .. } => Some(*use_span),
+        BorrowError::UseAfterPartialMove { use_span, .. } => Some(*use_span),
+        _ => None,
+    }) {
+        return TypeckError::diagnostic(
+            "use-after-partial-move",
+            message,
+            use_span.0 as u32,
+            use_span.1 as u32,
+        );
+    }
+    if let Some(use_span) = errors.iter().find_map(|err| match err {
+        BorrowError::UseAfterMove { use_span, .. } => Some(*use_span),
         _ => None,
     }) {
         return TypeckError::diagnostic(

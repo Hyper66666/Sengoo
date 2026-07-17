@@ -1,3 +1,4 @@
+use super::call_emission_helpers::{runtime_async_wrapper_future_ty, runtime_async_wrapper_origin};
 use super::method_builtin_helpers::{
     try_lower_rc_borrow_method_call, try_lower_string_as_str_method_call,
     try_lower_string_len_method_call,
@@ -203,10 +204,11 @@ pub(super) fn emit_resolved_method_call(
         .function_sig(resolved_func_name)
         .map(|sig| sig.ret_type.clone())
         .unwrap_or(MIR_I64);
-    let mut future_origin = None;
-    if resolved_func_name == "HttpServer_next_request_async" {
-        ret_type = MIRType::Future(Box::new(http_server_next_request_outcome_mir_type()));
-        future_origin = Some("sengoo_http_server_next_request_async".to_string());
+    let future_origin = runtime_async_wrapper_origin(resolved_func_name).map(str::to_string);
+    if future_origin.is_some() {
+        if let Some(future_ty) = runtime_async_wrapper_future_ty(resolved_func_name) {
+            ret_type = future_ty;
+        }
     }
     let struct_type_name = match &ret_type {
         MIRType::Struct { name, .. } => Some(name.clone()),

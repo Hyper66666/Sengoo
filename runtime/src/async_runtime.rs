@@ -10,29 +10,51 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
+#[cfg(all(test, feature = "native-bridge"))]
+static ASYNC_RUNTIME_TEST_GUARD: Mutex<()> = Mutex::new(());
+
+#[cfg(feature = "native-bridge")]
+mod async_file;
 #[cfg(feature = "native-bridge")]
 mod bridge;
 #[cfg(feature = "native-bridge")]
 mod concurrent;
+#[cfg(feature = "native-bridge")]
+mod executor;
 #[cfg(feature = "native-bridge")]
 mod futures;
 mod reactor;
 #[cfg(feature = "native-bridge")]
 mod select;
 #[cfg(feature = "native-bridge")]
+mod task_scope;
+#[cfg(feature = "native-bridge")]
 mod thread_pool;
+#[cfg(feature = "native-bridge")]
+mod user_context;
 
+#[cfg(feature = "native-bridge")]
+pub use async_file::{
+    sengoo_async_file_close, sengoo_async_file_open_read, sengoo_async_file_read_into,
+    sengoo_async_file_wait_readable__cancel, sengoo_async_file_wait_readable__drop,
+    sengoo_async_file_wait_readable__poll, sengoo_async_file_wait_readable__result,
+    sengoo_async_file_wait_readable__start, AsyncFileReadinessOutcome,
+};
 #[cfg(all(test, feature = "native-bridge"))]
 use bridge::{scheduler_mut, ForeignAsyncTask, CURRENT_SCHEDULER};
 #[cfg(feature = "native-bridge")]
 pub use bridge::{
-    sengoo_async_cancel_task, sengoo_async_run_main_i64, sengoo_async_scheduler_cancel,
+    sengoo_async_cancel_task, sengoo_async_join_task, sengoo_async_run_main_i64,
+    sengoo_async_runtime_enable_executor, sengoo_async_runtime_executor_enabled,
+    sengoo_async_runtime_shutdown_executor, sengoo_async_scheduler_cancel,
     sengoo_async_scheduler_free, sengoo_async_scheduler_new, sengoo_async_scheduler_run_until_idle,
-    sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_task_status,
+    sengoo_async_scheduler_task_status, sengoo_async_spawn_raw, sengoo_async_spawn_task_raw,
+    sengoo_async_task_status,
 };
 #[cfg(feature = "native-bridge")]
 pub use concurrent::{
-    sengoo_async_channel_bounded_i64, sengoo_async_channel_pair_free,
+    sengoo_arc_borrow_ptr, sengoo_arc_clone, sengoo_arc_drop, sengoo_arc_new, sengoo_arc_new_parts,
+    sengoo_arc_strong_count, sengoo_async_channel_bounded_i64, sengoo_async_channel_pair_free,
     sengoo_async_channel_pair_receiver, sengoo_async_channel_pair_sender,
     sengoo_async_channel_recv_i64__cancel, sengoo_async_channel_recv_i64__drop,
     sengoo_async_channel_recv_i64__poll, sengoo_async_channel_recv_i64__result,
@@ -41,16 +63,24 @@ pub use concurrent::{
     sengoo_async_channel_send_i64__result, sengoo_async_channel_send_i64__start,
     sengoo_async_channel_sender_clone, sengoo_async_channel_sender_close,
     sengoo_async_channel_sender_drop, sengoo_async_mutex_close, sengoo_async_mutex_drop,
-    sengoo_async_mutex_guard_get_i64, sengoo_async_mutex_guard_set_i64,
-    sengoo_async_mutex_guard_unlock_i64, sengoo_async_mutex_lock_i64__cancel,
+    sengoo_async_mutex_guard_copy_into, sengoo_async_mutex_guard_get,
+    sengoo_async_mutex_guard_get_i64, sengoo_async_mutex_guard_set,
+    sengoo_async_mutex_guard_set_i64, sengoo_async_mutex_guard_unlock,
+    sengoo_async_mutex_guard_unlock_i64, sengoo_async_mutex_lock__cancel,
+    sengoo_async_mutex_lock__drop, sengoo_async_mutex_lock__poll, sengoo_async_mutex_lock__result,
+    sengoo_async_mutex_lock__start, sengoo_async_mutex_lock_i64__cancel,
     sengoo_async_mutex_lock_i64__drop, sengoo_async_mutex_lock_i64__poll,
     sengoo_async_mutex_lock_i64__result, sengoo_async_mutex_lock_i64__start,
-    sengoo_async_mutex_new_i64, sengoo_async_mutex_unlock_i64,
-    sengoo_async_runtime_enable_thread_pool, sengoo_async_runtime_thread_pool_enabled,
-    sengoo_async_rwlock_close, sengoo_async_rwlock_drop, sengoo_async_rwlock_new_i64,
-    sengoo_async_rwlock_read_guard_get_i64, sengoo_async_rwlock_read_guard_unlock_i64,
-    sengoo_async_rwlock_try_read_i64, sengoo_async_rwlock_try_write_i64,
-    sengoo_async_rwlock_write_guard_get_i64, sengoo_async_rwlock_write_guard_set_i64,
+    sengoo_async_mutex_new, sengoo_async_mutex_new_i64, sengoo_async_mutex_new_parts,
+    sengoo_async_mutex_unlock_i64, sengoo_async_runtime_enable_thread_pool,
+    sengoo_async_runtime_thread_pool_enabled, sengoo_async_rwlock_close, sengoo_async_rwlock_drop,
+    sengoo_async_rwlock_new, sengoo_async_rwlock_new_i64, sengoo_async_rwlock_new_parts,
+    sengoo_async_rwlock_read_guard_copy_into, sengoo_async_rwlock_read_guard_get_i64,
+    sengoo_async_rwlock_read_guard_unlock, sengoo_async_rwlock_read_guard_unlock_i64,
+    sengoo_async_rwlock_try_read, sengoo_async_rwlock_try_read_i64, sengoo_async_rwlock_try_write,
+    sengoo_async_rwlock_try_write_i64, sengoo_async_rwlock_write_guard_copy_into,
+    sengoo_async_rwlock_write_guard_get_i64, sengoo_async_rwlock_write_guard_set,
+    sengoo_async_rwlock_write_guard_set_i64, sengoo_async_rwlock_write_guard_unlock,
     sengoo_async_rwlock_write_guard_unlock_i64, sengoo_async_shared_counter_clone_i64,
     sengoo_async_shared_counter_drop, sengoo_async_shared_counter_get_i64,
     sengoo_async_shared_counter_job_drop, sengoo_async_shared_counter_join_i64,
@@ -91,6 +121,16 @@ pub use select::{
     sengoo_async_select_i16, sengoo_async_select_i32, sengoo_async_select_i64,
     sengoo_async_select_i8, sengoo_async_select_n_winner, sengoo_async_select_winner,
 };
+#[cfg(feature = "native-bridge")]
+pub use task_scope::{
+    sengoo_async_task_scope_cancel_join, sengoo_async_task_scope_join, sengoo_async_task_scope_new,
+    sengoo_async_task_scope_spawn_raw,
+};
+#[cfg(feature = "native-bridge")]
+pub use user_context::{
+    sengoo_async_context_begin, sengoo_async_context_drop, sengoo_async_context_finish_delay,
+    sengoo_async_context_wake, sengoo_async_context_wake_after,
+};
 
 pub type TaskId = u64;
 
@@ -107,6 +147,7 @@ pub enum TaskLifecycleStatus {
     Pending = 1,
     Completed = 2,
     Canceled = 3,
+    Failed = 4,
 }
 
 pub trait CoroutineTask {
@@ -458,6 +499,7 @@ unsafe fn handle_take_box<T>(handle: i64) -> Option<Box<T>> {
 #[cfg(all(test, feature = "native-bridge"))]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 
     unsafe extern "C" {
@@ -472,7 +514,7 @@ mod tests {
     static SELECT_HINT_POLLS: AtomicU32 = AtomicU32::new(0);
     static CANCEL_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
     static DROP_DISPATCH_CALLS: AtomicU32 = AtomicU32::new(0);
-    static TEST_GUARD: Mutex<()> = Mutex::new(());
+    use super::ASYNC_RUNTIME_TEST_GUARD as TEST_GUARD;
 
     #[test]
     fn async_handle_helpers_reject_zero_handles() {
@@ -788,6 +830,23 @@ mod tests {
     }
 
     #[test]
+    fn current_scheduler_join_drives_cooperative_task_to_completion() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let mut scheduler = CoroutineScheduler::new();
+        let task = scheduler.spawn(CountDownTask(3)) as i64;
+
+        CURRENT_SCHEDULER.with(|cell| {
+            let previous = cell.replace(&mut scheduler);
+            assert_eq!(
+                sengoo_async_join_task(task),
+                TaskLifecycleStatus::Completed as i64
+            );
+            assert_eq!(sengoo_async_task_status(task), 2);
+            cell.set(previous);
+        });
+    }
+
+    #[test]
     fn current_scheduler_task_wrappers_return_defaults_without_scheduler() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         CURRENT_SCHEDULER.with(|cell| {
@@ -935,8 +994,58 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
+    }
+
+    #[test]
+    fn reactor_wait_cancel_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_wait_drop_releases_owned_child_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        let interest = sengoo_async_reactor_timer_register(1_000);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        unsafe { sengoo_async_reactor_wait__drop(handle) };
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn reactor_pending_wait_records_a_bounded_wakeup_hint() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        clear_poll_wakeup_hint();
+        let interest = sengoo_async_reactor_timer_register(100);
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 0);
+        let hint =
+            take_poll_wakeup_hint().expect("pending reactor wait must allow scheduler sleep");
+        let now = Instant::now();
+        assert!(hint > now + Duration::from_millis(50));
+        assert!(hint <= now + Duration::from_millis(200));
+
+        assert!(unsafe { sengoo_async_reactor_wait__cancel(handle) });
     }
 
     #[cfg(unix)]
@@ -980,7 +1089,6 @@ mod tests {
         assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
         unsafe {
             sengoo_async_reactor_wait__result(handle);
-            sengoo_async_sleep__result(child);
         }
 
         #[cfg(unix)]
@@ -993,6 +1101,67 @@ mod tests {
             _close(fds[0]);
             _close(fds[1]);
         }
+    }
+
+    #[test]
+    fn reactor_tcp_registration_observes_socket_readiness() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test client");
+            std::thread::sleep(Duration::from_millis(20));
+            stream.write_all(b"x").expect("write readiness byte");
+        });
+
+        let tcp_handle = crate::net::sengoo_tcp_connect(c"127.0.0.1".as_ptr().cast(), port, 1_000);
+        assert_ne!(tcp_handle, 0);
+        let interest = sengoo_async_reactor_tcp_readable_register(tcp_handle);
+        let child = sengoo_async_sleep__start(1_000);
+        let wait =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(wait) }, 0);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while unsafe { sengoo_async_reactor_wait__poll(wait) } == 0 {
+            assert!(Instant::now() < deadline, "TCP reactor readiness timed out");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        unsafe { sengoo_async_reactor_wait__result(wait) };
+        assert_eq!(crate::net::sengoo_tcp_close(tcp_handle), 1);
+        server.join().expect("test server should finish");
+    }
+
+    #[test]
+    fn reactor_owned_fd_close_wakes_without_stale_interest() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let baseline = reactor::interest_count();
+        let mut fds = [-1i32; 2];
+        #[cfg(unix)]
+        assert_eq!(unsafe { pipe(fds.as_mut_ptr()) }, 0);
+        #[cfg(windows)]
+        assert_eq!(unsafe { _pipe(fds.as_mut_ptr(), 4096, 0x8000) }, 0);
+
+        let interest = sengoo_async_reactor_fd_readable_register(i64::from(fds[0]));
+        let child = sengoo_async_sleep__start(1_000);
+        let handle =
+            sengoo_async_reactor_wait__start(interest, async_spawn_kind_id_for_tests(), child);
+        assert_eq!(reactor::interest_count(), baseline + 1);
+
+        #[cfg(unix)]
+        unsafe {
+            close(fds[0]);
+            close(fds[1]);
+        }
+        #[cfg(windows)]
+        unsafe {
+            _close(fds[0]);
+            _close(fds[1]);
+        }
+
+        assert_eq!(unsafe { sengoo_async_reactor_wait__poll(handle) }, 1);
+        unsafe { sengoo_async_reactor_wait__result(handle) };
+        assert_eq!(reactor::interest_count(), baseline);
     }
 
     #[test]
@@ -1183,7 +1352,10 @@ mod tests {
         });
 
         let start = Instant::now();
-        let finished = scheduler.run_until_idle(2);
+        let mut finished = Vec::new();
+        while !scheduler.is_empty() && start.elapsed() < Duration::from_millis(100) {
+            finished.extend(scheduler.run_until_idle(1));
+        }
         let elapsed = start.elapsed();
 
         assert_eq!(finished.len(), 1);
@@ -1262,6 +1434,164 @@ mod tests {
             sengoo_async_runtime_enable_thread_pool(0),
             -thread_pool::STATUS_INVALID_ARGUMENT
         );
+    }
+
+    #[test]
+    fn concurrent_detached_spawn_drops_completed_future_frame_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let future = sengoo_async_sleep__start(0);
+        let task = sengoo_async_spawn_task_raw(async_spawn_kind_id_for_tests(), future);
+        assert!(task > 0);
+        assert_eq!(
+            sengoo_async_join_task(task),
+            TaskLifecycleStatus::Completed as i64
+        );
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn concurrent_rejected_detached_spawn_releases_future_frame_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(1, 1), 1);
+
+        let accepted = sengoo_async_spawn_task_raw(
+            async_spawn_kind_id_for_tests(),
+            sengoo_async_sleep__start(1_000),
+        );
+        assert!(accepted > 0);
+        let rejected = sengoo_async_spawn_task_raw(
+            async_spawn_kind_id_for_tests(),
+            sengoo_async_sleep__start(1_000),
+        );
+        assert_eq!(rejected, 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(true), 0);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_normal_join_releases_all_children_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let scope = sengoo_async_task_scope_new();
+        assert!(scope > 0);
+        for _ in 0..2 {
+            assert_eq!(
+                sengoo_async_task_scope_spawn_raw(
+                    scope,
+                    async_spawn_kind_id_for_tests(),
+                    sengoo_async_sleep__start(5),
+                ),
+                1
+            );
+        }
+        assert_eq!(sengoo_async_task_scope_join(scope), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(task_scope::active_scope_count(), 0);
+        assert_eq!(sengoo_async_task_scope_join(scope), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_early_exit_cancels_then_joins_children() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        assert_eq!(sengoo_async_runtime_enable_executor(2, 4), 1);
+
+        let scope = sengoo_async_task_scope_new();
+        for _ in 0..2 {
+            assert_eq!(
+                sengoo_async_task_scope_spawn_raw(
+                    scope,
+                    async_spawn_kind_id_for_tests(),
+                    sengoo_async_sleep__start(1_000),
+                ),
+                1
+            );
+        }
+        assert_eq!(sengoo_async_task_scope_cancel_join(scope), 3);
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(task_scope::active_scope_count(), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_rejected_submission_releases_future_frame() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        CANCEL_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+        DROP_DISPATCH_CALLS.store(0, Ordering::SeqCst);
+
+        assert_eq!(
+            sengoo_async_task_scope_spawn_raw(
+                i64::MAX,
+                async_spawn_kind_id_for_tests(),
+                sengoo_async_sleep__start(1_000),
+            ),
+            0
+        );
+        assert_eq!(CANCEL_DISPATCH_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_DISPATCH_CALLS.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn structured_task_scope_stress_leaves_no_scope_or_executor_tasks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        let _executor_guard = executor::EXECUTOR_TEST_GUARD
+            .lock()
+            .expect("executor test guard mutex poisoned");
+        executor::shutdown(executor::ConcurrentShutdownMode::Cancel);
+        assert_eq!(sengoo_async_runtime_enable_executor(4, 8), 1);
+
+        for _ in 0..100 {
+            let scope = sengoo_async_task_scope_new();
+            for _ in 0..4 {
+                assert_eq!(
+                    sengoo_async_task_scope_spawn_raw(
+                        scope,
+                        async_spawn_kind_id_for_tests(),
+                        sengoo_async_sleep__start(0),
+                    ),
+                    1
+                );
+            }
+            assert_eq!(sengoo_async_task_scope_join(scope), 2);
+        }
+        assert_eq!(task_scope::active_scope_count(), 0);
+        assert_eq!(executor::active_task_count(), 0);
+
+        assert_eq!(sengoo_async_runtime_shutdown_executor(false), 0);
     }
 
     #[test]
@@ -1385,6 +1715,316 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_generic_arc_mutex_payload_drops_exactly_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_payload(
+            destination: *mut std::ffi::c_void,
+            source: *mut std::ffi::c_void,
+        ) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_payload(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let descriptor = concurrent::SengooTypeDescriptor {
+            abi_version: concurrent::SENGOO_COLLECTIONS_ABI_VERSION,
+            flags: 0,
+            size: 8,
+            align: 8,
+            move_value: Some(move_payload),
+            drop_value: Some(drop_payload),
+            clone_value: None,
+            hash_value: None,
+            eq_value: None,
+            compare_value: None,
+        };
+        let mut payload = 41_i64;
+        let arc = unsafe {
+            concurrent::sengoo_arc_new(
+                &descriptor,
+                (&mut payload as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(arc, 0);
+        let cloned = unsafe { concurrent::sengoo_arc_clone(arc) };
+        assert_ne!(cloned, 0);
+        unsafe { concurrent::sengoo_arc_drop(cloned) };
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_generic_parts_accept_typed_callbacks_and_reject_missing_callbacks() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut arc_value = 17_i64;
+        let arc = unsafe {
+            concurrent::sengoo_arc_new_parts(
+                (&mut arc_value as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(arc, 0);
+        assert_eq!(
+            unsafe { *(concurrent::sengoo_arc_borrow_ptr(arc).cast::<i64>()) },
+            17
+        );
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+
+        let mut mutex_value = 29_i64;
+        let mutex = unsafe {
+            concurrent::sengoo_async_mutex_new_parts(
+                (&mut mutex_value as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(mutex, 0);
+        let lock = concurrent::sengoo_async_mutex_lock__start(mutex);
+        assert_ne!(lock, 0);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__poll(lock) },
+            1
+        );
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__result(lock) },
+            0
+        );
+        let mut copied = 0_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    mutex,
+                    (&mut copied as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(copied, 29);
+
+        let mut replacement = 31_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_set(
+                    mutex,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        let mut replaced = 0_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    mutex,
+                    (&mut replaced as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(replaced, 31);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_guard_unlock(mutex) },
+            0
+        );
+
+        let mut untouched = 9_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_copy_into(
+                    0,
+                    (&mut untouched as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(untouched, 9);
+
+        let mut failed_replacement = 41_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_async_mutex_guard_set(
+                    0,
+                    (&mut failed_replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        unsafe { concurrent::sengoo_async_mutex_drop(mutex) };
+
+        let mut rejected = 1_i64;
+        assert_eq!(
+            unsafe {
+                concurrent::sengoo_arc_new_parts(
+                    (&mut rejected as *mut i64).cast(),
+                    8,
+                    8,
+                    None,
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 3);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn concurrent_generic_arc_mutex_shared_counter_joins_workers_deterministically() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(4), 1);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {}
+
+        let descriptor = concurrent::SengooTypeDescriptor {
+            abi_version: concurrent::SENGOO_COLLECTIONS_ABI_VERSION,
+            flags: 0,
+            size: 8,
+            align: 8,
+            move_value: Some(move_i64),
+            drop_value: Some(drop_i64),
+            clone_value: None,
+            hash_value: None,
+            eq_value: None,
+            compare_value: None,
+        };
+        let mut initial = 2_i64;
+        let mut mutex = unsafe {
+            concurrent::sengoo_async_mutex_new(
+                &descriptor,
+                (&mut initial as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(mutex, 0);
+        let arc = unsafe {
+            concurrent::sengoo_arc_new(
+                &descriptor,
+                (&mut mutex as *mut i64).cast::<std::ffi::c_void>(),
+            )
+        };
+        assert_ne!(arc, 0);
+
+        let mut jobs = Vec::new();
+        for _ in 0..8 {
+            let cloned = unsafe { concurrent::sengoo_arc_clone(arc) };
+            let job =
+                unsafe { concurrent::sengoo_async_shared_counter_spawn_add_i64(cloned, 1, 5) };
+            assert_ne!(job, 0);
+            jobs.push((cloned, job));
+        }
+        for (cloned, job) in jobs {
+            assert!(unsafe { concurrent::sengoo_async_shared_counter_join_i64(job) } >= 2);
+            unsafe { concurrent::sengoo_async_shared_counter_job_drop(job) };
+            unsafe { concurrent::sengoo_arc_drop(cloned) };
+        }
+
+        let mutex_handle = unsafe { *(concurrent::sengoo_arc_borrow_ptr(arc).cast::<i64>()) };
+        let locked = concurrent::sengoo_async_mutex_lock__start(mutex_handle);
+        while unsafe { concurrent::sengoo_async_mutex_lock__poll(locked) } == 0 {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_lock__result(locked) },
+            0
+        );
+        let value_ptr = unsafe { concurrent::sengoo_async_mutex_guard_get(mutex_handle) };
+        assert!(!value_ptr.is_null());
+        assert_eq!(unsafe { *(value_ptr.cast::<i64>()) }, 42);
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_mutex_guard_unlock(mutex_handle) },
+            0
+        );
+
+        unsafe { concurrent::sengoo_arc_drop(arc) };
+    }
+
+    #[test]
+    fn concurrent_shared_counter_job_keeps_last_source_arc_alive() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+        assert_eq!(sengoo_async_runtime_enable_thread_pool(1), 1);
+
+        let release = Arc::new(AtomicBool::new(false));
+        let worker_release = release.clone();
+        let blocker = thread_pool::test_only_submit_to_worker(
+            move || {
+                while !worker_release.load(Ordering::Acquire) {
+                    std::thread::yield_now();
+                }
+                0
+            },
+            0,
+        )
+        .expect("blocker should occupy the only worker");
+
+        let counter = concurrent::sengoo_async_shared_counter_new_i64(2);
+        assert_ne!(counter, 0);
+        let job = unsafe { concurrent::sengoo_async_shared_counter_spawn_add_i64(counter, 1, 40) };
+        assert_ne!(job, 0);
+        unsafe { concurrent::sengoo_async_shared_counter_drop(counter) };
+
+        release.store(true, Ordering::Release);
+        while !blocker.completed.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            unsafe { concurrent::sengoo_async_shared_counter_join_i64(job) },
+            42
+        );
+        unsafe { concurrent::sengoo_async_shared_counter_job_drop(job) };
+    }
+
+    #[test]
     fn concurrent_channel_send_recv_round_trip() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         thread_pool::test_only_disable_thread_pool();
@@ -1473,26 +2113,43 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_rwlock_guards_support_readers_writer_and_safe_duplicate_unlock() {
+    fn concurrent_generic_rwlock_supports_multiple_readers_exclusive_writer_and_i64_wrappers() {
         let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
         thread_pool::test_only_disable_thread_pool();
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {}
+
         let lock = sengoo_async_rwlock_new_i64(5);
 
-        let first_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
+        let first_reader = unsafe { sengoo_async_rwlock_try_read(lock) };
         let second_reader = unsafe { sengoo_async_rwlock_try_read_i64(lock) };
         assert!(first_reader > 0);
         assert!(second_reader > 0);
+
+        let mut copied = 0_i64;
         assert_eq!(
-            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, first_reader) },
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    first_reader,
+                    (&mut copied as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(copied, 5);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_get_i64(lock, second_reader) },
             5
         );
         assert_eq!(
-            unsafe { sengoo_async_rwlock_try_write_i64(lock) },
+            unsafe { sengoo_async_rwlock_try_write(lock) },
             -concurrent::STATUS_LOCK_UNAVAILABLE
         );
 
         assert_eq!(
-            unsafe { sengoo_async_rwlock_read_guard_unlock_i64(lock, first_reader) },
+            unsafe { sengoo_async_rwlock_read_guard_unlock(lock, first_reader) },
             0
         );
         assert_eq!(
@@ -1510,16 +2167,28 @@ mod tests {
 
         let writer = unsafe { sengoo_async_rwlock_try_write_i64(lock) };
         assert!(writer > 0);
+        let mut replacement = 9_i64;
         assert_eq!(
-            unsafe { sengoo_async_rwlock_write_guard_set_i64(lock, writer, 9) },
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    writer,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
             0
+        );
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_get_i64(lock, writer) },
+            9
         );
         assert_eq!(
             unsafe { sengoo_async_rwlock_try_read_i64(lock) },
             -concurrent::STATUS_LOCK_UNAVAILABLE
         );
         assert_eq!(
-            unsafe { sengoo_async_rwlock_write_guard_unlock_i64(lock, writer) },
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
             0
         );
         assert_eq!(
@@ -1539,10 +2208,222 @@ mod tests {
         );
         unsafe { sengoo_async_rwlock_close(lock) };
         assert_eq!(
-            unsafe { sengoo_async_rwlock_try_read_i64(lock) },
+            unsafe { sengoo_async_rwlock_try_read(lock) },
             -concurrent::STATUS_INVALID_HANDLE
         );
         unsafe { sengoo_async_rwlock_drop(lock) };
+    }
+
+    #[test]
+    fn concurrent_generic_rwlock_invalid_copy_and_set_preserve_output_and_consume_inputs() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut initial = 7_i64;
+        let lock = unsafe {
+            sengoo_async_rwlock_new_parts(
+                (&mut initial as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(lock, 0);
+
+        let reader = unsafe { sengoo_async_rwlock_try_read(lock) };
+        assert!(reader > 0);
+
+        let mut read_output = 123_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    reader,
+                    (&mut read_output as *mut i64).cast(),
+                    4,
+                )
+            },
+            -concurrent::STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(read_output, 123);
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    0,
+                    (&mut read_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(read_output, 123);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_read_guard_unlock(lock, reader) },
+            0
+        );
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_read_guard_copy_into(
+                    lock,
+                    reader,
+                    (&mut read_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(read_output, 123);
+
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let mut rejected = 11_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    0,
+                    (&mut rejected as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+
+        let mut write_output = 456_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    writer,
+                    (&mut write_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            0
+        );
+        assert_eq!(write_output, 7);
+
+        write_output = 789;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    writer,
+                    (&mut write_output as *mut i64).cast(),
+                    4,
+                )
+            },
+            -concurrent::STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(write_output, 789);
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_copy_into(
+                    lock,
+                    999_999,
+                    (&mut write_output as *mut i64).cast(),
+                    8,
+                )
+            },
+            -concurrent::STATUS_INVALID_HANDLE
+        );
+        assert_eq!(write_output, 789);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_drop(lock) };
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn concurrent_generic_rwlock_close_and_drop_stay_stable_and_drop_once() {
+        let _guard = TEST_GUARD.lock().expect("test guard mutex poisoned");
+        thread_pool::test_only_disable_thread_pool();
+
+        static MOVE_COUNT: AtomicU32 = AtomicU32::new(0);
+        static DROP_COUNT: AtomicU32 = AtomicU32::new(0);
+
+        extern "C" fn move_i64(destination: *mut std::ffi::c_void, source: *mut std::ffi::c_void) {
+            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+            unsafe {
+                std::ptr::copy_nonoverlapping(source.cast::<u8>(), destination.cast::<u8>(), 8);
+                std::ptr::write_bytes(source.cast::<u8>(), 0, 8);
+            }
+        }
+
+        extern "C" fn drop_i64(_value: *mut std::ffi::c_void) {
+            DROP_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        DROP_COUNT.store(0, Ordering::SeqCst);
+
+        let mut initial = 5_i64;
+        let lock = unsafe {
+            sengoo_async_rwlock_new_parts(
+                (&mut initial as *mut i64).cast(),
+                8,
+                8,
+                Some(move_i64),
+                Some(drop_i64),
+            )
+        };
+        assert_ne!(lock, 0);
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 0);
+
+        let writer = unsafe { sengoo_async_rwlock_try_write(lock) };
+        assert!(writer > 0);
+
+        let mut replacement = 13_i64;
+        assert_eq!(
+            unsafe {
+                sengoo_async_rwlock_write_guard_set(
+                    lock,
+                    writer,
+                    (&mut replacement as *mut i64).cast(),
+                    Some(drop_i64),
+                )
+            },
+            0
+        );
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            unsafe { sengoo_async_rwlock_write_guard_unlock(lock, writer) },
+            0
+        );
+
+        unsafe { sengoo_async_rwlock_close(lock) };
+        unsafe { sengoo_async_rwlock_close(lock) };
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        unsafe { sengoo_async_rwlock_drop(lock) };
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 2);
     }
 
     #[test]

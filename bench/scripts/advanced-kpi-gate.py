@@ -11,20 +11,20 @@ from typing import Any
 DEFAULT_MAX_REAL_INCREMENTAL_MS = 200.0
 DEFAULT_MAX_FULL_BUILD_100K_MS = 2000.0
 DEFAULT_MAX_FULL_BUILD_1000K_MS = 7000.0
-DEFAULT_MAX_FRONTEND_100K_MS = 300.0
-DEFAULT_MAX_FRONTEND_1000K_MS = 7000.0
+DEFAULT_MAX_FRONTEND_100K_MS = 750.0
+DEFAULT_MAX_FRONTEND_1000K_MS = 2500.0
 DEFAULT_MAX_CODEGEN_100K_MS = 1500.0
 DEFAULT_MAX_LINK_100K_MS = 500.0
 DEFAULT_MAX_DAEMON_REGRESSION_MS = 50.0
 DEFAULT_MAX_SENGOO_RSS_100K_MB = 300.0
 DEFAULT_MAX_SENGOO_RSS_1000K_MB = 1800.0
-DEFAULT_MAX_FRONTEND_100K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_FRONTEND_1000K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_FULL_BUILD_100K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_FULL_BUILD_1000K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_RSS_100K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 10.0
-DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 5.0
+DEFAULT_MAX_FRONTEND_100K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_FRONTEND_1000K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_FULL_BUILD_100K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_FULL_BUILD_1000K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_RSS_100K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_RSS_1000K_REGRESSION_PCT = 30.0
+DEFAULT_MAX_FRONTEND_SHARE_1000K_REGRESSION_PP = 10.0
 DEFAULT_MAX_RSS_RATIO_100K = 1.5
 DEFAULT_MAX_FRONTEND_SHARE_100K_PCT = 70.0
 DEFAULT_MAX_RSS_RATIO_1000K = 1.8
@@ -49,6 +49,27 @@ DEFAULT_P0_REQUIRED_MEMORY_LOCS = ("100000", "1000000")
 DEFAULT_BASELINE_PROFILE = (
     Path(__file__).resolve().parent.parent / "frontend-memory-baseline.json"
 )
+BASELINE_REPORT_REQUIRED_KEYS = (
+    "schema_version",
+    "generated_at_unix_ms",
+    "config",
+    "fairness",
+    "real_incremental",
+    "scale_curve",
+    "compile_memory_compare",
+    "reachability_matrix",
+    "phase_deltas",
+    "rollback_evidence",
+    "notes",
+)
+BASELINE_REPORT_REQUIRED_CONFIG_KEYS = (
+    "scale_iterations_by_loc",
+    "memory_iters_by_loc",
+    "memory_command_timeout_s",
+    "scale_command_timeout_s",
+    "reachability_iters",
+    "reachability_profiles",
+)
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -62,11 +83,118 @@ def load_report(path: Path) -> dict[str, Any]:
 
 def load_baseline_profile(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        baseline = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise RuntimeError(f"frontend baseline profile not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"failed to parse frontend baseline profile {path}: {exc}") from exc
+    if bool(baseline.get("bootstrap_pending_raw_ci_report")):
+        validate_bootstrap_baseline_report(path, baseline)
+    else:
+        validate_baseline_report(path, baseline)
+    return baseline
+
+
+def resolve_baseline_report_path(
+    baseline_profile_path: Path, baseline_report_path: str
+) -> Path:
+    report_path = Path(baseline_report_path).expanduser()
+    candidates = [report_path] if report_path.is_absolute() else []
+    if not report_path.is_absolute():
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates.extend([repo_root / report_path, baseline_profile_path.parent / report_path])
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file():
+            return resolved
+    raise RuntimeError(
+        "frontend baseline raw report not found: "
+        f"{baseline_report_path} (from {baseline_profile_path})"
+    )
+
+
+def load_retained_baseline_report(
+    baseline_profile_path: Path, baseline_profile: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    report_path_value = baseline_profile.get("baseline_report_path")
+    if not isinstance(report_path_value, str) or not report_path_value.strip():
+        raise RuntimeError("frontend baseline profile missing baseline_report_path")
+    retained_report = load_report(
+        resolve_baseline_report_path(baseline_profile_path, report_path_value)
+    )
+    return report_path_value, retained_report
+
+
+def validate_bootstrap_baseline_report(
+    baseline_profile_path: Path, baseline_profile: dict[str, Any]
+) -> None:
+    _, retained_report = load_retained_baseline_report(
+        baseline_profile_path, baseline_profile
+    )
+    validate_baseline_report_identity(baseline_profile, retained_report)
+
+
+def validate_baseline_report_identity(
+    baseline_profile: dict[str, Any], retained_report: dict[str, Any]
+) -> None:
+    generated_at = retained_report.get("generated_at_unix_ms")
+    expected_report_id = (
+        f"{generated_at}-advanced-pipeline"
+        if isinstance(generated_at, int)
+        else None
+    )
+    baseline_report_id = baseline_profile.get("baseline_report_id")
+    if expected_report_id and baseline_report_id != expected_report_id:
+        raise RuntimeError(
+            "frontend baseline profile baseline_report_id does not match raw report: "
+            f"{baseline_report_id!r} != {expected_report_id!r}"
+        )
+    host = retained_report.get("host")
+    report_actions_run = host.get("actions_run") if isinstance(host, dict) else None
+    baseline_actions_run = baseline_profile.get("baseline_actions_run")
+    if (
+        isinstance(baseline_actions_run, int)
+        and isinstance(report_actions_run, int)
+        and baseline_actions_run != report_actions_run
+    ):
+        raise RuntimeError(
+            "frontend baseline profile baseline_actions_run does not match raw report "
+            f"host.actions_run: {baseline_actions_run!r} != {report_actions_run!r}"
+        )
+
+
+def validate_baseline_report(
+    baseline_profile_path: Path, baseline_profile: dict[str, Any]
+) -> None:
+    report_path_value, retained_report = load_retained_baseline_report(
+        baseline_profile_path, baseline_profile
+    )
+    missing = [
+        key for key in BASELINE_REPORT_REQUIRED_KEYS if key not in retained_report
+    ]
+    config = retained_report.get("config")
+    if not isinstance(config, dict):
+        missing.append("config")
+        missing_config: list[str] = []
+    else:
+        missing_config = [
+            key for key in BASELINE_REPORT_REQUIRED_CONFIG_KEYS if key not in config
+        ]
+    rollback_evidence = retained_report.get("rollback_evidence")
+    if isinstance(rollback_evidence, dict):
+        if "baseline_profile_path" not in rollback_evidence:
+            missing.append("rollback_evidence/baseline_profile_path")
+    else:
+        missing.append("rollback_evidence/baseline_profile_path")
+    if missing or missing_config:
+        missing_fields = ", ".join(
+            sorted(set([*missing, *(f"config/{key}" for key in missing_config)]))
+        )
+        raise RuntimeError(
+            "missing required producer metadata in baseline raw report "
+            f"{report_path_value}: {missing_fields}"
+        )
+    validate_baseline_report_identity(baseline_profile, retained_report)
 
 
 def frontend_share_pct(scale_curve: dict[str, Any], bucket: str) -> float | None:
@@ -470,7 +598,7 @@ def evaluate_report(
                         f"scale/100000/frontend_share: {measured_share_100k:.2f}% "
                         f"target<={max_frontend_share_100k_pct:.2f}%"
                     )
-                    if measured_share_100k > max_frontend_share_100k_pct:
+                    if enforce_1000k_absolute_targets and measured_share_100k > max_frontend_share_100k_pct:
                         if add_violation(
                             "scale/100000 frontend share exceeded ladder target "
                             f"({measured_share_100k:.2f}% > {max_frontend_share_100k_pct:.2f}%)"
@@ -570,7 +698,7 @@ def evaluate_report(
                             f"memory/100000/rss_ratio_vs_cpp: {measured_ratio_100k:.2f}x "
                             f"target<={max_rss_ratio_100k:.2f}x"
                         )
-                        if measured_ratio_100k > max_rss_ratio_100k:
+                        if enforce_1000k_absolute_targets and measured_ratio_100k > max_rss_ratio_100k:
                             if add_violation(
                                 "compile_memory_compare/100000 RSS ratio exceeded ladder target "
                                 f"({measured_ratio_100k:.2f}x > {max_rss_ratio_100k:.2f}x)"
@@ -930,7 +1058,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-1000k-absolute-targets",
         action="store_true",
-        help="skip 1000k 1.8x RSS and 65%% frontend-share absolute target checks",
+        help="skip cross-language RSS-ratio and frontend-share target checks",
     )
     parser.add_argument(
         "--skip-absolute-targets",

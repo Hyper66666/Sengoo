@@ -2,55 +2,47 @@
 
 Sengoo currently has three build target families:
 
-| Target | Artifact | Host toolchain | Current capability |
-| --- | --- | --- | --- |
-| `native` | platform executable | clang/LLVM or cached native artifacts | Full supported stdlib/runtime surface |
-| `bytecode` | `.sgbc` | none at run time | Scalar MIR subset with internal function calls, branches, loops, phi nodes, and integer/boolean arithmetic |
-| `wasm` | `.wasm` | WebAssembly runtime | Scalar MIR subset emitted as a core WebAssembly module exporting `main` |
+| Target | Artifact | Host toolchain | Support tier | Current capability |
+| --- | --- | --- | --- | --- |
+| `native` | platform executable | clang/LLVM or cached native artifacts | **production** | Full supported stdlib/runtime surface |
+| `wasm` | `.wasm` | Node or wasmtime | **experimental scalar** | Scalar MIR, wasm32 width, signedness-correct integer ops, ABI-validated modules, `sgc run --target wasm` |
+| `bytecode` | `.sgbc` | none at run time | **experimental prototype (production VM NO-GO)** | Scalar MIR subset only |
 
-The portable backends are deliberately conservative. They reject unsupported
-MIR, FFI, and stdlib calls with diagnostics that point back to this document
-rather than silently falling back to native code or miscompiling.
+Native production semantics remain the differential oracle. Unsupported features
+fail with `unsupported-target-capability` and never fall back to native.
 
-## Supported Source Shape
+## WASM (experimental scalar)
 
-The first portable slice supports programs that lower to scalar MIR:
+See also:
 
-- `i64`, `bool`, `char`, unit, references/pointers represented as integer-like
-  handles, and plain return values.
-- Internal function calls, recursion, `if`/`else`, loops represented in MIR,
-  `switch`, `goto`, and SSA `phi`.
-- Unary and binary integer/boolean operations supported by MIR.
+- `docs/architecture/wasm-emitter-decision.md`
+- `docs/wasm-wasi-profile.md`
+- `runtime/abi/portable_runtime_abi_v1.json`
 
-`sgc build --target bytecode input.sg -o app.sgbc` writes a versioned `SGB1`
-bytecode file. `sgc run --target bytecode input.sg` compiles and interprets the
-program without invoking clang, LLVM, or a native linker.
+```bash
+sgc build input.sg --target wasm -o app.wasm
+sgc run input.sg --target wasm
+```
 
-`sgc build --target wasm input.sg -o app.wasm` writes a core WebAssembly module
-that exports `main`. WebAssembly `i64` results appear as BigInt values in
-JavaScript hosts.
+### Guarantees
 
-## Unsupported Areas
+- Frontend uses `wasm32-unknown-unknown` (32-bit `usize`/`isize`).
+- Modules embed MIR + portable runtime ABI versions; unknown versions are
+  rejected **before** host execution.
+- Unsigned integer div/rem/shr/compare use unsigned opcodes/semantics.
+- Load/Store/AddrOf and non-scalar types fail closed (not silent Move).
 
-These features are not portable yet and remain native-only:
+### Non-guarantees (deferred)
 
-- FFI and host stdlib calls, including file, process, network, string-buffer,
-  JSON, database, and reflection helpers.
-- Heap-backed values, aggregate layout, arrays, enum payloads, closures, owned
-  `String`, generic collections, and automatic `Drop` in the VM heap.
-- WASI filesystem, environment, stdin/stdout, and clock imports.
-- Async functions, futures, reactor I/O, and thread-pool execution.
-- Program arguments for `sgc run --target bytecode`.
+- Owned String/Vec/user Drop in linear memory
+- WASI args/env/stdout/stderr/time/file imports
+- Windows+Unix CI matrix for portable smoke (Ubuntu only today)
 
-When a program touches one of these surfaces, the portable backend should fail
-at compile time with a diagnostic naming the unsupported call or MIR construct.
+## Bytecode prototype
 
-## Forward Compatibility
+```bash
+sgc build input.sg --target bytecode -o app.sgbc
+sgc run input.sg --target bytecode
+```
 
-The bytecode header is:
-
-- magic: `SGB1`
-- version: little-endian `u16`, currently `1`
-
-Version `1` is for scalar MIR only. Future versions can add heap objects,
-drop-glue opcodes, and host import tables without changing the native target.
+Production VM cancelled: `docs/bytecode-vm-value-review.md`.

@@ -2,9 +2,10 @@ use miette::{IntoDiagnostic, Result};
 use sengoo_compiler::hir::HIRItem;
 use sengoo_compiler::mir::MirFunction;
 use sengoo_compiler::{
-    collect_ffi_codegen_config, lower_ast, lower_ast_with_coverage, lower_hir_with_options,
-    AssertCallsiteContext, Codegen, CoverageContext, DebugInfoConfig, FfiCodegenConfig,
-    IntegerOverflowMode, MirLowerOptions, MirOptLevel, Parser, TargetPointerWidth, TypeChecker,
+    collect_ffi_codegen_config_for_pointer_width, lower_ast, lower_ast_with_coverage,
+    lower_hir_with_options, AssertCallsiteContext, Codegen, CoverageContext, DebugInfoConfig,
+    FfiCodegenConfig, IntegerOverflowMode, MirBundle, MirLowerOptions, MirOptLevel, Parser,
+    TargetPointerWidth, TypeChecker, MIR_SEMANTIC_ABI_VERSION,
 };
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -365,7 +366,14 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
             drop(type_env.take());
             drop(program.take());
         }
-        let ffi_codegen = collect_ffi_codegen_config(&hir_module);
+        let pointer_width = match target_pointer_width {
+            32 => TargetPointerWidth::Bits32,
+            64 => TargetPointerWidth::Bits64,
+            other => {
+                return Err(miette::miette!("unsupported target pointer width: {other}"));
+            }
+        };
+        let ffi_codegen = collect_ffi_codegen_config_for_pointer_width(&hir_module, pointer_width);
         let mir_lower_start = Instant::now();
         let mut mir_options =
             MirLowerOptions::new(runtime_contract_checks, true, async_functions.clone())
@@ -463,19 +471,36 @@ fn compile_frontend_to_mir_with_phase_timings<S: AsRef<str>>(
     Ok((mir_fns, ffi_codegen, phases))
 }
 
-pub(crate) fn compile_source_to_mir_bundle_for_fast_jit(
+/// Compile source to a target-aware MIR bundle.
+///
+/// `target_triple = None` uses the host pointer width. Portable backends pass
+/// an explicit triple (for example `wasm32-unknown-unknown`) so pointer-sized
+/// language semantics never inherit the build host by accident.
+pub(crate) fn compile_source_to_mir_bundle(
     source: &str,
     opt_level: u8,
-) -> Result<(Vec<MirFunction>, FfiCodegenConfig)> {
-    let (mir_fns, ffi_codegen, _phases) = compile_frontend_to_mir_with_phase_timings(
+    target_triple: Option<&str>,
+) -> Result<MirBundle> {
+    let pointer_width = match target_triple {
+        Some(triple) => TargetPointerWidth::from_target_triple(triple).ok_or_else(|| {
+            miette::miette!("unsupported target architecture in triple `{triple}`")
+        })?,
+        None => TargetPointerWidth::host(),
+    };
+    let (functions, ffi_codegen, _phases) = compile_frontend_to_mir_with_phase_timings(
         source,
         opt_level,
         false,
         None,
         None,
-        TargetPointerWidth::host().bits(),
+        pointer_width.bits(),
     )?;
-    Ok((mir_fns, ffi_codegen))
+    Ok(MirBundle {
+        semantic_abi_version: MIR_SEMANTIC_ABI_VERSION,
+        target_pointer_width: pointer_width,
+        functions,
+        ffi_codegen,
+    })
 }
 
 pub(crate) fn compile_source_to_llvm_file_with_phase_timings(

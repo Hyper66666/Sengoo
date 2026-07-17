@@ -857,6 +857,37 @@ mod tests {
     }
 
     #[test]
+    fn ffi_c_call_rejects_null_symbol_argv_and_output_pointers() {
+        let _guard = test_lock();
+        let path = c_str("self://builtin");
+        let lib = sengoo_ffi_c_open(path.as_ptr());
+        assert_ne!(lib, 0);
+
+        let symbol = c_str("sengoo_ffi_builtin_add2");
+        let args = [10_i64, 32_i64];
+        let mut out = 0_i64;
+        assert_eq!(
+            sengoo_ffi_c_call_i64(lib, std::ptr::null(), 0, std::ptr::null(), &mut out),
+            SENGOO_FFI_ERR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            sengoo_ffi_c_call_i64(lib, symbol.as_ptr(), 1, std::ptr::null(), &mut out),
+            SENGOO_FFI_ERR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            sengoo_ffi_c_call_i64(
+                lib,
+                symbol.as_ptr(),
+                args.len(),
+                args.as_ptr(),
+                std::ptr::null_mut(),
+            ),
+            SENGOO_FFI_ERR_INVALID_ARGUMENT
+        );
+        assert_eq!(sengoo_ffi_c_close(lib), SENGOO_FFI_STATUS_OK);
+    }
+
+    #[test]
     fn ffi_callback_rejects_invalid_library_handle() {
         let _guard = test_lock();
         let symbol = c_str("sengoo_ffi_builtin_sum4");

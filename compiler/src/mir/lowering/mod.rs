@@ -163,6 +163,17 @@ fn http_server_next_request_outcome_mir_type() -> MIRType {
     }
 }
 
+fn file_readiness_outcome_mir_type() -> MIRType {
+    MIRType::Struct {
+        name: "FileReadinessOutcome".to_string(),
+        fields: vec![
+            ("is_ok".to_string(), MIR_BOOL),
+            ("value".to_string(), MIR_BOOL),
+            ("error".to_string(), MIR_I64),
+        ],
+    }
+}
+
 /// Lambda 捕获环境。
 struct LambdaEnv {
     /// 捕获变量列表，保存变量名及其对应的局部变量 `Local`。

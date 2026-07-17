@@ -1,5 +1,8 @@
 # Generated benchmark outputs
 results/*.json
+!results/1784029453395-advanced-pipeline.json
+*-advanced-gate.json
+!sample-frontend-1000k-gate-ok-advanced-gate.json
 results/*.env
 .cross-lang-work/
 .scenario-matrix-work/

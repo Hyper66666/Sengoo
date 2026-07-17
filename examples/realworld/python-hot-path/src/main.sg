@@ -1,0 +1,7 @@
+import python_hot_path;
+
+def main() -> i64 {
+    let actual = hot_path_mix(6, 7);
+    let expected = hot_path_oracle(6, 7);
+    if actual == expected { 0; } else { 41; };
+}

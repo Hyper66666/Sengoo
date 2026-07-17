@@ -244,7 +244,19 @@ impl<'a> LoweringContext<'a> {
             .filter_map(|param| hir_subst.get(&param.name))
             .map(crate::type_naming::hir_type_instance_name)
             .collect::<Vec<_>>();
-        specialized.name = format!("{}_{}", template.name, suffixes.join("_"));
+        let specialization_suffix = suffixes.join("_");
+        let default_name = format!("{}_{}", template.name, specialization_suffix);
+        specialized.name = if self.known_functions_base.contains(&default_name) {
+            format!("{}__generic_{}", template.name, specialization_suffix)
+        } else {
+            default_name
+        };
+        if specialized.is_async {
+            self.options
+                .async_functions
+                .borrow_mut()
+                .insert(specialized.name.clone());
+        }
 
         let specialized_name =
             self.lower_materialized_function(specialized.clone(), specialized.params.len())?;

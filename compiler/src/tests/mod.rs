@@ -38,6 +38,7 @@ pub mod impl_specialization_helpers_tests;
 pub mod incremental_typeck_tests;
 pub mod local_type_helpers_tests;
 pub mod lowering_helpers_tests;
+pub mod m1_language_coherence_tests;
 pub mod macro_tests;
 pub mod match_pattern_parser_tests;
 pub mod match_phi_tests;

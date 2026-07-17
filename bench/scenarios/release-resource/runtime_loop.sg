@@ -1,0 +1,9 @@
+def main() -> i64 {
+    let mut index = 0;
+    let mut total = 0;
+    while index < 1000000 {
+        total = total + (index % 17);
+        index = index + 1;
+    }
+    if total == 7999964 { 0 } else { 1 }
+}

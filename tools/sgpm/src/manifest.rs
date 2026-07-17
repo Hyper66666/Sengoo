@@ -437,6 +437,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsupported_source_edition_with_stable_diagnostic() {
+        let source = "[package]\nname = \"hello\"\nversion = \"0.1.0\"\nedition = \"2027\"\n";
+        let err = Manifest::parse(source).expect_err("unsupported edition should fail");
+        assert_eq!(
+            err.to_string(),
+            "unsupported Sengoo edition '2027'; expected '2026'"
+        );
+    }
+
+    #[test]
     fn parses_minimal_manifest() {
         let manifest = Manifest::parse(
             r#"
@@ -645,5 +655,32 @@ path = "tests/custom.sg"
         assert_eq!(dep.name, "foo");
         assert_eq!(dep.git.as_deref(), Some("file:///tmp/foo"));
         assert_eq!(dep.rev.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn bounded_fuzz_manifest_and_workspace_parsers_never_panic() {
+        let cases = std::env::var("SENGOO_FUZZ_CASES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(512)
+            .clamp(1, 10_000);
+        let alphabet = b"[]{}='\".,:/\\_-+0123456789abcdefghijklmnopqrstuvwxyz\n\t ";
+        let mut state = 0x6d5a_56da_1f12_9b31_u64;
+        for case in 0..cases {
+            let len = case % 1024;
+            let mut bytes = Vec::with_capacity(len);
+            for _ in 0..len {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                bytes.push(alphabet[(state as usize) % alphabet.len()]);
+            }
+            let source = String::from_utf8(bytes).expect("fuzz alphabet is ASCII");
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = Manifest::parse(&source);
+                let _ = WorkspaceManifest::parse(&source);
+            }));
+            assert!(result.is_ok(), "manifest parser panicked on case {case}");
+        }
     }
 }
