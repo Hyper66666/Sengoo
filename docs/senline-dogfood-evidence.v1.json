@@ -31,12 +31,12 @@
           "test_name": "tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes"
         },
         "red_command": "cargo test -p sgc --bin sgc tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes -- --exact --nocapture",
-        "red_status": "pending-commit",
-        "red_commit": null
+        "red_status": "preserved",
+        "red_commit": "f3e2c538ef2f5da819672cc129c92fde7927e11a"
       },
       "fix": {
         "summary": "Zero every newly exposed Buffer gap before advancing used_len.",
-        "fixing_commit": null,
+        "fixing_commit": "f2a55b16faeb84861336b7684a59f962939477c0",
         "affected_gates": [
           "cargo test -p sgc --bin sgc tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes -- --exact --nocapture"
         ],
@@ -44,8 +44,7 @@
           "Do not require every protocol caller to pre-zero full Buffer capacity."
         ],
         "remaining_platform_gaps": [
-          "Clean immutable Windows and Linux installed artifacts are not built yet.",
-          "The linked Senline pin and final consumer gate are not available yet."
+          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [
@@ -119,12 +118,12 @@
           "test_name": "sgpm_check_exposes_transitive_dependency_library_module_map"
         },
         "red_command": "cargo test -p sgpm --test integration sgpm_check_exposes_transitive_dependency_library_module_map -- --exact --nocapture",
-        "red_status": "pending-commit",
-        "red_commit": null
+        "red_status": "preserved",
+        "red_commit": "dbff39d2d0d4e536de28f6b356194a600402e4dd"
       },
       "fix": {
         "summary": "Expose the selected package's deterministic transitive library module map and reject conflicting aliases.",
-        "fixing_commit": null,
+        "fixing_commit": "bd6056d299134589b5b6056d9c03b32323acbb0c",
         "affected_gates": [
           "cargo test -p sgpm --test integration transitive -- --nocapture",
           "sgpm --runtime-mode source-development test --locked"
@@ -133,8 +132,7 @@
           "Do not duplicate every worker-internal dependency in the HTTP product manifest."
         ],
         "remaining_platform_gaps": [
-          "Clean installed Windows and Linux package loops are not complete.",
-          "The linked Senline pin and final consumer gate are not available yet."
+          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [
@@ -208,12 +206,12 @@
           "test_name": "real_sgc_http_request_owned_string_accessors_are_safe"
         },
         "red_command": "cargo test -p sgc --test http_request_strings real_sgc_http_request_owned_string_accessors_are_safe -- --exact --nocapture",
-        "red_status": "pending-commit",
-        "red_commit": null
+        "red_status": "preserved",
+        "red_commit": "bd6056d299134589b5b6056d9c03b32323acbb0c"
       },
       "fix": {
         "summary": "Preserve exact length metadata for HTTP request copies and construct owned request strings from explicit byte lengths.",
-        "fixing_commit": null,
+        "fixing_commit": "1777562d3555681c14ca920810bee6460b7ccfb7",
         "affected_gates": [
           "cargo test -p sgc --test http_request_strings -- --nocapture",
           "sgpm --runtime-mode source-development test --locked"
@@ -222,8 +220,7 @@
           "Do not let each HTTP consumer allocate a second Buffer or bypass strict JSON length checks."
         ],
         "remaining_platform_gaps": [
-          "The complete malformed, segmented, and large-request localhost matrix is pending.",
-          "Clean installed Windows and Linux package loops and the Senline pin are pending."
+          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [

@@ -539,7 +539,31 @@ fn durable_senline_defect_evidence_validates_against_the_versioned_schema() {
         "sengoo-standard-library"
     );
     assert_eq!(first["ownership"]["discovery_status"], "known-baseline");
-    assert_eq!(first["fix"]["fixing_commit"], Value::Null);
+    // Sengoo-owned fixes record a 40-char fixing revision; pin/consumer gates
+    // remain pending until Senline write scope (tasks 7.5 / 9.5).
+    let fixing = first["fix"]["fixing_commit"]
+        .as_str()
+        .expect("SGDOG-2026-001 fixing_commit must be a recorded Sengoo revision");
+    assert_eq!(
+        fixing.len(),
+        40,
+        "fixing_commit must be a full git revision"
+    );
+    assert!(
+        fixing.chars().all(|c| c.is_ascii_hexdigit()),
+        "fixing_commit must be lowercase hex"
+    );
+    assert_eq!(
+        first["minimized_regression"]["red_status"], "preserved",
+        "Sengoo-owned RED regression must be preserved with a red_commit"
+    );
+    assert!(
+        first["minimized_regression"]["red_commit"]
+            .as_str()
+            .map(|s| s.len() == 40)
+            .unwrap_or(false),
+        "red_commit must be a full revision when red_status is preserved"
+    );
     assert_eq!(first["senline_pin"]["status"], "pending");
     assert_eq!(first["final_consumer_gate"]["status"], "pending");
 
@@ -640,6 +664,7 @@ fn evidence_schema_rejects_every_empty_or_workaround_only_green_state() {
         Box::new(|value| {
             value["records"][0]["minimized_regression"]["red_status"] =
                 Value::String("preserved".to_owned());
+            value["records"][0]["minimized_regression"]["red_commit"] = Value::Null;
         }),
     ));
     mutations.push((
