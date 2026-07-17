@@ -6,16 +6,21 @@
 - [x] 1.3 Pin numeric bounds in `design.md`: max requests per connection,
   idle timeout default, max streaming chunk size.
 
-## 2. Handler-callback routing
+## 2. Sengoo-side router (handlers)
 
-- [ ] 2.1 Stdlib registration API: exact path + method table, default
-  handler, one-mode-per-listener rule with stable status on violation.
-- [ ] 2.2 Dispatch on the async serving loop through answer-exactly-once
-  handles; unmatched routes answered with the documented status.
-- [ ] 2.3 Handler failure maps to the 500-family response; tests cover
-  matched, unmatched, and failing handlers.
-- [ ] 2.4 Realworld fixture serves at least two routes through handlers via
-  real `sgc` localhost smoke.
+- [ ] 2.1 Stdlib `HttpRouter`: `http_router_new`, `http_router_route(method,
+  path, handler)`, `http_router_default(handler)`, and `serve_http(server,
+  router)`. Handler type frozen as
+  `fn(&mut HttpServerRequest) -> Result<bool, i64>`. Method/path matched as
+  exact bytes (no patterns/normalization/decoding). One default max.
+- [ ] 2.2 `serve_http` is implemented in Sengoo by pulling via the existing
+  async pull API (no Rust→Sengoo callback ABI). Unmatched routes answer 404;
+  pull vs router mix rejected with stable status.
+- [ ] 2.3 Handler `Err` / `Ok(false)` / unanswered maps to 500 if not already
+  answered; tests cover matched, unmatched (404), failing (500), and mode
+  violation.
+- [ ] 2.4 Realworld fixture serves at least two exact routes through the
+  router via real `sgc` localhost smoke.
 
 ## 3. Keep-alive
 
