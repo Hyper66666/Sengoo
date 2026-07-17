@@ -1208,6 +1208,23 @@ long long sengoo_http_server_bind(long long host, long long port) {
     return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
 }
 
+long long sengoo_http_server_bind_tls(
+    long long host,
+    long long port,
+    long long cert_pem,
+    long long cert_len,
+    long long key_pem,
+    long long key_len
+) {
+    (void)host;
+    (void)port;
+    (void)cert_pem;
+    (void)cert_len;
+    (void)key_pem;
+    (void)key_len;
+    return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_TLS_UNAVAILABLE);
+}
+
 long long sengoo_http_server_local_port(long long handle) {
     (void)handle;
     return sengoo_net_fallback_i64_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);

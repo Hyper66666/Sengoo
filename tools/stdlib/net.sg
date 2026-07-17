@@ -19,6 +19,14 @@
     fn sengoo_http_body_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_http_close(handle: i64) -> i64;
     fn sengoo_http_server_bind(host: i64, port: i64) -> i64;
+    fn sengoo_http_server_bind_tls(
+        host: i64,
+        port: i64,
+        cert_pem: i64,
+        cert_len: i64,
+        key_pem: i64,
+        key_len: i64
+    ) -> i64;
     fn sengoo_http_server_local_port(handle: i64) -> i64;
     fn sengoo_http_server_set_limits(handle: i64, max_header_bytes: i64, max_body_bytes: i64) -> i64;
     fn sengoo_http_server_set_keep_alive(handle: i64, enabled: i64) -> i64;
@@ -321,6 +329,29 @@ def http_server_bind_raw(host_ptr: i64, port: i64) -> Result<HttpServer, i64> {
 
 def http_server_bind(host: &str, port: i64) -> Result<HttpServer, i64> {
     http_server_bind_raw(sengoo_stdlib_str_ptr(host), port)
+}
+
+def http_server_bind_tls(
+    host: &str,
+    port: i64,
+    cert_ptr: i64,
+    cert_len: i64,
+    key_ptr: i64,
+    key_len: i64
+) -> Result<HttpServer, i64> {
+    let handle = sengoo_http_server_bind_tls(
+        sengoo_stdlib_str_ptr(host),
+        port,
+        cert_ptr,
+        cert_len,
+        key_ptr,
+        key_len
+    );
+    if handle != 0 {
+        Result { is_ok: true, value: HttpServer { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpServer { handle: 0 }, error: net_last_status() }
+    }
 }
 
 impl HttpServer {
