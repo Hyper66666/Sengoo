@@ -718,6 +718,7 @@ mod tests {
                 middlewares: Vec::new(),
                 max_header_bytes: 16 * 1024,
                 max_body_bytes: 1024 * 1024,
+                serve_mode: 0,
             })
             .expect("server should store");
 

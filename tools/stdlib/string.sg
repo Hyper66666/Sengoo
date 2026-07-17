@@ -12,6 +12,7 @@ extern "C" {
     fn sengoo_string_len(handle: i64) -> i64;
     fn sengoo_string_is_empty(handle: i64) -> i64;
     fn sengoo_string_from_str_copy(value_ptr: i64) -> i64;
+    fn sengoo_string_from_bytes_copy(bytes_ptr: i64, len: i64) -> i64;
     fn sengoo_string_from_buffer(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_string_from_utf8(buffer_handle: i64, used_len: i64) -> i64;
     fn sengoo_string_char_count(handle: i64) -> i64;
@@ -272,6 +273,19 @@ def string_with_capacity(capacity: i64) -> Result<String, i64> {
 
 def string_from_str(value: &str) -> Result<String, i64> {
     let raw = sengoo_string_from_str_copy(sengoo_stdlib_str_ptr(value));
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+/// Build an owned String from a raw byte pointer + length.
+/// Prefer this after writing through `Buffer.ptr()`; `string_from_buffer`
+/// requires the managed buffer `used_len` to have been updated (e.g. via
+/// `copy_in`), which raw pointer writes do not do.
+def string_from_bytes_raw(bytes_ptr: i64, len: i64) -> Result<String, i64> {
+    let raw = sengoo_string_from_bytes_copy(bytes_ptr, len);
     if raw >= 0 {
         string_result_ok(String { handle: raw })
     } else {

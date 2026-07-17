@@ -1277,6 +1277,18 @@ long long sengoo_http_server_next_request(long long handle, long long timeout_ms
     return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
 }
 
+long long sengoo_http_server_next_request_router(long long handle, long long timeout_ms) {
+    (void)handle;
+    (void)timeout_ms;
+    return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
+long long sengoo_http_server_claim_serve_mode(long long handle, long long mode) {
+    (void)handle;
+    (void)mode;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
 typedef struct {
     long long handle;
 } SengooHttpServerRequestHandle;
@@ -1291,7 +1303,10 @@ typedef struct {
     long long error;
 } SengooHttpServerNextRequestFallbackFuture;
 
-long long sengoo_http_server_next_request_async__start(long long handle, long long timeout_ms) {
+static long long sengoo_http_server_next_request_async_start_fallback(
+    long long handle,
+    long long timeout_ms
+) {
     (void)handle;
     (void)timeout_ms;
     SengooHttpServerNextRequestFallbackFuture* future =
@@ -1310,9 +1325,24 @@ long long sengoo_http_server_next_request_async__start(long long handle, long lo
     return future_handle;
 }
 
+long long sengoo_http_server_next_request_async__start(long long handle, long long timeout_ms) {
+    return sengoo_http_server_next_request_async_start_fallback(handle, timeout_ms);
+}
+
+long long sengoo_http_server_next_request_router_async__start(
+    long long handle,
+    long long timeout_ms
+) {
+    return sengoo_http_server_next_request_async_start_fallback(handle, timeout_ms);
+}
+
 long long sengoo_http_server_next_request_async__poll(long long handle) {
     (void)handle;
     return 1;
+}
+
+long long sengoo_http_server_next_request_router_async__poll(long long handle) {
+    return sengoo_http_server_next_request_async__poll(handle);
 }
 
 SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(long long handle) {
@@ -1329,13 +1359,27 @@ SengooHttpServerNextRequestResult sengoo_http_server_next_request_async__result(
     return result;
 }
 
+SengooHttpServerNextRequestResult sengoo_http_server_next_request_router_async__result(
+    long long handle
+) {
+    return sengoo_http_server_next_request_async__result(handle);
+}
+
 unsigned char sengoo_http_server_next_request_async__cancel(long long handle) {
     free(sengoo_opaque_handle_take(handle));
     return 1;
 }
 
+unsigned char sengoo_http_server_next_request_router_async__cancel(long long handle) {
+    return sengoo_http_server_next_request_async__cancel(handle);
+}
+
 void sengoo_http_server_next_request_async__drop(long long handle) {
     free(sengoo_opaque_handle_take(handle));
+}
+
+void sengoo_http_server_next_request_router_async__drop(long long handle) {
+    sengoo_http_server_next_request_async__drop(handle);
 }
 
 long long sengoo_http_request_method_len(long long handle) {

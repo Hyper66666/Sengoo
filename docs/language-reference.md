@@ -152,7 +152,7 @@ def main() -> i64 {
 | Enums | Supported | Unit and payload variants, construction, return values, and `match`. |
 | Arrays | Supported | Fixed-array index bounds diagnostics (`array-index-out-of-bounds`), assignment, and `for` iteration lower to MIR; see `compiler/src/tests/m1_language_coherence_tests.rs` and `array_assign_tests`. |
 | Generic collections | Supported | `Vec<T>`, `VecDeque<T>`, `HashMap<K,V>`, `HashSet<T>`, `BTreeMap<K,V>`, and `BTreeSet<T>` use owning ABI-v1 storage with exact Drop; see `examples/realworld/default-library-conformance`. |
-| References | Subset | Borrowing and move blocking are lexical and conservative. |
+| References | Subset | Intraprocedural last-use borrow ending is implemented for straight-line and remaining-use look-ahead; live borrows still block owner moves; escaping locals report `borrow-escapes-owner`. Full temporary/NLL precision remains open. |
 | `dyn Trait` | Experimental | Single-trait `&self`/`&mut self` dispatch and owned vtable-drop glue exist; `Box<dyn>`, multi-trait objects, value receivers, and Cranelift dispatch remain open. |
 
 ## Expressions And Statements
@@ -174,7 +174,12 @@ def main() -> i64 {
 
 Sengoo uses move-based ownership plus compiler-inserted cleanup for `Drop`
 types. Drop order is reverse declaration order. Moving an owned value invalidates
-the source; moving while a lexical borrow is live is rejected.
+the source. A local borrow is live through its last reachable use in the current
+block (last-use termination); the owner may move only after that point. Moving
+while a borrow alias still has a later use is rejected with
+`cannot-move-borrowed`. Returning a reference into a local/temporary reports
+`borrow-escapes-owner`. Named non-Copy field partial moves report
+`use-after-partial-move` when the whole aggregate is used again.
 
 Status: **Subset**.
 
@@ -182,11 +187,13 @@ Proof:
 
 - `docs/language-features.md#29-ownership-moves-and-automatic-drop`
 - AMM compiler tests under `compiler/src/tests/`
+- `compiler/src/tests/m1_language_coherence_tests.rs` (last-use, escape, partial move)
+- `compiler/src/tests/owned_string_tests.rs`
 
 Known open work:
 
 - Leak-check harnesses for more runtime domains.
-- Richer temporary/borrow lifetime precision.
+- Full temporary/expression NLL precision beyond remaining-statement look-ahead.
 - Some owned aggregate values inside generic wrappers still need move/drop
   polish.
 
@@ -201,7 +208,7 @@ Known open work:
 | Conflicting impl diagnostics | Supported | Duplicate trait impl tests. |
 | `dyn Trait` | Experimental | See Types section. |
 | `#[derive]` | Subset | Clone/Copy/Eq/Ord/Hash/Default/Debug surfaces exist for current named shapes. |
-| Static trait functions | Unsupported | Blocks Rust-style `From<T>::from` today. |
+| Static trait functions | Subset | Receiver-less methods resolve via `Trait::method(args)` and `Type::method(args)` when args uniquely select one impl; ambiguity reports `ambiguous-trait-associated-function`. Full Rust-style associated-function ergonomics (e.g. blanket `From` inference) remain open. Proof: `m1_trait_associated_function_trait_and_type_paths`. |
 
 ## Generic Collections And Iterators
 
@@ -304,12 +311,20 @@ Supported:
 Proof: `docs/runtime-async-semantics.md`, `compiler/src/tests/async_tests.rs`,
 `tools/sgc/src/tests.rs`.
 
+Supported (concurrency subset, also under `std::async`):
+
+- Generic `channel<T: Send>` with async send/recv, owned endpoints, and Drop
+  cleanup; smoke fixture `examples/realworld/async-channel-smoke`.
+- Structured concurrency via `TaskScope` / `scope_spawn` (scoped children join
+  on normal exit and cancel-then-join on early exit).
+- Structural `Send`/`Sync` bounds on spawn/channel/shared-state paths.
+
 Open:
 
 - Generic bounds across every thread-spawn API and an explicit owned-handle
   policy beyond the current structural `Send`/`Sync` model.
-- Generic channels and structured concurrency.
 - Work-stealing executor and all-host reactor completion.
+- Inline user futures across every select/cross-thread spawn boundary.
 
 ## Formatting
 

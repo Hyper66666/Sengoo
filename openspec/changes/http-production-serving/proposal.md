@@ -16,10 +16,12 @@ answer an HTTP request" and "can host an internal production service".
 Feature order is pinned (umbrella decision D4): each lands with tests
 before the next starts.
 
-1. **Handler-callback routing**: applications register per-route handlers;
-   the server dispatches matched requests to handlers and answers unmatched
-   routes with the documented status response, replacing hand-written pull
-   loops for the common case (the pull API remains).
+1. **Sengoo-side router (no reverse FFI callback)**: applications register
+   exact method+path handlers and a single default on `HttpRouter`;
+   `serve_http` runs a Sengoo loop over the existing async pull API and
+   dispatches to `fn(&mut HttpServerRequest) -> Result<bool, i64>` handlers.
+   Unmatched routes get 404; handler failure / unanswered get 500. Pull and
+   router modes are mutually exclusive per listener.
 2. **Opt-in keep-alive**: bounded HTTP/1.1 connection reuse with pinned
    max-requests-per-connection and idle-timeout bounds; the default without
    opting in remains `Connection: close`.

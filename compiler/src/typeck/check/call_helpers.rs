@@ -379,13 +379,15 @@ impl TypeChecker {
                 0,
                 TyKind::Future(Box::new(self.env.int_ty(IntKind::I64))),
             )),
-            "HttpServer_next_request_async" => Some(Ty::new(
-                0,
-                TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
-                    name: "HttpServerNextRequestOutcome".to_string(),
-                    args: vec![],
-                }))),
-            )),
+            "HttpServer_next_request_async" | "HttpServer_next_request_router_async" => {
+                Some(Ty::new(
+                    0,
+                    TyKind::Future(Box::new(self.env.new_ty(TyKind::Adt {
+                        name: "HttpServerNextRequestOutcome".to_string(),
+                        args: vec![],
+                    }))),
+                ))
+            }
             _ => None,
         }
     }
@@ -566,7 +568,9 @@ impl TypeChecker {
                                 | "mutex_lock_async"
                                 | "raw_mutex_lock_async"
                                 | "HttpServer_next_request_async"
+                                | "HttpServer_next_request_router_async"
                                 | "sengoo_http_server_next_request_async__start"
+                                | "sengoo_http_server_next_request_router_async__start"
                         )
                 });
                 if !direct_function {
@@ -674,7 +678,9 @@ impl TypeChecker {
             self.check_shared_state_send_argument(args)?;
         }
 
-        if builtin_name == Some("sengoo_http_server_next_request_async__start") {
+        if builtin_name == Some("sengoo_http_server_next_request_async__start")
+            || builtin_name == Some("sengoo_http_server_next_request_router_async__start")
+        {
             if args.len() != 2 {
                 return Err(TypeckError::ArgumentCountMismatch {
                     expected: 2,
@@ -1708,12 +1714,12 @@ impl TypeChecker {
         }
 
         if matches!(&receiver_ty.kind, TyKind::Adt { name, .. } if name == "HttpServer")
-            && method_name == "next_request_async"
+            && (method_name == "next_request_async" || method_name == "next_request_router_async")
         {
             if self.async_context_depth == 0 {
-                return Err(TypeckError::Other(
-                    "HttpServer.next_request_async is only allowed in async contexts".to_string(),
-                ));
+                return Err(TypeckError::Other(format!(
+                    "HttpServer.{method_name} is only allowed in async contexts"
+                )));
             }
             if args.len() != 1 {
                 return Err(TypeckError::ArgumentCountMismatch {

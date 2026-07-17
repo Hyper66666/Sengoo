@@ -100,6 +100,7 @@ impl Codegen {
         self.maybe_declare_timeout_cancel_runtime_functions(mir_fns);
         self.maybe_declare_user_context_runtime_functions(mir_fns);
         self.maybe_declare_concurrent_async_runtime_functions(mir_fns);
+        self.maybe_declare_http_next_request_async_runtime_functions(mir_fns);
         self.maybe_declare_async_task_runtime_functions(mir_fns);
         self.maybe_declare_eprint_runtime_functions(mir_fns);
         self.maybe_declare_coverage_runtime_functions(mir_fns);
