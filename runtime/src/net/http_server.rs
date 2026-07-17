@@ -116,6 +116,28 @@ pub(super) struct HttpRequestEntry {
 /// Cap of pulled-but-unanswered request handles per server (design D5).
 const MAX_PENDING_DYNAMIC_REQUESTS: usize = 64;
 const ASYNC_HTTP_IO_SLICE: Duration = Duration::from_millis(5);
+/// Max streaming chunk size (design D-C3).
+pub(super) const HTTP_STREAM_MAX_CHUNK: usize = 65_536;
+
+#[derive(Debug)]
+enum HttpStreamBodyMode {
+    /// Transfer-Encoding: chunked
+    Chunked,
+    /// Content-Length known; remaining bytes to write.
+    Fixed { remaining: usize },
+}
+
+/// In-flight streamed response body. Request handle is consumed at begin.
+#[derive(Debug)]
+pub(super) struct HttpResponseStreamEntry {
+    server_handle: u64,
+    stream: TcpStream,
+    mode: HttpStreamBodyMode,
+    finished: bool,
+    answered_before: u32,
+    client_wants_close: bool,
+    version: String,
+}
 
 fn gateway_timeout_response() -> HttpServerResponse {
     HttpServerResponse {
@@ -398,6 +420,8 @@ impl NetRuntime {
                 /*keep_alive=*/ false,
             );
         }
+        // Abort any in-flight response streams (Drop closes the TCP stream).
+        let _ = self.http_response_stream_drain_for_server(handle)?;
         Ok(1)
     }
 
@@ -450,6 +474,60 @@ impl NetRuntime {
     ) -> Result<Vec<HttpRequestEntry>, NetErrorCode> {
         let mut table = self
             .http_requests
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let handles: Vec<u64> = table
+            .iter()
+            .filter(|(_, entry)| entry.server_handle == server_handle)
+            .map(|(handle, _)| *handle)
+            .collect();
+        Ok(handles
+            .into_iter()
+            .filter_map(|handle| table.remove(&handle))
+            .collect())
+    }
+
+    fn http_response_stream_store(
+        &self,
+        entry: HttpResponseStreamEntry,
+    ) -> Result<u64, NetErrorCode> {
+        let handle = self.alloc_handle();
+        self.http_response_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .insert(handle, entry);
+        Ok(handle)
+    }
+
+    fn http_response_stream_with_mut<F, R>(&self, handle: u64, f: F) -> Result<R, NetErrorCode>
+    where
+        F: FnOnce(&mut HttpResponseStreamEntry) -> Result<R, NetErrorCode>,
+    {
+        let mut table = self
+            .http_response_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?;
+        let entry = table.get_mut(&handle).ok_or(NetErrorCode::HandleNotFound)?;
+        f(entry)
+    }
+
+    fn http_response_stream_take(
+        &self,
+        handle: u64,
+    ) -> Result<HttpResponseStreamEntry, NetErrorCode> {
+        self.http_response_streams
+            .lock()
+            .map_err(|_| NetErrorCode::InternalError)?
+            .remove(&handle)
+            .ok_or(NetErrorCode::HandleNotFound)
+    }
+
+    fn http_response_stream_drain_for_server(
+        &self,
+        server_handle: u64,
+    ) -> Result<Vec<HttpResponseStreamEntry>, NetErrorCode> {
+        let mut table = self
+            .http_response_streams
             .lock()
             .map_err(|_| NetErrorCode::InternalError)?;
         let handles: Vec<u64> = table
@@ -1870,6 +1948,112 @@ pub extern "C" fn sengoo_http_request_body_copy(
         .unwrap_or_else(fail_i64)
 }
 
+fn should_keep_alive(
+    keep_alive_enabled: bool,
+    client_wants_close: bool,
+    answered_after: u32,
+    version: &str,
+) -> bool {
+    keep_alive_enabled
+        && !client_wants_close
+        && answered_after < HTTP_KEEP_ALIVE_MAX_REQUESTS
+        && version.to_ascii_uppercase().starts_with("HTTP/1.1")
+}
+
+fn write_stream_headers(
+    stream: &mut TcpStream,
+    status: i32,
+    content_length: Option<usize>,
+    keep_alive: bool,
+) -> Result<(), NetErrorCode> {
+    let mut head = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: {}\r\n",
+        status,
+        http_reason_phrase(status),
+        if keep_alive { "keep-alive" } else { "close" },
+    );
+    match content_length {
+        Some(len) => head.push_str(&format!("Content-Length: {len}\r\n\r\n")),
+        None => head.push_str("Transfer-Encoding: chunked\r\n\r\n"),
+    }
+    stream
+        .write_all(head.as_bytes())
+        .map_err(|err| classify_io_error(&err))?;
+    stream.flush().map_err(|err| classify_io_error(&err))
+}
+
+fn write_chunked_body_chunk(stream: &mut TcpStream, chunk: &[u8]) -> Result<(), NetErrorCode> {
+    let header = format!("{:x}\r\n", chunk.len());
+    stream
+        .write_all(header.as_bytes())
+        .map_err(|err| classify_io_error(&err))?;
+    stream
+        .write_all(chunk)
+        .map_err(|err| classify_io_error(&err))?;
+    stream
+        .write_all(b"\r\n")
+        .map_err(|err| classify_io_error(&err))?;
+    stream.flush().map_err(|err| classify_io_error(&err))
+}
+
+fn write_chunked_terminator(stream: &mut TcpStream) -> Result<(), NetErrorCode> {
+    stream
+        .write_all(b"0\r\n\r\n")
+        .map_err(|err| classify_io_error(&err))?;
+    stream.flush().map_err(|err| classify_io_error(&err))
+}
+
+fn begin_stream_impl(request_handle: u64, status: i32, content_length: Option<usize>) -> u64 {
+    if !(100..=599).contains(&status) {
+        return fail_handle(NetErrorCode::InvalidArgument);
+    }
+    if let Some(len) = content_length {
+        if len > usize::try_from(i64::MAX).unwrap_or(usize::MAX) {
+            return fail_handle(NetErrorCode::InvalidArgument);
+        }
+    }
+
+    let entry = match net_runtime().http_request_take(request_handle) {
+        Ok(entry) => entry,
+        Err(code) => return fail_handle(code),
+    };
+
+    let keep_alive_enabled = net_runtime()
+        .http_server_keep_alive_enabled(entry.server_handle)
+        .unwrap_or(false);
+    // Keep-alive decision uses the count after this response completes; headers
+    // must match finish() so the client sees a stable Connection value.
+    let answered_after = entry.answered_before.saturating_add(1);
+    let keep_alive = should_keep_alive(
+        keep_alive_enabled,
+        entry.client_wants_close,
+        answered_after,
+        &entry.version,
+    );
+
+    let mut stream = entry.stream;
+    if let Err(code) = write_stream_headers(&mut stream, status, content_length, keep_alive) {
+        return fail_handle(code);
+    }
+
+    let mode = match content_length {
+        Some(remaining) => HttpStreamBodyMode::Fixed { remaining },
+        None => HttpStreamBodyMode::Chunked,
+    };
+    let stream_entry = HttpResponseStreamEntry {
+        server_handle: entry.server_handle,
+        stream,
+        mode,
+        finished: false,
+        answered_before: entry.answered_before,
+        client_wants_close: entry.client_wants_close,
+        version: entry.version,
+    };
+    net_runtime()
+        .http_response_stream_store(stream_entry)
+        .unwrap_or_else(fail_handle)
+}
+
 fn respond_impl(
     handle: u64,
     status: i32,
@@ -1906,11 +2090,12 @@ fn respond_impl(
         .http_server_keep_alive_enabled(entry.server_handle)
         .unwrap_or(false);
     let answered_after = entry.answered_before.saturating_add(1);
-    let under_cap = answered_after < HTTP_KEEP_ALIVE_MAX_REQUESTS;
-    let keep_alive = keep_alive_enabled
-        && !entry.client_wants_close
-        && under_cap
-        && entry.version.to_ascii_uppercase().starts_with("HTTP/1.1");
+    let keep_alive = should_keep_alive(
+        keep_alive_enabled,
+        entry.client_wants_close,
+        answered_after,
+        &entry.version,
+    );
 
     match write_http_response(
         &mut entry.stream,
@@ -1972,6 +2157,135 @@ pub extern "C" fn sengoo_http_request_close(handle: u64) -> i64 {
     match net_runtime().http_request_take(handle) {
         Ok(mut entry) => {
             let _ = write_http_response(&mut entry.stream, &gateway_timeout_response(), false);
+            1
+        }
+        Err(NetErrorCode::HandleNotFound) => 1,
+        Err(code) => fail_bool(code),
+    }
+}
+
+/// Begin a chunked streamed response. Consumes the request handle (answer-once).
+#[no_mangle]
+pub extern "C" fn sengoo_http_request_begin_stream(request_handle: u64, status: i32) -> u64 {
+    reset_last_error();
+    begin_stream_impl(request_handle, status, None)
+}
+
+/// Begin a fixed-length streamed response. Consumes the request handle.
+#[no_mangle]
+pub extern "C" fn sengoo_http_request_begin_stream_with_length(
+    request_handle: u64,
+    status: i32,
+    content_length: u64,
+) -> u64 {
+    reset_last_error();
+    let len = match usize::try_from(content_length) {
+        Ok(len) => len,
+        Err(_) => return fail_handle(NetErrorCode::InvalidArgument),
+    };
+    begin_stream_impl(request_handle, status, Some(len))
+}
+
+/// Write one body chunk (≤ 65536 bytes). Disconnect → STATUS_IO; timeout → STATUS_TIMEOUT.
+#[no_mangle]
+pub extern "C" fn sengoo_http_response_stream_write(
+    stream_handle: u64,
+    data: *const u8,
+    len: usize,
+) -> i64 {
+    reset_last_error();
+    if len > HTTP_STREAM_MAX_CHUNK {
+        return fail_bool(NetErrorCode::InvalidArgument);
+    }
+    let chunk = match read_c_buffer(data, len) {
+        Ok(chunk) => chunk,
+        Err(code) => return fail_bool(code),
+    };
+    match net_runtime().http_response_stream_with_mut(stream_handle, |entry| {
+        if entry.finished {
+            return Err(NetErrorCode::HandleNotFound);
+        }
+        match &mut entry.mode {
+            HttpStreamBodyMode::Chunked => {
+                write_chunked_body_chunk(&mut entry.stream, &chunk)?;
+            }
+            HttpStreamBodyMode::Fixed { remaining } => {
+                if chunk.len() > *remaining {
+                    return Err(NetErrorCode::InvalidArgument);
+                }
+                entry
+                    .stream
+                    .write_all(&chunk)
+                    .map_err(|err| classify_io_error(&err))?;
+                entry
+                    .stream
+                    .flush()
+                    .map_err(|err| classify_io_error(&err))?;
+                *remaining -= chunk.len();
+            }
+        }
+        Ok(1_i64)
+    }) {
+        Ok(v) => v,
+        Err(code) => fail_bool(code),
+    }
+}
+
+/// Finish a streamed response. May recycle the connection under keep-alive.
+#[no_mangle]
+pub extern "C" fn sengoo_http_response_stream_finish(stream_handle: u64) -> i64 {
+    reset_last_error();
+    let mut entry = match net_runtime().http_response_stream_take(stream_handle) {
+        Ok(entry) => entry,
+        Err(code) => return fail_bool(code),
+    };
+    if entry.finished {
+        return fail_bool(NetErrorCode::HandleNotFound);
+    }
+    match &entry.mode {
+        HttpStreamBodyMode::Chunked => {
+            if let Err(code) = write_chunked_terminator(&mut entry.stream) {
+                return fail_bool(code);
+            }
+        }
+        HttpStreamBodyMode::Fixed { remaining } => {
+            if *remaining != 0 {
+                // Incomplete fixed body: abort connection (no keep-alive).
+                entry.finished = true;
+                return fail_bool(NetErrorCode::InvalidArgument);
+            }
+        }
+    }
+    entry.finished = true;
+    let answered_after = entry.answered_before.saturating_add(1);
+    let keep_alive_enabled = net_runtime()
+        .http_server_keep_alive_enabled(entry.server_handle)
+        .unwrap_or(false);
+    let keep_alive = should_keep_alive(
+        keep_alive_enabled,
+        entry.client_wants_close,
+        answered_after,
+        &entry.version,
+    );
+    if keep_alive {
+        let _ = net_runtime().http_server_put_live_connection(
+            entry.server_handle,
+            LiveHttpConnection {
+                stream: entry.stream,
+                answered_count: answered_after,
+            },
+        );
+    }
+    1
+}
+
+/// Drop/abort a stream handle. Unfinished streams close the TCP connection.
+#[no_mangle]
+pub extern "C" fn sengoo_http_response_stream_close(stream_handle: u64) -> i64 {
+    reset_last_error();
+    match net_runtime().http_response_stream_take(stream_handle) {
+        Ok(_entry) => {
+            // Drop closes the TcpStream → connection abort for unfinished streams.
             1
         }
         Err(NetErrorCode::HandleNotFound) => 1,
@@ -2118,6 +2432,120 @@ mod tests {
             assert_eq!(sengoo_http_request_respond(req, 200, b"ok".as_ptr(), 2), 1);
         }
         worker.join().expect("client join");
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn response_stream_chunked_completes_and_drop_aborts() {
+        use std::io::{Read, Write};
+        use std::thread;
+
+        let _guard = super::super::net_test_lock();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0);
+        let port = sengoo_http_server_local_port(server);
+
+        // Completing stream path.
+        let worker = thread::spawn(move || {
+            let mut stream =
+                TcpStream::connect(("127.0.0.1", port as u16)).expect("client connect");
+            stream
+                .write_all(b"GET /s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write");
+            let mut raw = Vec::new();
+            stream.read_to_end(&mut raw).expect("read all");
+            let text = String::from_utf8_lossy(&raw);
+            assert!(
+                text.contains("Transfer-Encoding: chunked")
+                    && text.contains("hello")
+                    && text.contains("world"),
+                "chunked body: {text}"
+            );
+        });
+        let req = sengoo_http_server_next_request(server, 5_000);
+        assert_ne!(req, 0);
+        let stream = sengoo_http_request_begin_stream(req, 200);
+        assert_ne!(stream, 0);
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"hello".as_ptr(), 5),
+            1
+        );
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"world".as_ptr(), 5),
+            1
+        );
+        assert_eq!(sengoo_http_response_stream_finish(stream), 1);
+        worker.join().expect("client join");
+
+        // Drop without finish aborts: oversize chunk rejected; unfinished close ok.
+        let worker2 = thread::spawn(move || {
+            let mut stream =
+                TcpStream::connect(("127.0.0.1", port as u16)).expect("client2 connect");
+            stream
+                .write_all(b"GET /t HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write");
+            let mut raw = Vec::new();
+            let _ = stream.read_to_end(&mut raw);
+        });
+        let req2 = sengoo_http_server_next_request(server, 5_000);
+        assert_ne!(req2, 0);
+        let stream2 = sengoo_http_request_begin_stream(req2, 200);
+        assert_ne!(stream2, 0);
+        let big = vec![b'x'; HTTP_STREAM_MAX_CHUNK + 1];
+        assert_eq!(
+            sengoo_http_response_stream_write(stream2, big.as_ptr(), big.len()),
+            0,
+            "oversize chunk must fail"
+        );
+        assert_eq!(sengoo_http_response_stream_close(stream2), 1);
+        let _ = worker2.join();
+        assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn response_stream_fixed_length_enforces_remaining() {
+        use std::io::{Read, Write};
+        use std::thread;
+
+        let _guard = super::super::net_test_lock();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0);
+        let port = sengoo_http_server_local_port(server);
+        let worker = thread::spawn(move || {
+            let mut stream =
+                TcpStream::connect(("127.0.0.1", port as u16)).expect("client connect");
+            stream
+                .write_all(b"GET /f HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("write");
+            let mut raw = Vec::new();
+            stream.read_to_end(&mut raw).expect("read");
+            let text = String::from_utf8_lossy(&raw);
+            assert!(
+                text.contains("Content-Length: 4") && text.ends_with("abcd"),
+                "fixed: {text}"
+            );
+        });
+        let req = sengoo_http_server_next_request(server, 5_000);
+        assert_ne!(req, 0);
+        let stream = sengoo_http_request_begin_stream_with_length(req, 200, 4);
+        assert_ne!(stream, 0);
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"ab".as_ptr(), 2),
+            1
+        );
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"cd".as_ptr(), 2),
+            1
+        );
+        // Extra byte beyond Content-Length.
+        assert_eq!(
+            sengoo_http_response_stream_write(stream, b"x".as_ptr(), 1),
+            0
+        );
+        // Remaining is still 0 after failed extra write? We rejected before writing,
+        // so remaining is 0 and finish should succeed.
+        assert_eq!(sengoo_http_response_stream_finish(stream), 1);
+        worker.join().expect("join");
         assert_eq!(sengoo_http_server_close(server), 1);
     }
 
