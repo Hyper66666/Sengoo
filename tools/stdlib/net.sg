@@ -21,6 +21,7 @@
     fn sengoo_http_server_bind(host: i64, port: i64) -> i64;
     fn sengoo_http_server_local_port(handle: i64) -> i64;
     fn sengoo_http_server_set_limits(handle: i64, max_header_bytes: i64, max_body_bytes: i64) -> i64;
+    fn sengoo_http_server_set_keep_alive(handle: i64, enabled: i64) -> i64;
     fn sengoo_http_server_add_route(handle: i64, method: i64, path_pattern: i64, status: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_server_add_middleware_require_header(handle: i64, name: i64, expected_value: i64, reject_status: i64, reject_body: i64, reject_body_len: i64) -> i64;
     fn sengoo_http_server_add_ws_echo_route(handle: i64, path_pattern: i64) -> i64;
@@ -325,6 +326,18 @@ impl HttpServer {
 
     def set_limits(self, max_header_bytes: i64, max_body_bytes: i64) -> Result<bool, i64> {
         let status = sengoo_http_server_set_limits(self.handle, max_header_bytes, max_body_bytes);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    /// Opt in (`enabled != 0`) to HTTP/1.1 keep-alive. Bounds are fixed:
+    /// max 100 requests per connection and 30s idle timeout. Default is off
+    /// (`Connection: close` every response).
+    def set_keep_alive(self, enabled: i64) -> Result<bool, i64> {
+        let status = sengoo_http_server_set_keep_alive(self.handle, enabled);
         if status != 0 {
             Result { is_ok: true, value: true, error: 0 }
         } else {

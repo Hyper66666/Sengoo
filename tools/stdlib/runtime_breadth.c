@@ -1220,6 +1220,12 @@ long long sengoo_http_server_set_limits(long long handle, long long max_header_b
     return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
 }
 
+long long sengoo_http_server_set_keep_alive(long long handle, long long enabled) {
+    (void)handle;
+    (void)enabled;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
 long long sengoo_http_server_add_route(
     long long handle,
     long long method,

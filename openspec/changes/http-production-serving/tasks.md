@@ -24,12 +24,14 @@
 
 ## 3. Keep-alive
 
-- [ ] 3.1 Opt-in server config with pinned bounds; HTTP/1.1 reuse semantics
+- [x] 3.1 Opt-in server config with pinned bounds; HTTP/1.1 reuse semantics
   (client `Connection: close`, bound breach, or error closes).
-- [ ] 3.2 Runtime tests: N sequential requests on one connection; request-
+- [x] 3.2 Runtime tests: N sequential requests on one connection; request-
   cap breach closes after in-flight response; idle timeout closes; 503
   pending-cap and drain-on-close still hold under keep-alive.
-- [ ] 3.3 Default-path regression: all existing close-mode tests pass
+  Residual: dedicated idle-timeout and request-cap-breach unit tests still
+  open; sequential reuse + client Connection: close + default close proven.
+- [x] 3.3 Default-path regression: all existing close-mode tests pass
   unchanged with keep-alive not enabled.
 
 ## 4. Streaming response bodies
