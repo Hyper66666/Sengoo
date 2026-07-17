@@ -46,6 +46,7 @@ if ($sourceRevision -cnotmatch '^[0-9a-f]{40}$') {
 Push-Location $HttpRoot
 try {
     $env:SENGOO_DETERMINISTIC_LINK = "1"
+    $env:SENGOO_INCREMENTAL_LINK = "off"
     & $SgpmPath --runtime-mode installed build --locked --release
     if ($LASTEXITCODE -ne 0) {
         throw "sgpm --runtime-mode installed build --locked --release failed for senline-http-dogfood"

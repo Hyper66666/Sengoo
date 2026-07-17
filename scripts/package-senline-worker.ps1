@@ -81,6 +81,7 @@ try {
         # source-development runtime or cargo.
         # Pin-grade dual builds require deterministic link metadata (/Brepro, no build-id).
         $env:SENGOO_DETERMINISTIC_LINK = "1"
+        $env:SENGOO_INCREMENTAL_LINK = "off"
         & $SgpmPath --runtime-mode installed build --locked --release
         if ($LASTEXITCODE -ne 0) {
             throw "sgpm --runtime-mode installed build --locked --release failed for senline-domain-worker"
