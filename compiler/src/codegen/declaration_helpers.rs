@@ -576,6 +576,7 @@ impl Codegen {
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_read")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_rwlock_write")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
+            && !Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_router_async")
             && !Self::mir_uses_async_origin(mir_fns, "sengoo_async_file_wait_readable")
         {
             return;
@@ -788,66 +789,6 @@ impl Codegen {
         Self::maybe_declare_optional_async_runtime_lifecycle(
             &mut self.declarations,
             mir_fns,
-            "sengoo_http_server_next_request_async",
-            &[
-                (
-                    "poll",
-                    "declare i64 @sengoo_http_server_next_request_async__poll(i64)\n",
-                ),
-                (
-                    "result",
-                    Self::sret_or_direct_decl(
-                        Self::async_result_uses_sret(
-                            targets_windows_msvc,
-                            "sengoo_http_server_next_request_async__result",
-                        ),
-                        "sengoo_http_server_next_request_async__result",
-                        "%HttpServerNextRequestOutcome",
-                    ),
-                ),
-                (
-                    "cancel",
-                    "declare i1 @sengoo_http_server_next_request_async__cancel(i64)\n",
-                ),
-                (
-                    "drop",
-                    "declare void @sengoo_http_server_next_request_async__drop(i64)\n",
-                ),
-            ],
-        );
-        Self::maybe_declare_optional_async_runtime_lifecycle(
-            &mut self.declarations,
-            mir_fns,
-            "sengoo_http_server_next_request_router_async",
-            &[
-                (
-                    "poll",
-                    "declare i64 @sengoo_http_server_next_request_router_async__poll(i64)\n",
-                ),
-                (
-                    "result",
-                    Self::sret_or_direct_decl(
-                        Self::async_result_uses_sret(
-                            targets_windows_msvc,
-                            "sengoo_http_server_next_request_router_async__result",
-                        ),
-                        "sengoo_http_server_next_request_router_async__result",
-                        "%HttpServerNextRequestOutcome",
-                    ),
-                ),
-                (
-                    "cancel",
-                    "declare i1 @sengoo_http_server_next_request_router_async__cancel(i64)\n",
-                ),
-                (
-                    "drop",
-                    "declare void @sengoo_http_server_next_request_router_async__drop(i64)\n",
-                ),
-            ],
-        );
-        Self::maybe_declare_optional_async_runtime_lifecycle(
-            &mut self.declarations,
-            mir_fns,
             "sengoo_async_file_wait_readable",
             &[
                 (
@@ -889,6 +830,55 @@ impl Codegen {
         for (_, decl) in lifecycle_decls {
             if !declarations.contains(decl) {
                 declarations.push_str(decl);
+            }
+        }
+    }
+
+    /// Declare poll/result/cancel/drop for both pull and router HTTP next_request
+    /// futures. Kept separate from the concurrent-async early-return gate so router
+    /// async await always gets declares even when no other concurrent symbols appear.
+    pub(super) fn maybe_declare_http_next_request_async_runtime_functions(
+        &mut self,
+        mir_fns: &[MirFunction],
+    ) {
+        let uses_http_next_request =
+            Self::mir_uses_async_origin(mir_fns, "sengoo_http_server_next_request_async")
+                || Self::mir_uses_async_origin(
+                    mir_fns,
+                    "sengoo_http_server_next_request_router_async",
+                )
+                || Self::mir_uses_async_origin(mir_fns, "HttpServer_next_request_async")
+                || Self::mir_uses_async_origin(mir_fns, "HttpServer_next_request_router_async");
+        if !uses_http_next_request {
+            return;
+        }
+        let targets_windows_msvc = self.targets_windows_msvc();
+        for decl in [
+            "declare i64 @sengoo_http_server_next_request_async__poll(i64)\n",
+            Self::sret_or_direct_decl(
+                Self::async_result_uses_sret(
+                    targets_windows_msvc,
+                    "sengoo_http_server_next_request_async__result",
+                ),
+                "sengoo_http_server_next_request_async__result",
+                "%HttpServerNextRequestOutcome",
+            ),
+            "declare i1 @sengoo_http_server_next_request_async__cancel(i64)\n",
+            "declare void @sengoo_http_server_next_request_async__drop(i64)\n",
+            "declare i64 @sengoo_http_server_next_request_router_async__poll(i64)\n",
+            Self::sret_or_direct_decl(
+                Self::async_result_uses_sret(
+                    targets_windows_msvc,
+                    "sengoo_http_server_next_request_router_async__result",
+                ),
+                "sengoo_http_server_next_request_router_async__result",
+                "%HttpServerNextRequestOutcome",
+            ),
+            "declare i1 @sengoo_http_server_next_request_router_async__cancel(i64)\n",
+            "declare void @sengoo_http_server_next_request_router_async__drop(i64)\n",
+        ] {
+            if !self.declarations.contains(decl) {
+                self.declarations.push_str(decl);
             }
         }
     }
