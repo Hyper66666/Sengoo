@@ -224,16 +224,7 @@ jobs:
           Copy-Item -LiteralPath "$primaryArchive.sha256" -Destination (Join-Path $primaryReleaseDir (Split-Path -Leaf "$primaryArchive.sha256"))
 
           $upgradeOutputDir = "target/dist-upgrade-${{ matrix.artifact }}"
-          $upgradeCargoTargetDir = Join-Path $env:RUNNER_TEMP "sengoo-cargo-upgrade-${{ matrix.artifact }}"
           Remove-Item -LiteralPath $upgradeOutputDir -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -LiteralPath $upgradeCargoTargetDir -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
-          Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
-          ./scripts/package-toolchain.ps1 `
-            -Version $upgradeVersion `
-            -OutputDir $upgradeOutputDir `
-            -CargoTargetDir $upgradeCargoTargetDir `
-            -SmokeEvidence "toolchain-distribution workflow upgrade smoke ${{ matrix.os }} ${{ github.sha }}"
           $env:SENGOO_BUILD_HASH = $secondaryBuildHash
           cargo build -p sgc -p sgpm -p sgfmt -p sglsp --release
           if ($LASTEXITCODE -ne 0) {

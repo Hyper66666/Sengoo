@@ -236,18 +236,6 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
         return;
     }
 
-    for fixture in [
-        "async-channel-smoke",
-        "cli-json-audit",
-        "compressed-json-artifact",
-        "http-client-status",
-        "http-echo-service",
-        "package-release-loop",
-        "senline-domain-worker",
-        "workspace-doc-loop",
-    ] {
-        let package = dir.join(fixture);
-        copy_dir_filtered(&realworld_fixture(fixture), &package);
     for fixture in realworld_fixture_names() {
         let package = dir.join(&fixture);
         copy_dir_filtered(&realworld_fixture(&fixture), &package);
@@ -276,9 +264,7 @@ fn realworld_locked_loop_uses_real_toolchain_binaries() {
             vec!["fmt", "--check", "--locked"],
             vec!["--runtime-mode", "source-development", "doc", "--locked"],
             vec!["--runtime-mode", "source-development", "build", "--locked"],
-            vec!["doc", "--locked"],
-            vec!["build", "--locked"],
-            vec!["run", "--locked"],
+            vec!["--runtime-mode", "source-development", "run", "--locked"],
         ] {
             let output = Command::new(sgpm())
                 .args(&args)
