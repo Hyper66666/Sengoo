@@ -61,18 +61,21 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 ## Latest dual-host CI
 
 - core-conformance run
-  [`29573240622`](https://github.com/Hyper66666/Sengoo/actions/runs/29573240622)
-  on tip `7a812a525` (product loops present; subsequent review reopened several
-  task claims that overstated completion).
+  [`29595215669`](https://github.com/Hyper66666/Sengoo/actions/runs/29595215669)
+  on tip `3e747e63b`:
+  - core-language + dual-host differential + binary I/O **green**
+  - installed product loops **green** (worker framed + HTTP plan equality +
+    `malformed_json`@200 + GET@400) on Ubuntu and Windows
+  - **worker** dual-package compare **ok=true** (33 identical payloads) both hosts
+  - **HTTP** dual-package still fails closed on equal-size executable hash
+    (task **8.7** remains open; product probes still ran)
 
 ## Known open Sengoo-side items
 
-1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (blocked outside this worktree).
-2. **Honest open after review remediation (still unchecked):** 5.12, 5.13, 6.5, 6.6, 7.2, 7.4, 7.7, 8.3 (partial), 8.7, 9.1, 9.2, 9.3 — see `tasks.md`.
-   - Compare gate is fail-closed on executable hash mismatch (8.7 will stay red until dual packages are bit-identical).
-   - Resource sampler v2 adds OLS / 10k-window / handle plateau / JSONL / `private_bytes` naming (needs 1M re-soak).
-   - Evidence red/fix commits reset to `pending-commit` / null until true red-first history exists.
-3. **P2 compiler debt:** ordinary by-value legacy-handle Drop still skipped (language ABI); worker uses product-level owning helpers.
+1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (**Blocked** outside this worktree).
+2. **Task 7.2 / 7.4 / 7.7** — true red-first defect history + complete pin/green chain not reconstructed; evidence keeps `red_status=pending-commit` and `fixing_commit=null`.
+3. **Task 8.7** — HTTP dual-package executable hash still diverges under fail-closed compare (worker dual-package is bit-identical on both hosts).
+4. **P2 compiler debt:** ordinary by-value legacy-handle Drop still skipped (language ABI); worker uses product-level owning helpers.
 
 ## Unsupported authority transfers
 
