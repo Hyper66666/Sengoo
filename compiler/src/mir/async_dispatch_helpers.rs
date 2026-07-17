@@ -4,7 +4,7 @@ pub const BUILTIN_ASYNC_DISPATCH_NAMES: [&str; 2] =
     ["sengoo_async_sleep", "sengoo_async_timeout_bool"];
 
 /// Runtime async helpers registered only when MIR lowering references them.
-pub const OPTIONAL_ASYNC_DISPATCH_NAMES: [&str; 9] = [
+pub const OPTIONAL_ASYNC_DISPATCH_NAMES: [&str; 10] = [
     "sengoo_async_timeout_cancel_i64",
     "sengoo_async_spawn_blocking_i64",
     "sengoo_async_channel_send_i64",
@@ -13,6 +13,7 @@ pub const OPTIONAL_ASYNC_DISPATCH_NAMES: [&str; 9] = [
     "sengoo_async_rwlock_read",
     "sengoo_async_rwlock_write",
     "sengoo_http_server_next_request_async",
+    "sengoo_http_server_next_request_router_async",
     "sengoo_async_file_wait_readable",
 ];
 

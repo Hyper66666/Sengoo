@@ -1281,8 +1281,9 @@ pub extern "C" fn sengoo_http_server_next_request_async__start(
 }
 
 /// Async pull for Sengoo-side router only (mode already claimed as ROUTER).
+/// Named `*_async__start` so Future lowering matches the standard async ABI.
 #[no_mangle]
-pub extern "C" fn sengoo_http_server_next_request_async_router__start(
+pub extern "C" fn sengoo_http_server_next_request_router_async__start(
     handle: u64,
     timeout_ms: u32,
 ) -> i64 {
@@ -1496,6 +1497,41 @@ pub unsafe extern "C" fn sengoo_http_server_next_request_async__drop(handle: i64
     if let Some(interest) = state.listener_interest {
         crate::async_runtime::http_listener_unregister(interest);
     }
+}
+
+// Router-mode async lifecycle aliases: same state machine as pull, different start only.
+#[no_mangle]
+/// # Safety
+///
+/// Same contract as [`sengoo_http_server_next_request_async__poll`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_router_async__poll(handle: i64) -> i64 {
+    unsafe { sengoo_http_server_next_request_async__poll(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// Same contract as [`sengoo_http_server_next_request_async__result`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_router_async__result(
+    handle: i64,
+) -> HttpServerNextRequestResult {
+    unsafe { sengoo_http_server_next_request_async__result(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// Same contract as [`sengoo_http_server_next_request_async__cancel`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_router_async__cancel(handle: i64) -> bool {
+    unsafe { sengoo_http_server_next_request_async__cancel(handle) }
+}
+
+#[no_mangle]
+/// # Safety
+///
+/// Same contract as [`sengoo_http_server_next_request_async__drop`].
+pub unsafe extern "C" fn sengoo_http_server_next_request_router_async__drop(handle: i64) {
+    unsafe { sengoo_http_server_next_request_async__drop(handle) }
 }
 
 fn request_text_len(handle: u64, read: fn(&HttpRequestEntry) -> &str) -> i64 {
@@ -1778,5 +1814,56 @@ mod tests {
         );
 
         assert_eq!(sengoo_http_server_close(server), 1);
+    }
+
+    #[test]
+    fn serve_mode_claim_is_exclusive_between_pull_and_router() {
+        let _guard = super::super::net_test_lock();
+        let server = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server, 0, "test server should bind");
+
+        assert_eq!(
+            sengoo_http_server_claim_serve_mode(server, HTTP_SERVER_MODE_ROUTER),
+            1,
+            "first router claim should succeed"
+        );
+        assert_eq!(
+            sengoo_http_server_claim_serve_mode(server, HTTP_SERVER_MODE_ROUTER),
+            1,
+            "idempotent router re-claim should succeed"
+        );
+        assert_eq!(
+            sengoo_http_server_claim_serve_mode(server, HTTP_SERVER_MODE_PULL),
+            0,
+            "pull claim after router should be rejected"
+        );
+        assert_eq!(
+            super::super::sengoo_net_last_error(),
+            i64::from(super::super::SENGOO_NET_ERR_INVALID_ARGUMENT),
+            "mode conflict maps to invalid argument"
+        );
+
+        // Pull next_request after router claim must also fail closed.
+        assert_eq!(
+            sengoo_http_server_next_request(server, 1),
+            0,
+            "public pull API must reject after router mode is claimed"
+        );
+
+        assert_eq!(sengoo_http_server_close(server), 1);
+
+        let server2 = sengoo_http_server_bind(std::ptr::null(), 0);
+        assert_ne!(server2, 0, "second test server should bind");
+        assert_eq!(
+            sengoo_http_server_claim_serve_mode(server2, HTTP_SERVER_MODE_PULL),
+            1,
+            "first pull claim should succeed"
+        );
+        assert_eq!(
+            sengoo_http_server_claim_serve_mode(server2, HTTP_SERVER_MODE_ROUTER),
+            0,
+            "router claim after pull should be rejected"
+        );
+        assert_eq!(sengoo_http_server_close(server2), 1);
     }
 }

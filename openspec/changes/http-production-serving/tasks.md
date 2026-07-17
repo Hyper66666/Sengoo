@@ -16,10 +16,10 @@
 - [x] 2.2 `serve_http` is implemented in Sengoo by pulling via the existing
   async pull API (no Rust鈫扴engoo callback ABI). Unmatched routes answer 404;
   pull vs router mix rejected with stable status.
-- [ ] 2.3 Handler `Err` / `Ok(false)` / unanswered maps to 500 if not already
+- [x] 2.3 Handler `Err` / `Ok(false)` / unanswered maps to 500 if not already
   answered; tests cover matched, unmatched (404), failing (500), and mode
   violation.
-- [ ] 2.4 Realworld fixture serves at least two exact routes through the
+- [x] 2.4 Realworld fixture serves at least two exact routes through the
   router via real `sgc` localhost smoke.
 
 ## 3. Keep-alive

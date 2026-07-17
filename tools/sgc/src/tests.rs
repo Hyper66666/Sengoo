@@ -7368,6 +7368,248 @@ async def main() -> i64 {
     let _ = fs::remove_file(&exe_path);
 }
 
+/// HttpRouter dual-route match + exact-path 404 + handler-failure 500 over real localhost.
+#[test]
+fn stdlib_http_router_dual_routes_404_and_500_localhost() {
+    use std::io::{BufRead, BufReader, Read};
+
+    let source = expand_stdlib_imports_for_source(
+        r#"
+import std::net;
+import std::io;
+import std::strconv;
+import std::status;
+
+def health_handler(request: HttpServerRequest) -> i64 {
+    if request.respond(200, "ok").unwrap_or(false) { 1 } else { 0 }
+}
+
+def echo_handler(request: HttpServerRequest) -> i64 {
+    if request.respond(200, "echo").unwrap_or(false) { 1 } else { 0 }
+}
+
+def fail_handler(request: HttpServerRequest) -> i64 {
+    0
+}
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok == false {
+        10
+    } else {
+        let server = bind_result.value;
+        let h_health: fn(HttpServerRequest) -> i64 = health_handler;
+        let h_echo: fn(HttpServerRequest) -> i64 = echo_handler;
+        let h_fail: fn(HttpServerRequest) -> i64 = fail_handler;
+        let r0 = http_router_new();
+        let r1 = http_router_route(r0, "GET", "/health", h_health);
+        if r1.is_ok == false {
+            server.close();
+            13
+        } else {
+            let r2 = http_router_route(r1.value, "GET", "/echo", h_echo);
+            if r2.is_ok == false {
+                server.close();
+                13
+            } else {
+                let r3 = http_router_route(r2.value, "GET", "/fail", h_fail);
+                if r3.is_ok == false {
+                    server.close();
+                    13
+                } else {
+                    let mut router = r3.value;
+                    let port = server.local_port().unwrap_or(0);
+                    let port_buffer = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+                    let port_len = strconv_format_i64(port, port_buffer).unwrap_or(0);
+                    io_stdout_write_raw(port_buffer.ptr(), port_len);
+                    io_stdout_write("\n");
+                    io_stdout_flush();
+                    port_buffer.free();
+
+                    let s1 = serve_http(server, router, 15000);
+                    if s1.is_ok == false {
+                        server.close();
+                        11
+                    } else {
+                        router = s1.value;
+                        let s2 = serve_http(server, router, 15000);
+                        if s2.is_ok == false {
+                            server.close();
+                            11
+                        } else {
+                            router = s2.value;
+                            let s3 = serve_http(server, router, 15000);
+                            if s3.is_ok == false {
+                                server.close();
+                                11
+                            } else {
+                                router = s3.value;
+                                let s4 = serve_http(server, router, 15000);
+                                server.close();
+                                if s4.is_ok { 0 } else { 12 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#,
+    )
+    .expect("http router stdlib imports should expand");
+    let llvm_ir =
+        compile_source(&source, 1).expect("http router program should compile to LLVM IR");
+
+    let Some(clang) = find_clang() else {
+        return;
+    };
+    let Some(runtime_c) = find_runtime_c() else {
+        return;
+    };
+    if !stdlib_runtime_c_is_compilable(&clang, Path::new(&runtime_c)) {
+        return;
+    }
+
+    let ll_path = temp_artifact("stdlib-http-router", "ll");
+    fs::write(&ll_path, llvm_ir).unwrap();
+    let obj_ext = if cfg!(windows) { "obj" } else { "o" };
+    let main_obj = temp_artifact("stdlib-http-router-main", obj_ext);
+    compile_ir_to_object(&clang, &ll_path, &main_obj, 2, None, false).unwrap();
+    let exe_path = temp_artifact("stdlib-http-router", if cfg!(windows) { "exe" } else { "" });
+    let mut object_paths = vec![main_obj.clone()];
+    append_native_runtime_inputs(&clang, &mut object_paths, Some(&runtime_c), 2, None).unwrap();
+    link_native_binary_from_objects(&clang, &object_paths, &exe_path, None, None).unwrap();
+
+    let mut child = Command::new(&exe_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("http router fixture should spawn");
+
+    let stdout = child.stdout.take().expect("child stdout should be piped");
+    let mut reader = BufReader::new(stdout);
+    let mut port_line = String::new();
+    reader
+        .read_line(&mut port_line)
+        .expect("router server should print its port");
+    let port: u16 = match port_line.trim().parse() {
+        Ok(port) => port,
+        Err(_) => {
+            let status = child.wait().expect("router fixture should be waitable");
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            panic!(
+                "port line should be numeric, got {port_line:?}; exit: {status:?}; stderr:\n{stderr_text}"
+            );
+        }
+    };
+
+    fn request_once(port: u16, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port))
+            .expect("client should connect to router server");
+        stream
+            .write_all(request)
+            .expect("client request should be writable");
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .expect("client should read router response");
+        String::from_utf8_lossy(&response).into_owned()
+    }
+
+    let health = request_once(
+        port,
+        b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        health.starts_with("HTTP/1.1 200 OK") && health.ends_with("ok"),
+        "health route: {health}"
+    );
+
+    let echo = request_once(
+        port,
+        b"GET /echo HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        echo.starts_with("HTTP/1.1 200 OK") && echo.ends_with("echo"),
+        "echo route: {echo}"
+    );
+
+    let missing = request_once(
+        port,
+        b"GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        missing.starts_with("HTTP/1.1 404 Not Found") && missing.contains("not found"),
+        "unmatched route should 404: {missing}"
+    );
+
+    let failed = request_once(
+        port,
+        b"GET /fail HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        failed.starts_with("HTTP/1.1 500 Internal Server Error")
+            && failed.contains("handler error"),
+        "failing handler should 500: {failed}"
+    );
+
+    let status = child.wait().expect("router fixture should exit");
+    assert!(
+        status.success(),
+        "router fixture should exit cleanly, got {status:?}"
+    );
+
+    let _ = fs::remove_file(&ll_path);
+    let _ = fs::remove_file(&main_obj);
+    let _ = fs::remove_file(&exe_path);
+}
+
+/// Mixing pull and router modes on one listener must fail with a stable status.
+#[test]
+fn stdlib_http_router_rejects_pull_mode_mix() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "http-router-mode-mix",
+        r#"
+import std::net;
+import std::status;
+
+def main() -> i64 {
+    let bind_result = http_server_bind("127.0.0.1", 0);
+    if bind_result.is_ok == false {
+        if bind_result.error == STATUS_UNSUPPORTED() { 0 } else { 10 }
+    } else {
+        let server = bind_result.value;
+        let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
+        if claimed.is_ok == false {
+            server.close();
+            11
+        } else {
+            let pull = server.next_request(1);
+            let mix_rejected = if pull.is_ok { false; } else { pull.error == STATUS_INVALID_ARGUMENT(); };
+            let re_claim = server.claim_serve_mode(HTTP_SERVER_MODE_PULL());
+            let re_claim_rejected = if re_claim.is_ok { false; } else { re_claim.error == STATUS_INVALID_ARGUMENT(); };
+            server.close();
+            if mix_rejected and re_claim_rejected { 0 } else { 12 }
+        }
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "mode mix should reject with STATUS_INVALID_ARGUMENT; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn stdlib_io_runtime_reads_stdin_and_writes_streams() {
     let Some(output) = compile_and_run_stdlib_import_program_with_stdin(

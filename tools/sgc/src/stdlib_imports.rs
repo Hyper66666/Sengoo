@@ -94,7 +94,7 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
-        "http" | "net" => &["ffi", "status"],
+        "http" | "net" => &["ffi", "status", "string", "async"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],
