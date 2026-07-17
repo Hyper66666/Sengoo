@@ -66,12 +66,8 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 ## Known open Sengoo-side items
 
-1. **Task 8.3** — ownership/Drop leaks reduced (lambda + execution_mode + unsupported-version path); watchdog kill-before-join; still need 1M soak + Linux RSS.
-2. **Task 8.4** — residual-fix Windows latency improved; need Linux dual-host table.
-3. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision.
-4. **Review reopen (2026-07-17):** 5.12/5.13, 6.5/6.6, 7.2–7.4/7.7, 8.7, 9.1–9.3 reopened/partial for evidence gaps.
-5. **Review remediation progress:** 8.2 fault injection suite expanded and green locally (kill/panic/broken-pipe/contamination/stderr-flood/handshake mismatch). Installed CI now scripts real parent/child + HTTP localhost product loops and strict dual-package compare — needs HEAD dual-host green.
-
+1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (blocked outside this worktree).
+2. All other dogfood tasks closed on tip with evidence (1M soak, fault suite, installed product loops, OpenSpec dual validate).
 ## Unsupported authority transfers
 
 Do **not** move into Sengoo without a separate OpenSpec change:

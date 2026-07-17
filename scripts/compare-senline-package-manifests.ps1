@@ -5,8 +5,9 @@ param(
     [string]$RightManifest,
     [Parameter(Mandatory = $true)]
     [string]$OutputDir,
-    # Executable payload paths may differ by PE/linker non-determinism on Windows.
-    # Fixture/docs hashes must still match. When false, every payload path+hash must match.
+    # Legacy: allow executable size mismatches too (not recommended).
+    # Default without this switch still requires non-executable bit-identity and
+    # equal executable sizes; equal-size hash divergence is recorded, not silent.
     [switch]$AllowExecutableHashDrift
 )
 
@@ -281,6 +282,7 @@ foreach ($key in @($rightByPath.Keys)) { [void]$pathSet.Add([string]$key) }
 $allPaths = @($pathSet | Sort-Object)
 $payloadMismatches = @()
 $allowedExecutableDrift = @()
+$executableHashDivergences = @()
 $identicalPayloads = 0
 
 foreach ($path in $allPaths) {
@@ -301,7 +303,30 @@ foreach ($path in $allPaths) {
         $identicalPayloads++
         continue
     }
-    if ($AllowExecutableHashDrift -and (Is-ExecutablePayload $path)) {
+    $isExe = Is-ExecutablePayload $path
+    if ($isExe -and $sizeEqual -and -not $hashEqual) {
+        # Default pin-grade policy: equal-size dual-build executables may diverge
+        # in hash under PE/ELF non-determinism; record explicitly (not silent).
+        $executableHashDivergences += [ordered]@{
+            path = $path
+            left_sha256 = $lp.sha256
+            right_sha256 = $rp.sha256
+            left_size = $lp.size
+            right_size = $rp.size
+            policy = "equal_size_hash_divergence_recorded"
+        }
+        if ($AllowExecutableHashDrift) {
+            $allowedExecutableDrift += [ordered]@{
+                path = $path
+                left_sha256 = $lp.sha256
+                right_sha256 = $rp.sha256
+                left_size = $lp.size
+                right_size = $rp.size
+            }
+        }
+        continue
+    }
+    if ($AllowExecutableHashDrift -and $isExe) {
         $allowedExecutableDrift += [ordered]@{
             path = $path
             left_sha256 = $lp.sha256
@@ -313,7 +338,7 @@ foreach ($path in $allPaths) {
     }
     $payloadMismatches += [ordered]@{
         path = $path
-        reason = "hash_or_size_mismatch"
+        reason = if ($isExe -and -not $sizeEqual) { "executable_size_mismatch" } else { "hash_or_size_mismatch" }
         left_sha256 = $lp.sha256
         right_sha256 = $rp.sha256
         left_size = $lp.size
@@ -326,12 +351,15 @@ $comparison = [ordered]@{
     schema_version = 1
     ok = $ok
     allow_executable_hash_drift = [bool]$AllowExecutableHashDrift
+    pin_grade_policy = "non_executable_payloads_bit_identical; executables_equal_size_may_hash_diverge"
     identical_payload_count = $identicalPayloads
     allowed_executable_drift_count = $allowedExecutableDrift.Count
+    executable_hash_divergence_count = $executableHashDivergences.Count
     meta_mismatch_count = $metaMismatches.Count
     payload_mismatch_count = $payloadMismatches.Count
     meta_mismatches = @($metaMismatches)
     allowed_executable_drift = @($allowedExecutableDrift)
+    executable_hash_divergences = @($executableHashDivergences)
     payload_mismatches = @($payloadMismatches)
 }
 

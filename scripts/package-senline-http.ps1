@@ -37,6 +37,12 @@ if (Test-Path -LiteralPath $sgfmtCandidate) {
     $env:SGPM_SGFMT = $sgfmtCandidate
 }
 
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+$sourceRevision = (git -C $repoRoot rev-parse HEAD).Trim().ToLowerInvariant()
+if ($sourceRevision -cnotmatch '^[0-9a-f]{40}$') {
+    throw "git rev-parse HEAD did not return a 40-char lowercase revision"
+}
+
 Push-Location $HttpRoot
 try {
     & $SgpmPath --runtime-mode installed build --locked --release
@@ -81,13 +87,27 @@ $payloads = @(
     }
 )
 
+$arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 $manifest = [ordered]@{
     schema_version = 1
     package = "senline-http-dogfood"
     version = $Version
     built_with_sgc = $sgcVersion
+    source_revision = $sourceRevision
     source_tree = "examples/realworld/senline-http-dogfood"
+    target = [ordered]@{
+        os = if ($hostIsWindows) { "windows" } else { "linux" }
+        arch = $arch
+        abi = if ($hostIsWindows) { "msvc" } else { "gnu" }
+    }
     protocols = @("senline-worker-v1", "http-loopback-dogfood-v1")
+    license = [ordered]@{
+        note = "See repository LICENSE / package Sengoo.toml; SBOM inputs are payload hashes below."
+    }
+    provenance = [ordered]@{
+        built_with_installed_toolchain_only = $true
+        cargo_forbidden_at_package_time = $true
+    }
     payloads = $payloads
     notes = @(
         "Built with installed toolchain binaries only (sgpm + sgc).",

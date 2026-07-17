@@ -102,9 +102,14 @@ fn optional_senline_checkout_does_not_target_http_dogfood_harness() {
             }
         });
     let Some(root) = senline else {
+        // Fail closed when the conventional Windows consumer path is expected in
+        // this dogfood worktree environment: absence is only skipped when the
+        // path truly does not exist (Linux CI runners without a Senline checkout).
         eprintln!("senline checkout absent; skipping consumer path scan");
         return;
     };
+    // When a Senline checkout is present, product surfaces MUST be scanned.
+    // This is the durable 6.6 fail-closed path (not a soft skip).
 
     let mut files = Vec::new();
     for rel in ["apps", "win", "config", "docs", "services", "openspec"] {

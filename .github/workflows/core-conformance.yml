@@ -139,12 +139,17 @@ jobs:
       - name: Run 10k reviewed and 100k seeded release corpora
         run: cargo test --release --locked -p sgc --test senline_worker_differential -- --ignored --nocapture --test-threads=1
 
+      - name: Resource sampler smoke + latency percentiles (task 8.4)
+        run: cargo test --release --locked -p sgc --test senline_worker_resource resource_sampler_smoke_single_worker_with_latency_percentiles -- --nocapture
+
       - name: Upload platform transcript evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: senline-worker-differential-${{ runner.os }}-${{ runner.arch }}
-          path: target/senline-differential/*.json
+          path: |
+            target/senline-differential/*.json
+            target/senline-resource/*smoke*.summary.json
           if-no-files-found: warn
 
   senline-installed-packages:

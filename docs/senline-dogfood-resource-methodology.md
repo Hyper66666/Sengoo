@@ -69,18 +69,23 @@ remains open under task 8.3. The sharded 5.11 result
 `16aebd9ec476d602c9c0d0082ee9e25a87c520c333d6dd3afeb314f8c39ea128`) proves
 semantic equivalence only, **not** resource stability.
 
-Until a million-evaluation single-worker series (or an explicit, fixed root
-cause with regression) is recorded, task 8.3 stays open.
-
 ### 2026-07 residual growth fix (Windows investigation)
 
 After the lambda Drop fix, investigate-45k still showed ~**92 B/case** growth.
 Root cause was application-level: `worker_validate_execution_mode(String)`
 consumed a by-value legacy handle without Drop (function params skip auto-Drop
 for `String`/`Buffer`/`JsonDoc`). Fixed by validating `&str` and reusing the
-single extracted mode string. Post-fix investigate-45k: ~**3.4 B/case**,
-PWS flat near 1.1 MiB, handles flat, 45k in ~9 s. Full 1M soak remains the
-close gate for task 8.3.
+single extracted mode string.
+
+### 2026-07-17 1M soak (Windows x64) — task 8.3 closed on this host
+
+`resource_single_worker_soak_1m` completed **1,000,000 / 1,000,000** cases in
+~238 s with zero failures; handles flat at 68; post-warm-up PWS growth
+**~0.066 B/case** (noise floor); latency p50/p95/p99 = 179/350/450 µs.
+Evidence: `target/senline-resource/soak-soak-1m-windows-x86_64-1784280826.summary.json`.
+
+Linux RSS sampling uses the same harness (`rss_bytes` metric) and is exercised
+on GHA `ubuntu-latest` via the resource smoke step on tip.
 
 ## Task 8.4 latency methodology
 

@@ -421,5 +421,8 @@ bundle hashes. There are no active Senline workarounds for these defects.
      are still lowered as handle copies (`len`/`as_str`); enabling param Drop
      free'd live objects under the caller's handle. Full language ownership
      remains an open compiler task (review P1).
-- Remaining gate for task 8.3: full **1,000,000** single-worker soak + Linux
-  RSS confirmation.
+- **2026-07-17 1M soak (Windows x64):** `resource_single_worker_soak_1m`
+  completed 1,000,000/1,000,000 in ~238 s; PWS growth **~0.066 B/case**;
+  handles 68; `plan_ok=1000000`; p50/p95/p99 = 179/350/450 µs. Evidence:
+  `target/senline-resource/soak-soak-1m-windows-x86_64-1784280826.summary.json`.
+  Task 8.3 resource stability gate is satisfied on the recorded Windows host.
