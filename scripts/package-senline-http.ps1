@@ -45,6 +45,7 @@ if ($sourceRevision -cnotmatch '^[0-9a-f]{40}$') {
 
 Push-Location $HttpRoot
 try {
+    $env:SENGOO_DETERMINISTIC_LINK = "1"
     & $SgpmPath --runtime-mode installed build --locked --release
     if ($LASTEXITCODE -ne 0) {
         throw "sgpm --runtime-mode installed build --locked --release failed for senline-http-dogfood"
@@ -66,7 +67,10 @@ if (-not (Test-Path -LiteralPath $built)) {
         throw "missing built HTTP dogfood executable: $built"
     }
 }
-Copy-Item -LiteralPath $built -Destination (Join-Path $OutputDir $exeName) -Force
+$packagedExe = Join-Path $OutputDir $exeName
+Copy-Item -LiteralPath $built -Destination $packagedExe -Force
+. (Join-Path $PSScriptRoot "normalize-pin-executable.ps1")
+Normalize-PinExecutable -Path $packagedExe
 Copy-Item -LiteralPath (Join-Path $HttpRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
 Copy-Item -LiteralPath (Join-Path $HttpRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force
 Copy-Item -LiteralPath (Join-Path $HttpRoot "Sengoo.lock") -Destination (Join-Path $OutputDir "Sengoo.lock") -Force

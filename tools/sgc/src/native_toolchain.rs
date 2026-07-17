@@ -504,6 +504,41 @@ fn platform_linker_args(target: &NativeBuildTarget) -> Vec<&'static str> {
     }
 }
 
+/// Pin-grade dual-build identity: when set (or when value is not "0"), linkers
+/// omit build-ids / PE timestamps that otherwise make equal-size dual packages
+/// diverge under hash compare.
+fn deterministic_link_requested() -> bool {
+    match std::env::var("SENGOO_DETERMINISTIC_LINK") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            !(trimmed.is_empty() || trimmed == "0" || trimmed.eq_ignore_ascii_case("false"))
+        }
+        // Default on: package dual-builds and CI pin-grade compares require it.
+        // Opt out with SENGOO_DETERMINISTIC_LINK=0 for debug link experiments.
+        Err(_) => true,
+    }
+}
+
+fn append_deterministic_link_args(command: &mut Command, target: &NativeBuildTarget) {
+    if !deterministic_link_requested() {
+        return;
+    }
+    if target.is_linux_gnu() || target.triple.contains("linux") {
+        // Drop GNU build-id notes that embed non-content identity.
+        command.arg("-Wl,--build-id=none");
+        command.arg("-Wl,--hash-style=gnu");
+    } else if target.is_windows_msvc() {
+        // clang driver path (cross or lld): /Brepro zeros PE timestamps.
+        command.arg("-Wl,/Brepro");
+    }
+}
+
+fn sorted_object_paths(object_paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = object_paths.to_vec();
+    paths.sort();
+    paths
+}
+
 fn link_cross_target(
     clang_exe: &str,
     object_paths: &[PathBuf],
@@ -518,13 +553,15 @@ fn link_cross_target(
     if target.is_linux_gnu() {
         command.arg("-fuse-ld=lld");
     }
-    for object in object_paths {
+    let objects = sorted_object_paths(object_paths);
+    for object in &objects {
         command.arg(object);
     }
     append_native_library_link_args(&mut command, native_link_libraries, target, &search_paths);
     for arg in platform_linker_args(target) {
         command.arg(arg);
     }
+    append_deterministic_link_args(&mut command, target);
     command.arg("-o").arg(executable_path);
     let status = command
         .status()
@@ -658,9 +695,13 @@ fn run_windows_link_command(
     let search_paths = native_library_search_paths_from_env();
     let mut link_cmd = Command::new(link_exe);
     link_cmd.arg("/NOLOGO");
-    let links_async_runtime = object_paths
-        .iter()
-        .any(|path| is_async_runtime_staticlib(path));
+    if deterministic_link_requested() {
+        // Zero PE timestamps / non-deterministic COFF metadata for dual-build
+        // pin-grade package identity (MSVC link.exe /Brepro).
+        link_cmd.arg("/Brepro");
+    }
+    let objects = sorted_object_paths(object_paths);
+    let links_async_runtime = objects.iter().any(|path| is_async_runtime_staticlib(path));
     if links_async_runtime {
         // Keep compiler-generated async dispatch symbols that are only referenced
         // from the Rust async runtime static library.
@@ -670,7 +711,7 @@ fn run_windows_link_command(
         link_cmd.arg(format!("/LIBPATH:{}", lib_path.display()));
     }
     append_native_library_link_args(&mut link_cmd, native_link_libraries, &target, &search_paths);
-    for object in object_paths {
+    for object in &objects {
         link_cmd.arg(object);
     }
     for lib in [
@@ -951,13 +992,15 @@ fn run_link_command(
     if use_lld {
         clang_cmd.arg("-fuse-ld=lld");
     }
-    for object in object_paths {
+    let objects = sorted_object_paths(object_paths);
+    for object in &objects {
         clang_cmd.arg(object);
     }
     append_native_library_link_args(&mut clang_cmd, native_link_libraries, target, &search_paths);
     for arg in platform_linker_args(target) {
         clang_cmd.arg(arg);
     }
+    append_deterministic_link_args(&mut clang_cmd, target);
     clang_cmd.arg("-o").arg(executable_path);
     clang_cmd
         .status()

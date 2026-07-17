@@ -79,6 +79,8 @@ try {
         # sgpm resolves locked path deps and module maps; use installed tools only.
         # Force installed runtime mode so packaging never falls back to checkout
         # source-development runtime or cargo.
+        # Pin-grade dual builds require deterministic link metadata (/Brepro, no build-id).
+        $env:SENGOO_DETERMINISTIC_LINK = "1"
         & $SgpmPath --runtime-mode installed build --locked --release
         if ($LASTEXITCODE -ne 0) {
             throw "sgpm --runtime-mode installed build --locked --release failed for senline-domain-worker"
@@ -96,7 +98,12 @@ try {
     if (-not (Test-Path -LiteralPath $builtInner)) {
         throw "missing built worker executable: $builtInner"
     }
-    Copy-Item -LiteralPath $builtInner -Destination (Join-Path $OutputDir $exeNameInner) -Force
+    $packagedExe = Join-Path $OutputDir $exeNameInner
+    Copy-Item -LiteralPath $builtInner -Destination $packagedExe -Force
+    # Normalize residual non-content identity (PE timestamp / ELF build-id) so dual
+    # packages can share bit-identical payload hashes after independent rebuilds.
+    . (Join-Path $PSScriptRoot "normalize-pin-executable.ps1")
+    Normalize-PinExecutable -Path $packagedExe
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "fixtures") -Destination (Join-Path $OutputDir "fixtures") -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "README.md") -Destination (Join-Path $OutputDir "README.md") -Force
     Copy-Item -LiteralPath (Join-Path $WorkerRoot "Sengoo.toml") -Destination (Join-Path $OutputDir "Sengoo.toml") -Force

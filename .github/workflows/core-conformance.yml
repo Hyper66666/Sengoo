@@ -476,6 +476,13 @@ jobs:
             if (-not $httpProc.HasExited) { $httpProc.Kill() }
             throw "http dogfood did not return plan kind: $($respText.Substring(0, [Math]::Min(200, $respText.Length)))"
           }
+          # Worker/HTTP plan byte equivalence (LF-normalized): HTTP body must match
+          # the framed worker plan for the same eligible-accept fixture.
+          $httpPlanBytes = [Text.Encoding]::UTF8.GetBytes($respText)
+          if ((Bytes-Key $httpPlanBytes) -ne (Bytes-Key $gotPlan)) {
+            if (-not $httpProc.HasExited) { $httpProc.Kill() }
+            throw "worker/HTTP plan bytes diverge for eligible-accept"
+          }
           if (-not $httpProc.WaitForExit(15000)) {
             $httpProc.Kill()
             throw "http dogfood did not exit after one request"
@@ -529,7 +536,38 @@ jobs:
             $httpProc2.Kill()
             throw "http dogfood did not exit after malformed probe"
           }
-          Write-Host "packaged HTTP localhost product loop green (port=$port, malformed_json protocol error on 200)"
+          # Transport policy: wrong method is HTTP 400 (not a protocol-error envelope).
+          $httpPsi3 = New-Object System.Diagnostics.ProcessStartInfo
+          $httpPsi3.FileName = $httpExe
+          $httpPsi3.WorkingDirectory = (Join-Path $pkgRoot "http-a")
+          $httpPsi3.RedirectStandardOutput = $true
+          $httpPsi3.RedirectStandardError = $true
+          $httpPsi3.UseShellExecute = $false
+          $httpProc3 = [Diagnostics.Process]::Start($httpPsi3)
+          $readyTask3 = $httpProc3.StandardOutput.ReadLineAsync()
+          if (-not $readyTask3.Wait(20000)) {
+            if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+            throw "http dogfood READY timed out on method probe"
+          }
+          $ready3 = $readyTask3.Result
+          if (-not $ready3 -or $ready3 -notmatch '^READY 127\.0\.0\.1:(\d+)$') {
+            if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+            throw "http dogfood READY invalid on method probe: '$ready3'"
+          }
+          $port3 = [int]$Matches[1]
+          if ($curlExe) {
+            $methodCode = & $curlExe -sS -o (Join-Path $pkgRoot "http-probe-method-resp.txt") -w "%{http_code}" `
+              -X GET "http://127.0.0.1:$port3/v1/submit-envelope"
+            if ([int]$methodCode -ne 400) {
+              if (-not $httpProc3.HasExited) { $httpProc3.Kill() }
+              throw "wrong HTTP method must return 400 transport error, got $methodCode"
+            }
+          }
+          if (-not $httpProc3.WaitForExit(15000)) {
+            $httpProc3.Kill()
+            throw "http dogfood did not exit after method probe"
+          }
+          Write-Host "packaged HTTP localhost product loop green (port=$port, worker/HTTP plan equal, malformed_json@200, GET@400)"
 
           Write-Host "senline installed worker/HTTP dual package + product loops green on ${{ matrix.os }}"
 
