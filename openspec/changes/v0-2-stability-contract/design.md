@@ -32,6 +32,11 @@ current v0.2.x line. Removal requires a later minor/edition change and migration
 tests. Warnings are suppressible only through a documented mechanism, not by
 removing the diagnostic code.
 
+Source declarations encode the machine-readable contract as
+`#[deprecated(replacement = "...", removal = "...", note = "...")]`. The
+legacy single-message form remains accepted for compatibility but is not
+sufficient metadata for newly deprecated Stable surfaces.
+
 ### D4: Public input never produces an unclassified panic
 
 Compiler source, manifests, lockfiles, packages/archives, protocol JSON, runtime

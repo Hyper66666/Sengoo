@@ -104,6 +104,7 @@ const RUNTIME_SPLIT_C_SOURCES: &[&str] = &[
     "runtime_collections.c",
     "runtime_json.c",
     "runtime_process.c",
+    "runtime_stream.c",
     "runtime_string.c",
 ];
 const RUNTIME_SHARED_HEADER: &str = "runtime_shared.h";

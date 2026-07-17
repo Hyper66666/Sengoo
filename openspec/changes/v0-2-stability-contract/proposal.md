@@ -1,5 +1,9 @@
 ## Why
 
+This active copy is a post-archive corrective change. It implements the
+structured replacement/removal diagnostic contract that the 2026-07-16 archive
+documented but did not yet carry through compiler JSON and LSP output.
+
 Sengoo already versions its runtime/portable ABI, manifests, lockfiles,
 diagnostic/test schemas, releases, and compatibility fixtures. To become a
 dependable language, those mechanisms must form one user-facing contract:

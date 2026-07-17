@@ -268,6 +268,12 @@ pub(crate) fn render_compile_warning_json(warning: &CompileWarning) -> String {
         "code": warning.code(),
         "message": warning.to_string(),
     });
+    if let Some(replacement) = warning.replacement() {
+        payload["replacement"] = serde_json::Value::String(replacement.to_string());
+    }
+    if let Some(removal) = warning.removal() {
+        payload["removal"] = serde_json::Value::String(removal.to_string());
+    }
     if let Some((lo, hi)) = warning.span().filter(|(lo, hi)| hi > lo) {
         let location = CompilerErrorLocationJson {
             line: None,

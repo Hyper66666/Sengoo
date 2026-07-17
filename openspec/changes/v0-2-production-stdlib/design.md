@@ -62,11 +62,10 @@ exact source-file checksums used by the build.
   returns `STATUS_INVALID_UTF8` on malformed input; existing
   `string_from_buffer` remains a compatibility wrapper with the same strict
   behavior.
-- `to_lowercase_simple`, `to_uppercase_simple`, and `casefold` use Unicode
-  17.0.0 locale-independent data and return owned String values.
-- `char_is_alphabetic`, `char_is_whitespace`, and `char_is_numeric` use the same
-  pinned data version.
-- Normalization and grapheme/locale behavior are explicitly unavailable rather
+- Full Unicode 17 simple lower/upper, `casefold`, and scalar property tables are
+  **deferred** for a follow-up change (see `docs/unicode-v0-2.md`). v0.2 ships
+  the UTF-8 / `char` / `STATUS_INVALID_UTF8` foundation only.
+- Normalization and grapheme/locale behavior remain explicitly unavailable rather
   than approximated.
 
 `STATUS_INVALID_UTF8` is the stable positive category `20`. Runtime raw errors
@@ -76,7 +75,7 @@ parsing continues to use `STATUS_PARSE` (`10`). `status_name_copy` and
 
 ### D6: Bound generated tables and operations
 
-Unicode tables are generated deterministically from checked-in version metadata
-or pinned source data with provenance. Case expansion and output growth use
-checked lengths and managed Buffers; no operation allocates from untrusted size
-without a documented ceiling.
+Any follow-up Unicode table implementation must be generated deterministically
+from pinned source data with provenance. Until that change is accepted, v0.2
+does not ship or claim full property/casefold tables. Existing UTF-8 operations
+use managed Buffers and documented ceilings.

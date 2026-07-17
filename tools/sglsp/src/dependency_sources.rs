@@ -1,13 +1,21 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default)]
 struct LockPackageEntry {
+    id: Option<String>,
     source_kind: Option<String>,
     source_path: Option<String>,
     manifest: Option<String>,
     legacy_source: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct LockDependencyEntry {
+    from: Option<String>,
+    alias: Option<String>,
+    to: Option<String>,
 }
 
 fn find_lockfile_for_root(root: &Path) -> Option<PathBuf> {
@@ -55,6 +63,7 @@ fn parse_lockfile_packages(content: &str) -> Vec<LockPackageEntry> {
             let value = value.trim().trim_matches('"');
             let value = unescape_toml_string(value);
             match key {
+                "id" => current.id = Some(value),
                 "source" => current.legacy_source = Some(value),
                 "source.kind" => current.source_kind = Some(value),
                 "source.path" => current.source_path = Some(value),
@@ -67,6 +76,40 @@ fn parse_lockfile_packages(content: &str) -> Vec<LockPackageEntry> {
         packages.push(current);
     }
     packages
+}
+
+fn parse_lockfile_dependencies(content: &str) -> Vec<LockDependencyEntry> {
+    let mut dependencies = Vec::new();
+    let mut current = LockDependencyEntry::default();
+    let mut in_dependency = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("[[") {
+            if in_dependency {
+                dependencies.push(current);
+                current = LockDependencyEntry::default();
+            }
+            in_dependency = trimmed == "[[dependency]]";
+            continue;
+        }
+        if !in_dependency {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let value = unescape_toml_string(value.trim().trim_matches('"'));
+        match key.trim() {
+            "from" => current.from = Some(value),
+            "alias" => current.alias = Some(value),
+            "to" => current.to = Some(value),
+            _ => {}
+        }
+    }
+    if in_dependency {
+        dependencies.push(current);
+    }
+    dependencies
 }
 
 fn package_root_from_entry(lockfile_dir: &Path, entry: &LockPackageEntry) -> Option<PathBuf> {
@@ -130,6 +173,55 @@ pub(crate) fn dependency_roots_for_workspace_roots(roots: &[PathBuf]) -> Vec<Pat
         }
     }
     dependency_roots.into_iter().collect()
+}
+
+pub(crate) fn dependency_aliases_from_lockfiles(roots: &[PathBuf]) -> HashMap<PathBuf, String> {
+    let mut aliases = HashMap::new();
+    for root in roots {
+        let Some(lockfile_path) = find_lockfile_for_root(root) else {
+            continue;
+        };
+        let Ok(content) = fs::read_to_string(&lockfile_path) else {
+            continue;
+        };
+        let lockfile_dir = lockfile_path.parent().unwrap_or_else(|| Path::new("."));
+        let packages = parse_lockfile_packages(&content);
+        let root_manifest =
+            fs::canonicalize(root.join("Sengoo.toml")).unwrap_or_else(|_| root.join("Sengoo.toml"));
+        let root_id = packages.iter().find_map(|package| {
+            let manifest = package.manifest.as_ref()?;
+            let manifest = fs::canonicalize(lockfile_dir.join(manifest))
+                .unwrap_or_else(|_| lockfile_dir.join(manifest));
+            (manifest == root_manifest)
+                .then(|| package.id.clone())
+                .flatten()
+        });
+        let Some(root_id) = root_id else {
+            continue;
+        };
+        let package_roots = packages
+            .iter()
+            .filter_map(|package| {
+                let id = package.id.as_ref()?;
+                let manifest = package.manifest.as_ref()?;
+                let manifest = fs::canonicalize(lockfile_dir.join(manifest))
+                    .unwrap_or_else(|_| lockfile_dir.join(manifest));
+                Some((id.as_str(), manifest.parent()?.to_path_buf()))
+            })
+            .collect::<HashMap<_, _>>();
+        for dependency in parse_lockfile_dependencies(&content) {
+            if dependency.from.as_deref() != Some(root_id.as_str()) {
+                continue;
+            }
+            let (Some(alias), Some(to)) = (dependency.alias, dependency.to) else {
+                continue;
+            };
+            if let Some(package_root) = package_roots.get(to.as_str()) {
+                aliases.insert(package_root.clone(), alias);
+            }
+        }
+    }
+    aliases
 }
 
 #[cfg(test)]

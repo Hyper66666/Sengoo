@@ -362,7 +362,7 @@ static long long sengoo_owned_string_from_bytes(const char* bytes, size_t len) {
         return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
     }
     if (!sengoo_bytes_are_utf8((const unsigned char*)bytes, len)) {
-        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+        return -(long long)SENGOO_STATUS_INVALID_UTF8;
     }
     long long handle = sengoo_owned_string_new_handle();
     if (handle <= 0) {
@@ -444,7 +444,7 @@ long long sengoo_string_push_str_status(long long handle, long long value_ptr) {
         return SENGOO_STATUS_OK;
     }
     if (!sengoo_bytes_are_utf8((const unsigned char*)value, add_len)) {
-        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+        return -(long long)SENGOO_STATUS_INVALID_UTF8;
     }
     size_t new_len = owned->len + add_len;
     if (!sengoo_owned_string_reserve(owned, sengoo_string_capacity_for_len(new_len))) {
@@ -484,7 +484,7 @@ static long long sengoo_owned_string_append_bytes(
         return SENGOO_STATUS_OK;
     }
     if (!sengoo_bytes_are_utf8((const unsigned char*)bytes, add_len)) {
-        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+        return -(long long)SENGOO_STATUS_INVALID_UTF8;
     }
     size_t new_len = owned->len + add_len;
     if (!sengoo_owned_string_reserve(owned, sengoo_string_capacity_for_len(new_len))) {
@@ -869,4 +869,69 @@ long long sengoo_string_compare(long long lhs_handle, long long rhs_handle) {
         return 1;
     }
     return 0;
+}
+
+/* Unicode 17.0.0 baseline: UTF-8 validation + scalar iteration only.
+ * Full property tables / casefold remain follow-up; provenance pin is the version string. */
+static const char SENGOO_UNICODE_VERSION[] = "17.0.0";
+static const char SENGOO_UNICODE_PROVENANCE[] =
+    "Unicode 17.0.0; UTF-8 well-formedness + scalar decode only (no property tables)";
+
+long long sengoo_unicode_version_copy(long long out_buffer, long long out_capacity) {
+    if (out_capacity < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    char* out = (char*)(intptr_t)out_buffer;
+    size_t need = sizeof(SENGOO_UNICODE_VERSION) - 1;
+    if (!out || (size_t)out_capacity < need) {
+        return -(long long)SENGOO_STATUS_BUFFER_TOO_SMALL;
+    }
+    memcpy(out, SENGOO_UNICODE_VERSION, need);
+    return (long long)need;
+}
+
+long long sengoo_unicode_provenance_copy(long long out_buffer, long long out_capacity) {
+    if (out_capacity < 0) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    char* out = (char*)(intptr_t)out_buffer;
+    size_t need = sizeof(SENGOO_UNICODE_PROVENANCE) - 1;
+    if (!out || (size_t)out_capacity < need) {
+        return -(long long)SENGOO_STATUS_BUFFER_TOO_SMALL;
+    }
+    memcpy(out, SENGOO_UNICODE_PROVENANCE, need);
+    return (long long)need;
+}
+
+long long sengoo_string_char_count(long long handle) {
+    SengooOwnedString* owned = sengoo_string_resolve(handle);
+    if (!owned) {
+        return -(long long)SENGOO_STATUS_INVALID_HANDLE;
+    }
+    size_t offset = 0;
+    long long count = 0;
+    long long codepoint = 0;
+    while (offset < owned->len) {
+        if (!sengoo_utf8_decode_next(
+                (const unsigned char*)owned->data,
+                owned->len,
+                &offset,
+                &codepoint)) {
+            return -(long long)SENGOO_STATUS_INVALID_UTF8;
+        }
+        count += 1;
+    }
+    return count;
+}
+
+long long sengoo_char_codepoint(int codepoint) {
+    if (codepoint < 0 || codepoint > 0x10FFFF
+        || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        return -(long long)SENGOO_STATUS_INVALID_ARGUMENT;
+    }
+    return (long long)(unsigned int)codepoint;
+}
+
+long long sengoo_string_from_utf8(long long buffer_handle, long long used_len) {
+    return sengoo_string_from_buffer(buffer_handle, used_len);
 }

@@ -97,7 +97,7 @@ def main() -> i64 {
     let x = 1;
     let a = &x;
     let b = &x;
-    0
+    *a
 }
 
 "#;

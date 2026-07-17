@@ -13,6 +13,13 @@ extern "C" {
     fn sengoo_string_is_empty(handle: i64) -> i64;
     fn sengoo_string_from_str_copy(value_ptr: i64) -> i64;
     fn sengoo_string_from_buffer(buffer_handle: i64, used_len: i64) -> i64;
+    fn sengoo_string_from_utf8(buffer_handle: i64, used_len: i64) -> i64;
+    fn sengoo_string_char_count(handle: i64) -> i64;
+    fn sengoo_char_codepoint(codepoint: char) -> i64;
+    fn sengoo_unicode_version_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_unicode_provenance_copy(buffer: i64, capacity: i64) -> i64;
+    fn sengoo_ffi_buffer_ptr(buffer_handle: i64) -> i64;
+    fn sengoo_ffi_buffer_len(buffer_handle: i64) -> i64;
     fn sengoo_string_clone_status(handle: i64) -> i64;
     fn sengoo_string_push_str_status(handle: i64, value_ptr: i64) -> i64;
     fn sengoo_string_concat_str_status(handle: i64, value_ptr: i64) -> i64;
@@ -281,6 +288,36 @@ def string_from_buffer(buffer: Buffer, used_len: i64) -> Result<String, i64> {
     }
 }
 
+/// Strict UTF-8 constructor. Malformed input maps to STATUS_INVALID_UTF8 (20).
+/// `string_from_buffer` remains a compatibility wrapper with the same strict behavior.
+def string_from_utf8(buffer: Buffer, used_len: i64) -> Result<String, i64> {
+    let raw = sengoo_string_from_utf8(buffer.handle, used_len);
+    if raw >= 0 {
+        string_result_ok(String { handle: raw })
+    } else {
+        string_result_err(0 - raw)
+    }
+}
+
+def unicode_version_copy(buffer: Buffer) -> Result<i64, i64> {
+    string_copy_result(sengoo_unicode_version_copy(
+        sengoo_ffi_buffer_ptr(buffer.handle),
+        sengoo_ffi_buffer_len(buffer.handle),
+    ))
+}
+
+def unicode_provenance_copy(buffer: Buffer) -> Result<i64, i64> {
+    string_copy_result(sengoo_unicode_provenance_copy(
+        sengoo_ffi_buffer_ptr(buffer.handle),
+        sengoo_ffi_buffer_len(buffer.handle),
+    ))
+}
+
+/// Unicode scalar value as u32-width integer (i64 payload). Surrogates rejected.
+def char_codepoint(value: char) -> Result<i64, i64> {
+    string_copy_result(sengoo_char_codepoint(value))
+}
+
 impl String {
     def len(self) -> i64 {
         sengoo_string_len(self.handle)
@@ -349,6 +386,11 @@ impl String {
 
     def chars(self) -> StringCharsIter {
         StringCharsIter { handle: sengoo_string_chars_iter_new(self.handle) }
+    }
+
+    /// Unicode scalar count (not grapheme count). Invalid UTF-8 returns Err.
+    def char_count(self) -> Result<i64, i64> {
+        string_copy_result(sengoo_string_char_count(self.handle))
     }
 
     def split(self, delimiter: &str) -> StringSplitIter {

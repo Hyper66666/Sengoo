@@ -41,7 +41,7 @@ pub(super) fn is_identifier_byte(b: u8) -> bool {
 }
 
 pub(super) fn byte_to_char_index(s: &str, byte_idx: usize) -> u32 {
-    s[..byte_idx].chars().count() as u32
+    s[..byte_idx].encode_utf16().count() as u32
 }
 
 pub(super) fn line_char_len(line: &str) -> u32 {

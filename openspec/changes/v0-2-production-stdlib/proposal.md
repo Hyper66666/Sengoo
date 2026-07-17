@@ -1,5 +1,9 @@
 ## Why
 
+This active copy is a post-archive corrective change. It reopens over-claimed
+stream ownership and Unicode wording from the 2026-07-16 archive; archive tasks
+remain open until this remediation passes the current gates.
+
 Sengoo's 35-module stdlib already supports files, processes, networking, JSON,
 config, compression, regex, databases, and concurrency. The remaining native
 default-path gaps are composability and text correctness: file/stdin/TCP reads
@@ -14,9 +18,9 @@ TLS server proof.
 - Add source-level synchronous `Reader` and `Writer` traits with pinned Buffer,
   partial-I/O, EOF, flush, timeout, cancellation, and ownership semantics.
 - Adapt supported file, stdio/fd, and TCP types without removing existing APIs.
-- Pin the v0.2 Unicode data version to 17.0.0 and complete UTF-8 validation,
-  `char` iteration, scalar counts/properties, simple case mapping, and default
-  case folding.
+- Pin the v0.2 Unicode provenance to 17.0.0 and complete strict UTF-8 validation,
+  `char` iteration, and scalar counts while explicitly deferring table-backed
+  properties, simple case mapping, and default case folding.
 - Add realworld fixtures that compose these public APIs under resource bounds.
 
 ## Capabilities

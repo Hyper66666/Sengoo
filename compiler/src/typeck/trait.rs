@@ -416,10 +416,13 @@ impl ImplRegistry {
 
     /// Return all type keys that implement the named trait.
     pub fn trait_impl_type_keys(&self, trait_name: &str) -> Vec<String> {
-        self.trait_impls
+        let mut keys: Vec<String> = self
+            .trait_impls
             .get(trait_name)
             .map(|type_map| type_map.keys().cloned().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        keys.sort();
+        keys
     }
 
     /// 获取类型的所有固有 impl

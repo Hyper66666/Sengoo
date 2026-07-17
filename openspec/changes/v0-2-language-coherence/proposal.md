@@ -1,5 +1,9 @@
 ## Why
 
+This active copy is a post-archive corrective change. It reopens borrow
+liveness and associated-call ambiguity defects found after the 2026-07-16
+archive; it is not itself archived yet.
+
 Sengoo already supports ownership, automatic Drop, generics, traits, associated
 types, match, arrays, and structured control flow, but the authoritative
 reference still marks key interactions as Subset or Experimental. These gaps

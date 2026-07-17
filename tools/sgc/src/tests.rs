@@ -543,6 +543,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
         "runtime_collections.c",
         "runtime_json.c",
         "runtime_process.c",
+        "runtime_stream.c",
         "runtime_shared.h",
     ] {
         fs::write(root.join(file), b"/* test runtime bundle input */\n").unwrap();
@@ -564,6 +565,7 @@ fn runtime_source_bundle_discovers_anchor_and_existing_split_sources() {
             "runtime_collections.c",
             "runtime_json.c",
             "runtime_process.c",
+            "runtime_stream.c",
         ]
     );
 
@@ -1180,13 +1182,22 @@ fn render_compile_error_json_with_location_serializes_structured_fields() {
 
 #[test]
 fn render_compile_warning_json_with_span_serializes_structured_location() {
-    let warning = CompileWarning::deprecated_use("fn", "old_main", None, Some((42, 50)));
+    let warning = CompileWarning::deprecated_use_with_metadata(
+        "fn",
+        "old_main",
+        Some("use the fallible entry point".to_string()),
+        Some("new_main".to_string()),
+        Some("v0.3.0".to_string()),
+        Some((42, 50)),
+    );
     let json = super::render_compile_warning_json(&warning);
     let value: Value = serde_json::from_str(&json).expect("warning json should be valid");
 
     assert_eq!(value["kind"], "compile_warning");
     assert_eq!(value["severity"], "warning");
     assert_eq!(value["code"], "attributes::deprecated_use");
+    assert_eq!(value["replacement"], "new_main");
+    assert_eq!(value["removal"], "v0.3.0");
     assert_eq!(value["location"]["span"]["lo"], 42);
     assert_eq!(value["location"]["span"]["hi"], 50);
 }
@@ -6913,6 +6924,124 @@ def main() -> i64 {
         42
     } else {
         1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_m3_invalid_utf8_status_and_string_from_utf8() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-invalid-utf8",
+        r#"
+import std::ffi;
+import std::status;
+import std::string;
+
+def main() -> i64 {
+    let ok_status = STATUS_OK() == 0;
+    let canceled = STATUS_CANCELED() == 19;
+    let invalid_utf8 = STATUS_INVALID_UTF8() == 20;
+    let name_buf = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let name_len = status_name_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+    let msg_len = status_message_copy(STATUS_INVALID_UTF8(), name_buf).unwrap_or(-1);
+
+    let good = ffi_buffer_from_bytes("hi").unwrap_or(Buffer { handle: 0 });
+    let good_s = string_from_utf8(good, 2);
+    let good_ok = good_s.is_ok;
+    let count = if good_ok { good_s.value.char_count().unwrap_or(-1) } else { -1 };
+    let cp = char_codepoint('A').unwrap_or(-1);
+
+    let bad = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let pushed = bad.push_u8(255).unwrap_or(-1);
+    let bad_s = string_from_utf8(bad, 1);
+    let bad_err = if bad_s.is_ok { -1 } else { bad_s.error };
+    let mapped = status_from_raw_ffi(0 - STATUS_INVALID_UTF8());
+
+    let version_buf = ffi_buffer_new(16).unwrap_or(Buffer { handle: 0 });
+    let version_len = unicode_version_copy(version_buf).unwrap_or(-1);
+
+    good.free();
+    bad.free();
+    name_buf.free();
+    version_buf.free();
+
+    if ok_status and canceled and invalid_utf8 and name_len > 0 and msg_len > 0
+        and good_ok and count == 2 and cp == 65 and pushed == 1 and bad_err == 20
+        and mapped == 20 and version_len >= 5
+    {
+        42
+    } else {
+        1
+    }
+}
+"#,
+    ) else {
+        return;
+    };
+
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "status: {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn stdlib_m3_stream_cursor_read_write_copy() {
+    let Some(output) = compile_and_run_stdlib_import_program_with_native_runtime(
+        "m3-stream-cursor",
+        r#"
+import std::ffi;
+import std::stream;
+import std::status;
+
+def exercise_streams() -> i64 {
+    let mut reader = cursor_from_bytes("hello-stream").unwrap_or(Cursor { handle: 0 });
+    let mut out = ffi_buffer_new(64).unwrap_or(Buffer { handle: 0 });
+    let total = read_to_end(&mut reader, &mut out).unwrap_or(-1);
+
+    let mut writer = cursor_with_capacity(64).unwrap_or(Cursor { handle: 0 });
+    let wrote = write_all(&mut writer, &out, total).unwrap_or(-1);
+
+    let mut reader2 = cursor_from_bytes("abc").unwrap_or(Cursor { handle: 0 });
+    let mut writer2 = cursor_with_capacity(16).unwrap_or(Cursor { handle: 0 });
+    let mut scratch = ffi_buffer_new(4).unwrap_or(Buffer { handle: 0 });
+    let copied = copy_stream(&mut reader2, &mut writer2, &mut scratch).unwrap_or(-1);
+
+    let mut zero_cap = ffi_buffer_new(0).unwrap_or(Buffer { handle: 0 });
+    let mut leftover = cursor_from_bytes("z").unwrap_or(Cursor { handle: 0 });
+    let zero_read = cursor_read_into(&mut leftover, &mut zero_cap);
+    let zero_is_buffer = if zero_read.is_ok { false } else { zero_read.error == STATUS_BUFFER_TOO_SMALL() };
+
+    if total == 12 and wrote == 12 and copied == 3 and zero_is_buffer {
+        42
+    } else {
+        1
+    }
+}
+
+def main() -> i64 {
+    let result = exercise_streams();
+    if result == 42 && sengoo_stream_cursor_live_handle_count() == 0 {
+        42
+    } else {
+        2
     }
 }
 "#,

@@ -20,6 +20,7 @@ sources=(
   runtime_collections.c
   runtime_json.c
   runtime_process.c
+  runtime_stream.c
   runtime_string.c
 )
 objects=()

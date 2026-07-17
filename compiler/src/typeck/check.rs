@@ -296,10 +296,12 @@ impl TypeChecker {
             return;
         };
         self.warnings
-            .push(crate::error::CompileWarning::deprecated_use(
+            .push(crate::error::CompileWarning::deprecated_use_with_metadata(
                 info.kind,
                 info.name,
                 info.message,
+                info.replacement,
+                info.removal,
                 Some((span.lo, span.hi)),
             ));
     }
