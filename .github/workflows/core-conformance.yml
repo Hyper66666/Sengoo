@@ -313,30 +313,50 @@ jobs:
 
           # Fresh package trees between A/B so dual-build does not silently reuse
           # a single package output directory. Force worker rebuild between packages
-          # by clearing package-local target after each packaging script run.
-          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-a")
-          $workerTarget = "examples/realworld/senline-domain-worker/target"
-          if (Test-Path -LiteralPath $workerTarget) {
-            Remove-Item -LiteralPath $workerTarget -Recurse -Force -ErrorAction SilentlyContinue
+          # by clearing package-local target and frontend build caches.
+          function Clear-SenlinePackageBuildCaches([string]$PackageRoot) {
+            foreach ($rel in @("target", "src/build", "tests/build")) {
+              $p = Join-Path $PackageRoot $rel
+              if (Test-Path -LiteralPath $p) {
+                Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+            Get-ChildItem -LiteralPath $PackageRoot -Recurse -Directory -Filter build -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '[\\/]packages[\\/]' } |
+              ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+              }
           }
+
+          ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-a")
+          Clear-SenlinePackageBuildCaches "examples/realworld/senline-domain-worker"
           ./scripts/package-senline-worker.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "worker-b")
-          # Require full payload identity (including executable). Pin-grade dual
-          # builds must not rely on AllowExecutableHashDrift.
-          ./scripts/compare-senline-package-manifests.ps1 `
-            -LeftManifest (Join-Path $pkgRoot "worker-a/worker-manifest.json") `
-            -RightManifest (Join-Path $pkgRoot "worker-b/worker-manifest.json") `
-            -OutputDir (Join-Path $pkgRoot "worker-compare")
+          # Fail-closed pin-grade compare (payload + dependency identities). Record
+          # result but continue product probes so functional gates still run when
+          # PE/ELF dual-build identity remains open under task 8.7.
+          $compareFailures = @()
+          try {
+            ./scripts/compare-senline-package-manifests.ps1 `
+              -LeftManifest (Join-Path $pkgRoot "worker-a/worker-manifest.json") `
+              -RightManifest (Join-Path $pkgRoot "worker-b/worker-manifest.json") `
+              -OutputDir (Join-Path $pkgRoot "worker-compare")
+          } catch {
+            $compareFailures += "worker dual-package compare failed: $($_.Exception.Message)"
+            Write-Host "::warning::$($compareFailures[-1])"
+          }
 
           ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-a")
-          $httpTarget = "examples/realworld/senline-http-dogfood/target"
-          if (Test-Path -LiteralPath $httpTarget) {
-            Remove-Item -LiteralPath $httpTarget -Recurse -Force -ErrorAction SilentlyContinue
-          }
+          Clear-SenlinePackageBuildCaches "examples/realworld/senline-http-dogfood"
           ./scripts/package-senline-http.ps1 -SgcPath $sgc -SgpmPath $sgpm -OutputDir (Join-Path $pkgRoot "http-b")
-          ./scripts/compare-senline-package-manifests.ps1 `
-            -LeftManifest (Join-Path $pkgRoot "http-a/http-manifest.json") `
-            -RightManifest (Join-Path $pkgRoot "http-b/http-manifest.json") `
-            -OutputDir (Join-Path $pkgRoot "http-compare")
+          try {
+            ./scripts/compare-senline-package-manifests.ps1 `
+              -LeftManifest (Join-Path $pkgRoot "http-a/http-manifest.json") `
+              -RightManifest (Join-Path $pkgRoot "http-b/http-manifest.json") `
+              -OutputDir (Join-Path $pkgRoot "http-compare")
+          } catch {
+            $compareFailures += "http dual-package compare failed: $($_.Exception.Message)"
+            Write-Host "::warning::$($compareFailures[-1])"
+          }
 
           # Real parent/child framed worker product loop against packaged binary.
           $workerExeName = if ($suffix -eq ".exe") { "senline_domain_worker.exe" } else { "senline_domain_worker" }
@@ -569,6 +589,9 @@ jobs:
           }
           Write-Host "packaged HTTP localhost product loop green (port=$port, worker/HTTP plan equal, malformed_json@200, GET@400)"
 
+          if ($compareFailures.Count -gt 0) {
+            throw ("pin-grade dual-package compare failed (task 8.7 open until bit-identical): " + ($compareFailures -join "; "))
+          }
           Write-Host "senline installed worker/HTTP dual package + product loops green on ${{ matrix.os }}"
 
       - name: Upload package compare evidence

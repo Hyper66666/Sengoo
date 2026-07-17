@@ -534,9 +534,30 @@ fn append_deterministic_link_args(command: &mut Command, target: &NativeBuildTar
 }
 
 fn sorted_object_paths(object_paths: &[PathBuf]) -> Vec<PathBuf> {
-    let mut paths = object_paths.to_vec();
-    paths.sort();
-    paths
+    // Sort only relocatable objects. Static archives (.a/.lib) must stay after
+    // the objects that reference them (Unix linkers resolve archive symbols in
+    // left-to-right order). Reordering archives to the front caused
+    // `undefined reference to sengoo_net_last_error` on Linux core-language CI.
+    let mut objects = Vec::new();
+    let mut archives = Vec::new();
+    for path in object_paths {
+        let is_archive = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("a")
+                    || ext.eq_ignore_ascii_case("lib")
+                    || ext.eq_ignore_ascii_case("rlib")
+            });
+        if is_archive {
+            archives.push(path.clone());
+        } else {
+            objects.push(path.clone());
+        }
+    }
+    objects.sort();
+    objects.extend(archives);
+    objects
 }
 
 fn link_cross_target(

@@ -93,18 +93,29 @@ consumed a by-value legacy handle without Drop (function params skip auto-Drop
 for `String`/`Buffer`/`JsonDoc`). Fixed by validating `&str` and reusing the
 single extracted mode string.
 
-### 2026-07-17 1M soak (Windows x64) — case count proven; methodology v2 still open
+### 2026-07-17 1M soak (Windows x64) — schema v2 oracle gates green
 
-`resource_single_worker_soak_1m` completed **1,000,000 / 1,000,000** cases in
-~238 s with zero failures; handles flat at 68; post-warm-up endpoint growth
-**~0.066 B/case** (noise floor); latency p50/p95/p99 = 179/350/450 µs.
-Evidence: `target/senline-resource/soak-soak-1m-windows-x86_64-1784280826.summary.json`
-(schema v1-era summary: endpoint growth only, no OLS/JSONL/10k-window fields).
+`resource_single_worker_soak_1m` on tip-era sampler completed
+**1,000,000 / 1,000,000** cases (~246 s) with zero failures under schema v2:
 
-**Task 8.3 remains partial** until a 1M re-soak is recorded under sampler
-schema v2 (OLS + 10k-window + handle plateau + JSONL + correct `private_bytes`
-metric name). Linux RSS sampling uses the same harness (`rss_bytes` metric)
-and is exercised on GHA `ubuntu-latest` via the resource smoke step.
+| Gate | Result |
+| --- | --- |
+| cases_completed | 1_000_000 |
+| metric | `private_bytes` (PrivateUsage) |
+| OLS regression slope | ≈ −0.040 B/case |
+| endpoint growth | ≈ 0.057 B/case |
+| max 10k-window delta | 163_840 bytes |
+| handles within plateau | true (68) |
+| process_count | 1 |
+| oracle plan match | every response classified |
+| JSONL series | full sample series written |
+
+Evidence (local, gitignored):
+`target/senline-resource/soak-soak-1m-windows-x86_64-1784302594.summary.json`
+(+ matching `.jsonl`). Latency p50/p95/p99 ≈ 173/326/547 µs.
+
+Linux RSS sampling uses the same harness (`rss_bytes` metric) and is exercised
+on GHA `ubuntu-latest` via the resource smoke step.
 
 ## Task 8.4 latency methodology
 

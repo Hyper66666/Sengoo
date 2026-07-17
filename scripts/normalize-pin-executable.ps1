@@ -48,25 +48,24 @@ function Normalize-PinExecutable {
         return
     }
 
-    # ELF: \x7fELF
+    # ELF: \x7fELF — strip non-content note/comment sections and optional
+    # full symbol strip so dual independent release builds hash-match.
     if ($bytes[0] -eq 0x7F -and $bytes[1] -eq 0x45 -and $bytes[2] -eq 0x4C -and $bytes[3] -eq 0x46) {
-        $candidates = @(
-            "llvm-objcopy",
-            "llvm-objcopy-19",
-            "llvm-objcopy-18",
-            "objcopy"
-        )
         $objcopy = $null
-        foreach ($name in $candidates) {
+        foreach ($name in @("llvm-objcopy", "llvm-objcopy-19", "llvm-objcopy-18", "objcopy")) {
             $cmd = Get-Command $name -ErrorAction SilentlyContinue
-            if ($cmd) {
-                $objcopy = $cmd.Source
-                break
-            }
+            if ($cmd) { $objcopy = $cmd.Source; break }
         }
         if ($objcopy) {
-            # Best-effort: leave binary intact if section is missing.
             & $objcopy --remove-section=.note.gnu.build-id --remove-section=.comment $Path 2>$null
+        }
+        $strip = $null
+        foreach ($name in @("llvm-strip", "llvm-strip-19", "llvm-strip-18", "strip")) {
+            $cmd = Get-Command $name -ErrorAction SilentlyContinue
+            if ($cmd) { $strip = $cmd.Source; break }
+        }
+        if ($strip) {
+            & $strip -s $Path 2>$null
         }
     }
 }
