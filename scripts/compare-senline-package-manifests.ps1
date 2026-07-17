@@ -14,15 +14,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Required on every pin-grade package manifest.
+# Required on every pin-grade package manifest (design: payload hashes, ABI,
+# dependency identities, and provenance must match across dual builds).
 $ManifestRequiredFields = @(
     "schema_version", "package", "version", "built_with_sgc", "source_tree",
-    "protocols", "payloads", "notes"
+    "source_revision", "target", "protocols",
+    "runtime_dependencies", "build_tools", "license", "provenance",
+    "payloads", "notes"
 )
-# Optional pin-grade extensions (worker packaging now emits these).
+# Optional only when a package family does not emit the field (HTTP packages
+# currently omit build_manifest_id; worker packages emit it).
 $ManifestOptionalFields = @(
-    "source_revision", "build_manifest_id", "target", "runtime_dependencies",
-    "build_tools", "license", "provenance"
+    "build_manifest_id"
 )
 $PayloadFields = @("path", "sha256", "size")
 $ExecutableNamePatterns = @(
@@ -170,6 +173,26 @@ function Normalize-Payloads($Value, [string]$Label) {
     return @($normalized | Sort-Object -Property path)
 }
 
+function Normalize-DependencyList($Value, [string]$Label) {
+    $items = @(Require-Array $Value $Label)
+    $normalized = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $items.Count; $i++) {
+        $item = $items[$i]
+        if ($null -eq $item -or $null -eq $item.PSObject) {
+            throw "$Label[$i] must be an object"
+        }
+        $name = Require-String $item.name "$Label[$i].name"
+        $entry = [ordered]@{ name = $name }
+        foreach ($prop in @($item.PSObject.Properties.Name | Sort-Object)) {
+            if ($prop -eq "name") { continue }
+            $entry[$prop] = $item.$prop
+        }
+        $normalized.Add([pscustomobject]$entry) | Out-Null
+    }
+    # Sort by name so dual-build ordering cannot mask identity changes.
+    return @($normalized | Sort-Object -Property name)
+}
+
 function Normalize-Manifest($Manifest, [string]$Label) {
     Assert-ManifestFields $Manifest $Label
     $schemaVersion = Require-Integer $Manifest.schema_version "$Label.schema_version" 0
@@ -194,12 +217,25 @@ function Normalize-Manifest($Manifest, [string]$Label) {
         version = Require-String $Manifest.version "$Label.version"
         built_with_sgc = Require-String $Manifest.built_with_sgc "$Label.built_with_sgc"
         source_tree = Require-String $Manifest.source_tree "$Label.source_tree"
+        source_revision = Require-String $Manifest.source_revision "$Label.source_revision"
+        target = $Manifest.target
         protocols = @($protocols)
+        runtime_dependencies = @(Normalize-DependencyList $Manifest.runtime_dependencies "$Label.runtime_dependencies")
+        build_tools = @(Normalize-DependencyList $Manifest.build_tools "$Label.build_tools")
+        license = $Manifest.license
+        provenance = $Manifest.provenance
         payloads = @(Normalize-Payloads $Manifest.payloads "$Label.payloads")
         notes = @($notes)
     }
-    # Carry optional pin-grade fields into the comparison object when present so
-    # dual builds must agree on source_revision / build_manifest_id / target.
+    if ($null -eq $normalized.target -or $null -eq $normalized.target.PSObject) {
+        throw "$Label.target must be an object"
+    }
+    if ($null -eq $normalized.license -or $null -eq $normalized.license.PSObject) {
+        throw "$Label.license must be an object"
+    }
+    if ($null -eq $normalized.provenance -or $null -eq $normalized.provenance.PSObject) {
+        throw "$Label.provenance must be an object"
+    }
     foreach ($optional in $ManifestOptionalFields) {
         if ($null -ne $Manifest.PSObject.Properties[$optional]) {
             $normalized[$optional] = $Manifest.$optional
@@ -217,49 +253,43 @@ function Canonical-Json($Object) {
     return ($Object | ConvertTo-Json -Depth 12 -Compress)
 }
 
+function Compare-MetaField($Left, $Right, [string]$Field, [System.Collections.ArrayList]$Mismatches) {
+    $leftHas = $Left.Contains($Field)
+    $rightHas = $Right.Contains($Field)
+    if (-not $leftHas -and -not $rightHas) { return }
+    $leftVal = if ($leftHas) { Canonical-Json $Left[$Field] } else { "<missing>" }
+    $rightVal = if ($rightHas) { Canonical-Json $Right[$Field] } else { "<missing>" }
+    if ($leftVal -ne $rightVal) {
+        [void]$Mismatches.Add([ordered]@{
+            field = $Field
+            left = if ($leftHas) { $Left[$Field] } else { $null }
+            right = if ($rightHas) { $Right[$Field] } else { $null }
+        })
+    }
+}
+
 $left = Normalize-Manifest (Read-JsonObject $LeftManifest "left") "left"
 $right = Normalize-Manifest (Read-JsonObject $RightManifest "right") "right"
 
+# Scalar/object/array meta fields that must match for pin-grade dual builds.
 $metaFields = @(
     "schema_version", "package", "version", "built_with_sgc", "source_tree",
-    "source_revision", "build_manifest_id"
+    "source_revision", "build_manifest_id", "target",
+    "runtime_dependencies", "build_tools", "license", "provenance"
 )
-$metaMismatches = @()
+$metaMismatches = New-Object System.Collections.ArrayList
 foreach ($field in $metaFields) {
-    $leftHas = $left.Contains($field)
-    $rightHas = $right.Contains($field)
-    if (-not $leftHas -and -not $rightHas) { continue }
-    $leftVal = if ($leftHas) { Canonical-Json $left[$field] } else { "<missing>" }
-    $rightVal = if ($rightHas) { Canonical-Json $right[$field] } else { "<missing>" }
-    if ($leftVal -ne $rightVal) {
-        $metaMismatches += [ordered]@{
-            field = $field
-            left = if ($leftHas) { $left[$field] } else { $null }
-            right = if ($rightHas) { $right[$field] } else { $null }
-        }
-    }
-}
-# target object must match when either side ships it
-if ($left.Contains("target") -or $right.Contains("target")) {
-    $leftTarget = if ($left.Contains("target")) { Canonical-Json $left["target"] } else { "<missing>" }
-    $rightTarget = if ($right.Contains("target")) { Canonical-Json $right["target"] } else { "<missing>" }
-    if ($leftTarget -ne $rightTarget) {
-        $metaMismatches += [ordered]@{
-            field = "target"
-            left = if ($left.Contains("target")) { $left["target"] } else { $null }
-            right = if ($right.Contains("target")) { $right["target"] } else { $null }
-        }
-    }
+    Compare-MetaField $left $right $field $metaMismatches
 }
 
 $leftProtocols = ($left.protocols -join "`n")
 $rightProtocols = ($right.protocols -join "`n")
 if ($leftProtocols -ne $rightProtocols) {
-    $metaMismatches += [ordered]@{
+    [void]$metaMismatches.Add([ordered]@{
         field = "protocols"
         left = $left.protocols
         right = $right.protocols
-    }
+    })
 }
 
 $leftByPath = @{}
@@ -349,7 +379,7 @@ $comparison = [ordered]@{
     schema_version = 1
     ok = $ok
     allow_executable_hash_drift = [bool]$AllowExecutableHashDrift
-    pin_grade_policy = "all_payload_hashes_must_match_unless_AllowExecutableHashDrift"
+    pin_grade_policy = "payload_hashes_and_dependency_identities_must_match_unless_AllowExecutableHashDrift"
     identical_payload_count = $identicalPayloads
     allowed_executable_drift_count = $allowedExecutableDrift.Count
     executable_hash_divergence_count = $executableHashDivergences.Count

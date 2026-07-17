@@ -91,7 +91,6 @@ def worker_required_literal(root: JsonValue, key: &str, expected: &str) -> Resul
     let checked = worker_required_ascii(root, key);
     if checked.is_err() { return worker_string_error(checked.error); };
     if not str_eq(checked.value.as_str(), expected) { return worker_string_error(SGJSON_UNKNOWN_ENUM()); };
-    // Reuse the validated string; a second extract would allocate another owned handle.
     checked;
 }
 
@@ -124,8 +123,6 @@ def worker_required_idempotency(root: JsonValue) -> Result<i64, i64> {
     if str_eq(value.value.as_str(), "new") { worker_i64_ok(SENLINE_IDEMPOTENCY_NEW()); } else if str_eq(value.value.as_str(), "exact_duplicate") { worker_i64_ok(SENLINE_IDEMPOTENCY_EXACT_DUPLICATE()); } else if str_eq(value.value.as_str(), "conflict") { worker_i64_ok(SENLINE_IDEMPOTENCY_CONFLICT()); } else { worker_i64_error(SGJSON_UNKNOWN_ENUM()); };
 }
 
-// Borrowed: by-value String params skip auto-Drop for legacy handle ABI, so a
-// by-value mode check would leak one owned string per successful evaluation.
 def worker_validate_execution_mode(value: &str) -> bool {
     str_eq(value, "fixture") or str_eq(value, "shadow") or str_eq(value, "guarded-development") or str_eq(value, "internal-alpha");
 }
@@ -327,9 +324,6 @@ def worker_encode_plan_v1(plan: SubmitEnvelopePlanV1) -> Result<WorkerEncodedFra
     Result { is_ok: true, value: WorkerEncodedFrameV1 { payload: output, len: serialized + 1 }, error: 0 };
 }
 
-// Owns `request` end-to-end on the unsupported path so nested Strings Drop.
-// Avoid if/else where only one branch moves `request`: path-insensitive moved
-// tracking would skip Drop on the borrow-only branch and leak every evaluation.
 def worker_reject_unsupported_operation_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
     worker_encode_unsupported_operation_error_v1(&request.context.evaluation_id);
 }
@@ -341,11 +335,7 @@ def worker_accept_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerE
 }
 
 def worker_process_decoded_request_v1(request: WorkerRequestV1) -> Result<WorkerEncodedFrameV1, i64> {
-    if not worker_operation_version_supported(request.context.operation_version) {
-        worker_reject_unsupported_operation_v1(request);
-    } else {
-        worker_accept_decoded_request_v1(request);
-    };
+    if not worker_operation_version_supported(request.context.operation_version) { worker_reject_unsupported_operation_v1(request); } else { worker_accept_decoded_request_v1(request); };
 }
 
 def worker_process_payload_v1(payload: Buffer, len: i64) -> Result<WorkerEncodedFrameV1, i64> {

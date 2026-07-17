@@ -411,11 +411,202 @@ fn reviewed_boundary_request_with_operation_version(index: u64, operation_versio
     bytes
 }
 
+/// Independent Rust oracle for reviewed-boundary cases (mirrors differential).
+fn boundary_case_fields(index: u64) -> CaseFields {
+    const MODES: [&str; 4] = ["fixture", "shadow", "guarded-development", "internal-alpha"];
+    let variant = index / 6;
+    let reference_len = if index.is_multiple_of(2) { 1 } else { 128 };
+    let (ciphertext_length_bytes, ciphertext_limit_bytes) = match variant % 4 {
+        0 => (0, 0),
+        1 => (1, 1),
+        2 => (u32::MAX, u32::MAX),
+        _ => (1, u32::MAX),
+    };
+    let relation = variant % 3;
+    let relation_values = match relation {
+        0 => (0_u32, 1_u32),
+        1 => (1, 1),
+        _ => (2, 1),
+    };
+    let mut case = CaseFields {
+        evaluation_id: evaluation_id(index, index ^ 0xbb67_ae85_84ca_a73b),
+        operation_epoch: [0, 1, JSON_SAFE_INTEGER_MAX][(variant % 3) as usize],
+        worker_generation: [JSON_SAFE_INTEGER_MAX, 0, 1][(variant % 3) as usize],
+        execution_mode: MODES[(index % MODES.len() as u64) as usize],
+        worker_bundle_id: ascii_ref(8, index, reference_len),
+        identifiers: [
+            ascii_ref(1, index, reference_len),
+            ascii_ref(2, index, reference_len),
+            ascii_ref(3, index, reference_len),
+            ascii_ref(4, index, reference_len),
+            ascii_ref(5, index, reference_len),
+            ascii_ref(6, index, reference_len),
+            ascii_ref(7, index, reference_len),
+        ],
+        has_submit_envelope_v2: variant.is_multiple_of(2),
+        ciphertext_length_bytes,
+        idempotency_status: "new",
+        recipient_pending_count: relation_values.0,
+        recipient_pending_limit: relation_values.1,
+        application_envelopes_used: relation_values.0,
+        application_envelopes_limit: relation_values.1,
+        ciphertext_limit_bytes,
+        enqueue_delivery_enabled: variant % 4 < 2,
+    };
+    match index % 6 {
+        0 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            case.has_submit_envelope_v2 = true;
+            case.enqueue_delivery_enabled = true;
+        }
+        1 => case.idempotency_status = "exact_duplicate",
+        2 => case.idempotency_status = "conflict",
+        3 => {
+            case.recipient_pending_count = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.recipient_pending_limit = 1;
+        }
+        4 => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = if variant.is_multiple_of(2) { 1 } else { 2 };
+            case.application_envelopes_limit = 1;
+        }
+        _ => {
+            case.recipient_pending_count = 0;
+            case.recipient_pending_limit = 1;
+            case.application_envelopes_used = 0;
+            case.application_envelopes_limit = 1;
+            if variant.is_multiple_of(2) {
+                case.has_submit_envelope_v2 = false;
+                case.enqueue_delivery_enabled = true;
+            } else {
+                case.has_submit_envelope_v2 = true;
+                case.enqueue_delivery_enabled = false;
+            }
+        }
+    }
+    case
+}
+
+fn oracle_decision_reason(case: &CaseFields) -> (&'static str, &'static str) {
+    if case.idempotency_status == "exact_duplicate" {
+        return ("duplicate_noop", "exact_duplicate");
+    }
+    if case.idempotency_status == "conflict" {
+        return ("reject", "idempotency_conflict");
+    }
+    if case.recipient_pending_count >= case.recipient_pending_limit {
+        return ("reject", "recipient_queue_full");
+    }
+    if case.application_envelopes_used >= case.application_envelopes_limit {
+        return ("reject", "application_budget_exhausted");
+    }
+    if !case.has_submit_envelope_v2 || !case.enqueue_delivery_enabled {
+        return ("reject", "delivery_disabled");
+    }
+    ("store_and_enqueue", "accepted_new")
+}
+
+#[derive(Clone, Copy)]
+enum ResponseExpectation {
+    /// kind=plan with decision/reason from the independent Rust oracle.
+    ReviewedBoundaryPlan,
+    /// kind=error with a fixed protocol/evaluation code.
+    ProtocolError { code: &'static str },
+}
+
+fn classify_response(
+    index: u64,
+    response: &[u8],
+    expectation: ResponseExpectation,
+) -> Result<ResponseClass, String> {
+    let value: Value = serde_json::from_slice(response)
+        .map_err(|error| format!("case {index} malformed JSON response: {error}"))?;
+    // Empty objects / non-contract shapes must not count as success.
+    if !value.is_object() || value.as_object().is_some_and(|o| o.is_empty()) {
+        return Err(format!(
+            "case {index} response is empty or non-object JSON (not a plan/error envelope)"
+        ));
+    }
+    let kind = value
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("case {index} response missing kind"))?;
+    match expectation {
+        ResponseExpectation::ReviewedBoundaryPlan => {
+            if kind != "plan" {
+                return Err(format!(
+                    "case {index} expected kind=plan, got kind={kind:?} body={}",
+                    String::from_utf8_lossy(response)
+                ));
+            }
+            let case = boundary_case_fields(index);
+            let (want_decision, want_reason) = oracle_decision_reason(&case);
+            let decision = value.get("decision").and_then(Value::as_str).unwrap_or("");
+            let reason = value.get("reason").and_then(Value::as_str).unwrap_or("");
+            if decision != want_decision || reason != want_reason {
+                return Err(format!(
+                    "case {index} oracle mismatch: got decision={decision:?} reason={reason:?}, want decision={want_decision:?} reason={want_reason:?}"
+                ));
+            }
+            let eval = value
+                .pointer("/context/evaluation_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if eval != case.evaluation_id {
+                return Err(format!(
+                    "case {index} evaluation_id mismatch: got {eval:?} want {:?}",
+                    case.evaluation_id
+                ));
+            }
+            let rev = value
+                .get("sengoo_module_revision")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if rev != PLANNER_FIXTURE_REVISION {
+                return Err(format!(
+                    "case {index} sengoo_module_revision mismatch: got {rev:?} want {PLANNER_FIXTURE_REVISION}"
+                ));
+            }
+            if decision == "store_and_enqueue" || decision == "duplicate_noop" {
+                Ok(ResponseClass::PlanAccept)
+            } else {
+                Ok(ResponseClass::PlanReject)
+            }
+        }
+        ResponseExpectation::ProtocolError { code } => {
+            if kind != "error" {
+                return Err(format!(
+                    "case {index} expected kind=error code={code}, got kind={kind:?}"
+                ));
+            }
+            let got = value.get("code").and_then(Value::as_str).unwrap_or("");
+            if got != code {
+                return Err(format!(
+                    "case {index} expected error code={code}, got {got:?}"
+                ));
+            }
+            Ok(ResponseClass::ProtocolError)
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ResponseClass {
+    PlanAccept,
+    PlanReject,
+    ProtocolError,
+}
+
 fn run_resource_corpus_with_requests<F>(
     executable: &Path,
     count: u64,
     timeout: Duration,
     mut request_for_index: F,
+    expectation: ResponseExpectation,
 ) -> ResourceOutcome
 where
     F: FnMut(u64) -> Vec<u8>,
@@ -473,9 +664,25 @@ where
     let mut window_start = Instant::now();
     let mut window_cases = 0_u64;
     let mut completed = 0_u64;
+    let mut worker_exited_early = false;
 
     if failures.is_empty() {
         for index in 0..count {
+            // Fail closed if the single worker child disappeared mid-soak.
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    failures.push(format!(
+                        "worker process exited early after case {completed}/{count}: {status}"
+                    ));
+                    worker_exited_early = true;
+                    break;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    failures.push(format!("worker process poll failed: {error}"));
+                    break;
+                }
+            }
             if started.elapsed() > timeout {
                 failures.push(format!(
                     "watchdog exceeded after case {index}/{} ({:?})",
@@ -504,35 +711,39 @@ where
                 }
             };
             let latency = req_started.elapsed();
+            match classify_response(index, &response, expectation) {
+                Ok(ResponseClass::PlanAccept) => plan_ok += 1,
+                Ok(ResponseClass::PlanReject) | Ok(ResponseClass::ProtocolError) => {
+                    plan_reject_or_error += 1
+                }
+                Err(error) => {
+                    failures.push(error);
+                    break;
+                }
+            }
             completed = index + 1;
             if index >= WARMUP_CASES {
                 latency_us.push(latency.as_micros() as u64);
-            }
-            // Accept any well-formed plan/error JSON response; reject hang/malformed.
-            match serde_json::from_slice::<Value>(&response) {
-                Ok(value) => {
-                    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
-                    if kind == "plan" {
-                        plan_ok += 1;
-                    } else {
-                        plan_reject_or_error += 1;
-                    }
-                }
-                Err(error) => {
-                    failures.push(format!("case {index} malformed JSON response: {error}"));
-                    break;
-                }
             }
 
             window_cases += 1;
             if index == 0 || (index + 1) % SAMPLE_EVERY == 0 || index + 1 == count {
                 let window_secs = window_start.elapsed().as_secs_f64().max(1e-9);
                 let cps = window_cases as f64 / window_secs;
+                let mem = sample_worker_memory_bytes(pid);
+                let handles = sample_worker_handle_count(pid);
+                if mem.is_none() || handles.is_none() {
+                    failures.push(format!(
+                        "case {} resource sample missing mem={mem:?} handles={handles:?} (cannot green-gate without metrics)",
+                        index + 1
+                    ));
+                    break;
+                }
                 samples.push(SamplePoint {
                     case_index: index + 1,
                     elapsed_ms: started.elapsed().as_millis() as u64,
-                    memory_bytes: sample_worker_memory_bytes(pid),
-                    handle_count: sample_worker_handle_count(pid),
+                    memory_bytes: mem,
+                    handle_count: handles,
                     cases_per_second_window: cps,
                 });
                 if (index + 1) % 1_000 == 0 {
@@ -541,8 +752,8 @@ where
                         index + 1,
                         started.elapsed().as_millis(),
                         cps,
-                        samples.last().and_then(|s| s.memory_bytes),
-                        samples.last().and_then(|s| s.handle_count)
+                        mem,
+                        handles
                     );
                 }
                 window_start = Instant::now();
@@ -550,6 +761,16 @@ where
             }
         }
     }
+
+    // process_count is 1 only while the single child remained alive through the
+    // full requested corpus (not exited early, not multi-worker).
+    let process_count = if worker_exited_early || completed != count {
+        // Still one intended child, but gate must fail via failures/cases.
+        1_u32
+    } else {
+        1_u32
+    };
+    let process_count_ok = !worker_exited_early && completed == count;
 
     // Kill the worker *before* joining stdout/stderr readers. Joining first
     // deadlocks the soak watchdog when the worker hangs with pipes still open.
@@ -576,13 +797,16 @@ where
     }
 
     ResourceOutcome {
-        cases: if completed == 0 { count } else { completed },
+        cases_requested: count,
+        cases_completed: completed,
         warm_up: WARMUP_CASES,
         elapsed: started.elapsed(),
         samples,
         latency_us,
         plan_ok,
         plan_reject_or_error,
+        process_count,
+        process_count_ok,
         failures,
     }
 }
@@ -731,18 +955,27 @@ struct SamplePoint {
 }
 
 struct ResourceOutcome {
-    cases: u64,
+    cases_requested: u64,
+    cases_completed: u64,
     warm_up: u64,
     elapsed: Duration,
     samples: Vec<SamplePoint>,
     latency_us: Vec<u64>,
     plan_ok: u64,
     plan_reject_or_error: u64,
+    process_count: u32,
+    process_count_ok: bool,
     failures: Vec<String>,
 }
 
 fn run_resource_corpus(executable: &Path, count: u64, timeout: Duration) -> ResourceOutcome {
-    run_resource_corpus_with_requests(executable, count, timeout, reviewed_boundary_request)
+    run_resource_corpus_with_requests(
+        executable,
+        count,
+        timeout,
+        reviewed_boundary_request,
+        ResponseExpectation::ReviewedBoundaryPlan,
+    )
 }
 
 fn finish_child(child: &mut Child, grace: Duration) -> std::io::Result<std::process::ExitStatus> {
@@ -906,6 +1139,11 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
     } else {
         "rss_bytes"
     };
+    let all_samples_present = outcome
+        .samples
+        .iter()
+        .all(|s| s.memory_bytes.is_some() && s.handle_count.is_some());
+    let response_accounted = outcome.plan_ok + outcome.plan_reject_or_error;
     let summary = serde_json::json!({
         "schema_version": 2,
         "label": label,
@@ -913,15 +1151,20 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
         "architecture": std::env::consts::ARCH,
         "fixed_seed_hex": format!("0x{FIXED_SEED:016x}"),
         "planner_contract_fixture_revision": PLANNER_FIXTURE_REVISION,
-        "cases_requested": outcome.cases,
+        "cases_requested": outcome.cases_requested,
+        "cases_completed": outcome.cases_completed,
         "warm_up_cases": outcome.warm_up,
         "elapsed_ms": outcome.elapsed.as_millis() as u64,
         "plan_ok": outcome.plan_ok,
         "plan_reject_or_error": outcome.plan_reject_or_error,
         "failure_count": outcome.failures.len(),
         "failures": outcome.failures,
-        "process_count": 1,
+        "process_count": outcome.process_count,
         "jsonl_series": jsonl_path.file_name().and_then(|s| s.to_str()),
+        "oracle": {
+            "kind": "independent_rust_boundary_or_protocol_error",
+            "notes": "Empty JSON / non-plan envelopes fail; reviewed-boundary cases require decision/reason match"
+        },
         "latency_post_warmup": {
             "sample_count": latency.len(),
             "mean_us": mean,
@@ -941,6 +1184,7 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
             "post_warmup_regression_slope_bytes_per_case": regression,
             "max_10k_window_delta_bytes": window_delta,
             "sample_count": outcome.samples.len(),
+            "all_samples_present": all_samples_present,
             "samples_tail": outcome.samples.iter().rev().take(5).map(|s| serde_json::json!({
                 "case_index": s.case_index,
                 "elapsed_ms": s.elapsed_ms,
@@ -960,7 +1204,10 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
             "max_10k_window_delta_bytes_bound": 32 * 1024 * 1024,
             "max_10k_window_within_bound": window_delta.map(|d| d < 32 * 1024 * 1024),
             "handles_within_plateau": handles_ok,
-            "process_count_is_one": true,
+            "process_count_is_one": outcome.process_count == 1 && outcome.process_count_ok,
+            "all_samples_present": all_samples_present,
+            "completed_all_requested": outcome.cases_completed == outcome.cases_requested,
+            "response_count_matches_completed": response_accounted == outcome.cases_completed,
             "zero_failures": outcome.failures.is_empty(),
             // Keep legacy key for older consumers.
             "growth_within_default_bound": growth.map(|g| g < 1024.0),
@@ -978,8 +1225,9 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
 fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
     let path = write_evidence(label, outcome);
     println!(
-        "senline-resource label={label} cases={} elapsed_ms={} failures={} evidence={}",
-        outcome.cases,
+        "senline-resource label={label} cases_requested={} cases_completed={} elapsed_ms={} failures={} evidence={}",
+        outcome.cases_requested,
+        outcome.cases_completed,
         outcome.elapsed.as_millis(),
         outcome.failures.len(),
         path.display()
@@ -1000,30 +1248,51 @@ fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
         "{label} resource run failures: {:?}",
         outcome.failures
     );
-    if let Some(slope) = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up) {
-        assert!(
-            slope < 1024.0,
-            "{label} post-warm-up regression slope {slope} B/case exceeds 1 KiB/case bound"
-        );
-    }
-    if let Some(delta) = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000) {
-        assert!(
-            delta < 32 * 1024 * 1024,
-            "{label} max ~10k-case memory window delta {delta} bytes exceeds +32 MiB"
-        );
-    }
-    if let Some(ok) = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16) {
-        assert!(
-            ok,
-            "{label} handle/FD count climbed past warm-up max + 16 plateau"
-        );
-    }
+    assert_eq!(
+        outcome.cases_completed, outcome.cases_requested,
+        "{label} did not complete all requested cases"
+    );
     assert_eq!(
         outcome.plan_ok + outcome.plan_reject_or_error,
+        outcome.cases_completed,
+        "{label} response accounting: plan_ok + reject/error must equal cases_completed"
+    );
+    assert!(
+        outcome.process_count == 1 && outcome.process_count_ok,
+        "{label} process_count gate failed: count={} ok={}",
+        outcome.process_count,
+        outcome.process_count_ok
+    );
+    assert!(
+        !outcome.samples.is_empty(),
+        "{label} resource sampler produced no memory/throughput samples"
+    );
+    assert!(
         outcome
-            .cases
-            .min(outcome.plan_ok + outcome.plan_reject_or_error),
-        "{label} response accounting"
+            .samples
+            .iter()
+            .all(|s| s.memory_bytes.is_some() && s.handle_count.is_some()),
+        "{label} one or more samples missing memory/handle metrics; cannot skip gates"
+    );
+    let slope = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up)
+        .unwrap_or_else(|| {
+            panic!("{label} missing OLS regression slope (need >=3 post-warm-up samples)")
+        });
+    assert!(
+        slope < 1024.0,
+        "{label} post-warm-up regression slope {slope} B/case exceeds 1 KiB/case bound"
+    );
+    let delta = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000)
+        .unwrap_or_else(|| panic!("{label} missing 10k-window memory delta"));
+    assert!(
+        delta < 32 * 1024 * 1024,
+        "{label} max ~10k-case memory window delta {delta} bytes exceeds +32 MiB"
+    );
+    let handles_ok = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16)
+        .unwrap_or_else(|| panic!("{label} missing handle plateau samples"));
+    assert!(
+        handles_ok,
+        "{label} handle/FD count climbed past warm-up max + 16 plateau"
     );
 }
 
@@ -1038,8 +1307,8 @@ fn resource_sampler_smoke_single_worker_with_latency_percentiles() {
         "post-warm-up latency samples missing"
     );
     assert!(
-        !outcome.samples.is_empty(),
-        "resource sampler produced no memory/throughput samples"
+        outcome.plan_ok + outcome.plan_reject_or_error == SMOKE_COUNT,
+        "smoke must oracle-match every response"
     );
 }
 
@@ -1051,10 +1320,15 @@ fn resource_unsupported_operation_version_path_does_not_grow_memory() {
     let root = WorkerTempDir::new("unsupported-opver");
     let executable = build_worker(&root);
     const COUNT: u64 = 2_048;
-    let outcome =
-        run_resource_corpus_with_requests(&executable, COUNT, Duration::from_secs(180), |index| {
-            reviewed_boundary_request_with_operation_version(index, 99)
-        });
+    let outcome = run_resource_corpus_with_requests(
+        executable.as_path(),
+        COUNT,
+        Duration::from_secs(180),
+        |index| reviewed_boundary_request_with_operation_version(index, 99),
+        ResponseExpectation::ProtocolError {
+            code: "unsupported_operation_version",
+        },
+    );
     assert_resource_outcome(&outcome, "unsupported-opver-2k");
     assert_eq!(
         outcome.plan_reject_or_error, COUNT,
@@ -1087,8 +1361,13 @@ fn resource_single_worker_investigation_50k() {
         "post-warm-up private-working-set growth {growth} B/case exceeds 1 KiB/case bound"
     );
     assert_eq!(
-        outcome.plan_ok, INVESTIGATION_COUNT,
+        outcome.cases_completed, INVESTIGATION_COUNT,
         "investigation must complete every reviewed-boundary case"
+    );
+    assert_eq!(
+        outcome.plan_ok + outcome.plan_reject_or_error,
+        INVESTIGATION_COUNT,
+        "investigation must oracle-match every response"
     );
 }
 

@@ -129,13 +129,17 @@ $manifest = [ordered]@{
         triple = if ($hostIsWindows) { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" }
     }
     protocols = @("senline-worker-v1", "http-loopback-dogfood-v1")
-    runtime_dependencies = @(
-        [ordered]@{ name = "sengoo_runtime"; role = "installed-native-runtime"; note = "Provided by installed Sengoo toolchain for the package target" }
-        [ordered]@{ name = "senline-domain-worker"; role = "loopback-planner-backend"; note = "HTTP dogfood spawns/forwards to the framed domain worker contract" }
-    )
+    # sengoo_runtime is linked into the executable by installed sgc at package
+    # time (static archive on current targets). It is a build/link input, not a
+    # separately shipped dynamic runtime dependency of this package.
+    # Planner logic is linked from the senline_domain_worker library package
+    # (direct library call), not by spawning a framed worker process.
+    runtime_dependencies = @()
     build_tools = @(
         [ordered]@{ name = "sgc"; version = $sgcVersion; role = "installed-toolchain-build" }
         [ordered]@{ name = "sgpm"; role = "installed-package-manager" }
+        [ordered]@{ name = "sengoo_runtime"; role = "installed-native-runtime-link-input"; note = "Statically linked via installed sgc; not a separate payload" }
+        [ordered]@{ name = "senline_domain_worker"; role = "linked-library-package"; note = "HTTP dogfood calls decoder/planner/encoders as a library; does not spawn a worker process" }
     )
     license = [ordered]@{
         spdx_expression = "UNLICENSED"

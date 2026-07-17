@@ -502,6 +502,9 @@ jobs:
             throw "http dogfood READY invalid on malformed probe: '$ready2'"
           }
           $port2 = [int]$Matches[1]
+          # Protocol contract: strict JSON errors return HTTP 200 + normalized
+          # protocol error envelope (malformed_json). Transport policy failures
+          # (method/path/header) are 400 — not this probe.
           $badBody = Join-Path $pkgRoot "http-probe-bad.json"
           [IO.File]::WriteAllText($badBody, "{not-json")
           $badResp = Join-Path $pkgRoot "http-probe-bad-resp.txt"
@@ -510,16 +513,23 @@ jobs:
               -X POST "http://127.0.0.1:$port2/v1/submit-envelope" `
               -H "Content-Type: application/json" `
               --data-binary "@$badBody"
-            if ([int]$badCode -eq 200) {
+            if ([int]$badCode -ne 200) {
               if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
-              throw "malformed HTTP body unexpectedly returned 200"
+              throw "malformed JSON must return HTTP 200 protocol error, got $badCode"
+            }
+            $badText = [IO.File]::ReadAllText($badResp)
+            $expectedMalformed = '{"kind":"error","schema_version":1,"scope":"protocol","code":"malformed_json","evaluation_id":null}'
+            $badNorm = $badText.TrimEnd("`r", "`n")
+            if ($badNorm -ne $expectedMalformed) {
+              if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+              throw "malformed JSON envelope mismatch: '$badText'"
             }
           }
           if (-not $httpProc2.WaitForExit(15000)) {
             $httpProc2.Kill()
             throw "http dogfood did not exit after malformed probe"
           }
-          Write-Host "packaged HTTP localhost product loop green (port=$port, malformed rejected)"
+          Write-Host "packaged HTTP localhost product loop green (port=$port, malformed_json protocol error on 200)"
 
           Write-Host "senline installed worker/HTTP dual package + product loops green on ${{ matrix.os }}"
 

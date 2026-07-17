@@ -176,12 +176,14 @@ $manifest = [ordered]@{
         triple = if ($hostIsWindows) { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" }
     }
     protocols = @("senline-worker-v1")
-    runtime_dependencies = @(
-        [ordered]@{ name = "sengoo_runtime"; role = "installed-native-runtime"; note = "Provided by installed Sengoo toolchain for the package target" }
-    )
+    # sengoo_runtime is linked by installed sgc at package time (static archive
+    # on current Windows/Linux targets). Recorded as a build/link input, not a
+    # separately shipped dynamic runtime payload of this package.
+    runtime_dependencies = @()
     build_tools = @(
         [ordered]@{ name = "sgc"; version = $sgcVersion; role = "installed-toolchain-build" }
         [ordered]@{ name = "sgpm"; role = "installed-package-manager" }
+        [ordered]@{ name = "sengoo_runtime"; role = "installed-native-runtime-link-input"; note = "Statically linked via installed sgc; not a separate package payload" }
     )
     license = [ordered]@{
         spdx_expression = "UNLICENSED"
