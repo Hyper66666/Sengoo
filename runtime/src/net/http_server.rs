@@ -2133,7 +2133,7 @@ fn release_abandoned_async_next_request(state: &AsyncNextRequestState) {
     } = state.outcome
     {
         if let Ok(mut entry) = net_runtime().http_request_take(value) {
-            let _ = write_http_response(&mut entry.stream, &gateway_timeout_response());
+            let _ = write_http_response(&mut entry.stream, &gateway_timeout_response(), false);
         }
     }
 }
