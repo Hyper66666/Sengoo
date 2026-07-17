@@ -1,4 +1,4 @@
-## 1. Pinning and prerequisites
+﻿## 1. Pinning and prerequisites
 
 - [x] 1.1 Run `openspec validate http-production-serving --strict`.
 - [x] 1.2 Confirm `async-cancellation-semantics` is archived (teardown
@@ -8,13 +8,13 @@
 
 ## 2. Sengoo-side router (handlers)
 
-- [ ] 2.1 Stdlib `HttpRouter`: `http_router_new`, `http_router_route(method,
+- [x] 2.1 Stdlib `HttpRouter`: `http_router_new`, `http_router_route(method,
   path, handler)`, `http_router_default(handler)`, and `serve_http(server,
   router)`. Handler type frozen as
   `fn(&mut HttpServerRequest) -> Result<bool, i64>`. Method/path matched as
   exact bytes (no patterns/normalization/decoding). One default max.
-- [ ] 2.2 `serve_http` is implemented in Sengoo by pulling via the existing
-  async pull API (no Rust→Sengoo callback ABI). Unmatched routes answer 404;
+- [x] 2.2 `serve_http` is implemented in Sengoo by pulling via the existing
+  async pull API (no Rust鈫扴engoo callback ABI). Unmatched routes answer 404;
   pull vs router mix rejected with stable status.
 - [ ] 2.3 Handler `Err` / `Ok(false)` / unanswered maps to 500 if not already
   answered; tests cover matched, unmatched (404), failing (500), and mode
@@ -78,3 +78,4 @@
 - [ ] Existing pull/static/bounds/drain/fallback requirements remain green
   and unchanged.
 - [ ] Matrix updated with proof; umbrella records Pillar C completion.
+

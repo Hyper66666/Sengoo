@@ -1,4 +1,4 @@
-extern "C" {
+﻿extern "C" {
     fn sengoo_stdlib_str_ptr(value: &str) -> i64;
     fn sengoo_net_last_error() -> i64;
     fn sengoo_net_clear_error();
@@ -27,6 +27,9 @@ extern "C" {
     fn sengoo_http_server_serve_once(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_http_server_close(handle: i64) -> i64;
     fn sengoo_http_server_next_request(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_server_next_request_router(handle: i64, timeout_ms: i64) -> i64;
+    fn sengoo_http_server_claim_serve_mode(handle: i64, mode: i64) -> i64;
+    fn sengoo_http_server_next_request_async_router__start(handle: i64, timeout_ms: i64) -> i64;
     fn sengoo_http_request_method_len(handle: i64) -> i64;
     fn sengoo_http_request_method_copy(handle: i64, buffer: i64, capacity: i64) -> i64;
     fn sengoo_http_request_path_len(handle: i64) -> i64;
@@ -395,8 +398,21 @@ impl HttpServer {
         sengoo_http_server_next_request_async__start(self.handle, timeout_ms)
     }
 
+    def next_request_async_router(self, timeout_ms: i64) -> Future<HttpServerNextRequestOutcome> {
+        sengoo_http_server_next_request_async_router__start(self.handle, timeout_ms)
+    }
+
     def close(self) -> bool {
         sengoo_http_server_close(self.handle) != 0
+    }
+
+    def claim_serve_mode(self, mode: i64) -> Result<bool, i64> {
+        let status = sengoo_http_server_claim_serve_mode(self.handle, mode);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
     }
 }
 
@@ -736,3 +752,192 @@ def net_bench_run_raw(connections: i64, rtt_messages_per_connection: i64, broadc
 def net_bench_run(connections: i64, rtt_messages_per_connection: i64, broadcast_rounds: i64, payload_bytes: i64, report: Buffer) -> Result<i64, i64> {
     net_bench_run_raw(connections, rtt_messages_per_connection, broadcast_rounds, payload_bytes, report.ptr(), report.len())
 }
+
+def HTTP_SERVER_MODE_PULL() -> i64 { 1 }
+def HTTP_SERVER_MODE_ROUTER() -> i64 { 2 }
+
+// Handler returns 1=answered, 0=not answered (500), negative=error.
+// Design: fn(&mut HttpServerRequest) -> Result<bool, i64>; i64 form is the
+// concrete stdlib encoding until fn-returning-Result is broadly supported.
+struct HttpRouter {
+    count: i64,
+    r0_used: bool,
+    r0_method: String,
+    r0_path: String,
+    r0_handler: fn(HttpServerRequest) -> i64,
+    r1_used: bool,
+    r1_method: String,
+    r1_path: String,
+    r1_handler: fn(HttpServerRequest) -> i64,
+    r2_used: bool,
+    r2_method: String,
+    r2_path: String,
+    r2_handler: fn(HttpServerRequest) -> i64,
+    r3_used: bool,
+    r3_method: String,
+    r3_path: String,
+    r3_handler: fn(HttpServerRequest) -> i64,
+    has_default: bool,
+    default_handler: fn(HttpServerRequest) -> i64,
+}
+
+def http_router_noop_handler(request: HttpServerRequest) -> i64 { 0 }
+
+def http_router_new() -> HttpRouter {
+    HttpRouter {
+        count: 0,
+        r0_used: false,
+        r0_method: String { handle: 0 },
+        r0_path: String { handle: 0 },
+        r0_handler: http_router_noop_handler,
+        r1_used: false,
+        r1_method: String { handle: 0 },
+        r1_path: String { handle: 0 },
+        r1_handler: http_router_noop_handler,
+        r2_used: false,
+        r2_method: String { handle: 0 },
+        r2_path: String { handle: 0 },
+        r2_handler: http_router_noop_handler,
+        r3_used: false,
+        r3_method: String { handle: 0 },
+        r3_path: String { handle: 0 },
+        r3_handler: http_router_noop_handler,
+        has_default: false,
+        default_handler: http_router_noop_handler,
+    }
+}
+
+def http_router_route(
+    router: HttpRouter,
+    method: &str,
+    path: &str,
+    handler: fn(HttpServerRequest) -> i64,
+) -> Result<HttpRouter, i64> {
+    let mut out = router;
+    if !out.r0_used {
+        out.r0_used = true;
+        out.r0_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r0_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r0_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r1_used {
+        out.r1_used = true;
+        out.r1_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r1_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r1_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r2_used {
+        out.r2_used = true;
+        out.r2_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r2_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r2_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else if !out.r3_used {
+        out.r3_used = true;
+        out.r3_method = string_from_str(method).unwrap_or(String { handle: 0 });
+        out.r3_path = string_from_str(path).unwrap_or(String { handle: 0 });
+        out.r3_handler = handler;
+        out.count = out.count + 1;
+        Result { is_ok: true, value: out, error: 0 }
+    } else {
+        Result { is_ok: false, value: out, error: STATUS_BUFFER_TOO_SMALL() }
+    }
+}
+
+def http_router_default(
+    router: HttpRouter,
+    handler: fn(HttpServerRequest) -> i64,
+) -> Result<HttpRouter, i64> {
+    let mut out = router;
+    if out.has_default {
+        Result { is_ok: false, value: out, error: STATUS_ALREADY_EXISTS() }
+    } else {
+        out.has_default = true;
+        out.default_handler = handler;
+        Result { is_ok: true, value: out, error: 0 }
+    }
+}
+
+def http_router_match_handles(
+    used: bool,
+    route_method_handle: i64,
+    route_path_handle: i64,
+    req_method_handle: i64,
+    req_path_handle: i64,
+) -> bool {
+    if !used {
+        false
+    } else {
+        sengoo_string_eq(route_method_handle, req_method_handle) != 0
+            and sengoo_string_eq(route_path_handle, req_path_handle) != 0
+    }
+}
+
+def http_server_next_request_router(server: HttpServer, timeout_ms: i64) -> Result<HttpServerRequest, i64> {
+    let handle = sengoo_http_server_next_request_router(server.handle, timeout_ms);
+    if handle != 0 {
+        Result { is_ok: true, value: HttpServerRequest { handle: handle }, error: 0 }
+    } else {
+        Result { is_ok: false, value: HttpServerRequest { handle: 0 }, error: net_last_status() }
+    }
+}
+
+def serve_http_once(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<bool, i64> {
+    let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
+    if !claimed.is_ok {
+        claimed
+    } else {
+        let pull = http_server_next_request_router(server, timeout_ms);
+        if !pull.is_ok {
+            Result { is_ok: false, value: false, error: pull.error }
+        } else {
+            let request = pull.value;
+            let method_r = request.method_string();
+            let path_r = request.path_string();
+            if !method_r.is_ok or !path_r.is_ok {
+                let ignored = request.respond(500, "internal error");
+                Result { is_ok: true, value: true, error: 0 }
+            } else {
+                let method = method_r.value;
+                let path = path_r.value;
+                let mut handler_ok = false;
+                let mut matched = false;
+                if http_router_match_handles(router.r0_used, router.r0_method.handle, router.r0_path.handle, method.handle, path.handle) {
+                    let h0 = router.r0_handler; handler_ok = h0(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r1_used, router.r1_method.handle, router.r1_path.handle, method.handle, path.handle) {
+                    let h1 = router.r1_handler; handler_ok = h1(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r2_used, router.r2_method.handle, router.r2_path.handle, method.handle, path.handle) {
+                    let h2 = router.r2_handler; handler_ok = h2(request) == 1;
+                    matched = true;
+                } else if http_router_match_handles(router.r3_used, router.r3_method.handle, router.r3_path.handle, method.handle, path.handle) {
+                    let h3 = router.r3_handler; handler_ok = h3(request) == 1;
+                    matched = true;
+                } else if router.has_default {
+                    let hd = router.default_handler; handler_ok = hd(request) == 1;
+                    matched = true;
+                } else {
+                    let ignored = request.respond(404, "not found");
+                    matched = true;
+                    handler_ok = true;
+                }
+                if matched and !handler_ok {
+                    let ignored = request.respond(500, "handler error");
+                }
+                Result { is_ok: true, value: true, error: 0 }
+            }
+        }
+    }
+}
+
+/// Serve one request under router mode. Call in a loop for multi-request hosts.
+/// (Async variant can wrap this once Future typing for alternate pull starts lands.)
+def serve_http(server: HttpServer, router: HttpRouter, timeout_ms: i64) -> Result<bool, i64> {
+    serve_http_once(server, router, timeout_ms)
+}
+
+

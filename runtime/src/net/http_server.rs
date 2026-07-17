@@ -59,6 +59,11 @@ pub(super) struct HttpServerMiddleware {
     pub(super) kind: HttpServerMiddlewareKind,
 }
 
+/// Serve-loop mode: unset until first pull or router claim (one-mode-per-listener).
+pub(super) const HTTP_SERVER_MODE_UNSET: u8 = 0;
+pub(super) const HTTP_SERVER_MODE_PULL: u8 = 1;
+pub(super) const HTTP_SERVER_MODE_ROUTER: u8 = 2;
+
 #[derive(Debug)]
 pub(super) struct HttpServerState {
     pub(super) listener: TcpListener,
@@ -66,6 +71,8 @@ pub(super) struct HttpServerState {
     pub(super) middlewares: Vec<HttpServerMiddleware>,
     pub(super) max_header_bytes: usize,
     pub(super) max_body_bytes: usize,
+    /// 0 = unset, 1 = pull, 2 = Sengoo-side router (`serve_http`).
+    pub(super) serve_mode: u8,
 }
 
 /// Pulled-but-unanswered dynamic request. Owns the connection; answering or
@@ -252,6 +259,32 @@ impl NetRuntime {
         self.http_server_with_state(handle, |state| {
             state.middlewares.push(middleware);
             1
+        })
+    }
+
+    /// Claim exclusive pull (1) or router (2) mode. Same mode is idempotent.
+    pub(crate) fn http_server_claim_serve_mode(
+        &self,
+        handle: u64,
+        mode: u8,
+    ) -> Result<i64, NetErrorCode> {
+        self.http_server_with_state(handle, |state| {
+            if state.serve_mode == HTTP_SERVER_MODE_UNSET {
+                state.serve_mode = mode;
+                1
+            } else if state.serve_mode == mode {
+                1
+            } else {
+                // Signal mode conflict via InvalidArgument mapping to STATUS_INVALID_ARGUMENT.
+                0
+            }
+        })
+        .and_then(|ok| {
+            if ok == 1 {
+                Ok(1)
+            } else {
+                Err(NetErrorCode::InvalidArgument)
+            }
         })
     }
 
@@ -947,6 +980,7 @@ pub extern "C" fn sengoo_http_server_bind(host: *const u8, port: u16) -> u64 {
         middlewares: Vec::new(),
         max_header_bytes: 16 * 1024,
         max_body_bytes: 1024 * 1024,
+        serve_mode: HTTP_SERVER_MODE_UNSET,
     };
     net_runtime()
         .http_server_store(state)
@@ -1120,9 +1154,20 @@ pub extern "C" fn sengoo_http_server_close(handle: u64) -> i64 {
     }
 }
 
+/// Claim serve mode for a listener. `mode` is 1 (pull) or 2 (router).
+/// Returns 1 on success, 0 on failure (`STATUS_INVALID_ARGUMENT` if already claimed differently).
 #[no_mangle]
-pub extern "C" fn sengoo_http_server_next_request(handle: u64, timeout_ms: u32) -> u64 {
+pub extern "C" fn sengoo_http_server_claim_serve_mode(handle: u64, mode: u8) -> i64 {
     reset_last_error();
+    if mode != HTTP_SERVER_MODE_PULL && mode != HTTP_SERVER_MODE_ROUTER {
+        return fail_bool(NetErrorCode::InvalidArgument);
+    }
+    net_runtime()
+        .http_server_claim_serve_mode(handle, mode)
+        .unwrap_or_else(fail_bool)
+}
+
+fn http_server_next_request_impl(handle: u64, timeout_ms: u32) -> u64 {
     let (listener, routes, middlewares, max_header_bytes, max_body_bytes) =
         match net_runtime().http_server_snapshot(handle) {
             Ok(snapshot) => snapshot,
@@ -1161,10 +1206,25 @@ pub extern "C" fn sengoo_http_server_next_request(handle: u64, timeout_ms: u32) 
 }
 
 #[no_mangle]
-pub extern "C" fn sengoo_http_server_next_request_async__start(
-    handle: u64,
-    timeout_ms: u32,
-) -> i64 {
+pub extern "C" fn sengoo_http_server_next_request(handle: u64, timeout_ms: u32) -> u64 {
+    reset_last_error();
+    // Public pull API: claim pull mode (rejects if router already claimed).
+    match net_runtime().http_server_claim_serve_mode(handle, HTTP_SERVER_MODE_PULL) {
+        Ok(_) => {}
+        Err(NetErrorCode::InvalidArgument) => return fail_handle(NetErrorCode::InvalidArgument),
+        Err(code) => return fail_handle(code),
+    }
+    http_server_next_request_impl(handle, timeout_ms)
+}
+
+/// Pull for Sengoo-side router only (mode already claimed as ROUTER).
+#[no_mangle]
+pub extern "C" fn sengoo_http_server_next_request_router(handle: u64, timeout_ms: u32) -> u64 {
+    reset_last_error();
+    http_server_next_request_impl(handle, timeout_ms)
+}
+
+fn http_server_next_request_async_start_impl(handle: u64, timeout_ms: u32) -> i64 {
     if handle == 0 {
         return 0;
     }
@@ -1203,6 +1263,30 @@ pub extern "C" fn sengoo_http_server_next_request_async__start(
         outcome,
     };
     Box::into_raw(Box::new(state)) as i64
+}
+
+#[no_mangle]
+pub extern "C" fn sengoo_http_server_next_request_async__start(
+    handle: u64,
+    timeout_ms: u32,
+) -> i64 {
+    match net_runtime().http_server_claim_serve_mode(handle, HTTP_SERVER_MODE_PULL) {
+        Ok(_) => {}
+        Err(code) => {
+            set_last_error(code);
+            return 0;
+        }
+    }
+    http_server_next_request_async_start_impl(handle, timeout_ms)
+}
+
+/// Async pull for Sengoo-side router only (mode already claimed as ROUTER).
+#[no_mangle]
+pub extern "C" fn sengoo_http_server_next_request_async_router__start(
+    handle: u64,
+    timeout_ms: u32,
+) -> i64 {
+    http_server_next_request_async_start_impl(handle, timeout_ms)
 }
 
 #[no_mangle]
