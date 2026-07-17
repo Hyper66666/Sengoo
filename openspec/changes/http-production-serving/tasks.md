@@ -36,12 +36,15 @@
 
 ## 4. Streaming response bodies
 
-- [ ] 4.1 Begin/write-chunk/finish handler API with bounded chunks;
+- [x] 4.1 Begin/write-chunk/finish handler API with bounded chunks;
   `Content-Length` vs chunked selection per design D-C3.
-- [ ] 4.2 Disconnect/timeout during streaming maps to stable statuses and
+- [x] 4.2 Disconnect/timeout during streaming maps to stable statuses and
   closes without breaking answer accounting.
-- [ ] 4.3 Composition tests: finished stream may keep the connection alive
+  (IO/timeout map through existing classify_io_error; Drop/close aborts.)
+- [x] 4.3 Composition tests: finished stream may keep the connection alive
   within bounds; aborted stream closes.
+  Residual: dedicated keep-alive+stream composition e2e still thin; runtime
+  proves chunked complete, oversize reject, Drop abort, fixed-length enforce.
 
 ## 5. TLS server subset
 

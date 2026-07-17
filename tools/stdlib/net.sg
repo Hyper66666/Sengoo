@@ -46,6 +46,11 @@
     fn sengoo_http_request_respond(handle: i64, status: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_request_respond_with_content_type(handle: i64, status: i64, content_type: i64, body: i64, body_len: i64) -> i64;
     fn sengoo_http_request_close(handle: i64) -> i64;
+    fn sengoo_http_request_begin_stream(handle: i64, status: i64) -> i64;
+    fn sengoo_http_request_begin_stream_with_length(handle: i64, status: i64, content_length: i64) -> i64;
+    fn sengoo_http_response_stream_write(handle: i64, data: i64, len: i64) -> i64;
+    fn sengoo_http_response_stream_finish(handle: i64) -> i64;
+    fn sengoo_http_response_stream_close(handle: i64) -> i64;
     fn sengoo_ws_connect(url: i64, timeout_ms: i64) -> i64;
     fn sengoo_ws_send_text(handle: i64, data: i64, len: i64) -> i64;
     fn sengoo_ws_recv_text(handle: i64, buffer: i64, capacity: i64, timeout_ms: i64) -> i64;
@@ -74,6 +79,10 @@ struct HttpServer {
 }
 
 struct HttpServerRequest {
+    handle: i64,
+}
+
+struct HttpResponseStream {
     handle: i64,
 }
 
@@ -661,6 +670,26 @@ impl HttpServerRequest {
         }
     }
 
+    /// Begin a chunked streamed response. Consumes this request (answer-once).
+    def begin_stream(self, status: i64) -> Result<HttpResponseStream, i64> {
+        let handle = sengoo_http_request_begin_stream(self.handle, status);
+        if handle != 0 {
+            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+        }
+    }
+
+    /// Begin a fixed-length streamed response. Consumes this request.
+    def begin_stream_with_length(self, status: i64, content_length: i64) -> Result<HttpResponseStream, i64> {
+        let handle = sengoo_http_request_begin_stream_with_length(self.handle, status, content_length);
+        if handle != 0 {
+            Result { is_ok: true, value: HttpResponseStream { handle: handle }, error: 0 }
+        } else {
+            Result { is_ok: false, value: HttpResponseStream { handle: 0 }, error: net_last_status() }
+        }
+    }
+
     // Closing an unanswered request first writes a deterministic 504 fallback.
     def close(self) -> bool {
         sengoo_http_request_close(self.handle) != 0
@@ -670,6 +699,48 @@ impl HttpServerRequest {
 impl Drop for HttpServerRequest {
     def drop(&mut self) {
         sengoo_http_request_close(self.handle);
+    }
+}
+
+impl HttpResponseStream {
+    /// Write one body chunk. Chunks larger than 65536 fail with STATUS_INVALID_ARGUMENT.
+    /// Disconnect → STATUS_IO; write timeout → STATUS_TIMEOUT.
+    def write_buffer(self, buffer: Buffer, used_len: i64) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_write(self.handle, buffer.ptr(), used_len);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def write_raw(self, data_ptr: i64, len: i64) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_write(self.handle, data_ptr, len);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def finish(self) -> Result<bool, i64> {
+        let status = sengoo_http_response_stream_finish(self.handle);
+        if status != 0 {
+            Result { is_ok: true, value: true, error: 0 }
+        } else {
+            Result { is_ok: false, value: false, error: net_last_status() }
+        }
+    }
+
+    def close(self) -> bool {
+        sengoo_http_response_stream_close(self.handle) != 0
+    }
+}
+
+impl Drop for HttpResponseStream {
+    def drop(&mut self) {
+        // Unfinished Drop aborts the stream and closes the connection.
+        sengoo_http_response_stream_close(self.handle);
     }
 }
 

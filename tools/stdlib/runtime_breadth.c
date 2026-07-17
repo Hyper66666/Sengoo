@@ -1500,6 +1500,40 @@ long long sengoo_http_request_close(long long handle) {
     return sengoo_net_fallback_close();
 }
 
+long long sengoo_http_request_begin_stream(long long handle, long long status) {
+    (void)handle;
+    (void)status;
+    return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
+long long sengoo_http_request_begin_stream_with_length(
+    long long handle,
+    long long status,
+    long long content_length
+) {
+    (void)handle;
+    (void)status;
+    (void)content_length;
+    return sengoo_net_fallback_handle_error(SENGOO_NET_ERR_UNSUPPORTED_SCHEME);
+}
+
+long long sengoo_http_response_stream_write(long long handle, long long data, long long len) {
+    (void)handle;
+    (void)data;
+    (void)len;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_response_stream_finish(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_bool_error(SENGOO_NET_ERR_HANDLE_NOT_FOUND);
+}
+
+long long sengoo_http_response_stream_close(long long handle) {
+    (void)handle;
+    return sengoo_net_fallback_close();
+}
+
 long long sengoo_ws_connect(long long url, long long timeout_ms) {
     (void)url;
     (void)timeout_ms;
