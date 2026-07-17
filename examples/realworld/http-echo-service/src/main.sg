@@ -1,12 +1,13 @@
 import std::net;
+
 import std::status;
 
 def health_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "ok").unwrap_or(false) { 1 } else { 0 }
+    if request.respond(200, "ok").unwrap_or(false) { 1; } else { 0; };
 }
 
 def echo_handler(request: HttpServerRequest) -> i64 {
-    if request.respond(200, "echo").unwrap_or(false) { 1 } else { 0 }
+    if request.respond(200, "echo").unwrap_or(false) { 1; } else { 0; };
 }
 
 def dual_router() -> Result<HttpRouter, i64> {
@@ -14,43 +15,16 @@ def dual_router() -> Result<HttpRouter, i64> {
     let h_echo: fn(HttpServerRequest) -> i64 = echo_handler;
     let r0 = http_router_new();
     let r1 = http_router_route(r0, "GET", "/health", h_health);
-    if r1.is_ok == false {
-        r1
-    } else {
-        http_router_route(r1.value, "GET", "/echo", h_echo)
-    }
+    if r1.is_ok == false { r1; } else { http_router_route(r1.value, "GET", "/echo", h_echo); };
 }
 
 def dispatch_dual(request: HttpServerRequest) -> bool {
     let built = dual_router();
-    if built.is_ok == false {
-        false
-    } else {
-        let ignored = http_router_dispatch(built.value, request);
-        true
-    }
+    if built.is_ok == false { false; } else { let ignored = http_router_dispatch(built.value, request); true; };
 }
 
-// Unattended: await one request with a short budget so the binary exits cleanly.
 async def main() -> i64 {
     let bind_result = http_server_bind("127.0.0.1", 0);
     let unsupported_host = if bind_result.is_ok { false; } else { bind_result.error == STATUS_UNSUPPORTED(); };
-    if bind_result.is_ok {
-        let server = bind_result.value;
-        let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER());
-        if claimed.is_ok == false {
-            server.close();
-            1
-        } else {
-            let outcome = await server.next_request_router_async(5000);
-            let timed_out = if outcome.is_ok { false; } else { outcome.error == STATUS_TIMEOUT(); };
-            let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; };
-            let closed = server.close();
-            if (answered or timed_out) and closed { 0; } else { 1; };
-        }
-    } else if unsupported_host {
-        0
-    } else {
-        1
-    }
+    if bind_result.is_ok { let server = bind_result.value; let claimed = server.claim_serve_mode(HTTP_SERVER_MODE_ROUTER()); if claimed.is_ok == false { server.close(); 1; } else { let outcome = await server.next_request_router_async(5000); let timed_out = if outcome.is_ok { false; } else { outcome.error == STATUS_TIMEOUT(); }; let answered = if outcome.is_ok { dispatch_dual(outcome.value); } else { false; }; let closed = server.close(); if (answered or timed_out) and closed { 0; } else { 1; }; }; } else if unsupported_host { 0; } else { 1; };
 }

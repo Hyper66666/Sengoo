@@ -94,7 +94,9 @@ fn source_module_direct_dependencies(module: &str) -> &'static [&'static str] {
         "fmt" => &["strconv", "status"],
         "regex" | "log" | "config" | "hash" | "encoding" | "compress" | "fs" => &["status"],
         "async" => &["status", "result"],
-        "http" | "net" => &["ffi", "status", "string", "async"],
+        // Keep `async` out of net's transitive deps so C-only fallback bundles
+        // that only import std::net do not require async mutex/sleep symbols.
+        "http" | "net" => &["ffi", "status", "string"],
         "db" | "lua54" | "proto" => &["ffi"],
         "assert" => &[],
         _ => &[],
