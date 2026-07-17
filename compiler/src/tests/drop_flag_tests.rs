@@ -1295,7 +1295,7 @@ def main() -> i64 {
         .expect("expected a lowered lambda function");
     assert!(
         !string_drop_calls(lambda).is_empty()
-            || named_drop_calls(lambda, "String_Drop_drop").len() >= 1,
+            || !named_drop_calls(lambda, "String_Drop_drop").is_empty(),
         "lambda taking String by value must drop its parameter; lambda IR name={}",
         lambda.name
     );
@@ -1363,7 +1363,7 @@ def main() -> i64 {
         .expect("expected reject helper");
     assert!(
         !string_drop_calls(reject).is_empty()
-            || named_drop_calls(reject, "String_Drop_drop").len() >= 1,
+            || !named_drop_calls(reject, "String_Drop_drop").is_empty(),
         "owning helper must drop nested String fields of aggregate params; ir={}",
         reject.name
     );

@@ -5,9 +5,10 @@ param(
     [string]$RightManifest,
     [Parameter(Mandatory = $true)]
     [string]$OutputDir,
-    # Legacy: allow executable size mismatches too (not recommended).
-    # Default without this switch still requires non-executable bit-identity and
-    # equal executable sizes; equal-size hash divergence is recorded, not silent.
+    # Explicit opt-in only. Default pin-grade policy requires every payload hash
+    # (including executables) to match across dual builds. With this switch,
+    # executable hash divergence is recorded under allowed_executable_drift and
+    # does not fail the comparison.
     [switch]$AllowExecutableHashDrift
 )
 
@@ -21,7 +22,7 @@ $ManifestRequiredFields = @(
 # Optional pin-grade extensions (worker packaging now emits these).
 $ManifestOptionalFields = @(
     "source_revision", "build_manifest_id", "target", "runtime_dependencies",
-    "license", "provenance"
+    "build_tools", "license", "provenance"
 )
 $PayloadFields = @("path", "sha256", "size")
 $ExecutableNamePatterns = @(
@@ -304,28 +305,9 @@ foreach ($path in $allPaths) {
         continue
     }
     $isExe = Is-ExecutablePayload $path
-    if ($isExe -and $sizeEqual -and -not $hashEqual) {
-        # Default pin-grade policy: equal-size dual-build executables may diverge
-        # in hash under PE/ELF non-determinism; record explicitly (not silent).
-        $executableHashDivergences += [ordered]@{
-            path = $path
-            left_sha256 = $lp.sha256
-            right_sha256 = $rp.sha256
-            left_size = $lp.size
-            right_size = $rp.size
-            policy = "equal_size_hash_divergence_recorded"
-        }
-        if ($AllowExecutableHashDrift) {
-            $allowedExecutableDrift += [ordered]@{
-                path = $path
-                left_sha256 = $lp.sha256
-                right_sha256 = $rp.sha256
-                left_size = $lp.size
-                right_size = $rp.size
-            }
-        }
-        continue
-    }
+    # Design requires payload hashes match across dual builds (including
+    # executables). AllowExecutableHashDrift is an explicit opt-in only; default
+    # fails closed so 8.7 cannot report green on PE/ELF hash divergence.
     if ($AllowExecutableHashDrift -and $isExe) {
         $allowedExecutableDrift += [ordered]@{
             path = $path
@@ -334,11 +316,27 @@ foreach ($path in $allPaths) {
             left_size = $lp.size
             right_size = $rp.size
         }
+        if ($isExe -and -not $hashEqual) {
+            $executableHashDivergences += [ordered]@{
+                path = $path
+                left_sha256 = $lp.sha256
+                right_sha256 = $rp.sha256
+                left_size = $lp.size
+                right_size = $rp.size
+                policy = "allow_executable_hash_drift_opt_in"
+            }
+        }
         continue
     }
     $payloadMismatches += [ordered]@{
         path = $path
-        reason = if ($isExe -and -not $sizeEqual) { "executable_size_mismatch" } else { "hash_or_size_mismatch" }
+        reason = if ($isExe -and -not $hashEqual -and $sizeEqual) {
+            "executable_hash_mismatch"
+        } elseif ($isExe -and -not $sizeEqual) {
+            "executable_size_mismatch"
+        } else {
+            "hash_or_size_mismatch"
+        }
         left_sha256 = $lp.sha256
         right_sha256 = $rp.sha256
         left_size = $lp.size
@@ -351,7 +349,7 @@ $comparison = [ordered]@{
     schema_version = 1
     ok = $ok
     allow_executable_hash_drift = [bool]$AllowExecutableHashDrift
-    pin_grade_policy = "non_executable_payloads_bit_identical; executables_equal_size_may_hash_diverge"
+    pin_grade_policy = "all_payload_hashes_must_match_unless_AllowExecutableHashDrift"
     identical_payload_count = $identicalPayloads
     allowed_executable_drift_count = $allowedExecutableDrift.Count
     executable_hash_divergence_count = $executableHashDivergences.Count

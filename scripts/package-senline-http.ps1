@@ -76,18 +76,45 @@ function Get-Sha256([string]$Path) {
 }
 
 $sgcVersion = (& $SgcPath --version).Trim()
-$payloads = @(
-    Get-ChildItem -LiteralPath $OutputDir -Recurse -File | ForEach-Object {
-        $rel = $_.FullName.Substring($OutputDir.Length).TrimStart('\', '/').Replace('\', '/')
-        [ordered]@{
+$arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$osName = if ($hostIsWindows) { "windows" } else { "linux" }
+$abi = if ($hostIsWindows) { "msvc" } else { "gnu" }
+$utf8 = [Text.UTF8Encoding]::new($false)
+
+# Ship license + SBOM input files before hashing package payloads.
+$licenseText = @(
+    "Senline HTTP dogfood package ($Version)",
+    "Source revision: $sourceRevision",
+    "License: UNLICENSED pending repository SPDX publication.",
+    "See Sengoo.toml package metadata and the parent Sengoo distribution license."
+) -join "`n"
+[IO.File]::WriteAllText((Join-Path $OutputDir "LICENSE.txt"), $licenseText + "`n", $utf8)
+
+function Get-PackagePayloads([string]$Root, [string[]]$ExcludeNames) {
+    $items = New-Object System.Collections.Generic.List[object]
+    Get-ChildItem -LiteralPath $Root -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($ExcludeNames -contains $rel) { return }
+        $items.Add([ordered]@{
             path = $rel
             sha256 = Get-Sha256 $_.FullName
             size = $_.Length
-        }
+        }) | Out-Null
     }
-)
+    return @($items | Sort-Object -Property path)
+}
 
-$arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
+$componentPayloads = Get-PackagePayloads -Root $OutputDir -ExcludeNames @("sbom-inputs.json", "http-manifest.json")
+$sbom = [ordered]@{
+    schema_version = 1
+    package = "senline-http-dogfood"
+    version = $Version
+    source_revision = $sourceRevision
+    components = @($componentPayloads)
+}
+[IO.File]::WriteAllText((Join-Path $OutputDir "sbom-inputs.json"), (($sbom | ConvertTo-Json -Depth 6) + "`n"), $utf8)
+
+$payloads = Get-PackagePayloads -Root $OutputDir -ExcludeNames @("http-manifest.json")
 $manifest = [ordered]@{
     schema_version = 1
     package = "senline-http-dogfood"
@@ -96,17 +123,29 @@ $manifest = [ordered]@{
     source_revision = $sourceRevision
     source_tree = "examples/realworld/senline-http-dogfood"
     target = [ordered]@{
-        os = if ($hostIsWindows) { "windows" } else { "linux" }
+        os = $osName
         arch = $arch
-        abi = if ($hostIsWindows) { "msvc" } else { "gnu" }
+        abi = $abi
+        triple = if ($hostIsWindows) { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" }
     }
     protocols = @("senline-worker-v1", "http-loopback-dogfood-v1")
+    runtime_dependencies = @(
+        [ordered]@{ name = "sengoo_runtime"; role = "installed-native-runtime"; note = "Provided by installed Sengoo toolchain for the package target" }
+        [ordered]@{ name = "senline-domain-worker"; role = "loopback-planner-backend"; note = "HTTP dogfood spawns/forwards to the framed domain worker contract" }
+    )
+    build_tools = @(
+        [ordered]@{ name = "sgc"; version = $sgcVersion; role = "installed-toolchain-build" }
+        [ordered]@{ name = "sgpm"; role = "installed-package-manager" }
+    )
     license = [ordered]@{
-        note = "See repository LICENSE / package Sengoo.toml; SBOM inputs are payload hashes below."
+        spdx_expression = "UNLICENSED"
+        file = "LICENSE.txt"
+        note = "Package ships LICENSE.txt; repository root may not yet publish a SPDX license."
     }
     provenance = [ordered]@{
         built_with_installed_toolchain_only = $true
         cargo_forbidden_at_package_time = $true
+        sbom_inputs = "sbom-inputs.json"
     }
     payloads = $payloads
     notes = @(
@@ -116,9 +155,7 @@ $manifest = [ordered]@{
     )
 }
 $manifestPath = Join-Path $OutputDir "http-manifest.json"
-$json = $manifest | ConvertTo-Json -Depth 6
-$utf8 = [Text.UTF8Encoding]::new($false)
-[IO.File]::WriteAllText($manifestPath, $json, $utf8)
+[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), $utf8)
 Write-Host "HTTP dogfood package written to $OutputDir"
 Write-Host "  executable: $(Join-Path $OutputDir $exeName)"
 Write-Host "  manifest:   $manifestPath"

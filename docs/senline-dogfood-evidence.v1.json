@@ -31,12 +31,12 @@
           "test_name": "tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes"
         },
         "red_command": "cargo test -p sgc --bin sgc tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes -- --exact --nocapture",
-        "red_status": "preserved",
-        "red_commit": "f3e2c538ef2f5da819672cc129c92fde7927e11a"
+        "red_status": "pending-commit",
+        "red_commit": null
       },
       "fix": {
         "summary": "Zero every newly exposed Buffer gap before advancing used_len.",
-        "fixing_commit": "f2a55b16faeb84861336b7684a59f962939477c0",
+        "fixing_commit": null,
         "affected_gates": [
           "cargo test -p sgc --bin sgc tests::stdlib_buffer_zeroes_gaps_before_exposing_extended_bytes -- --exact --nocapture"
         ],
@@ -44,7 +44,8 @@
           "Do not require every protocol caller to pre-zero full Buffer capacity."
         ],
         "remaining_platform_gaps": [
-          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
+          "Red-first commit history is not yet reconstructed for this known-baseline rehearsal (task 7.2 open).",
+          "The linked Senline pin and final consumer gate remain pending (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [
@@ -118,12 +119,12 @@
           "test_name": "sgpm_check_exposes_transitive_dependency_library_module_map"
         },
         "red_command": "cargo test -p sgpm --test integration sgpm_check_exposes_transitive_dependency_library_module_map -- --exact --nocapture",
-        "red_status": "preserved",
-        "red_commit": "dbff39d2d0d4e536de28f6b356194a600402e4dd"
+        "red_status": "pending-commit",
+        "red_commit": null
       },
       "fix": {
         "summary": "Expose the selected package's deterministic transitive library module map and reject conflicting aliases.",
-        "fixing_commit": "bd6056d299134589b5b6056d9c03b32323acbb0c",
+        "fixing_commit": null,
         "affected_gates": [
           "cargo test -p sgpm --test integration transitive -- --nocapture",
           "sgpm --runtime-mode source-development test --locked"
@@ -132,7 +133,8 @@
           "Do not duplicate every worker-internal dependency in the HTTP product manifest."
         ],
         "remaining_platform_gaps": [
-          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
+          "Red-first commit history is not yet reconstructed (task 7.2 open).",
+          "The linked Senline pin and final consumer gate remain pending (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [
@@ -206,12 +208,12 @@
           "test_name": "real_sgc_http_request_owned_string_accessors_are_safe"
         },
         "red_command": "cargo test -p sgc --test http_request_strings real_sgc_http_request_owned_string_accessors_are_safe -- --exact --nocapture",
-        "red_status": "preserved",
-        "red_commit": "bd6056d299134589b5b6056d9c03b32323acbb0c"
+        "red_status": "pending-commit",
+        "red_commit": null
       },
       "fix": {
         "summary": "Preserve exact length metadata for HTTP request copies and construct owned request strings from explicit byte lengths.",
-        "fixing_commit": "1777562d3555681c14ca920810bee6460b7ccfb7",
+        "fixing_commit": null,
         "affected_gates": [
           "cargo test -p sgc --test http_request_strings -- --nocapture",
           "sgpm --runtime-mode source-development test --locked"
@@ -220,7 +222,8 @@
           "Do not let each HTTP consumer allocate a second Buffer or bypass strict JSON length checks."
         ],
         "remaining_platform_gaps": [
-          "The linked Senline pin and final consumer gate remain pending outside this worktree (tasks 7.5/9.5)."
+          "Red-first commit history is not yet reconstructed (task 7.2 open).",
+          "The linked Senline pin and final consumer gate remain pending (tasks 7.5/9.5)."
         ]
       },
       "target_artifacts": [

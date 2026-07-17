@@ -615,6 +615,8 @@ fn sample_worker_handle_count(pid: u32) -> Option<u64> {
 
 #[cfg(windows)]
 mod win_sample {
+    // Win32 FFI type spellings match the SDK headers (HANDLE/BOOL/DWORD).
+    #![allow(clippy::upper_case_acronyms)]
     use std::mem::{size_of, MaybeUninit};
     use std::os::raw::c_void;
 
@@ -657,7 +659,8 @@ mod win_sample {
         ) -> BOOL;
     }
 
-    pub(super) fn private_working_set_bytes(pid: u32) -> Option<u64> {
+    /// Private bytes (PrivateUsage). Prefer this for long-session growth.
+    pub(super) fn private_bytes(pid: u32) -> Option<u64> {
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
             if handle.is_null() {
@@ -698,7 +701,9 @@ mod win_sample {
 
 #[cfg(windows)]
 fn sample_worker_memory_bytes(pid: u32) -> Option<u64> {
-    win_sample::private_working_set_bytes(pid)
+    // PrivateUsage (commit private bytes). Documented metric name is
+    // `private_bytes` — not WorkingSetSize/Private Working Set.
+    win_sample::private_bytes(pid)
 }
 
 #[cfg(windows)]
@@ -754,11 +759,16 @@ fn finish_child(child: &mut Child, grace: Duration) -> std::io::Result<std::proc
     }
 }
 
-fn memory_growth_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option<f64> {
-    let post: Vec<&SamplePoint> = samples
+fn post_warmup_memory_samples(samples: &[SamplePoint], warm_up: u64) -> Vec<&SamplePoint> {
+    samples
         .iter()
         .filter(|s| s.case_index > warm_up && s.memory_bytes.is_some())
-        .collect();
+        .collect()
+}
+
+/// Endpoint slope: (last - first) / cases. Kept for comparison with prior digests.
+fn memory_growth_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option<f64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
     if post.len() < 2 {
         return None;
     }
@@ -770,6 +780,82 @@ fn memory_growth_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option
     }
     let delta = last.memory_bytes.unwrap() as i64 - first.memory_bytes.unwrap() as i64;
     Some(delta as f64 / cases)
+}
+
+/// Ordinary least-squares slope of memory_bytes vs case_index after warm-up.
+fn memory_regression_slope_bytes_per_case(samples: &[SamplePoint], warm_up: u64) -> Option<f64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
+    if post.len() < 3 {
+        return None;
+    }
+    let n = post.len() as f64;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_xx = 0.0;
+    let mut sum_xy = 0.0;
+    for s in &post {
+        let x = s.case_index as f64;
+        let y = s.memory_bytes.unwrap() as f64;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    let denom = n * sum_xx - sum_x * sum_x;
+    if denom.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((n * sum_xy - sum_x * sum_y) / denom)
+}
+
+/// Max memory increase over any contiguous ~10k-case sample window after warm-up.
+fn max_memory_window_delta_bytes(
+    samples: &[SamplePoint],
+    warm_up: u64,
+    window_cases: u64,
+) -> Option<i64> {
+    let post = post_warmup_memory_samples(samples, warm_up);
+    if post.len() < 2 {
+        return None;
+    }
+    let mut max_delta: i64 = i64::MIN;
+    for (i, start) in post.iter().enumerate() {
+        let start_cases = start.case_index;
+        let start_mem = start.memory_bytes.unwrap() as i64;
+        for end in post.iter().skip(i + 1) {
+            let span = end.case_index.saturating_sub(start_cases);
+            if span >= window_cases {
+                let delta = end.memory_bytes.unwrap() as i64 - start_mem;
+                max_delta = max_delta.max(delta);
+                break;
+            }
+        }
+    }
+    if max_delta == i64::MIN {
+        // Fall back to full-window delta when the series is shorter than window_cases.
+        let first = post.first().unwrap().memory_bytes.unwrap() as i64;
+        let last = post.last().unwrap().memory_bytes.unwrap() as i64;
+        return Some(last - first);
+    }
+    Some(max_delta)
+}
+
+fn handle_plateau_ok(samples: &[SamplePoint], warm_up: u64, slack: u64) -> Option<bool> {
+    let post: Vec<_> = samples
+        .iter()
+        .filter(|s| s.case_index > warm_up && s.handle_count.is_some())
+        .collect();
+    if post.is_empty() {
+        return None;
+    }
+    let warm_max = samples
+        .iter()
+        .filter(|s| s.case_index <= warm_up.max(1) && s.handle_count.is_some())
+        .map(|s| s.handle_count.unwrap())
+        .max()
+        .unwrap_or_else(|| post[0].handle_count.unwrap());
+    let post_max = post.iter().map(|s| s.handle_count.unwrap()).max().unwrap();
+    Some(post_max <= warm_max.saturating_add(slack))
 }
 
 fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
@@ -784,18 +870,44 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
         latency.iter().sum::<u64>() as f64 / latency.len() as f64
     };
     let growth = memory_growth_bytes_per_case(&outcome.samples, outcome.warm_up);
+    let regression = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up);
+    let window_delta = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000);
+    let handles_ok = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
         .as_secs();
-    let path = evidence_root().join(format!(
-        "soak-{}-{}-{}-{stamp}.summary.json",
+    let stem = format!(
+        "soak-{}-{}-{}-{stamp}",
         label,
         std::env::consts::OS,
         std::env::consts::ARCH
-    ));
+    );
+    let path = evidence_root().join(format!("{stem}.summary.json"));
+    let jsonl_path = evidence_root().join(format!("{stem}.jsonl"));
+    // Full sample series for offline regression / 10k-window review (gitignored).
+    {
+        let mut jsonl = String::new();
+        for s in &outcome.samples {
+            let line = serde_json::json!({
+                "case_index": s.case_index,
+                "elapsed_ms": s.elapsed_ms,
+                "memory_bytes": s.memory_bytes,
+                "handle_count": s.handle_count,
+                "cases_per_second_window": s.cases_per_second_window
+            });
+            jsonl.push_str(&line.to_string());
+            jsonl.push('\n');
+        }
+        fs::write(&jsonl_path, jsonl).expect("write resource JSONL series");
+    }
+    let metric = if cfg!(windows) {
+        "private_bytes" // PROCESS_MEMORY_COUNTERS_EX.PrivateUsage
+    } else {
+        "rss_bytes"
+    };
     let summary = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "label": label,
         "platform": std::env::consts::OS,
         "architecture": std::env::consts::ARCH,
@@ -808,6 +920,8 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
         "plan_reject_or_error": outcome.plan_reject_or_error,
         "failure_count": outcome.failures.len(),
         "failures": outcome.failures,
+        "process_count": 1,
+        "jsonl_series": jsonl_path.file_name().and_then(|s| s.to_str()),
         "latency_post_warmup": {
             "sample_count": latency.len(),
             "mean_us": mean,
@@ -817,8 +931,15 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
             "notes": "request-write-complete to response-frame-complete wall time; not Senline admission/sandbox timing"
         },
         "memory": {
-            "metric": if cfg!(windows) { "private_working_set_bytes" } else { "rss_bytes" },
-            "post_warmup_growth_bytes_per_case": growth,
+            "metric": metric,
+            "metric_notes": if cfg!(windows) {
+                "Windows PrivateUsage (private bytes), not WorkingSetSize"
+            } else {
+                "Linux VmRSS"
+            },
+            "post_warmup_endpoint_growth_bytes_per_case": growth,
+            "post_warmup_regression_slope_bytes_per_case": regression,
+            "max_10k_window_delta_bytes": window_delta,
             "sample_count": outcome.samples.len(),
             "samples_tail": outcome.samples.iter().rev().take(5).map(|s| serde_json::json!({
                 "case_index": s.case_index,
@@ -828,10 +949,22 @@ fn write_evidence(label: &str, outcome: &ResourceOutcome) -> PathBuf {
                 "cases_per_second_window": s.cases_per_second_window
             })).collect::<Vec<_>>(),
         },
+        "handles": {
+            "plateau_slack": 16,
+            "within_plateau": handles_ok,
+        },
         "gates": {
             "default_growth_bound_bytes_per_case": 1024.0,
-            "growth_within_default_bound": growth.map(|g| g < 1024.0),
+            "endpoint_growth_within_default_bound": growth.map(|g| g < 1024.0),
+            "regression_slope_within_default_bound": regression.map(|g| g < 1024.0),
+            "max_10k_window_delta_bytes_bound": 32 * 1024 * 1024,
+            "max_10k_window_within_bound": window_delta.map(|d| d < 32 * 1024 * 1024),
+            "handles_within_plateau": handles_ok,
+            "process_count_is_one": true,
             "zero_failures": outcome.failures.is_empty(),
+            // Keep legacy key for older consumers.
+            "growth_within_default_bound": growth.map(|g| g < 1024.0),
+            "post_warmup_growth_bytes_per_case": growth,
         }
     });
     fs::write(
@@ -867,6 +1000,24 @@ fn assert_resource_outcome(outcome: &ResourceOutcome, label: &str) {
         "{label} resource run failures: {:?}",
         outcome.failures
     );
+    if let Some(slope) = memory_regression_slope_bytes_per_case(&outcome.samples, outcome.warm_up) {
+        assert!(
+            slope < 1024.0,
+            "{label} post-warm-up regression slope {slope} B/case exceeds 1 KiB/case bound"
+        );
+    }
+    if let Some(delta) = max_memory_window_delta_bytes(&outcome.samples, outcome.warm_up, 10_000) {
+        assert!(
+            delta < 32 * 1024 * 1024,
+            "{label} max ~10k-case memory window delta {delta} bytes exceeds +32 MiB"
+        );
+    }
+    if let Some(ok) = handle_plateau_ok(&outcome.samples, outcome.warm_up, 16) {
+        assert!(
+            ok,
+            "{label} handle/FD count climbed past warm-up max + 16 plateau"
+        );
+    }
     assert_eq!(
         outcome.plan_ok + outcome.plan_reject_or_error,
         outcome

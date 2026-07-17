@@ -281,6 +281,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed check --locked failed" }
             & $sgpm --runtime-mode installed test --locked
             if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed test --locked failed" }
+            & $sgpm fmt --check --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm fmt --check --locked failed" }
+            & $sgpm --runtime-mode installed doc --locked
+            if ($LASTEXITCODE -ne 0) { throw "worker sgpm doc --locked failed" }
             & $sgpm --runtime-mode installed build --locked --release
             if ($LASTEXITCODE -ne 0) { throw "worker sgpm installed build --locked --release failed" }
           } finally {
@@ -293,6 +297,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "http sgpm installed check --locked failed" }
             & $sgpm --runtime-mode installed test --locked
             if ($LASTEXITCODE -ne 0) { throw "http sgpm installed test --locked failed" }
+            & $sgpm fmt --check --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm fmt --check --locked failed" }
+            & $sgpm --runtime-mode installed doc --locked
+            if ($LASTEXITCODE -ne 0) { throw "http sgpm doc --locked failed" }
             & $sgpm --runtime-mode installed build --locked --release
             if ($LASTEXITCODE -ne 0) { throw "http sgpm installed build --locked --release failed" }
           } finally {
@@ -472,7 +480,46 @@ jobs:
             $httpProc.Kill()
             throw "http dogfood did not exit after one request"
           }
-          Write-Host "packaged HTTP localhost product loop green (port=$port)"
+          if ($httpProc.ExitCode -ne 0) {
+            throw "http dogfood exit code $($httpProc.ExitCode) after successful plan response"
+          }
+          # Malformed body must not hang the product loop path (second package probe).
+          $httpPsi2 = New-Object System.Diagnostics.ProcessStartInfo
+          $httpPsi2.FileName = $httpExe
+          $httpPsi2.WorkingDirectory = (Join-Path $pkgRoot "http-a")
+          $httpPsi2.RedirectStandardOutput = $true
+          $httpPsi2.RedirectStandardError = $true
+          $httpPsi2.UseShellExecute = $false
+          $httpProc2 = [Diagnostics.Process]::Start($httpPsi2)
+          $readyTask2 = $httpProc2.StandardOutput.ReadLineAsync()
+          if (-not $readyTask2.Wait(20000)) {
+            if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+            throw "http dogfood READY timed out on malformed probe"
+          }
+          $ready2 = $readyTask2.Result
+          if (-not $ready2 -or $ready2 -notmatch '^READY 127\.0\.0\.1:(\d+)$') {
+            if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+            throw "http dogfood READY invalid on malformed probe: '$ready2'"
+          }
+          $port2 = [int]$Matches[1]
+          $badBody = Join-Path $pkgRoot "http-probe-bad.json"
+          [IO.File]::WriteAllText($badBody, "{not-json")
+          $badResp = Join-Path $pkgRoot "http-probe-bad-resp.txt"
+          if ($curlExe) {
+            $badCode = & $curlExe -sS -o $badResp -w "%{http_code}" `
+              -X POST "http://127.0.0.1:$port2/v1/submit-envelope" `
+              -H "Content-Type: application/json" `
+              --data-binary "@$badBody"
+            if ([int]$badCode -eq 200) {
+              if (-not $httpProc2.HasExited) { $httpProc2.Kill() }
+              throw "malformed HTTP body unexpectedly returned 200"
+            }
+          }
+          if (-not $httpProc2.WaitForExit(15000)) {
+            $httpProc2.Kill()
+            throw "http dogfood did not exit after malformed probe"
+          }
+          Write-Host "packaged HTTP localhost product loop green (port=$port, malformed rejected)"
 
           Write-Host "senline installed worker/HTTP dual package + product loops green on ${{ matrix.os }}"
 
@@ -484,4 +531,6 @@ jobs:
           path: |
             ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/comparison.json
             ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/**/*-manifest.json
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/worker-a/**
+            ${{ runner.temp }}/senline-pkg-${{ matrix.artifact }}/http-a/**
           if-no-files-found: warn

@@ -60,13 +60,20 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 
 ## Latest dual-host CI
 
-- **ALL_GREEN** core-conformance run
+- core-conformance run
   [`29573240622`](https://github.com/Hyper66666/Sengoo/actions/runs/29573240622)
-  on tip `7a812a525` including installed worker/HTTP product loops (Windows + Ubuntu).
+  on tip `7a812a525` (product loops present; subsequent review reopened several
+  task claims that overstated completion).
+
 ## Known open Sengoo-side items
 
 1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (blocked outside this worktree).
-2. All other dogfood tasks closed on tip with evidence (1M soak, fault suite, installed product loops, OpenSpec dual validate).
+2. **Honest open after review remediation (still unchecked):** 5.12, 5.13, 6.5, 6.6, 7.2, 7.4, 7.7, 8.3 (partial), 8.7, 9.1, 9.2, 9.3 — see `tasks.md`.
+   - Compare gate is fail-closed on executable hash mismatch (8.7 will stay red until dual packages are bit-identical).
+   - Resource sampler v2 adds OLS / 10k-window / handle plateau / JSONL / `private_bytes` naming (needs 1M re-soak).
+   - Evidence red/fix commits reset to `pending-commit` / null until true red-first history exists.
+3. **P2 compiler debt:** ordinary by-value legacy-handle Drop still skipped (language ABI); worker uses product-level owning helpers.
+
 ## Unsupported authority transfers
 
 Do **not** move into Sengoo without a separate OpenSpec change:
