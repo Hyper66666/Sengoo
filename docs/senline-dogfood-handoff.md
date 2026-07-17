@@ -61,9 +61,8 @@ Produced by `scripts/package-toolchain.ps1` and verified by
 ## Latest dual-host CI
 
 - **ALL_GREEN** core-conformance run
-  [`29430796769`](https://github.com/Hyper66666/Sengoo/actions/runs/29430796769)
-  on tip including installed worker/HTTP matrix (Windows + Ubuntu).
-
+  [`29573240622`](https://github.com/Hyper66666/Sengoo/actions/runs/29573240622)
+  on tip `7a812a525` including installed worker/HTTP product loops (Windows + Ubuntu).
 ## Known open Sengoo-side items
 
 1. **Task 7.5 / 9.5** — Senline pin advancement requires a writable Senline Git revision (blocked outside this worktree).

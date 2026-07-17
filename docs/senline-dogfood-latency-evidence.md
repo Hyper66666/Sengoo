@@ -12,9 +12,9 @@ Harness: `tools/sgc/tests/senline_worker_resource.rs`.
 | Host | Label | Post-warm-up samples | p50 µs | p95 µs | p99 µs | Notes |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | Local Windows x64 | smoke-1k residual-fix | 768 | 59 | 110 | 150 | After ownership fixes |
-| Local Windows x64 | investigate-45k residual-fix | 44,744 | 154 | 332 | 500 | Full 45k window |
-| Local Windows x64 | soak-1m (task 8.3) | 999,744 | 179 | 350 | 450 | 1,000,000 cases; growth ~0.07 B/case |
-| GHA dual-host | resource sampler smoke | (see CI artifacts `senline-worker-differential-*-*/*smoke*.summary.json`) | | | | Wired in `core-conformance.yml` on tip; fill from green HEAD run |
+| Local Windows x64 | soak-1m (task 8.3) | 999,744 | 179 | 350 | 450 | 1e6 cases; growth ~0.07 B/case |
+| GHA `windows-latest` | smoke-1k run `29573240622` | 768 | 121 | 167 | 196 | CI resource smoke; PWS metric |
+| GHA `ubuntu-latest` | smoke-1k run `29573240622` | 768 | 94 | 104 | 111 | CI resource smoke; RSS metric |
 
 ### Mean request time (derived bulk corpora; not pXX)
 
@@ -31,7 +31,7 @@ Concurrency for V1 worker evaluation remains **one in-flight request** per worke
 ## Host labels
 
 - Local Windows development host: Windows x64 private working set sampler.
-- CI: GitHub Actions `windows-latest` / `ubuntu-latest` (resource smoke step on tip).
+- CI: GitHub Actions `windows-latest` / `ubuntu-latest` (resource smoke on tip run `29573240622`).
 
 ## Non-claims
 
